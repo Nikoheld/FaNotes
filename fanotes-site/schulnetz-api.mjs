@@ -887,6 +887,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       return scrapeWithSession(baseUrl, { ...session, userAgent }, fetchImpl, {
         previousEvents: stored?.events || [],
         previousExams: stored?.exams || [],
+        vacations: stored?.vacations || [],
         weekFetched: stored?.weekFetched || {},
         weekRead: stored?.weekRead || {},
         examWeekFetched: stored?.examWeekFetched || {},

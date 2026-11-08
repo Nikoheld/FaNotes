@@ -14,7 +14,7 @@ const val WEEK_CAP = 48
 const val WEEK_PROBE = 4
 
 /** Far weeks beyond that horizon loaded on one sync, so a refresh is not one week per day. */
-const val WEEK_BATCH = 4
+const val WEEK_BATCH = 8
 
 data class WeekSpan(val start: LocalDate, val end: LocalDate)
 

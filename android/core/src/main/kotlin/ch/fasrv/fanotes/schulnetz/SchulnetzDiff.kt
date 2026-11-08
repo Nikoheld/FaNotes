@@ -121,6 +121,7 @@ fun diffSnapshots(
     next: SchulnetzSnapshot,
     settings: NotifySettings = NotifySettings(),
     today: LocalDate = LocalDate.now(),
+    now: java.time.ZonedDateTime = if (today == LocalDate.now(SCHOOL_ZONE)) java.time.ZonedDateTime.now(SCHOOL_ZONE) else today.atStartOfDay(SCHOOL_ZONE),
 ): List<SchulnetzChange> {
     if (previous == null) return emptyList()
     // The master switch drops the diff before any row is built. Callers still store the snapshot.
@@ -181,12 +182,16 @@ fun diffSnapshots(
         }
         val beforeEvents = previous.events.associateBy { it.id }
         val knownEvents = previous.events + previous.exams + next.exams
-        for (event in next.events) {
-            if (weekMondayKey(event.start) in freshWeeks) continue
-            if (event.isLesson() || event.isExamLike() || beforeEvents[event.id] != null) continue
-            if (knownEvents.any { sameSchoolSlot(event, it) }) continue
+        // Only the range the previous appointment list already covered can hold news; later
+        // appointments are the list reaching further. A large batch is the list growing too.
+        val horizon = appointmentHorizon(previous)
+        val appointments = next.events.filter { event ->
+            weekMondayKey(event.start) !in freshWeeks && !event.isLesson() && !event.isExamLike() && beforeEvents[event.id] == null &&
+                knownEvents.none { sameSchoolSlot(event, it) } && eventBody(event).isNotBlank() &&
+                (horizon == null || eventDate(eventDay(event))?.let { !it.isAfter(horizon) } == true)
+        }
+        for (event in if (appointments.size > APPOINTMENT_BURST) emptyList() else appointments) {
             val body = eventBody(event)
-            if (body.isBlank()) continue
             changes += linkedChange(
                 id = "event:${event.id}:${eventKey(event)}",
                 category = "event",
@@ -198,7 +203,8 @@ fun diffSnapshots(
             )
         }
     }
-    return deduped(changes).filter { alertAllowed(settings, it) }
+    // A notice about a lesson, exam or appointment that has already ended is never sent.
+    return deduped(changes).filter { alertAllowed(settings, it) && !changeIsOver(it, now) }
 }
 
 private fun diffGrades(previous: List<SchoolGrade>, next: List<SchoolGrade>, changes: MutableList<SchulnetzChange>) {

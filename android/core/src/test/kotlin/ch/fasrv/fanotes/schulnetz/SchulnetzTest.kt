@@ -133,11 +133,11 @@ class SchulnetzDiffTest {
             absences = listOf(SchoolAbsence("a1", "2026-10-01", "2026-10-01", "08:00", "08:45", "Französisch", "Arzt", false, false, "")),
             messages = listOf(SchoolMessage("m1", "Elternabend", "Freitag", "2026-11-01")),
         )
-        assertTrue(diffSnapshots(null, next).isEmpty())
-        val changes = diffSnapshots(SchulnetzSnapshot(), next)
+        assertTrue(fixtureDiff(null, next).isEmpty())
+        val changes = fixtureDiff(SchulnetzSnapshot(), next)
         assertEquals(setOf("grade", "timetable", "exam", "absence", "event"), changes.map { it.category }.toSet())
         assertEquals("Neue Note", changes.first { it.category == "grade" }.title)
-        val quiet = diffSnapshots(SchulnetzSnapshot(), next, NotifySettings(grades = false, timetable = false, exams = false, absences = false, events = false))
+        val quiet = fixtureDiff(SchulnetzSnapshot(), next, NotifySettings(grades = false, timetable = false, exams = false, absences = false, events = false))
         assertTrue(quiet.isEmpty())
     }
 
@@ -150,17 +150,17 @@ class SchulnetzDiffTest {
         val cancelled = lesson.copy(status = "cancelled")
         val cover = lesson.copy(id = "e2", teachers = listOf("Frau Meier"), comment = "Vertretung")
         val next = SchulnetzSnapshot(events = listOf(cancelled, cover))
-        val changes = diffSnapshots(previous, next)
+        val changes = fixtureDiff(previous, next)
         assertEquals("Lektion fällt aus", changes.first { it.id.startsWith("timetable:e1:") }.title)
         assertEquals("Vertretung", changes.first { it.id.startsWith("timetable:e2:") }.title)
         assertEquals("Lektion entfernt", changes.first { it.id == "timetable:gone:removed" }.title)
-        val again = diffSnapshots(next, next)
+        val again = fixtureDiff(next, next)
         assertTrue(again.none { it.category == "timetable" })
-        val moved = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(lesson.copy(room = "R202"))))
+        val moved = fixtureDiff(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(lesson.copy(room = "R202"))))
         assertEquals("Raum geändert", moved.single { it.category == "timetable" }.title)
-        val shifted = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(lesson.copy(start = "2026-11-02T09:15:00", end = "2026-11-02T10:00:00"))))
+        val shifted = fixtureDiff(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(lesson.copy(start = "2026-11-02T09:15:00", end = "2026-11-02T10:00:00"))))
         assertEquals("Zeit geändert", shifted.single { it.category == "timetable" }.title)
-        assertEquals("Neue Note", diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(grades = listOf(SchoolGrade("g2", "Chemie", "che", "Chemie", "Test", "2026-11-01", 6.0, 1.0, true, null, "")))).single { it.category == "grade" }.title)
+        assertEquals("Neue Note", fixtureDiff(SchulnetzSnapshot(), SchulnetzSnapshot(grades = listOf(SchoolGrade("g2", "Chemie", "che", "Chemie", "Test", "2026-11-01", 6.0, 1.0, true, null, "")))).single { it.category == "grade" }.title)
     }
 
     @Test
@@ -175,7 +175,7 @@ class SchulnetzDiffTest {
             SchulnetzSnapshot(fetchedAt = "2026-11-02T12:00:00Z", grades = listOf(average, exam)).toNormalizedJson(),
         )
         assertEquals(listOf(exam), stored?.grades)
-        val changes = diffSnapshots(SchulnetzSnapshot(grades = listOf(average, exam)), SchulnetzSnapshot(grades = listOf(exam)))
+        val changes = fixtureDiff(SchulnetzSnapshot(grades = listOf(average, exam)), SchulnetzSnapshot(grades = listOf(exam)))
         assertTrue(changes.none { it.category == "grade" })
         assertTrue(isSummaryGradeTitle("Aktueller Durchschnitt"))
         assertTrue(isSummaryGradeTitle("Ø"))
@@ -196,7 +196,7 @@ class SchulnetzDiffTest {
             teachers = emptyList(),
             comment = "",
         )
-        val duplicates = diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(exams = listOf(wrapped, wrapped.copy(id = "p2"))))
+        val duplicates = fixtureDiff(SchulnetzSnapshot(), SchulnetzSnapshot(exams = listOf(wrapped, wrapped.copy(id = "p2"))))
             .filter { it.category == "exam" }
         assertEquals(1, duplicates.size)
         assertEquals("Neue Prüfung", duplicates.single().title)
@@ -208,38 +208,38 @@ class SchulnetzDiffTest {
         val dateOnly = lesson.copy(id = "d", start = "2026-11-12", end = "2026-11-12", text = "Prüfung", courseName = "Prüfung", eventType = "exam", room = "")
         val midnight = lesson.copy(id = "m", start = "2026-11-12T00:00:00", end = "2026-11-12T00:00:00", text = "Klausur", courseName = "Klausur", eventType = "exam", room = "")
         val timed = lesson.copy(id = "r", start = "2026-11-12T08:15:00", end = "2026-11-12T09:00:00", text = "Test Physik", courseName = "Test Physik", eventType = "exam")
-        val clocks = diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(exams = listOf(dateOnly, midnight, timed))).filter { it.category == "exam" }
+        val clocks = fixtureDiff(SchulnetzSnapshot(), SchulnetzSnapshot(exams = listOf(dateOnly, midnight, timed))).filter { it.category == "exam" }
         assertTrue(clocks.none { it.body.contains("00:00") })
         assertTrue(clocks.single { it.body.contains("Physik") }.body.contains("08:15"))
         val overnight = lesson.copy(id = "z", start = "2026-11-12T00:00:00", end = "2026-11-12T01:00:00", text = "Nacht", courseName = "Nacht", eventType = "exam", room = "")
-        assertTrue(diffSnapshots(SchulnetzSnapshot(), SchulnetzSnapshot(exams = listOf(overnight))).single { it.category == "exam" }.body.contains("00:00"))
+        assertTrue(fixtureDiff(SchulnetzSnapshot(), SchulnetzSnapshot(exams = listOf(overnight))).single { it.category == "exam" }.body.contains("00:00"))
         val stored = lesson.copy(id = "old", text = "Test Chemie", courseName = "Test Chemie", timetableText = "Test Chemie", eventType = "lesson")
         val movedId = stored.copy(id = "new", eventType = "exam")
-        val quiet = diffSnapshots(SchulnetzSnapshot(events = listOf(stored)), SchulnetzSnapshot(exams = listOf(movedId)))
+        val quiet = fixtureDiff(SchulnetzSnapshot(events = listOf(stored)), SchulnetzSnapshot(exams = listOf(movedId)))
         assertTrue(quiet.none { it.title == "Neue Prüfung" || it.title == "Lektion entfernt" || it.title == "Neuer Termin" })
         val asBlock = stored.copy(eventType = "0_stp")
-        val stillQuiet = diffSnapshots(SchulnetzSnapshot(events = listOf(asBlock)), SchulnetzSnapshot(exams = listOf(movedId)))
+        val stillQuiet = fixtureDiff(SchulnetzSnapshot(events = listOf(asBlock)), SchulnetzSnapshot(exams = listOf(movedId)))
         assertTrue(stillQuiet.none { it.title == "Neue Prüfung" || it.title == "Lektion entfernt" })
         val later = movedId.copy(id = stored.id, start = "2026-11-02T10:15:00", end = "2026-11-02T11:00:00")
-        assertEquals(listOf("Prüfung verschoben"), diffSnapshots(SchulnetzSnapshot(events = listOf(stored)), SchulnetzSnapshot(exams = listOf(later))).map { it.title })
+        assertEquals(listOf("Prüfung verschoben"), fixtureDiff(SchulnetzSnapshot(events = listOf(stored)), SchulnetzSnapshot(exams = listOf(later))).map { it.title })
         val other = lesson.copy(id = "bio", text = "Test Biologie", courseName = "Test Biologie", timetableText = "Test Biologie", eventType = "exam")
-        val added = diffSnapshots(SchulnetzSnapshot(events = listOf(stored)), SchulnetzSnapshot(events = listOf(stored), exams = listOf(other)))
+        val added = fixtureDiff(SchulnetzSnapshot(events = listOf(stored)), SchulnetzSnapshot(events = listOf(stored), exams = listOf(other)))
         assertTrue(added.any { it.title == "Neue Prüfung" })
         assertTrue(added.none { it.title == "Lektion entfernt" })
-        val gone = diffSnapshots(
+        val gone = fixtureDiff(
             SchulnetzSnapshot(exams = listOf(timed), weekFetched = mapOf("2026-11-09" to "2026-11-04T12:00:00Z")),
             SchulnetzSnapshot(weekFetched = mapOf("2026-11-09" to "2026-11-04T12:00:00Z")),
         )
         assertTrue(gone.none { it.category == "exam" })
-        val kept = diffSnapshots(SchulnetzSnapshot(exams = listOf(timed)), SchulnetzSnapshot(exams = listOf(timed)))
+        val kept = fixtureDiff(SchulnetzSnapshot(exams = listOf(timed)), SchulnetzSnapshot(exams = listOf(timed)))
         assertTrue(kept.none { it.title == "Prüfung entfällt" || it.title == "Neue Prüfung" })
         val termin = lesson.copy(id = "term-2", eventType = "event", text = "Elternabend", courseName = "Elternabend", timetableText = "Elternabend")
         val earlier = termin.copy(id = "term-1")
-        val repeat = diffSnapshots(SchulnetzSnapshot(events = listOf(earlier)), SchulnetzSnapshot(events = listOf(earlier, termin)))
+        val repeat = fixtureDiff(SchulnetzSnapshot(events = listOf(earlier)), SchulnetzSnapshot(events = listOf(earlier, termin)))
         assertTrue(repeat.none { it.title == "Neuer Termin" })
         val fresh = termin.copy(id = "term-3", text = "Konzert", courseName = "Konzert", timetableText = "Konzert")
-        assertTrue(diffSnapshots(SchulnetzSnapshot(events = listOf(earlier)), SchulnetzSnapshot(events = listOf(earlier, fresh))).any { it.title == "Neuer Termin" })
-        val sameNote = diffSnapshots(
+        assertTrue(fixtureDiff(SchulnetzSnapshot(events = listOf(earlier)), SchulnetzSnapshot(events = listOf(earlier, fresh))).any { it.title == "Neuer Termin" })
+        val sameNote = fixtureDiff(
             SchulnetzSnapshot(messages = listOf(SchoolMessage("a", "Termin", "Elternabend", "12.11.2026"))),
             SchulnetzSnapshot(messages = listOf(SchoolMessage("b", "Termin", "Elternabend", "13.11.2026"))),
         )
@@ -249,18 +249,18 @@ class SchulnetzDiffTest {
     @Test
     fun theSameLessonWithANewIdIsQuiet() {
         val renamed = lesson.copy(id = "neu", courseName = "Mathematik Holm", text = "Mathematik Holm", timetableText = "Mathematik Holm")
-        val quiet = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(renamed)))
+        val quiet = fixtureDiff(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(renamed)))
         assertTrue(quiet.none { it.category == "timetable" })
         val droppedTeachers = lesson.copy(id = "plain", teachers = emptyList())
-        assertTrue(diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(droppedTeachers))).none { it.category == "timetable" })
+        assertTrue(fixtureDiff(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(droppedTeachers))).none { it.category == "timetable" })
         val cover = lesson.copy(id = "cover", teachers = listOf("Frau Meier"))
-        assertEquals("Vertretung", diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(cover))).single { it.category == "timetable" }.title)
+        assertEquals("Vertretung", fixtureDiff(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(cover))).single { it.category == "timetable" }.title)
         val otherRoom = lesson.copy(id = "room", room = "R202")
-        val moved = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(otherRoom)))
+        val moved = fixtureDiff(SchulnetzSnapshot(events = listOf(lesson)), SchulnetzSnapshot(events = listOf(otherRoom)))
         assertTrue(moved.any { it.title == "Lektion entfernt" })
         assertTrue(moved.any { it.title == "Stundenplan geändert" })
         val missing = lesson.copy(id = "bio", start = "2026-11-03T10:00:00", end = "2026-11-03T10:45:00", text = "Biologie", courseName = "Biologie")
-        val removed = diffSnapshots(SchulnetzSnapshot(events = listOf(lesson, missing)), SchulnetzSnapshot(events = listOf(renamed)))
+        val removed = fixtureDiff(SchulnetzSnapshot(events = listOf(lesson, missing)), SchulnetzSnapshot(events = listOf(renamed)))
         assertEquals("Lektion entfernt", removed.single { it.id == "timetable:bio:removed" }.title)
         assertTrue(removed.none { it.id.contains("e1") })
     }

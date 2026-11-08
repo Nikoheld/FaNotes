@@ -365,10 +365,15 @@ class SchulnetzClient(
         val htmlSpan = parseWeekSpan(planHtml)
         val icalUrl = findIcalUrl(planHtml, root)
         val icalAvailable = !icalUrl.isNullOrBlank() && webReadAllowed(icalUrl)
+        // Without a range on the page, plan the school year from appointments and holidays,
+        // not only the four weeks around today.
         val knownSpan = htmlSpan ?: previous.storedSpan()
+        // Planning only: the fallback is not Schulnetz's range, so it is never stored as one.
+        val planSpan = knownSpan ?: ch.fasrv.fanotes.schulnetz.fallbackSchoolSpan(previous?.events.orEmpty(), previous?.vacations.orEmpty(), today)
         val plan = planWeekFetches(
-            if (knownSpan != null) mondaysBetween(knownSpan.start, knownSpan.end) else emptyList(),
-            confirmedLessonStamps(previous?.events.orEmpty(), previous?.weekFetched.orEmpty(), previous?.weekRead.orEmpty()),
+            if (planSpan != null) mondaysBetween(planSpan.start, planSpan.end) else emptyList(),
+            // Retry timing follows every attempt, so an unread week is not requested on every sync.
+            previous?.weekFetched.orEmpty() + confirmedLessonStamps(previous?.events.orEmpty(), previous?.weekFetched.orEmpty(), previous?.weekRead.orEmpty()),
             previous?.icalFetchedAt.orEmpty(),
             java.time.Instant.parse(fetchedNow),
             today,
@@ -407,20 +412,39 @@ class SchulnetzClient(
         val examWeeks = linkedMapOf<java.time.LocalDate, List<ch.fasrv.fanotes.schulnetz.AgendaEvent>>()
         val checkedEmpty = mutableSetOf<java.time.LocalDate>()
         var currentEmptyUsable = false
+        /** True once the scheduler itself returned lessons for some week in this read. */
+        var schedulerGaveLessons = false
         val examStamps = previous?.examWeekFetched.orEmpty().toMutableMap()
         if (canFetch && !callerMain) {
+            // Schulnetz hands out a new transid with every page, and the scheduler only answers
+            // with the transid of its own page. After Terminliste and Prüfungen the timetable's
+            // transid is stale and every week came back empty, so open each page again right
+            // before its weeks: first the timetable weeks, then the exam weeks.
+            fun reopen(pageId: String, label: String) {
+                // The current transid, like a click on the page that is open now; older links carry stale ones.
+                val url = pageUrl(root, pageId, id, transid)
+                get(url, label, pageId)
+            }
+            if (plan.fetch.isNotEmpty()) reopen("22202", "stundenplan-wochen")
             for (monday in plan.fetch) {
                 if (oauthPage != null || sawSessionProblem || parseFailed) break
                 val max = monday.plusDays(7)
                 val curr = if (monday == weekMonday(today)) today.toString() else monday.toString()
                 val lessonBody = get(schedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "scheduler", "scheduler")
                 val lessonParsed = if (schedulerWeekLoaded(lessonBody)) offMain("scheduler-xml") { parseSchedulerXml(lessonBody) } else emptyList()
+                // Shape only, no content: shows in the diagnostic log why a week has no lessons.
+                trace("scheduler week=$monday bytes=${lessonBody.length} loaded=${schedulerWeekLoaded(lessonBody)} usable=${schedulerBodyUsable(lessonBody)} lessons=${lessonParsed?.size ?: -1} $context")
                 if (lessonParsed == null) break
-                if (lessonParsed.isNotEmpty()) lessonWeeks[monday] = lessonParsed
+                if (lessonParsed.isNotEmpty()) { lessonWeeks[monday] = lessonParsed; schedulerGaveLessons = true }
                 else if (schedulerBodyUsable(lessonBody) && !schedulerWeekLoaded(lessonBody)) {
                     if (monday != weekMonday(today)) checkedEmpty += monday else currentEmptyUsable = true
                 }
+            }
+            if (plan.fetch.isNotEmpty() && oauthPage == null && !sawSessionProblem && !parseFailed) reopen("21312", "pruefungen-wochen")
+            for (monday in plan.fetch) {
                 if (oauthPage != null || sawSessionProblem || parseFailed) break
+                val max = monday.plusDays(7)
+                val curr = if (monday == weekMonday(today)) today.toString() else monday.toString()
                 val examBody = get(examSchedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "pruefungen-xml", "21312")
                 val examParsed = if (schedulerWeekLoaded(examBody)) {
                     offMain("exam-xml") {
@@ -480,11 +504,19 @@ class SchulnetzClient(
                 stamps[monday] = fetchedNow
                 reads[monday] = fetchedNow
             }
+            // An empty answer proves a free week only when the scheduler gave lessons for another
+            // week in this read, or the week is a holiday. Otherwise the week stays "not loaded".
+            val proven = schedulerGaveLessons
+            val vacations = previous?.vacations.orEmpty()
             for (monday in checkedEmpty) {
                 stamps[monday.toString()] = fetchedNow
-                reads[monday.toString()] = fetchedNow
+                if (ch.fasrv.fanotes.schulnetz.emptyWeekCountsAsRead(monday, proven, vacations)) reads[monday.toString()] = fetchedNow
             }
-            if (currentMonday !in lessonWeeks && currentEmptyUsable) reads[currentMonday.toString()] = fetchedNow
+            if (currentMonday !in lessonWeeks && currentEmptyUsable && ch.fasrv.fanotes.schulnetz.emptyWeekCountsAsRead(currentMonday, proven, vacations)) reads[currentMonday.toString()] = fetchedNow
+            if (!proven && plan.fetch.isNotEmpty()) {
+                val cleaned = ch.fasrv.fanotes.schulnetz.withoutUnprovenEmptyReads(reads, events, vacations)
+                reads.clear(); reads.putAll(cleaned)
+            }
         }
         var icalExams = emptyList<ch.fasrv.fanotes.schulnetz.AgendaEvent>()
         if (canFetch && !timetableFailed && plan.fetchIcal && icalAvailable) {
