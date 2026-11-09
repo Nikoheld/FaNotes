@@ -2399,3 +2399,14 @@ test('an exam-like appointment that stays listed is not reported as cancelled', 
   // Gone from the list and from the exams: that is a cancellation.
   assert.deepEqual(diffSnapshotsAt(snapshot, { ...snapshot, events: [] }, {}, '2026-11-09', at).map((c) => c.title), ['Prüfung entfällt'])
 })
+
+test('a near week read without lessons is checked again within half an hour', () => {
+  const now = '2026-11-09T06:10:00Z'
+  const stamps = { '2026-11-09': '2026-11-09T05:24:00Z', '2026-11-16': '2026-11-09T05:24:00Z', '2026-11-23': '2026-11-09T05:24:00Z', '2026-12-07': '2026-11-09T05:24:00Z', '2026-12-14': '2026-11-09T05:24:00Z', '2026-10-26': '2026-11-09T05:24:00Z' }
+  const base = { mondays: [], fetchedAt: stamps, icalFetchedAt: '', now, today: '2026-11-09', icalAvailable: false }
+  // Without the hint only the current and adjacent weeks are due after 30 minutes.
+  assert.deepEqual(planWeekFetches(base).fetch.filter((m) => stamps[m]).sort(), ['2026-11-09', '2026-11-16'])
+  // Empty weeks up to four ahead join them; a past empty week and one five ahead keep the daily cadence.
+  const empty = new Set(['2026-11-23', '2026-12-07', '2026-12-14', '2026-10-26'])
+  assert.deepEqual(planWeekFetches({ ...base, emptyWeeks: empty }).fetch.filter((m) => stamps[m]).sort(), ['2026-11-09', '2026-11-16', '2026-11-23', '2026-12-07'])
+})

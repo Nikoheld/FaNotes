@@ -112,4 +112,13 @@ class SchoolTimingTest {
         assertTrue(diffSnapshots(snapshot, snapshot, NotifySettings(), today, at).isEmpty())
         assertEquals(listOf("Prüfung entfällt"), diffSnapshots(snapshot, snapshot.copy(events = emptyList()), NotifySettings(), today, at).map { it.title })
     }
+
+    @Test fun aNearWeekReadWithoutLessonsIsCheckedAgainSoon() {
+        val stamp = "2026-11-09T05:24:00Z"
+        val stamps = listOf("2026-11-09", "2026-11-16", "2026-11-23", "2026-12-07", "2026-12-14", "2026-10-26").associateWith { stamp }
+        val now = java.time.Instant.parse("2026-11-09T06:10:00Z")
+        fun due(empty: Set<String>) = planWeekFetches(emptyList(), stamps, "", now, today, false, empty).fetch.map { it.toString() }.filter { it in stamps }.sorted()
+        assertEquals(listOf("2026-11-09", "2026-11-16"), due(emptySet()))
+        assertEquals(listOf("2026-11-09", "2026-11-16", "2026-11-23", "2026-12-07"), due(setOf("2026-11-23", "2026-12-07", "2026-12-14", "2026-10-26")))
+    }
 }

@@ -1813,7 +1813,9 @@ const stampAge = (stamp, now) => {
 
 const weekDistance = (monday, current) => Math.round((Date.parse(`${monday}T00:00:00Z`) - Date.parse(`${current}T00:00:00Z`)) / (7 * 86400000))
 
-export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = '', now, today, icalAvailable = false } = {}) => {
+// emptyWeeks: weeks read without a lesson. Up to WEEK_PROBE weeks ahead they are checked again on the
+// short cadence, so a week an earlier empty answer marked free does not stay free for a day.
+export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = '', now, today, icalAvailable = false, emptyWeeks = new Set() } = {}) => {
   const current = weekMonday(today)
   const probing = !mondays.length
   const universe = capMondays(probing ? probeMondays(today) : mondays, today)
@@ -1822,7 +1824,8 @@ export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = 
   for (const monday of universe) {
     const distance = Math.abs(weekDistance(monday, current))
     const stamp = fetchedAt?.[monday]
-    const wanted = monday === current || !stamp || (distance <= 1 ? stampAge(stamp, now) >= WEEK_ADJACENT_MS : stampAge(stamp, now) >= WEEK_FAR_MS)
+    const soon = distance <= 1 || (monday > current && distance <= WEEK_PROBE && emptyWeeks.has(monday))
+    const wanted = monday === current || !stamp || (soon ? stampAge(stamp, now) >= WEEK_ADJACENT_MS : stampAge(stamp, now) >= WEEK_FAR_MS)
     if (!wanted) continue
     if (distance <= WEEK_PROBE) due.push(monday)
     else beyond.push(monday)

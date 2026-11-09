@@ -378,6 +378,9 @@ class SchulnetzClient(
             java.time.Instant.parse(fetchedNow),
             today,
             icalAvailable,
+            emptyWeeks = previous?.weekRead.orEmpty().keys.filterTo(HashSet()) { week ->
+                previous?.events.orEmpty().none { it.isLesson() && weekMondayKey(it.start) == week }
+            },
         )
         val discovered = findSchedulerUrl(planHtml, root)
         val fromPlan = parseSchedulerNote(planNote)

@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { addDays, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { addDays, isLesson, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -165,6 +165,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       now: nowIso,
       today,
       icalAvailable,
+      emptyWeeks: new Set(Object.keys(weekRead).filter((week) => !previousEvents.some((event) => isLesson(event) && weekMonday(String(event.start || '').slice(0, 10)) === week))),
     })
     const lessonWeeks = {}
     const examWeeks = {}
