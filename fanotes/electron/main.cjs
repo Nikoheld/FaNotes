@@ -54,6 +54,7 @@ const {
   famdEncodingForSave,
   parseFamd,
   readFamdCompanion,
+  rewriteFamdText,
   parseNoteBackups,
   parseNoteLinks,
   parseNoteTextFields,
@@ -63,7 +64,12 @@ const {
 } = require('./famd.cjs')
 const pdfOcrStore = require('./pdf-ocr.cjs')
 const pageTextStore = require('./page-text.cjs')
-const { composeFile: composeFamdOffThread, openFile: openFamdOffThread } = require('./famdOpenPool.cjs')
+const {
+  composeFile: composeFamdOffThread,
+  inspectDrawing: inspectDrawingOffThread,
+  openFile: openFamdOffThread,
+  rewriteText: rewriteFamdTextOffThread,
+} = require('./famdOpenPool.cjs')
 const { parseSubjectBooks } = require('./subject-book.cjs')
 const { createAddonStore, registerAddonIpc } = require('./addons.cjs')
 const { createSyncHost, registerSyncIpc } = require('./sync.cjs')
@@ -1805,12 +1811,14 @@ async function snapshotNoteHistory(relativePath) {
   }
 }
 
+/** `options.inkJson` is the text of `ink`: a large drawing is composed from it in the famd worker. */
 async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefined, options = {}) {
   const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
   if (!isNoteExtension(extension)) return
   const famdRelativePath = companionNotePath(markdownRelativePath, '.famd')
   const { target } = await resolveVaultPath(famdRelativePath, { allowMissing: true, expected: 'file' })
-  const write = () => writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink)
+  const inkJson = ink !== undefined && typeof options.inkJson === 'string' ? options.inkJson : undefined
+  const write = () => writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink, inkJson)
   if (options.heldQueueTarget === target) return write()
   return queueFileWrite(target, write)
 }
@@ -1829,7 +1837,8 @@ async function mutateFamdCompanion(notePath, mutate) {
     await snapshotNoteHistory(markdownPath)
     const markdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
     const existingSource = await readOptionalNoteFile(famdRelative)
-    const existing = existingSource ? parseFamd(existingSource) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
+    // Written back with the same encoding, so v2 ink can stay packed.
+    const existing = existingSource ? parseFamd(existingSource, { unpack: false }) : { markdown: stripFamdPayload(markdown), payload: emptyFamdPayload() }
     const body = stripFamdPayload(markdown || existing.markdown)
     const basePayload = {
       ...(existing.payload || emptyFamdPayload()),
@@ -1852,7 +1861,7 @@ async function mutateFamdCompanion(notePath, mutate) {
   })
 }
 
-async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink) {
+async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink, inkJson) {
   invalidateFamdCompanion(famdRelativePath)
   const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
   const mdRelativePath = companionNotePath(markdownRelativePath, '.md')
@@ -1871,6 +1880,11 @@ async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, tar
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error
     }
+  }
+  if (text == null && inkJson !== undefined) {
+    // A large drawing: the worker parses the new ink, packs it, and returns
+    // the file. Packing 320k samples here took about 0.3 s after each pause.
+    text = await composeFamdOffThread(target, typeof markdown === 'string' ? markdown : '', currentSettings.paperStyle, MAX_FAMD_BYTES, inkJson)
   }
   if (text == null) {
     text = composeFamdCompanion(await readOptionalNoteFile(famdRelativePath), markdown, ink, currentSettings.paperStyle)
@@ -2733,6 +2747,18 @@ function validateDrawingJson(drawingJson) {
   }
 }
 
+/** `validateDrawingJson` for a large drawing: the same checks, the parse in the famd worker. */
+async function inspectDrawingJsonOffThread(drawingJson) {
+  if (typeof drawingJson !== 'string' || Buffer.byteLength(drawingJson, 'utf8') > MAX_DRAWING_JSON_BYTES) {
+    throw new Error('Die Zeichnungsdaten sind ungültig oder zu groß.')
+  }
+  try {
+    return await inspectDrawingOffThread(drawingJson)
+  } catch {
+    throw new Error('Die Zeichnungsdaten sind kein gültiges JSON.')
+  }
+}
+
 /** A drawing object that was already parsed with the companion. No second JSON.parse. */
 function acceptDrawingDocument(value) {
   if (!isPlainObject(value)) throw new Error('Die Zeichnungsdaten sind kein gültiges JSON.')
@@ -3538,20 +3564,20 @@ function registerIpcHandlers() {
             }
           }
           const isFamdFile = path.extname(normalizedRelativePath).toLocaleLowerCase('en-US') === '.famd'
-          const existingFamdSource = isFamdFile ? await readOptionalNoteFile(normalizedRelativePath) : null
           let written
           if (isFamdFile) {
-            const parsedExisting = parseFamd(existingFamdSource ?? '')
-            if (existingFamdSource && famdLooksStored(existingFamdSource) && !parsedExisting.payload) {
-              throw new Error('Die Notiz konnte nicht gelesen werden und wurde nicht überschrieben.')
-            }
-            const previous = parsedExisting.payload || emptyFamdPayload()
-            const textChanged = markdownBody !== stripFamdPayload(parsedExisting.markdown || '')
-            written = serializeFamd(markdownBody, {
-              ...previous,
-              updatedAt: textChanged ? new Date().toISOString() : (previous.updatedAt || new Date().toISOString()),
-              worksheets: worksheetIdsFromMarkdown(markdownBody),
-            }, famdEncodingForSave(existingFamdSource))
+            // A large note is rewritten in the famd worker. This thread also
+            // forwards pen and key input to the window, so a long rewrite here
+            // was a stall on every autosave.
+            const size = await statRegularFileNoFollow(target, MAX_FAMD_BYTES)
+              .then((info) => info.size)
+              .catch((error) => {
+                if (error?.code === 'ENOENT') return 0
+                throw error
+              })
+            written = size >= FAMD_ASYNC_CHARS
+              ? await rewriteFamdTextOffThread(target, markdownBody, MAX_FAMD_BYTES)
+              : rewriteFamdText(await readOptionalNoteFile(normalizedRelativePath), markdownBody)
           } else {
             const existingMd = existing ? await readOptionalNoteFile(normalizedRelativePath, noteByteLimit(normalizedRelativePath)) : null
             if (existingMd && famdLooksStored(existingMd) && inkHasMarks(parseFamd(existingMd).payload) && !inkHasMarks(parseFamd(content).payload)) {
@@ -4228,7 +4254,12 @@ function registerIpcHandlers() {
     const id = safeDrawingId(payload.id)
     const title = safeEntryName(payload.title, 'Zeichnung')
     const png = payload.imageData === undefined ? null : decodePngDataUrl(payload.imageData)
-    const drawingDocument = validateDrawingJson(payload.drawingJson)
+    // A large drawing is parsed in the famd worker; only its top-level fields
+    // come back. Parsing 320k samples here took about 0.25 s per save.
+    const largeDrawing = typeof payload.drawingJson === 'string' && payload.drawingJson.length >= FAMD_ASYNC_CHARS
+    const drawingDocument = largeDrawing
+      ? await inspectDrawingJsonOffThread(payload.drawingJson)
+      : validateDrawingJson(payload.drawingJson)
     const metadata = drawingLibraryMetadata(drawingDocument, id, new Date().toISOString())
     if (metadata.title !== title) {
       throw new Error('Der Zeichnungstitel stimmt nicht mit den Zeichnungsdaten überein.')
@@ -4252,7 +4283,10 @@ function registerIpcHandlers() {
         await queueFileWrite(famdTarget, async () => {
           const markdownPath = noteMarkdownSourcePath(notePath)
           const noteMarkdown = (await readOptionalNoteFile(markdownPath, noteByteLimit(markdownPath))) ?? ''
-          await writeFamdCompanion(notePath, stripFamdPayload(noteMarkdown), drawingDocument, { heldQueueTarget: famdTarget })
+          await writeFamdCompanion(notePath, stripFamdPayload(noteMarkdown), drawingDocument, {
+            heldQueueTarget: famdTarget,
+            ...(largeDrawing ? { inkJson: payload.drawingJson } : {}),
+          })
         })
       } catch (error) {
         throw new Error(`Handschrift konnte nicht in die Notiz geschrieben werden: ${error?.message ?? error}`)

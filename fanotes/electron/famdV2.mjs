@@ -60,19 +60,41 @@ const crc32 = (text) => crc32Bytes(new TextEncoder().encode(text))
 
 const crcHex = (text) => crc32(text).toString(16).padStart(8, '0')
 
+const FAMD85_CODES = Uint8Array.from(FAMD85, (char) => char.charCodeAt(0))
+const FAMD85_POW4 = 85 * 85 * 85 * 85
+const TEXT_CHUNK = 8192
+
+const asciiText = (codes) => {
+  let text = ''
+  for (let start = 0; start < codes.length; start += TEXT_CHUNK) {
+    text += String.fromCharCode.apply(null, codes.subarray(start, Math.min(codes.length, start + TEXT_CHUNK)))
+  }
+  return text
+}
+
+// One byte per output character, turned into text once. Joining a
+// five-string array for every four bytes, with the digits in floating point,
+// made packing 320k points take about a second. The top digit takes the one
+// division a uint32 needs; the rest of the group fits a small integer.
 const encode85 = (bytes) => {
   if (bytes.length % 4 !== 0) throw new FamdCorruptError('famd v2 point block length')
-  const parts = new Array(bytes.length / 4)
-  for (let index = 0, group = 0; index < bytes.length; index += 4, group += 1) {
-    let value = (((bytes[index] * 256 + bytes[index + 1]) * 256 + bytes[index + 2]) * 256) + bytes[index + 3]
-    const chars = ['', '', '', '', '']
-    for (let digit = 4; digit >= 0; digit -= 1) {
-      chars[digit] = FAMD85[value % 85]
-      value = Math.floor(value / 85)
-    }
-    parts[group] = chars.join('')
+  const out = new Uint8Array((bytes.length / 4) * 5)
+  for (let index = 0, at = 0; index < bytes.length; index += 4, at += 5) {
+    const value = (((bytes[index] * 256 + bytes[index + 1]) * 256 + bytes[index + 2]) * 256) + bytes[index + 3]
+    const d0 = Math.floor(value / FAMD85_POW4)
+    let rest = (value - d0 * FAMD85_POW4) | 0
+    const d1 = (rest / 614125) | 0
+    rest -= d1 * 614125
+    const d2 = (rest / 7225) | 0
+    rest -= d2 * 7225
+    const d3 = (rest / 85) | 0
+    out[at] = FAMD85_CODES[d0]
+    out[at + 1] = FAMD85_CODES[d1]
+    out[at + 2] = FAMD85_CODES[d2]
+    out[at + 3] = FAMD85_CODES[d3]
+    out[at + 4] = FAMD85_CODES[rest - d3 * 85]
   }
-  return parts.join('')
+  return asciiText(out)
 }
 
 const decode85 = (value) => {
@@ -124,14 +146,21 @@ const writeFloat64 = (view, offset, value) => {
   view.setUint32(offset + 4, 0x7ff80000, true)
 }
 
+const hasOwn = Object.prototype.hasOwnProperty
+
+// Most points carry only the packed keys. Walking the keys in place, and
+// building an object only for a point that has more, keeps a large save from
+// allocating a key list and an object for every sample.
 const pointExtras = (point, keepPointer) => {
   if (!point || typeof point !== 'object') return null
-  const extra = {}
-  for (const key of Object.keys(point)) {
+  let extra = null
+  for (const key in point) {
+    if (!hasOwn.call(point, key)) continue
     if (PACKED_POINT_KEYS.has(key) && (key !== 'pointerType' || !keepPointer)) continue
+    if (!extra) extra = {}
     extra[key] = point[key]
   }
-  return Object.keys(extra).length ? extra : null
+  return extra
 }
 
 const packPointer = (points) => {
@@ -379,6 +408,7 @@ export {
   encodeV2Document,
   famdEncodingForSave,
   isActiveV2,
+  packInk as packV2Ink,
   readV2Payload,
   v2CutIndex,
 }
