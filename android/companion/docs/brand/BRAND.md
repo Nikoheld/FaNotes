@@ -9,12 +9,13 @@ Edit the generator, not the generated files:
 python3 android/companion/docs/brand/gen.py .
 ```
 
-## The mark: "Taktschiene"
+## The mark: K+
 
-A **K** whose arms branch from a round node on a vertical stem, with a gold **+** beside it. It
-follows the design system ([DESIGN_SYSTEM.md](../DESIGN_SYSTEM.md)): the stem and node are the
-planner's time rail and lesson node, the tile is the ink of the Snow and light themes, and gold is
-the single warm accent. The shapes are bold and round-capped, so "K+" still reads at 32 px.
+The **K+** of the earlier icon is the core: a straight stem, two arms that meet at the stem, and a
+separate gold **+**. It is drawn with the polish of the design system ([DESIGN_SYSTEM.md](../DESIGN_SYSTEM.md)):
+one stroke weight for the K and the plus, round terminals, the plus nested in the K's opening and
+the pair centred optically, on the flat ink tile of the light and Snow themes with paper and gold.
+It reads at 32 px, in one colour and as a notification icon.
 
 | Token | Value | Use |
 | --- | --- | --- |
@@ -30,18 +31,34 @@ the single warm accent. The shapes are bold and round-capped, so "K+" still read
 - **Splash (Android 12+):** the system splash uses the adaptive launcher icon; no theme change.
 - **Wordmark:** the app shows no logo or wordmark in its UI, so none was added.
 
-## Directions considered
+## How it got here
 
-![Three directions](directions.png)
+First round, three directions ([directions.png](directions.png)); A was chosen and shipped in the
+first version of this branch:
 
-- **A · Taktschiene** (chosen): the clearest at 48 and 32 px and as a one-colour icon, recognisably
-  "K+" and continuous with the previous mark.
+- **A · Taktschiene:** a K whose arms branch from a round node, with a gold plus.
 - **B · Tagesband:** a plus made of day-band segments. Distinctive, but it loses "Kanti" and reads
   as a generic plus.
 - **C · Kachel:** a K cut out of a timetable tile with a plus badge. Busy at small sizes, and the
   badge breaks in the one-colour themed icon and in the notification icon.
 
-[`directions.py`](directions.py) draws the three directions; [`preview.py`](preview.py) renders
-before/after straight from the VectorDrawable XML (with Chromium headless).
+Second round (feedback: keep the old K+, execute it better), see
+[k-plus-variants.png](k-plus-variants.png): the old mark, the node K, and three K+ executions.
+**M1 · K+ rounded** was chosen: it is the old K+ exactly as a concept, with one weight, round
+terminals and the plus sized and nested to balance the K; the cut (M2) and square-cap (M3)
+versions looked blunt or heavy.
+
+[`directions.py`](directions.py) and [`k_plus_variants.py`](k_plus_variants.py) draw the rounds; [`preview.py`](preview.py) renders
+before/after straight from the VectorDrawable XML and [`export.py`](export.py) writes the PNG
+exports (Chromium headless).
+
+## Exports
+
+- `android/docs/launcher-icon/`: 512 px PNGs of each icon (square, round, squircle, one-colour on
+  dark, light and themed backgrounds), the previous icons as `old-*`, and `comparison.png`.
+- `play/kanti-play-icon-512.png`: Google Play store icon, 512 x 512, 32-bit PNG, full-bleed and
+  fully opaque (Play applies its own mask and shadow).
+- `play/kanti-feature-1024x500.png`: Google Play feature graphic, 1024 x 500, 24-bit PNG without
+  alpha, key content inside the centre.
 
 ![Before and after](before-after.png)

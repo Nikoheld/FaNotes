@@ -1,4 +1,4 @@
-"""Kanti+ mark (direction A "Taktschiene"): one geometry, emitted as SVG masters and Android
+"""Kanti+ mark (the K+ of the earlier icon, redrawn): one geometry, emitted as SVG masters and Android
 VectorDrawables, so every size is derived from the same vectors.
 
 Usage: python3 gen.py <repo root>
@@ -17,11 +17,12 @@ GOLD = "#E7B552"
 SCALE = 0.92  # keeps every mark inside the 66 dp safe zone of the 108 dp canvas
 
 # Primitives: ("rrect", x, y, w, h, r, color[, alpha]) ("circle", cx, cy, r, color) ("stroke", d, width, color)
+# The K+ of the earlier mark (straight stem, arms meeting at the stem, a separate gold plus), drawn
+# with one stroke weight, round terminals and the plus nested in the K's opening.
 KANTI = [
-    ("rrect", 28.5, 33, 9, 42, 4.5, PAPER),
-    ("stroke", "M44.5,54 L58.5,37.5 M44.5,54 L58.5,70.5", 9, PAPER),
-    ("circle", 42, 54, 8.5, PAPER),
-    ("stroke", "M66,54 H82 M74,46 V62", 8.5, GOLD),
+    ("stroke", "M32.5,34 V74", 9.5, PAPER),
+    ("stroke", "M55.5,34 L34.5,55 L55.5,74", 9.5, PAPER),
+    ("stroke", "M60.5,54 H75.5 M68,46.5 V61.5", 9.5, GOLD),
 ]
 SCHULE = [
     ("stroke", "M30,47 L54,31 L78,47", 7, PAPER),
