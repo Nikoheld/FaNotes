@@ -650,7 +650,10 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
         }
 
         fun update(context: Context, manager: AppWidgetManager, ids: IntArray) {
-            val snapshot = CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
+            val demo = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean(CompanionGraph.DEMO_PREF, false)
+            // Demo mode never writes the cache; the widget builds the same invented week itself.
+            val snapshot = if (demo) ch.fasrv.fanotes.schulnetz.demoSnapshot(java.time.LocalDate.now(ch.fasrv.fanotes.schulnetz.SCHOOL_ZONE))
+                else CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
             val hidden = java.io.File(context.filesDir, "vault/${CompanionGraph.HIDDEN_PATH}").takeIf { it.isFile }?.readText()?.let { parseHiddenLessons(it) }.orEmpty()
             val compact = java.io.File(context.filesDir, "vault/${CompanionGraph.DESK_PATH}").takeIf { it.isFile }?.readText()?.let { parseDeskPrefs(it).widgetCompact } == true
             val zone = ZoneId.systemDefault()

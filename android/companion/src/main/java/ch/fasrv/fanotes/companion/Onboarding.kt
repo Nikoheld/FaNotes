@@ -121,6 +121,8 @@ fun OnboardingScreen(model: CompanionModel, modifier: Modifier = Modifier) {
                     1 -> if (!linked) {
                         PrimaryButton(t(R.string.connect_schulnetz), { model.continueLocally(); model.requestVisibleLogin("onboarding") }, Modifier.fillMaxWidth(), enabled = !model.busy, icon = Icons.Outlined.School)
                         TextButton(onClick = { go(2) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(t(R.string.onboarding_later)) }
+                        // For app review and trying Kanti+ without Schulnetz: invented data only.
+                        if (model.canStartDemo()) TextButton(onClick = { model.startDemo() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(t(R.string.demo_view)) }
                     } else PrimaryButton(t(R.string.onboarding_next), { go(2) }, Modifier.fillMaxWidth())
                     3 -> {
                         if (!allowed && Build.VERSION.SDK_INT >= 33) {
