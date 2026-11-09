@@ -772,6 +772,29 @@ export const gradeDiffBase = (previous, next) => {
   return { ...previous, grades: next.grades }
 }
 
+/** More new absences or messages than this in one upload are a list reappearing, not news. */
+export const UPLOAD_LIST_BURST = 3
+
+/**
+ * The previous snapshot as the diff of an app upload should see it. The server never reads
+ * absences, start-page appointments or the Terminliste itself; they only arrive with uploads (which
+ * were refused with 413 for days). A list the server never held, or one that grows by more than
+ * UPLOAD_LIST_BURST at once, is taken as the baseline instead of being announced item by item.
+ */
+export const uploadDiffBase = (previous, next) => {
+  if (!previous || !next) return previous
+  const base = { ...previous }
+  for (const field of ['absences', 'messages']) {
+    const known = new Set((previous[field] || []).map((item) => item?.id))
+    const fresh = (next[field] || []).filter((item) => !known.has(item?.id)).length
+    if (!(previous[field] || []).length || fresh > UPLOAD_LIST_BURST) base[field] = next[field] || []
+  }
+  if (!(previous.events || []).some((event) => !isLesson(event))) {
+    base.events = [...(previous.events || []), ...(next.events || []).filter((event) => !isLesson(event))]
+  }
+  return base
+}
+
 export const keepLoadedGrades = (previousGrades, nextGrades, complete = true) => {
   const next = Array.isArray(nextGrades) ? nextGrades : []
   const prev = Array.isArray(previousGrades) ? previousGrades : []

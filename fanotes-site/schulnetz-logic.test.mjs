@@ -97,7 +97,7 @@ const FIXTURE_TODAY = '2026-11-01'
 const diffSnapshots = (previous, next, settings = {}, today = FIXTURE_TODAY, now) => diffSnapshotsAt(previous, next, settings, today, now)
 import { scrapeWithSession } from './schulnetz-web.mjs'
 import { gzipSync } from 'node:zlib'
-import { GRADE_PARSER_VERSION, SNAPSHOT_JSON_LIMIT, decodeRequestJson, gradeDiffBase, mergeEventsById } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, SNAPSHOT_JSON_LIMIT, UPLOAD_LIST_BURST, decodeRequestJson, gradeDiffBase, mergeEventsById, uploadDiffBase } from './schulnetz-logic.mjs'
 
 const marks = [
   { mark: 5.5, weight: 1 },
@@ -2647,5 +2647,21 @@ test('a semester-sized app snapshot is accepted plain and gzip', async () => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('the first upload after uploads were refused announces no absence, message or appointment backlog', () => {
+  const absence = (id) => ({ id, dateFrom: '2026-11-02', dateTo: '2026-11-02', hourFrom: '07:45', hourTo: '08:30', subject: 'Fach', reason: 'Krank', excused: false, acknowledged: false, status: 'offen' })
+  const message = (id) => ({ id, title: 'Termin', body: `Elternabend ${id}`, at: '2026-11-20' })
+  const appointment = (id) => ({ id, start: '2026-11-20T19:00:00', end: '2026-11-20T20:00:00', text: `Anlass ${id}`, eventType: 'event' })
+  const server = { events: realIdLessons(['2026-11-09']), absences: [], messages: [], exams: [] }
+  const upload = { ...server, absences: [absence('a1'), absence('a2')], messages: [message('m1')], events: [...server.events, appointment('t1'), appointment('t2')] }
+  assert.ok(diffSnapshots(server, upload, {}).length > 0, 'without the base the backlog would be announced')
+  assert.equal(diffSnapshots(uploadDiffBase(server, upload), upload, {}).length, 0)
+  // Once the lists are known, a single new absence is news again; a large batch is not.
+  const known = { ...upload }
+  const one = { ...upload, absences: [...upload.absences, absence('a3')] }
+  assert.equal(diffSnapshots(uploadDiffBase(known, one), one, {}).filter((change) => change.category === 'absence').length, 1)
+  const many = { ...upload, absences: [...upload.absences, ...Array.from({ length: UPLOAD_LIST_BURST + 1 }, (_, i) => absence(`b${i}`))] }
+  assert.equal(diffSnapshots(uploadDiffBase(known, many), many, {}).filter((change) => change.category === 'absence').length, 0)
 })
 
