@@ -134,7 +134,32 @@ const runOnce = () => {
   }
 }
 
+// Each pen sample on a PDF note measured every page's box, then used only
+// x and y, which never depend on those boxes: 2.5–5.3 ms per sample on a
+// 2,000-page PDF. The mapping must stay the same without them.
+const checkSampleSkipsPageBoxes = () => {
+  const overlay = { left: 40, top: 20, width: 800, height: 4000 }
+  const pages = [
+    { top: 20, height: 1000 },
+    { top: 1036, height: 1000 },
+    { top: 2052, height: 1000 },
+  ]
+  for (const [x, y] of [[440, 520], [440, 1028], [440, 2600], [10, -50], [900, 5000]]) {
+    const withPages = pdfOverlayPointFromClient(x, y, overlay, pages)
+    const without = pdfOverlayPointFromClient(x, y, overlay)
+    assert.equal(without.x, withPages.x, `x at ${x},${y} does not need page boxes`)
+    assert.equal(without.y, withPages.y, `y at ${x},${y} does not need page boxes`)
+  }
+  const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
+  const start = board.indexOf('const pointFromEvent = useCallback(')
+  assert.ok(start > 0, 'DrawingBoard maps samples in pointFromEvent')
+  const body = board.slice(start, board.indexOf('}, [', start))
+  assert.doesNotMatch(body, /querySelectorAll\(\s*'\[data-pdf-page\]'/, 'a pen sample does not walk every PDF page')
+  assert.match(body, /pdfOverlayPointFromClient\(event\.clientX, event\.clientY, surface\)/)
+}
+
 try {
+  checkSampleSkipsPageBoxes()
   const first = runOnce()
   const second = runOnce()
   assert.deepEqual(first, second)
