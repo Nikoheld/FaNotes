@@ -23,6 +23,9 @@ class FixtureGuardTest {
             "start.html",
             "stundenplan.html",
             "terminliste.html",
+            "stundenplan-5141.html",
+            "pruefungsplan-5141.html",
+            "terminliste-alle.html",
         )
         for (name in names) {
             val html = checkNotNull(javaClass.getResource("/schulnetz/$name")) { name }.readText()

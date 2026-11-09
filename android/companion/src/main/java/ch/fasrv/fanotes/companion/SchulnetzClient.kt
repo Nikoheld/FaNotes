@@ -44,6 +44,7 @@ import ch.fasrv.fanotes.schulnetz.httpResultCategory
 import ch.fasrv.fanotes.schulnetz.linkedPageUrl
 import ch.fasrv.fanotes.schulnetz.pageUrl
 import ch.fasrv.fanotes.schulnetz.redactSchulnetzSecrets
+import ch.fasrv.fanotes.schulnetz.schedulerTransid
 import ch.fasrv.fanotes.schulnetz.sessionIdsFromPage
 import ch.fasrv.fanotes.schulnetz.startPageUrl
 import ch.fasrv.fanotes.schulnetz.isExamLike
@@ -225,7 +226,20 @@ class SchulnetzClient(
         if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    fun fetchWeb(baseUrl: String, session: WebSession, loader: (String) -> LoadedPage, signedOut: Boolean = false, trace: (String) -> Unit = {}, previous: SchulnetzSnapshot? = null, context: String = ""): WebBundle {
+    /** Main-thread check; JVM tests replace it because they have no Android looper. */
+    internal var onMainThread: () -> Boolean = { Looper.myLooper() == Looper.getMainLooper() }
+
+    fun fetchWeb(
+        baseUrl: String,
+        session: WebSession,
+        loader: (String) -> LoadedPage,
+        signedOut: Boolean = false,
+        trace: (String) -> Unit = {},
+        previous: SchulnetzSnapshot? = null,
+        context: String = "",
+        today: java.time.LocalDate = java.time.LocalDate.now(),
+        fetchedNow: String = java.time.Instant.now().toString(),
+    ): WebBundle {
         val root = baseUrl.trimEnd('/')
         var id = session.id
         var transid = session.transid
@@ -248,13 +262,14 @@ class SchulnetzClient(
         }
         fun adopt(page: LoadedPage) {
             val found = sessionIdsFromPage(page.finalUrl, page.body) ?: return
+            // Source only, never the values: page-scheduler and page-links are the fresh transid.
             trace("session ids source=${found.source}")
             id = found.id
             transid = found.transid
         }
         fun get(url: String, label: String, pageId: String): String {
             val started = System.nanoTime()
-            val mainThread = Looper.myLooper() == Looper.getMainLooper()
+            val mainThread = onMainThread()
             val pageName = pageToken(url)
             fun duration() = (System.nanoTime() - started) / 1_000_000
             if (isForcedLogoutUrl(url) || !webReadAllowed(url)) {
@@ -327,13 +342,19 @@ class SchulnetzClient(
                 break
             }
             pages[pageId] = get(url, label, pageId)
+            if (pageId == "22108" && pages[pageId].orEmpty().isNotBlank() && !sawSessionProblem && oauthPage == null) {
+                // The whole list in one read, with the transid this page just printed (GET only).
+                pages["22108-all"] = get(pageUrl(root, "22108", id, transid, TERMINLISTE_ALL), "termine-alle", "22108")
+            }
         }
         // The start page contains recent marks, not a complete grade book.
         val grades = readGradesPage(pages["21311"].orEmpty())
         val absences = readAbsencesPage(pages["21111"].orEmpty())
         val exams = readExamsPage(pages["21312"].orEmpty())
-        val terminePages = mutableListOf(pages["22108"].orEmpty())
-        if (oauthPage == null && !sawSessionProblem) {
+        val fullList = pages["22108-all"].orEmpty().takeIf { parseTerminliste(it).isNotEmpty() }
+        trace("termine full-list=${fullList != null} rows=${fullList?.let { parseTerminliste(it).size } ?: 0} $context")
+        val terminePages = mutableListOf(fullList ?: pages["22108"].orEmpty())
+        if (fullList == null && oauthPage == null && !sawSessionProblem) {
             val seenTermine = parseTerminliste(pages["22108"].orEmpty()).map { it.id }.toMutableSet()
             val seenRows = mutableSetOf<Int>()
             var currentRow = 0
@@ -359,10 +380,10 @@ class SchulnetzClient(
         absences.error?.let { errors += it }
         exams.error?.let { errors += it }
         termine.error?.let { errors += it }
-        val today = java.time.LocalDate.now()
-        val fetchedNow = java.time.Instant.now().toString()
         val planHtml = pages["22202"].orEmpty()
-        val htmlSpan = parseWeekSpan(planHtml)
+        // The semester Schulnetz offers (createGridView from/to and the other markers); Prüfungsplan has the same range.
+        val htmlSpan = parseWeekSpan(planHtml) ?: parseWeekSpan(pages["21312"].orEmpty())
+        trace("semester span=${htmlSpan?.let { "${it.start}..${it.end}" } ?: "none"} $context")
         val icalUrl = findIcalUrl(planHtml, root)
         val icalAvailable = !icalUrl.isNullOrBlank() && webReadAllowed(icalUrl)
         // Without a range on the page, plan the school year from appointments and holidays,
@@ -381,10 +402,12 @@ class SchulnetzClient(
             emptyWeeks = previous?.weekRead.orEmpty().keys.filterTo(HashSet()) { week ->
                 previous?.events.orEmpty().none { it.isLesson() && weekMondayKey(it.start) == week }
             },
+            // Asked before but never confirmed (an empty answer without proof): ask again soon.
+            unreadWeeks = previous?.weekFetched.orEmpty().keys.filterTo(HashSet()) { it !in previous?.weekRead.orEmpty() },
         )
         val discovered = findSchedulerUrl(planHtml, root)
         val fromPlan = parseSchedulerNote(planNote)
-        val callerMain = Looper.myLooper() == Looper.getMainLooper()
+        val callerMain = onMainThread()
         var parseFailed = false
         val parseStarted = System.nanoTime()
         trace("parse stundenplan begin mainThread=$callerMain bytes=${planHtml.length} tables=${tableCount(planHtml)} weeksRequested=${plan.fetch.size} $context")
@@ -418,22 +441,27 @@ class SchulnetzClient(
         /** True once the scheduler itself returned lessons for some week in this read. */
         var schedulerGaveLessons = false
         val examStamps = previous?.examWeekFetched.orEmpty().toMutableMap()
+        val examEmpty = mutableListOf<String>()
+        var examSchedulerAnswered = false
         if (canFetch && !callerMain) {
-            // Schulnetz hands out a new transid with every page, and the scheduler only answers
-            // with the transid of its own page. After Terminliste and Prüfungen the timetable's
-            // transid is stale and every week came back empty, so open each page again right
-            // before its weeks: first the timetable weeks, then the exam weeks.
-            fun reopen(pageId: String, label: String) {
-                // The current transid, like a click on the page that is open now; older links carry stale ones.
-                val url = pageUrl(root, pageId, id, transid)
-                get(url, label, pageId)
+            // Schulnetz mints a new transid with every page and prints it into that page's links and
+            // its own scheduler call (loadStundenplanReal). The scheduler answers only with that fresh
+            // transid; the one in the request URL returns an empty <data></data>. So open each page
+            // again right before its weeks and use the transid it printed: first Stundenplan, then
+            // Prüfungsplan, each with its own.
+            fun reopen(pageId: String, label: String): String {
+                val body = get(pageUrl(root, pageId, id, transid), label, pageId)
+                val printed = schedulerTransid(body, pageId)
+                // Source only, never the value.
+                trace("scheduler transid page=$pageId source=${if (printed != null) "page-scheduler" else "session"} $context")
+                return printed ?: transid
             }
-            if (plan.fetch.isNotEmpty()) reopen("22202", "stundenplan-wochen")
+            val lessonTransid = if (plan.fetch.isNotEmpty()) reopen("22202", "stundenplan-wochen") else transid
             for (monday in plan.fetch) {
                 if (oauthPage != null || sawSessionProblem || parseFailed) break
                 val max = monday.plusDays(7)
                 val curr = if (monday == weekMonday(today)) today.toString() else monday.toString()
-                val lessonBody = get(schedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "scheduler", "scheduler")
+                val lessonBody = get(schedulerUrl(root, id, lessonTransid, curr, monday.toString(), max.toString()), "scheduler", "scheduler")
                 val lessonParsed = if (schedulerWeekLoaded(lessonBody)) offMain("scheduler-xml") { parseSchedulerXml(lessonBody) } else emptyList()
                 // Shape only, no content: shows in the diagnostic log why a week has no lessons.
                 trace("scheduler week=$monday bytes=${lessonBody.length} loaded=${schedulerWeekLoaded(lessonBody)} usable=${schedulerBodyUsable(lessonBody)} lessons=${lessonParsed?.size ?: -1} $context")
@@ -443,12 +471,12 @@ class SchulnetzClient(
                     if (monday != weekMonday(today)) checkedEmpty += monday else currentEmptyUsable = true
                 }
             }
-            if (plan.fetch.isNotEmpty() && oauthPage == null && !sawSessionProblem && !parseFailed) reopen("21312", "pruefungen-wochen")
+            val examTransid = if (plan.fetch.isNotEmpty() && oauthPage == null && !sawSessionProblem && !parseFailed) reopen("21312", "pruefungen-wochen") else transid
             for (monday in plan.fetch) {
                 if (oauthPage != null || sawSessionProblem || parseFailed) break
                 val max = monday.plusDays(7)
                 val curr = if (monday == weekMonday(today)) today.toString() else monday.toString()
-                val examBody = get(examSchedulerUrl(root, id, transid, curr, monday.toString(), max.toString()), "pruefungen-xml", "21312")
+                val examBody = get(examSchedulerUrl(root, id, examTransid, curr, monday.toString(), max.toString()), "pruefungen-xml", "21312")
                 val examParsed = if (schedulerWeekLoaded(examBody)) {
                     offMain("exam-xml") {
                         parseSchedulerXml(examBody).map { event ->
@@ -462,11 +490,15 @@ class SchulnetzClient(
                 if (examParsed.isNotEmpty()) {
                     examWeeks[monday] = examParsed
                     examStamps[monday.toString()] = fetchedNow
+                    examSchedulerAnswered = true
                 } else if (schedulerBodyUsable(examBody) && !schedulerWeekLoaded(examBody) &&
                     previous?.exams.orEmpty().none { weekMondayKey(it.start) == monday.toString() }) {
-                    examStamps[monday.toString()] = fetchedNow
+                    examEmpty += monday.toString()
                 }
             }
+            // A bare <data></data> is also what a stale transid returns: an empty exam week only counts
+            // when a scheduler of this read returned something.
+            if (examSchedulerAnswered || schedulerGaveLessons) for (week in examEmpty) examStamps[week] = fetchedNow
         } else if (canFetch) {
             parseFailed = true
         }
@@ -883,6 +915,8 @@ class SchulnetzClient(
 
     companion object {
         const val CLIENT_ID = SCHULNETZ_CLIENT_ID
+        /** Terminliste as one table read: every row of the list Schulnetz offers. */
+        const val TERMINLISTE_ALL = "tblName=tblTerminliste&sRow=0&numRows=1000000"
         private val ALERT_SETTING_NAMES = listOf(
             "enabled", "grades", "gradeNew", "gradeChanged", "timetable", "lessonCancelled", "lessonChanged",
             "exams", "examNew", "examMoved", "examCancelled", "examRoom", "absences", "events",

@@ -493,9 +493,17 @@ class WebSessionTest {
         assertEquals("3cbca9162e104cac", chosen?.id)
         assertEquals("bcfb2e", chosen?.transid)
         assertTrue(chosen!!.source.startsWith("page-links:"))
-        val fromUrl = sessionIdsFromPage(
+        // The page's printed transid wins over the one in the URL that was sent; a body without links
+        // (the scheduler XML) falls back to the URL.
+        val fromPage = sessionIdsFromPage(
             "https://www.schulnetz-ag.ch/aksa/index.php?pageid=1&id=3cbca9162e104cac&transid=a28e52",
             html,
+        )
+        assertEquals("bcfb2e", fromPage?.transid)
+        assertTrue(fromPage!!.source.startsWith("page-links:"))
+        val fromUrl = sessionIdsFromPage(
+            "https://www.schulnetz-ag.ch/aksa/index.php?pageid=1&id=3cbca9162e104cac&transid=a28e52",
+            "<?xml version='1.0' encoding='utf-8' ?><data></data>",
         )
         assertEquals("final-url", fromUrl?.source)
         assertEquals("a28e52", fromUrl?.transid)

@@ -46,6 +46,21 @@ const lesson = (id, startLocal, endLocal, room, text, teacher) => {
   return `<div class="dhx_cal_event" event_id="${id}" data-bar-start="${start}" data-bar-end="${end}" title="Lehrperson: ${teacher}"><div class="stpt_event_text">${text}</div><div class="stpt_event_date">${clock} - ${endClock} / ${room}</div></div>`
 }
 
+// Schulnetz 5.14.1 page shape (anonymized): every page prints a fresh transid into its links and its
+// own scheduler call; the semester range appears in the grid view, the date templates, the
+// Folgesemester guard and the Wochenplan inputs, never as limit_start/limit_end.
+const SESSION = 'f1a2b3c4d5e6f708'
+const PRINTED = { '22202': 'a1b2c3', '21312': 'b2c3d4', '22108': 'c3d4e5' }
+const menu = (transid) => ['1', '21311', '21111', '21200', '22206', '22202', '22108', '21312']
+  .map((id) => `<a href="index.php?pageid=${id}&amp;id=${SESSION}&amp;transid=${transid}">Seite ${id}</a>`).join('\n')
+const semesterScript = (pageId, ansicht, extra) => `<script>
+scheduler.createGridView({name:"grid",fields:[{id:"start_date",label:"<span id='von_spalte'>Von</span>&nbsp;",align:'left',width:145},{id:"text",label:"Fach",align:'left'}],from:new Date("2026-08-10"),to:new Date("2027-01-30")});
+scheduler.templates.wp_date=function(start,end){if(scheduler.getState().mode=="wochenplan")return scheduler.templates.day_date(new Date("2026-08-10"))+" &ndash; "+scheduler.templates.day_date(scheduler.date.add(new Date("2027-01-30"),-1,"day"));else return week_date_default(start,end)};
+scheduler.templates.grid_date=function(start,end){return scheduler.templates.day_date(new Date("2026-08-10"))+" &ndash; "+scheduler.templates.day_date(scheduler.date.add(new Date("2027-01-30"),-1,"day"))};
+function loadStundenplanReal(scheduler){showExportLoader();var state=scheduler.getState();scheduler.clearAll();var dateToString=scheduler.date.date_to_str("%Y-%m-%d");var view=state.mode;var curr_date=dateToString(state.date);var min_date=dateToString(state.min_date);var max_date=dateToString(state.max_date);if('2027-01-30'<max_date)
+alert('Der Stundenplan wurde vom Stundenplaner für das Folgesemester noch nicht freigegeben!');let url="scheduler_processor.php?view="+view+"&curr_date="+curr_date+"&min_date="+min_date+"&max_date="+max_date+"&ansicht=${ansicht}${extra}&id=${SESSION}&transid=${PRINTED[pageId]}&pageid=${pageId}";callback=null;try{scheduler.load(url,callback)}catch(error){hideExportLoader()}}
+</script>`
+
 const files = {
   'noten.html': page(`
 <a href="index.php?pageid=21311">Noten</a>
@@ -102,6 +117,42 @@ ${[
 <div id="scheduler"></div>
 <script>${lehrerliste}</script>
 `),
+  'stundenplan-5141.html': page(`
+<h1>Schülerinnen- und Schülerplan</h1>
+${menu(PRINTED['22202'])}
+<div class="dhx_cal_tab" name="week_tab">Woche</div>
+<div class="dhx_cal_tab" name="grid_tab" title="Semester als Liste">Liste</div>
+<div class="dhx_cal_tab" name="wochenplan_tab" title="Semester als Wochenplan">Wochenplan</div>
+<script>${lehrerliste}</script>
+${semesterScript('22202', 'schueleransicht', '')}
+<form onsubmit="xajax_save_wochenplan_dates($('zeitraum_von').value, $('zeitraum_bis').value); return false;">
+<input type="text" name="zeitraum_von" id="zeitraum_von" class="mdl-textfield__input" value="10.08.2026">
+<input type="text" name="zeitraum_bis" id="zeitraum_bis" class="mdl-textfield__input" value="29.01.2027">
+</form>
+${[
+    lesson('syn-1', '2026-11-02T07:45:00', '2026-11-02T08:30:00', 'A12', 'Deutsch Holm', 'Mira Holm'),
+    lesson('syn-2', '2026-11-02T08:35:00', '2026-11-02T09:20:00', 'B04', 'Mathematik Nord', 'Leo Nord'),
+    lesson('syn-3', '2026-11-03T09:40:00', '2026-11-03T10:25:00', 'C11', 'Chemie Kern', 'Pia Kern'),
+  ].join('\n')}
+`),
+  'pruefungsplan-5141.html': page(`
+<h1>Prüfungsplan</h1>
+${menu(PRINTED['21312'])}
+<div id="scheduler"></div>
+<script>${lehrerliste}</script>
+${semesterScript('21312', 'klassenuebersicht', '&showOnlyThisClass=-1')}
+`),
+  'terminliste-alle.html': page(`
+<h1>Terminliste</h1>
+${menu(PRINTED['22108'])}
+<table class="tblTerminliste" id="tblTerminliste">
+  <tr><th>Datum von</th><th>Bezeichnung</th><th>Raum</th></tr>
+${Array.from({ length: 40 }, (_, index) => {
+    const day = new Date(Date.UTC(2026, 10, 2 + index * 2))
+    const text = `${String(day.getUTCDate()).padStart(2, '0')}.${String(day.getUTCMonth() + 1).padStart(2, '0')}.${day.getUTCFullYear()}`
+    return `  <tr><td>${text}</td><td>Schulanlass ${index + 1}</td><td>Aula</td></tr>`
+  }).join('\n')}
+</table>`),
   'start.html': page(`
 <a href="index.php?pageid=1">Start</a>
 <div>

@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { addDays, isLesson, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { addDays, isLesson, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -146,7 +146,8 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
   let events = previousEvents
   let exams = previousExams
   if (!pages.problem && pages['22202']) {
-    const htmlSpan = parseWeekSpan(pages['22202'])
+    // The semester Schulnetz offers; Prüfungsplan carries the same range.
+    const htmlSpan = parseWeekSpan(pages['22202']) || parseWeekSpan(pages['21312'] || '')
     if (htmlSpan) {
       weekSpanStart = htmlSpan.start
       weekSpanEnd = htmlSpan.end
@@ -166,6 +167,8 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       today,
       icalAvailable,
       emptyWeeks: new Set(Object.keys(weekRead).filter((week) => !previousEvents.some((event) => isLesson(event) && weekMonday(String(event.start || '').slice(0, 10)) === week))),
+      // Asked before but never confirmed (an empty answer without proof): ask again soon.
+      unreadWeeks: new Set(Object.keys(weekFetched).filter((week) => !Object.hasOwn(weekRead, week))),
     })
     const lessonWeeks = {}
     const examWeeks = {}
@@ -173,16 +176,19 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     let currentEmptyUsable = false
     const emptyWeeks = []
     let schedulerGaveLessons = false
-    // Schulnetz hands out a new transid with every page, and the scheduler only answers with the
-    // transid of its own page. After Terminliste and Prüfungen the timetable's transid is stale and
-    // every week came back empty, so open each page again right before its weeks.
-    const reopen = async (pageId) => { await get(`/index.php?pageid=${pageId}&id=${session.id}&transid=${transid}`) }
-    if (plan.fetch.length && !pages.problem) await reopen('22202')
+    // Schulnetz mints a new transid with every page and prints it into that page's links and its
+    // own scheduler call. The scheduler answers only with that fresh transid; a replayed one returns
+    // an empty <data></data>. So open each page again right before its weeks and use what it printed.
+    const reopen = async (pageId) => {
+      const body = await get(`/index.php?pageid=${pageId}&id=${session.id}&transid=${transid}`)
+      return schedulerTransid(body, pageId) || transid
+    }
+    const lessonTransid = plan.fetch.length && !pages.problem ? await reopen('22202') : transid
     for (const monday of plan.fetch) {
       if (pages.problem) break
       const max = addDays(monday, 7)
       const curr = monday === current ? today : monday
-      const lessonUrl = schedulerFetchUrl({ root, pageId: '22202', ansicht: 'schueleransicht', id: session.id, transid, today: curr, min: monday, max, extra: '' })
+      const lessonUrl = schedulerFetchUrl({ root, pageId: '22202', ansicht: 'schueleransicht', id: session.id, transid: lessonTransid, today: curr, min: monday, max, extra: '' })
       const lessonBody = await get(lessonUrl)
       if (schedulerWeekLoaded(lessonBody)) {
         const parsed = parseSchedulerXml(lessonBody)
@@ -201,12 +207,14 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         }
       }
     }
-    if (plan.fetch.length && !pages.problem) await reopen('21312')
+    const examTransid = plan.fetch.length && !pages.problem ? await reopen('21312') : transid
+    const examEmpty = []
+    let examAnswered = false
     for (const monday of plan.fetch) {
       if (pages.problem) break
       const max = addDays(monday, 7)
       const curr = monday === current ? today : monday
-      const examUrl = schedulerFetchUrl({ root, pageId: '21312', ansicht: 'klassenuebersicht', id: session.id, transid, today: curr, min: monday, max, extra: 'showOnlyThisClass=-1' })
+      const examUrl = schedulerFetchUrl({ root, pageId: '21312', ansicht: 'klassenuebersicht', id: session.id, transid: examTransid, today: curr, min: monday, max, extra: 'showOnlyThisClass=-1' })
       const examBody = await get(examUrl)
       if (schedulerWeekLoaded(examBody)) {
         const parsed = parseSchedulerXml(examBody).map((event) => ({
@@ -216,11 +224,15 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         if (parsed.length) {
           examWeeks[monday] = parsed
           examWeekFetched[monday] = nowIso
+          examAnswered = true
         }
       } else if (schedulerBodyUsable(examBody) && !previousExams.some((event) => weekMonday(String(event.start || '').slice(0, 10)) === monday)) {
-        examWeekFetched[monday] = nowIso
+        examEmpty.push(monday)
       }
     }
+    // A bare <data></data> is also what a stale transid returns: an empty exam week only counts when
+    // a scheduler of this read returned something.
+    if (examAnswered || schedulerGaveLessons) for (const monday of examEmpty) examWeekFetched[monday] = nowIso
     const lessonEvents = Object.values(lessonWeeks).flat()
     events = overlayLessons(previousEvents, lessonEvents, new Set(Object.keys(lessonWeeks)))
     exams = carryTimetableExams(lessonEvents, overlayDated(previousExams, Object.values(examWeeks).flat(), new Set(Object.keys(examWeeks))))
