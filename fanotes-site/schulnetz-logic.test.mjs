@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -11,6 +12,11 @@ import { fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, s
 import {
   diffSnapshots as diffSnapshotsAt,
   changeIsOver,
+  weekMondayKey,
+  addDays,
+  semesterSpan,
+  schedulerTransid,
+  extractWebIds,
   keepServerLessons,
   legacySnapshotView,
   lessonSeedWeeks,
@@ -2472,4 +2478,61 @@ test('an older app gets this week only and no stamps that would read as changes'
   assert.deepEqual(view.weekFetched, { '2026-12-21': 'S' })
   assert.deepEqual(view.weekRead, { '2026-11-09': 'S', '2026-12-21': 'S' })
   assert.equal(legacySnapshotView({ events: [appointment] }, '2026-11-09').events.length, 1)
+})
+
+const fixture5141 = (name) => readFileSync(new URL(`../android/core/src/test/resources/schulnetz/${name}`, import.meta.url), 'utf8')
+
+test('the semester range and the fresh transid come from the real 5.14.1 page shape', () => {
+  const plan = fixture5141('stundenplan-5141.html')
+  const exams = fixture5141('pruefungsplan-5141.html')
+  assert.deepEqual(parseWeekSpan(plan), { start: '2026-08-10', end: '2027-01-29' })
+  assert.deepEqual(parseWeekSpan(exams), { start: '2026-08-10', end: '2027-01-29' })
+  assert.deepEqual(semesterSpan('return scheduler.templates.day_date(new Date("2026-08-10"))+" &ndash; "+scheduler.templates.day_date(scheduler.date.add(new Date("2027-01-30"),-1,"day"));'), { start: '2026-08-10', end: '2027-01-29' })
+  assert.deepEqual(semesterSpan('<input id="zeitraum_von" value="10.08.2026"> if(\'2027-01-30\'<max_date) alert(1)'), { start: '2026-08-10', end: '2027-01-29' })
+  assert.equal(semesterSpan('<html><body>Stundenplan</body></html>'), null)
+  assert.equal(schedulerTransid(plan, '22202'), 'a1b2c3')
+  assert.equal(schedulerTransid(exams, '21312'), 'b2c3d4')
+  // The URL carried the transid that was sent; the page printed a fresh one, which wins.
+  assert.deepEqual(extractWebIds('https://www.schulnetz-ag.ch/aksa/index.php?pageid=22202&id=f1a2b3c4d5e6f708&transid=e0e0e0', plan), { id: 'f1a2b3c4d5e6f708', transid: 'a1b2c3' })
+  // A body without links (the scheduler XML) keeps the URL's ids.
+  assert.deepEqual(extractWebIds('https://x.schulnetz-ag.ch/aksa/scheduler_processor.php?id=f1a2b3c4d5e6f708&transid=a1b2c3', '<data></data>'), { id: 'f1a2b3c4d5e6f708', transid: 'a1b2c3' })
+})
+
+test('a scrape loads every semester week with each page\'s printed transid and never trusts a bare empty answer', async () => {
+  const empty = "<?xml version='1.0' encoding='utf-8' ?><data></data>"
+  const lessonXml = (monday) => `<data>${[0, 1, 2, 3, 4].map((d) => { const day = addDays(monday, d); return `<event id="L${day}"><start_date>${day} 07:45</start_date><end_date>${day} 08:30</end_date><text>Fach</text><event_type>0_stp</event_type></event><event id="M${day}"><start_date>${day} 08:35</start_date><end_date>${day} 09:20</end_date><text>Fach 2</text><event_type>0_stp</event_type></event>` }).join('')}</data>`
+  const scrape = async (works, options = {}) => {
+    const calls = []
+    const fetchImpl = async (url) => {
+      const target = String(url)
+      calls.push(target)
+      const q = Object.fromEntries(new URL(target).searchParams)
+      let body = `<html><body>${['1', '21311', '21111', '21411', '21200', '22202', '22108', '21312'].map((p) => `<a href="index.php?pageid=${p}&amp;id=f1a2b3c4d5e6f708&amp;transid=d1e2f3">x</a>`).join('')}</body></html>`
+      if (target.includes('scheduler_processor')) {
+        body = empty
+        if (works && q.pageid === '22202' && q.transid === 'a1b2c3' && !['2026-12-21', '2026-12-28'].includes(q.min_date)) body = lessonXml(q.min_date)
+      } else if (q.pageid === '22202') body = fixture5141('stundenplan-5141.html')
+      else if (q.pageid === '21312') body = fixture5141('pruefungsplan-5141.html')
+      return { status: 200, headers: { get: () => '' }, text: async () => body }
+    }
+    const result = await scrapeWithSession('https://www.schulnetz-ag.ch/aksa', { php: 'php', id: 'f1a2b3c4d5e6f708', transid: 'e0e0e0', userAgent: 'test' }, fetchImpl, { today: '2026-11-06', now: '2026-11-06T17:00:00Z', ...options })
+    return { result, calls }
+  }
+  const { result, calls } = await scrape(true)
+  const lessonCalls = calls.filter((url) => url.includes('scheduler_processor') && url.includes('pageid=22202'))
+  assert.ok(lessonCalls.length > 9)
+  assert.ok(lessonCalls.every((url) => url.includes('transid=a1b2c3')))
+  assert.ok(calls.filter((url) => url.includes('scheduler_processor') && url.includes('pageid=21312')).every((url) => url.includes('transid=b2c3d4')))
+  assert.equal(result.weekSpanStart, '2026-08-10')
+  assert.equal(result.weekSpanEnd, '2027-01-29')
+  const taught = new Set(result.events.filter(isLesson).map((event) => weekMondayKey(event.start)))
+  for (const week of ['2026-11-09', '2026-11-16', '2026-12-07', '2027-01-25']) assert.ok(taught.has(week), week)
+  assert.ok(result.weekRead['2026-12-21'], 'a holiday answered empty with a proven transid is a free week')
+  // Stale transid everywhere: weeks are attempted, never marked read, and asked again 40 minutes later.
+  const stale = await scrape(false)
+  assert.ok(stale.result.weekFetched['2026-11-16'])
+  assert.equal(stale.result.weekRead['2026-11-16'], undefined)
+  const retry = await scrape(true, { now: '2026-11-06T17:40:00Z', previousEvents: stale.result.events, weekFetched: stale.result.weekFetched, weekRead: stale.result.weekRead, weekSpanStart: stale.result.weekSpanStart, weekSpanEnd: stale.result.weekSpanEnd })
+  assert.ok(retry.calls.some((url) => url.includes('scheduler_processor') && url.includes('min_date=2026-11-23')))
+  assert.ok(retry.result.weekRead['2026-11-23'])
 })

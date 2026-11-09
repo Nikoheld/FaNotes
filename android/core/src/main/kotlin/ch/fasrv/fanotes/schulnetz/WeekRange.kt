@@ -137,7 +137,29 @@ fun parseWeekSpan(html: String): WeekSpan? {
     val min = dataDate(html, "min")
     val max = dataDate(html, "max")
     if (min != null && max != null && !max.isBefore(min)) return WeekSpan(min, max)
-    return null
+    return semesterSpan(html)
+}
+
+/**
+ * The semester Schulnetz 5.14 offers on Stundenplan and Prüfungsplan, which it never states as
+ * limit_start/limit_end: the grid view `from`/`to` (to is exclusive), the wp_date/grid_date
+ * templates, the "Folgesemester" guard date (exclusive) and the Wochenplan "Zeitraum" inputs.
+ */
+fun semesterSpan(html: String): WeekSpan? {
+    fun iso(value: String?) = value?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    fun dotted(value: String?) = value?.let { runCatching { LocalDate.parse(it, java.time.format.DateTimeFormatter.ofPattern("d.M.yyyy")) }.getOrNull() }
+    val grid = Regex("""createGridView\(\{[\s\S]{0,4000}?from\s*:\s*new\s+Date\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*\)\s*,\s*to\s*:\s*new\s+Date\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*\)""").find(html)
+    val template = Regex("""day_date\(\s*new\s+Date\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*\)\s*\)[\s\S]{0,160}?day_date\(\s*scheduler\.date\.add\(\s*new\s+Date\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*\)\s*,\s*-1\s*,\s*["']day["']""").find(html)
+    val guard = Regex("""if\s*\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*<\s*max_date\s*\)""").find(html)
+    val from = Regex("""id\s*=\s*["']zeitraum_von["'][^>]*?value\s*=\s*["'](\d{1,2}\.\d{1,2}\.\d{4})["']""").find(html)
+    val to = Regex("""id\s*=\s*["']zeitraum_bis["'][^>]*?value\s*=\s*["'](\d{1,2}\.\d{1,2}\.\d{4})["']""").find(html)
+    val start = iso(grid?.groupValues?.get(1)) ?: iso(template?.groupValues?.get(1)) ?: dotted(from?.groupValues?.get(1))
+    val end = iso(grid?.groupValues?.get(2))?.minusDays(1)
+        ?: iso(template?.groupValues?.get(2))?.minusDays(1)
+        ?: dotted(to?.groupValues?.get(1))
+        ?: iso(guard?.groupValues?.get(1))?.minusDays(1)
+    if (start == null || end == null || end.isBefore(start)) return null
+    return WeekSpan(start, end)
 }
 
 fun spanOfEvents(events: List<AgendaEvent>): WeekSpan? {
@@ -155,6 +177,8 @@ fun planWeekFetches(
     icalAvailable: Boolean,
     /** Weeks read without a lesson. Up to [WEEK_PROBE] weeks ahead they are checked again on the short cadence. */
     emptyWeeks: Set<String> = emptySet(),
+    /** Weeks asked for but never confirmed as read. They are asked again on the short cadence. */
+    unreadWeeks: Set<String> = emptySet(),
 ): WeekPlan {
     val current = weekMonday(today)
     val probing = mondays.isEmpty()
@@ -167,14 +191,17 @@ fun planWeekFetches(
         val wanted = when {
             monday == current -> true
             stamp.isNullOrBlank() -> true
-            distance <= 1 || (monday > current && distance <= WEEK_PROBE.toLong() && monday.toString() in emptyWeeks) -> stampAge(stamp, now) >= WEEK_ADJACENT_MS
+            distance <= 1 || monday.toString() in unreadWeeks ||
+                (monday > current && distance <= WEEK_PROBE.toLong() && monday.toString() in emptyWeeks) -> stampAge(stamp, now) >= WEEK_ADJACENT_MS
             else -> stampAge(stamp, now) >= WEEK_FAR_MS
         }
         if (!wanted) continue
         if (distance <= WEEK_PROBE.toLong()) due += monday else beyond += monday
     }
+    // Oldest attempt first; among equals the coming weeks before past ones, nearest first.
     beyond.sortedWith(
         compareBy<LocalDate> { fetchedAt[it.toString()].orEmpty() }
+            .thenBy { it.isBefore(current) }
             .thenBy { abs(ChronoUnit.DAYS.between(current, it)) },
     ).take(WEEK_BATCH).forEach { due += it }
     val first = fetchedAt.isEmpty() && icalFetchedAt.isBlank()

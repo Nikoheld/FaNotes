@@ -90,19 +90,43 @@ data class PageSessionIds(val id: String, val transid: String, val source: Strin
 
 data class NavTarget(val pageId: String, val id: String, val transid: String, val href: String)
 
-/** id and transid from the page that just loaded. The final URL wins; otherwise the id used by the most links. */
+/**
+ * The transid a loaded page printed for its own scheduler calls (`loadStundenplanReal` builds
+ * `scheduler_processor.php?...&ansicht=…&id=…&transid=…&pageid=…`). Schulnetz mints a new transid
+ * with every page, and the scheduler answers only with that one; a replayed transid returns an
+ * empty `<data></data>`. With [pageId], only that page's scheduler call counts.
+ */
+fun schedulerTransid(html: String, pageId: String? = null): String? {
+    val text = html.replace("&amp;", "&").replace("&#38;", "&")
+    return Regex("""(?i)ansicht=[a-z]+[^"'<>\s]*?[?&]id=[a-f0-9]{4,}&transid=([a-f0-9]{4,})[^"'<>\s]*?[?&]pageid=(\d+)""")
+        .findAll(text)
+        .firstOrNull { pageId == null || it.groupValues[2] == pageId }
+        ?.groupValues?.get(1)
+}
+
+/**
+ * id and transid for the next request, from the page that just loaded, the way a browser follows it:
+ * the transid the page printed into its scheduler call or its links. The final URL is only a fallback
+ * for pages without links, because it carries the transid that was sent, not the fresh one.
+ */
 fun sessionIdsFromPage(finalUrl: String, html: String): PageSessionIds? {
+    val links = navigationTargets(html)
+    if (links.isNotEmpty()) {
+        val best = links.groupBy { it.id.lowercase() }.maxWithOrNull(
+            compareBy<Map.Entry<String, List<NavTarget>>> { entry -> entry.value.map { it.pageId }.distinct().size }.thenBy { it.value.size },
+        )
+        if (best != null) {
+            val sample = best.value.last()
+            val scheduler = schedulerTransid(html)
+            if (scheduler != null) return PageSessionIds(sample.id, scheduler, "page-scheduler")
+            return PageSessionIds(sample.id, sample.transid, "page-links:${best.value.size}")
+        }
+    }
     val uri = runCatching { URI(finalUrl) }.getOrNull()
     val urlId = queryValue(uri?.rawQuery, "id")?.takeIf { HEX_VALUE.matches(it) }
     val urlTrans = queryValue(uri?.rawQuery, "transid")?.takeIf { HEX_VALUE.matches(it) }
     if (urlId != null && urlTrans != null) return PageSessionIds(urlId, urlTrans, "final-url")
-    val links = navigationTargets(html)
-    if (links.isEmpty()) return null
-    val best = links.groupBy { it.id.lowercase() }.maxWithOrNull(
-        compareBy<Map.Entry<String, List<NavTarget>>> { entry -> entry.value.map { it.pageId }.distinct().size }.thenBy { it.value.size },
-    ) ?: return null
-    val sample = best.value.last()
-    return PageSessionIds(sample.id, sample.transid, "page-links:${best.value.size}")
+    return null
 }
 
 fun navigationTargets(html: String): List<NavTarget> {

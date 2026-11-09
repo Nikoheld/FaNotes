@@ -1674,10 +1674,39 @@ export const terminlisteNextUrl = (html, baseUrl, currentRow = 0) => {
   return `${String(baseUrl || '').replace(/\/+$/u, '')}/${best.replace(/^\/+/u, '')}`
 }
 
+/**
+ * The transid a loaded page printed for its own scheduler calls (loadStundenplanReal builds
+ * scheduler_processor.php?...&ansicht=…&id=…&transid=…&pageid=…). Schulnetz mints a new transid with
+ * every page; the scheduler answers only with that one, a replayed transid returns <data></data>.
+ */
+export const schedulerTransid = (html, pageId = '') => {
+  const text = String(html || '').replace(/&amp;/gu, '&').replace(/&#38;/gu, '&')
+  for (const match of text.matchAll(/ansicht=[a-z]+[^"'<>\s]*?[?&]id=[a-f0-9]{4,}&transid=([a-f0-9]{4,})[^"'<>\s]*?[?&]pageid=(\d+)/giu)) {
+    if (!pageId || match[2] === String(pageId)) return match[1]
+  }
+  return ''
+}
+
+/**
+ * id and transid for the next request, from the page that just loaded, the way a browser follows
+ * it: the transid printed into the page's scheduler call or links. The URL is only a fallback for
+ * bodies without links (the scheduler XML), because it carries the transid that was sent.
+ */
 export const extractWebIds = (url, html) => {
-  const blob = `${url}\n${html}`
-  const id = /[?&]id=([a-f0-9]{4,})/i.exec(blob)?.[1] || ''
-  const transid = /[?&]transid=([a-f0-9]{4,})/i.exec(blob)?.[1] || ''
+  const text = String(html || '').replace(/&amp;/gu, '&').replace(/&#38;/gu, '&')
+  const links = [...text.matchAll(/href\s*=\s*["']([^"']+)["']/giu)].map((match) => match[1])
+    .filter((href) => /(?:^|[?&])pageid=\d+/iu.test(href) && !/pageid=9999\b/iu.test(href))
+    .map((href) => ({ id: /(?:^|[?&])id=([a-f0-9]{4,})/iu.exec(href)?.[1] || '', transid: /(?:^|[?&])transid=([a-f0-9]{4,})/iu.exec(href)?.[1] || '' }))
+    .filter((link) => link.id && link.transid)
+  if (links.length) {
+    const groups = new Map()
+    for (const link of links) groups.set(link.id.toLowerCase(), [...(groups.get(link.id.toLowerCase()) || []), link])
+    const best = [...groups.values()].sort((a, b) => b.length - a.length)[0]
+    const sample = best.at(-1)
+    return { id: sample.id, transid: schedulerTransid(text) || sample.transid }
+  }
+  const id = /[?&]id=([a-f0-9]{4,})/iu.exec(String(url || ''))?.[1] || ''
+  const transid = /[?&]transid=([a-f0-9]{4,})/iu.exec(String(url || ''))?.[1] || ''
   return id && transid ? { id, transid } : null
 }
 
@@ -1797,7 +1826,30 @@ export const parseWeekSpan = (html) => {
   const min = dataDate(html, 'min')
   const max = dataDate(html, 'max')
   if (min && max && max >= min) return { start: min, end: max }
-  return null
+  return semesterSpan(html)
+}
+
+/**
+ * The semester Schulnetz 5.14 offers on Stundenplan and Prüfungsplan, never stated as
+ * limit_start/limit_end: the grid view from/to (to is exclusive), the wp_date/grid_date templates,
+ * the "Folgesemester" guard date (exclusive) and the Wochenplan "Zeitraum" inputs.
+ */
+export const semesterSpan = (html) => {
+  const text = String(html || '')
+  const dotted = (value) => {
+    const match = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/u.exec(value || '')
+    return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : ''
+  }
+  const valid = (day) => (parsedDay(day) ? day : '')
+  const grid = /createGridView\(\{[\s\S]{0,4000}?from\s*:\s*new\s+Date\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*\)\s*,\s*to\s*:\s*new\s+Date\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*\)/u.exec(text)
+  const template = /day_date\(\s*new\s+Date\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*\)\s*\)[\s\S]{0,160}?day_date\(\s*scheduler\.date\.add\(\s*new\s+Date\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*\)\s*,\s*-1\s*,\s*["']day["']/u.exec(text)
+  const guard = /if\s*\(\s*["'](\d{4}-\d{2}-\d{2})["']\s*<\s*max_date\s*\)/u.exec(text)
+  const from = /id\s*=\s*["']zeitraum_von["'][^>]*?value\s*=\s*["'](\d{1,2}\.\d{1,2}\.\d{4})["']/u.exec(text)
+  const to = /id\s*=\s*["']zeitraum_bis["'][^>]*?value\s*=\s*["'](\d{1,2}\.\d{1,2}\.\d{4})["']/u.exec(text)
+  const start = valid(grid?.[1]) || valid(template?.[1]) || valid(dotted(from?.[1]))
+  const end = (valid(grid?.[2]) && addDays(grid[2], -1)) || (valid(template?.[2]) && addDays(template[2], -1)) ||
+    valid(dotted(to?.[1])) || (valid(guard?.[1]) && addDays(guard[1], -1)) || ''
+  return start && end && end >= start ? { start, end } : null
 }
 
 export const spanOfEvents = (events) => {
@@ -1817,7 +1869,8 @@ const weekDistance = (monday, current) => Math.round((Date.parse(`${monday}T00:0
 
 // emptyWeeks: weeks read without a lesson. Up to WEEK_PROBE weeks ahead they are checked again on the
 // short cadence, so a week an earlier empty answer marked free does not stay free for a day.
-export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = '', now, today, icalAvailable = false, emptyWeeks = new Set() } = {}) => {
+// unreadWeeks: weeks asked for but never confirmed as read; asked again on the short cadence.
+export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = '', now, today, icalAvailable = false, emptyWeeks = new Set(), unreadWeeks = new Set() } = {}) => {
   const current = weekMonday(today)
   const probing = !mondays.length
   const universe = capMondays(probing ? probeMondays(today) : mondays, today)
@@ -1826,15 +1879,18 @@ export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = 
   for (const monday of universe) {
     const distance = Math.abs(weekDistance(monday, current))
     const stamp = fetchedAt?.[monday]
-    const soon = distance <= 1 || (monday > current && distance <= WEEK_PROBE && emptyWeeks.has(monday))
+    const soon = distance <= 1 || unreadWeeks.has(monday) || (monday > current && distance <= WEEK_PROBE && emptyWeeks.has(monday))
     const wanted = monday === current || !stamp || (soon ? stampAge(stamp, now) >= WEEK_ADJACENT_MS : stampAge(stamp, now) >= WEEK_FAR_MS)
     if (!wanted) continue
     if (distance <= WEEK_PROBE) due.push(monday)
     else beyond.push(monday)
   }
+  // Oldest attempt first; among equals the coming weeks before past ones, nearest first.
   beyond.sort((left, right) => {
     const stamp = String(fetchedAt?.[left] || '').localeCompare(String(fetchedAt?.[right] || ''))
     if (stamp) return stamp
+    const past = Number(left < current) - Number(right < current)
+    if (past) return past
     return Math.abs(weekDistance(left, current)) - Math.abs(weekDistance(right, current))
   }).slice(0, WEEK_BATCH).forEach((monday) => due.push(monday))
   const first = Object.keys(fetchedAt || {}).length === 0 && !icalFetchedAt

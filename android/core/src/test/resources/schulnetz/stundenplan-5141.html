@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Synthetic</title></head>
+<body><main>
+
+<h1>Schülerinnen- und Schülerplan</h1>
+<a href="index.php?pageid=1&amp;id=f1a2b3c4d5e6f708&amp;transid=a1b2c3">Seite 1</a>
+<a href="index.php?pageid=21311&amp;id=f1a2b3c4d5e6f708&amp;transid=a1b2c3">Seite 21311</a>
+<a href="index.php?pageid=21111&amp;id=f1a2b3c4d5e6f708&amp;transid=a1b2c3">Seite 21111</a>
+<a href="index.php?pageid=21200&amp;id=f1a2b3c4d5e6f708&amp;transid=a1b2c3">Seite 21200</a>
+<a href="index.php?pageid=22206&amp;id=f1a2b3c4d5e6f708&amp;transid=a1b2c3">Seite 22206</a>
+<a href="index.php?pageid=22202&amp;id=f1a2b3c4d5e6f708&amp;transid=a1b2c3">Seite 22202</a>
+<a href="index.php?pageid=22108&amp;id=f1a2b3c4d5e6f708&amp;transid=a1b2c3">Seite 22108</a>
+<a href="index.php?pageid=21312&amp;id=f1a2b3c4d5e6f708&amp;transid=a1b2c3">Seite 21312</a>
+<div class="dhx_cal_tab" name="week_tab">Woche</div>
+<div class="dhx_cal_tab" name="grid_tab" title="Semester als Liste">Liste</div>
+<div class="dhx_cal_tab" name="wochenplan_tab" title="Semester als Wochenplan">Wochenplan</div>
+<script>var lehrerliste=[{"key":"1","label":"Holm, Mira","status":"active","name":"Mira Holm","kuerzel":"EX01"},{"key":"2","label":"Nord, Leo","status":"active","name":"Leo Nord","kuerzel":"EX02"},{"key":"3","label":"Kern, Pia","status":"active","name":"Pia Kern","kuerzel":"EX03"},{"key":"4","label":"Salt, Quinn","status":"active","name":"Quinn Salt","kuerzel":"EX04"},{"key":"5","label":"Berg, Rita","status":"active","name":"Rita Berg","kuerzel":"EX05"},{"key":"6","label":"Feld, Uwe","status":"active","name":"Uwe Feld","kuerzel":"EX06"},{"key":"7","label":"Glas, Wera","status":"active","name":"Wera Glas","kuerzel":"EX07"},{"key":"8","label":"Igel, Yann","status":"active","name":"Yann Igel","kuerzel":"EX08"},{"key":"9","label":"Bode, Anja","status":"active","name":"Anja Bode","kuerzel":"EX09"},{"key":"10","label":"Dahl, Ciro","status":"active","name":"Ciro Dahl","kuerzel":"EX10"}];</script>
+<script>
+scheduler.createGridView({name:"grid",fields:[{id:"start_date",label:"<span id='von_spalte'>Von</span>&nbsp;",align:'left',width:145},{id:"text",label:"Fach",align:'left'}],from:new Date("2026-08-10"),to:new Date("2027-01-30")});
+scheduler.templates.wp_date=function(start,end){if(scheduler.getState().mode=="wochenplan")return scheduler.templates.day_date(new Date("2026-08-10"))+" &ndash; "+scheduler.templates.day_date(scheduler.date.add(new Date("2027-01-30"),-1,"day"));else return week_date_default(start,end)};
+scheduler.templates.grid_date=function(start,end){return scheduler.templates.day_date(new Date("2026-08-10"))+" &ndash; "+scheduler.templates.day_date(scheduler.date.add(new Date("2027-01-30"),-1,"day"))};
+function loadStundenplanReal(scheduler){showExportLoader();var state=scheduler.getState();scheduler.clearAll();var dateToString=scheduler.date.date_to_str("%Y-%m-%d");var view=state.mode;var curr_date=dateToString(state.date);var min_date=dateToString(state.min_date);var max_date=dateToString(state.max_date);if('2027-01-30'<max_date)
+alert('Der Stundenplan wurde vom Stundenplaner für das Folgesemester noch nicht freigegeben!');let url="scheduler_processor.php?view="+view+"&curr_date="+curr_date+"&min_date="+min_date+"&max_date="+max_date+"&ansicht=schueleransicht&id=f1a2b3c4d5e6f708&transid=a1b2c3&pageid=22202";callback=null;try{scheduler.load(url,callback)}catch(error){hideExportLoader()}}
+</script>
+<form onsubmit="xajax_save_wochenplan_dates($('zeitraum_von').value, $('zeitraum_bis').value); return false;">
+<input type="text" name="zeitraum_von" id="zeitraum_von" class="mdl-textfield__input" value="10.08.2026">
+<input type="text" name="zeitraum_bis" id="zeitraum_bis" class="mdl-textfield__input" value="29.01.2027">
+</form>
+<div class="dhx_cal_event" event_id="syn-1" data-bar-start="1793601900000" data-bar-end="1793604600000" title="Lehrperson: Mira Holm"><div class="stpt_event_text">Deutsch Holm</div><div class="stpt_event_date">07:45 - 08:30 / A12</div></div>
+<div class="dhx_cal_event" event_id="syn-2" data-bar-start="1793604900000" data-bar-end="1793607600000" title="Lehrperson: Leo Nord"><div class="stpt_event_text">Mathematik Nord</div><div class="stpt_event_date">08:35 - 09:20 / B04</div></div>
+<div class="dhx_cal_event" event_id="syn-3" data-bar-start="1793695200000" data-bar-end="1793697900000" title="Lehrperson: Pia Kern"><div class="stpt_event_text">Chemie Kern</div><div class="stpt_event_date">09:40 - 10:25 / C11</div></div>
+
+</main></body></html>
