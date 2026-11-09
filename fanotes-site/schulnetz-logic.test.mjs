@@ -11,6 +11,8 @@ import { fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, s
 import {
   diffSnapshots as diffSnapshotsAt,
   changeIsOver,
+  keepServerLessons,
+  legacySnapshotView,
   lessonSeedWeeks,
   LESSON_SEED_MIN,
   TIMETABLE_BURST,
@@ -2441,4 +2443,33 @@ test('without a page range the planner follows a published timetable forward', (
   assert.equal(fallbackSchoolSpan([], [], '2026-11-09', [exam]).end, '2027-03-18')
   // Still at most forty weeks ahead.
   assert.equal(fallbackSchoolSpan([lesson('2027-07-01')], [], '2026-11-09').end, '2027-08-16')
+})
+
+test('a phone upload keeps the timetable weeks the server read', () => {
+  const lesson = (id, day, room = 'A1') => ({ id, start: `${day}T08:00:00`, end: `${day}T08:45:00`, text: 'Deutsch', room, teachers: ['T'], courseName: 'Deutsch', status: '', eventType: '0_stp' })
+  const appointment = { id: 't1', start: '2026-11-20T15:00:00', end: '2026-11-20T16:00:00', text: 'Sporttag', eventType: 'event' }
+  const server = { events: [lesson('s1', '2026-11-10'), lesson('s2', '2026-11-17'), lesson('s3', '2026-11-24')], weekFetched: { '2026-11-16': 'S', '2026-11-23': 'S' }, weekRead: { '2026-11-09': 'S', '2026-11-16': 'S', '2026-11-23': 'S' } }
+  // An older app: its own rendering of this week, nothing later, and empty stamps for later weeks.
+  const upload = { events: [lesson('dom1', '2026-11-10', 'A1 '), appointment, lesson('p9', '2026-12-01')], weekFetched: { '2026-11-16': 'P', '2026-11-30': 'P' }, weekRead: { '2026-11-16': 'P', '2026-11-30': 'P' }, grades: [] }
+  const merged = keepServerLessons(server, upload)
+  assert.deepEqual(merged.events.map((e) => e.id).sort(), ['p9', 's1', 's2', 's3', 't1'])
+  assert.deepEqual(merged.weekFetched, { '2026-11-16': 'S', '2026-11-23': 'S', '2026-11-30': 'P' })
+  assert.deepEqual(merged.weekRead, { '2026-11-09': 'S', '2026-11-16': 'S', '2026-11-23': 'S', '2026-11-30': 'P' })
+  // Nothing read yet on the server: the upload stays as it is.
+  assert.equal(keepServerLessons({ events: [appointment] }, upload), upload)
+})
+
+test('an older app gets this week only and no stamps that would read as changes', () => {
+  const lesson = (id, day) => ({ id, start: `${day}T08:00:00`, end: `${day}T08:45:00`, text: 'Deutsch', room: 'A1', teachers: ['T'], courseName: 'Deutsch', status: '', eventType: '0_stp' })
+  const appointment = { id: 't1', start: '2026-11-20T15:00:00', end: '2026-11-20T16:00:00', text: 'Sporttag', eventType: 'event' }
+  const snapshot = {
+    events: [lesson('a', '2026-11-10'), lesson('b', '2026-11-17'), appointment],
+    weekFetched: { '2026-11-09': 'S', '2026-11-16': 'S', '2026-12-21': 'S' },
+    weekRead: { '2026-11-09': 'S', '2026-11-16': 'S', '2026-12-21': 'S' },
+  }
+  const view = legacySnapshotView(snapshot, '2026-11-09')
+  assert.deepEqual(view.events.map((e) => e.id), ['a', 't1'])
+  assert.deepEqual(view.weekFetched, { '2026-12-21': 'S' })
+  assert.deepEqual(view.weekRead, { '2026-11-09': 'S', '2026-12-21': 'S' })
+  assert.equal(legacySnapshotView({ events: [appointment] }, '2026-11-09').events.length, 1)
 })

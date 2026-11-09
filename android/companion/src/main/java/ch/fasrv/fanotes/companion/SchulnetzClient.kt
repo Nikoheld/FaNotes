@@ -795,6 +795,8 @@ class SchulnetzClient(
                 "Accept" to "application/json",
                 "Accept-Language" to AppLanguage.acceptLanguage(),
                 "Content-Type" to "application/json",
+                // This app's own diff handles every timetable week; older apps get this week only.
+                "X-Kanti-Timetable" to "weeks",
             ),
             json,
             client,

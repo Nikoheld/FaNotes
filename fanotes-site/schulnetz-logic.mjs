@@ -2167,3 +2167,55 @@ export const lessonSeedWeeks = (previous, next) => {
 }
 /** More lesson changes than this in one read is the timetable reloading, not news. */
 export const TIMETABLE_BURST = 20
+
+const lessonWeeksOf = (events = []) => new Set(events.filter(isLesson).map((event) => weekMondayKey(event.start)).filter(Boolean))
+
+/**
+ * A phone upload does not replace timetable weeks the server has read: for those weeks the server's
+ * lessons and stamps stay. An older app only sees this week and would otherwise erase the rest, and
+ * its rendered lessons differ in form from the scheduler's, which would read as changes.
+ */
+export const keepServerLessons = (previous, upload) => {
+  const weeks = lessonWeeksOf(previous?.events)
+  if (!weeks.size || !upload) return upload
+  const events = [
+    ...(upload.events || []).filter((event) => !isLesson(event) || !weeks.has(weekMondayKey(event.start))),
+    ...(previous.events || []).filter((event) => isLesson(event) && weeks.has(weekMondayKey(event.start))),
+  ]
+  const stamps = (field) => {
+    const out = { ...(upload[field] || {}) }
+    for (const week of weeks) {
+      if (previous?.[field]?.[week]) out[week] = previous[field][week]
+      else delete out[week]
+    }
+    return out
+  }
+  return { ...upload, events, weekFetched: stamps('weekFetched'), weekRead: stamps('weekRead') }
+}
+
+/** Header a client sends when its own notification diff handles every timetable week. */
+export const TIMETABLE_WEEKS_HEADER = 'x-kanti-timetable'
+
+/**
+ * What an older app gets: this week's lessons, without the per-week "fetched" stamps of weeks with
+ * lessons, so its own diff, which lacks the first-timetable rule, has nothing to announce. Other
+ * weeks stay unread for it rather than looking free.
+ */
+export const legacySnapshotView = (snapshot, today = zurichToday()) => {
+  if (!snapshot) return snapshot
+  const current = weekMonday(today)
+  const weeks = lessonWeeksOf(snapshot.events)
+  if (!weeks.size) return snapshot
+  const weekFetched = { ...(snapshot.weekFetched || {}) }
+  const weekRead = { ...(snapshot.weekRead || {}) }
+  for (const week of weeks) {
+    delete weekFetched[week]
+    if (week !== current) delete weekRead[week]
+  }
+  return {
+    ...snapshot,
+    events: (snapshot.events || []).filter((event) => !isLesson(event) || weekMondayKey(event.start) === current),
+    weekFetched,
+    weekRead,
+  }
+}

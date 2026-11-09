@@ -10,6 +10,7 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
+import { keepServerLessons, legacySnapshotView, TIMETABLE_WEEKS_HEADER } from './schulnetz-logic.mjs'
 import {
   applyEventWindow,
   diffSnapshots,
@@ -290,7 +291,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
     if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Der Schnappschuss ist ungültig.')
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
-    const snapshot = { ...body, revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
+    const snapshot = { ...keepServerLessons(previous, body), revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
     const changes = await publishChanges(accountId, link, await agendaDiff(accountId, previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
@@ -1128,7 +1129,9 @@ export const createSchulnetzRuntime = (options = {}) => {
         return true
       }
       if (route === '/snapshot' && method === 'GET') {
-        const snapshot = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+        const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+        // Apps that handle every timetable week say so; older ones get this week only.
+        const snapshot = String(request.headers?.[TIMETABLE_WEEKS_HEADER] || '') === 'weeks' ? stored : legacySnapshotView(stored, zurichToday(now()))
         send(response, 200, snapshot || { revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], startMessages: [] })
         return true
       }
