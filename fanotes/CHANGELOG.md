@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.19
+
+- Add several school connections and the TAM intranet as a second provider.
+
 ## 2026.11.2-beta.18
 
 - Announce no backlog from the first app upload after uploads were refused.

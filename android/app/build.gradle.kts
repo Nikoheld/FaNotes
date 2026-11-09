@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val fanotesVersion = providers.gradleProperty("fanotes.version").orElse("2026.11.2-beta.18")
+val fanotesVersion = providers.gradleProperty("fanotes.version").orElse("2026.11.2-beta.19")
 
 android {
     namespace = "ch.fasrv.fanotes"
@@ -13,7 +13,7 @@ android {
         applicationId = "ch.fasrv.fanotes"
         minSdk = 29
         targetSdk = 36
-        versionCode = 51000168
+        versionCode = 51000169
         versionName = fanotesVersion.get()
     }
 
