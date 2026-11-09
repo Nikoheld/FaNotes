@@ -12,6 +12,7 @@ import {
 } from './pdfOcr'
 import { nextSnapshotTier, retainSnapshots, snapshotExtension } from '../../electron/noteHistoryPolicy.mjs'
 import { germanCount, germanIndexOf } from './germanSearch'
+import { sanitizePageTextRecord, type PageTextRecord } from './docSearch/pageText'
 import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
@@ -248,6 +249,8 @@ export function createBrowserApi(): FaNotesApi {
   const drawings = new Map<string, DrawingLibraryDocument>()
   const worksheets = new Map<string, WorksheetDocument>()
   const pdfOcr = new Map<string, PdfOcrCache>()
+  /** `fanotes-page-text-v1` records of browser-vault PDFs (document search). */
+  const pageText = new Map<string, PageTextRecord>()
   const notePaper = new Map<string, PaperStyle>()
   let subjectBooks: SubjectBookRecord[] = []
   let folderLocations: FolderLocationMap = {}
@@ -314,7 +317,7 @@ export function createBrowserApi(): FaNotesApi {
         doc: to === null ? null : { ...doc, path: exact ? to : `${to}${stored.slice(from.length)}` },
       })
     }
-    if (!moves.length) return
+    if (!moves.length) { await retargetPageText(from, to); return }
     await write('meta', (store) => {
       for (const move of moves) {
         store.delete(`pdf-ocr:${move.from}`)
@@ -324,6 +327,27 @@ export function createBrowserApi(): FaNotesApi {
     for (const move of moves) {
       pdfOcr.delete(move.from)
       if (move.doc) pdfOcr.set(move.doc.path, move.doc)
+    }
+    await retargetPageText(from, to)
+  }
+
+  const retargetPageText = async (from: string, to: string | null) => {
+    const moves: Array<{ from: string; record: PageTextRecord | null }> = []
+    for (const [stored, record] of pageText) {
+      const exact = stored === from
+      if (!exact && !stored.startsWith(`${from}/`)) continue
+      moves.push({ from: stored, record: to === null ? null : { ...record, path: exact ? to : `${to}${stored.slice(from.length)}` } })
+    }
+    if (!moves.length) return
+    await write('meta', (store) => {
+      for (const move of moves) {
+        store.delete(`page-text:${move.from}`)
+        if (move.record) store.put({ key: `page-text:${move.record.path}`, value: move.record } satisfies MetaRecord)
+      }
+    })
+    for (const move of moves) {
+      pageText.delete(move.from)
+      if (move.record) pageText.set(move.record.path, move.record)
     }
   }
 
@@ -393,6 +417,11 @@ export function createBrowserApi(): FaNotesApi {
     drawingRows.forEach((row) => drawings.set(row.id, row))
     worksheetRows.forEach((row) => worksheets.set(row.id, row))
     for (const [key, value] of meta) {
+      if (key.startsWith('page-text:')) {
+        const record = sanitizePageTextRecord(value)
+        if (record && record.path === key.slice('page-text:'.length)) pageText.set(record.path, record)
+        continue
+      }
       if (!key.startsWith('pdf-ocr:')) continue
       const parsed = sanitizePdfOcrCache(value)
       const storedPath = key.slice('pdf-ocr:'.length)
@@ -856,6 +885,25 @@ export function createBrowserApi(): FaNotesApi {
       await setMeta(`pdf-ocr:${path}`, doc)
       pdfOcr.set(path, doc)
       return doc
+    },
+    readPageText: async (rawPath) => {
+      await ready
+      const path = resolveStored(normalizePath(rawPath), false)
+      const blob = assets.get(path)
+      if (!blob) return null
+      const record = pageText.get(path) ?? null
+      return record && record.size === blob.size ? record : null
+    },
+    writePageText: async (payload) => {
+      await ready
+      const path = resolveStored(normalizePath(payload?.path ?? ''), false)
+      const blob = assets.get(path)
+      if (!blob || !/\.pdf$/iu.test(path)) throw new Error('Die PDF-Notiz wurde nicht gefunden.')
+      const record = sanitizePageTextRecord(payload)
+      if (!record || record.path !== path || record.size !== blob.size) return null
+      await setMeta(`page-text:${path}`, record)
+      pageText.set(path, record)
+      return record
     },
     writeFile: async (rawPath, content) => {
       await ready

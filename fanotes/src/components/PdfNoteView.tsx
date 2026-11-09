@@ -54,6 +54,7 @@ import {
 import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
 import { pageNeedsLocalOcr, pdfByteStamp, pdfPagePlainText, pdfTextSearchHits } from '../lib/pdfOcr'
+import { subscribePdfReveal } from '../lib/docSearch/reveal'
 import { runLocalPdfOcr } from '../lib/pdfOcrRun'
 import { VIEW_ZOOM_MIN, readSharedZoomMax, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
@@ -625,6 +626,9 @@ export function PdfNoteView({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const layoutTimerRef = useRef<number | null>(null)
   const searchTokenRef = useRef(0)
+  /** Document search asked for this page; the in-document search lands there instead of on the first hit. */
+  const revealRef = useRef<{ page: number; query: string } | null>(null)
+  const [revealToken, setRevealToken] = useState(0)
   const pdfTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
   const loadedPathRef = useRef('')
   const pdfIdentityRef = useRef<{ path: string; size: number; stamp: string } | null>(null)
@@ -1015,8 +1019,58 @@ export function PdfNoteView({
     setSearchHits(hits)
     setSearchIndex(0)
     setSearching(false)
+    const reveal = revealRef.current
+    if (reveal) {
+      revealRef.current = null
+      const onPage = hits.findIndex((hit) => hit.page === reveal.page)
+      if (onPage >= 0) setSearchIndex(onPage)
+      scrollToPage(reveal.page)
+      return
+    }
     if (hits[0]) scrollToPage(hits[0].page)
   }, [ocrPages, pdf, scrollToPage])
+
+  useEffect(() => subscribePdfReveal(path, (request) => {
+    revealRef.current = { page: request.page, query: request.query }
+    setRevealToken(request.token)
+  }), [path])
+
+  useEffect(() => {
+    const reveal = revealRef.current
+    if (!reveal || !pdf || !revealToken) return
+    const target = Math.min(Math.max(1, reveal.page), pdf.numPages)
+    // The view restores its start page while it lays out; keep going until
+    // the requested page is really on screen and stays there.
+    let cancelled = false
+    let stable = 0
+    let tries = 0
+    const settle = () => {
+      if (cancelled) return
+      const node = pagesRef.current?.querySelector<HTMLElement>(`[data-pdf-page="${target}"]`)
+      const box = node?.getBoundingClientRect()
+      const onScreen = Boolean(box && box.height > 0 && box.top < window.innerHeight * 0.75 && box.bottom > window.innerHeight * 0.25)
+      if (onScreen) stable += 1
+      else {
+        stable = 0
+        if (node) {
+          node.scrollIntoView({ block: 'center' })
+          setCurrentPage(target)
+          setPageDraft(String(target))
+        }
+      }
+      tries += 1
+      if (stable < 3 && tries < 60) window.setTimeout(settle, 150)
+    }
+    scrollToPage(target)
+    window.setTimeout(settle, 150)
+    if (reveal.query.trim()) {
+      setSearchQuery(reveal.query.trim())
+      setSearchOpen(true)
+    } else {
+      revealRef.current = null
+    }
+    return () => { cancelled = true }
+  }, [revealToken, pdf, scrollToPage])
 
   useEffect(() => {
     if (!searchOpen) return

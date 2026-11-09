@@ -2003,6 +2003,8 @@ export default function App({ startupBootstrap }: AppProps) {
       const visibleContent = stripFamdPayload(nextContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
       addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
+      // Document search re-reads changed notes in the background (debounced).
+      if (!options?.quiet) void import('./lib/docSearch/service').then(({ docSearch }) => docSearch.notifyChanged())
       // A statistics-only save must not start a sync. The timer still runs;
       // the engine then sees the same note and skips the upload.
       // A statistics tick must not count as the user clearing the note.
@@ -3950,6 +3952,24 @@ export default function App({ startupBootstrap }: AppProps) {
     if (settingsRef.current.experimentalHomeworkApi) void loadSecureSettings()
   }, [bootstrap?.vaultPath, loadSecureSettings])
 
+  // Document search: one local index per vault, filled in the background.
+  useEffect(() => {
+    const vaultPath = bootstrap?.vaultPath
+    if (!vaultPath || bootstrap?.onboardingRequired) return
+    let cancelled = false
+    void import('./lib/docSearch/service').then(({ docSearch }) => {
+      if (!cancelled) void docSearch.start({ api: window.fanotes, platform: window.fanotes.platform, vaultPath, version: APP_VERSION }).catch(() => undefined)
+    })
+    return () => {
+      cancelled = true
+      void import('./lib/docSearch/service').then(({ docSearch }) => docSearch.stop())
+    }
+  }, [bootstrap?.vaultPath, bootstrap?.onboardingRequired])
+  useEffect(() => {
+    if (!tree.length) return
+    void import('./lib/docSearch/service').then(({ docSearch }) => docSearch.notifyChanged())
+  }, [tree])
+
   const openSettings = useCallback((section?: SettingsSection) => {
     setSettingsSection(section)
     void loadSecureSettings()
@@ -4380,6 +4400,11 @@ export default function App({ startupBootstrap }: AppProps) {
     if (hit.kind !== 'drawing' || !hit.drawingId) {
       await openNote(hit.relativePath)
       reveal(hit.relativePath)
+      // Document index hit on a PDF page: go to the page and mark the words there.
+      if (hit.unit === 'pdf-page' && hit.page) {
+        const { requestPdfReveal } = await import('./lib/docSearch/reveal')
+        requestPdfReveal(hit.relativePath, hit.page, hit.query ?? '')
+      }
       return
     }
     if (hit.notePath) {

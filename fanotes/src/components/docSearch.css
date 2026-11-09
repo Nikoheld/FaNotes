@@ -1,0 +1,18 @@
+/* Document search additions to the vault search panel. Uses the app's tokens. */
+.doc-search-status { margin: 0 12px 6px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.doc-search-status-row { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+.doc-search-status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-search-mini { display: inline-flex; align-items: center; gap: 4px; min-height: 24px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-soft); background: transparent; font: inherit; cursor: pointer; }
+.doc-search-mini:hover, .doc-search-mini:focus-visible { background: var(--panel-hover); color: var(--text); }
+.doc-search-issues { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); max-height: 220px; overflow: auto; }
+.doc-search-issues p { margin: 0 0 6px; }
+.doc-search-issues ul { margin: 0 0 6px; padding-left: 16px; }
+.doc-search-issues li { margin: 2px 0; overflow-wrap: anywhere; }
+.doc-search-issues strong { color: var(--text-soft); font-weight: 600; }
+.doc-search-issue-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.doc-search-issue-actions button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-soft); background: transparent; font: inherit; cursor: pointer; }
+.doc-search-issue-actions button:hover, .doc-search-issue-actions button:focus-visible { background: var(--panel-hover); }
+.search-results button > p mark { padding: 0 1px; border-radius: 3px; color: inherit; background: color-mix(in srgb, var(--accent, #2a6f97) 26%, transparent); }
+.doc-hit-where { color: var(--accent-readable, var(--text-soft)); font-weight: 600; }
+.search-results button > small.doc-hit-also { margin: 4px 0 0 20px; font-size: 11px; }
+@media (prefers-reduced-motion: reduce) { .doc-search-status .spin { animation: none; } }
