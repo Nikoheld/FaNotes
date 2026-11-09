@@ -47,6 +47,14 @@ class SchulnetzLoginActivity : ComponentActivity() {
         if (base.isBlank() || host.isBlank()) { finish(); return }
         val graph = (application as CompanionApplication).graph
         val viewOnly = intent.getBooleanExtra(EXTRA_VIEW, false)
+        // The connection's own cookie jar; TAM intranet pages instead of Schulnetz ones.
+        val slot = intent.getStringExtra(EXTRA_SLOT).orEmpty()
+        val tam = SchoolProvider.of(intent.getStringExtra(EXTRA_PROVIDER)) == SchoolProvider.TAM
+        if (!SchoolCookies.isolated(slot)) {
+            graph.schulnetzLog.info("visible login activity refused reason=no-webview-profiles")
+            if (tam) graph.finishTamLogin(false) else graph.finishVisibleLogin(null)
+            finish(); return
+        }
         val explicit = intent.getStringExtra(EXTRA_URL).orEmpty()
         if (!viewOnly && savedInstanceState?.getBoolean(STATE_PERMITTED) != true && !graph.consumeOauthPermit()) {
             graph.schulnetzLog.info("visible login activity refused reason=oauth-not-permitted")
@@ -71,8 +79,8 @@ class SchulnetzLoginActivity : ComponentActivity() {
                         Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             ActionIcon(Icons.Outlined.Close, t(R.string.close_school_sign_in)) { finish() }
                             Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                                Text(if (viewOnly) t(R.string.school_session) else t(R.string.connect_schulnetz), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                StatusLine(t(R.string.schulnetz_read_only), StateTone.Accent)
+                                Text(if (viewOnly) t(R.string.school_session) else if (tam) t(R.string.connect_tam) else t(R.string.connect_schulnetz), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                StatusLine(if (tam) t(R.string.tam_read_only) else t(R.string.schulnetz_read_only), StateTone.Accent)
                             }
                         }
                         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), trackColor = LocalCompanionSemantics.current.sunken)
@@ -91,12 +99,14 @@ class SchulnetzLoginActivity : ComponentActivity() {
                         }
                         AndroidView(factory = { context -> WebView(context).also { web ->
                             webView = web
-                            prepareWebView(web)
+                            SchoolCookies.bind(web, slot)
+                            prepareWebView(web, slot)
                             web.webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = !loginWebViewAllowed(request.url.toString(), base)
+                                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
+                                    if (tam) !tamLoginWebViewAllowed(request.url.toString()) else !loginWebViewAllowed(request.url.toString(), base)
                                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                                     val target = request.url?.toString().orEmpty()
-                                    if (!schulnetzActionBlocked(target)) return null
+                                    if (!(if (tam) tamActionBlocked(target) else schulnetzActionBlocked(target))) return null
                                     return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                                 }
                                 override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) { loading = true; pageError = null }
@@ -111,16 +121,18 @@ class SchulnetzLoginActivity : ComponentActivity() {
                                     loading = false
                                     view.evaluateJavascript(HTML_JS) { raw ->
                                         val html = decodeJsString(raw)
-                                        if (webView === view && !isFinishing && !isDestroyed && !viewOnly && isLoggedInLanding(url, html)) {
+                                        val done = if (tam) tamSignedIn(url, html, base) else isLoggedInLanding(url, html)
+                                        if (webView === view && !isFinishing && !isDestroyed && !viewOnly && done) {
                                             SchulnetzLoginBridge.landingUrl = url
                                             SchulnetzLoginBridge.landingHtml = html
-                                            CookieManager.getInstance().flush()
+                                            SchulnetzLoginBridge.provider = if (tam) SchoolProvider.TAM.wire else SchoolProvider.SCHULNETZ.wire
+                                            runCatching { SchoolCookies.manager(slot).flush() }
                                             setResult(RESULT_OK); finish()
                                         }
                                     }
                                 }
                             }
-                            web.loadUrl(if (viewOnly && explicit.isNotBlank()) explicit else webLoginUrl(base))
+                            web.loadUrl(if (viewOnly && explicit.isNotBlank()) explicit else if (tam) base else webLoginUrl(base))
                         } }, modifier = Modifier.fillMaxSize())
                     }
                 }
@@ -141,13 +153,15 @@ class SchulnetzLoginActivity : ComponentActivity() {
     companion object {
         private const val STATE_PERMITTED = "login-permitted"
         const val EXTRA_BASE = "base"; const val EXTRA_HOST = "host"; const val EXTRA_URL = "url"; const val EXTRA_VIEW = "view"
+        const val EXTRA_SLOT = "slot"; const val EXTRA_PROVIDER = "provider"
         private const val HTML_JS = "(function(){return document.documentElement?document.documentElement.outerHTML:''})()"
     }
 }
-object SchulnetzLoginBridge { var landingUrl = ""; var landingHtml = "" }
-internal fun prepareWebView(web: WebView) {
-    CookieManager.getInstance().setAcceptCookie(true)
-    CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
+object SchulnetzLoginBridge { var landingUrl = ""; var landingHtml = ""; var provider = "" }
+internal fun prepareWebView(web: WebView, slot: String = ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT) {
+    val cookies = SchoolCookies.manager(slot)
+    cookies.setAcceptCookie(true)
+    cookies.setAcceptThirdPartyCookies(web, true)
     web.settings.javaScriptEnabled = true
     web.settings.domStorageEnabled = true
     web.settings.allowFileAccess = false

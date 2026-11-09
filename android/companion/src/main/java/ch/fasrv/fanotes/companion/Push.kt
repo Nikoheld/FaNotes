@@ -1,5 +1,10 @@
 package ch.fasrv.fanotes.companion
 
+import ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT
+import ch.fasrv.fanotes.schulnetz.SchoolProvider
+import ch.fasrv.fanotes.schulnetz.parseConnectionRegistry
+import ch.fasrv.fanotes.schulnetz.slotChangeId
+import ch.fasrv.fanotes.schulnetz.slotVaultPath
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -84,8 +89,20 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
+/**
+ * Which school connection a notice belongs to: its storage slot (seen ids, grade ledger, settings,
+ * hidden lessons), its id (opening the notice shows that connection) and its name, which is put in
+ * front of the title once there is more than one connection.
+ */
+data class AlertScope(val slot: String = PRIMARY_SLOT, val connectionId: String = "", val label: String = "", val labelled: Boolean = false) {
+    companion object {
+        val PRIMARY = AlertScope()
+    }
+}
+
 object CompanionAlerts {
     const val CHANNEL = "schulnetz-alerts"
+    const val EXTRA_CONNECTION = "ch.fasrv.fanotes.companion.NOTIFY_CONNECTION"
     const val EXTRA_CATEGORY = "ch.fasrv.fanotes.companion.NOTIFY_CATEGORY"
     const val EXTRA_TARGET_ID = "ch.fasrv.fanotes.companion.NOTIFY_TARGET_ID"
     const val EXTRA_TARGET_IDS = "ch.fasrv.fanotes.companion.NOTIFY_TARGET_IDS"
@@ -121,8 +138,8 @@ object CompanionAlerts {
         work.cancelUniqueWork(SCHOOL_WORK)
     }
 
-    fun showReauth(context: Context) {
-        show(context, ch.fasrv.fanotes.schulnetz.linkedChange(
+    fun showReauth(context: Context, scope: AlertScope = AlertScope.PRIMARY) {
+        show(scope, context, ch.fasrv.fanotes.schulnetz.linkedChange(
             "schulnetz-login-required",
             "event",
             "Bei Schulnetz neu anmelden",
@@ -180,12 +197,21 @@ object CompanionAlerts {
         file.writeText((kept + line).takeLast(40).joinToString("\n") + "\n")
     }
 
-    fun showAll(context: Context, changes: List<SchulnetzChange>, gradeKeysSettled: Boolean = false) {
-        val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+    fun showAll(context: Context, changes: List<SchulnetzChange>, gradeKeysSettled: Boolean = false) = showAll(AlertScope.PRIMARY, context, changes, gradeKeysSettled)
+
+    fun showAll(scope: AlertScope, context: Context, changes: List<SchulnetzChange>, gradeKeysSettled: Boolean = false) {
+        val prefs = slotPrefs(context, scope)
         val guess = prefs.getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
-        val snapshot = CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) } ?: SchulnetzSnapshot()
-        if (guess) rememberUnrevealed(context, newGradeTargetIds(changes))
-        prepareGradeNotifications(changes, guess, snapshot).forEach { show(context, it, gradeKeysSettled) }
+        val snapshot = CompanionGraph.snapshotFile(context, scope.slot).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) } ?: SchulnetzSnapshot()
+        if (guess) rememberUnrevealed(context, newGradeTargetIds(changes), scope)
+        prepareGradeNotifications(changes, guess, snapshot).forEach { show(scope, context, it, gradeKeysSettled) }
+    }
+
+    private fun slotPrefs(context: Context, scope: AlertScope) = SlotPrefs(context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE), scope.slot)
+
+    /** Forgets a removed connection's shown ids. Its ledger and settings go with its storage. */
+    fun forgetAll(scope: AlertScope, context: Context) {
+        slotPrefs(context, scope).edit().remove(SEEN).apply()
     }
 
     /**
@@ -193,21 +219,26 @@ object CompanionAlerts {
      * run after this fix record every grade currently on file without telling
      * anyone again. [gradeKeysSettled] on the following [showAll] must be true.
      */
-    fun settledChanges(context: Context, changes: List<SchulnetzChange>, grades: List<SchoolGrade>): List<SchulnetzChange> {
-        val ledger = readGradeLedger(context)
+    fun settledChanges(context: Context, changes: List<SchulnetzChange>, grades: List<SchoolGrade>): List<SchulnetzChange> =
+        settledChanges(AlertScope.PRIMARY, context, changes, grades)
+
+    fun settledChanges(scope: AlertScope, context: Context, changes: List<SchulnetzChange>, grades: List<SchoolGrade>): List<SchulnetzChange> {
+        val ledger = readGradeLedger(context, scope.slot)
         val settled = settleGradeNotifications(changes, grades, ledger)
-        writeGradeLedger(context, settled.keys)
+        writeGradeLedger(context, settled.keys, scope.slot)
         return settled.changes
     }
 
-    fun show(context: Context, change: SchulnetzChange, gradeKeysSettled: Boolean = false) {
-        if (change.category != "settings" && context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean("school-disconnected", false)) return
+    fun show(context: Context, change: SchulnetzChange, gradeKeysSettled: Boolean = false) = show(AlertScope.PRIMARY, context, change, gradeKeysSettled)
+
+    fun show(scope: AlertScope, context: Context, change: SchulnetzChange, gradeKeysSettled: Boolean = false) {
+        if (change.category != "settings" && slotPrefs(context, scope).getBoolean("school-disconnected", false)) return
         if (change.id.isBlank()) return
         if (!notificationsAllowed(context)) return
         // Also guards pushes from a server that has not been updated yet.
         if (changeIsOver(change)) { DiagnosticTrace.record("push", "stale", 0, "dropped", change.category); return }
         // Preference filter before the notice is posted. A disabled alert is not shown and then cancelled.
-        val stored = context.getSharedPreferences(NotifyPrefs.FILE, Context.MODE_PRIVATE)
+        val stored = SlotPrefs(context.getSharedPreferences(NotifyPrefs.FILE, Context.MODE_PRIVATE), scope.slot)
         val gate = schoolAlertGate(
             notifySettingsFromPrefs(present = { stored.contains(it) }, read = { stored.getBoolean(it, false) }),
             change,
@@ -217,28 +248,28 @@ object CompanionAlerts {
         if (!gradeKeysSettled && change.category == "grade" && !isNotificationProbe(change.id)) {
             val keys = change.gradeKeys.filter { it.isNotBlank() }
             if (keys.isNotEmpty()) {
-                val known = readGradeLedger(context) ?: emptySet()
+                val known = readGradeLedger(context, scope.slot) ?: emptySet()
                 if (keys.all { it in known }) return
-                writeGradeLedger(context, known + keys)
+                writeGradeLedger(context, known + keys, scope.slot)
             }
         }
-        if (!remember(context, change.id)) {
+        if (!remember(context, change.id, scope)) {
             if (isNotificationProbe(change.id)) {
                 DiagnosticTrace.record("push", "duplicate", 0, "dropped", change.correlation.ifBlank { "probe" })
             }
             return
         }
         val hidden = runCatching {
-            val file = java.io.File(context.filesDir, "vault/${CompanionGraph.HIDDEN_PATH}")
+            val file = java.io.File(context.filesDir, "vault/${slotVaultPath(scope.slot, CompanionGraph.HIDDEN_PATH)}")
             if (!file.isFile) emptyList() else parseHiddenLessons(file.readText())
         }.getOrDefault(emptyList())
         if (changeIsHidden(change, hidden)) return
         val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
-        val guess = prefs.getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
-        val snapshot = CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
+        val guess = slotPrefs(context, scope).getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
+        val snapshot = CompanionGraph.snapshotFile(context, scope.slot).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
         var shown = change
         if (guess && change.category == "grade" && !isNotificationProbe(change.id)) {
-            rememberUnrevealed(context, change.linkIds())
+            rememberUnrevealed(context, change.linkIds(), scope)
             shown = if (snapshot != null) redactGradeChange(change, snapshot) else change.copy(
                 title = hiddenGradeTitle(change, change.courseId.ifBlank { "einem Fach" }),
                 body = hiddenGradeBody(change.body.substringAfter(" · ").substringBefore(" · ").ifBlank { "Tippen zum Aufdecken" }),
@@ -273,13 +304,16 @@ object CompanionAlerts {
             "event" -> "schulnetz-event"
             else -> CHANNEL
         }
+        // The same change id in two connections is two notices.
+        val noticeId = slotChangeId(scope.slot, shown.id).hashCode()
         val open = PendingIntent.getActivity(
             context,
-            shown.id.hashCode(),
-            notifyIntent(context, shown),
+            noticeId,
+            notifyIntent(context, shown, scope),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val title = shownText(shown.title.ifBlank { t(R.string.schulnetz) })
+        val bare = shownText(shown.title.ifBlank { t(R.string.schulnetz) })
+        val title = if (scope.labelled && scope.label.isNotBlank()) "${scope.label} · $bare" else bare
         val body = shownText(shown.body)
         val lock = lockScreenNotice()
         val publicTitle = shownText(lock.publicTitle, fragments = false)
@@ -290,7 +324,7 @@ object CompanionAlerts {
             .setContentText(publicText)
             .build()
         val manager = context.getSystemService(NotificationManager::class.java)
-        val id = shown.id.hashCode()
+        val id = noticeId
         fun post(picture: android.graphics.Bitmap?) {
             val builder = NotificationCompat.Builder(context, channel)
                 .setSmallIcon(R.drawable.ic_stat)
@@ -328,10 +362,10 @@ object CompanionAlerts {
         return hiddenGradePortraitUrl(guess, shown, mark, LocalDate.now(ZoneId.of("Europe/Zurich")))
     }
 
-    fun rememberUnrevealed(context: Context, ids: Collection<String>) {
+    fun rememberUnrevealed(context: Context, ids: Collection<String>, scope: AlertScope = AlertScope.PRIMARY) {
         val next = ids.filter { it.isNotBlank() }
         if (next.isEmpty()) return
-        val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+        val prefs = slotPrefs(context, scope)
         val stored = prefs.getStringSet(CompanionGraph.UNREVEALED_PREF, emptySet()).orEmpty().toMutableSet()
         if (!stored.addAll(next)) return
         prefs.edit().putStringSet(CompanionGraph.UNREVEALED_PREF, stored).apply()
@@ -349,9 +383,10 @@ object CompanionAlerts {
         show(context, SchulnetzChange(payload.hashCode().toString(), "event", "Schulnetz", payload.take(180)))
     }
 
-    fun notifyIntent(context: Context, change: SchulnetzChange): Intent {
+    fun notifyIntent(context: Context, change: SchulnetzChange, scope: AlertScope = AlertScope.PRIMARY): Intent {
         val ids = ArrayList(change.linkIds())
         return Intent(context, MainActivity::class.java)
+            .putExtra(EXTRA_CONNECTION, scope.connectionId)
             .setAction(Intent.ACTION_VIEW)
             .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
             .putExtra(EXTRA_CATEGORY, change.category)
@@ -362,15 +397,18 @@ object CompanionAlerts {
             .putExtra(EXTRA_PAYLOAD, notifyPayload(change))
     }
 
-    fun forget(context: Context, id: String) {
-        val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+    fun forget(context: Context, id: String) = forget(AlertScope.PRIMARY, context, id)
+
+    fun forget(scope: AlertScope, context: Context, id: String) {
+        context.getSystemService(NotificationManager::class.java)?.cancel(slotChangeId(scope.slot, id).hashCode())
+        val prefs = slotPrefs(context, scope)
         val seen = prefs.getStringSet(SEEN, emptySet()).orEmpty().toMutableSet()
         if (!seen.remove(id)) return
         prefs.edit().putStringSet(SEEN, seen).apply()
     }
 
-    private fun remember(context: Context, id: String): Boolean {
-        val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
+    private fun remember(context: Context, id: String, scope: AlertScope): Boolean {
+        val prefs = slotPrefs(context, scope)
         val seen = prefs.getStringSet(SEEN, emptySet()).orEmpty().toMutableSet()
         if (!seen.add(id)) return false
         val stored = if (seen.size > 2000) {
@@ -391,11 +429,11 @@ object CompanionAlerts {
 
 private const val GRADE_LEDGER = "notified-grades-v1.json"
 
-internal fun gradeLedgerFile(context: Context) = java.io.File(context.filesDir, GRADE_LEDGER)
+internal fun gradeLedgerFile(context: Context, slot: String = PRIMARY_SLOT) = slotFile(context, slot, GRADE_LEDGER)
 
 /** Null when this install has never recorded grade identities. That is the migration. */
-internal fun readGradeLedger(context: Context): Set<String>? {
-    val file = gradeLedgerFile(context)
+internal fun readGradeLedger(context: Context, slot: String = PRIMARY_SLOT): Set<String>? {
+    val file = gradeLedgerFile(context, slot)
     if (!file.isFile) return null
     val obj = runCatching { parseJson(file.readText()) as? JsonValue.Obj }.getOrNull() ?: return null
     if (obj.double("version") != 1.0) return null
@@ -403,7 +441,7 @@ internal fun readGradeLedger(context: Context): Set<String>? {
     return keys.toSet()
 }
 
-internal fun writeGradeLedger(context: Context, keys: Set<String>) {
+internal fun writeGradeLedger(context: Context, keys: Set<String>, slot: String = PRIMARY_SLOT) {
     val body = buildString {
         append("{\"version\":1,\"keys\":[")
         keys.sorted().forEachIndexed { index, key ->
@@ -412,7 +450,7 @@ internal fun writeGradeLedger(context: Context, keys: Set<String>) {
         }
         append("]}")
     }
-    val file = gradeLedgerFile(context)
+    val file = gradeLedgerFile(context, slot)
     file.parentFile?.mkdirs()
     val temporary = java.io.File(file.parentFile, "${file.name}.${System.nanoTime()}.tmp")
     temporary.writeText(body)
@@ -485,11 +523,16 @@ private fun schoolConstraints() = Constraints.Builder()
 
 internal fun linkedForPush(context: Context): Boolean {
     val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
-    if (prefs.getBoolean("school-disconnected", false)) return false
     if (!prefs.getBoolean("school-linked", false) && !prefs.getString("push-topic", null).isNullOrBlank()) {
         prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
     }
-    return prefs.getBoolean("school-linked", false)
+    // Any server-linked connection keeps push delivery armed.
+    val slots = parseConnectionRegistry(prefs.getString(CompanionGraph.CONNECTIONS_PREF, null))?.connections
+        ?.filter { it.provider == SchoolProvider.SCHULNETZ }?.map { it.slot } ?: listOf(PRIMARY_SLOT)
+    return slots.ifEmpty { listOf(PRIMARY_SLOT) }.any { slot ->
+        val scoped = SlotPrefs(prefs, slot)
+        scoped.getBoolean("school-linked", false) && !scoped.getBoolean("school-disconnected", false)
+    }
 }
 
 internal data class LockScreenNotice(val visibility: Int, val publicTitle: String, val publicText: String)
@@ -572,6 +615,31 @@ class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWor
 }
 
 /** Fires only after a long quiet stretch, then starts the slow fallback. */
+/** Reads every TAM connection on the device (TAM has no server push). */
+class TamRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val app = applicationContext as? CompanionApplication ?: return Result.success()
+        runCatching { app.graph.refreshTamConnections("tam-background") }
+        return Result.success()
+    }
+}
+
+internal const val TAM_REFRESH = "kanti-tam-refresh"
+internal const val TAM_REFRESH_HOURS = 3L
+
+/** Keeps the periodic TAM read armed while a TAM connection exists. */
+internal fun armTamRefresh(context: Context, any: Boolean) {
+    val work = WorkManager.getInstance(context)
+    if (!any) {
+        work.cancelUniqueWork(TAM_REFRESH)
+        return
+    }
+    val request = androidx.work.PeriodicWorkRequestBuilder<TamRefreshWorker>(TAM_REFRESH_HOURS, java.util.concurrent.TimeUnit.HOURS)
+        .setConstraints(schoolConstraints())
+        .build()
+    work.enqueueUniquePeriodicWork(TAM_REFRESH, androidx.work.ExistingPeriodicWorkPolicy.KEEP, request)
+}
+
 class FcmWatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val prefs = applicationContext.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
@@ -616,8 +684,9 @@ class CompanionFcmService : FirebaseMessagingService() {
         }
         when (message.data["event"].orEmpty()) {
             // Data-only message. Foreground and background both reach pullChangeDelta, which filters before display.
-            "sync" -> runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta() } }
-            "reauth" -> CompanionAlerts.showReauth(applicationContext)
+            // The push names its connection by route key; pull only that one.
+            "sync" -> runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta(message.data["route"]) } }
+            "reauth" -> CompanionAlerts.showReauth(applicationContext, runBlocking { app.graph.alertScopeForRoute(message.data["route"]) })
             "test" -> CompanionAlerts.showTest(applicationContext)
         }
     }
@@ -652,9 +721,11 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
         fun update(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val demo = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean(CompanionGraph.DEMO_PREF, false)
             // Demo mode never writes the cache; the widget builds the same invented week itself.
+            // The widget shows the connection the app shows, from that connection's own cache.
+            val slot = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getString(CompanionGraph.ACTIVE_SLOT_PREF, PRIMARY_SLOT).orEmpty()
             val snapshot = if (demo) ch.fasrv.fanotes.schulnetz.demoSnapshot(java.time.LocalDate.now(ch.fasrv.fanotes.schulnetz.SCHOOL_ZONE))
-                else CompanionGraph.snapshotFile(context).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
-            val hidden = java.io.File(context.filesDir, "vault/${CompanionGraph.HIDDEN_PATH}").takeIf { it.isFile }?.readText()?.let { parseHiddenLessons(it) }.orEmpty()
+                else CompanionGraph.snapshotFile(context, slot).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
+            val hidden = java.io.File(context.filesDir, "vault/${slotVaultPath(slot, CompanionGraph.HIDDEN_PATH)}").takeIf { it.isFile }?.readText()?.let { parseHiddenLessons(it) }.orEmpty()
             val compact = java.io.File(context.filesDir, "vault/${CompanionGraph.DESK_PATH}").takeIf { it.isFile }?.readText()?.let { parseDeskPrefs(it).widgetCompact } == true
             val zone = ZoneId.systemDefault()
             val events = snapshot?.let { visibleEvents(it.events, hidden, zone) }.orEmpty()

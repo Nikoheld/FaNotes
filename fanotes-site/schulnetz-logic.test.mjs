@@ -8,7 +8,7 @@ import test from 'node:test'
 import { createCipheriv, generateKeyPairSync, randomBytes } from 'node:crypto'
 import { createSchulnetzRuntime, openToken, sealToken } from './schulnetz-api.mjs'
 import { notifyAccountDeleted, setAccountDeletedHook } from './sync-api.mjs'
-import { fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
+import { connectionRouteKey, fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
 import {
   diffSnapshots as diffSnapshotsAt,
   changeIsOver,
@@ -297,7 +297,10 @@ test('stored refresh tokens are encrypted and only the poller refreshes', async 
     assert.equal(sent.length, 1)
     assert.equal(sent[0].message.data.event, 'sync')
     assert.equal(sent[0].message.android.priority, 'HIGH')
-    assert.equal(sent[0].message.android.collapse_key, 'kanti-sync')
+    // The push names its connection by route key, and each connection has its own collapse slot.
+    assert.equal(sent[0].message.data.route, connectionRouteKey(accountId))
+    assert.equal(sent[0].message.android.collapse_key, `kanti-sync-${connectionRouteKey(accountId)}`)
+    assert.equal(JSON.stringify(sent[0]).includes(accountId), false)
     assert.equal(sent[0].message.notification, undefined)
     assert.equal(JSON.stringify(sent[0]).includes('4.5'), false)
     assert.equal(JSON.stringify(sent[0]).includes('5.5'), false)
@@ -1849,7 +1852,8 @@ test('delivery probe reaches only the registered device and leaves school record
     assert.equal(message.message.data.probe, '1')
     assert.equal(message.message.data.serverAt, serverAt)
     assert.equal(message.message.data.correlation, 'probe:20261107120000000')
-    assert.equal(message.message.android.collapse_key, 'kanti-probe')
+    assert.match(message.message.android.collapse_key, /^kanti-probe-[a-f0-9]{16}$/u)
+    assert.equal(message.message.data.route, message.message.android.collapse_key.slice('kanti-probe-'.length))
     assert.equal(message.message.android.priority, 'HIGH')
     assert.equal(message.message.android.ttl, '21600s')
     assert.equal(message.message.notification, undefined)
@@ -2663,5 +2667,19 @@ test('the first upload after uploads were refused announces no absence, message 
   assert.equal(diffSnapshots(uploadDiffBase(known, one), one, {}).filter((change) => change.category === 'absence').length, 1)
   const many = { ...upload, absences: [...upload.absences, ...Array.from({ length: UPLOAD_LIST_BURST + 1 }, (_, i) => absence(`b${i}`))] }
   assert.equal(diffSnapshots(uploadDiffBase(known, many), many, {}).filter((change) => change.category === 'absence').length, 0)
+})
+
+test('a push names its school connection by a route key and keeps one collapse slot per connection', () => {
+  // Shared test vector with the app (android core ConnectionsTest).
+  assert.equal(connectionRouteKey('0123456789abcdef0123456789abcdef'), 'b6df6a1c77130be8')
+  const first = fcmDataMessage('token', 'sync', { route: connectionRouteKey('0123456789abcdef0123456789abcdef') })
+  const second = fcmDataMessage('token', 'sync', { route: connectionRouteKey('fedcba9876543210fedcba9876543210') })
+  assert.equal(first.message.data.route, 'b6df6a1c77130be8')
+  assert.notEqual(first.message.android.collapse_key, second.message.android.collapse_key)
+  assert.equal(JSON.stringify(first).includes('0123456789abcdef0123456789abcdef'), false)
+  // Without a valid route the message stays as before.
+  const plain = fcmDataMessage('token', 'sync', { route: 'not-a-route' })
+  assert.equal(plain.message.data.route, undefined)
+  assert.equal(plain.message.android.collapse_key, 'kanti-sync')
 })
 

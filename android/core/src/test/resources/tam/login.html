@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<!-- Synthetic TAM intranet sign-in page (school "bmz"), shaped like the public login markup. The
+     hash and csrf values are invented. -->
+<html lang="de"><head><meta charset="utf-8"><base href="/bmz/"/><title>Intranet</title>
+<script>var school='bmz', baseUrl='/', csrfToken='0000aaaa1111bbbb2222cccc3333dddd';</script></head>
+<body>
+<form name="login-form" class="login-form showForm" action="/bmz" method="post" accept-charset="UTF-8">
+  <input type="hidden" name="hash" value="0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f.12345678"/>
+  <input type="hidden" name="loginschool" class="login--school-login--login-school" value="bmz"/>
+  <input type="text" id="loginuser" name="loginuser" placeholder="Benutzername"/>
+  <input type="password" autocomplete="off" name="loginpassword" id="loginpassword" placeholder="Passwort"/>
+  <button type="submit" class="login--school-login--login-button">Anmelden</button>
+</form>
+<a href="https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=00000000-0000-0000-0000-000000000000&amp;redirect_uri=https://intranet.tam.ch/auth/azure&amp;state=x">Microsoft</a>
+</body></html>
