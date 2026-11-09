@@ -1,0 +1,136 @@
+{
+ "date": "2026-11-09",
+ "method": "Synthetic German pages (DejaVu Sans/Serif, 1400x1980 px, 8 sentences, 82 distinct words >= 4 letters) generated with Pillow; the app's own line segmenter (segmentPdfOcrLines) feeds the bundled TrOCR models through transformers.js 3.8.1 on onnxruntime-node (CPU) on the shared host; host Tesseract 5 (deu, psm 3) on the same images for comparison. Word recall = share of ground-truth words (folded, >= 4 letters) that appear exactly in the OCR output, i.e. what a search can find. CER on folded text.",
+ "models": {
+  "fanotes-trocr": [
+   {
+    "page": "clean-sans",
+    "lines": 15,
+    "trocrRecall": 90,
+    "trocrCer": 2.1,
+    "trocrSec": 4.8,
+    "tessRecall": 100,
+    "tessCer": 0,
+    "tessSec": 0.6
+   },
+   {
+    "page": "clean-serif",
+    "lines": 15,
+    "trocrRecall": 83,
+    "trocrCer": 2.1,
+    "trocrSec": 4.7,
+    "tessRecall": 100,
+    "tessCer": 0,
+    "tessSec": 0.7
+   },
+   {
+    "page": "small-sans",
+    "lines": 8,
+    "trocrRecall": 88,
+    "trocrCer": 1.8,
+    "trocrSec": 3.9,
+    "tessRecall": 100,
+    "tessCer": 0,
+    "tessSec": 0.6
+   },
+   {
+    "page": "skew-2deg",
+    "lines": 15,
+    "trocrRecall": 88,
+    "trocrCer": 1.6,
+    "trocrSec": 6.8,
+    "tessRecall": 100,
+    "tessCer": 0,
+    "tessSec": 1.3
+   },
+   {
+    "page": "noise-lowcontrast",
+    "lines": 15,
+    "trocrRecall": 81,
+    "trocrCer": 75.5,
+    "trocrSec": 7.5,
+    "tessRecall": 95,
+    "tessCer": 5.3,
+    "tessSec": 1.9
+   },
+   {
+    "page": "rotated-90",
+    "lines": 3,
+    "trocrRecall": 0,
+    "trocrCer": 98.5,
+    "trocrSec": 1.4,
+    "tessRecall": 0,
+    "tessCer": 85.7,
+    "tessSec": 1.2
+   }
+  ],
+  "fanotes-trocr-web": [
+   {
+    "page": "clean-sans",
+    "lines": 15,
+    "trocrRecall": 88,
+    "trocrCer": 2.8,
+    "trocrSec": 3.5,
+    "tessRecall": 100,
+    "tessCer": 0,
+    "tessSec": 0.5
+   },
+   {
+    "page": "clean-serif",
+    "lines": 15,
+    "trocrRecall": 74,
+    "trocrCer": 4.1,
+    "trocrSec": 3.5,
+    "tessRecall": 100,
+    "tessCer": 0,
+    "tessSec": 1.2
+   },
+   {
+    "page": "small-sans",
+    "lines": 8,
+    "trocrRecall": 86,
+    "trocrCer": 2.4,
+    "trocrSec": 3.3,
+    "tessRecall": 100,
+    "tessCer": 0,
+    "tessSec": 0.6
+   },
+   {
+    "page": "skew-2deg",
+    "lines": 15,
+    "trocrRecall": 86,
+    "trocrCer": 3.1,
+    "trocrSec": 3.2,
+    "tessRecall": 100,
+    "tessCer": 0,
+    "tessSec": 0.5
+   },
+   {
+    "page": "noise-lowcontrast",
+    "lines": 15,
+    "trocrRecall": 78,
+    "trocrCer": 112.6,
+    "trocrSec": 4.7,
+    "tessRecall": 95,
+    "tessCer": 5.3,
+    "tessSec": 0.7
+   },
+   {
+    "page": "rotated-90",
+    "lines": 3,
+    "trocrRecall": 0,
+    "trocrCer": 98.9,
+    "trocrSec": 0.7,
+    "tessRecall": 0,
+    "tessCer": 85.7,
+    "tessSec": 0.5
+   }
+  ]
+ },
+ "orientation": {
+  "note": "recognizeOriented with fanotes-trocr after orientation detection (ascender/descender geometry, no extra recognition calls)",
+  "clean-sans turned 0/90/180/270": "recall 90% each",
+  "sparse page 3 lines turned 0/90": "confidence estimate 0.95 each",
+  "fixture in scripts/fixtures/doc-search/lines.rgba.z": "all four turns detected in check-doc-search"
+ }
+}
