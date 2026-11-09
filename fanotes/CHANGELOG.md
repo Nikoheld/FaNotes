@@ -1,5 +1,24 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.14
+
+- Keep the server's timetable weeks and give older apps this week only.
+- Follow a published timetable forward when the page shows no range.
+- Match a lesson by id only within its week.
+- Check a near week read without lessons again within half an hour.
+- Read a week's first timetable silently and stop a false exam cancellation.
+- Stop measuring every PDF page on each pen sample.
+- Stop notices for past school events and load the timetable beyond this week.
+- Hand PDFium bitmaps that own their buffer to ImageData without copying them again.
+- Render PDF pages before queued thumbnails, and give every page a thumbnail painted only near the rail's view.
+- Let PDFium draw every window directly, turned or not, instead of rasterizing and turning the whole page.
+- Copy each PDFium frame out of the pipe once instead of once per 64 KiB read.
+- Close the document index safely on sign-out and record search limits.
+- Search the content of notes, PDFs and scans in Kanti+.
+- Record the redesign verification and synthetic screenshots.
+- Fix redesign regressions found in device checks and review.
+- Redesign Kanti+ around a time-first design system.
+
 ## 2026.11.2-beta.13
 
 - Load every offered timetable week and keep an unread week from looking free.
