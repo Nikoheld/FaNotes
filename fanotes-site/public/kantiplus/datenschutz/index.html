@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f5f0" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#14161b" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Datenschutzerklärung der App Kanti+ (ch.fasrv.kantiplus): welche Daten die App und der fasrv-Server verarbeiten, wozu, wie lange und wie du sie löschst." />
+    <link rel="canonical" href="https://fanotes.fasrv.ch/kantiplus/datenschutz/" />
+    <link rel="icon" href="/assets/fanotes.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/fanotes-base.css?v=20261108.1" />
+    <link rel="stylesheet" href="/fanotes-site.css?v=20261108.1" />
+    <link rel="stylesheet" href="/kantiplus/legal.css?v=20261109.1" />
+    <script src="/fanotes-boot.js?v=20261108.1"></script>
+    <title>Datenschutzerklärung Kanti+</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Zum Inhalt springen</a>
+    <header class="site-header is-solid">
+      <div class="wrap site-header-inner">
+        <a class="brand" href="/" aria-label="FaNotes Startseite">
+          <img src="/assets/fanotes.svg" alt="" width="32" height="32" />
+          <span>FaNotes</span>
+        </a>
+      </div>
+    </header>
+    <main id="main" class="paper-dots">
+      <div class="wrap legal">
+        <article>
+          <p class="kicker">Kanti+ für Android</p>
+          <h1>Datenschutzerklärung</h1>
+          <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>) · Stand: 9. November 2026 · <a href="#english">English version</a></p>
+
+          <div class="note">
+            <p><strong>Kanti+ ist eine inoffizielle App.</strong> Sie wird privat entwickelt und ist weder mit Schulnetz (dem Anbieter) noch mit einer Kantonsschule, dem Kanton oder Microsoft verbunden. Kanti+ liest deine Daten aus Schulnetz nur und verändert dort nichts.</p>
+          </div>
+
+          <ul class="toc">
+            <li><a href="#kurz">Kurz gesagt</a></li>
+            <li><a href="#verantwortlich">Verantwortlich</a></li>
+            <li><a href="#daten">Welche Daten</a></li>
+            <li><a href="#zwecke">Wozu</a></li>
+            <li><a href="#empfaenger">Dienstleister</a></li>
+            <li><a href="#speicherung">Speicherung und Sicherheit</a></li>
+            <li><a href="#dauer">Aufbewahrung</a></li>
+            <li><a href="#loeschen">Löschen</a></li>
+            <li><a href="#rechte">Deine Rechte</a></li>
+          </ul>
+
+          <h2 id="kurz">Kurz gesagt</h2>
+          <ul>
+            <li>Kanti+ zeigt deine Schuldaten aus Schulnetz an (Noten, Stundenplan, Prüfungen, Absenzen, Termine, Mitteilungen) und meldet Änderungen per Benachrichtigung.</li>
+            <li>Damit Benachrichtigungen auch bei geschlossener App ankommen, ruft der fasrv-Server Schulnetz in deinem Auftrag ab. Dafür speichert er deine Microsoft-Anmeldung für Schulnetz verschlüsselt, höchstens 14 Tage lang.</li>
+            <li>Keine Werbung, kein Tracking, keine Analyse-Werkzeuge in der App, kein Verkauf von Daten.</li>
+            <li>Du kannst deine Daten in der App jederzeit löschen. Ohne App geht es per E-Mail, siehe <a href="/kantiplus/konto-loeschen/">Konto und Daten löschen</a>.</li>
+          </ul>
+
+          <h2 id="verantwortlich">Verantwortlich</h2>
+          <p>Fabio, Entwickler von FaNotes und Kanti+ (Privatperson).<br />E-Mail: <a href="mailto:fabiokunz2109@gmail.com">fabiokunz2109@gmail.com</a></p>
+          <p>Diese Erklärung richtet sich nach dem Schweizer Datenschutzgesetz (DSG) und, soweit anwendbar, nach der Datenschutz-Grundverordnung der EU (DSGVO).</p>
+
+          <h2 id="daten">Welche Daten verarbeitet werden</h2>
+
+          <h3>1. Schuldaten aus Schulnetz</h3>
+          <p>Noten, Stundenplan, Termine aus der Terminliste, Prüfungen, Absenzen, Mitteilungen der Startseite, Kontoauszug und, falls Schulnetz sie liefert, Name und Klasse. Kanti+ liest diese Daten nur und speichert sie</p>
+          <ul>
+            <li>auf deinem Gerät, damit die App auch offline funktioniert, und</li>
+            <li>auf dem fasrv-Server, damit er Änderungen erkennen und dich benachrichtigen kann. Dazu gehört eine Liste der zuletzt gemeldeten Änderungen (höchstens 200 Einträge).</li>
+          </ul>
+
+          <h3>2. Anmeldung bei Schulnetz</h3>
+          <p>Du meldest dich in der App auf der Anmeldeseite von Microsoft an. Kanti+ sieht und speichert dein Passwort nicht. Nach der Anmeldung übergibt die App ausgewählte Microsoft-Sitzungscookies an den fasrv-Server. Der Server bewahrt sie zusammen mit seiner eigenen Schulnetz-Sitzung verschlüsselt auf (AES-256-GCM) und ruft damit etwa alle drei Minuten deine Schuldaten ab.</p>
+          <p>Die Cookies werden spätestens 14 Tage nach deiner letzten Anmeldung in der App gelöscht. Danach bittet dich die App, dich neu anzumelden.</p>
+
+          <h3>3. Geräte- und Benachrichtigungsdaten</h3>
+          <ul>
+            <li><strong>Anonyme Kennung:</strong> Beim ersten Start legt die App auf dem Server eine anonyme Kennung an, auch ohne Schulnetz-Verbindung. Der Server speichert davon nur einen Hash-Wert.</li>
+            <li><strong>Geräte-ID:</strong> eine zufällige ID, die mit der Schulnetz-Verbindung gespeichert wird.</li>
+            <li><strong>Push-Token</strong> von Firebase Cloud Messaging (höchstens 8 pro Konto).</li>
+            <li><strong>Einstellungen:</strong> welche Benachrichtigungen du erhalten möchtest.</li>
+          </ul>
+
+          <h3>4. Optionales FaNotes-Konto</h3>
+          <p>Wenn du ein FaNotes-Konto anlegst oder verbindest, speichert der Server:</p>
+          <ul>
+            <li>deine E-Mail-Adresse;</li>
+            <li>statt deines Passworts nur einen davon abgeleiteten Hash;</li>
+            <li>deine angemeldeten Geräte und Sitzungen.</li>
+          </ul>
+          <p>Deine Notizen und App-Daten werden Ende-zu-Ende-verschlüsselt abgeglichen (AES-256-GCM, der Schlüssel entsteht aus deinem Passwort). Dazu gehören auch Aufgaben, Termine und die Schuldaten auf dem Gerät. Der Server kann diese Inhalte nicht lesen.</p>
+
+          <h3>5. Deine eigenen Einträge</h3>
+          <p>Aufgaben, eigene Termine, Fächerfarben, ausgeblendete Lektionen und Planer-Einstellungen bleiben auf deinem Gerät. Nur mit FaNotes-Konto werden sie verschlüsselt abgeglichen (siehe oben).</p>
+
+          <h3>6. Diagnose</h3>
+          <p>Protokolle und gespeicherte Schulnetz-Seiten zur Fehlersuche bleiben auf deinem Gerät. Sie verlassen es nur, wenn du sie selbst über «Teilen» weitergibst. Android-Backups der App sind ausgeschaltet.</p>
+
+          <h3>7. Server-Protokolle</h3>
+          <p>Alle Anfragen laufen über Cloudflare. Der Webserver protokolliert 14 Tage lang die aufgerufene Adresse, den Zeitpunkt, den User-Agent und eine IP-Adresse von Cloudflare (nicht deine eigene). Deine IP-Adresse wird nur kurz im Arbeitsspeicher verwendet, um Missbrauch zu begrenzen.</p>
+          <p>Das Dienstprotokoll enthält höchstens 90 Tage lang eine gekürzte Konto-Kennung und Fehlerarten, aber keine Schuldaten.</p>
+
+          <h2 id="zwecke">Wozu die Daten verwendet werden</h2>
+          <ul>
+            <li>deine Schuldaten in der App anzeigen,</li>
+            <li>dich über neue Noten, Prüfungen und Änderungen benachrichtigen,</li>
+            <li>mit FaNotes-Konto: deine Daten zwischen deinen Geräten abgleichen,</li>
+            <li>den Dienst sicher betreiben und Fehler beheben.</li>
+          </ul>
+          <p>Es gibt keine Werbung, kein Tracking, keine Analyse- oder Absturzdienste in der App und keine Profilbildung. Daten werden weder verkauft noch für andere Zwecke weitergegeben.</p>
+
+          <h2 id="empfaenger">Dienstleister und Empfänger</h2>
+          <ul>
+            <li><strong>Google Firebase Cloud Messaging</strong> stellt Benachrichtigungen zu. Google erhält das Push-Token und eine Firebase-Installations-ID. Die Nachricht selbst ist nur ein Weckruf ohne Schulinhalte; die Details holt die App danach vom fasrv-Server.</li>
+            <li><strong>Cloudflare</strong> leitet die Verbindungen zum fasrv-Server weiter und schützt ihn (TLS). Cloudflare sieht dabei IP-Adresse und Anfragen.</li>
+            <li><strong>Microsoft und Schulnetz</strong> sind die Quelle deiner Daten. Die App und der Server melden sich dort mit deiner Sitzung an und lesen deine Daten.</li>
+            <li><strong>Wikimedia Commons:</strong> Für das Spiel «Note erraten» lädt die App Porträtbilder von dort; dabei sieht Wikimedia deine IP-Adresse.</li>
+          </ul>
+          <p>Google, Cloudflare und Wikimedia können Daten auch ausserhalb der Schweiz verarbeiten, etwa in den USA.</p>
+
+          <h2 id="speicherung">Speicherung und Sicherheit</h2>
+          <ul>
+            <li>Der fasrv-Server wird vom Entwickler selbst betrieben.</li>
+            <li>Verbindungen sind mit TLS verschlüsselt. Anmeldecookies und Server-Sitzung sind zusätzlich mit AES-256-GCM verschlüsselt; Notizen mit FaNotes-Konto Ende-zu-Ende.</li>
+            <li>Kanti+-Daten werden auf dem Server nicht in Backups kopiert.</li>
+          </ul>
+
+          <h2 id="dauer">Aufbewahrung</h2>
+          <ul>
+            <li><strong>Schuldaten und anonyme Kennung auf dem Server:</strong> bis du sie in der App löschst, die Schule trennst oder dein FaNotes-Konto löschst. Die Liste der gemeldeten Änderungen umfasst höchstens die letzten 200 Einträge.</li>
+            <li><strong>Microsoft-Anmeldecookies:</strong> höchstens 14 Tage nach deiner letzten Anmeldung in der App.</li>
+            <li><strong>Protokolle:</strong> Webserver 14 Tage, Dienstprotokoll höchstens 90 Tage.</li>
+            <li><strong>Daten auf dem Gerät:</strong> bis du sie in der App löschst oder die App entfernst.</li>
+          </ul>
+          <p>Eine automatische Löschung nach längerer Inaktivität gibt es derzeit nicht. Nutze die Löschfunktion oder schreib uns.</p>
+
+          <h2 id="loeschen">Daten löschen</h2>
+          <p>In der App unter Einstellungen → Schulnetz bzw. Konto und Sync:</p>
+          <ul>
+            <li><strong>«Meine Kanti+-Daten löschen»</strong> (ohne FaNotes-Konto) entfernt deine Schuldaten, die Schulnetz-Anmeldung, Push-Token und die anonyme Kennung vom Server und die Schuldaten von deinem Gerät.</li>
+            <li><strong>«Schule trennen»</strong> löscht die Schulnetz-Verbindung und die Schuldaten auf dem Server.</li>
+          </ul>
+          <p>Alle Wege, auch ohne App und für das FaNotes-Konto, findest du auf der Seite <a href="/kantiplus/konto-loeschen/">Konto und Daten löschen</a>.</p>
+
+          <h2 id="rechte">Deine Rechte</h2>
+          <p>Du kannst jederzeit Auskunft über deine Daten verlangen, sie berichtigen oder löschen lassen, ihre Herausgabe in einem gängigen Format verlangen und der Bearbeitung widersprechen.</p>
+          <p>Schreib dafür an <a href="mailto:fabiokunz2109@gmail.com">fabiokunz2109@gmail.com</a>. Du kannst dich ausserdem beim Eidgenössischen Datenschutz- und Öffentlichkeitsbeauftragten (EDÖB) oder, wenn die DSGVO gilt, bei der Aufsichtsbehörde deines Landes beschweren.</p>
+
+          <h2>Änderungen</h2>
+          <p>Ändert sich, was Kanti+ mit Daten macht, wird diese Seite angepasst und das Datum oben aktualisiert.</p>
+
+          <hr />
+          <section id="english" lang="en">
+            <h2>Privacy policy (English)</h2>
+            <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>) · Last updated: 9 November 2026</p>
+            <p><strong>Kanti+ is an unofficial app</strong>, developed privately. It is not affiliated with Schulnetz, any Kantonsschule, the canton or Microsoft, and it only reads data from Schulnetz.</p>
+            <p><strong>Controller:</strong> Fabio, developer of FaNotes and Kanti+ (private individual), <a href="mailto:fabiokunz2109@gmail.com">fabiokunz2109@gmail.com</a>. This policy follows the Swiss Federal Act on Data Protection (FADP) and, where applicable, the EU GDPR.</p>
+
+            <h3>Data we process</h3>
+            <ul>
+              <li><strong>School data from Schulnetz:</strong> grades, timetable, appointments, exams, absences, messages, account statement and, if provided, name and class. It is stored on your device and on the fasrv server, so the server can detect changes and notify you. This includes a list of the last 200 notified changes.</li>
+              <li><strong>Schulnetz sign-in:</strong> you sign in on Microsoft's page; Kanti+ never sees or stores your password. Selected Microsoft session cookies and the server's Schulnetz session are stored on the server, encrypted with AES-256-GCM, and used to read your data about every three minutes. The cookies are deleted at the latest 14 days after your last sign-in in the app.</li>
+              <li><strong>Device and push data:</strong>
+                <ul>
+                  <li>an anonymous identity created on first start, of which the server stores only a hash;</li>
+                  <li>a random device ID;</li>
+                  <li>Firebase Cloud Messaging push tokens (at most 8 per account);</li>
+                  <li>your notification settings.</li>
+                </ul>
+              </li>
+              <li><strong>Optional FaNotes account:</strong>
+                <ul>
+                  <li>your email address, a hash derived from your password (never the password itself), and your devices and sessions;</li>
+                  <li>notes and app data, including tasks, appointments and school data, synced end-to-end encrypted, so the server cannot read them.</li>
+                </ul>
+              </li>
+              <li><strong>Your own entries</strong> (tasks, appointments, colours, hidden lessons) stay on your device unless you use a FaNotes account.</li>
+              <li><strong>Diagnostics</strong> stay on your device. They leave it only if you share them yourself. Android app backup is disabled.</li>
+              <li><strong>Server logs:</strong> requests pass through Cloudflare.
+                <ul>
+                  <li>The web server keeps the requested path, time, user agent and a Cloudflare IP address (not yours) for 14 days.</li>
+                  <li>The service log keeps a shortened account ID and error types for up to 90 days.</li>
+                </ul>
+              </li>
+            </ul>
+
+            <h3>Purposes, sharing and storage</h3>
+            <ul>
+              <li><strong>Purposes:</strong> showing your school data, notifying you of changes, syncing between your devices (with a FaNotes account), and operating the service securely.</li>
+              <li><strong>No commercial use:</strong> no ads, no tracking, no analytics or crash-reporting SDKs, no profiling, no sale of data.</li>
+              <li><strong>Service providers:</strong>
+                <ul>
+                  <li>Google Firebase Cloud Messaging delivers wake-up messages without school content (push token, Firebase installation ID).</li>
+                  <li>Cloudflare proxies connections.</li>
+                  <li>Microsoft and Schulnetz are the data source.</li>
+                  <li>Wikimedia Commons serves portraits for the "Note erraten" game.</li>
+                </ul>
+                Google, Cloudflare and Wikimedia may process data outside Switzerland, for example in the USA.</li>
+              <li><strong>Storage and security:</strong> the server is operated by the developer. Kanti+ data on it is not copied to backups.</li>
+            </ul>
+
+            <h3>Retention</h3>
+            <ul>
+              <li>School data and the anonymous identity stay on the server until you delete them in the app, disconnect your school, or delete your FaNotes account.</li>
+              <li>Microsoft cookies are kept at most 14 days after your last sign-in.</li>
+              <li>Logs are kept 14 days (web server) and at most 90 days (service log).</li>
+              <li>Data on your device stays until you delete it or remove the app.</li>
+              <li>There is currently no automatic deletion after inactivity.</li>
+            </ul>
+
+            <h3>Deletion and your rights</h3>
+            <p>In the app, go to Settings → Schulnetz or Konto und Sync:</p>
+            <ul>
+              <li>"Meine Kanti+-Daten löschen" deletes your school data, Schulnetz sign-in, push tokens and the anonymous identity from the server.</li>
+              <li>"Schule trennen" deletes the Schulnetz connection and the school data on the server.</li>
+            </ul>
+            <p>For all options, including deletion without the app and FaNotes account deletion, see <a href="/kantiplus/konto-loeschen/#english">Delete your account and data</a>.</p>
+            <p>You may request access, correction, deletion or a copy of your data, and object to processing: write to <a href="mailto:fabiokunz2109@gmail.com">fabiokunz2109@gmail.com</a>. You may also complain to the Swiss FDPIC or, where the GDPR applies, to your local supervisory authority.</p>
+          </section>
+        </article>
+      </div>
+    </main>
+  </body>
+</html>
