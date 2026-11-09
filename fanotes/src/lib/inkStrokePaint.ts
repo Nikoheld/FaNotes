@@ -81,21 +81,35 @@ export const createMarkerCoverage = (width: number, height: number): MarkerCover
   return { width: w, height: h, mask: new Uint8Array(w * h) }
 }
 
-/** Same row move as `shiftInkWindowBitmap`: positive `dy` shifts content down. */
+/**
+ * Same row move as `shiftInkWindowBitmap`: positive `dy` shifts content down.
+ * In place: the mask is as large as the slice bitmap (about 12 MB at three
+ * viewports), and every scroll move and page grow at the bottom of a long
+ * page used to allocate a second one and copy the rows twice.
+ */
 export const shiftMarkerCoverage = (coverage: MarkerCoverage, dy: number) => {
   const shift = Math.trunc(dy)
   if (!shift) return
   const { width, height, mask } = coverage
-  const next = new Uint8Array(mask.length)
   if (shift > 0) {
     const rows = height - shift
-    if (rows > 0) next.set(mask.subarray(0, rows * width), shift * width)
+    if (rows <= 0) {
+      mask.fill(0)
+      return
+    }
+    mask.copyWithin(shift * width, 0, rows * width)
+    mask.fill(0, 0, shift * width)
+    mask.fill(0, height * width)
   } else {
     const up = -shift
     const rows = height - up
-    if (rows > 0) next.set(mask.subarray(up * width), 0)
+    if (rows <= 0) {
+      mask.fill(0)
+      return
+    }
+    mask.copyWithin(0, up * width)
+    mask.fill(0, mask.length - up * width)
   }
-  mask.set(next)
 }
 
 type MarkerGuard = {

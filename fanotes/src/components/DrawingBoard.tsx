@@ -132,7 +132,7 @@ import {
 import { BUG_REPORT_PEN_SAMPLE_MS, buildPenDiagnosticEvent, diagnosticLog } from '../lib/bugReport'
 import { boundsOfInkIndexes, copyInkSelection, inkEditUndoSnapshot, moveInkSelection, scaleInkSelection } from '../lib/inkSelect'
 import { bumpInkGeometryEpoch, strokePointBounds } from '../lib/strokeBounds'
-import { drawingDocumentJson } from '../lib/drawingJson'
+import { drawingDocumentJson, warmStrokeJsonWhenIdle } from '../lib/drawingJson'
 import { applyToolErase } from '../lib/toolErase'
 import {
   inkPointerSessionFromSample,
@@ -3719,10 +3719,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     void paper?.offsetHeight
     const nextPaintW = writePageStayExtent(nextW, paper?.offsetWidth ?? 0)
     const nextPaintH = writePageStayExtent(nextH, paper?.offsetHeight ?? 0)
-    forEachTrackedPoint((point) => {
-      point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
-      point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
-    })
+    // keepMarkOnPage returns the value itself on an axis whose extent and
+    // origin stay; a bottom grow then leaves x alone instead of calling into
+    // the page module twice per sample.
+    const moveX = addX !== 0 || nextPaintW !== prevPaintW
+    const moveY = addY !== 0 || nextPaintH !== prevPaintH
+    if (moveX && moveY) {
+      forEachTrackedPoint((point) => {
+        point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
+        point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
+      })
+    } else if (moveY) {
+      forEachTrackedPoint((point) => {
+        point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
+      })
+    } else if (moveX) {
+      forEachTrackedPoint((point) => {
+        point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
+      })
+    }
     const remapPose = <T extends { x: number; y: number }>(pose: T | null): T | null => {
       if (!pose) return pose
       return {
@@ -7568,6 +7583,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [activeMode, mode, settings.experimentalHandwritingToText, settings.lastRecognitionMode, recognitionLanguage, sourceHeight])
 
+  // Large pages: write each stroke's save JSON while the pen rests, so the
+  // autosave below joins cached text instead of stringifying every sample
+  // after a page grow. Not part of the save queue: a flush never waits on it.
+  useEffect(() => {
+    if (revision === 0 || !dirtyRef.current) return
+    if (!inkPagePersists(strokesRef.current.length, inkRecordExists())) return
+    return warmStrokeJsonWhenIdle(() => strokesRef.current)
+  }, [inkRecordExists, revision])
+
   useEffect(() => {
     if (revision === 0 || !dirtyRef.current) return
     if (!inkPagePersists(strokesRef.current.length, inkRecordExists())) return
@@ -9878,7 +9902,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         samples={resources?.samples ?? []}
         pageWidth={sourceWidth}
         pageHeight={sourceHeight}
-        suggestedStartY={Math.max(96, bottomOfStrokes(strokesRef.current, sourceHeight) + 58)}
+        // Measured only while the dialog is open: this runs on every render of
+        // the board, and after a page grow it re-measured every stroke.
+        suggestedStartY={textToHandwritingOpen ? Math.max(96, bottomOfStrokes(strokesRef.current, sourceHeight) + 58) : 96}
         color={penColor}
         baseWidth={penWidth}
         pressureEnabled={settings.pressureEnabled}

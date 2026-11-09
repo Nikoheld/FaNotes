@@ -151,6 +151,86 @@ try {
     for (const text of ['', 'abc', 'Größe', '✓€', '😀', 'a\ud800b', '\udc00', 'x'.repeat(1000) + '😀'.repeat(3)]) {
       assert.equal(textBytes(text), new TextEncoder().encode(text).byteLength, `utf-8 length of ${JSON.stringify(text)}`)
     }
+
+    // The highlighter mask moves in place, row for row like the copy it replaces.
+    const { createMarkerCoverage, shiftMarkerCoverage } = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
+    const copiedShift = (coverage, dy) => {
+      const shift = Math.trunc(dy)
+      if (!shift) return
+      const { width, height, mask } = coverage
+      const next = new Uint8Array(mask.length)
+      if (shift > 0) {
+        const rows = height - shift
+        if (rows > 0) next.set(mask.subarray(0, rows * width), shift * width)
+      } else {
+        const rows = height + shift
+        if (rows > 0) next.set(mask.subarray(-shift * width), 0)
+      }
+      mask.set(next)
+    }
+    for (const [width, height] of [[7, 5], [3, 1], [16, 9]]) {
+      for (const dy of [-12, -9, -5, -4, -1, -0.6, 0, 0.4, 1, 2, 4, 5, 9, 12, 2.7, -3.2]) {
+        const moved = createMarkerCoverage(width, height)
+        for (let index = 0; index < moved.mask.length; index += 1) moved.mask[index] = (index * 37 + 11) % 251
+        const copied = { ...moved, mask: moved.mask.slice() }
+        shiftMarkerCoverage(moved, dy)
+        copiedShift(copied, dy)
+        assert.deepEqual([...moved.mask], [...copied.mask], `marker coverage ${width}×${height} moved by ${dy}`)
+      }
+    }
+
+    // Idle warming fills the save JSON of a large page and never changes it.
+    const { warmStrokeJsonWhenIdle } = await server.ssrLoadModule('/src/lib/drawingJson.ts')
+    assert.equal(globalThis.scheduler, undefined, 'this check stands in for scheduler.postTask itself')
+    const queued = []
+    const run = (rounds) => {
+      for (let round = 0; round < rounds && queued.length; round += 1) queued.shift()()
+    }
+    globalThis.scheduler = {
+      postTask: (callback, { priority, signal }) => {
+        assert.equal(priority, 'background', 'warming never competes with input or rendering')
+        queued.push(() => { if (!signal.aborted) callback() })
+        return new Promise(() => {})
+      },
+    }
+    const bigPage = Array.from({ length: 800 }, (_, index) => stroke(index))
+    const bigDrawing = { ...drawing, strokes: bigPage }
+    try {
+      warmStrokeJsonWhenIdle(() => strokes.slice(0, 10))
+      assert.equal(queued.length, 0, 'a small page is left to the save')
+      warmStrokeJsonWhenIdle(() => bigPage, { sliceMs: 0 })
+      assert.equal(queued.length, 1, 'a large page is warmed in the background')
+      run(300)
+      // A grow halfway through moves every sample: the walk starts again.
+      for (const item of bigPage) for (const sample of item.points) sample.y *= 0.9
+      bumpInkGeometryEpoch()
+      run(5_000)
+      assert.equal(queued.length, 0, 'the walk ends')
+      assert.equal(drawingDocumentJson(bigDrawing), JSON.stringify(bigDrawing), 'a warmed page saves the same JSON')
+      const cancel = warmStrokeJsonWhenIdle(() => bigPage, { sliceMs: 0 })
+      run(3)
+      cancel()
+      run(5_000)
+      assert.equal(queued.length, 0, 'a new revision cancels the walk')
+    } finally {
+      delete globalThis.scheduler
+    }
+    // Without postTask the walk runs in idle callbacks.
+    const idle = []
+    globalThis.window = {
+      requestIdleCallback: (callback) => idle.push(callback),
+      cancelIdleCallback: (id) => { idle[id - 1] = () => {} },
+    }
+    try {
+      for (const item of bigPage) for (const sample of item.points) sample.x *= 0.9
+      bumpInkGeometryEpoch()
+      warmStrokeJsonWhenIdle(() => bigPage, { sliceMs: 0 })
+      for (let round = 0; round < 5_000 && idle.length; round += 1) idle.shift()()
+      assert.equal(idle.length, 0, 'the idle walk ends')
+      assert.equal(drawingDocumentJson(bigDrawing), JSON.stringify(bigDrawing))
+    } finally {
+      delete globalThis.window
+    }
   }
 
   const committedStrokes = 2_000
