@@ -38,7 +38,9 @@ jobs:
           set -o pipefail
           "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
       - name: Schulnetz unit tests
-        run: node --test fanotes-site/schulnetz-logic.test.mjs fanotes-site/sync-guard.test.mjs fanotes-site/schulnetz-i18n.test.mjs
+        run: |
+          node --test fanotes-site/schulnetz-logic.test.mjs fanotes-site/sync-guard.test.mjs fanotes-site/schulnetz-i18n.test.mjs
+          node fanotes/scripts/android-version-code.mjs --self-test
       - name: Firebase config when the secret exists
         working-directory: android
         env:

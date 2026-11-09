@@ -347,13 +347,31 @@ jobs:
           printf '%s' "$FANOTES_ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
           export FANOTES_ANDROID_KEYSTORE="$keystore"
           version="$(node -p "require('../fanotes/package.json').version")"
+          # Play needs a higher versionCode for every upload. The code comes from
+          # the calendar version, which only moves forward.
+          version_code="$(node ../fanotes/scripts/android-version-code.mjs "$version")"
           source "$RUNNER_TEMP/retry-network.sh"
           retry_network ./gradlew :core:test --tests ch.fasrv.fanotes.schulnetz.* :companion:assembleRelease :companion:bundleRelease -Pfanotes.version="$version" --stacktrace
           apk="companion/build/outputs/apk/release/companion-release.apk"
           aab="companion/build/outputs/bundle/release/companion-release.aab"
+          symbols="companion/build/outputs/native-debug-symbols/release/native-debug-symbols.zip"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --min-sdk-version 29 "$apk"
+          # sed and grep -c read all input, so pipefail never sees a SIGPIPE.
+          badging="$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk" | sed -n '1p')"
+          echo "$badging"
+          case "$badging" in
+            *"name='ch.fasrv.kantiplus' versionCode='${version_code}' versionName='${version}' "*) ;;
+            *) echo "Kanti+ must be built as versionCode ${version_code}, versionName ${version}." >&2; exit 1 ;;
+          esac
+          symbol_tables="$(unzip -Z1 "$aab" | grep -c '^BUNDLE-METADATA/com.android.tools.build.debugsymbols/.*\.so\.sym$' || true)"
+          if [ "$symbol_tables" -eq 0 ]; then
+            echo "The Kanti+ bundle has no native debug symbols." >&2
+            exit 1
+          fi
+          echo "Native symbol tables in the bundle: ${symbol_tables}"
           cp "$apk" "Kanti-Plus-${version}-android.apk"
           cp "$aab" "Kanti-Plus-${version}-android.aab"
+          cp "$symbols" "Kanti-Plus-${version}-native-debug-symbols.zip"
       - uses: actions/upload-artifact@v6
         with:
           name: android-companion
@@ -361,6 +379,7 @@ jobs:
           path: |
             android/Kanti-Plus-*-android.apk
             android/Kanti-Plus-*-android.aab
+            android/Kanti-Plus-*-native-debug-symbols.zip
 
   publish:
     name: Publish GitHub release

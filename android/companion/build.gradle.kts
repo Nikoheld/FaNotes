@@ -1,3 +1,8 @@
+import com.android.build.api.artifact.MultipleArtifact
+import com.android.build.api.artifact.SingleArtifact
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -14,7 +19,7 @@ android {
         applicationId = "ch.fasrv.kantiplus"
         minSdk = 29
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 51000166
         versionName = fanotesVersion.get()
     }
@@ -46,6 +51,9 @@ android {
                 "proguard-rules.pro",
             )
             signingConfig = signingConfigs.getByName("release")
+            // Play reads the symbol tables from the bundle and from
+            // build/outputs/native-debug-symbols/release/native-debug-symbols.zip.
+            ndk { debugSymbolLevel = "SYMBOL_TABLE" }
         }
     }
 
@@ -96,6 +104,63 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // On-device OCR for scanned pages (Tesseract 5, Apache 2.0). No network use.
     implementation("com.github.adaptech-cz.Tesseract4Android:tesseract4android:4.8.0")
+}
+
+/**
+ * Native debug symbols for Play. Tesseract4Android and androidx.graphics ship
+ * their .so files already stripped. AGP skips a library that stripping leaves
+ * unchanged, so its own SYMBOL_TABLE extraction wrote nothing and Play saw a
+ * bundle without symbols. For such a library the dynamic symbol table is all
+ * there is, and an unchanged copy is what `objcopy --strip-debug` would write.
+ * A library that still has a .symtab or debug sections is left to AGP, which
+ * needs the NDK to extract it.
+ */
+abstract class StrippedNativeSymbolTablesTask : DefaultTask() {
+    @get:InputFiles
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val nativeLibs: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val symbolTables: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val out = symbolTables.get().asFile
+        out.deleteRecursively()
+        nativeLibs.get().asFile.walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".so") && isStrippedElf(it) }
+            .forEach { it.copyTo(out.resolve("${it.parentFile.name}/${it.name}.sym")) }
+    }
+
+    private fun isStrippedElf(file: File): Boolean = runCatching {
+        val elf = ByteBuffer.wrap(file.readBytes())
+        if (elf.getInt(0) != 0x7f454c46) return@runCatching false
+        val wide = elf.get(4).toInt() == 2
+        elf.order(if (elf.get(5).toInt() == 2) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN)
+        val table = if (wide) elf.getLong(0x28).toInt() else elf.getInt(0x20)
+        val entrySize = elf.getShort(if (wide) 0x3a else 0x2e).toInt() and 0xffff
+        val count = elf.getShort(if (wide) 0x3c else 0x30).toInt() and 0xffff
+        val namesIndex = elf.getShort(if (wide) 0x3e else 0x32).toInt() and 0xffff
+        val header = { index: Int -> table + index * entrySize }
+        val names = if (wide) elf.getLong(header(namesIndex) + 0x18).toInt() else elf.getInt(header(namesIndex) + 0x10)
+        (0 until count).none { index ->
+            var at = names + elf.getInt(header(index))
+            val name = buildString { while (elf.get(at).toInt() != 0) append(elf.get(at++).toInt().toChar()) }
+            name == ".symtab" || name.startsWith(".debug_") || name.startsWith(".zdebug_")
+        }
+    }.getOrDefault(false)
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        val variantName = variant.name.replaceFirstChar { it.uppercase() }
+        val symbols = tasks.register<StrippedNativeSymbolTablesTask>("extract${variantName}StrippedNativeSymbolTables") {
+            nativeLibs.set(variant.artifacts.get(SingleArtifact.MERGED_NATIVE_LIBS))
+        }
+        variant.artifacts.use(symbols)
+            .wiredWith(StrippedNativeSymbolTablesTask::symbolTables)
+            .toAppendTo(MultipleArtifact.NATIVE_SYMBOL_TABLES)
+    }
 }
 
 if (file("google-services.json").isFile) {

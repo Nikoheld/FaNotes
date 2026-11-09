@@ -69,5 +69,23 @@ view. Use a disposable, signed-out emulator (it creates a uniquely named test no
 
 The APK is `companion/build/outputs/apk/debug/companion-debug.apk`.
 
+## Google Play bundle
+
+The Alpha and Release workflows build the signed bundle in the **Android Companion** job of
+`.github/workflows/release.yml`. The `android-companion` artifact and the GitHub release hold
+`Kanti-Plus-<version>-android.aab` and `Kanti-Plus-<version>-native-debug-symbols.zip`.
+
+- `versionCode` comes from the calendar version (`fanotes/scripts/android-version-code.mjs`):
+  `50000000 + months since 2026-01 × 100000 + stable × 100`, and a beta sits just below its
+  stable (`− 50 + beta`). 2026.11.2-beta.16 is 51000166. Versions only move forward, so every
+  bundle has a higher code. The job fails when the built app has a different code or name.
+- The release build keeps native symbol tables (`debugSymbolLevel = "SYMBOL_TABLE"`). The
+  Tesseract and androidx.graphics libraries arrive already stripped, so
+  `extractReleaseStrippedNativeSymbolTables` adds their dynamic symbol tables. Play reads them
+  from the bundle. The zip is for a manual upload in the Play Console.
+- A local `./gradlew :companion:bundleRelease` stops at `validateSigningRelease` unless
+  `FANOTES_ANDROID_KEYSTORE` and `FANOTES_ANDROID_KEYSTORE_PASSWORD` are set. A throwaway
+  keystore with the alias `fanotes` is enough to check the bundle; never upload that build.
+
 See [verification results](docs/VERIFICATION.md) for the actual device checks,
 screenshots, environmental setup and untested boundaries for this implementation.

@@ -6,6 +6,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { androidVersionCode } from './android-version-code.mjs'
 
 const fanotesRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(fanotesRoot, '..')
@@ -29,24 +30,7 @@ const notes = (readArg('--notes') || `FaNotes ${version}`)
   .map((line) => (line.startsWith('- ') ? line : `- ${line}`))
 
 const dryRun = process.argv.includes('--dry-run')
-const match = VERSION_PATTERN.exec(version)
-// Android installs an update only when versionCode increases, and Play rejects
-// a code above 2_100_000_000. Concatenating YYYYMMNNBB crosses that cap for a
-// beta of 2026.10.11, and it also sorts above every later 8-digit stable.
-// Each future stable keeps 49 betas in the integers just below it. Every code
-// stays above the published 2026.10.10 value 20261010.
-const year = Number(match[1])
-const monthNumber = Number(match[2])
-const stableNumber = Number(match[3])
-const betaNumber = match[4] ? Number(match[4]) : 0
-if (betaNumber > 49) throw new Error('Android supports at most 49 betas for one stable release.')
-const monthIndex = (year - 2026) * 12 + (monthNumber - 1)
-if (monthIndex < 0 || stableNumber > 900) throw new Error(`Android versionCode cannot encode ${version}.`)
-const stableCode = 50_000_000 + monthIndex * 100_000 + stableNumber * 100
-const versionCode = betaNumber === 0 ? stableCode : stableCode - 50 + betaNumber
-if (versionCode <= 20_261_010 || versionCode > 2_100_000_000) {
-  throw new Error(`Android versionCode ${versionCode} for ${version} is outside the installable range.`)
-}
+const versionCode = androidVersionCode(version)
 
 const write = (filePath, next) => {
   const current = fs.readFileSync(filePath, 'utf8')
