@@ -24,6 +24,8 @@ school day as a measured line:
 Rejected defaults: generic card stacks with identical radii and shadows, all-caps eyebrow labels
 (the old "ALS NÄCHSTES" is now sentence case), a monospace face for data, decorative gradients.
 
+The launcher, themed and notification icons follow the same tokens; see [brand/BRAND.md](brand/BRAND.md).
+
 ## Tokens
 
 All colours come from one pure function, `kantiPalette(themeId, systemDark, accent, amoled)` in
