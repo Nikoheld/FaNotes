@@ -55,6 +55,8 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
     val context = LocalContext.current
     val sync by model.graph.engine.state.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf("") }
+    var deleteAccount by remember { mutableStateOf(false) }
+    var deletePassword by remember { mutableStateOf("") }
     if (page == Page.Diagnostics) {
         val owner = LocalLifecycleOwner.current
         DisposableEffect(owner) {
@@ -149,6 +151,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                                 PrimaryButton(t(R.string.sync_now), model::sync, Modifier.fillMaxWidth().padding(top = 14.dp), enabled = !model.busy && sync.status != SyncStatus.SYNCING, icon = Icons.Outlined.Sync)
                                 if (model.graph.plannerHold()) SecondaryButton(t(R.string.upload_tasks_and_calendar), model::acceptUpload, Modifier.fillMaxWidth().padding(top = 10.dp))
                                 TextButton(onClick = { confirm = "logout" }, modifier = Modifier.padding(top = 4.dp)) { Text(t(R.string.sign_out), color = MaterialTheme.colorScheme.error) }
+                                TextButton(onClick = { deletePassword = ""; deleteAccount = true }, enabled = !model.busy) { Text(t(R.string.delete_fanotes_account), color = MaterialTheme.colorScheme.error) }
                             }
                         }
                     }
@@ -164,8 +167,8 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                             IconTile(Icons.Outlined.School, StateTone.Accent, 44.dp)
                             Column {
                                 Text(t(R.string.schulnetz), style = MaterialTheme.typography.titleLarge)
-                                StatusLine(when { model.link.needsReauth -> t(R.string.sign_in_again_to_refresh); model.link.linked -> t(R.string.connected); else -> t(R.string.not_connected) },
-                                    when { model.link.needsReauth -> StateTone.Warning; model.link.linked -> StateTone.Accent; else -> StateTone.Neutral })
+                                StatusLine(when { model.demo -> t(R.string.demo_active_title); model.link.needsReauth -> t(R.string.sign_in_again_to_refresh); model.link.linked -> t(R.string.connected); else -> t(R.string.not_connected) },
+                                    when { model.demo -> StateTone.Warning; model.link.needsReauth -> StateTone.Warning; model.link.linked -> StateTone.Accent; else -> StateTone.Neutral })
                             }
                         }
                         Text(t(R.string.read_your_school_information_here_manage_officia), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 14.dp))
@@ -174,9 +177,19 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                             Modifier.fillMaxWidth().padding(top = 14.dp), enabled = !model.busy)
                         Text(t(R.string.school_data_updated, updatedLabel(model.snapshot.fetchedAt)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
                     }
-                    if (model.link.linked || !model.notesAccount) FineDivider()
-                    if (model.link.linked) SettingRow(Icons.Outlined.LinkOff, t(R.string.disconnect_school), "", chevron = false) { confirm = "unlink" }
-                    if (!model.notesAccount) {
+                    if (model.demo) {
+                        FineDivider()
+                        Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) { InfoBanner(t(R.string.demo_active_title), t(R.string.demo_active_body), tone = StateTone.Warning) }
+                        SettingRow(Icons.Outlined.NotificationsActive, t(R.string.demo_sample_notice), "", chevron = false) { model.showDemoNotice(context) }
+                        FineDivider()
+                        SettingRow(Icons.Outlined.LinkOff, t(R.string.demo_end), "", chevron = false) { model.stopDemo() }
+                    } else if (model.canStartDemo()) {
+                        FineDivider()
+                        SettingRow(Icons.Outlined.School, t(R.string.demo_view), t(R.string.demo_view_body)) { model.startDemo() }
+                    }
+                    if (!model.demo && (model.link.linked || !model.notesAccount)) FineDivider()
+                    if (model.link.linked && !model.demo) SettingRow(Icons.Outlined.LinkOff, t(R.string.disconnect_school), "", chevron = false) { confirm = "unlink" }
+                    if (!model.notesAccount && !model.demo) {
                         if (model.link.linked) FineDivider()
                         SettingRow(Icons.Outlined.EditNote, t(R.string.sync_notes_with_fanotes), "") { model.navigate(Page.Auth) }
                         FineDivider()
@@ -403,6 +416,27 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             }
             confirm = ""
         }
+    }
+    if (deleteAccount) {
+        AlertDialog(
+            onDismissRequest = { deleteAccount = false },
+            shape = MaterialTheme.shapes.extraLarge,
+            title = { Text(t(R.string.delete_fanotes_account), style = MaterialTheme.typography.headlineSmall) },
+            text = {
+                Column {
+                    Text(t(R.string.delete_fanotes_account_body), style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(deletePassword, { deletePassword = it }, Modifier.fillMaxWidth().padding(top = 12.dp), label = { Text(t(R.string.password)) }, singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { model.deleteNotesAccount(deletePassword); deletePassword = ""; deleteAccount = false }, enabled = deletePassword.isNotBlank()) {
+                    Text(t(R.string.delete), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { deletePassword = ""; deleteAccount = false }) { Text(t(R.string.cancel)) } },
+        )
     }
     val export = model.diagnosticExport
     if (export != null) {

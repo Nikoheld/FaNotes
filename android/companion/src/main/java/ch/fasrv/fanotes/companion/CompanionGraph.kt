@@ -23,6 +23,7 @@ import ch.fasrv.fanotes.ink.InkDocument
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.parseJson
+import ch.fasrv.fanotes.schulnetz.isDemo
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.HypotheticalGrade
 import ch.fasrv.fanotes.schulnetz.AlertGate
@@ -209,10 +210,46 @@ class CompanionGraph(private val context: Context) {
                 if (cached.fetchedAt.isNotBlank() || cached.grades.isNotEmpty() || cached.events.isNotEmpty()) {
                     snapshot.value = cached
                 }
+                if (demoActive()) showDemo()
             } finally {
                 snapshotReady.value = true
             }
         }
+    }
+
+    /*
+     * Demo mode: invented school data for app review and for trying Kanti+ without Schulnetz.
+     * The demo snapshot lives in memory only. While it is on, no Schulnetz page, no Kanti+ server
+     * call and no push registration runs: schoolAuth() and ensureGuest() refuse, and the refresh,
+     * push and upload paths return early. It can only start without a school link or FaNotes account.
+     */
+    fun demoActive(): Boolean = prefs.getBoolean(DEMO_PREF, false)
+
+    fun canStartDemo(): Boolean = !link.value.linked && engine.state.value.account == null && !prefs.getBoolean("school-linked", false)
+
+    fun startDemo(): Boolean {
+        if (!demoActive() && !canStartDemo()) return false
+        prefs.edit().putBoolean(DEMO_PREF, true).apply()
+        showDemo()
+        NextLessonWidget.update(context)
+        return true
+    }
+
+    /** Rebuilds the demo for today, so the current and coming weeks always have lessons. */
+    fun showDemo() {
+        val now = java.time.ZonedDateTime.now(ch.fasrv.fanotes.schulnetz.SCHOOL_ZONE)
+        snapshot.value = ch.fasrv.fanotes.schulnetz.demoSnapshot(now.toLocalDate(), now)
+        link.value = SchulnetzLinkState(linked = true, baseUrl = baseUrl(), displayName = ch.fasrv.fanotes.schulnetz.DEMO_DISPLAY_NAME,
+            lastPollAt = snapshot.value.fetchedAt, settings = notifySettings())
+    }
+
+    fun stopDemo() {
+        if (!demoActive()) return
+        prefs.edit().putBoolean(DEMO_PREF, false).apply()
+        val cached = readCachedSnapshot()
+        snapshot.value = if (cached.isDemo()) SchulnetzSnapshot() else cached
+        link.value = SchulnetzLinkState(baseUrl = baseUrl())
+        NextLessonWidget.update(context)
     }
 
     fun deviceId(): String {
@@ -301,6 +338,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     suspend fun refreshSchulnetz(caller: String = "unspecified") {
+        if (demoActive()) { showDemo(); return }
         if (schoolDisconnected()) return
         trail.caller(caller)
         schulnetzLog.info("refresh queued caller=$caller ${trail.snapshot()} lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
@@ -591,7 +629,7 @@ class CompanionGraph(private val context: Context) {
      * Does not scrape Schulnetz and does not sync notes.
      */
     suspend fun pullChangeDelta() {
-        if (schoolDisconnected()) return
+        if (demoActive() || schoolDisconnected()) return
         awaitBoot()
         withContext(Dispatchers.IO) {
             withTimeoutOrNull(8_000) {
@@ -629,7 +667,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     private suspend fun uploadFcmToken(token: String) {
-        if (schoolDisconnected()) return
+        if (demoActive() || schoolDisconnected()) return
         val session = runCatching { schoolAuth() }.getOrNull() ?: return
         val now = System.currentTimeMillis()
         val sentToken = prefs.getString("fcm-sent-token", "").orEmpty()
@@ -844,6 +882,8 @@ class CompanionGraph(private val context: Context) {
     }
 
     suspend fun runVisibleLogin(caller: String) {
+        // A real sign-in ends the demo first; demo data never meets a real account.
+        stopDemo()
         schulnetzLog.info("visible login queued caller=$caller lockHeld=${gate.isLocked} holder=${gate.holder.orEmpty()}")
         gate.exclusive("visible-login:$caller") {
             prefs.edit().putBoolean("school-disconnected", false).apply()
@@ -1059,6 +1099,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     private fun publishSnapshot(previous: SchulnetzSnapshot?, incoming: SchulnetzSnapshot, settings: NotifySettings) {
+        if (demoActive() || incoming.isDemo()) return
         val next = incoming.copy(grades = ch.fasrv.fanotes.schulnetz.keepGradeRead(previous?.grades.orEmpty(), incoming.grades, incoming.trustedGradeRead()))
         val hidden = hiddenLessons()
         val local = notifySettings()
@@ -1135,6 +1176,8 @@ class CompanionGraph(private val context: Context) {
     }
 
     private fun writeCache(value: SchulnetzSnapshot) {
+        // The demo is never stored.
+        if (value.isDemo()) return
         val file = snapshotFile(context)
         file.writeText(value.toNormalizedJson())
     }
@@ -1185,6 +1228,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     suspend fun ensureGuest(): SchoolAuth = guestLock.withLock {
+        if (demoActive()) throw DemoModeException()
         readGuestFile()?.let { return@withLock it }
         val created = client.createGuest()
         writeGuestFile(created)
@@ -1206,6 +1250,7 @@ class CompanionGraph(private val context: Context) {
 
     /** FaNotes session when signed in, otherwise the anonymous device identity. */
     suspend fun schoolAuth(): SchoolAuth {
+        if (demoActive()) throw DemoModeException()
         val session = engine.currentSession()
         if (session != null) {
             adoptGuest(session)
@@ -1258,6 +1303,9 @@ class CompanionGraph(private val context: Context) {
         CompanionAlerts.retireLegacyPush(context)
         cancelSchoolDelivery(context)
     }
+
+    /** After the FaNotes account was deleted on the server, its school data there is gone too: drop the local copy. */
+    fun forgetSchoolOfDeletedAccount() = clearSchoolCache()
 
     fun schoolDisconnected(): Boolean = prefs.getBoolean("school-disconnected", false)
 
@@ -1333,6 +1381,7 @@ class CompanionGraph(private val context: Context) {
         const val UNREVEALED_PREF = "unrevealed-grades"
         const val PLANNER_HOLD_PREF = "hold-planner-upload"
         const val DIAGNOSTIC_MODE_PREF = "diagnostic-mode"
+        const val DEMO_PREF = "demo-mode"
         const val DIAGNOSTIC_SCENARIO_PREF = "diagnostic-scenario"
         val PLANNER_HOLD_PATHS = setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH, DESK_PATH)
         const val SERVER_POLL_MS = 60_000L
@@ -1376,3 +1425,6 @@ private fun fingerprint(value: String): String {
     val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
     return digest.joinToString("") { "%02x".format(it) }.take(32)
 }
+
+/** Thrown instead of any school or server call while the demo is shown. */
+class DemoModeException : IllegalStateException("Demo-Modus: keine Verbindung zu Schulnetz oder Server")

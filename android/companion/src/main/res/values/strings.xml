@@ -1047,4 +1047,19 @@
         <item quantity="one">%1$d document searchable</item>
         <item quantity="other">%1$d documents searchable</item>
     </plurals>
+    <string name="demo_view">View demo</string>
+    <string name="demo_view_body">No Schulnetz account needed: invented marks, timetable and exams.</string>
+    <string name="demo_active_title">Demo mode</string>
+    <string name="demo_active_body">Everything shown is invented. In demo mode Kanti+ reads nothing from Schulnetz and sends nothing to a server.</string>
+    <string name="demo_end">End demo</string>
+    <string name="demo_ended">Demo ended.</string>
+    <string name="demo_refreshed">Demo data rebuilt for today.</string>
+    <string name="demo_unavailable">The demo is only available without a connected school and without a FaNotes account.</string>
+    <string name="demo_sample_notice">Show a sample notification</string>
+    <string name="demo_sample_title">New exam</string>
+    <string name="demo_sample_body">Biology: cell biology (demo)</string>
+    <string name="delete_fanotes_account">Delete FaNotes account</string>
+    <string name="delete_fanotes_account_body">The account, your encrypted notes on the server and this account\'s Kanti+ school data are deleted for good. Notes and tasks on this device stay until you remove the app. Enter your password to confirm.</string>
+    <string name="fanotes_account_deleted">Account and server data deleted.</string>
+    <string name="could_not_delete_account">The account could not be deleted.</string>
 </resources>

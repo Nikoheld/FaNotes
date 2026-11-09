@@ -1047,4 +1047,19 @@
         <item quantity="one">%1$d Dokument durchsuchbar</item>
         <item quantity="other">%1$d Dokumente durchsuchbar</item>
     </plurals>
+    <string name="demo_view">Demo ansehen</string>
+    <string name="demo_view_body">Ohne Schulnetz-Konto: erfundene Noten, Stundenplan und Prüfungen.</string>
+    <string name="demo_active_title">Demo-Modus</string>
+    <string name="demo_active_body">Alle Angaben sind erfunden. Kanti+ liest im Demo-Modus nichts aus Schulnetz und sendet nichts an einen Server.</string>
+    <string name="demo_end">Demo beenden</string>
+    <string name="demo_ended">Demo beendet.</string>
+    <string name="demo_refreshed">Demo-Daten für heute neu erstellt.</string>
+    <string name="demo_unavailable">Die Demo gibt es nur ohne verbundene Schule und ohne FaNotes-Konto.</string>
+    <string name="demo_sample_notice">Beispiel-Mitteilung zeigen</string>
+    <string name="demo_sample_title">Neue Prüfung</string>
+    <string name="demo_sample_body">Biologie: Zellbiologie (Demo)</string>
+    <string name="delete_fanotes_account">FaNotes-Konto löschen</string>
+    <string name="delete_fanotes_account_body">Das Konto, deine verschlüsselten Notizen auf dem Server und die Kanti+-Schuldaten dieses Kontos werden endgültig gelöscht. Notizen und Aufgaben auf diesem Gerät bleiben, bis du die App löschst. Gib zur Bestätigung dein Passwort ein.</string>
+    <string name="fanotes_account_deleted">Konto und Serverdaten wurden gelöscht.</string>
+    <string name="could_not_delete_account">Das Konto konnte nicht gelöscht werden.</string>
 </resources>

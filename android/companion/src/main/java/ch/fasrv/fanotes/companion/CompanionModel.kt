@@ -155,6 +155,40 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         if (chrome != home) selectNav(home)
     }
     fun continueLocally() { localAccess = true; graph.setLocalAccess(true); message = null }
+
+    /** Demo only without a school link or FaNotes account, so invented data never meets a real one. */
+    fun canStartDemo(): Boolean = !demo && !notesAccount && !link.linked
+
+    fun startDemo() {
+        if (!canStartDemo() || !graph.startDemo()) { message = t(R.string.demo_unavailable); return }
+        demo = true
+        snapshot = graph.snapshot.value
+        link = graph.link.value
+        schoolReady = true
+        if (onboardingActive) finishOnboarding() else continueLocally()
+    }
+
+    fun stopDemo() {
+        if (!demo) return
+        graph.stopDemo()
+        demo = false
+        snapshot = graph.snapshot.value
+        link = graph.link.value
+        message = t(R.string.demo_ended)
+    }
+
+    /** A local sample notification in demo mode; nothing is sent or received. */
+    fun showDemoNotice(context: android.content.Context) {
+        if (!demo) return
+        val day = java.time.LocalDate.now().plusDays(8)
+        CompanionAlerts.show(context, ch.fasrv.fanotes.schulnetz.SchulnetzChange(
+            id = "${ch.fasrv.fanotes.schulnetz.DEMO_ID_PREFIX}notice-${System.currentTimeMillis()}",
+            category = "exam",
+            title = t(R.string.demo_sample_title),
+            body = t(R.string.demo_sample_body),
+            date = day.toString(),
+        ))
+    }
     /** Ends the first-run or replayed onboarding. A replay never changes accounts or connections. */
     fun finishOnboarding(openNotes: Boolean = false) {
         val replay = onboardingReplay
@@ -217,6 +251,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var snapshot by mutableStateOf(graph.snapshot.value)
     /** False until the cached school snapshot has been read and shown. */
     var schoolReady by mutableStateOf(false)
+    /** Invented school data for app review; see CompanionGraph.demoActive(). */
+    var demo by mutableStateOf(graph.demoActive())
     var link by mutableStateOf(graph.link.value)
     var notes by mutableStateOf<List<VaultNode>>(emptyList())
     var noteFolder by mutableStateOf("")
@@ -376,6 +412,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         busy = true
         viewModelScope.launch {
             try {
+                if (demo) stopDemo()
                 val offer = withContext(Dispatchers.IO) { graph.armPlannerHold() }
                 if (register) graph.engine.register(email.trim(), password) else graph.engine.login(email.trim(), password)
                 graph.engine.syncNow("phone")
@@ -428,6 +465,28 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
+    /** Deletes the FaNotes account and its server data (password-confirmed). Local files stay on the device. */
+    fun deleteNotesAccount(password: String) {
+        if (busy || password.isBlank()) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                graph.engine.deleteAccount(password)
+                runCatching { graph.docSearch.forgetAll() }
+                withContext(Dispatchers.IO) { graph.forgetSchoolOfDeletedAccount() }
+                if (route.destination == Destination.Notes || route.page == Page.Editor || route.page == Page.Trash || route.page == Page.Profile || route.page == Page.DocSearch) {
+                    history = emptyList()
+                    route = CompanionRoute(Destination.Today)
+                }
+                notesAccount = false
+                message = t(R.string.fanotes_account_deleted)
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = ch.fasrv.fanotes.desk.userVisibleFailure(error, t(R.string.could_not_delete_account)) ?: t(R.string.could_not_delete_account)
+            } finally { busy = false }
+        }
+    }
+
     fun acceptUpload() {
         offerUpload = false
         graph.releasePlannerHold()
@@ -437,6 +496,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun declineUpload() { offerUpload = false }
 
     fun refreshSchool() {
+        if (demo) { graph.showDemo(); message = t(R.string.demo_refreshed); return }
         busy = true
         viewModelScope.launch {
             try {
@@ -450,6 +510,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun deleteKantiData() {
+        if (demo) { stopDemo(); return }
         if (busy || notesAccount) return
         busy = true
         viewModelScope.launch {
@@ -468,6 +529,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun requestVisibleLogin(caller: String) {
         graph.trail.action("connect")
         if (busy) return
+        if (demo) stopDemo()
         val base = normalizeSchoolBase(baseUrl)
         if (base == null) { message = t(R.string.school_address_unsupported); return }
         if (!usesWebsiteSession(base)) { message = t(R.string.web_signin_unavailable); return }
@@ -549,6 +611,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun unlink() {
+        if (demo) { stopDemo(); return }
         if (busy) return
         busy = true
         viewModelScope.launch {
