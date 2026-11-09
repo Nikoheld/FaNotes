@@ -369,7 +369,7 @@ class SchulnetzClient(
         // not only the four weeks around today.
         val knownSpan = htmlSpan ?: previous.storedSpan()
         // Planning only: the fallback is not Schulnetz's range, so it is never stored as one.
-        val planSpan = knownSpan ?: ch.fasrv.fanotes.schulnetz.fallbackSchoolSpan(previous?.events.orEmpty(), previous?.vacations.orEmpty(), today)
+        val planSpan = knownSpan ?: ch.fasrv.fanotes.schulnetz.fallbackSchoolSpan(previous?.events.orEmpty(), previous?.vacations.orEmpty(), today, previous?.exams.orEmpty())
         val plan = planWeekFetches(
             if (planSpan != null) mondaysBetween(planSpan.start, planSpan.end) else emptyList(),
             // Retry timing follows every attempt, so an unread week is not requested on every sync.
@@ -378,6 +378,9 @@ class SchulnetzClient(
             java.time.Instant.parse(fetchedNow),
             today,
             icalAvailable,
+            emptyWeeks = previous?.weekRead.orEmpty().keys.filterTo(HashSet()) { week ->
+                previous?.events.orEmpty().none { it.isLesson() && weekMondayKey(it.start) == week }
+            },
         )
         val discovered = findSchedulerUrl(planHtml, root)
         val fromPlan = parseSchedulerNote(planNote)
@@ -792,6 +795,8 @@ class SchulnetzClient(
                 "Accept" to "application/json",
                 "Accept-Language" to AppLanguage.acceptLanguage(),
                 "Content-Type" to "application/json",
+                // This app's own diff handles every timetable week; older apps get this week only.
+                "X-Kanti-Timetable" to "weeks",
             ),
             json,
             client,

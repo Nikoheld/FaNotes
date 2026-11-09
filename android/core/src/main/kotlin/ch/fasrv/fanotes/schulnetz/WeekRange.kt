@@ -153,6 +153,8 @@ fun planWeekFetches(
     now: Instant,
     today: LocalDate,
     icalAvailable: Boolean,
+    /** Weeks read without a lesson. Up to [WEEK_PROBE] weeks ahead they are checked again on the short cadence. */
+    emptyWeeks: Set<String> = emptySet(),
 ): WeekPlan {
     val current = weekMonday(today)
     val probing = mondays.isEmpty()
@@ -165,7 +167,7 @@ fun planWeekFetches(
         val wanted = when {
             monday == current -> true
             stamp.isNullOrBlank() -> true
-            distance <= 1 -> stampAge(stamp, now) >= WEEK_ADJACENT_MS
+            distance <= 1 || (monday > current && distance <= WEEK_PROBE.toLong() && monday.toString() in emptyWeeks) -> stampAge(stamp, now) >= WEEK_ADJACENT_MS
             else -> stampAge(stamp, now) >= WEEK_FAR_MS
         }
         if (!wanted) continue

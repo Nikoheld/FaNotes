@@ -18,7 +18,7 @@ class AgendaBaselineTest {
         val prepared = prepareAgendaRead(stored, next)
         // The production paths write this BEFORE diffing. Round-trip it to cover restart persistence.
         val persisted = parseAgendaBaseline(agendaBaselineJson(prepared.weeks))
-        return diffSnapshots(prepared.comparison(previous), next) to persisted
+        return fixtureDiff(prepared.comparison(previous), next) to persisted
     }
 
     @Test fun firstCoveredExamWeekIsQuietEvenWithAnOldLessonAndDifferentCalendarUid() {
@@ -100,11 +100,11 @@ class AgendaBaselineTest {
         assertEquals(setOf("23.11.2026", "24.11.2026"), notices.map { it.body.substringBefore(" · ") }.toSet())
         val lessons = listOf(exam("lesson-1").copy(text = "Synthetic lesson", timetableText = "Synthetic lesson", eventType = "lesson"),
             exam("lesson-2", "2026-11-24").copy(text = "Synthetic lesson", timetableText = "Synthetic lesson", eventType = "lesson"))
-        val cancelled = diffSnapshots(SchulnetzSnapshot(events = lessons), SchulnetzSnapshot(events = lessons.map { it.copy(status = "cancelled") }))
+        val cancelled = fixtureDiff(SchulnetzSnapshot(events = lessons), SchulnetzSnapshot(events = lessons.map { it.copy(status = "cancelled") }))
         assertEquals(setOf("23.11.2026", "24.11.2026"), cancelled.map { it.body.substringBefore(" · ") }.toSet())
         assertTrue(cancelled.all { it.title == "Lektion fällt aus" })
         val night = lessons.first().copy(start = "2026-11-08T23:30:00Z", end = "2026-11-09T00:15:00Z")
-        val notice = diffSnapshots(SchulnetzSnapshot(events = listOf(night)), SchulnetzSnapshot(events = listOf(night.copy(status = "cancelled"))))
+        val notice = fixtureDiff(SchulnetzSnapshot(events = listOf(night)), SchulnetzSnapshot(events = listOf(night.copy(status = "cancelled"))))
         assertTrue(notice.single().body.startsWith("09.11.2026 · "))
         assertTrue(notice.single().body.contains("00:30–01:15"))
     }

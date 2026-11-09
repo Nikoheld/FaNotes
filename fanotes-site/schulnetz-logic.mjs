@@ -1135,7 +1135,7 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   if (!previous) return []
   // Master off: do not build rows. The caller still stores the snapshot.
   if (settings?.enabled === false) return []
-  const freshWeeks = new Set([...introducedWeeks(previous, next), ...legacyBackfillWeeks(previous, next)])
+  const freshWeeks = new Set([...introducedWeeks(previous, next), ...legacyBackfillWeeks(previous, next), ...lessonSeedWeeks(previous, next)])
   previous = { ...previous, grades: withoutSummaryGrades(previous.grades) }
   next = { ...next, grades: withoutSummaryGrades(next.grades) }
   const prefs = {
@@ -1149,9 +1149,16 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   const changes = []
   if (prefs.grades) diffGradeList(previous.grades || [], next.grades || [], changes)
   if (prefs.timetable) {
-    diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', changes, freshWeeks, next.exams || [])
+    const lessonChanges = []
+    diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', lessonChanges, freshWeeks, next.exams || [])
+    // So many lesson changes in one read is the timetable reloading, not news.
+    if (lessonChanges.length <= TIMETABLE_BURST) changes.push(...lessonChanges)
   }
-  if (prefs.exams) diffExams([...(previous.exams || []), ...(previous.events || []).filter(isExamLike)], next.exams || [], changes, freshWeeks)
+  if (prefs.exams) {
+    // An exam-like appointment that is still listed has not been cancelled.
+    const stillListed = new Set((next.events || []).map((event) => event.id))
+    diffExams([...(previous.exams || []), ...(previous.events || []).filter((event) => isExamLike(event) && !stillListed.has(event.id))], next.exams || [], changes, freshWeeks)
+  }
   if (prefs.absences) {
     const before = new Set((previous.absences || []).map((item) => item.id))
     for (const absence of next.absences || []) {
@@ -1248,10 +1255,12 @@ const diffGradeList = (previous, next, changes) => {
 }
 
 const diffAgenda = (previous, next, category, created, removed, changes, skipWeeks = new Set(), spareAgainst = []) => {
-  const before = new Map(previous.map((event) => [event.id, event]))
-  const after = new Set(next.map((event) => event.id))
+  // Schulnetz reuses a lesson id across weeks, so an id only names the same lesson within a week.
+  const weekId = (event) => `${event.id}|${weekMondayKey(event.start) || ''}`
+  const before = new Map(previous.map((event) => [weekId(event), event]))
+  const after = new Set(next.map(weekId))
   for (const event of next) {
-    const old = before.get(event.id)
+    const old = before.get(weekId(event))
     if (!old && skipWeeks.has(weekMondayKey(event.start))) continue
     const slotTwin = !old && category === 'timetable' ? previous.find((candidate) => sameLessonSlot(event, candidate)) : null
     const prior = old || slotTwin
@@ -1275,7 +1284,7 @@ const diffAgenda = (previous, next, category, created, removed, changes, skipWee
     }))
   }
   for (const event of previous) {
-    if (after.has(event.id)) continue
+    if (after.has(weekId(event))) continue
     if (skipWeeks.has(weekMondayKey(event.start))) continue
     if (spareAgainst.some((candidate) => sameSchoolSlot(event, candidate))) continue
     if (category === 'timetable' && next.some((candidate) => sameLessonSlot(event, candidate))) continue
@@ -1806,7 +1815,9 @@ const stampAge = (stamp, now) => {
 
 const weekDistance = (monday, current) => Math.round((Date.parse(`${monday}T00:00:00Z`) - Date.parse(`${current}T00:00:00Z`)) / (7 * 86400000))
 
-export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = '', now, today, icalAvailable = false } = {}) => {
+// emptyWeeks: weeks read without a lesson. Up to WEEK_PROBE weeks ahead they are checked again on the
+// short cadence, so a week an earlier empty answer marked free does not stay free for a day.
+export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = '', now, today, icalAvailable = false, emptyWeeks = new Set() } = {}) => {
   const current = weekMonday(today)
   const probing = !mondays.length
   const universe = capMondays(probing ? probeMondays(today) : mondays, today)
@@ -1815,7 +1826,8 @@ export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = 
   for (const monday of universe) {
     const distance = Math.abs(weekDistance(monday, current))
     const stamp = fetchedAt?.[monday]
-    const wanted = monday === current || !stamp || (distance <= 1 ? stampAge(stamp, now) >= WEEK_ADJACENT_MS : stampAge(stamp, now) >= WEEK_FAR_MS)
+    const soon = distance <= 1 || (monday > current && distance <= WEEK_PROBE && emptyWeeks.has(monday))
+    const wanted = monday === current || !stamp || (soon ? stampAge(stamp, now) >= WEEK_ADJACENT_MS : stampAge(stamp, now) >= WEEK_FAR_MS)
     if (!wanted) continue
     if (distance <= WEEK_PROBE) due.push(monday)
     else beyond.push(monday)
@@ -2114,11 +2126,19 @@ export const withoutUnprovenEmptyReads = (reads = {}, events = [], vacations = [
   const taught = new Set(events.filter(isLesson).map((event) => weekMondayKey(event.start)).filter(Boolean))
   return Object.fromEntries(Object.entries(reads).filter(([week]) => taught.has(week) || weekIsHoliday(week, vacations)))
 }
-/** School year from appointments and holidays when the page shows no range: four weeks back, at least four and at most forty ahead. */
-export const fallbackSchoolSpan = (events = [], vacations = [], today = zurichToday()) => {
+/** Weeks looked at past the last week that had lessons, so a published timetable is followed forward. */
+export const LESSON_WALK_WEEKS = 8
+/**
+ * School year when the page shows no range: from appointments, exams, holidays, and eight weeks past
+ * the last lesson read. Four weeks back, at least four and at most forty ahead.
+ */
+export const fallbackSchoolSpan = (events = [], vacations = [], today = zurichToday(), exams = []) => {
+  const lessonDays = events.filter(isLesson).map((event) => eventDay(event)).filter(Boolean).sort()
   const days = [
     ...events.filter((event) => !isLesson(event)).map((event) => eventDay(event)),
+    ...exams.map((event) => eventDay(event)),
     ...vacationRanges(vacations).flat(),
+    ...(lessonDays.length ? [addDays(lessonDays.at(-1), LESSON_WALK_WEEKS * 7)] : []),
   ].filter(Boolean).sort()
   if (!days.length) return null
   // Never narrower than the four-week probe around today.
@@ -2127,4 +2147,75 @@ export const fallbackSchoolSpan = (events = [], vacations = [], today = zurichTo
   const high = addDays(today, 280)
   const reach = days.at(-1) < high ? days.at(-1) : high
   return { start, end: reach > probeEnd ? reach : probeEnd }
+}
+
+/** Lessons that must appear at once in an empty week before it counts as the timetable loading. */
+export const LESSON_SEED_MIN = 3
+/**
+ * Weeks whose lessons appear for the first time, several at once. That is the timetable loading (a
+ * week an older read stamped as empty, or a week further ahead), not a change, so it is read
+ * silently. One or two lessons added to an empty week are still news.
+ */
+export const lessonSeedWeeks = (previous, next) => {
+  const had = new Set((previous?.events || []).filter(isLesson).map((event) => weekMondayKey(event.start)).filter(Boolean))
+  const count = new Map()
+  for (const event of (next?.events || []).filter(isLesson)) {
+    const week = weekMondayKey(event.start)
+    if (week && !had.has(week)) count.set(week, (count.get(week) || 0) + 1)
+  }
+  return new Set([...count].filter(([, n]) => n >= LESSON_SEED_MIN).map(([week]) => week))
+}
+/** More lesson changes than this in one read is the timetable reloading, not news. */
+export const TIMETABLE_BURST = 20
+
+const lessonWeeksOf = (events = []) => new Set(events.filter(isLesson).map((event) => weekMondayKey(event.start)).filter(Boolean))
+
+/**
+ * A phone upload does not replace timetable weeks the server has read: for those weeks the server's
+ * lessons and stamps stay. An older app only sees this week and would otherwise erase the rest, and
+ * its rendered lessons differ in form from the scheduler's, which would read as changes.
+ */
+export const keepServerLessons = (previous, upload) => {
+  const weeks = lessonWeeksOf(previous?.events)
+  if (!weeks.size || !upload) return upload
+  const events = [
+    ...(upload.events || []).filter((event) => !isLesson(event) || !weeks.has(weekMondayKey(event.start))),
+    ...(previous.events || []).filter((event) => isLesson(event) && weeks.has(weekMondayKey(event.start))),
+  ]
+  const stamps = (field) => {
+    const out = { ...(upload[field] || {}) }
+    for (const week of weeks) {
+      if (previous?.[field]?.[week]) out[week] = previous[field][week]
+      else delete out[week]
+    }
+    return out
+  }
+  return { ...upload, events, weekFetched: stamps('weekFetched'), weekRead: stamps('weekRead') }
+}
+
+/** Header a client sends when its own notification diff handles every timetable week. */
+export const TIMETABLE_WEEKS_HEADER = 'x-kanti-timetable'
+
+/**
+ * What an older app gets: this week's lessons, without the per-week "fetched" stamps of weeks with
+ * lessons, so its own diff, which lacks the first-timetable rule, has nothing to announce. Other
+ * weeks stay unread for it rather than looking free.
+ */
+export const legacySnapshotView = (snapshot, today = zurichToday()) => {
+  if (!snapshot) return snapshot
+  const current = weekMonday(today)
+  const weeks = lessonWeeksOf(snapshot.events)
+  if (!weeks.size) return snapshot
+  const weekFetched = { ...(snapshot.weekFetched || {}) }
+  const weekRead = { ...(snapshot.weekRead || {}) }
+  for (const week of weeks) {
+    delete weekFetched[week]
+    if (week !== current) delete weekRead[week]
+  }
+  return {
+    ...snapshot,
+    events: (snapshot.events || []).filter((event) => !isLesson(event) || weekMondayKey(event.start) === current),
+    weekFetched,
+    weekRead,
+  }
 }

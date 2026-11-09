@@ -11,6 +11,11 @@ import { fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, s
 import {
   diffSnapshots as diffSnapshotsAt,
   changeIsOver,
+  keepServerLessons,
+  legacySnapshotView,
+  lessonSeedWeeks,
+  LESSON_SEED_MIN,
+  TIMETABLE_BURST,
   appointmentHorizon,
   APPOINTMENT_BURST,
   emptyWeekCountsAsRead,
@@ -1351,7 +1356,8 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(second.weekFetched['2026-11-09'], '2026-11-04T12:30:00Z')
   assert.equal(second.weekFetched['2026-12-07'], '2026-11-04T12:00:00Z')
   const secondSchedulers = urls.filter((url) => url.includes('scheduler_processor'))
-  assert.equal(secondSchedulers.length, 18)
+  // Nine probe weeks plus a batch of far weeks: the planner follows the stored far lesson (7 Dec) eight weeks on.
+  assert.equal(secondSchedulers.length, (9 + WEEK_BATCH) * 2)
   assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-11-02') && url.includes('pageid=22202')), true)
   assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-11-09') && url.includes('pageid=22202')), true)
   assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-12-07')), false)
@@ -1384,8 +1390,10 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   const loaded = async (url) => {
     const target = String(url)
     let body = '<html><body>ok</body></html>'
-    if (target.includes('scheduler_processor') && target.includes('pageid=22202')) body = lessonXml
-    if (target.includes('scheduler_processor') && target.includes('pageid=21312')) body = examXml
+    // Schulnetz answers each week with that week's rows; other weeks are empty.
+    const thisWeek = target.includes('min_date=2026-11-02')
+    if (target.includes('scheduler_processor') && target.includes('pageid=22202')) body = thisWeek ? lessonXml : '<data></data>'
+    if (target.includes('scheduler_processor') && target.includes('pageid=21312')) body = thisWeek ? examXml : '<data></data>'
     return { status: 200, headers: { get: () => '' }, text: async () => body }
   }
   const read = await scrapeWithSession(base, session, loaded, {
@@ -1447,7 +1455,8 @@ test('an unmarked timetable still loads next week into the schedule', async () =
   const schedulers = urls.filter((url) => url.includes('scheduler_processor'))
   assert.equal(schedulers.some((url) => url.includes('pageid=22202') && url.includes('min_date=2026-11-09') && url.includes('max_date=2026-11-16') && !url.includes('action=')), true)
   assert.equal(schedulers.some((url) => url.includes('min_date=2026-08-17') || url.includes('min_date=2027-')), false)
-  assert.equal(schedulers.length, 18)
+  // Nine probe weeks plus the weeks up to eight past the stored lesson (4 Nov): through 4 Jan.
+  assert.equal(schedulers.length, 13 * 2)
   assert.equal(read.events.some((event) => event.id === 'next' && event.start === '2026-11-09T08:15:00'), true)
   assert.equal(read.events.some((event) => event.id === 'now'), true)
   assert.equal(read.events.some((event) => event.id === 'e1'), false)
@@ -1464,8 +1473,11 @@ test('an unmarked timetable still loads next week into the schedule', async () =
     weekRead: read.weekRead,
   })
   const againSchedulers = urls.filter((url) => url.includes('scheduler_processor'))
-  assert.equal(againSchedulers.length, 2)
-  assert.equal(againSchedulers.every((url) => url.includes('min_date=2026-11-02')), true)
+  // The current week again, plus only far weeks the walk forward has not read yet.
+  const againWeeks = [...new Set(againSchedulers.map((url) => url.match(/min_date=([\d-]+)/u)[1]))]
+  assert.equal(againWeeks.includes('2026-11-02'), true)
+  assert.equal(againWeeks.filter((week) => week !== '2026-11-02').every((week) => !read.weekFetched[week] && week > '2026-11-30'), true)
+  assert.equal(againSchedulers.length, againWeeks.length * 2)
   assert.equal(again.events.some((event) => event.id === 'next'), true)
 })
 
@@ -2354,4 +2366,110 @@ test('a scrape reopens the timetable before its weeks and plans the school year 
   // The scheduler gave lessons, so an empty later week is a real free week.
   const empty = asked.find((monday) => monday > '2026-12-14')
   if (empty) assert.equal(typeof result.weekRead[empty], 'string')
+})
+
+test('a week that gets its timetable for the first time is read silently', () => {
+  // 9 Nov 2026 incident: older reads stamped weeks as read from empty scheduler answers; when the
+  // lessons finally loaded, each one was announced as "Stundenplan geändert" or "Vertretung".
+  const at = new Date('2026-11-09T05:45:00Z')
+  const week = ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13']
+  const lessons = week.flatMap((day, d) => Array.from({ length: 8 }, (_, h) => ({
+    id: `s${d}${h}`, start: `${day}T${String(7 + h).padStart(2, '0')}:45:00`, end: `${day}T${String(8 + h).padStart(2, '0')}:30:00`,
+    text: `Fach ${h}`, room: `R${h}`, teachers: [`T${h}`], courseName: `Fach ${h}`, status: '', eventType: '0_stp',
+  })))
+  const stamps = { '2026-11-09': '2026-11-08T20:00:00Z' }
+  const previous = { grades: [], events: [], exams: [], absences: [], messages: [], weekFetched: stamps, weekRead: stamps }
+  const next = { ...previous, events: lessons, weekFetched: { '2026-11-09': '2026-11-09T05:45:00Z' }, weekRead: { '2026-11-09': '2026-11-09T05:45:00Z' }, fetchedAt: '2026-11-09T05:45:00Z' }
+  assert.deepEqual([...lessonSeedWeeks(previous, next)], ['2026-11-09'])
+  assert.deepEqual(diffSnapshotsAt(previous, next, {}, '2026-11-09', at), [])
+  // Same through the poller's notification baseline, where the week was stored with no lessons.
+  const read = prepareAgendaRead({ '2026-11-09': { fetchedAt: '2026-11-08T20:00:00Z', events: [], exams: [], weekFetched: stamps, examWeekFetched: {} } }, next)
+  const before = { ...previous, events: read.before.events, exams: read.before.exams }
+  assert.deepEqual(diffSnapshotsAt(before, next, {}, '2026-11-09', at), [])
+  // One or two lessons added to an empty week are still news; later changes in a seeded week too.
+  const one = { ...next, events: lessons.slice(0, LESSON_SEED_MIN - 1) }
+  assert.equal(diffSnapshotsAt(previous, one, {}, '2026-11-09', at).filter((c) => c.category === 'timetable').length, LESSON_SEED_MIN - 1)
+  const moved = { ...next, events: lessons.map((l) => l.id === 's40' ? { ...l, room: 'Aula' } : l) }
+  assert.deepEqual(diffSnapshotsAt(next, moved, {}, '2026-11-09', at).map((c) => c.title), ['Raum geändert'])
+  // A whole timetable changing in one read is a reload, not news.
+  const reload = { ...next, events: lessons.map((l) => ({ ...l, room: `${l.room}x` })) }
+  assert.ok(lessons.length > TIMETABLE_BURST)
+  assert.deepEqual(diffSnapshotsAt(next, reload, {}, '2026-11-09', at), [])
+})
+
+test('an exam-like appointment that stays listed is not reported as cancelled', () => {
+  const at = new Date('2026-11-09T05:45:00Z')
+  const listed = { id: 'term1', start: '2026-12-01T08:00:00', end: '2026-12-01T12:00:00', text: 'Prüfung Biologie', room: '', teachers: [], courseName: '', status: '', eventType: 'event' }
+  // Another exam keeps the exam list non-empty; an empty list never cancels anything.
+  const other = { id: 'x9', start: '2026-12-08T10:00:00', end: '2026-12-08T10:45:00', text: 'Chemie', room: 'R1', teachers: [], courseName: 'Chemie', status: '', eventType: '1_pru' }
+  const snapshot = { grades: [], events: [listed], exams: [other], absences: [], messages: [] }
+  assert.equal(isExamLike(listed), true)
+  assert.deepEqual(diffSnapshotsAt(snapshot, snapshot, {}, '2026-11-09', at), [])
+  // Gone from the list and from the exams: that is a cancellation.
+  assert.deepEqual(diffSnapshotsAt(snapshot, { ...snapshot, events: [] }, {}, '2026-11-09', at).map((c) => c.title), ['Prüfung entfällt'])
+})
+
+test('a near week read without lessons is checked again within half an hour', () => {
+  const now = '2026-11-09T06:10:00Z'
+  const stamps = { '2026-11-09': '2026-11-09T05:24:00Z', '2026-11-16': '2026-11-09T05:24:00Z', '2026-11-23': '2026-11-09T05:24:00Z', '2026-12-07': '2026-11-09T05:24:00Z', '2026-12-14': '2026-11-09T05:24:00Z', '2026-10-26': '2026-11-09T05:24:00Z' }
+  const base = { mondays: [], fetchedAt: stamps, icalFetchedAt: '', now, today: '2026-11-09', icalAvailable: false }
+  // Without the hint only the current and adjacent weeks are due after 30 minutes.
+  assert.deepEqual(planWeekFetches(base).fetch.filter((m) => stamps[m]).sort(), ['2026-11-09', '2026-11-16'])
+  // Empty weeks up to four ahead join them; a past empty week and one five ahead keep the daily cadence.
+  const empty = new Set(['2026-11-23', '2026-12-07', '2026-12-14', '2026-10-26'])
+  assert.deepEqual(planWeekFetches({ ...base, emptyWeeks: empty }).fetch.filter((m) => stamps[m]).sort(), ['2026-11-09', '2026-11-16', '2026-11-23', '2026-12-07'])
+})
+
+test('a lesson id that Schulnetz reuses in another week is not a moved lesson', () => {
+  const at = new Date('2026-11-09T05:45:00Z')
+  const lesson = (id, start, room) => ({ id, start, end: start.replace(':45:', ':30:').replace('T07', 'T08'), text: 'Deutsch', room, teachers: ['T'], courseName: 'Deutsch', status: '', eventType: '0_stp' })
+  const thisWeek = [lesson('L1', '2026-11-12T07:45:00', 'A1'), lesson('L2', '2026-11-13T07:45:00', 'A1'), lesson('L3', '2026-11-11T07:45:00', 'A1')]
+  const previous = { grades: [], events: thisWeek, exams: [], absences: [], messages: [] }
+  // Two weeks later the same ids come back, one of them in another room.
+  const later = [lesson('L1', '2026-11-26T07:45:00', 'B2'), lesson('L2', '2026-11-27T07:45:00', 'A1'), lesson('L4', '2026-11-25T07:45:00', 'A1')]
+  const next = { ...previous, events: [...thisWeek, ...later] }
+  assert.deepEqual(diffSnapshotsAt(previous, next, {}, '2026-11-09', at), [])
+  // Within one week the id still tracks a real change.
+  const moved = { ...previous, events: [lesson('L1', '2026-11-12T07:45:00', 'C3'), ...thisWeek.slice(1)] }
+  assert.deepEqual(diffSnapshotsAt(previous, moved, {}, '2026-11-09', at).map((c) => c.title), ['Raum geändert'])
+})
+
+test('without a page range the planner follows a published timetable forward', () => {
+  const lesson = (day) => ({ id: day, start: `${day}T08:00:00`, end: `${day}T08:45:00`, text: 'Deutsch', eventType: '0_stp' })
+  // Lessons only (no appointment list): eight weeks past the last lesson read.
+  assert.deepEqual(fallbackSchoolSpan([lesson('2026-12-10')], [], '2026-11-09'), { start: '2026-10-12', end: '2027-02-04' })
+  // Exams count as known dates too.
+  const exam = { id: 'x', start: '2027-03-18T10:00:00', end: '2027-03-18T10:45:00', text: 'Chemie', eventType: 'exam' }
+  assert.equal(fallbackSchoolSpan([], [], '2026-11-09', [exam]).end, '2027-03-18')
+  // Still at most forty weeks ahead.
+  assert.equal(fallbackSchoolSpan([lesson('2027-07-01')], [], '2026-11-09').end, '2027-08-16')
+})
+
+test('a phone upload keeps the timetable weeks the server read', () => {
+  const lesson = (id, day, room = 'A1') => ({ id, start: `${day}T08:00:00`, end: `${day}T08:45:00`, text: 'Deutsch', room, teachers: ['T'], courseName: 'Deutsch', status: '', eventType: '0_stp' })
+  const appointment = { id: 't1', start: '2026-11-20T15:00:00', end: '2026-11-20T16:00:00', text: 'Sporttag', eventType: 'event' }
+  const server = { events: [lesson('s1', '2026-11-10'), lesson('s2', '2026-11-17'), lesson('s3', '2026-11-24')], weekFetched: { '2026-11-16': 'S', '2026-11-23': 'S' }, weekRead: { '2026-11-09': 'S', '2026-11-16': 'S', '2026-11-23': 'S' } }
+  // An older app: its own rendering of this week, nothing later, and empty stamps for later weeks.
+  const upload = { events: [lesson('dom1', '2026-11-10', 'A1 '), appointment, lesson('p9', '2026-12-01')], weekFetched: { '2026-11-16': 'P', '2026-11-30': 'P' }, weekRead: { '2026-11-16': 'P', '2026-11-30': 'P' }, grades: [] }
+  const merged = keepServerLessons(server, upload)
+  assert.deepEqual(merged.events.map((e) => e.id).sort(), ['p9', 's1', 's2', 's3', 't1'])
+  assert.deepEqual(merged.weekFetched, { '2026-11-16': 'S', '2026-11-23': 'S', '2026-11-30': 'P' })
+  assert.deepEqual(merged.weekRead, { '2026-11-09': 'S', '2026-11-16': 'S', '2026-11-23': 'S', '2026-11-30': 'P' })
+  // Nothing read yet on the server: the upload stays as it is.
+  assert.equal(keepServerLessons({ events: [appointment] }, upload), upload)
+})
+
+test('an older app gets this week only and no stamps that would read as changes', () => {
+  const lesson = (id, day) => ({ id, start: `${day}T08:00:00`, end: `${day}T08:45:00`, text: 'Deutsch', room: 'A1', teachers: ['T'], courseName: 'Deutsch', status: '', eventType: '0_stp' })
+  const appointment = { id: 't1', start: '2026-11-20T15:00:00', end: '2026-11-20T16:00:00', text: 'Sporttag', eventType: 'event' }
+  const snapshot = {
+    events: [lesson('a', '2026-11-10'), lesson('b', '2026-11-17'), appointment],
+    weekFetched: { '2026-11-09': 'S', '2026-11-16': 'S', '2026-12-21': 'S' },
+    weekRead: { '2026-11-09': 'S', '2026-11-16': 'S', '2026-12-21': 'S' },
+  }
+  const view = legacySnapshotView(snapshot, '2026-11-09')
+  assert.deepEqual(view.events.map((e) => e.id), ['a', 't1'])
+  assert.deepEqual(view.weekFetched, { '2026-12-21': 'S' })
+  assert.deepEqual(view.weekRead, { '2026-11-09': 'S', '2026-12-21': 'S' })
+  assert.equal(legacySnapshotView({ events: [appointment] }, '2026-11-09').events.length, 1)
 })

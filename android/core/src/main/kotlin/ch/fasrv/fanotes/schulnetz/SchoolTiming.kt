@@ -72,15 +72,39 @@ fun withoutUnprovenEmptyReads(reads: Map<String, String>, events: List<AgendaEve
     }
 }
 
+/** Weeks looked at past the last week that had lessons, so a published timetable is followed forward. */
+const val LESSON_WALK_WEEKS = 8L
+
 /**
- * The school year when the timetable page shows no date range: from the appointment list and
- * holidays: four weeks back, at least four and at most forty weeks ahead.
+ * The school year when the timetable page shows no date range: from the appointment list, exams,
+ * holidays, and eight weeks past the last lesson read: four weeks back, at least four and at most
+ * forty weeks ahead.
  */
-fun fallbackSchoolSpan(events: List<AgendaEvent>, vacations: List<SchoolVacation>, today: LocalDate): WeekSpan? {
+fun fallbackSchoolSpan(events: List<AgendaEvent>, vacations: List<SchoolVacation>, today: LocalDate, exams: List<AgendaEvent> = emptyList()): WeekSpan? {
+    val lastLesson = events.asSequence().filter { it.isLesson() }.mapNotNull { eventDate(eventDay(it)) }.maxOrNull()
     val days = events.asSequence().filter { !it.isLesson() }.mapNotNull { eventDate(eventDay(it)) } +
-        vacationDays(vacations).asSequence().flatMap { sequenceOf(it.start, it.endInclusive) }
+        exams.asSequence().mapNotNull { eventDate(eventDay(it)) } +
+        vacationDays(vacations).asSequence().flatMap { sequenceOf(it.start, it.endInclusive) } +
+        listOfNotNull(lastLesson?.plusWeeks(LESSON_WALK_WEEKS)).asSequence()
     val all = days.toList()
     if (all.isEmpty()) return null
     // Never narrower than the four-week probe around today.
     return WeekSpan(today.minusWeeks(4), maxOf(today.plusWeeks(4), minOf(all.max(), today.plusWeeks(40))))
 }
+
+/** Lessons that must appear at once in an empty week before it counts as the timetable loading. */
+const val LESSON_SEED_MIN = 3
+
+/**
+ * Weeks whose lessons appear for the first time, several at once. That is the timetable loading (a
+ * week an older read stamped as empty, or a week further ahead), not a change, so it is read
+ * silently. One or two lessons added to an empty week are still news.
+ */
+fun lessonSeedWeeks(previous: SchulnetzSnapshot, next: SchulnetzSnapshot): Set<String> {
+    val had = previous.events.asSequence().filter { it.isLesson() }.mapNotNull { weekMondayKey(it.start) }.toSet()
+    return next.events.asSequence().filter { it.isLesson() }.mapNotNull { weekMondayKey(it.start) }.filter { it !in had }
+        .groupingBy { it }.eachCount().filterValues { it >= LESSON_SEED_MIN }.keys
+}
+
+/** More lesson changes than this in one read is the timetable reloading, not news. */
+const val TIMETABLE_BURST = 20
