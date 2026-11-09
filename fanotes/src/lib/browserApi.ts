@@ -87,7 +87,22 @@ export const repairBrowserWelcomeMarkdown = (path: string, content: string) => {
   return content
 }
 
-const textBytes = (value: string) => new TextEncoder().encode(value).byteLength
+// UTF-8 length without building the bytes: encoding a 43 MB drawing just to
+// read its length took 0.1–0.2 s per save. A lone surrogate counts as the
+// three bytes of U+FFFD, as TextEncoder writes it.
+export const textBytes = (value: string) => {
+  let bytes = 0
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code < 0x80) bytes += 1
+    else if (code < 0x800) bytes += 2
+    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length && (value.charCodeAt(index + 1) & 0xfc00) === 0xdc00) {
+      bytes += 4
+      index += 1
+    } else bytes += 3
+  }
+  return bytes
+}
 const clone = <T>(value: T): T => structuredClone(value)
 
 const requestResult = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {

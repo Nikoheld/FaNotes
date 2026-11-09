@@ -92,6 +92,67 @@ try {
   assert.doesNotMatch(mainSource, /setSpellCheckerLanguages|configureSpellChecker/u)
   assert.match(editorSource, /this\.schedule\(view, 3200\)/u)
 
+  // Large-note autosave, culling, and erasing reused per-stroke results
+  // instead of reading every sample each time. The results must stay exact.
+  {
+    const { strokePointBounds, bumpInkGeometryEpoch } = await server.ssrLoadModule('/src/lib/strokeBounds.ts')
+    const { drawingDocumentJson, strokeJson } = await server.ssrLoadModule('/src/lib/drawingJson.ts')
+    const { applyToolErase } = await server.ssrLoadModule('/src/lib/toolErase.ts')
+    const { textBytes } = await server.ssrLoadModule('/src/lib/browserApi.ts')
+    const point = (x, y, t = 1) => ({ x, y, t, pressure: 0.5, tiltX: 0, tiltY: 0, pointerType: 'pen' })
+    const stroke = (index) => ({
+      color: '#123', baseWidth: 2, brush: 'fineliner', pressureEnabled: true,
+      points: Array.from({ length: 30 }, (_, i) => point(0.1 + (index % 7) * 0.1 + i * 0.002, 0.05 + Math.floor(index / 7) * 0.04 + Math.sin(i) * 0.01, i * 8)),
+    })
+    const strokes = Array.from({ length: 60 }, (_, index) => stroke(index))
+    const drawing = {
+      schemaVersion: 1, title: 'He said "strokes":[] here', paperStyle: 'lines', sourceWidth: 794, sourceHeight: 2246,
+      createdAt: 'a', updatedAt: 'b', strokes,
+      sections: [{ id: 's', top: { x: 0, y: 0.5 }, hidden: { strokes: [stroke(99)] } }],
+      inkHistory: { extras: [stroke(98)], undo: [[{ ref: 1 }]], redo: [] },
+    }
+    assert.equal(drawingDocumentJson(drawing), JSON.stringify(drawing), 'cached drawing JSON is JSON.stringify')
+    assert.equal(drawingDocumentJson(drawing), JSON.stringify(drawing), 'and stays it on the second save')
+    // A page grow moves points in place; a section move shifts one stroke.
+    for (const item of strokes) for (const sample of item.points) sample.y *= 0.5
+    bumpInkGeometryEpoch()
+    assert.equal(drawingDocumentJson(drawing), JSON.stringify(drawing), 'a moved page is written again')
+    strokes[3].points[12].x += 0.001
+    assert.equal(strokeJson(strokes[3]), JSON.stringify(strokes[3]), 'an interior sample moved in place is written again, with no epoch')
+    strokes[4].points[0].t = undefined
+    assert.equal(strokeJson(strokes[4]), JSON.stringify(strokes[4]))
+    assert.equal(drawingDocumentJson({ ...drawing, strokes: [strokes[0], undefined, strokes[1]] }), JSON.stringify({ ...drawing, strokes: [strokes[0], undefined, strokes[1]] }))
+
+    const loop = (points) => {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      for (const sample of points) { if (sample.x < minX) minX = sample.x; if (sample.x > maxX) maxX = sample.x; if (sample.y < minY) minY = sample.y; if (sample.y > maxY) maxY = sample.y }
+      return { minX, minY, maxX, maxY }
+    }
+    const live = stroke(5)
+    const pick = ({ minX, minY, maxX, maxY }) => ({ minX, minY, maxX, maxY })
+    assert.deepEqual(pick(strokePointBounds(live.points)), loop(live.points))
+    live.points.push(point(0.95, 0.9))
+    assert.deepEqual(pick(strokePointBounds(live.points)), loop(live.points), 'a live stroke that grew is measured again')
+    live.points.splice(0, 1, point(0.01, 0.01))
+    assert.deepEqual(pick(strokePointBounds(live.points)), loop(live.points), 'a replaced first sample is measured again')
+    for (const sample of live.points) sample.y += 0.02
+    assert.deepEqual(pick(strokePointBounds(live.points)), loop(live.points), 'a section shift is measured again')
+    for (const sample of live.points) sample.x *= 0.5
+    bumpInkGeometryEpoch()
+    assert.deepEqual(pick(strokePointBounds(live.points)), loop(live.points), 'a rescale is measured again')
+    assert.deepEqual(pick(strokePointBounds([])), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity })
+
+    // The eraser still removes the same strokes with cached bounds.
+    const page = Array.from({ length: 40 }, (_, index) => stroke(index))
+    const erased = applyToolErase(page, [point(0.4, 0.09), point(0.6, 0.11)], 6, 794, 1123)
+    assert.ok(erased.length < page.length, 'the eraser still erases')
+    assert.equal(applyToolErase(page, [point(0.99, 0.99)], 4, 794, 1123), page, 'and leaves a page alone when nothing is near')
+
+    for (const text of ['', 'abc', 'Größe', '✓€', '😀', 'a\ud800b', '\udc00', 'x'.repeat(1000) + '😀'.repeat(3)]) {
+      assert.equal(textBytes(text), new TextEncoder().encode(text).byteLength, `utf-8 length of ${JSON.stringify(text)}`)
+    }
+  }
+
   const committedStrokes = 2_000
   const frames = 120
   const averageActiveStrokeSegments = 90

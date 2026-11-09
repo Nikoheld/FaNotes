@@ -1936,6 +1936,13 @@ export default function App({ startupBootstrap }: AppProps) {
     await restoreWorkspace(data.vaultPath, initialTree)
   }, [openNote, restoreWorkspace])
 
+  /** The same gate pushEditableShare checks first: a live share that owns this note. */
+  const editableShareOwns = useCallback((path: string) => {
+    const liveEdit = shareEditRef.current
+    if (!liveEdit || shareEditApplyingRef.current || !liveEdit.owns(path)) return false
+    return Boolean(liveEdit.sharePathFor(path))
+  }, [])
+
   const pushEditableShare = useCallback((path: string, patch: Parameters<ShareEditClient['editNote']>[1]) => {
     const liveEdit = shareEditRef.current
     if (!liveEdit || shareEditApplyingRef.current || !liveEdit.owns(path)) return
@@ -4553,7 +4560,11 @@ export default function App({ startupBootstrap }: AppProps) {
       ...drawing,
       noteRelativePath: notePath ?? undefined,
     })
-    if (notePath) {
+    // Both reads below parse the whole drawing on this thread (about 0.3 s each
+    // on a 320k-sample note, after every autosave). Each now runs only when its
+    // result is used: shared ink for a live share of this note, and the
+    // drawing's own timestamp when the save did not return one.
+    if (notePath && editableShareOwns(notePath)) {
       try {
         const parsed = JSON.parse(payload.drawingJson) as unknown
         if (parsed && typeof parsed === 'object') {
@@ -4565,11 +4576,13 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     if (notePath && inkSummary) recordInkSnapshotFor(notePath, inkSummary)
     let updatedAt = asset.updatedAt ?? new Date().toISOString()
-    try {
-      const drawingData = JSON.parse(payload.drawingJson) as { updatedAt?: unknown }
-      if (!asset.updatedAt && typeof drawingData.updatedAt === 'string') updatedAt = drawingData.updatedAt
-    } catch {
-      // Main validates the JSON; this fallback only keeps the immediate UI resilient.
+    if (!asset.updatedAt) {
+      try {
+        const drawingData = JSON.parse(payload.drawingJson) as { updatedAt?: unknown }
+        if (typeof drawingData.updatedAt === 'string') updatedAt = drawingData.updatedAt
+      } catch {
+        // Main validates the JSON; this fallback only keeps the immediate UI resilient.
+      }
     }
     const document: DrawingLibraryDocument = {
       id: asset.id,
@@ -4599,7 +4612,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePathRef.current !== notePath) return result
     setDrawingSession((current) => current.path === notePath ? { ...current, document } : current)
     return result
-  }, [activePath, pushEditableShare, recordInkSnapshotFor, saveContent])
+  }, [activePath, editableShareOwns, pushEditableShare, recordInkSnapshotFor, saveContent])
 
   const saveWorksheetDocument = useCallback(async (document: WorksheetDocument) => {
     const session = vaultSessionGenerationRef.current
