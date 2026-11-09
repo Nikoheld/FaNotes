@@ -2,6 +2,7 @@ import { FilePenLine, FileText, LoaderCircle, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SearchHit } from '../types'
 import { DocSearchStatus, hitLabel, useDocIndexHits } from './DocSearchStatus'
+import { getUiLanguage } from '../i18n'
 import './docSearch.css'
 
 const markExcerpt = (text: string, ranges: Array<[number, number]>) => {
@@ -73,7 +74,7 @@ export function SearchPanel({
             <span className="search-result-title">{hit.kind === 'drawing' ? <FilePenLine size={14} /> : <FileText size={14} />}<strong>{hit.title}</strong><b>{hit.matches}</b></span>
             <small>{hit.kind === 'drawing' ? 'Handschrift-Seite · unsichtbar transkribiert' : hit.unit ? <><span className="doc-hit-where">{hitLabel(hit)}</span> · {hit.relativePath}</> : hit.relativePath}</small>
             <p>{hit.highlights?.length ? markExcerpt(hit.excerpt, hit.highlights) : hit.excerpt}</p>
-            {hit.alsoIn ? <small className="doc-hit-also">Gleicher Text auch in {hit.alsoIn} {hit.alsoIn === 1 ? 'weiteren Datei' : 'weiteren Dateien'}</small> : null}
+            {hit.alsoIn ? <small className="doc-hit-also">{getUiLanguage() === 'en' ? `Same text in ${hit.alsoIn} other ${hit.alsoIn === 1 ? 'file' : 'files'}` : `Gleicher Text auch in ${hit.alsoIn} ${hit.alsoIn === 1 ? 'weiteren Datei' : 'weiteren Dateien'}`}</small> : null}
           </button>
         ))}
       </div>
