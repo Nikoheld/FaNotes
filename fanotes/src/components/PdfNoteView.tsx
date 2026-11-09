@@ -54,6 +54,7 @@ import {
 import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
 import { pageNeedsLocalOcr, pdfByteStamp, pdfPagePlainText, pdfTextSearchHits } from '../lib/pdfOcr'
+import { subscribePdfReveal } from '../lib/docSearch/reveal'
 import { runLocalPdfOcr } from '../lib/pdfOcrRun'
 import { VIEW_ZOOM_MIN, readSharedZoomMax, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
@@ -625,6 +626,9 @@ export function PdfNoteView({
   const searchInputRef = useRef<HTMLInputElement>(null)
   const layoutTimerRef = useRef<number | null>(null)
   const searchTokenRef = useRef(0)
+  /** Document search asked for this page; the in-document search lands there instead of on the first hit. */
+  const revealRef = useRef<{ page: number; query: string } | null>(null)
+  const [revealToken, setRevealToken] = useState(0)
   const pdfTaskRef = useRef<PDFDocumentLoadingTask | null>(null)
   const loadedPathRef = useRef('')
   const pdfIdentityRef = useRef<{ path: string; size: number; stamp: string } | null>(null)
@@ -1015,8 +1019,33 @@ export function PdfNoteView({
     setSearchHits(hits)
     setSearchIndex(0)
     setSearching(false)
+    const reveal = revealRef.current
+    if (reveal) {
+      revealRef.current = null
+      const onPage = hits.findIndex((hit) => hit.page === reveal.page)
+      if (onPage >= 0) setSearchIndex(onPage)
+      scrollToPage(reveal.page)
+      return
+    }
     if (hits[0]) scrollToPage(hits[0].page)
   }, [ocrPages, pdf, scrollToPage])
+
+  useEffect(() => subscribePdfReveal(path, (request) => {
+    revealRef.current = { page: request.page, query: request.query }
+    setRevealToken(request.token)
+  }), [path])
+
+  useEffect(() => {
+    const reveal = revealRef.current
+    if (!reveal || !pdf || !revealToken) return
+    scrollToPage(Math.min(Math.max(1, reveal.page), pdf.numPages))
+    if (reveal.query.trim()) {
+      setSearchQuery(reveal.query.trim())
+      setSearchOpen(true)
+    } else {
+      revealRef.current = null
+    }
+  }, [revealToken, pdf, scrollToPage])
 
   useEffect(() => {
     if (!searchOpen) return
