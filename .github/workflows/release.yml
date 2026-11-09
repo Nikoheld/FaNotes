@@ -43,9 +43,47 @@ jobs:
       - name: Install dependencies
         working-directory: fanotes
         run: npm ci
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: electron-${{ runner.os }}-${{ hashFiles('fanotes/package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+      - name: Network retry helper
+        shell: bash
+        run: |
+          # A build is retried only when its log shows a network failure
+          # (GitHub release downloads, Gradle, Maven). Real build errors fail at once.
+          cat > "$RUNNER_TEMP/retry-network.sh" <<'SH'
+          retry_network() {
+            local attempt=1 max=4 log status errexit=0
+            case $- in *e*) errexit=1 ;; esac
+            while :; do
+              log="$(mktemp)"
+              set +e
+              "$@" 2>&1 | tee "$log"
+              status=${PIPESTATUS[0]}
+              if [ "$errexit" -eq 1 ]; then set -e; fi
+              if [ "$status" -eq 0 ]; then rm -f "$log"; return 0; fi
+              if [ "$attempt" -ge "$max" ] || ! grep -Eqi '(response code|status code|HTTP/[0-9.]+|HTTP|returned HTTP response code:?) ?50[234]|Gateway Time-?out|Bad Gateway|Service Unavailable|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|Read timed out|Connection reset|Could not (GET|HEAD|download)' "$log"; then
+                rm -f "$log"; return "$status"
+              fi
+              rm -f "$log"
+              echo "::warning::Network error during the build (attempt ${attempt}/${max}). Retrying in $((attempt * 120)) s."
+              sleep $((attempt * 120))
+              attempt=$((attempt + 1))
+            done
+          }
+          SH
       - name: Build Linux packages
         working-directory: fanotes
-        run: npm run dist:linux:ci
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/retry-network.sh"
+          retry_network npm run dist:linux:ci
       - uses: actions/upload-artifact@v6
         with:
           name: linux
@@ -70,9 +108,47 @@ jobs:
       - name: Install dependencies
         working-directory: fanotes
         run: npm ci
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('fanotes/package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+      - name: Network retry helper
+        shell: bash
+        run: |
+          # A build is retried only when its log shows a network failure
+          # (GitHub release downloads, Gradle, Maven). Real build errors fail at once.
+          cat > "$RUNNER_TEMP/retry-network.sh" <<'SH'
+          retry_network() {
+            local attempt=1 max=4 log status errexit=0
+            case $- in *e*) errexit=1 ;; esac
+            while :; do
+              log="$(mktemp)"
+              set +e
+              "$@" 2>&1 | tee "$log"
+              status=${PIPESTATUS[0]}
+              if [ "$errexit" -eq 1 ]; then set -e; fi
+              if [ "$status" -eq 0 ]; then rm -f "$log"; return 0; fi
+              if [ "$attempt" -ge "$max" ] || ! grep -Eqi '(response code|status code|HTTP/[0-9.]+|HTTP|returned HTTP response code:?) ?50[234]|Gateway Time-?out|Bad Gateway|Service Unavailable|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|Read timed out|Connection reset|Could not (GET|HEAD|download)' "$log"; then
+                rm -f "$log"; return "$status"
+              fi
+              rm -f "$log"
+              echo "::warning::Network error during the build (attempt ${attempt}/${max}). Retrying in $((attempt * 120)) s."
+              sleep $((attempt * 120))
+              attempt=$((attempt + 1))
+            done
+          }
+          SH
       - name: Build Windows packages
         working-directory: fanotes
-        run: npm run dist:windows:ci
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/retry-network.sh"
+          retry_network npm run dist:windows:ci
       - uses: actions/upload-artifact@v6
         with:
           name: windows
@@ -101,7 +177,7 @@ jobs:
           set -euo pipefail
           sdk_root="$RUNNER_TEMP/android-sdk"
           mkdir -p "$sdk_root/cmdline-tools"
-          curl -fsSL -o "$RUNNER_TEMP/cmdline.zip" https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 20 -o "$RUNNER_TEMP/cmdline.zip" https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip
           unzip -q "$RUNNER_TEMP/cmdline.zip" -d "$sdk_root/cmdline-tools"
           mv "$sdk_root/cmdline-tools/cmdline-tools" "$sdk_root/cmdline-tools/latest"
           echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
@@ -113,6 +189,42 @@ jobs:
           yes | "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" --licenses >/dev/null
           set -o pipefail
           "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+      - name: Cache Gradle downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          # Module build files change with every version bump; only the
+          # wrapper and the settings decide what is downloaded.
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/settings.gradle.kts', 'android/build.gradle.kts') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - name: Network retry helper
+        shell: bash
+        run: |
+          # A build is retried only when its log shows a network failure
+          # (GitHub release downloads, Gradle, Maven). Real build errors fail at once.
+          cat > "$RUNNER_TEMP/retry-network.sh" <<'SH'
+          retry_network() {
+            local attempt=1 max=4 log status errexit=0
+            case $- in *e*) errexit=1 ;; esac
+            while :; do
+              log="$(mktemp)"
+              set +e
+              "$@" 2>&1 | tee "$log"
+              status=${PIPESTATUS[0]}
+              if [ "$errexit" -eq 1 ]; then set -e; fi
+              if [ "$status" -eq 0 ]; then rm -f "$log"; return 0; fi
+              if [ "$attempt" -ge "$max" ] || ! grep -Eqi '(response code|status code|HTTP/[0-9.]+|HTTP|returned HTTP response code:?) ?50[234]|Gateway Time-?out|Bad Gateway|Service Unavailable|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|Read timed out|Connection reset|Could not (GET|HEAD|download)' "$log"; then
+                rm -f "$log"; return "$status"
+              fi
+              rm -f "$log"
+              echo "::warning::Network error during the build (attempt ${attempt}/${max}). Retrying in $((attempt * 120)) s."
+              sleep $((attempt * 120))
+              attempt=$((attempt + 1))
+            done
+          }
+          SH
       - name: Test and build the Android app
         working-directory: android
         env:
@@ -130,7 +242,8 @@ jobs:
           printf '%s' "$FANOTES_ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
           export FANOTES_ANDROID_KEYSTORE="$keystore"
           version="$(node -p "require('../fanotes/package.json').version")"
-          ./gradlew :core:test :app:assembleRelease -Pfanotes.version="$version" --stacktrace
+          source "$RUNNER_TEMP/retry-network.sh"
+          retry_network ./gradlew :core:test :app:assembleRelease -Pfanotes.version="$version" --stacktrace
           apk="app/build/outputs/apk/release/app-release.apk"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --min-sdk-version 29 "$apk"
           cp "$apk" "FaNotes-${version}-android.apk"
@@ -160,7 +273,7 @@ jobs:
           set -euo pipefail
           sdk_root="$RUNNER_TEMP/android-sdk"
           mkdir -p "$sdk_root/cmdline-tools"
-          curl -fsSL -o "$RUNNER_TEMP/cmdline.zip" https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 20 -o "$RUNNER_TEMP/cmdline.zip" https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip
           unzip -q "$RUNNER_TEMP/cmdline.zip" -d "$sdk_root/cmdline-tools"
           mv "$sdk_root/cmdline-tools/cmdline-tools" "$sdk_root/cmdline-tools/latest"
           echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
@@ -172,6 +285,42 @@ jobs:
           yes | "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" --licenses >/dev/null
           set -o pipefail
           "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+      - name: Cache Gradle downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          # Module build files change with every version bump; only the
+          # wrapper and the settings decide what is downloaded.
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/gradle/wrapper/gradle-wrapper.properties', 'android/settings.gradle.kts', 'android/build.gradle.kts') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - name: Network retry helper
+        shell: bash
+        run: |
+          # A build is retried only when its log shows a network failure
+          # (GitHub release downloads, Gradle, Maven). Real build errors fail at once.
+          cat > "$RUNNER_TEMP/retry-network.sh" <<'SH'
+          retry_network() {
+            local attempt=1 max=4 log status errexit=0
+            case $- in *e*) errexit=1 ;; esac
+            while :; do
+              log="$(mktemp)"
+              set +e
+              "$@" 2>&1 | tee "$log"
+              status=${PIPESTATUS[0]}
+              if [ "$errexit" -eq 1 ]; then set -e; fi
+              if [ "$status" -eq 0 ]; then rm -f "$log"; return 0; fi
+              if [ "$attempt" -ge "$max" ] || ! grep -Eqi '(response code|status code|HTTP/[0-9.]+|HTTP|returned HTTP response code:?) ?50[234]|Gateway Time-?out|Bad Gateway|Service Unavailable|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|Read timed out|Connection reset|Could not (GET|HEAD|download)' "$log"; then
+                rm -f "$log"; return "$status"
+              fi
+              rm -f "$log"
+              echo "::warning::Network error during the build (attempt ${attempt}/${max}). Retrying in $((attempt * 120)) s."
+              sleep $((attempt * 120))
+              attempt=$((attempt + 1))
+            done
+          }
+          SH
       - name: Firebase config when the secret exists
         working-directory: android
         env:
@@ -198,7 +347,8 @@ jobs:
           printf '%s' "$FANOTES_ANDROID_KEYSTORE_B64" | base64 -d > "$keystore"
           export FANOTES_ANDROID_KEYSTORE="$keystore"
           version="$(node -p "require('../fanotes/package.json').version")"
-          ./gradlew :core:test --tests ch.fasrv.fanotes.schulnetz.* :companion:assembleRelease :companion:bundleRelease -Pfanotes.version="$version" --stacktrace
+          source "$RUNNER_TEMP/retry-network.sh"
+          retry_network ./gradlew :core:test --tests ch.fasrv.fanotes.schulnetz.* :companion:assembleRelease :companion:bundleRelease -Pfanotes.version="$version" --stacktrace
           apk="companion/build/outputs/apk/release/companion-release.apk"
           aab="companion/build/outputs/bundle/release/companion-release.aab"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --min-sdk-version 29 "$apk"
@@ -254,9 +404,19 @@ jobs:
           else
             release_flags=(--prerelease=false)
           fi
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" dist-artifacts/* --clobber
-          else
-            gh release create "$tag" dist-artifacts/* --title "FaNotes ${version}" --notes-file "$notes" --verify-tag "${release_flags[@]}"
-          fi
-          gh release edit "$tag" --draft=false --title "FaNotes ${version}" --notes-file "$notes" "${release_flags[@]}"
+          # Every command is checked explicitly: set -e does not apply inside
+          # a function that runs as an if condition. All steps are idempotent.
+          publish() {
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release upload "$tag" dist-artifacts/* --clobber || return 1
+            else
+              gh release create "$tag" dist-artifacts/* --title "FaNotes ${version}" --notes-file "$notes" --verify-tag "${release_flags[@]}" || return 1
+            fi
+            gh release edit "$tag" --draft=false --title "FaNotes ${version}" --notes-file "$notes" "${release_flags[@]}" || return 1
+          }
+          for attempt in 1 2 3 4; do
+            if publish; then exit 0; fi
+            if [ "$attempt" -eq 4 ]; then exit 1; fi
+            echo "::warning::Publishing failed (attempt ${attempt}/4). Retrying in $((attempt * 60)) s."
+            sleep $((attempt * 60))
+          done
