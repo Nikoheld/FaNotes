@@ -1,5 +1,18 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.17
+
+- Prepare the Kanti+ release bundle for Google Play.
+- Add the Kanti+ privacy policy and account deletion pages.
+- Add a demo mode for app review and in-app FaNotes account deletion.
+- Bring back the K+ as the mark and add Play store assets.
+- Redesign the Kanti+ mark on the Stundentakt palette.
+- Load every semester week with the transid each Schulnetz page printed.
+- Cut the work a page grow at the bottom of a long note does: warm save JSON in the background, shift the highlighter mask in place, and skip the unchanged axis.
+- Count a web drawing's UTF-8 bytes with a native scan for non-ASCII characters.
+- Stop re-reading every ink sample on autosave, stroke end, erase, and page grow.
+- Keep large .famd autosaves off the Electron main thread and stop re-packing unchanged ink.
+
 ## 2026.11.2-beta.16
 
 - Show the document search status and labels in English too.
