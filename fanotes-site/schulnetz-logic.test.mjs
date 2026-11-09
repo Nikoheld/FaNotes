@@ -2410,3 +2410,17 @@ test('a near week read without lessons is checked again within half an hour', ()
   const empty = new Set(['2026-11-23', '2026-12-07', '2026-12-14', '2026-10-26'])
   assert.deepEqual(planWeekFetches({ ...base, emptyWeeks: empty }).fetch.filter((m) => stamps[m]).sort(), ['2026-11-09', '2026-11-16', '2026-11-23', '2026-12-07'])
 })
+
+test('a lesson id that Schulnetz reuses in another week is not a moved lesson', () => {
+  const at = new Date('2026-11-09T05:45:00Z')
+  const lesson = (id, start, room) => ({ id, start, end: start.replace(':45:', ':30:').replace('T07', 'T08'), text: 'Deutsch', room, teachers: ['T'], courseName: 'Deutsch', status: '', eventType: '0_stp' })
+  const thisWeek = [lesson('L1', '2026-11-12T07:45:00', 'A1'), lesson('L2', '2026-11-13T07:45:00', 'A1'), lesson('L3', '2026-11-11T07:45:00', 'A1')]
+  const previous = { grades: [], events: thisWeek, exams: [], absences: [], messages: [] }
+  // Two weeks later the same ids come back, one of them in another room.
+  const later = [lesson('L1', '2026-11-26T07:45:00', 'B2'), lesson('L2', '2026-11-27T07:45:00', 'A1'), lesson('L4', '2026-11-25T07:45:00', 'A1')]
+  const next = { ...previous, events: [...thisWeek, ...later] }
+  assert.deepEqual(diffSnapshotsAt(previous, next, {}, '2026-11-09', at), [])
+  // Within one week the id still tracks a real change.
+  const moved = { ...previous, events: [lesson('L1', '2026-11-12T07:45:00', 'C3'), ...thisWeek.slice(1)] }
+  assert.deepEqual(diffSnapshotsAt(previous, moved, {}, '2026-11-09', at).map((c) => c.title), ['Raum geändert'])
+})

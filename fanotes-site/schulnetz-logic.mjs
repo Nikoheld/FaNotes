@@ -1255,10 +1255,12 @@ const diffGradeList = (previous, next, changes) => {
 }
 
 const diffAgenda = (previous, next, category, created, removed, changes, skipWeeks = new Set(), spareAgainst = []) => {
-  const before = new Map(previous.map((event) => [event.id, event]))
-  const after = new Set(next.map((event) => event.id))
+  // Schulnetz reuses a lesson id across weeks, so an id only names the same lesson within a week.
+  const weekId = (event) => `${event.id}|${weekMondayKey(event.start) || ''}`
+  const before = new Map(previous.map((event) => [weekId(event), event]))
+  const after = new Set(next.map(weekId))
   for (const event of next) {
-    const old = before.get(event.id)
+    const old = before.get(weekId(event))
     if (!old && skipWeeks.has(weekMondayKey(event.start))) continue
     const slotTwin = !old && category === 'timetable' ? previous.find((candidate) => sameLessonSlot(event, candidate)) : null
     const prior = old || slotTwin
@@ -1282,7 +1284,7 @@ const diffAgenda = (previous, next, category, created, removed, changes, skipWee
     }))
   }
   for (const event of previous) {
-    if (after.has(event.id)) continue
+    if (after.has(weekId(event))) continue
     if (skipWeeks.has(weekMondayKey(event.start))) continue
     if (spareAgainst.some((candidate) => sameSchoolSlot(event, candidate))) continue
     if (category === 'timetable' && next.some((candidate) => sameLessonSlot(event, candidate))) continue

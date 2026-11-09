@@ -121,4 +121,21 @@ class SchoolTimingTest {
         assertEquals(listOf("2026-11-09", "2026-11-16"), due(emptySet()))
         assertEquals(listOf("2026-11-09", "2026-11-16", "2026-11-23", "2026-12-07"), due(setOf("2026-11-23", "2026-12-07", "2026-12-14", "2026-10-26")))
     }
+
+    @Test fun aLessonIdReusedInAnotherWeekIsNotAMovedLesson() {
+        val thisWeek = listOf(
+            lesson("L1", "2026-11-12T07:45:00", "2026-11-12T08:30:00", "A1"),
+            lesson("L2", "2026-11-13T07:45:00", "2026-11-13T08:30:00", "A1"),
+            lesson("L3", "2026-11-11T07:45:00", "2026-11-11T08:30:00", "A1"),
+        )
+        val later = listOf(
+            lesson("L1", "2026-11-26T07:45:00", "2026-11-26T08:30:00", "B2"),
+            lesson("L2", "2026-11-27T07:45:00", "2026-11-27T08:30:00", "A1"),
+            lesson("L4", "2026-11-25T07:45:00", "2026-11-25T08:30:00", "A1"),
+        )
+        val previous = blank.copy(events = thisWeek)
+        assertTrue(diffSnapshots(previous, previous.copy(events = thisWeek + later), NotifySettings(), today, at).isEmpty())
+        val moved = previous.copy(events = listOf(thisWeek[0].copy(room = "C3")) + thisWeek.drop(1))
+        assertEquals(listOf("Raum geändert"), diffSnapshots(previous, moved, NotifySettings(), today, at).map { it.title })
+    }
 }

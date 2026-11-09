@@ -257,10 +257,12 @@ private fun diffAgenda(
     skipWeeks: Set<String> = emptySet(),
     spareAgainst: List<AgendaEvent> = emptyList(),
 ) {
-    val before = previous.associateBy { it.id }
-    val after = next.associateBy { it.id }
+    // Schulnetz reuses a lesson id across weeks, so an id only names the same lesson within a week.
+    fun weekId(event: AgendaEvent) = "${event.id}|${weekMondayKey(event.start).orEmpty()}"
+    val before = previous.associateBy(::weekId)
+    val after = next.associateBy(::weekId)
     for (event in next) {
-        val old = before[event.id]
+        val old = before[weekId(event)]
         if (old == null && weekMondayKey(event.start) in skipWeeks) continue
         val slotTwin = if (old == null && category == "timetable") previous.firstOrNull { sameLessonSlot(event, it) } else null
         val prior = old ?: slotTwin
@@ -289,7 +291,7 @@ private fun diffAgenda(
         )
     }
     for (event in previous) {
-        if (after[event.id] != null) continue
+        if (after[weekId(event)] != null) continue
         if (weekMondayKey(event.start) in skipWeeks) continue
         if (spareAgainst.any { sameSchoolSlot(event, it) }) continue
         if (category == "timetable" && next.any { sameLessonSlot(event, it) }) continue
