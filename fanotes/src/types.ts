@@ -339,6 +339,20 @@ export type SearchHit = {
   notePath?: string
   /** 0–1 page position when the hit is handwriting. */
   inkAnchor?: { y: number }
+  /** Document index: 1-based PDF page or worksheet number of the match. */
+  page?: number
+  /** Document index: where the text came from. */
+  source?: 'text' | 'text-layer' | 'ocr' | 'transcript'
+  /** Document index: what part of the document matched. */
+  unit?: 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations'
+  /** Document index: estimated OCR confidence 0–1. */
+  confidence?: number
+  /** Document index: [start, end) ranges of matched words in `excerpt`. */
+  highlights?: Array<[number, number]>
+  /** Document index: identical page text in this many other files. */
+  alsoIn?: number
+  /** Document index: the query that produced the hit, for in-page marking. */
+  query?: string
 }
 
 export type DrawingAsset = {
@@ -593,6 +607,9 @@ export type FaNotesApi = {
   writeRecognitionModel?: (content: string) => Promise<{ modifiedAt: string }>
   readPdfOcr?: (relativePath: string) => Promise<import('./lib/pdfOcr').PdfOcrCache | null>
   writePdfOcr?: (payload: import('./lib/pdfOcr').PdfOcrWrite) => Promise<import('./lib/pdfOcr').PdfOcrCache | null>
+  /** `fanotes-page-text-v1` sidecar of a PDF (document search contract). */
+  readPageText?: (relativePath: string) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
+  writePageText?: (record: import('./lib/docSearch/pageText').PageTextRecord) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   convertFamdNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>

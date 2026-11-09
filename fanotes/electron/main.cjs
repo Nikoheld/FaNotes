@@ -62,6 +62,7 @@ const {
   worksheetIdsFromMarkdown,
 } = require('./famd.cjs')
 const pdfOcrStore = require('./pdf-ocr.cjs')
+const pageTextStore = require('./page-text.cjs')
 const { composeFile: composeFamdOffThread, openFile: openFamdOffThread } = require('./famdOpenPool.cjs')
 const { parseSubjectBooks } = require('./subject-book.cjs')
 const { createAddonStore, registerAddonIpc } = require('./addons.cjs')
@@ -179,6 +180,8 @@ const IPC = Object.freeze({
   writeRecognitionModel: 'fanotes:write-recognition-model',
   readPdfOcr: 'fanotes:read-pdf-ocr',
   writePdfOcr: 'fanotes:write-pdf-ocr',
+  readPageText: 'fanotes:read-page-text',
+  writePageText: 'fanotes:write-page-text',
   createNote: 'fanotes:create-note',
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
@@ -2523,6 +2526,60 @@ async function rewritePdfOcrSidecars(root, fromPath, toPath) {
   }
 }
 
+/** `.fanotes/page-text/`: shared per-page text (document search contract). */
+async function ensurePageTextDirectory(root) {
+  let cursor = await ensureInternalVaultDirectory(root)
+  cursor = path.join(cursor, pageTextStore.DIRECTORY)
+  try {
+    const info = await fsp.lstat(cursor)
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Der interne Textordner ist unsicher.')
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    await fsp.mkdir(cursor, { mode: 0o700 }).catch((mkdirError) => {
+      if (mkdirError?.code !== 'EEXIST') throw mkdirError
+    })
+    const created = await fsp.lstat(cursor)
+    if (!created.isDirectory() || created.isSymbolicLink()) throw new Error('Der interne Textordner ist unsicher.')
+  }
+  const realCursor = await fsp.realpath(cursor)
+  if (!isInsideRoot(root, realCursor)) throw new Error('Der interne Textordner verlässt den Vault.')
+  return cursor
+}
+
+/** Page text follows a renamed or moved PDF and is removed with a deleted one. */
+async function rewritePageTextSidecars(root, fromPath, toPath) {
+  const directory = path.join(root, INTERNAL_VAULT_DIRECTORY, pageTextStore.DIRECTORY)
+  let names
+  try {
+    const info = await fsp.lstat(directory)
+    if (!info.isDirectory() || info.isSymbolicLink()) return
+    names = await fsp.readdir(directory)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    if (!/^[a-f0-9]{32}\.json$/u.test(name)) continue
+    const filePath = path.join(directory, name)
+    try {
+      const record = pageTextStore.sanitize(JSON.parse((await readRegularFileNoFollow(filePath, pageTextStore.MAX_BYTES)).toString('utf8')))
+      if (!record) continue
+      const exact = record.path === fromPath
+      const nested = record.path.startsWith(`${fromPath}/`)
+      if (!exact && !nested) continue
+      if (toPath === null) {
+        await fsp.rm(filePath, { force: true })
+        continue
+      }
+      const next = { ...record, path: exact ? toPath : `${toPath}${record.path.slice(fromPath.length)}` }
+      const destination = path.join(directory, pageTextStore.sidecarName(next.path))
+      await atomicWrite(destination, `${JSON.stringify(next)}\n`, { encoding: 'utf8', mode: 0o600 })
+      if (destination !== filePath) await fsp.rm(filePath, { force: true })
+    } catch (error) {
+      console.warn('FaNotes: Seitentext konnte nicht mitgezogen werden:', error?.message ?? error)
+    }
+  }
+}
+
 function assertWorksheetId(value) {
   if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,96}$/.test(value)) {
     throw new Error('Ungültige Arbeitsblatt-ID.')
@@ -3754,6 +3811,9 @@ function registerIpcHandlers() {
       await rewritePdfOcrSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
         console.warn('FaNotes: PDF-Texterkennung konnte nicht mit umbenannt werden:', error?.message ?? error)
       })
+      await rewritePageTextSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
+        console.warn('FaNotes: Seitentext konnte nicht nachgeführt werden:', error?.message ?? error)
+      })
       return nextRelativePath
     } finally {
       mutationBarrier.release()
@@ -3856,6 +3916,9 @@ function registerIpcHandlers() {
       await rewritePdfOcrSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
         console.warn('FaNotes: PDF-Texterkennung konnte nicht mit verschoben werden:', error?.message ?? error)
       })
+      await rewritePageTextSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
+        console.warn('FaNotes: Seitentext konnte nicht nachgeführt werden:', error?.message ?? error)
+      })
       return nextRelativePath
     } finally {
       mutationBarrier.release()
@@ -3909,6 +3972,9 @@ function registerIpcHandlers() {
       }
       await rewritePdfOcrSidecars(root, trashedRelativePath, null).catch((error) => {
         console.warn('FaNotes: PDF-Texterkennung konnte nicht gelöscht werden:', error?.message ?? error)
+      })
+      await rewritePageTextSidecars(root, trashedRelativePath, null).catch((error) => {
+        console.warn('FaNotes: Seitentext konnte nicht nachgeführt werden:', error?.message ?? error)
       })
     } finally {
       mutationBarrier.release()
@@ -3989,6 +4055,36 @@ function registerIpcHandlers() {
     const destination = path.join(directory, pdfOcrStore.sidecarName(identity.normalized))
     await atomicWrite(destination, `${JSON.stringify(document)}\n`, { encoding: 'utf8', mode: 0o600 })
     return document
+  })
+
+  handle(IPC.readPageText, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') return null
+    try {
+      const identity = await pdfOcrFileIdentity(relativePath)
+      if (!identity) return null
+      const target = (await resolveVaultPath(pageTextStore.sidecarRelative(identity.normalized), {
+        allowInternal: true,
+        allowMissing: true,
+        expected: 'file',
+      })).target
+      const raw = (await readRegularFileNoFollow(target, pageTextStore.MAX_BYTES)).toString('utf8')
+      return pageTextStore.recordForFile(raw, { path: identity.normalized, size: identity.size })
+    } catch {
+      return null
+    }
+  })
+
+  handle(IPC.writePageText, async (_event, payload) => {
+    await ensureBootstrap()
+    if (!isPlainObject(payload) || typeof payload.path !== 'string') throw new Error('Der Seitentext ist ungültig.')
+    const identity = await pdfOcrFileIdentity(payload.path)
+    if (!identity) throw new Error('Seitentext gibt es nur für PDF-Notizen.')
+    const built = pageTextStore.buildForWrite(payload, { path: identity.normalized, size: identity.size })
+    if (!built) return null
+    const directory = await ensurePageTextDirectory(identity.root)
+    await atomicWrite(path.join(directory, pageTextStore.sidecarName(identity.normalized)), built.serialized, { encoding: 'utf8', mode: 0o600 })
+    return built.record
   })
 
   handle(IPC.search, async (_event, rawQuery) => {
