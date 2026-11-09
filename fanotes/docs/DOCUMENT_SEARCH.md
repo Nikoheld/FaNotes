@@ -204,14 +204,15 @@ pages, backoff and unsupported files, no concurrent passes, damaged-store rebuil
 (build ~0.6 s, query p50 ~12 ms / p95 ~27 ms in Node on the shared host).
 
 Browser end-to-end (real web app from this branch, Vite dev server, Chromium 156, synthetic vault,
-harness outside the repo, run phase by phase on one profile): 44 of 45 checks passed across setup,
-search, page navigation, reload, offline, rename, delete, edit, full rebuild and OCR-while-typing. The
-one failure: a 1.3 s main-thread task during setup, while the app itself imported and opened seven PDFs;
-during an isolated full rebuild the longest task was 147 ms. Typing (Event Timing, keydown): warm
-baseline p50 24 ms / p95 40 ms; during a full rebuild p50 24 / p95 48 ms; while a fresh 6-page dense
-scan was recognised p50 16 / p95 24 ms (indexing yields while typing). 6 dense scanned pages became
-searchable 100 s after import in the web app (WASM TrOCR, shared host). Renderer JS heap after indexing
-79 MB. The first keystrokes after a page load are slow without any indexing (p95 2.4 s, editor
+harness outside the repo, run phase by phase on one fresh profile): 43 of 44 checks passed across
+setup, search, page navigation (page 250 of 300 visibly on screen with the word marked), reload,
+offline, rename, delete, edit, full rebuild and OCR-while-typing. The one failure: a 1.65 s main-thread
+task during setup, while the app itself imported and opened seven PDFs; during an isolated full rebuild
+the longest task was 191 ms. Typing (Event Timing, keydown): warm baseline p50 24 ms / p95 48 ms;
+during a full rebuild p50 24 / p95 40 ms; while a fresh 6-page dense scan was recognised p50 16 /
+p95 24 ms (indexing yields while typing). 6 dense scanned pages became searchable 98 s after import in
+the web app (WASM TrOCR, shared host). Query-to-results in the panel 14–186 ms. Renderer JS heap after
+indexing 79 MB. The first keystrokes after a page load are slow without any indexing (p95 2.4 s, editor
 warm-up) — that is not caused by this feature. Not tested: the Electron desktop
 build (its IPC was syntax-checked and mirrors the existing pdf-ocr handlers), Firefox/Safari, real
 scans or phone photos, real handwriting, the Tauri host.

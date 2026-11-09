@@ -1038,13 +1038,38 @@ export function PdfNoteView({
   useEffect(() => {
     const reveal = revealRef.current
     if (!reveal || !pdf || !revealToken) return
-    scrollToPage(Math.min(Math.max(1, reveal.page), pdf.numPages))
+    const target = Math.min(Math.max(1, reveal.page), pdf.numPages)
+    // The view restores its start page while it lays out; keep going until
+    // the requested page is really on screen and stays there.
+    let cancelled = false
+    let stable = 0
+    let tries = 0
+    const settle = () => {
+      if (cancelled) return
+      const node = pagesRef.current?.querySelector<HTMLElement>(`[data-pdf-page="${target}"]`)
+      const box = node?.getBoundingClientRect()
+      const onScreen = Boolean(box && box.height > 0 && box.top < window.innerHeight * 0.75 && box.bottom > window.innerHeight * 0.25)
+      if (onScreen) stable += 1
+      else {
+        stable = 0
+        if (node) {
+          node.scrollIntoView({ block: 'center' })
+          setCurrentPage(target)
+          setPageDraft(String(target))
+        }
+      }
+      tries += 1
+      if (stable < 3 && tries < 60) window.setTimeout(settle, 150)
+    }
+    scrollToPage(target)
+    window.setTimeout(settle, 150)
     if (reveal.query.trim()) {
       setSearchQuery(reveal.query.trim())
       setSearchOpen(true)
     } else {
       revealRef.current = null
     }
+    return () => { cancelled = true }
   }, [revealToken, pdf, scrollToPage])
 
   useEffect(() => {
