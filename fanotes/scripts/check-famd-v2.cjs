@@ -16,11 +16,14 @@ const {
   createNoteCompanion,
   emptyFamdPayload,
   famdEncodingForSave,
+  composeFamdCompanion,
   parseFamd,
+  rewriteFamdText,
   sameFamdPayload,
   serializeFamd,
   stripFamdPayload,
 } = require('../electron/famd.cjs')
+const v2codec = require('../electron/famdV2.mjs')
 
 const ROOT = path.join(__dirname, '..')
 const mode = process.argv[2] || 'all'
@@ -326,10 +329,20 @@ const checkCreate = () => {
   assert.ok(composeStart >= 0)
   const composeEnd = codec.indexOf('\nfunction ', composeStart + 10)
   const compose = codec.slice(composeStart, composeEnd === -1 ? codec.length : composeEnd)
-  assert.match(compose, /parseFamd\(existingSource\)/)
-  const composeSave = compose.indexOf('serializeFamd(body, payload, v2codec.famdEncodingForSave(existingSource))')
+  // The stored ink may stay packed only because it is written back in the
+  // encoding of the same source, and nothing before the write swallows a parse error.
+  assert.match(compose, /parseFamd\(existingSource, \{ unpack: false \}\)/)
+  assert.match(compose, /const encoding = v2codec\.famdEncodingForSave\(existingSource\)/)
+  const composeSave = compose.indexOf('serializeFamd(body, payload, encoding)')
   assert.ok(composeSave > 0)
   assert.equal(compose.slice(0, composeSave).includes('catch'), false)
+  const rewriteStart = codec.indexOf('function rewriteFamdText')
+  assert.ok(rewriteStart >= 0)
+  const rewrite = codec.slice(rewriteStart, codec.indexOf('\nfunction ', rewriteStart + 10))
+  assert.match(rewrite, /parseFamd\(existingSource \?\? '', \{ unpack: false \}\)/)
+  assert.match(rewrite, /v2codec\.famdEncodingForSave\(existingSource\)\)/)
+  assert.match(rewrite, /nicht überschrieben/)
+  assert.equal(rewrite.includes('catch'), false)
   const mutator = functionBody(main, 'mutateFamdCompanion')
   const mutatorSave = mutator.indexOf('serializeFamd(nextBody, nextPayload, famdEncodingForSave(existingSource))')
   assert.ok(mutatorSave > 0)
@@ -337,12 +350,15 @@ const checkCreate = () => {
   const creator = functionBody(main, 'writeFamdCompanion')
   assert.match(creator, /writeFamdCompanionNow\(/)
   assert.match(main, /await writeFamdCompanion\(entry\.relativePath, `# \$\{title\}\\n\\n`\)/)
-  const writeAt = main.indexOf('const existingFamdSource = isFamdFile')
+  // A .famd text save goes through rewriteFamdText, in the worker for a large
+  // note. Only a missing file falls through (a new note); any other error throws.
+  const writeAt = main.indexOf('const size = await statRegularFileNoFollow(target, MAX_FAMD_BYTES)')
   assert.ok(writeAt >= 0)
-  const writeWindow = main.slice(writeAt, writeAt + 700)
-  assert.match(writeWindow, /parseFamd\(existingFamdSource \?\? ''\)/)
-  assert.match(writeWindow, /famdEncodingForSave\(existingFamdSource\)/)
-  assert.equal(writeWindow.includes('catch'), false)
+  const writeWindow = main.slice(writeAt, main.indexOf('} else {', writeAt))
+  assert.match(writeWindow, /rewriteFamdTextOffThread\(target, markdownBody, MAX_FAMD_BYTES\)/)
+  assert.match(writeWindow, /rewriteFamdText\(await readOptionalNoteFile\(normalizedRelativePath\), markdownBody\)/)
+  assert.match(writeWindow, /if \(error\?\.code === 'ENOENT'\) return 0\n\s+throw error/)
+  assert.equal(writeWindow.split('catch').length - 1, 1, 'the ENOENT fall-through is the only catch')
   console.log('create ok')
 }
 
@@ -437,12 +453,84 @@ const checkConvert = () => {
   }
 }
 
+/**
+ * Autosaves of a large note used to unpack every sample and pack it again on
+ * the Electron main thread: about 0.7 s per text save and 1.1 s per ink save
+ * at 320k points. A text save now keeps the stored ink as it is, an ink save
+ * packs the new ink once, and the packer writes the same bytes as before.
+ */
+const checkFastPaths = () => {
+  // Reference strings from the previous encoder: all-zero bytes, and a point
+  // whose bytes hit 0xff, float extremes, a subnormal, and NaN.
+  const famdPts = (value) => JSON.parse(v2codec.encodeV2Document('', {
+    updatedAt: 'x',
+    worksheets: [],
+    ink: { strokes: [{ points: [{
+      x: value, y: value, t: value ? -1e308 : 0, pressure: value ? 1e308 : 0,
+      tiltX: value ? 5e-324 : 0, tiltY: value ? Number.NaN : 0, pointerType: 'pen',
+    }] }] },
+  }).split('\n')[1]).ink.strokes[0].famdPts
+  assert.equal(famdPts(0), '!'.repeat(45))
+  assert.equal(famdPts(1), 'u9X.!U[IHRq@@1DU[IHRq@@2p!==+#!!!!!!!!!!!!*gE')
+
+  const stroke = (index, count) => ({
+    color: '#203040',
+    baseWidth: 3,
+    points: Array.from({ length: count }, (_, sample) => ({
+      x: ((index * 3 + sample) % 97) / 97,
+      y: ((index * 5 + sample * 2) % 89) / 89,
+      t: sample * 12 + index,
+      pressure: 0.35 + (sample % 5) * 0.1,
+      tiltX: (sample % 7) - 3,
+      tiltY: 4,
+      pointerType: sample % 9 === 0 ? 'mouse' : 'pen',
+      ...(sample === 3 ? { note: 'Größe' } : {}),
+    })),
+  })
+  const ink = { schemaVersion: 1, title: 'Handschrift', strokes: Array.from({ length: 40 }, (_, index) => stroke(index, 30)) }
+  const source = serializeFamd('# Heft\n\nText\n', { ...emptyFamdPayload('2026-11-01T00:00:00.000Z'), ink, paperStyle: 'dots' }, 'v2')
+  const storedInk = (text) => JSON.stringify(v2codec.readV2Payload(text, { unpack: false }).ink)
+
+  const packed = parseFamd(source, { unpack: false }).payload.ink
+  assert.ok(packed.strokes.every((item) => typeof item.famdPts === 'string' && !('points' in item)), 'a text save does not unpack samples')
+
+  const textSaved = rewriteFamdText(source, '# Heft\n\nNeuer Text\n')
+  assert.equal(stripFamdPayload(textSaved), '# Heft\n\nNeuer Text')
+  assert.equal(storedInk(textSaved), storedInk(source), 'a text save keeps the stored ink byte for byte')
+  assert.notEqual(parseFamd(textSaved).payload.updatedAt, '2026-11-01T00:00:00.000Z')
+  assert.equal(parseFamd(rewriteFamdText(source, '# Heft\n\nText')).payload.updatedAt, '2026-11-01T00:00:00.000Z', 'the same text keeps its timestamp')
+  assert.equal(parseFamd(textSaved).payload.paperStyle, 'dots')
+  const corrupt = source.replace(/crc=[0-9a-f]{8}/u, 'crc=00000000')
+  assert.throws(() => rewriteFamdText(corrupt, '# Heft\n'), /nicht überschrieben|checksum/u, 'an unreadable note is not overwritten')
+
+  const composedText = composeFamdCompanion(source, '# Heft\n\nNeuer Text\n', undefined, 'grid')
+  assert.equal(storedInk(composedText), storedInk(source), 'a companion text save keeps the stored ink byte for byte')
+  const sameInk = composeFamdCompanion(source, '# Heft\n\nText\n', parseFamd(source).payload.ink, 'grid')
+  assert.equal(parseFamd(sameInk).payload.updatedAt, '2026-11-01T00:00:00.000Z', 'saving the same ink keeps the timestamp')
+  const nextInk = { ...ink, strokes: [...ink.strokes, stroke(99, 12)] }
+  const inkSaved = composeFamdCompanion(source, '# Heft\n\nText\n', JSON.parse(JSON.stringify(nextInk)), 'grid')
+  assert.equal(parseFamd(inkSaved).payload.ink.strokes.length, 41)
+  assert.equal(storedInk(inkSaved), JSON.stringify(v2codec.packV2Ink(nextInk)), 'new ink is packed once')
+  assert.ok(sameFamdPayload(parseFamd(inkSaved).payload, { ...parseFamd(inkSaved).payload, ink: nextInk }), 'new ink reads back as written')
+  assert.notEqual(parseFamd(inkSaved).payload.updatedAt, '2026-11-01T00:00:00.000Z')
+
+  // A v1 note stays v1: packed columns never land in a v1 file.
+  const v1 = serializeFamd('# Alt\n', { ...emptyFamdPayload('2026-11-01T00:00:00.000Z'), ink }, 'v1')
+  const v1Saved = composeFamdCompanion(v1, '# Alt\n\nmehr\n', JSON.parse(JSON.stringify(nextInk)), 'grid')
+  assert.match(v1Saved, /fanotes-famd:v1/u)
+  assert.doesNotMatch(v1Saved, /famdPts/u)
+  assert.match(rewriteFamdText(v1, '# Alt\n\nmehr\n'), /fanotes-famd:v1/u)
+}
+
 const main = async () => {
   if (!MODES.has(mode)) {
     console.error('usage: node scripts/check-famd-v2.cjs [format|create|convert|all]')
     process.exit(2)
   }
-  if (mode === 'format' || mode === 'all') await checkFormat()
+  if (mode === 'format' || mode === 'all') {
+    await checkFormat()
+    checkFastPaths()
+  }
   if (mode === 'create' || mode === 'all') checkCreate()
   if (mode === 'convert' || mode === 'all') checkConvert()
 }

@@ -131,6 +131,8 @@ import {
 } from '../lib/inkNotice'
 import { BUG_REPORT_PEN_SAMPLE_MS, buildPenDiagnosticEvent, diagnosticLog } from '../lib/bugReport'
 import { boundsOfInkIndexes, copyInkSelection, inkEditUndoSnapshot, moveInkSelection, scaleInkSelection } from '../lib/inkSelect'
+import { bumpInkGeometryEpoch, strokePointBounds } from '../lib/strokeBounds'
+import { drawingDocumentJson, warmStrokeJsonWhenIdle } from '../lib/drawingJson'
 import { applyToolErase } from '../lib/toolErase'
 import {
   inkPointerSessionFromSample,
@@ -460,13 +462,11 @@ const measureInkWindow = (paper: HTMLElement, scroller: HTMLElement, rotation: n
   })
 }
 
-const strokeIntersectsWindow = (stroke: { points: Array<{ y: number }> }, window: InkWindow) => {
-  let minY = 1
-  let maxY = 0
-  for (const point of stroke.points) {
-    if (point.y < minY) minY = point.y
-    if (point.y > maxY) maxY = point.y
-  }
+const strokeIntersectsWindow = (stroke: { points: Array<{ x: number; y: number }> }, window: InkWindow) => {
+  // Cached per stroke: every scroll repaint used to read every point.
+  const bounds = strokePointBounds(stroke.points)
+  const minY = bounds.minY < 1 ? bounds.minY : 1
+  const maxY = bounds.maxY > 0 ? bounds.maxY : 0
   const pad = 0.03
   return maxY >= window.y0 - pad && minY <= window.y1 + pad
 }
@@ -918,17 +918,17 @@ const waitForBackgroundIdle = () => new Promise<void>((resolve) => {
 })
 
 const bottomOfStrokes = (strokes: InkStroke[], sourceHeight: number) => strokes.reduce((bottom, stroke) => (
-  stroke.points.reduce((strokeBottom, point) => Math.max(strokeBottom, point.y * sourceHeight), bottom)
+  Math.max(bottom, strokePointBounds(stroke.points).maxY * sourceHeight)
 ), 0)
 
+// Per-stroke cached bounds: this ran over every point after each stroke and undo.
 const inkAbsoluteBounds = (strokes: InkStroke[], sourceWidth: number, sourceHeight: number) => {
   let maxX = 0
   let maxY = 0
   for (const stroke of strokes) {
-    for (const point of stroke.points) {
-      maxX = Math.max(maxX, point.x * sourceWidth)
-      maxY = Math.max(maxY, point.y * sourceHeight)
-    }
+    const bounds = strokePointBounds(stroke.points)
+    maxX = Math.max(maxX, bounds.maxX * sourceWidth)
+    maxY = Math.max(maxY, bounds.maxY * sourceHeight)
   }
   return { maxX, maxY }
 }
@@ -3310,9 +3310,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
    */
   const forEachTrackedPoint = useCallback((visit: (point: StrokePoint) => void) => {
     const seen = new Set<StrokePoint>()
+    // Undo and redo snapshots share stroke objects. Skipping a stroke already
+    // walked keeps a page grow from looking up every point once per snapshot
+    // (80 snapshots × 320k samples). Points stay deduplicated for strokes that
+    // share them.
+    const seenStrokes = new Set<InkStroke>()
     const visitStrokes = (strokes: readonly InkStroke[] | null | undefined) => {
       if (!strokes) return
       for (const stroke of strokes) {
+        if (seenStrokes.has(stroke)) continue
+        seenStrokes.add(stroke)
         for (const point of stroke.points) {
           if (seen.has(point)) continue
           seen.add(point)
@@ -3339,6 +3346,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         visit(edge)
       }
     }
+    // Every caller moves the points it visits; cached stroke bounds are stale now.
+    bumpInkGeometryEpoch()
   }, [])
 
   /** Same holders as forEachTrackedPoint, stroke by stroke, for moves that depend on where a stroke starts. */
@@ -3710,10 +3719,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     void paper?.offsetHeight
     const nextPaintW = writePageStayExtent(nextW, paper?.offsetWidth ?? 0)
     const nextPaintH = writePageStayExtent(nextH, paper?.offsetHeight ?? 0)
-    forEachTrackedPoint((point) => {
-      point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
-      point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
-    })
+    // keepMarkOnPage returns the value itself on an axis whose extent and
+    // origin stay; a bottom grow then leaves x alone instead of calling into
+    // the page module twice per sample.
+    const moveX = addX !== 0 || nextPaintW !== prevPaintW
+    const moveY = addY !== 0 || nextPaintH !== prevPaintH
+    if (moveX && moveY) {
+      forEachTrackedPoint((point) => {
+        point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
+        point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
+      })
+    } else if (moveY) {
+      forEachTrackedPoint((point) => {
+        point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
+      })
+    } else if (moveX) {
+      forEachTrackedPoint((point) => {
+        point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
+      })
+    }
     const remapPose = <T extends { x: number; y: number }>(pose: T | null): T | null => {
       if (!pose) return pose
       return {
@@ -6596,7 +6620,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       id: drawingIdRef.current,
       title,
       imageData,
-      drawingJson: JSON.stringify(drawing),
+      drawingJson: drawingDocumentJson(drawing),
       inkSummary: summarizeInkStrokes(strokesRef.current, page.width, page.height),
     }
   }, [activeMode, mathSolverEnabled, mode, paperStyle, settings.paperSquareMm, settings.smoothing, title])
@@ -7558,6 +7582,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       console.error('Unsichtbares Handschrift-Transkript konnte nicht aktualisiert werden.', error)
     }
   }, [activeMode, mode, settings.experimentalHandwritingToText, settings.lastRecognitionMode, recognitionLanguage, sourceHeight])
+
+  // Large pages: write each stroke's save JSON while the pen rests, so the
+  // autosave below joins cached text instead of stringifying every sample
+  // after a page grow. Not part of the save queue: a flush never waits on it.
+  useEffect(() => {
+    if (revision === 0 || !dirtyRef.current) return
+    if (!inkPagePersists(strokesRef.current.length, inkRecordExists())) return
+    return warmStrokeJsonWhenIdle(() => strokesRef.current)
+  }, [inkRecordExists, revision])
 
   useEffect(() => {
     if (revision === 0 || !dirtyRef.current) return
@@ -9869,7 +9902,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         samples={resources?.samples ?? []}
         pageWidth={sourceWidth}
         pageHeight={sourceHeight}
-        suggestedStartY={Math.max(96, bottomOfStrokes(strokesRef.current, sourceHeight) + 58)}
+        // Measured only while the dialog is open: this runs on every render of
+        // the board, and after a page grow it re-measured every stroke.
+        suggestedStartY={textToHandwritingOpen ? Math.max(96, bottomOfStrokes(strokesRef.current, sourceHeight) + 58) : 96}
         color={penColor}
         baseWidth={penWidth}
         pressureEnabled={settings.pressureEnabled}

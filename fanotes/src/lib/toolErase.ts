@@ -1,3 +1,4 @@
+import { strokePointBounds } from './strokeBounds'
 import {
   cutPageStroke,
   distanceToPath,
@@ -119,20 +120,16 @@ export const applyToolErase = <T extends ToolEraseStroke>(
     pathBottom = Math.max(pathBottom, point.y)
   }
 
+  // Cached bounds per stroke: building a pixel array for every stroke on each
+  // eraser move cost about 0.3 s per drag on a 320k-sample note.
   const near: T[] = []
   for (const stroke of strokes) {
     if (!stroke.points.length) continue
-    const pixels = pixelsOf(stroke.points, sourceWidth, sourceHeight)
-    let left = Number.POSITIVE_INFINITY
-    let top = Number.POSITIVE_INFINITY
-    let right = Number.NEGATIVE_INFINITY
-    let bottom = Number.NEGATIVE_INFINITY
-    for (const pixel of pixels) {
-      left = Math.min(left, pixel.x)
-      top = Math.min(top, pixel.y)
-      right = Math.max(right, pixel.x)
-      bottom = Math.max(bottom, pixel.y)
-    }
+    const bounds = strokePointBounds(stroke.points)
+    const left = bounds.minX * sourceWidth
+    const top = bounds.minY * sourceHeight
+    const right = bounds.maxX * sourceWidth
+    const bottom = bounds.maxY * sourceHeight
     const pad = radius + visibleHalfWidth(stroke) + 96
     if (boundsOverlap(left, top, right, bottom, pathLeft - pad, pathTop - pad, pathRight + pad, pathBottom + pad)) {
       near.push(stroke)

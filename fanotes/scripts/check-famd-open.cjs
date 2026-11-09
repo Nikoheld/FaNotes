@@ -17,6 +17,7 @@ const {
   openFamdFile,
   parseFamd,
   readFamdCompanion,
+  rewriteFamdText,
   serializeFamd,
 } = require('../electron/famd.cjs')
 const { crcHex } = require('../electron/famdV2.mjs')
@@ -25,7 +26,7 @@ const {
   expandPackedInk,
   frameBudgetOpen,
 } = require('../electron/famdPack.mjs')
-const { close, composeFile, openFile } = require('../electron/famdOpenPool.cjs')
+const { close, composeFile, inspectDrawing, openFile, rewriteText } = require('../electron/famdOpenPool.cjs')
 
 const MAX_DRAWING_JSON_BYTES = 24 * 1024 * 1024
 
@@ -227,7 +228,48 @@ const run = async () => {
   assert.ok(slimBytes < MAX_DRAWING_JSON_BYTES, `slim drawing json ${slimBytes}`)
   assert.ok(maxGap < 300, `main-thread gap ${maxGap}ms over ${ticks} ticks`)
   assert.ok(ticks >= 1, `main-thread ticks ${ticks}`)
-  console.log(`famd open ok slim=${medium.slimBytes} heavySlim=${slimBytes} gap=${maxGap}ms ticks=${ticks}`)
+
+  // Autosaves of a heavy note: the text save and the ink save run in the
+  // worker and give the same file as the main-thread code. On the main thread
+  // they held it for about 0.7 s and 1.1 s per save at 320k samples.
+  const watchGap = () => {
+    let gap = 0
+    let at = Date.now()
+    const timer = setInterval(() => {
+      const now = Date.now()
+      gap = Math.max(gap, now - at)
+      at = now
+    }, 5)
+    return () => {
+      clearInterval(timer)
+      return gap
+    }
+  }
+  const stamp = (text) => ({ ...parseFamd(text).payload, updatedAt: 'same' })
+  const newText = '# Heavy\n\nNeuer Absatz.\n'
+  let stop = watchGap()
+  const rewritten = await rewriteText(heavyPath, newText, 40 * 1024 * 1024)
+  const textGap = stop()
+  assert.equal(parseFamd(rewritten).markdown, parseFamd(rewriteFamdText(heavySource, newText)).markdown)
+  assert.deepEqual(stamp(rewritten), stamp(rewriteFamdText(heavySource, newText)), 'worker text save equals the main-thread one')
+  assert.ok(textGap < 300, `text save main-thread gap ${textGap}ms`)
+  const created = await rewriteText(path.join(directory, 'missing.famd'), '# Neu\n', 40 * 1024 * 1024)
+  assert.deepEqual(stamp(created), stamp(rewriteFamdText('', '# Neu\n')), 'a missing note is a new one')
+
+  const nextInk = { ...heavyInk, strokes: [...heavyInk.strokes, makeStroke(9000, 40, 'pen')] }
+  const nextJson = JSON.stringify(nextInk)
+  stop = watchGap()
+  const head = await inspectDrawing(nextJson)
+  const composed = await composeFile(heavyPath, '# Heavy\n', 'plain', 40 * 1024 * 1024, nextJson)
+  const inkGap = stop()
+  assert.deepEqual(head, { schemaVersion: 1, title: 'Handschrift', strokes: [] }, 'only the top-level fields come back')
+  assert.deepEqual(stamp(composed), stamp(composeFamdCompanion(heavySource, '# Heavy\n', JSON.parse(nextJson), 'plain')), 'worker ink save equals the main-thread one')
+  assert.equal(parseFamd(composed).payload.ink.strokes.length, 4001)
+  assert.ok(inkGap < 300, `ink save main-thread gap ${inkGap}ms`)
+  await assert.rejects(inspectDrawing('{"strokes": ['), 'broken drawing JSON is refused')
+  const fresh = await composeFile(path.join(directory, 'fresh.famd'), '# Neu\n', 'plain', 40 * 1024 * 1024, JSON.stringify(heavyInk))
+  assert.equal(parseFamd(fresh).payload.ink.strokes.length, 4000, 'ink for a note without a companion yet')
+  console.log(`famd open ok slim=${medium.slimBytes} heavySlim=${slimBytes} gap=${maxGap}ms ticks=${ticks} textSaveGap=${textGap}ms inkSaveGap=${inkGap}ms`)
 }
 
 run().catch((error) => {

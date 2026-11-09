@@ -67,12 +67,24 @@ function openFile(filePath, maxChars) {
   return ask({ op: 'open', filePath, maxChars })
 }
 
-function composeFile(filePath, markdown, paperStyle, maxChars) {
-  return ask({ op: 'compose', filePath, markdown, paperStyle, maxChars })
+/** `inkJson` replaces the ink; without it the stored ink is kept. */
+function composeFile(filePath, markdown, paperStyle, maxChars, inkJson) {
+  return ask({ op: 'compose', filePath, markdown, paperStyle, maxChars, ...(typeof inkJson === 'string' ? { inkJson } : {}) })
+}
+
+function rewriteText(filePath, markdown, maxChars) {
+  return ask({ op: 'rewriteText', filePath, markdown, maxChars })
+}
+
+/** The drawing's top-level fields, parsed in the worker; `strokes` is [] or null. */
+function inspectDrawing(drawingJson) {
+  return ask({ op: 'inspectDrawing', drawingJson })
 }
 
 module.exports = {
   close,
   composeFile,
+  inspectDrawing,
   openFile,
+  rewriteText,
 }

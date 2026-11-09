@@ -247,11 +247,18 @@ function payloadFromParsed(parsed) {
   }
 }
 
-function parseFamd(source) {
+/**
+ * `unpack: false` keeps v2 ink in its stored columns. Only a caller that
+ * writes the payload back with `famdEncodingForSave` of the same source may
+ * use it: that is v2 again, and the packed strokes pass through unchanged.
+ * Unpacking every sample to pack it again on each autosave held the Electron
+ * main thread for about 0.7 s on a 320k-point note.
+ */
+function parseFamd(source, options = {}) {
   const markdown = stripFamdPayload(source)
   if (typeof source !== 'string' || !source) return { markdown: '', payload: null }
   if (v2codec.isActiveV2(source)) {
-    const payload = payloadFromParsed(v2codec.readV2Payload(source))
+    const payload = payloadFromParsed(v2codec.readV2Payload(source, options.unpack === false ? { unpack: false } : {}))
     if (!payload) throw new v2codec.FamdCorruptError('famd v2 payload')
     return { markdown, payload }
   }
@@ -338,14 +345,19 @@ function famdLooksStored(source) {
 }
 
 function composeFamdCompanion(existingSource, markdown, ink, settingsPaperStyle) {
-  const existing = existingSource ? parseFamd(existingSource) : { markdown: '', payload: emptyFamdPayload() }
+  const encoding = v2codec.famdEncodingForSave(existingSource)
+  // A v2 note is written back as v2: its stored ink stays packed, and new ink
+  // is packed once. Comparing two unpacked copies as JSON was most of an ink save.
+  const existing = existingSource ? parseFamd(existingSource, { unpack: false }) : { markdown: '', payload: emptyFamdPayload() }
   if (existingSource && famdLooksStored(existingSource) && !existing.payload) {
     throw new Error('Die Notiz konnte nicht gelesen werden und wurde nicht überschrieben.')
   }
   const incoming = parseFamd(typeof markdown === 'string' ? markdown : '')
   const body = incoming.markdown || stripFamdPayload(typeof markdown === 'string' ? markdown : '')
   const existingPayload = existing.payload || emptyFamdPayload()
-  const inkDocument = ink === undefined ? existingPayload.ink : ink
+  const inkDocument = ink === undefined
+    ? existingPayload.ink
+    : (encoding === 'v2' ? v2codec.packV2Ink(ink) : ink)
   const paperFromInk = inkDocument && typeof inkDocument === 'object' && isPaperStyle(inkDocument.paperStyle)
     ? inkDocument.paperStyle
     : undefined
@@ -360,7 +372,7 @@ function composeFamdCompanion(existingSource, markdown, ink, settingsPaperStyle)
     paperStyle: existingPayload.paperStyle || incoming.payload?.paperStyle || paperFromInk || (isPaperStyle(settingsPaperStyle) ? settingsPaperStyle : undefined),
     ...(incoming.payload?.pageStats ? { pageStats: incoming.payload.pageStats } : {}),
   }
-  return serializeFamd(body, payload, v2codec.famdEncodingForSave(existingSource))
+  return serializeFamd(body, payload, encoding)
 }
 
 function serializeFamd(markdown, payload, encoding) {
@@ -385,6 +397,25 @@ function serializeFamd(markdown, payload, encoding) {
   if (encoding === 'v2') return v2codec.encodeV2Document(body, next)
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
+}
+
+/**
+ * The next bytes of a `.famd` note after a text save: the new markdown, the
+ * stored payload, and the ink exactly as it is on disk. The main thread runs
+ * this for a small note; the famd worker runs it for a large one.
+ */
+function rewriteFamdText(existingSource, markdownBody, now = new Date().toISOString()) {
+  const parsedExisting = parseFamd(existingSource ?? '', { unpack: false })
+  if (existingSource && famdLooksStored(existingSource) && !parsedExisting.payload) {
+    throw new Error('Die Notiz konnte nicht gelesen werden und wurde nicht überschrieben.')
+  }
+  const previous = parsedExisting.payload || emptyFamdPayload()
+  const textChanged = markdownBody !== stripFamdPayload(parsedExisting.markdown || '')
+  return serializeFamd(markdownBody, {
+    ...previous,
+    updatedAt: textChanged ? now : (previous.updatedAt || now),
+    worksheets: worksheetIdsFromMarkdown(markdownBody),
+  }, v2codec.famdEncodingForSave(existingSource))
 }
 
 /** Bytes for a note that did not exist yet. New notes use the compact encoding. */
@@ -568,6 +599,7 @@ module.exports = {
   openFamdFile,
   parseFamd,
   readFamdCompanion,
+  rewriteFamdText,
   parseNoteBackups,
   parseNoteLinks,
   parseNoteTextFields,
