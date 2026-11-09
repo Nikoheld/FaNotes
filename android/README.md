@@ -19,7 +19,7 @@ Handwriting recognition is a `HandwritingRecognizer` seam. The stroke JSON alrea
 ## Requirements
 
 - JDK 17 or newer (the project compiles the core module to JVM 17 bytecode).
-- Android SDK platform `android-37.0` and build-tools 36. `compileSdk` is 37, `targetSdk` is 36, `minSdk` is 29 (Android 10), which covers current Galaxy Tabs.
+- Android SDK platform `android-37.0` and build-tools 36. `compileSdk` is 37, `targetSdk` is 36 for the tablet app and 37 for Kanti+, `minSdk` is 29 (Android 10), which covers current Galaxy Tabs.
 - A tablet or a stylus-capable emulator. Fingers navigate; a mouse can ink, so a desktop emulator can still draw.
 
 ## Build

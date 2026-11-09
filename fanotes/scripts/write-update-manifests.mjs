@@ -118,6 +118,7 @@ const main = () => {
   entry(directory, version, `FaNotes-${version}-android.apk`, sums)
   entry(directory, version, `Kanti-Plus-${version}-android.apk`, sums)
   entry(directory, version, `Kanti-Plus-${version}-android.aab`, sums)
+  entry(directory, version, `Kanti-Plus-${version}-native-debug-symbols.zip`, sums)
 
   fs.writeFileSync(path.join(directory, 'SHA256SUMS'), `${sums.sort().join('\n')}\n`)
   fs.writeFileSync(path.join(directory, updateManifestFileName('linux', channel)), `${JSON.stringify(sign(linux, privateKeyPem))}\n`)
