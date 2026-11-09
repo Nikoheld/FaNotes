@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { addDays, isLesson, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, addDays, isLesson, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -191,7 +191,9 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       const lessonUrl = schedulerFetchUrl({ root, pageId: '22202', ansicht: 'schueleransicht', id: session.id, transid: lessonTransid, today: curr, min: monday, max, extra: '' })
       const lessonBody = await get(lessonUrl)
       if (schedulerWeekLoaded(lessonBody)) {
-        const parsed = parseSchedulerXml(lessonBody)
+        // Only lessons inside the requested week answer for it. An answer for another week must not
+        // empty this one; the week then stays unread and is asked again.
+        const parsed = parseSchedulerXml(lessonBody).filter((event) => weekMonday(String(event.start || '').slice(0, 10)) === monday)
         if (parsed.length) {
           lessonWeeks[monday] = parsed
           weekFetched[monday] = nowIso
@@ -258,7 +260,10 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         }
         const refreshed = new Set(Object.keys(lessonWeeks))
         const covered = new Set(weekSpanStart && weekSpanEnd ? mondaysBetween(weekSpanStart, weekSpanEnd) : icalEvents.map((event) => weekMonday(String(event.start || '').slice(0, 10))).filter(Boolean))
-        const uncovered = new Set([...covered].filter((monday) => !refreshed.has(monday)))
+        // iCal only replaces lessons in weeks it has lessons for; a feed without lessons for a week
+        // (or without any) must not empty the scheduler's weeks.
+        const icalLessonWeeks = new Set(icalEvents.filter(isLesson).map((event) => weekMonday(String(event.start || '').slice(0, 10))))
+        const uncovered = new Set([...covered].filter((monday) => !refreshed.has(monday) && icalLessonWeeks.has(monday)))
         events = overlayLessons(events, icalEvents, uncovered)
         exams = carryTimetableExams(icalEvents.filter((event) => !Object.hasOwn(examWeeks, weekMonday(String(event.start || '').slice(0, 10)))), exams)
         for (const monday of covered) {
@@ -271,6 +276,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
   return {
     problem: pages.problem || '',
     grades: parseGradesHtml(pages['21311'] || ''),
+    gradeParser: GRADE_PARSER_VERSION,
     events,
     exams,
     startHtml: pages['1'] || '',

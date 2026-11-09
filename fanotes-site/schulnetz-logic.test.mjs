@@ -96,6 +96,8 @@ import {
 const FIXTURE_TODAY = '2026-11-01'
 const diffSnapshots = (previous, next, settings = {}, today = FIXTURE_TODAY, now) => diffSnapshotsAt(previous, next, settings, today, now)
 import { scrapeWithSession } from './schulnetz-web.mjs'
+import { gzipSync } from 'node:zlib'
+import { GRADE_PARSER_VERSION, SNAPSHOT_JSON_LIMIT, UPLOAD_LIST_BURST, decodeRequestJson, gradeDiffBase, mergeEventsById, uploadDiffBase } from './schulnetz-logic.mjs'
 
 const marks = [
   { mark: 5.5, weight: 1 },
@@ -2536,3 +2538,130 @@ test('a scrape loads every semester week with each page\'s printed transid and n
   assert.ok(retry.calls.some((url) => url.includes('scheduler_processor') && url.includes('min_date=2026-11-23')))
   assert.ok(retry.result.weekRead['2026-11-23'])
 })
+
+// --- Lessons survive later reads; every grade row is read (beta.17 field reports) ---
+
+const realIdLessons = (mondays) => mondays.flatMap((monday) => [0, 1, 2, 3, 4].flatMap((d) => [0, 1, 2].map((slot) => {
+  const day = addDays(monday, d)
+  const clock = ['07:45', '08:35', '09:40'][slot]
+  // Schulnetz numbers the lessons of a week and reuses those ids every week.
+  return { id: String(d * 3 + slot + 1), start: `${day}T${clock}:00`, end: `${day}T${clock}:00`, text: `Fach ${slot}`, eventType: '0_stp', teachers: [], room: '' }
+})))
+
+test('appointments merge by id without dropping lessons that reuse their id every week', () => {
+  const lessons = realIdLessons(['2026-11-02', '2026-11-09', '2026-11-16'])
+  const appointment = { id: 'T1', start: '2026-11-12T08:00:00', end: '2026-11-12T12:00:00', text: 'Sporttag', eventType: 'event' }
+  const merged = mergeEventsById([...lessons, appointment], [{ ...appointment, text: 'Sporttag (verschoben)' }, { ...appointment, id: 'T2' }])
+  assert.equal(merged.filter(isLesson).length, 45)
+  for (const week of ['2026-11-02', '2026-11-09', '2026-11-16']) assert.equal(merged.filter((event) => isLesson(event) && weekMondayKey(event.start) === week).length, 15, week)
+  assert.equal(merged.find((event) => event.id === 'T1').text, 'Sporttag (verschoben)')
+  assert.ok(merged.some((event) => event.id === 'T2'))
+})
+
+test('a scheduler answer for another week never empties the requested week', async () => {
+  const lessonXml = (monday) => `<data>${realIdLessons([monday]).map((event) => `<event id="${event.id}"><start_date>${event.start.slice(0, 10)} ${event.start.slice(11, 16)}</start_date><end_date>${event.start.slice(0, 10)} ${event.start.slice(11, 16)}</end_date><text>${event.text}</text><event_type>0_stp</event_type></event>`).join('')}</data>`
+  const fetchImpl = async (url) => {
+    const target = String(url)
+    const q = Object.fromEntries(new URL(target).searchParams)
+    let body = `<html><body>${['1', '21311', '21111', '21411', '21200', '22202', '22108', '21312'].map((p) => `<a href="index.php?pageid=${p}&amp;id=f1a2b3c4d5e6f708&amp;transid=d1e2f3">x</a>`).join('')}</body></html>`
+    // The scheduler ignores the requested range and always answers with the week of 9 November.
+    if (target.includes('scheduler_processor')) body = q.pageid === '22202' && q.transid === 'a1b2c3' ? lessonXml('2026-11-09') : "<?xml version='1.0' encoding='utf-8' ?><data></data>"
+    else if (q.pageid === '22202') body = fixture5141('stundenplan-5141.html')
+    else if (q.pageid === '21312') body = fixture5141('pruefungsplan-5141.html')
+    return { status: 200, headers: { get: () => '' }, text: async () => body }
+  }
+  const stored = realIdLessons(['2026-11-16', '2026-11-23'])
+  const read = await scrapeWithSession('https://www.schulnetz-ag.ch/aksa', { php: 'php', id: 'f1a2b3c4d5e6f708', transid: 'e0e0e0', userAgent: 'test' }, fetchImpl, {
+    today: '2026-11-11', now: '2026-11-11T17:00:00Z', previousEvents: stored, weekFetched: { '2026-11-16': '2026-11-10T07:00:00Z', '2026-11-23': '2026-11-10T07:00:00Z' }, weekRead: { '2026-11-16': '2026-11-10T07:00:00Z', '2026-11-23': '2026-11-10T07:00:00Z' },
+  })
+  for (const week of ['2026-11-09', '2026-11-16', '2026-11-23']) assert.equal(read.events.filter((event) => isLesson(event) && weekMondayKey(event.start) === week).length, 15, week)
+})
+
+test('every grade row of a real-shaped grades page is read, tooltips and pending rows included', async () => {
+  const html = await readFile(new URL('../android/core/src/test/resources/schulnetz/noten-5141.html', import.meta.url), 'utf8')
+  const grades = parseGradesHtml(html)
+  // 8 rows in four courses: plain marks, marks followed by an info tooltip with other numbers, a comma
+  // decimal, rows still waiting for a mark, and a row without date or weight. A course without
+  // grades adds none.
+  assert.equal(grades.length, 8)
+  const by = (title) => grades.find((grade) => grade.title === title)
+  assert.equal(by('Geometrie').mark, 4.25)
+  assert.equal(by('Aufsatz Erörterung').mark, 5)
+  assert.equal(by('Aufsatz Erörterung').weight, 2)
+  assert.equal(by('Kurztest Wurzeln').mark, 4.5)
+  assert.equal(by('Kurztest Wurzeln').weight, 0.5)
+  assert.equal(by('Funktionen').mark, null)
+  assert.equal(by('Genetik').mark, null)
+  assert.equal(by('Vocabulaire').date, '')
+  assert.equal(by('Vocabulaire').weight, 1)
+  assert.ok(grades.every((grade) => grade.mark == null || (grade.mark >= 1 && grade.mark <= 6)))
+  assert.deepEqual([...new Set(grades.map((grade) => grade.courseId))], ['MAT_K99Z_Demo', 'Kurs', 'BIO_K99Z_Demo', 'FRA_K99Z_Demo'])
+})
+
+test('a pending grade is not news, its mark arriving is a new grade', () => {
+  const pending = { id: 'web:MAT:14.10.2026:Funktionen:', course: 'Mathematik', courseId: 'MAT', subject: 'Mathematik', title: 'Funktionen', date: '2026-10-14', mark: null, weight: 1, confirmed: true }
+  const base = { grades: [{ ...pending, id: 'web:MAT:02.09.2026:Algebra:5.5', title: 'Algebra', date: '2026-09-02', mark: 5.5 }] }
+  const withPending = { grades: [...base.grades, pending] }
+  assert.equal(diffSnapshots(base, withPending, {}).filter((change) => change.category === 'grade').length, 0)
+  const marked = { grades: [...base.grades, { ...pending, id: 'web:MAT:14.10.2026:Funktionen:4', mark: 4 }] }
+  const changes = diffSnapshots(withPending, marked, {}).filter((change) => change.category === 'grade')
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0].title, 'Neue Note')
+})
+
+test('grades only the new parser reads are not announced once, later grades are', async () => {
+  const html = await readFile(new URL('../android/core/src/test/resources/schulnetz/noten-5141.html', import.meta.url), 'utf8')
+  const all = parseGradesHtml(html)
+  // What the old parser kept: plain marks only.
+  const old = { grades: all.filter((grade) => ['Algebra 1', 'Kurztest Wurzeln', 'Vocabulaire'].includes(grade.title)) }
+  const next = { grades: all, gradeParser: GRADE_PARSER_VERSION }
+  assert.ok(diffSnapshots(old, next, {}).some((change) => change.category === 'grade'), 'without the reseed the old marks would be announced')
+  assert.equal(diffSnapshots(gradeDiffBase(old, next), next, {}).filter((change) => change.category === 'grade').length, 0)
+  const later = { ...next, grades: [...all, { ...all[0], id: 'web:MAT:11.11.2026:Neu:4', title: 'Neu', date: '2026-11-11', mark: 4 }] }
+  assert.equal(diffSnapshots(gradeDiffBase(next, later), later, {}).filter((change) => change.category === 'grade').length, 1)
+})
+
+test('a semester-sized app snapshot is accepted plain and gzip', async () => {
+  const lessons = realIdLessons(Array.from({ length: 24 }, (_, week) => addDays('2026-08-10', week * 7)))
+    .map((event) => ({ ...event, room: 'Zimmer 101', teachers: ['Lehrperson A'], courseId: '41234', courseName: 'Mathematik Grundlagenfach', timetableText: 'Mathematik Grundlagenfach' }))
+  const body = JSON.stringify({ grades: [], events: lessons, weekRead: {}, weekFetched: {} })
+  assert.ok(body.length > 64 * 1024, 'bigger than the old 64 KB limit')
+  assert.deepEqual(decodeRequestJson(gzipSync(Buffer.from(body)), 'gzip').events.length, lessons.length)
+  assert.throws(() => decodeRequestJson(gzipSync(Buffer.alloc(SNAPSHOT_JSON_LIMIT + 10, 32)), 'gzip'), (error) => error.status === 413)
+  assert.throws(() => decodeRequestJson(Buffer.from(body), 'br'), (error) => error.status === 415)
+  assert.throws(() => decodeRequestJson(Buffer.from('not gzip'), 'gzip'), (error) => error.status === 400)
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-upload-'))
+  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false })
+  try {
+    const guest = await runtime.createGuest('203.0.113.34')
+    await runtime.linkAccount(guest.accountId, { baseUrl: 'https://www.schulnetz-ag.ch/aksa', deviceId: '0123456789abcdef01234567', refreshToken: 'synthetic-refresh-token-long-enough' })
+    const plain = await invokeSchulnetz(runtime, 'PUT', '/api/v1/schulnetz/snapshot', guestHeaders(guest), body)
+    assert.equal(plain.status, 200)
+    const packed = await invokeSchulnetz(runtime, 'PUT', '/api/v1/schulnetz/snapshot', { ...guestHeaders(guest), 'content-encoding': 'gzip' }, gzipSync(Buffer.from(body)))
+    assert.equal(packed.status, 200)
+    const stored = JSON.parse(await readFile(join(root, 'accounts', guest.accountId, 'snapshot.json'), 'utf8'))
+    assert.equal(stored.events.filter(isLesson).length, lessons.length)
+    // Other requests keep the small limit.
+    const big = await invokeSchulnetz(runtime, 'PUT', '/api/v1/schulnetz/settings', guestHeaders(guest), JSON.stringify({ pad: 'x'.repeat(70 * 1024) }))
+    assert.equal(big.status, 413)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('the first upload after uploads were refused announces no absence, message or appointment backlog', () => {
+  const absence = (id) => ({ id, dateFrom: '2026-11-02', dateTo: '2026-11-02', hourFrom: '07:45', hourTo: '08:30', subject: 'Fach', reason: 'Krank', excused: false, acknowledged: false, status: 'offen' })
+  const message = (id) => ({ id, title: 'Termin', body: `Elternabend ${id}`, at: '2026-11-20' })
+  const appointment = (id) => ({ id, start: '2026-11-20T19:00:00', end: '2026-11-20T20:00:00', text: `Anlass ${id}`, eventType: 'event' })
+  const server = { events: realIdLessons(['2026-11-09']), absences: [], messages: [], exams: [] }
+  const upload = { ...server, absences: [absence('a1'), absence('a2')], messages: [message('m1')], events: [...server.events, appointment('t1'), appointment('t2')] }
+  assert.ok(diffSnapshots(server, upload, {}).length > 0, 'without the base the backlog would be announced')
+  assert.equal(diffSnapshots(uploadDiffBase(server, upload), upload, {}).length, 0)
+  // Once the lists are known, a single new absence is news again; a large batch is not.
+  const known = { ...upload }
+  const one = { ...upload, absences: [...upload.absences, absence('a3')] }
+  assert.equal(diffSnapshots(uploadDiffBase(known, one), one, {}).filter((change) => change.category === 'absence').length, 1)
+  const many = { ...upload, absences: [...upload.absences, ...Array.from({ length: UPLOAD_LIST_BURST + 1 }, (_, i) => absence(`b${i}`))] }
+  assert.equal(diffSnapshots(uploadDiffBase(known, many), many, {}).filter((change) => change.category === 'absence').length, 0)
+})
+

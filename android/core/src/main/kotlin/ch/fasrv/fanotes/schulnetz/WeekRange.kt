@@ -281,18 +281,27 @@ fun stampWeeks(previous: Map<String, String>, minDay: String, maxDay: String, no
     return out
 }
 
+/**
+ * Merges [incoming] into [base] by identity: an incoming entry replaces the base entry with the same
+ * identity, new ones are appended. Schulnetz reuses a lesson id in every week (the live timetable had
+ * 43 ids for 669 lessons), so a lesson's identity is its id and its start; an id alone would keep
+ * only the first week's lesson and drop every later one.
+ */
 fun mergeById(base: List<AgendaEvent>, incoming: List<AgendaEvent>): List<AgendaEvent> {
     if (incoming.isEmpty()) return base
-    val incomingById = incoming.associateBy { it.id }
+    val incomingByKey = incoming.associateBy(::mergeKey)
     val seen = mutableSetOf<String>()
     val out = mutableListOf<AgendaEvent>()
     for (event in base) {
-        if (!seen.add(event.id)) continue
-        out += incomingById[event.id] ?: event
+        val key = mergeKey(event)
+        if (!seen.add(key)) continue
+        out += incomingByKey[key] ?: event
     }
-    for (event in incoming) if (seen.add(event.id)) out += event
+    for (event in incoming) if (seen.add(mergeKey(event))) out += event
     return out
 }
+
+private fun mergeKey(event: AgendaEvent): String = if (event.isLesson()) "lesson|${event.id}|${event.start}" else event.id
 
 fun schedulerBodyUsable(body: String): Boolean {
     val trimmed = body.trim()

@@ -379,7 +379,8 @@ class CompanionGraph(private val context: Context) {
                     .onFailure { schulnetzLog.error(it) }
             } else if (remote.linked && !link.value.needsReauth) {
                 val body = runCatching { client.snapshot(session) }.getOrNull()
-                val next = body?.let { parseNormalizedSnapshot(it) }
+                // The server copy can be partial; it never empties lessons or grades this app holds.
+                val next = body?.let { parseNormalizedSnapshot(it) }?.let { ch.fasrv.fanotes.schulnetz.adoptServerSnapshot(previous, it) }
                 if (next != null) publishSnapshot(previous, next, notifySettings())
             }
             if (remote.linked) prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
@@ -391,7 +392,7 @@ class CompanionGraph(private val context: Context) {
             deleteLocalToken()
             prefs.edit().putBoolean("school-linked", true).remove("push-topic").remove("push-server").apply()
             val body = client.snapshot(session)
-            val next = parseNormalizedSnapshot(body) ?: previous
+            val next = parseNormalizedSnapshot(body)?.let { ch.fasrv.fanotes.schulnetz.adoptServerSnapshot(previous, it) } ?: previous
             publishSnapshot(previous, next, notifySettings())
             val changes = runCatching { client.changes(session, prefs.getLong("change-cursor", 0L), probeDeviceKey(fcmToken().orEmpty())) }.getOrNull()
             if (changes != null) applyServerChanges(changes)
@@ -645,7 +646,8 @@ class CompanionGraph(private val context: Context) {
                         prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
                     }
                     val body = runCatching { client.snapshot(session) }.getOrNull()
-                    val next = body?.let { parseNormalizedSnapshot(it) }?.let { keepLoaded(snapshot.value, it) }
+                    // Week by week: an empty, partial or older server week keeps the stored lessons.
+                    val next = body?.let { parseNormalizedSnapshot(it) }?.let { ch.fasrv.fanotes.schulnetz.adoptServerSnapshot(snapshot.value, it) }
                     if (next != null && next.fetchedAt.isNotBlank()) {
                         snapshot.value = next
                         writeCache(next)
@@ -1179,7 +1181,14 @@ class CompanionGraph(private val context: Context) {
         // The demo is never stored.
         if (value.isDemo()) return
         val file = snapshotFile(context)
-        file.writeText(value.toNormalizedJson())
+        // Write beside the cache and rename over it, so a process kill mid-write never leaves a
+        // truncated cache that reads back as "no school data".
+        val temp = File(file.parentFile, "${file.name}.tmp")
+        temp.writeText(value.toNormalizedJson())
+        if (!temp.renameTo(file)) {
+            file.writeText(value.toNormalizedJson())
+            temp.delete()
+        }
     }
 
     private fun readLocalToken(): LocalToken? {

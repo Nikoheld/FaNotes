@@ -49,11 +49,13 @@ class TimetableWeeksFetchTest {
             .joinToString("") { """<a href="index.php?pageid=$it&amp;id=$sessionId&amp;transid=d1e2f3">Seite $it</a>""" } +
         "</body></html>"
 
-    private fun lessons(monday: LocalDate): String = buildString {
+    /** [reusedIds]: ids 1..15 every week, the way the real scheduler numbers a week's lessons. */
+    private fun lessons(monday: LocalDate, reusedIds: Boolean = false): String = buildString {
         append("<data>")
         for (day in 0L..4L) for ((slot, clock) in listOf("07:45" to "08:30", "08:35" to "09:20", "09:40" to "10:25").withIndex()) {
             val date = monday.plusDays(day)
-            append("""<event id="L$date-$slot"><start_date>$date ${clock.first}</start_date><end_date>$date ${clock.second}</end_date><text>Fach $slot</text><zimmerkuerzel>A$slot</zimmerkuerzel><event_type>0_stp</event_type></event>""")
+            val id = if (reusedIds) "${day * 3 + slot + 1}" else "L$date-$slot"
+            append("""<event id="$id"><start_date>$date ${clock.first}</start_date><end_date>$date ${clock.second}</end_date><text>Fach $slot</text><zimmerkuerzel>A$slot</zimmerkuerzel><event_type>0_stp</event_type></event>""")
         }
         append("</data>")
     }
@@ -63,7 +65,15 @@ class TimetableWeeksFetchTest {
 
     private class Recorder(val requests: MutableList<String> = mutableListOf(), val traces: MutableList<String> = mutableListOf())
 
-    private fun read(recorder: Recorder, schedulerWorks: Boolean = true, previous: SchulnetzSnapshot? = null, at: String = fetchedNow): SchulnetzSnapshot {
+    private fun read(
+        recorder: Recorder,
+        schedulerWorks: Boolean = true,
+        previous: SchulnetzSnapshot? = null,
+        at: String = fetchedNow,
+        reusedIds: Boolean = false,
+        answersWeek: LocalDate? = null,
+        gradesPage: Boolean = false,
+    ): SchulnetzSnapshot {
         val loader: (String) -> LoadedPage = { url ->
             recorder.requests += url
             val q = query(url)
@@ -72,11 +82,13 @@ class TimetableWeeksFetchTest {
                     val monday = LocalDate.parse(q.getValue("min_date"))
                     when {
                         !schedulerWorks -> empty
-                        q["pageid"] == "22202" && q["transid"] == "a1b2c3" -> if (monday.toString() in holidays) empty else lessons(monday)
+                        // answersWeek: a scheduler that ignores the requested range.
+                        q["pageid"] == "22202" && q["transid"] == "a1b2c3" -> if (monday.toString() in holidays) empty else lessons(answersWeek ?: monday, reusedIds)
                         q["pageid"] == "21312" && q["transid"] == "b2c3d4" -> exam(monday)
                         else -> empty
                     }
                 }
+                q["pageid"] == "21311" && gradesPage -> fixture("noten-5141.html")
                 q["pageid"] == "22202" -> fixture("stundenplan-5141.html")
                 q["pageid"] == "21312" -> fixture("pruefungsplan-5141.html")
                 q["pageid"] == "22108" && q.containsKey("numRows") -> fixture("terminliste-alle.html")
@@ -154,5 +166,41 @@ class TimetableWeeksFetchTest {
         assertTrue(again.requests.any { it.contains("scheduler_processor.php") && it.contains("min_date=2026-11-23") })
         assertTrue(later.events.any { it.isLesson() && it.start.startsWith("2026-11-23") })
         assertTrue("2026-11-23" in later.weekRead)
+    }
+
+    private fun perWeek(snapshot: SchulnetzSnapshot): Map<String, Int> =
+        snapshot.events.filter { it.isLesson() }.groupingBy { weekMondayKey(it.start).orEmpty() }.eachCount()
+
+    @Test fun lessonsStayThroughLaterSyncsWhenSchulnetzReusesLessonIds() {
+        val first = read(Recorder(), reusedIds = true, gradesPage = true)
+        val loaded = perWeek(first)
+        // Every week read keeps all 15 lessons, though every week uses the ids 1..15 and the
+        // Terminliste is merged in. Before, only the first week's lessons kept their ids.
+        for (week in listOf("2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23", "2026-12-07")) assertEquals(week, 15, loaded[week])
+        assertTrue(first.events.any { !it.isLesson() })
+
+        // A later sync whose scheduler only returns the stale-transid <data></data>: nothing is lost,
+        // and this week's lessons are not replaced by what the page itself drew.
+        val stale = read(Recorder(), schedulerWorks = false, previous = first, at = "2026-11-06T17:40:00Z", reusedIds = true)
+        assertEquals(loaded, perWeek(stale))
+
+        // A scheduler that answers every request with this week's lessons empties no other week.
+        val confused = read(Recorder(), previous = stale, at = "2026-11-07T18:00:00Z", reusedIds = true, answersWeek = LocalDate.parse("2026-11-02"))
+        assertEquals(loaded, perWeek(confused))
+
+        // The widget and planner still see next week.
+        val next = upcomingLessons(confused.events, Instant.parse("2026-11-07T18:00:00Z"), zone, 4)
+        assertTrue(next.isNotEmpty() && next.first().start.startsWith("2026-11-09"))
+        assertFalse(upcomingTimetableUnread(confused, today))
+    }
+
+    @Test fun everyGradeRowIsReadAndNothingIsEverSentToSchulnetz() {
+        val recorder = Recorder()
+        val snapshot = read(recorder, gradesPage = true)
+        assertEquals(8, snapshot.grades.size)
+        assertEquals(3, snapshot.grades.count { it.mark == null })
+        assertEquals(4.25, snapshot.grades.single { it.title == "Geometrie" }.mark)
+        // Read-only: the page's confirm link and mail form are never used, nor any action, save or logout.
+        assertTrue(recorder.requests.none { it.contains("action=") || it.contains("xajax") || it.contains("pageid=9999") || it.contains("23118") })
     }
 }
