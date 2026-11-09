@@ -11,6 +11,9 @@ import { fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, s
 import {
   diffSnapshots as diffSnapshotsAt,
   changeIsOver,
+  lessonSeedWeeks,
+  LESSON_SEED_MIN,
+  TIMETABLE_BURST,
   appointmentHorizon,
   APPOINTMENT_BURST,
   emptyWeekCountsAsRead,
@@ -2354,4 +2357,45 @@ test('a scrape reopens the timetable before its weeks and plans the school year 
   // The scheduler gave lessons, so an empty later week is a real free week.
   const empty = asked.find((monday) => monday > '2026-12-14')
   if (empty) assert.equal(typeof result.weekRead[empty], 'string')
+})
+
+test('a week that gets its timetable for the first time is read silently', () => {
+  // 9 Nov 2026 incident: older reads stamped weeks as read from empty scheduler answers; when the
+  // lessons finally loaded, each one was announced as "Stundenplan geändert" or "Vertretung".
+  const at = new Date('2026-11-09T05:45:00Z')
+  const week = ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13']
+  const lessons = week.flatMap((day, d) => Array.from({ length: 8 }, (_, h) => ({
+    id: `s${d}${h}`, start: `${day}T${String(7 + h).padStart(2, '0')}:45:00`, end: `${day}T${String(8 + h).padStart(2, '0')}:30:00`,
+    text: `Fach ${h}`, room: `R${h}`, teachers: [`T${h}`], courseName: `Fach ${h}`, status: '', eventType: '0_stp',
+  })))
+  const stamps = { '2026-11-09': '2026-11-08T20:00:00Z' }
+  const previous = { grades: [], events: [], exams: [], absences: [], messages: [], weekFetched: stamps, weekRead: stamps }
+  const next = { ...previous, events: lessons, weekFetched: { '2026-11-09': '2026-11-09T05:45:00Z' }, weekRead: { '2026-11-09': '2026-11-09T05:45:00Z' }, fetchedAt: '2026-11-09T05:45:00Z' }
+  assert.deepEqual([...lessonSeedWeeks(previous, next)], ['2026-11-09'])
+  assert.deepEqual(diffSnapshotsAt(previous, next, {}, '2026-11-09', at), [])
+  // Same through the poller's notification baseline, where the week was stored with no lessons.
+  const read = prepareAgendaRead({ '2026-11-09': { fetchedAt: '2026-11-08T20:00:00Z', events: [], exams: [], weekFetched: stamps, examWeekFetched: {} } }, next)
+  const before = { ...previous, events: read.before.events, exams: read.before.exams }
+  assert.deepEqual(diffSnapshotsAt(before, next, {}, '2026-11-09', at), [])
+  // One or two lessons added to an empty week are still news; later changes in a seeded week too.
+  const one = { ...next, events: lessons.slice(0, LESSON_SEED_MIN - 1) }
+  assert.equal(diffSnapshotsAt(previous, one, {}, '2026-11-09', at).filter((c) => c.category === 'timetable').length, LESSON_SEED_MIN - 1)
+  const moved = { ...next, events: lessons.map((l) => l.id === 's40' ? { ...l, room: 'Aula' } : l) }
+  assert.deepEqual(diffSnapshotsAt(next, moved, {}, '2026-11-09', at).map((c) => c.title), ['Raum geändert'])
+  // A whole timetable changing in one read is a reload, not news.
+  const reload = { ...next, events: lessons.map((l) => ({ ...l, room: `${l.room}x` })) }
+  assert.ok(lessons.length > TIMETABLE_BURST)
+  assert.deepEqual(diffSnapshotsAt(next, reload, {}, '2026-11-09', at), [])
+})
+
+test('an exam-like appointment that stays listed is not reported as cancelled', () => {
+  const at = new Date('2026-11-09T05:45:00Z')
+  const listed = { id: 'term1', start: '2026-12-01T08:00:00', end: '2026-12-01T12:00:00', text: 'Prüfung Biologie', room: '', teachers: [], courseName: '', status: '', eventType: 'event' }
+  // Another exam keeps the exam list non-empty; an empty list never cancels anything.
+  const other = { id: 'x9', start: '2026-12-08T10:00:00', end: '2026-12-08T10:45:00', text: 'Chemie', room: 'R1', teachers: [], courseName: 'Chemie', status: '', eventType: '1_pru' }
+  const snapshot = { grades: [], events: [listed], exams: [other], absences: [], messages: [] }
+  assert.equal(isExamLike(listed), true)
+  assert.deepEqual(diffSnapshotsAt(snapshot, snapshot, {}, '2026-11-09', at), [])
+  // Gone from the list and from the exams: that is a cancellation.
+  assert.deepEqual(diffSnapshotsAt(snapshot, { ...snapshot, events: [] }, {}, '2026-11-09', at).map((c) => c.title), ['Prüfung entfällt'])
 })

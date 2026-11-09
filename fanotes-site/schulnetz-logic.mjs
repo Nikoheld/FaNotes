@@ -1135,7 +1135,7 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   if (!previous) return []
   // Master off: do not build rows. The caller still stores the snapshot.
   if (settings?.enabled === false) return []
-  const freshWeeks = new Set([...introducedWeeks(previous, next), ...legacyBackfillWeeks(previous, next)])
+  const freshWeeks = new Set([...introducedWeeks(previous, next), ...legacyBackfillWeeks(previous, next), ...lessonSeedWeeks(previous, next)])
   previous = { ...previous, grades: withoutSummaryGrades(previous.grades) }
   next = { ...next, grades: withoutSummaryGrades(next.grades) }
   const prefs = {
@@ -1149,9 +1149,16 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   const changes = []
   if (prefs.grades) diffGradeList(previous.grades || [], next.grades || [], changes)
   if (prefs.timetable) {
-    diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', changes, freshWeeks, next.exams || [])
+    const lessonChanges = []
+    diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', lessonChanges, freshWeeks, next.exams || [])
+    // So many lesson changes in one read is the timetable reloading, not news.
+    if (lessonChanges.length <= TIMETABLE_BURST) changes.push(...lessonChanges)
   }
-  if (prefs.exams) diffExams([...(previous.exams || []), ...(previous.events || []).filter(isExamLike)], next.exams || [], changes, freshWeeks)
+  if (prefs.exams) {
+    // An exam-like appointment that is still listed has not been cancelled.
+    const stillListed = new Set((next.events || []).map((event) => event.id))
+    diffExams([...(previous.exams || []), ...(previous.events || []).filter((event) => isExamLike(event) && !stillListed.has(event.id))], next.exams || [], changes, freshWeeks)
+  }
   if (prefs.absences) {
     const before = new Set((previous.absences || []).map((item) => item.id))
     for (const absence of next.absences || []) {
@@ -2128,3 +2135,22 @@ export const fallbackSchoolSpan = (events = [], vacations = [], today = zurichTo
   const reach = days.at(-1) < high ? days.at(-1) : high
   return { start, end: reach > probeEnd ? reach : probeEnd }
 }
+
+/** Lessons that must appear at once in an empty week before it counts as the timetable loading. */
+export const LESSON_SEED_MIN = 3
+/**
+ * Weeks whose lessons appear for the first time, several at once. That is the timetable loading (a
+ * week an older read stamped as empty, or a week further ahead), not a change, so it is read
+ * silently. One or two lessons added to an empty week are still news.
+ */
+export const lessonSeedWeeks = (previous, next) => {
+  const had = new Set((previous?.events || []).filter(isLesson).map((event) => weekMondayKey(event.start)).filter(Boolean))
+  const count = new Map()
+  for (const event of (next?.events || []).filter(isLesson)) {
+    const week = weekMondayKey(event.start)
+    if (week && !had.has(week)) count.set(week, (count.get(week) || 0) + 1)
+  }
+  return new Set([...count].filter(([, n]) => n >= LESSON_SEED_MIN).map(([week]) => week))
+}
+/** More lesson changes than this in one read is the timetable reloading, not news. */
+export const TIMETABLE_BURST = 20

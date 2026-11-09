@@ -126,23 +126,28 @@ fun diffSnapshots(
     if (previous == null) return emptyList()
     // The master switch drops the diff before any row is built. Callers still store the snapshot.
     if (!settings.enabled) return emptyList()
-    val freshWeeks = introducedWeeks(previous, next) + legacyBackfillWeeks(previous, next)
+    val freshWeeks = introducedWeeks(previous, next) + legacyBackfillWeeks(previous, next) + lessonSeedWeeks(previous, next)
     val changes = mutableListOf<SchulnetzChange>()
     if (settings.grades) diffGrades(previous.grades.withoutSummaryGrades(), next.grades.withoutSummaryGrades(), changes)
     if (settings.timetable) {
+        val lessonChanges = mutableListOf<SchulnetzChange>()
         diffAgenda(
             previous.events.filter { it.isLesson() },
             next.events.filter { it.isLesson() },
             category = "timetable",
             created = "Stundenplan geändert",
             removed = "Lektion entfernt",
-            changes = changes,
+            changes = lessonChanges,
             skipWeeks = freshWeeks,
             spareAgainst = next.exams,
         )
+        // So many lesson changes in one read is the timetable reloading, not news.
+        if (lessonChanges.size <= TIMETABLE_BURST) changes += lessonChanges
     }
     if (settings.exams) {
-        diffExams(previous.exams + previous.events.filter { it.isExamLike() }, next.exams, changes, freshWeeks)
+        // An exam-like appointment that is still listed has not been cancelled.
+        val stillListed = next.events.mapTo(HashSet()) { it.id }
+        diffExams(previous.exams + previous.events.filter { it.isExamLike() && it.id !in stillListed }, next.exams, changes, freshWeeks)
     }
     if (settings.absences) {
         val before = previous.absences.associateBy { it.id }

@@ -80,4 +80,36 @@ class SchoolTimingTest {
         assertEquals(WeekSpan(LocalDate.parse("2026-10-12"), LocalDate.parse("2026-12-07")), fallbackSchoolSpan(listOf(appointment("z", "2026-11-10")), emptyList(), today))
         assertNull(fallbackSchoolSpan(emptyList(), emptyList(), today))
     }
+
+    private fun lesson(id: String, start: String, end: String, room: String) =
+        AgendaEvent(id = id, start = start, end = end, text = "Fach", comment = "", room = room, teachers = listOf("T"), courseId = "", courseName = "Fach", status = "", eventType = "0_stp", color = "", timetableText = "")
+
+    @Test fun aWeekThatGetsItsTimetableForTheFirstTimeIsReadSilently() {
+        // 9 Nov 2026: weeks stamped as read from empty answers announced every lesson once it loaded.
+        val days = listOf("2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13")
+        val lessons = days.flatMapIndexed { d, day ->
+            (0 until 8).map { h -> lesson("s$d$h", "${day}T%02d:45:00".format(7 + h), "${day}T%02d:30:00".format(8 + h), "R$h") }
+        }
+        val stamps = mapOf("2026-11-09" to "2026-11-08T20:00:00Z")
+        val previous = blank.copy(weekFetched = stamps, weekRead = stamps)
+        val next = previous.copy(events = lessons, weekFetched = mapOf("2026-11-09" to "2026-11-09T05:45:00Z"))
+        assertEquals(setOf("2026-11-09"), lessonSeedWeeks(previous, next))
+        assertTrue(diffSnapshots(previous, next, NotifySettings(), today, at).isEmpty())
+        val few = next.copy(events = lessons.filter { it.start.startsWith("2026-11-10") }.take(LESSON_SEED_MIN - 1))
+        assertEquals(LESSON_SEED_MIN - 1, diffSnapshots(previous, few, NotifySettings(), today, at).count { it.category == "timetable" })
+        val moved = next.copy(events = lessons.map { if (it.id == "s47") it.copy(room = "Aula") else it })
+        assertEquals(listOf("Raum geändert"), diffSnapshots(next, moved, NotifySettings(), today, at).map { it.title })
+        assertTrue(lessons.size > TIMETABLE_BURST)
+        val reload = next.copy(events = lessons.map { it.copy(room = it.room + "x") })
+        assertTrue(diffSnapshots(next, reload, NotifySettings(), today, at).isEmpty())
+    }
+
+    @Test fun anExamLikeAppointmentThatStaysListedIsNotCancelled() {
+        val listed = appointment("term1", "2026-12-01").copy(text = "Prüfung Biologie")
+        val other = exam("x9", "2026-12-08T10:00:00", "2026-12-08T10:45:00")
+        val snapshot = blank.copy(events = listOf(listed), exams = listOf(other))
+        assertTrue(listed.isExamLike())
+        assertTrue(diffSnapshots(snapshot, snapshot, NotifySettings(), today, at).isEmpty())
+        assertEquals(listOf("Prüfung entfällt"), diffSnapshots(snapshot, snapshot.copy(events = emptyList()), NotifySettings(), today, at).map { it.title })
+    }
 }
