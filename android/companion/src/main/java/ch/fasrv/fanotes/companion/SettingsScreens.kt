@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes.companion
 
+import ch.fasrv.fanotes.schulnetz.SchoolProvider
 import android.Manifest
 import android.content.Intent
 import android.os.Build
@@ -55,6 +56,10 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
     val context = LocalContext.current
     val sync by model.graph.engine.state.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf("") }
+    var connectionMenu by remember { mutableStateOf<String?>(null) }
+    var renameTarget by remember { mutableStateOf<String?>(null) }
+    var renameDraft by remember { mutableStateOf("") }
+    var addConnection by remember { mutableStateOf(false) }
     var deleteAccount by remember { mutableStateOf(false) }
     var deletePassword by remember { mutableStateOf("") }
     if (page == Page.Diagnostics) {
@@ -159,22 +164,52 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 sync.error?.let { error -> item(key = "sync-error") { Spacer(Modifier.height(12.dp)); InfoBanner(t(R.string.sync_needs_attention), shownText(error), t(R.string.try_again), true, onAction = model::sync) } }
                 if (sync.conflicts.isNotEmpty()) item(key = "conflicts") { Spacer(Modifier.height(12.dp)); InfoBanner(t(R.string.conflict_copies_kept), tp(R.plurals.conflict_copies, sync.conflicts.size, sync.conflicts.size), tone = StateTone.Warning) }
             }
-            item(key = "school-head") { SectionLabel(t(R.string.school_connection)) }
+            // Every connection: show it, rename it, sign in again or remove it; add another one.
+            item(key = "connections-head") { SectionLabel(t(R.string.school_connections)) }
+            item(key = "connections") {
+                Group {
+                    model.connections.connections.forEachIndexed { index, connection ->
+                        if (index > 0) FineDivider()
+                        val shown = connection.id == model.connections.active?.id
+                        val provider = if (connection.provider == SchoolProvider.TAM) t(R.string.connection_provider_tam) else t(R.string.connection_provider_schulnetz)
+                        SettingRow(Icons.Outlined.School, connection.label, if (shown) t(R.string.connection_row_shown, provider) else provider) { connectionMenu = connection.id }
+                    }
+                    if (model.connections.connections.isNotEmpty()) FineDivider()
+                    SettingRow(Icons.Outlined.Add, t(R.string.add_connection), t(R.string.connection_add_body)) { addConnection = true }
+                }
+            }
+            item(key = "school-head") { SectionLabel(model.connections.active?.label ?: t(R.string.school_connection)) }
             item(key = "school") {
                 Group {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             IconTile(Icons.Outlined.School, StateTone.Accent, 44.dp)
                             Column {
-                                Text(t(R.string.schulnetz), style = MaterialTheme.typography.titleLarge)
+                                Text(model.connections.active?.label ?: t(R.string.schulnetz), style = MaterialTheme.typography.titleLarge)
                                 StatusLine(when { model.demo -> t(R.string.demo_active_title); model.link.needsReauth -> t(R.string.sign_in_again_to_refresh); model.link.linked -> t(R.string.connected); else -> t(R.string.not_connected) },
                                     when { model.demo -> StateTone.Warning; model.link.needsReauth -> StateTone.Warning; model.link.linked -> StateTone.Accent; else -> StateTone.Neutral })
                             }
                         }
                         Text(t(R.string.read_your_school_information_here_manage_officia), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 14.dp))
+                        val tam = model.shownProvider == SchoolProvider.TAM
                         OutlinedTextField(model.baseUrl, { model.baseUrl = it }, Modifier.fillMaxWidth(), label = { Text(t(R.string.school_address)) }, singleLine = true, shape = MaterialTheme.shapes.small, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                        PrimaryButton(if (model.link.needsReauth) t(R.string.sign_in_to_schulnetz_again) else if (model.link.linked) t(R.string.open_school_session) else t(R.string.connect_with_microsoft), { model.requestVisibleLogin("connections") },
+                        PrimaryButton(
+                            when {
+                                tam && model.link.linked && !model.link.needsReauth -> t(R.string.sign_in_again)
+                                tam -> t(R.string.connect_tam)
+                                model.link.needsReauth -> t(R.string.sign_in_to_schulnetz_again)
+                                model.link.linked -> t(R.string.open_school_session)
+                                else -> t(R.string.connect_with_microsoft)
+                            },
+                            { model.requestVisibleLogin("connections") },
                             Modifier.fillMaxWidth().padding(top = 14.dp), enabled = !model.busy)
+                        if (tam) {
+                            // Appointments come from the user's own TAM calendar export, when they add it.
+                            var link by remember(model.tamCalendarLink) { mutableStateOf(model.tamCalendarLink) }
+                            Text(t(R.string.tam_calendar_link_body), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 14.dp))
+                            OutlinedTextField(link, { link = it }, Modifier.fillMaxWidth().padding(top = 6.dp), label = { Text(t(R.string.tam_calendar_link)) }, singleLine = true, shape = MaterialTheme.shapes.small, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                            SecondaryButton(t(R.string.save), { model.saveTamCalendarLink(link) }, Modifier.fillMaxWidth().padding(top = 8.dp), enabled = !model.busy)
+                        }
                         Text(t(R.string.school_data_updated, updatedLabel(model.snapshot.fetchedAt)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
                     }
                     if (model.demo) {
@@ -381,7 +416,65 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
         else -> Unit
     }
     }
-    if (confirm.isNotBlank()) {
+    connectionMenu?.let { id ->
+        val connection = model.connections.byId(id)
+        if (connection == null) { connectionMenu = null } else AlertDialog(
+            onDismissRequest = { connectionMenu = null },
+            shape = MaterialTheme.shapes.extraLarge,
+            title = { Text(connection.label, style = MaterialTheme.typography.headlineSmall) },
+            text = {
+                Column {
+                    if (connection.id != model.connections.active?.id) SettingRow(Icons.Outlined.Visibility, t(R.string.show_connection), "", chevron = false) { model.showConnection(id); connectionMenu = null }
+                    SettingRow(Icons.Outlined.Edit, t(R.string.rename_connection), "", chevron = false) { renameDraft = connection.label; renameTarget = id; connectionMenu = null }
+                    SettingRow(Icons.Outlined.Login, t(R.string.sign_in_again), "", chevron = false) { model.reloginConnection(id); connectionMenu = null }
+                    SettingRow(Icons.Outlined.DeleteOutline, t(R.string.remove_connection), "", tone = StateTone.Error, chevron = false) { confirm = "remove:$id"; connectionMenu = null }
+                }
+            },
+            confirmButton = { TextButton(onClick = { connectionMenu = null }) { Text(t(R.string.close)) } },
+        )
+    }
+    renameTarget?.let { id ->
+        AlertDialog(
+            onDismissRequest = { renameTarget = null },
+            shape = MaterialTheme.shapes.extraLarge,
+            title = { Text(t(R.string.rename_connection), style = MaterialTheme.typography.headlineSmall) },
+            text = { OutlinedTextField(renameDraft, { renameDraft = it.take(40) }, Modifier.fillMaxWidth(), label = { Text(t(R.string.connection_name)) }, singleLine = true, shape = MaterialTheme.shapes.small) },
+            confirmButton = { TextButton(onClick = { model.renameConnection(id, renameDraft); renameTarget = null }) { Text(t(R.string.save)) } },
+            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text(t(R.string.cancel)) } },
+        )
+    }
+    if (addConnection) {
+        var provider by remember { mutableStateOf(SchoolProvider.SCHULNETZ) }
+        var address by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { addConnection = false },
+            shape = MaterialTheme.shapes.extraLarge,
+            title = { Text(t(R.string.add_connection), style = MaterialTheme.typography.headlineSmall) },
+            text = {
+                Column {
+                    SegmentedTabs(listOf(SchoolProvider.SCHULNETZ.wire to t(R.string.connection_provider_schulnetz), SchoolProvider.TAM.wire to t(R.string.connection_provider_tam)), provider.wire, { provider = SchoolProvider.of(it) }, Modifier.fillMaxWidth())
+                    OutlinedTextField(address, { address = it }, Modifier.fillMaxWidth().padding(top = 12.dp), singleLine = true, shape = MaterialTheme.shapes.small,
+                        label = { Text(if (provider == SchoolProvider.TAM) t(R.string.connection_address_tam_hint) else t(R.string.connection_address_schulnetz_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+                    Text(t(R.string.connection_add_body), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
+                }
+            },
+            confirmButton = { TextButton(onClick = { addConnection = false; model.addConnection(provider, address) }, enabled = address.isNotBlank() && !model.busy) { Text(t(R.string.add_connection)) } },
+            dismissButton = { TextButton(onClick = { addConnection = false }) { Text(t(R.string.cancel)) } },
+        )
+    }
+    if (confirm.startsWith("remove:")) {
+        val id = confirm.removePrefix("remove:")
+        ConfirmDialog(
+            model.connections.byId(id)?.label ?: t(R.string.remove_connection),
+            t(R.string.remove_connection_body),
+            t(R.string.remove_connection),
+            { confirm = "" },
+        ) {
+            model.removeConnection(id)
+            confirm = ""
+        }
+    } else if (confirm.isNotBlank()) {
         val deleteKanti = confirm == "delete-kanti"
         ConfirmDialog(
             when (confirm) {

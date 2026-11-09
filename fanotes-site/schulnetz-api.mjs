@@ -44,6 +44,7 @@ import {
 } from './schulnetz-logic.mjs'
 import { establishWebSession, scrapeWithSession } from './schulnetz-web.mjs'
 import {
+  connectionRouteKey,
   FCM_ACCOUNT_FILE,
   exchangeServiceAccount,
   fcmDataMessage,
@@ -577,7 +578,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     let dropped = false
     for (const token of tokens) {
       try {
-        const result = await sendFcm(token, event, priority)
+        const result = await sendFcm(token, event, priority, { route: connectionRouteKey(accountId) })
         if (result?.drop) {
           link.fcmTokens = (link.fcmTokens || []).filter((item) => item !== token)
           dropped = true
@@ -593,7 +594,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (event !== 'sync' && event !== 'reauth' && event !== 'test') return { rejected: true }
     if (!isValidFcmToken(token) || !(link.fcmTokens || []).includes(token)) return { rejected: true }
     try {
-      const result = await sendFcm(token, event, priority, extra)
+      const result = await sendFcm(token, event, priority, { route: connectionRouteKey(accountId), ...extra })
       if (result?.drop) {
         link.fcmTokens = (link.fcmTokens || []).filter((item) => item !== token)
         await saveLink(accountId, link)

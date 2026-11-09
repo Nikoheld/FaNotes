@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package ch.fasrv.fanotes.companion
 
+import androidx.compose.foundation.horizontalScroll
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -472,6 +473,14 @@ private fun ScheduleScreen(model: CompanionModel) {
                 !model.planWeek -> dateLabel(model.day)
                 plannerWeekIsCurrent(model.day, today) -> t(R.string.this_week)
                 else -> weekRange
+            }
+            // Several school connections: switch the one shown here; each keeps syncing on its own.
+            if (model.connections.connections.size > 1) item(key = "connection-switch") {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    model.connections.connections.forEach { connection ->
+                        Pill(connection.label, connection.id == model.connections.active?.id) { model.showConnection(connection.id) }
+                    }
+                }
             }
             item(key = "heading") { Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(heading, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).padding(end = 8.dp).semantics { heading() }, maxLines = 2, overflow = TextOverflow.Ellipsis)

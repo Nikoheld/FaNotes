@@ -72,6 +72,10 @@
           <p>Du meldest dich in der App auf der Anmeldeseite von Microsoft an. Kanti+ sieht und speichert dein Passwort nicht. Nach der Anmeldung übergibt die App ausgewählte Microsoft-Sitzungscookies an den fasrv-Server. Der Server bewahrt sie zusammen mit seiner eigenen Schulnetz-Sitzung verschlüsselt auf (AES-256-GCM) und ruft damit etwa alle drei Minuten deine Schuldaten ab.</p>
           <p>Die Cookies werden spätestens 14 Tage nach deiner letzten Anmeldung in der App gelöscht. Danach bittet dich die App, dich neu anzumelden.</p>
 
+          <h3>2a. TAM-Intranet und mehrere Verbindungen</h3>
+          <p>Du kannst mehrere Schulverbindungen hinzufügen, auch für das TAM-Intranet (<code>intranet.tam.ch</code>). Jede Verbindung meldet sich einzeln an und hat auf dem Gerät eigene Anmeldedaten, Schuldaten, Einstellungen und Mitteilungen. Jede weitere Schulnetz-Verbindung erhält auf dem fasrv-Server eine eigene anonyme Kennung.</p>
+          <p>Beim TAM-Intranet meldest du dich auf der Seite deiner Schule an; Kanti+ sieht dein Passwort nicht. Kanti+ liest Stundenplan, Prüfungen, Absenzen, Noten und, wenn du ihn hinzufügst, deinen TAM-Kalenderlink <strong>nur auf deinem Gerät</strong>. Diese Daten und die TAM-Anmeldung werden nicht an den fasrv-Server gesendet. Der Kalenderlink wird auf dem Gerät verschlüsselt gespeichert.</p>
+
           <h3>3. Geräte- und Benachrichtigungsdaten</h3>
           <ul>
             <li><strong>Anonyme Kennung:</strong> Beim ersten Start legt die App auf dem Server eine anonyme Kennung an, auch ohne Schulnetz-Verbindung. Der Server speichert davon nur einen Hash-Wert.</li>
@@ -159,6 +163,7 @@
             <ul>
               <li><strong>School data from Schulnetz:</strong> grades, timetable, appointments, exams, absences, messages, account statement and, if provided, name and class. It is stored on your device and on the fasrv server, so the server can detect changes and notify you. This includes a list of the last 200 notified changes.</li>
               <li><strong>Schulnetz sign-in:</strong> you sign in on Microsoft's page; Kanti+ never sees or stores your password. Selected Microsoft session cookies and the server's Schulnetz session are stored on the server, encrypted with AES-256-GCM, and used to read your data about every three minutes. The cookies are deleted at the latest 14 days after your last sign-in in the app.</li>
+              <li><strong>TAM intranet and several connections:</strong> you can add several school connections, including the TAM intranet (<code>intranet.tam.ch</code>). Each connection signs in on its own and keeps its own sign-in, school data, settings and notices on the device; each further Schulnetz connection has its own anonymous identity on the fasrv server. For the TAM intranet you sign in on your school's page and Kanti+ never sees your password. Timetable, exams, absences, grades and, if you add it, your TAM calendar link are read <strong>on your device only</strong> and are not sent to the fasrv server. The calendar link is stored encrypted on the device.</li>
               <li><strong>Device and push data:</strong>
                 <ul>
                   <li>an anonymous identity created on first start, of which the server stores only a hash;</li>

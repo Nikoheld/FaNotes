@@ -1,7 +1,7 @@
 // Firebase Cloud Messaging HTTP v1. A missing service account skips the send.
 // Payloads are data messages: an event name, never a grade.
 
-import { createSign } from 'node:crypto'
+import { createHash, createSign } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { credentialOr } from './credentials.mjs'
 
@@ -69,9 +69,18 @@ export const fcmPriorityForChanges = (changes) => {
   return null
 }
 
+/**
+ * Which school connection a push belongs to. A device can hold several connections, each with its
+ * own server identity; the push names it by this key (a hash, so no account id travels through FCM).
+ * The app computes the same key: android core `connectionRouteKey`.
+ */
+export const connectionRouteKey = (accountId) => createHash('sha256').update(`kanti-route:${String(accountId || '')}`).digest('hex').slice(0, 16)
+
 export const fcmDataMessage = (token, event, options = {}) => {
   const priority = options.priority === 'NORMAL' ? 'NORMAL' : 'HIGH'
   const data = { event: String(event) }
+  const route = typeof options.route === 'string' && /^[a-f0-9]{16}$/u.test(options.route) ? options.route : ''
+  if (route) data.route = route
   if (options.probe === true) data.probe = '1'
   if (typeof options.serverAt === 'string' && options.serverAt) data.serverAt = options.serverAt
   if (typeof options.correlation === 'string' && /^probe:[0-9]{1,20}$/u.test(options.correlation)) data.correlation = options.correlation
@@ -81,7 +90,8 @@ export const fcmDataMessage = (token, event, options = {}) => {
       data,
       android: {
         priority,
-        collapse_key: options.probe === true ? 'kanti-probe' : (COLLAPSE_KEY[event] || 'kanti-sync'),
+        // One collapse slot per connection: two connections' pushes while offline must not replace each other.
+        collapse_key: `${options.probe === true ? 'kanti-probe' : (COLLAPSE_KEY[event] || 'kanti-sync')}${route ? `-${route}` : ''}`,
         ttl: priority === 'HIGH' ? '21600s' : '3600s',
       },
     },

@@ -46,7 +46,8 @@ data class LoadedPage(
  * One WebView for every schulNetz read. The session cookie is IP-bound, so pages
  * must use the same WebView stack as the login instead of a second HTTP client.
  */
-class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
+/** The headless browser of one connection. [slot] picks its WebView profile (its own cookie jar). */
+class SchulnetzBrowser(context: Context, private val log: SchulnetzLog, private val profileSlot: String = ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT) {
     private val app = context.applicationContext
     private val webHandler = Handler(Looper.getMainLooper())
     private val generation = AtomicInteger()
@@ -74,6 +75,31 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
         log.info("load end kind=$kind page=${pageToken(page.finalUrl.ifBlank { url })} status=${page.status} bytes=${page.body.length} tables=${tableCount(page.body)} durationMs=$duration timeout=$timedOut cancelled=$cancelled mainThread=false error=${page.error.orEmpty()}")
         log.info(describe(url, page))
         return page
+    }
+
+    /**
+     * Loads [url], runs [script] in the page (for example expanding collapsed grid rows, which makes
+     * the page load their content), and reads the page [settleMs] later.
+     */
+    fun loadAfterScript(url: String, script: String, settleMs: Long): LoadedPage {
+        if (Looper.myLooper() == Looper.getMainLooper()) return LoadedPage(url, url, 0, "", "main-thread")
+        val landed = navigate(url)
+        if (landed.error != null || landed.body.isBlank()) return landed
+        val slot = open(url)
+        val js = """
+            (function(){
+              var gen = ${JSONObject.quote(slot.nonce)};
+              try { $script } catch (e) {}
+              setTimeout(function(){
+                window.FanotesHtml.deliverFetch(String(gen), "200", String(location.href), document.documentElement ? document.documentElement.outerHTML : "");
+              }, ${settleMs.coerceIn(200L, 8_000L)});
+            })()
+        """.trimIndent()
+        webHandler.post {
+            if (slot.generation != generation.get() || slot.done.get()) return@post
+            ensure().evaluateJavascript(js, null)
+        }
+        return await(slot, url)
     }
 
     private fun navigate(url: String): LoadedPage {
@@ -160,7 +186,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
         if (!slot.done.compareAndSet(false, true)) return
         slot.page = page
         slot.latch.countDown()
-        webHandler.post { CookieManager.getInstance().flush() }
+        webHandler.post { runCatching { SchoolCookies.manager(profileSlot).flush() } }
     }
 
     internal fun hasPendingLoad(): Boolean = pending?.done?.get() == false
@@ -244,10 +270,20 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
         check(Looper.myLooper() == Looper.getMainLooper())
         web?.let { return it }
         val created = webViewFactory(app)
-        prepareWebView(created)
+        // Before anything loads: a further connection reads in its own profile.
+        SchoolCookies.bind(created, profileSlot)
+        prepareWebView(created, profileSlot)
         created.addJavascriptInterface(Bridge(), "FanotesHtml")
         web = created
         return created
+    }
+
+    /** Destroys this browser's WebView (a removed connection), so its profile can be deleted. */
+    fun close() {
+        webHandler.post {
+            web?.let { runCatching { it.stopLoading(); it.destroy() } }
+            web = null
+        }
     }
 
     private fun currentUrl(): String {
@@ -263,7 +299,7 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
     }
 
     private fun describe(requested: String, page: LoadedPage): String {
-        val names = runCatching { cookieNames(CookieManager.getInstance().getCookie(page.finalUrl.ifBlank { requested }).orEmpty()) }.getOrDefault(emptyList())
+        val names = runCatching { cookieNames(SchoolCookies.manager(profileSlot).getCookie(page.finalUrl.ifBlank { requested }).orEmpty()) }.getOrDefault(emptyList())
         val classified = classifySchulnetzPage(page.finalUrl.ifBlank { requested }, page.body)
         return "load status=${page.status} rule=${classified.rule} class=${classified.problem} bytes=${page.body.length} tables=${tableCount(page.body)} family=${localAddressFamily()} cookieNames=${names.joinToString("|")} error=${page.error.orEmpty()} page=${pageToken(requested)} final=${pageToken(page.finalUrl)}"
     }
@@ -393,6 +429,8 @@ class SchulnetzBrowser(context: Context, private val log: SchulnetzLog) {
         private fun navigationAllowed(target: String): Boolean {
             if (webReadAllowed(target)) return true
             val host = runCatching { URI(target).host }.getOrNull()?.lowercase().orEmpty()
+            // A TAM connection reads intranet pages; actions and logout stay blocked.
+            if (host == ch.fasrv.fanotes.schulnetz.TAM_HOST && target.startsWith("https://") && !ch.fasrv.fanotes.schulnetz.tamActionBlocked(target)) return true
             return isMicrosoftLoginHost(host)
         }
     }

@@ -1,5 +1,9 @@
 package ch.fasrv.fanotes.companion
 
+import ch.fasrv.fanotes.schulnetz.tamSchoolRoot
+import ch.fasrv.fanotes.schulnetz.MAX_CONNECTIONS
+import ch.fasrv.fanotes.schulnetz.SchoolProvider
+import ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
@@ -254,6 +258,9 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     /** Invented school data for app review; see CompanionGraph.demoActive(). */
     var demo by mutableStateOf(graph.demoActive())
     var link by mutableStateOf(graph.link.value)
+    /** Every school connection and which one the app shows. */
+    var connections by mutableStateOf(graph.connections.value)
+    var tamCalendarLink by mutableStateOf("")
     var notes by mutableStateOf<List<VaultNode>>(emptyList())
     var noteFolder by mutableStateOf("")
     var writtenNotes by mutableStateOf(0)
@@ -312,6 +319,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             }
         }
         viewModelScope.launch { graph.link.collect { link = it } }
+        viewModelScope.launch { graph.connections.collect { connections = it } }
         viewModelScope.launch { graph.docSearch.status.collect { docStatus = it } }
         viewModelScope.launch { graph.snapshotReady.collect { ready -> if (ready && snapshot === graph.snapshot.value) schoolReady = true } }
         viewModelScope.launch {
@@ -500,7 +508,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         busy = true
         viewModelScope.launch {
             try {
-                graph.refreshSchulnetz("settings")
+                // The refresh button reads the connection the app shows.
+                graph.refreshShown("settings")
                 message = t(R.string.school_data_refreshed)
             } catch (error: Exception) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
@@ -530,6 +539,17 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         graph.trail.action("connect")
         if (busy) return
         if (demo) stopDemo()
+        if (shownProvider == SchoolProvider.TAM) {
+            val root = tamSchoolRoot(baseUrl)
+            if (root == null) { message = t(R.string.tam_address_unsupported); return }
+            graph.setBaseUrl(root)
+            baseUrl = root
+            busy = true
+            viewModelScope.launch {
+                try { graph.runVisibleLogin(caller) } finally { busy = false }
+            }
+            return
+        }
         val base = normalizeSchoolBase(baseUrl)
         if (base == null) { message = t(R.string.school_address_unsupported); return }
         if (!usesWebsiteSession(base)) { message = t(R.string.web_signin_unavailable); return }
@@ -545,15 +565,115 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
     }
 
+    /** The provider of the connection the app shows (Schulnetz while nothing is connected). */
+    val shownProvider: SchoolProvider get() = connections.active?.provider ?: SchoolProvider.SCHULNETZ
+
+    /** Re-reads everything that belongs to the shown connection after a switch or removal. */
+    private fun reloadShownConnection() {
+        baseUrl = graph.baseUrl()
+        settings = graph.notifySettings()
+        unrevealedIds = graph.unrevealedGradeIds()
+        tamCalendarLink = if (shownProvider == SchoolProvider.TAM) graph.current().tamCalendarUrl() else ""
+        reload()
+    }
+
+    fun showConnection(id: String) {
+        if (connections.active?.id == id) return
+        graph.activateConnection(id)
+        connections = graph.connections.value
+        reloadShownConnection()
+        connections.active?.let { message = t(R.string.connection_switched, it.label) }
+    }
+
+    fun renameConnection(id: String, label: String) {
+        graph.renameConnection(id, label)
+        connections = graph.connections.value
+    }
+
+    /** Adds a Schulnetz or TAM connection: its own sign-in, listed once that worked. */
+    fun addConnection(provider: SchoolProvider, address: String) {
+        graph.trail.action("add-connection")
+        if (busy) return
+        if (connections.connections.size >= MAX_CONNECTIONS) { message = t(R.string.connection_limit_reached, MAX_CONNECTIONS); return }
+        val base = when (provider) {
+            SchoolProvider.TAM -> tamSchoolRoot(address)
+            SchoolProvider.SCHULNETZ -> normalizeSchoolBase(address)?.takeIf { usesWebsiteSession(it) }
+        }
+        if (base == null) { message = if (provider == SchoolProvider.TAM) t(R.string.tam_address_unsupported) else t(R.string.school_address_unsupported); return }
+        val slotFree = connections.bySlot(PRIMARY_SLOT) == null
+        if (!slotFree && !SchoolCookies.profilesSupported()) { message = t(R.string.connection_needs_profiles); return }
+        if (demo) stopDemo()
+        busy = true
+        viewModelScope.launch {
+            try {
+                val session = graph.beginConnection(provider, base)
+                graph.runVisibleLogin("add-connection", session)
+                connections = graph.connections.value
+                reloadShownConnection()
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = t(R.string.could_not_open_signin)
+            } finally { busy = false }
+        }
+    }
+
+    /** Signs a listed connection in again (its own cookie jar and page session). */
+    fun reloginConnection(id: String) {
+        val session = graph.sessionById(id) ?: return
+        if (busy) return
+        if (demo) stopDemo()
+        busy = true
+        viewModelScope.launch {
+            try { graph.runVisibleLogin("relogin", session) }
+            catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = t(R.string.could_not_open_signin)
+            } finally { busy = false }
+        }
+    }
+
+    fun removeConnection(id: String) {
+        if (busy) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                graph.removeConnection(id)
+                connections = graph.connections.value
+                reloadShownConnection()
+                message = t(R.string.connection_removed)
+            } finally { busy = false }
+        }
+    }
+
+    fun saveTamCalendarLink(url: String) {
+        if (graph.current().setTamCalendarUrl(url)) {
+            tamCalendarLink = graph.current().tamCalendarUrl()
+            message = t(R.string.tam_calendar_link_saved)
+            refreshSchool()
+        } else {
+            message = t(R.string.tam_calendar_link_invalid)
+        }
+    }
+
     fun onWebLoginFinished() {
         val html = SchulnetzLoginBridge.landingHtml
         val url = SchulnetzLoginBridge.landingUrl
+        val provider = SchulnetzLoginBridge.provider
         SchulnetzLoginBridge.landingHtml = ""
         SchulnetzLoginBridge.landingUrl = ""
-        val web = extractWebSession(url, html, baseUrl)
-        val php = phpSessionCookie(baseUrl)
+        SchulnetzLoginBridge.provider = ""
+        if (SchoolProvider.of(provider) == SchoolProvider.TAM) {
+            graph.finishTamLogin(true, html)
+            message = t(R.string.tam_connected)
+            return
+        }
+        // The page and cookies of the connection that is signing in, not of the one shown.
+        val slot = graph.loginSlot()
+        val base = graph.loginBaseUrl()
+        val web = extractWebSession(url, html, base)
+        val php = phpSessionCookie(base, slot)
         if (web == null) {
-            graph.schulnetzLog.info("visible login bridge empty url=${redactSchulnetzSecrets(url)} cookieNames=${cookieNames(CookieManager.getInstance().getCookie(baseUrl).orEmpty()).joinToString("|")}")
+            graph.schulnetzLog.info("visible login bridge empty url=${redactSchulnetzSecrets(url)} cookieNames=${cookieNames(runCatching { SchoolCookies.manager(slot).getCookie(base) }.getOrNull().orEmpty()).joinToString("|")}")
             graph.finishVisibleLogin(null)
             message = t(R.string.signin_cancelled)
             return
@@ -564,7 +684,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun onWebLoginCancelled() {
         val viewing = graph.viewingSession
-        graph.finishVisibleLogin(null)
+        if (graph.loginProvider() == SchoolProvider.TAM) graph.finishTamLogin(false) else graph.finishVisibleLogin(null)
         if (!viewing) message = t(R.string.signin_cancelled)
     }
 
@@ -866,6 +986,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun openNotify(intent: Intent?) {
         if (intent == null) return
+        // A notice opens the connection it belongs to.
+        intent.getStringExtra(CompanionAlerts.EXTRA_CONNECTION)?.takeIf { it.isNotBlank() && connections.byId(it) != null }?.let(::showConnection)
         val payload = intent.getStringExtra(CompanionAlerts.EXTRA_PAYLOAD).orEmpty()
         val fromPayload = payload.takeIf { it.isNotBlank() }?.let { ch.fasrv.fanotes.schulnetz.changeFromPayload(it) }
         val category = intent.getStringExtra(CompanionAlerts.EXTRA_CATEGORY).orEmpty()
@@ -1121,8 +1243,9 @@ private fun diagnosticSyncWord(name: String): String = when (name) {
     else -> "unbekannt"
 }
 
-internal fun exportSsoCookies(): Map<String, String> {
-    val manager = CookieManager.getInstance()
+/** A connection's cookie jar: the app's original one for connection one, its own profile otherwise. */
+internal fun exportSsoCookies(slot: String = PRIMARY_SLOT): Map<String, String> {
+    val manager = SchoolCookies.manager(slot)
     return SSO_COOKIE_URLS.mapNotNull { url ->
         val host = runCatching { URI(url).host }.getOrNull() ?: return@mapNotNull null
         val cleaned = stripPhpSession(manager.getCookie(url).orEmpty())
@@ -1130,11 +1253,11 @@ internal fun exportSsoCookies(): Map<String, String> {
     }.toMap()
 }
 
-internal fun hasMicrosoftCookies(): Boolean = microsoftCookieNames().isNotBlank()
+internal fun hasMicrosoftCookies(slot: String = PRIMARY_SLOT): Boolean = microsoftCookieNames(slot).isNotBlank()
 
-internal fun microsoftCookieNames(): String =
+internal fun microsoftCookieNames(slot: String = PRIMARY_SLOT): String =
     SSO_COOKIE_URLS.mapNotNull { url ->
-        val names = cookieNames(CookieManager.getInstance().getCookie(url).orEmpty())
+        val names = cookieNames(runCatching { SchoolCookies.manager(slot).getCookie(url) }.getOrNull().orEmpty())
         val host = runCatching { URI(url).host }.getOrNull() ?: return@mapNotNull null
         if (names.isEmpty()) null else "$host=${names.joinToString("|")}"
     }.joinToString(",")
@@ -1172,8 +1295,8 @@ internal fun shareFile(context: Context, title: String, file: File, mime: String
     if (Looper.myLooper() == Looper.getMainLooper()) send.run() else Handler(Looper.getMainLooper()).post(send)
 }
 
-internal fun phpSessionCookie(baseUrl: String): String {
-    val raw = CookieManager.getInstance().getCookie(baseUrl).orEmpty()
+internal fun phpSessionCookie(baseUrl: String, slot: String = PRIMARY_SLOT): String {
+    val raw = runCatching { SchoolCookies.manager(slot).getCookie(baseUrl) }.getOrNull().orEmpty()
     return Regex("PHPSESSID=([^;]+)").find(raw)?.groupValues?.get(1).orEmpty()
 }
 
