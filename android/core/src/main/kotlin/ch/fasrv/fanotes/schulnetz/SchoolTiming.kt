@@ -72,13 +72,20 @@ fun withoutUnprovenEmptyReads(reads: Map<String, String>, events: List<AgendaEve
     }
 }
 
+/** Weeks looked at past the last week that had lessons, so a published timetable is followed forward. */
+const val LESSON_WALK_WEEKS = 8L
+
 /**
- * The school year when the timetable page shows no date range: from the appointment list and
- * holidays: four weeks back, at least four and at most forty weeks ahead.
+ * The school year when the timetable page shows no date range: from the appointment list, exams,
+ * holidays, and eight weeks past the last lesson read: four weeks back, at least four and at most
+ * forty weeks ahead.
  */
-fun fallbackSchoolSpan(events: List<AgendaEvent>, vacations: List<SchoolVacation>, today: LocalDate): WeekSpan? {
+fun fallbackSchoolSpan(events: List<AgendaEvent>, vacations: List<SchoolVacation>, today: LocalDate, exams: List<AgendaEvent> = emptyList()): WeekSpan? {
+    val lastLesson = events.asSequence().filter { it.isLesson() }.mapNotNull { eventDate(eventDay(it)) }.maxOrNull()
     val days = events.asSequence().filter { !it.isLesson() }.mapNotNull { eventDate(eventDay(it)) } +
-        vacationDays(vacations).asSequence().flatMap { sequenceOf(it.start, it.endInclusive) }
+        exams.asSequence().mapNotNull { eventDate(eventDay(it)) } +
+        vacationDays(vacations).asSequence().flatMap { sequenceOf(it.start, it.endInclusive) } +
+        listOfNotNull(lastLesson?.plusWeeks(LESSON_WALK_WEEKS)).asSequence()
     val all = days.toList()
     if (all.isEmpty()) return null
     // Never narrower than the four-week probe around today.

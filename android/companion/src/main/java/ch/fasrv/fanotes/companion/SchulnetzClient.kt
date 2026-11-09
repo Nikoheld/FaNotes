@@ -369,7 +369,7 @@ class SchulnetzClient(
         // not only the four weeks around today.
         val knownSpan = htmlSpan ?: previous.storedSpan()
         // Planning only: the fallback is not Schulnetz's range, so it is never stored as one.
-        val planSpan = knownSpan ?: ch.fasrv.fanotes.schulnetz.fallbackSchoolSpan(previous?.events.orEmpty(), previous?.vacations.orEmpty(), today)
+        val planSpan = knownSpan ?: ch.fasrv.fanotes.schulnetz.fallbackSchoolSpan(previous?.events.orEmpty(), previous?.vacations.orEmpty(), today, previous?.exams.orEmpty())
         val plan = planWeekFetches(
             if (planSpan != null) mondaysBetween(planSpan.start, planSpan.end) else emptyList(),
             // Retry timing follows every attempt, so an unread week is not requested on every sync.

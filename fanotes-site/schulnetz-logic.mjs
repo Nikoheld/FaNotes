@@ -2126,11 +2126,19 @@ export const withoutUnprovenEmptyReads = (reads = {}, events = [], vacations = [
   const taught = new Set(events.filter(isLesson).map((event) => weekMondayKey(event.start)).filter(Boolean))
   return Object.fromEntries(Object.entries(reads).filter(([week]) => taught.has(week) || weekIsHoliday(week, vacations)))
 }
-/** School year from appointments and holidays when the page shows no range: four weeks back, at least four and at most forty ahead. */
-export const fallbackSchoolSpan = (events = [], vacations = [], today = zurichToday()) => {
+/** Weeks looked at past the last week that had lessons, so a published timetable is followed forward. */
+export const LESSON_WALK_WEEKS = 8
+/**
+ * School year when the page shows no range: from appointments, exams, holidays, and eight weeks past
+ * the last lesson read. Four weeks back, at least four and at most forty ahead.
+ */
+export const fallbackSchoolSpan = (events = [], vacations = [], today = zurichToday(), exams = []) => {
+  const lessonDays = events.filter(isLesson).map((event) => eventDay(event)).filter(Boolean).sort()
   const days = [
     ...events.filter((event) => !isLesson(event)).map((event) => eventDay(event)),
+    ...exams.map((event) => eventDay(event)),
     ...vacationRanges(vacations).flat(),
+    ...(lessonDays.length ? [addDays(lessonDays.at(-1), LESSON_WALK_WEEKS * 7)] : []),
   ].filter(Boolean).sort()
   if (!days.length) return null
   // Never narrower than the four-week probe around today.

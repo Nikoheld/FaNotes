@@ -1354,7 +1354,8 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   assert.equal(second.weekFetched['2026-11-09'], '2026-11-04T12:30:00Z')
   assert.equal(second.weekFetched['2026-12-07'], '2026-11-04T12:00:00Z')
   const secondSchedulers = urls.filter((url) => url.includes('scheduler_processor'))
-  assert.equal(secondSchedulers.length, 18)
+  // Nine probe weeks plus a batch of far weeks: the planner follows the stored far lesson (7 Dec) eight weeks on.
+  assert.equal(secondSchedulers.length, (9 + WEEK_BATCH) * 2)
   assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-11-02') && url.includes('pageid=22202')), true)
   assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-11-09') && url.includes('pageid=22202')), true)
   assert.equal(secondSchedulers.some((url) => url.includes('min_date=2026-12-07')), false)
@@ -1387,8 +1388,10 @@ test('a web scrape reads the whole current week and keeps a far lesson', async (
   const loaded = async (url) => {
     const target = String(url)
     let body = '<html><body>ok</body></html>'
-    if (target.includes('scheduler_processor') && target.includes('pageid=22202')) body = lessonXml
-    if (target.includes('scheduler_processor') && target.includes('pageid=21312')) body = examXml
+    // Schulnetz answers each week with that week's rows; other weeks are empty.
+    const thisWeek = target.includes('min_date=2026-11-02')
+    if (target.includes('scheduler_processor') && target.includes('pageid=22202')) body = thisWeek ? lessonXml : '<data></data>'
+    if (target.includes('scheduler_processor') && target.includes('pageid=21312')) body = thisWeek ? examXml : '<data></data>'
     return { status: 200, headers: { get: () => '' }, text: async () => body }
   }
   const read = await scrapeWithSession(base, session, loaded, {
@@ -1450,7 +1453,8 @@ test('an unmarked timetable still loads next week into the schedule', async () =
   const schedulers = urls.filter((url) => url.includes('scheduler_processor'))
   assert.equal(schedulers.some((url) => url.includes('pageid=22202') && url.includes('min_date=2026-11-09') && url.includes('max_date=2026-11-16') && !url.includes('action=')), true)
   assert.equal(schedulers.some((url) => url.includes('min_date=2026-08-17') || url.includes('min_date=2027-')), false)
-  assert.equal(schedulers.length, 18)
+  // Nine probe weeks plus the weeks up to eight past the stored lesson (4 Nov): through 4 Jan.
+  assert.equal(schedulers.length, 13 * 2)
   assert.equal(read.events.some((event) => event.id === 'next' && event.start === '2026-11-09T08:15:00'), true)
   assert.equal(read.events.some((event) => event.id === 'now'), true)
   assert.equal(read.events.some((event) => event.id === 'e1'), false)
@@ -1467,8 +1471,11 @@ test('an unmarked timetable still loads next week into the schedule', async () =
     weekRead: read.weekRead,
   })
   const againSchedulers = urls.filter((url) => url.includes('scheduler_processor'))
-  assert.equal(againSchedulers.length, 2)
-  assert.equal(againSchedulers.every((url) => url.includes('min_date=2026-11-02')), true)
+  // The current week again, plus only far weeks the walk forward has not read yet.
+  const againWeeks = [...new Set(againSchedulers.map((url) => url.match(/min_date=([\d-]+)/u)[1]))]
+  assert.equal(againWeeks.includes('2026-11-02'), true)
+  assert.equal(againWeeks.filter((week) => week !== '2026-11-02').every((week) => !read.weekFetched[week] && week > '2026-11-30'), true)
+  assert.equal(againSchedulers.length, againWeeks.length * 2)
   assert.equal(again.events.some((event) => event.id === 'next'), true)
 })
 
@@ -2423,4 +2430,15 @@ test('a lesson id that Schulnetz reuses in another week is not a moved lesson', 
   // Within one week the id still tracks a real change.
   const moved = { ...previous, events: [lesson('L1', '2026-11-12T07:45:00', 'C3'), ...thisWeek.slice(1)] }
   assert.deepEqual(diffSnapshotsAt(previous, moved, {}, '2026-11-09', at).map((c) => c.title), ['Raum geändert'])
+})
+
+test('without a page range the planner follows a published timetable forward', () => {
+  const lesson = (day) => ({ id: day, start: `${day}T08:00:00`, end: `${day}T08:45:00`, text: 'Deutsch', eventType: '0_stp' })
+  // Lessons only (no appointment list): eight weeks past the last lesson read.
+  assert.deepEqual(fallbackSchoolSpan([lesson('2026-12-10')], [], '2026-11-09'), { start: '2026-10-12', end: '2027-02-04' })
+  // Exams count as known dates too.
+  const exam = { id: 'x', start: '2027-03-18T10:00:00', end: '2027-03-18T10:45:00', text: 'Chemie', eventType: 'exam' }
+  assert.equal(fallbackSchoolSpan([], [], '2026-11-09', [exam]).end, '2027-03-18')
+  // Still at most forty weeks ahead.
+  assert.equal(fallbackSchoolSpan([lesson('2027-07-01')], [], '2026-11-09').end, '2027-08-16')
 })

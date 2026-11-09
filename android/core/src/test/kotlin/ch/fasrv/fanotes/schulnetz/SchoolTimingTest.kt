@@ -138,4 +138,12 @@ class SchoolTimingTest {
         val moved = previous.copy(events = listOf(thisWeek[0].copy(room = "C3")) + thisWeek.drop(1))
         assertEquals(listOf("Raum geändert"), diffSnapshots(previous, moved, NotifySettings(), today, at).map { it.title })
     }
+
+    @Test fun withoutAPageRangeThePlannerFollowsAPublishedTimetableForward() {
+        val taught = lesson("l", "2026-12-10T08:00:00", "2026-12-10T08:45:00", "A1")
+        assertEquals(WeekSpan(LocalDate.parse("2026-10-12"), LocalDate.parse("2027-02-04")), fallbackSchoolSpan(listOf(taught), emptyList(), today))
+        val exam = exam("x", "2027-03-18T10:00:00", "2027-03-18T10:45:00")
+        assertEquals(LocalDate.parse("2027-03-18"), fallbackSchoolSpan(emptyList(), emptyList(), today, listOf(exam))?.end)
+        assertEquals(LocalDate.parse("2027-08-16"), fallbackSchoolSpan(listOf(taught.copy(start = "2027-07-01T08:00:00", end = "2027-07-01T08:45:00")), emptyList(), today)?.end)
+    }
 }

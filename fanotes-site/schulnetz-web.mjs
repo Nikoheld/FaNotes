@@ -154,7 +154,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     const vacations = Array.isArray(options.vacations) ? options.vacations : []
     // Without a range on the page, plan the school year from appointments and holidays,
     // not only the four weeks around today.
-    const span = weekSpanStart && weekSpanEnd ? { start: weekSpanStart, end: weekSpanEnd } : fallbackSchoolSpan(previousEvents, vacations, today)
+    const span = weekSpanStart && weekSpanEnd ? { start: weekSpanStart, end: weekSpanEnd } : fallbackSchoolSpan(previousEvents, vacations, today, previousExams)
     const icalUrl = findIcalUrl(pages['22202'], root)
     const icalAvailable = Boolean(icalUrl && schulnetzCallAllowed('GET', icalUrl))
     const plan = planWeekFetches({
