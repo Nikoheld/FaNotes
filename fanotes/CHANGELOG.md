@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.18
+
+- Announce no backlog from the first app upload after uploads were refused.
+- Keep stored lessons through later syncs and read every grade row.
+
 ## 2026.11.2-beta.17
 
 - Prepare the Kanti+ release bundle for Google Play.
