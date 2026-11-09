@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<!-- Synthetic Schulnetz 5.14.1 Noten page (pageid 21311). Every name, course, date and mark is
+     invented; the markup follows the real page: course rows with a hidden detail row each, nested
+     "clean" tables, info tooltips after some marks, rows still waiting for a mark. -->
+<html lang="de"><head><meta charset="utf-8"><title>schulNetz</title></head>
+<body><main class="mdl-layout__content">
+<h3>Aktuelle Noten</h3>
+<table class="mdl-data-table mdl-js-data-table mdl-table--listtable" style="width: 100%; margin-top: 20px;">
+  <tbody><tr>
+    <th style="text-align: left; width: 22%;">Kurs</th>
+    <th style="text-align: left; width: 22%;" colspan="2">Notendurchschnitt</th>
+    <th style="text-align: left; width: 22%;">Bestätigt</th>
+    <th style="text-align: left; width: 34%;">Mitteilung an Lehrperson</th>
+  </tr>
+  <tr>
+    <td style="border-bottom: 0; padding-top: 2mm;"><b>MAT_K99Z_Demo</b><br>Mathematik</td>
+    <td style="border-bottom: 0; padding-top: 2mm; color: #df8d06;">4.750</td>
+    <td style="border-bottom: 0; padding-top: 2mm;">
+      <button type="button" class="mdl-button mdl-js-button mdl-button--icon" id="einzelpr_btn_0_0"><i class="far fa-ballot-check fa-xs"></i></button>
+      <div class="mdl-tooltip mdl-tooltip--right" for="einzelpr_btn_0_0" id="mdl_tooltip_einzelpr_btn_0_0">Einzelprüfungen anzeigen</div>
+      <button type="button" class="mdl-button mdl-js-button mdl-button--icon" id="notenverlauf_btn_0_0"><i class="fal fa-analytics fa-xs"></i></button>
+      <div class="mdl-tooltip mdl-tooltip--right" for="notenverlauf_btn_0_0" id="mdl_tooltip_notenverlauf_btn_0_0">Notenverlauf anzeigen</div>
+    </td>
+    <td style="border-bottom: 0; padding-top: 2mm;"><a href="#" onclick="return false;">bestätigen</a></td>
+    <td style="border-bottom: 0; padding-top: 2mm;">
+      <div id="mail_toggle_0"><a href="#" onclick="return false;">Mitteilung schreiben</a></div>
+      <div id="mail_0" style="display: none;">
+        <form action="index.php?pageid=21311&amp;action=send_email&amp;id=f1a2b3c4d5e6f708&amp;transid=c3d4e5" method="post">
+          <input type="hidden" value="0" name="index"><textarea name="emailtext" id="emailtext_0" cols="50" rows="4"></textarea>
+          <input type="submit" class="btnsubmit" value="Senden">
+        </form>
+      </div>
+    </td>
+  </tr>
+  <tr style="display: none;" class="0_0_detailrow">
+    <td colspan="5" style="border-top: 0; border-bottom: 0; padding: 0;">
+      <table class="clean" style="width:100%; table-layout: fixed;">
+        <tbody><tr>
+          <td style="text-align:left; width: 20%;"><i>Datum</i></td>
+          <td style="text-align:left; width: 40%;"><i>Thema</i></td>
+          <td style="text-align:left; width: 20%;"><i>Bewertung</i></td>
+          <td style="text-align:left; width: 20%;"><i>Gewichtung</i></td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">02.09.2026</td>
+          <td style="text-align:left;">Algebra 1</td>
+          <td style="text-align:left;">5.5</td>
+          <td style="text-align:left;">1</td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">23.09.2026</td>
+          <td style="text-align:left;">Geometrie</td>
+          <td style="text-align:left;">
+            4.25 <span id="aa11bb22cc33d" style="font-size: inherit; line-height: inherit;" tabindex="100000"><i class="far fa-info-circle"></i></span><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--no-wrap mdl-tooltip--large mdl-tooltip--table" for="aa11bb22cc33d" id="mdl_tooltip_aa11bb22cc33d"><b>Details zur Note</b><br>Punkte: 18</div>
+          </td>
+          <td style="text-align:left;">1</td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">14.10.2026</td>
+          <td style="text-align:left;">Funktionen</td>
+          <td style="text-align:left;">
+          </td>
+          <td style="text-align:left;">1</td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">28.10.2026</td>
+          <td style="text-align:left;">Kurztest Wurzeln</td>
+          <td style="text-align:left;">4,5</td>
+          <td style="text-align:left;">0.5</td>
+        </tr>
+        <tr>
+          <td colspan="2" style="text-align: right; padding-bottom: 10px;"><i>Aktueller Durchschnitt:</i></td>
+          <td colspan="2" style="text-align: left; padding-bottom: 10px;"><i>4.750</i></td>
+        </tr>
+      </tbody></table>
+    </td>
+  </tr>
+  <tr style="display: none;" id="schueleruebersicht_verlauf_0_0">
+    <td id="schueleruebersicht_verlauf_content_0_0" colspan="5" style="border-top: 0; text-align: center;"><canvas id="notenverlauf_0_0" width="500" height="250"></canvas></td>
+  </tr>
+  <tr>
+    <td style="border-bottom: 0; padding-top: 2mm;"><b>Kurs 2.1 (GF)</b><br>Deutsch</td>
+    <td style="border-bottom: 0; padding-top: 2mm;">5.000</td>
+    <td style="border-bottom: 0; padding-top: 2mm;">
+      <button type="button" class="mdl-button mdl-js-button mdl-button--icon" id="einzelpr_btn_0_1"><i class="far fa-ballot-check fa-xs"></i></button>
+      <div class="mdl-tooltip mdl-tooltip--right" for="einzelpr_btn_0_1" id="mdl_tooltip_einzelpr_btn_0_1">Einzelprüfungen anzeigen</div>
+    </td>
+    <td style="border-bottom: 0; padding-top: 2mm;">bestätigt</td>
+    <td style="border-bottom: 0; padding-top: 2mm;"></td>
+  </tr>
+  <tr style="display: none;" class="0_1_detailrow">
+    <td colspan="5" style="border-top: 0; border-bottom: 0; padding: 0;">
+      <table class="clean" style="width:100%; table-layout: fixed;">
+        <tbody><tr>
+          <td style="text-align:left; width: 20%;"><i>Datum</i></td>
+          <td style="text-align:left; width: 40%;"><i>Thema</i></td>
+          <td style="text-align:left; width: 20%;"><i>Bewertung</i></td>
+          <td style="text-align:left; width: 20%;"><i>Gewichtung</i></td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">08.09.2026</td>
+          <td style="text-align:left;">Aufsatz Erörterung</td>
+          <td style="text-align:left;">
+            5 <span id="dd44ee55ff66a" tabindex="100000"><i class="far fa-info-circle"></i></span><div class="mdl-tooltip mdl-tooltip--bottom mdl-tooltip--table" for="dd44ee55ff66a" id="mdl_tooltip_dd44ee55ff66a"><b>Details zur Note</b><br>Punkte: 24</div>
+          </td>
+          <td style="text-align:left;">2</td>
+        </tr>
+        <tr>
+          <td colspan="2" style="text-align: right; padding-bottom: 10px;"><i>Aktueller Durchschnitt:</i></td>
+          <td colspan="2" style="text-align: left; padding-bottom: 10px;"><i>5.000</i></td>
+        </tr>
+      </tbody></table>
+    </td>
+  </tr>
+  <tr style="display: none;" id="schueleruebersicht_verlauf_0_1"><td colspan="5"><canvas id="notenverlauf_0_1"></canvas></td></tr>
+  <tr>
+    <td style="border-bottom: 0; padding-top: 2mm;"><b>ENG_K99Z_Demo</b><br>Englisch</td>
+    <td style="border-bottom: 0; padding-top: 2mm;">--</td>
+    <td style="border-bottom: 0; padding-top: 2mm;"></td>
+    <td style="border-bottom: 0; padding-top: 2mm;"></td>
+    <td style="border-bottom: 0; padding-top: 2mm;"></td>
+  </tr>
+  <tr style="display: none;" class="0_2_detailrow"><td colspan="5" style="border-top: 0; border-bottom: 0; padding: 0;"></td></tr>
+  <tr style="display: none;" id="schueleruebersicht_verlauf_0_2"><td colspan="5"><canvas id="notenverlauf_0_2"></canvas></td></tr>
+  <tr>
+    <td style="border-bottom: 0; padding-top: 2mm;"><b>BIO_K99Z_Demo</b><br>Biologie</td>
+    <td style="border-bottom: 0; padding-top: 2mm;">--</td>
+    <td style="border-bottom: 0; padding-top: 2mm;"></td>
+    <td style="border-bottom: 0; padding-top: 2mm;"></td>
+    <td style="border-bottom: 0; padding-top: 2mm;"></td>
+  </tr>
+  <tr style="display: none;" class="0_3_detailrow">
+    <td colspan="5" style="border-top: 0; border-bottom: 0; padding: 0;">
+      <table class="clean" style="width:100%; table-layout: fixed;">
+        <tbody><tr>
+          <td style="text-align:left; width: 20%;"><i>Datum</i></td>
+          <td style="text-align:left; width: 40%;"><i>Thema</i></td>
+          <td style="text-align:left; width: 20%;"><i>Bewertung</i></td>
+          <td style="text-align:left; width: 20%;"><i>Gewichtung</i></td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">30.10.2026</td>
+          <td style="text-align:left;">Zellbiologie</td>
+          <td style="text-align:left;">
+          </td>
+          <td style="text-align:left;">1</td>
+        </tr>
+        <tr>
+          <td style="text-align:left;">06.11.2026</td>
+          <td style="text-align:left;">Genetik</td>
+          <td style="text-align:left;"></td>
+          <td style="text-align:left;">1</td>
+        </tr>
+      </tbody></table>
+    </td>
+  </tr>
+  <tr style="display: none;" id="schueleruebersicht_verlauf_0_3"><td colspan="5"><canvas id="notenverlauf_0_3"></canvas></td></tr>
+  <tr>
+    <td style="border-bottom: 0; padding-top: 2mm;"><b>FRA_K99Z_Demo</b><br>Französisch</td>
+    <td style="border-bottom: 0; padding-top: 2mm;">4.500</td>
+    <td style="border-bottom: 0; padding-top: 2mm;"></td>
+    <td style="border-bottom: 0; padding-top: 2mm;">bestätigt</td>
+    <td style="border-bottom: 0; padding-top: 2mm;"></td>
+  </tr>
+  <tr style="display: none;" class="0_4_detailrow">
+    <td colspan="5" style="border-top: 0; border-bottom: 0; padding: 0;">
+      <table class="clean" style="width:100%; table-layout: fixed;">
+        <tbody><tr>
+          <td style="text-align:left; width: 20%;"><i>Datum</i></td>
+          <td style="text-align:left; width: 40%;"><i>Thema</i></td>
+          <td style="text-align:left; width: 20%;"><i>Bewertung</i></td>
+          <td style="text-align:left; width: 20%;"><i>Gewichtung</i></td>
+        </tr>
+        <tr>
+          <td style="text-align:left;"></td>
+          <td style="text-align:left;">Vocabulaire</td>
+          <td style="text-align:left;">4.5</td>
+          <td style="text-align:left;"></td>
+        </tr>
+        <tr>
+          <td colspan="2" style="text-align: right; padding-bottom: 10px;"><i>Aktueller Durchschnitt:</i></td>
+          <td colspan="2" style="text-align: left; padding-bottom: 10px;"><i>4.500</i></td>
+        </tr>
+      </tbody></table>
+    </td>
+  </tr>
+  <tr style="display: none;" id="schueleruebersicht_verlauf_0_4"><td colspan="5"><canvas id="notenverlauf_0_4"></canvas></td></tr>
+</tbody></table>
+</main></body></html>

@@ -222,7 +222,15 @@ class SchulnetzClient(
     }
 
     fun uploadSnapshot(session: SchoolAuth, snapshot: SchulnetzSnapshot) {
-        val (code, body) = fanotes("PUT", "/snapshot", session, snapshot.toNormalizedJson())
+        val json = snapshot.toNormalizedJson()
+        // A semester of lessons is several hundred KB of JSON, too big for a plain upload; gzip keeps
+        // it small. A server without gzip support answers 400/413/415, then the plain body is sent.
+        var (code, body) = fanotes("PUT", "/snapshot", session, json, gzip = true)
+        if (code == 400 || code == 413 || code == 415) {
+            val plain = fanotes("PUT", "/snapshot", session, json)
+            code = plain.first
+            body = plain.second
+        }
         if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
@@ -462,10 +470,15 @@ class SchulnetzClient(
                 val max = monday.plusDays(7)
                 val curr = if (monday == weekMonday(today)) today.toString() else monday.toString()
                 val lessonBody = get(schedulerUrl(root, id, lessonTransid, curr, monday.toString(), max.toString()), "scheduler", "scheduler")
-                val lessonParsed = if (schedulerWeekLoaded(lessonBody)) offMain("scheduler-xml") { parseSchedulerXml(lessonBody) } else emptyList()
+                val parsedWeek = if (schedulerWeekLoaded(lessonBody)) offMain("scheduler-xml") { parseSchedulerXml(lessonBody) } else emptyList()
+                // Only lessons inside the requested week answer for it. An answer for another week
+                // must not empty this one; the week then stays unread and is asked again.
+                val lessonParsed = parsedWeek?.filter { weekMondayKey(it.start) == monday.toString() }
+                val outside = (parsedWeek?.size ?: 0) - (lessonParsed?.size ?: 0)
                 // Shape only, no content: shows in the diagnostic log why a week has no lessons.
-                trace("scheduler week=$monday bytes=${lessonBody.length} loaded=${schedulerWeekLoaded(lessonBody)} usable=${schedulerBodyUsable(lessonBody)} lessons=${lessonParsed?.size ?: -1} $context")
+                trace("scheduler week=$monday bytes=${lessonBody.length} loaded=${schedulerWeekLoaded(lessonBody)} usable=${schedulerBodyUsable(lessonBody)} lessons=${lessonParsed?.size ?: -1} outside=$outside $context")
                 if (lessonParsed == null) break
+                if (lessonParsed.isEmpty() && outside > 0) continue
                 if (lessonParsed.isNotEmpty()) { lessonWeeks[monday] = lessonParsed; schedulerGaveLessons = true }
                 else if (schedulerBodyUsable(lessonBody) && !schedulerWeekLoaded(lessonBody)) {
                     if (monday != weekMonday(today)) checkedEmpty += monday else currentEmptyUsable = true
@@ -503,7 +516,11 @@ class SchulnetzClient(
             parseFailed = true
         }
         val currentMonday = weekMonday(today)
-        if (currentMonday !in lessonWeeks && canFetch && !parseFailed) {
+        // The lessons the page itself drew only stand in when this week has none stored yet. They can
+        // be a partial view (one day, the visible part), so they never replace a scheduler read.
+        val storedThisWeek = previous?.events.orEmpty().any { it.isLesson() && weekMondayKey(it.start) == currentMonday.toString() }
+        var drawnOnly = false
+        if (currentMonday !in lessonWeeks && canFetch && !parseFailed && !storedThisWeek) {
             val fallback = offMain("stundenplan-html") {
                 val rendered = parseRenderedTimetable(planHtml)
                 when {
@@ -512,7 +529,11 @@ class SchulnetzClient(
                     else -> parseTimetableHtml(planHtml)
                 }
             }
-            if (fallback?.isNotEmpty() == true) lessonWeeks[currentMonday] = fallback
+            val drawn = fallback?.filter { weekMondayKey(it.start) == currentMonday.toString() }.orEmpty()
+            if (drawn.isNotEmpty()) {
+                lessonWeeks[currentMonday] = drawn
+                drawnOnly = true
+            }
         }
         if (currentMonday !in examWeeks && exams.value.isNotEmpty() && !parseFailed && planError.isBlank()) examWeeks[currentMonday] = exams.value
         val expectedPlan = oauthPage == null && !sawSessionProblem && id.isNotBlank() && transid.isNotBlank()
@@ -537,7 +558,8 @@ class SchulnetzClient(
         if (canFetch && !timetableFailed) {
             for (monday in refreshedLessons) {
                 stamps[monday] = fetchedNow
-                reads[monday] = fetchedNow
+                // What the page drew is not a scheduler read; the scheduler is asked again next time.
+                if (!(drawnOnly && monday == currentMonday.toString())) reads[monday] = fetchedNow
             }
             // An empty answer proves a free week only when the scheduler gave lessons for another
             // week in this read, or the week is a holiday. Otherwise the week stays "not loaded".
@@ -562,7 +584,10 @@ class SchulnetzClient(
                     icalAt = fetchedNow
                     if (htmlSpan == null) spanOfEvents(parsed)?.let { span = it }
                     val covered = if (span != null) mondaysBetween(span.start, span.end).map { it.toString() }.toSet() else parsed.mapNotNull { weekMondayKey(it.start) }.toSet()
-                    events = overlayLessons(events, parsed, covered - refreshedLessons)
+                    // iCal only replaces lessons in weeks it has lessons for; a feed without lessons
+                    // for a week (or without any) must not empty the scheduler's weeks.
+                    val icalLessonWeeks = parsed.filter { it.isLesson() }.mapNotNull { weekMondayKey(it.start) }.toSet()
+                    events = overlayLessons(events, parsed, (covered intersect icalLessonWeeks) - refreshedLessons)
                     icalExams = parsed.filter { it.isExamLike() && weekMondayKey(it.start) !in examWeeks.keys.map { week -> week.toString() }.toSet() }
                     for (monday in covered) if (icalExams.any { weekMondayKey(it.start) == monday } ||
                         previous?.exams.orEmpty().none { weekMondayKey(it.start) == monday }) examStamps[monday] = fetchedNow
@@ -600,6 +625,7 @@ class SchulnetzClient(
                 weekSpanStart = span?.start?.toString().orEmpty(),
                 weekSpanEnd = span?.end?.toString().orEmpty(),
                 icalFetchedAt = icalAt,
+                gradeParser = ch.fasrv.fanotes.schulnetz.GRADE_PARSER_VERSION,
             ),
             blocked = blocked,
             timetableFailed = timetableFailed,
@@ -646,7 +672,8 @@ class SchulnetzClient(
         }
         "21111" -> snapshot.copy(absences = readAbsencesPage(html).value.ifEmpty { snapshot.absences })
         "21312" -> snapshot.copy(exams = readExamsPage(html).value.ifEmpty { snapshot.exams })
-        "22108" -> snapshot.copy(events = (snapshot.events + readTerminliste(html).value).distinctBy { it.id })
+        // Appointments merge by id; lessons reuse ids across weeks and are never deduplicated by id.
+        "22108" -> snapshot.copy(events = mergeById(snapshot.events, readTerminliste(html).value))
         "21411" -> snapshot.copy(konto = parseKontoauszug(html).ifEmpty { snapshot.konto })
         "1" -> snapshot.copy(startMessages = parseStartMessages(html).ifEmpty { snapshot.startMessages })
         else -> snapshot
@@ -817,7 +844,7 @@ class SchulnetzClient(
         return tokens
     }
 
-    private fun fanotes(method: String, path: String, session: SchoolAuth, json: String?, client: OkHttpClient = http): Pair<Int, String> =
+    private fun fanotes(method: String, path: String, session: SchoolAuth, json: String?, client: OkHttpClient = http, gzip: Boolean = false): Pair<Int, String> =
         call(
             method,
             "$SYNC_ORIGIN$SCHULNETZ_API_PATH$path",
@@ -832,17 +859,21 @@ class SchulnetzClient(
             ),
             json,
             client,
+            gzip,
         )
 
-    private fun call(method: String, url: String, headers: Map<String, String>, body: String?, client: OkHttpClient = http): Pair<Int, String> {
+    private fun call(method: String, url: String, headers: Map<String, String>, body: String?, client: OkHttpClient = http, gzip: Boolean = false): Pair<Int, String> {
         val media = if (headers["Content-Type"]?.contains("json") == true) "application/json" else "application/x-www-form-urlencoded"
+        val compress = gzip && method != "GET" && body != null
         val requestBody = when {
             method == "GET" -> null
             body == null && method == "DELETE" -> ByteArray(0).toRequestBody(null)
+            compress -> gzipBytes(body.orEmpty().encodeToByteArray()).toRequestBody(media.toMediaType())
             else -> (body ?: "").toRequestBody(media.toMediaType())
         }
         val builder = Request.Builder().url(url).method(method, requestBody)
         headers.forEach { (name, value) -> builder.header(name, value) }
+        if (compress) builder.header("Content-Encoding", "gzip")
         val watch = DiagnosticTrace.enabled
         val started = if (watch) System.nanoTime() else 0L
         try {
@@ -923,4 +954,11 @@ class SchulnetzClient(
             "appointmentNew", "messageNew", "deadlines", "guessGrades",
         )
     }
+}
+
+/** Gzip for request bodies the Kanti+ server accepts compressed. */
+internal fun gzipBytes(raw: ByteArray): ByteArray {
+    val out = java.io.ByteArrayOutputStream(raw.size / 4 + 64)
+    java.util.zip.GZIPOutputStream(out).use { it.write(raw) }
+    return out.toByteArray()
 }

@@ -204,6 +204,7 @@ fun SchulnetzSnapshot.toNormalizedJson(): String = buildString {
         append("}")
     }
     append(",\"gradesReadComplete\":").append(gradesReadComplete)
+    if (gradeParser > 0) append(",\"gradeParser\":").append(gradeParser)
     append(",\"grades\":").appendGrades(grades)
     append(",\"events\":").appendEvents(events)
     append(",\"exams\":").appendEvents(exams)
@@ -258,6 +259,7 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
             )
         },
         gradesReadComplete = obj.bool("gradesReadComplete") != false,
+        gradeParser = obj.double("gradeParser")?.toInt() ?: 0,
         grades = obj.array("grades")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toGrade() }.withoutSummaryGrades(),
         events = obj.array("events")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toEvent() },
         exams = obj.array("exams")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toEvent() },

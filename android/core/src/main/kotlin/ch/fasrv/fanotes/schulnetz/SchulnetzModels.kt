@@ -232,7 +232,16 @@ data class SchulnetzSnapshot(
      * An empty readable body is included. An iCal range is not.
      */
     val weekRead: Map<String, String> = emptyMap(),
+    /**
+     * Version of the grade parser that produced [grades]. Server snapshots below
+     * [GRADE_PARSER_VERSION] came from a parser that dropped marks with an info tooltip, so the app
+     * keeps its own grade list instead of adopting theirs.
+     */
+    val gradeParser: Int = 0,
 )
+
+/** 2: marks with an info tooltip and rows still waiting for a mark are read. */
+const val GRADE_PARSER_VERSION = 2
 
 data class NotifySettings(
     val grades: Boolean = true,

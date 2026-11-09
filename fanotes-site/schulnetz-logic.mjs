@@ -2,6 +2,7 @@
 // The phone app has the same rules in android/core/.../schulnetz. Keep the
 // change-id formula identical: category:entityId:key.
 
+import { gunzipSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
 import { isIP } from 'node:net'
 
@@ -390,20 +391,26 @@ export const isLesson = (event) => {
   return kind.includes('lesson') || kind.includes('unterricht') || kind.includes('timetable') || kind === 'period' || kind === 'stunde'
 }
 
+// Schulnetz reuses a lesson id in every week, so a lesson's identity is its id and its start. An id
+// alone would keep only the first week's lesson and drop every later one.
+const mergeKey = (event) => (isLesson(event) ? `lesson|${event.id}|${event.start}` : event.id)
+
 export const mergeEventsById = (base, incoming) => {
   const extra = incoming || []
   if (!extra.length) return base || []
-  const incomingById = new Map(extra.map((event) => [event.id, event]))
+  const incomingById = new Map(extra.map((event) => [mergeKey(event), event]))
   const seen = new Set()
   const out = []
   for (const event of base || []) {
-    if (seen.has(event.id)) continue
-    seen.add(event.id)
-    out.push(incomingById.get(event.id) || event)
+    const key = mergeKey(event)
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(incomingById.get(key) || event)
   }
   for (const event of extra) {
-    if (seen.has(event.id)) continue
-    seen.add(event.id)
+    const key = mergeKey(event)
+    if (seen.has(key)) continue
+    seen.add(key)
     out.push(event)
   }
   return out
@@ -722,6 +729,48 @@ export const placeholderCourse = (value) => {
 
 export const trustedGradeRead = (snapshot) => snapshot?.gradesReadComplete !== false &&
   !(snapshot?.readErrors || []).some((error) => /inaktivit|ip.adresse|neu anmelden|anmeldung|login|not(en|es):.*(nicht lesbar|failed)/iu.test(String(error)))
+
+/** Raw upload limit for an app snapshot; nginx takes 1 MB for this site. */
+export const SNAPSHOT_BODY_LIMIT = 960 * 1024
+/** A gzip upload may expand to this much JSON, no more (a semester of lessons is well below). */
+export const SNAPSHOT_JSON_LIMIT = 8 * 1024 * 1024
+
+/**
+ * The JSON an app sent, plain or gzip (Content-Encoding: gzip). Throws { status } for a body that is
+ * too large once inflated (413), an encoding other than gzip (415), or broken gzip or JSON (400).
+ */
+export const decodeRequestJson = (raw, encoding = '', maxJson = SNAPSHOT_JSON_LIMIT) => {
+  const fail = (status, message) => { throw Object.assign(new Error(message), { status }) }
+  const kind = String(encoding || '').trim().toLowerCase()
+  let bytes = raw
+  if (kind === 'gzip') {
+    try {
+      bytes = gunzipSync(raw, { maxOutputLength: maxJson })
+    } catch (error) {
+      if (error?.code === 'ERR_BUFFER_TOO_LARGE' || error?.code === 'ERR_OUT_OF_RANGE' || /larger than|maxOutputLength/iu.test(String(error?.message))) fail(413, 'Die Anfrage ist zu gross.')
+      fail(400, 'Ungültige Komprimierung.')
+    }
+  } else if (kind && kind !== 'identity') {
+    fail(415, 'Diese Komprimierung wird nicht unterstützt.')
+  }
+  if (bytes.length > maxJson) fail(413, 'Die Anfrage ist zu gross.')
+  if (!bytes.length) return {}
+  try { return JSON.parse(bytes.toString('utf8')) } catch { fail(400, 'Ungültiges JSON.') }
+}
+
+/** 2: marks with an info tooltip and rows still waiting for a mark are read (the app reads them too). */
+export const GRADE_PARSER_VERSION = 2
+
+/**
+ * The previous snapshot as the notification diff should see it. When it came from an older grade
+ * parser, grades that only the new parser reads are not news: the grade diff starts from the new list
+ * and the ledger takes every key, so nothing that was already in Schulnetz is announced.
+ */
+export const gradeDiffBase = (previous, next) => {
+  if (!previous || (Number(previous.gradeParser) || 0) >= GRADE_PARSER_VERSION) return previous
+  if (!Array.isArray(next?.grades) || !next.grades.length) return previous
+  return { ...previous, grades: next.grades }
+}
 
 export const keepLoadedGrades = (previousGrades, nextGrades, complete = true) => {
   const next = Array.isArray(nextGrades) ? nextGrades : []
@@ -1243,9 +1292,11 @@ const diffGradeList = (previous, next, changes) => {
         || gradeKey(matched) === gradeKey(grade)
       if (same) continue
     }
+    // A row still waiting for its mark is not news. Its mark arriving is a new grade.
+    if (grade.mark == null) continue
     const key = gradeKey(grade)
     const course = grade.course || grade.subject || grade.courseId || 'Kurs'
-    changes.push(linkedChange(`grade:${grade.id}:${key}`, 'grade', matched ? 'Notenänderung' : 'Neue Note', `${course} · ${grade.title || 'Note'} · ${formatMark(grade.mark)} · Gewicht ${formatMark(grade.weight)}`, {
+    changes.push(linkedChange(`grade:${grade.id}:${key}`, 'grade', matched && matched.mark != null ? 'Notenänderung' : 'Neue Note', `${course} · ${grade.title || 'Note'} · ${formatMark(grade.mark)} · Gewicht ${formatMark(grade.weight)}`, {
       targetId: gradeTargetId(grade),
       courseId: courseKeyOf(grade),
       date: grade.date || '',
@@ -1505,8 +1556,20 @@ const clean = (value) => String(value || '').replace(/<[^>]+>/g, ' ').replace(/\
 const gradeTables = (html) => {
   const tables = []
   const stack = []
+  // Schulnetz puts an info icon and a hidden .mdl-tooltip (with more numbers) after some marks.
+  // Its text is not part of the cell; the mark is the cell's own text.
+  let tooltipDepth = 0
   for (const token of String(html || '').matchAll(/<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script\s*>|<[^>]+>|[^<]+/gi)) {
     const part = token[0]
+    const div = /^<(\/)?div\b/i.exec(part)
+    if (tooltipDepth > 0) {
+      if (div) tooltipDepth += div[1] ? -1 : 1
+      continue
+    }
+    if (div && !div[1] && /\bclass\s*=\s*["'][^"']*\bmdl-tooltip\b/i.test(part)) {
+      tooltipDepth = 1
+      continue
+    }
     const tag = /^<(\/)?(table|tr|td|th)\b/i.exec(part)
     if (tag) {
       const close = Boolean(tag[1])
@@ -1560,15 +1623,19 @@ export const parseGradesHtml = (html) => {
         if (!course) continue
         for (const detail of row.nested) for (const exam of detail.rows) {
           const values = exam.cells.map((cell) => clean(cell.text))
-          if (values[0] === '') values.shift()
+          // Exactly the four grade columns (Datum, Thema, Bewertung, Gewichtung) with an empty date
+          // is a grade without a date; a leading empty cell before a date is the indented layout.
+          const undated = values.length === 4 && values[0] === '' && Boolean(values[1]) && !/\d{2}\.\d{2}\.\d{4}/u.test(values[1]) &&
+            !isSummaryGradeTitle(values[1]) && (parseMark(values[2]) != null || /\d/u.test(values[3] || ''))
+          if (values[0] === '' && !undated) values.shift()
           const [date, topic, markText, weight] = values
-          if (!/^\d{2}\.\d{2}\.\d{4}$/u.test(date || '') || !topic || isSummaryGradeTitle(topic)) continue
+          if ((!undated && !/^\d{2}\.\d{2}\.\d{4}$/u.test(date || '')) || !topic || isSummaryGradeTitle(topic)) continue
+          // A row still waiting for its mark is kept with mark null, as the app reads it.
           const mark = parseMark(markText || '')
-          if (mark == null) continue
           grades.push({
             id: `web:${courseId}:${date}:${topic}:${numKey(mark)}`,
             course, courseId, subject: course, title: topic,
-            date: `${date.slice(6, 10)}-${date.slice(3, 5)}-${date.slice(0, 2)}`,
+            date: undated ? '' : `${date.slice(6, 10)}-${date.slice(3, 5)}-${date.slice(0, 2)}`,
             mark, weight: parseWeight(weight || '1'), confirmed: true, courseGrade: average, comment: '',
           })
         }

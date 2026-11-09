@@ -10,7 +10,7 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { keepServerLessons, legacySnapshotView, TIMETABLE_WEEKS_HEADER } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, legacySnapshotView, TIMETABLE_WEEKS_HEADER } from './schulnetz-logic.mjs'
 import {
   applyEventWindow,
   diffSnapshots,
@@ -293,7 +293,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const snapshot = { ...keepServerLessons(previous, body), revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
-    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
+    // The app reads every grade row; an upload whose grades were kept is stored as a complete list.
+    snapshot.gradeParser = snapshot.grades === previous?.grades ? (Number(previous?.gradeParser) || 0) : GRADE_PARSER_VERSION
+    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, gradeDiffBase(previous, snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.needsReauth = false
@@ -865,8 +867,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     snapshot.weekSpanStart = span.start || ''
     snapshot.weekSpanEnd = span.end || ''
     snapshot.icalFetchedAt = previous?.icalFetchedAt || ''
+    snapshot.gradeParser = GRADE_PARSER_VERSION
     snapshot.revision = (link.revision || 0) + 1
-    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
+    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, gradeDiffBase(previous, snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
@@ -938,6 +941,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       fetchedAt: now().toISOString(),
       grades: keepLoadedGrades(previous?.grades, scraped.grades || [], !failed),
       gradesReadComplete: !failed,
+      gradeParser: failed ? (Number(previous?.gradeParser) || 0) : (scraped.gradeParser || 0),
       events: failed ? (previous?.events || []) : (scraped.events || []),
       exams: failed ? (previous?.exams || []) : (scraped.exams || previous?.exams || []),
       absences: previous?.absences || [],
@@ -954,7 +958,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       weekSpanEnd: scraped.weekSpanEnd || previous?.weekSpanEnd || '',
       icalFetchedAt: scraped.icalFetchedAt || previous?.icalFetchedAt || '',
     }
-    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, previous, snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
+    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, gradeDiffBase(previous, snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
@@ -1033,16 +1037,26 @@ export const createSchulnetzRuntime = (options = {}) => {
     return Math.max(0, maximum - current.count)
   }
 
-  const readBody = async (request) => {
+  // A snapshot upload carries a semester of lessons: it may be up to SNAPSHOT_BODY_LIMIT raw and gzip.
+  // Every other request stays small and plain.
+  const readBody = async (request, { limit = MAX_BODY, inflate = false } = {}) => {
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > MAX_BODY) fail(413, 'Die Anfrage ist zu gross.')
+      if (size > limit) fail(413, 'Die Anfrage ist zu gross.')
       chunks.push(chunk)
     }
     if (!chunks.length) return {}
-    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { fail(400, 'Ungültiges JSON.') }
+    const raw = Buffer.concat(chunks)
+    if (!inflate) {
+      try { return JSON.parse(raw.toString('utf8')) } catch { fail(400, 'Ungültiges JSON.') }
+    }
+    try {
+      return decodeRequestJson(raw, request.headers?.['content-encoding'] || '')
+    } catch (error) {
+      fail(error?.status || 400, error?.message || 'Ungültiges JSON.')
+    }
   }
 
   const rateHits = new Map()
@@ -1124,7 +1138,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (route === '/link' && method === 'DELETE') { await unlink(accountId); send(response, 200, { linked: false }); return true }
       if (route === '/snapshot' && method === 'PUT') {
         accountRate(accountId, 'snapshot', SNAPSHOT_LIMIT)
-        const body = await readBody(request)
+        const body = await readBody(request, { limit: SNAPSHOT_BODY_LIMIT, inflate: true })
         send(response, 200, await withAccount(accountId, () => acceptSnapshot(accountId, body)))
         return true
       }

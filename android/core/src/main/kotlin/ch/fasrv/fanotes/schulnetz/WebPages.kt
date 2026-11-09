@@ -26,7 +26,7 @@ fun readGradesPage(html: String): PageRead<List<SchoolGrade>> {
         // A nonempty parse can still be partial. Every dated exam row must have a course owner.
         val expected = Jsoup.parse(html).select("tr").count { row ->
             val table = row.closestTable() ?: return@count false
-            val cells = ownTexts(row, table).dropWhile { it.isBlank() }
+            val cells = gradeCellTexts(row, table).dropWhile { it.isBlank() }
             cells.size >= 3 && DATE.matches(cells[0]) && !isSummaryGradeTitle(cells[1]) && number(cells[2]) != null
         }
         if (grades.size < expected) return PageRead(emptyList(), "Noten: Seite geladen, aber nicht lesbar")
@@ -663,13 +663,17 @@ private fun foldLabel(raw: String): String =
 private fun examsFrom(detail: Element, course: String, courseId: String, average: Double?): List<SchoolGrade> {
     val exams = mutableListOf<SchoolGrade>()
     for (row in detail.select("tr").filter { it.closestTable() == detail }) {
-        val cells = ownTexts(row, detail)
+        val cells = gradeCellTexts(row, detail)
         if (cells.isEmpty()) continue
         val first = cells[0]
         if (first == "Prüfungsgruppe" || first == "Einzelprüfungen" || isSummaryGradeTitle(first) || first.startsWith("Aktueller Durchschnitt")) continue
-        val values = if (cells[0].isBlank()) cells.drop(1) else cells
+        // Exactly the four grade columns (Datum, Thema, Bewertung, Gewichtung) with an empty date is a
+        // grade without a date; a leading empty cell before a date is the indented layout.
+        val undated = cells.size == 4 && cells[0].isBlank() && cells[1].isNotBlank() && !DATE.containsMatchIn(cells[1]) &&
+            !isSummaryGradeTitle(cells[1]) && (number(cells[2]) != null || number(cells[3]) != null)
+        val values = if (cells[0].isBlank() && !undated) cells.drop(1) else cells
         if (values.any { isSummaryGradeTitle(it) } && !DATE.containsMatchIn(values.getOrElse(0) { "" })) continue
-        if (values.size < 2 || !DATE.containsMatchIn(values[0])) continue
+        if (values.size < 2 || (!undated && !DATE.containsMatchIn(values[0]))) continue
         val markCell = values.getOrElse(2) { "" }.substringBefore("Details")
         val mark = number(markCell)
         exams += SchoolGrade(
@@ -693,6 +697,16 @@ private fun ownCells(row: Element, table: Element): List<Element> =
     row.select("th, td").filter { it.closestTable() == table }
 
 private fun ownTexts(row: Element, table: Element): List<String> = ownCells(row, table).map { clean(it.text()) }
+
+/**
+ * Grade cells without their hover tooltips. Schulnetz puts an info icon and a hidden
+ * `.mdl-tooltip` (with more numbers) after some marks; the mark is the cell's own text.
+ */
+private fun gradeCellTexts(row: Element, table: Element): List<String> = ownCells(row, table).map { cell ->
+    val copy = cell.clone()
+    copy.select(".mdl-tooltip").remove()
+    clean(copy.text())
+}
 
 private fun Element.closestTable(): Element? {
     var node: Element? = this

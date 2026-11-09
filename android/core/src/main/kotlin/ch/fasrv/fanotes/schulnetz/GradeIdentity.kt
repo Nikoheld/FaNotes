@@ -135,13 +135,15 @@ internal fun matchGradeChanges(previous: List<SchoolGrade>, next: List<SchoolGra
                 gradeKey(matched) == gradeKey(grade)
             if (same) continue
         }
+        // A row still waiting for its mark is not news. Its mark arriving is a new grade.
+        if (grade.mark == null) continue
         val key = gradeKey(grade)
         val course = grade.courseLabel.ifBlank { "Kurs" }
         val name = grade.title.ifBlank { "Note" }
         changes += linkedChange(
             id = "grade:${grade.id}:$key",
             category = "grade",
-            title = if (matched == null) "Neue Note" else "Notenänderung",
+            title = if (matched == null || matched.mark == null) "Neue Note" else "Notenänderung",
             body = "$course · $name · ${formatMark(grade.mark)} · Gewicht ${formatMark(grade.weight)}",
             targetId = gradeTargetId(grade),
             courseId = grade.courseKey,
