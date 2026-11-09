@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.16
+
+- Show the document search status and labels in English too.
+- Keep a revealed PDF page on screen while the viewer restores its start page.
+- Search document content from the vault search and open results at their page.
+- Store page-text records on desktop and in the browser vault.
+- Index document content for search, with a shared page-text contract.
+
 ## 2026.11.2-beta.15
 
 - Retry release builds on download errors and cache their tools.
