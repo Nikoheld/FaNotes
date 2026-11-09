@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.15
+
+- Retry release builds on download errors and cache their tools.
+
 ## 2026.11.2-beta.14
 
 - Keep the server's timetable weeks and give older apps this week only.
