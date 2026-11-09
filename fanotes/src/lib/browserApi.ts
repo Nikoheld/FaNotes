@@ -88,21 +88,22 @@ export const repairBrowserWelcomeMarkdown = (path: string, content: string) => {
 }
 
 // UTF-8 length without building the bytes: encoding a 43 MB drawing just to
-// read its length took 0.1–0.2 s per save. A lone surrogate counts as the
-// three bytes of U+FFFD, as TextEncoder writes it.
+// read its length took 0.1–0.2 s per save. Drawing JSON is nearly all ASCII,
+// so the native regex scan only stops at the few characters that need more
+// than one byte. A lone surrogate counts as the three bytes of U+FFFD, as
+// TextEncoder writes it.
+const MULTI_BYTE = /[\ud800-\udbff][\udc00-\udfff]|[\u0080-\u07ff]|[\u0800-\uffff]/g
 export const textBytes = (value: string) => {
-  let bytes = 0
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index)
-    if (code < 0x80) bytes += 1
-    else if (code < 0x800) bytes += 2
-    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length && (value.charCodeAt(index + 1) & 0xfc00) === 0xdc00) {
-      bytes += 4
-      index += 1
-    } else bytes += 3
+  let bytes = value.length
+  MULTI_BYTE.lastIndex = 0
+  for (let match = MULTI_BYTE.exec(value); match; match = MULTI_BYTE.exec(value)) {
+    const code = match[0].charCodeAt(0)
+    // A pair is 2 units and 4 bytes; U+0080–U+07FF is 2 bytes; the rest of the BMP is 3.
+    bytes += match[0].length === 2 ? 2 : code < 0x800 ? 1 : 2
   }
   return bytes
 }
+
 const clone = <T>(value: T): T => structuredClone(value)
 
 const requestResult = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
