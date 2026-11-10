@@ -71,7 +71,8 @@ import ch.fasrv.fanotes.schulnetz.parseKontoauszug
 import ch.fasrv.fanotes.schulnetz.parseSchedulerXml
 import ch.fasrv.fanotes.schulnetz.parseStartMessages
 import ch.fasrv.fanotes.schulnetz.parseTokenJson
-import ch.fasrv.fanotes.schulnetz.readAbsencesPage
+import ch.fasrv.fanotes.schulnetz.readAbsenceStatement
+import ch.fasrv.fanotes.schulnetz.withAbsenceStatement
 import ch.fasrv.fanotes.schulnetz.readExamsPage
 import ch.fasrv.fanotes.schulnetz.readGradesPage
 import ch.fasrv.fanotes.schulnetz.readTerminliste
@@ -374,7 +375,7 @@ class SchulnetzClient(
         }
         // The start page contains recent marks, not a complete grade book.
         val grades = readGradesPage(pages["21311"].orEmpty())
-        val absences = readAbsencesPage(pages["21111"].orEmpty())
+        val absences = readAbsenceStatement(pages["21111"].orEmpty())
         val exams = readExamsPage(pages["21312"].orEmpty())
         val fullList = pages["22108-all"].orEmpty().takeIf { parseTerminliste(it).isNotEmpty() }
         trace("termine full-list=${fullList != null} rows=${fullList?.let { parseTerminliste(it).size } ?: 0} $context")
@@ -631,7 +632,10 @@ class SchulnetzClient(
                 grades = grades.value,
                 events = events,
                 exams = examEvents,
-                absences = absences.value,
+                absences = absences.value.absences,
+                absenceQuota = absences.value.quota,
+                absenceRemaining = absences.value.remaining,
+                absenceParser = if (absences.value.read) ch.fasrv.fanotes.schulnetz.ABSENCE_PARSER_VERSION else 0,
                 messages = messages,
                 konto = parseKontoauszug(pages["21411"].orEmpty()),
                 startMessages = parseStartMessages(pages["1"].orEmpty()),
@@ -687,7 +691,7 @@ class SchulnetzClient(
             snapshot.copy(grades = ch.fasrv.fanotes.schulnetz.keepGradeRead(snapshot.grades, read.value, read.error == null),
                 gradesReadComplete = read.error == null && read.value.isNotEmpty())
         }
-        "21111" -> snapshot.copy(absences = readAbsencesPage(html).value.ifEmpty { snapshot.absences })
+        "21111" -> snapshot.withAbsenceStatement(readAbsenceStatement(html).value)
         "21312" -> snapshot.copy(exams = readExamsPage(html).value.ifEmpty { snapshot.exams })
         // Appointments merge by id; lessons reuse ids across weeks and are never deduplicated by id.
         "22108" -> snapshot.copy(events = mergeById(snapshot.events, readTerminliste(html).value))
@@ -924,6 +928,8 @@ class SchulnetzClient(
                 "Content-Type" to "application/json",
                 // This app's own diff handles every timetable week; older apps get this week only.
                 "X-Kanti-Timetable" to "weeks",
+                // This app reads absence points and open reports; older apps get the rows their reader makes.
+                "X-Kanti-Absences" to ch.fasrv.fanotes.schulnetz.ABSENCE_PARSER_VERSION.toString(),
             ),
             json,
             client,

@@ -109,6 +109,7 @@ private fun clockMinutes(raw: String): Int? = runCatching { LocalTime.parse(raw.
 @Composable
 fun TodayScreen(model: CompanionModel) {
     val now = rememberNow()
+    val absenceTally = remember(model.snapshot) { absenceTally(model.snapshot) }
     val zone = ZoneId.systemDefault()
     val today = now.atZone(zone).toLocalDate()
     val sync by model.graph.engine.state.collectAsStateWithLifecycle()
@@ -219,7 +220,8 @@ fun TodayScreen(model: CompanionModel) {
         val pointsShown = "pluspunkte" in cards && model.desk.showPluspunkte && model.snapshot.grades.isNotEmpty()
         val updates = model.snapshot.messages.size + model.snapshot.startMessages.size
         val updatesShown = "events" in cards && updates > 0
-        if (gradesShown || pointsShown || updatesShown) {
+        val absencesShown = "absences" in cards && absenceTally.quota != null && absenceTally.remaining != null
+        if (gradesShown || pointsShown || updatesShown || absencesShown) {
             item(key = "school-head") { SectionLabel(t(R.string.from_school)) }
             item(key = "school-group") {
                 val courses = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)) }
@@ -230,8 +232,15 @@ fun TodayScreen(model: CompanionModel) {
                         val total = remember(courses) { promotionTotals(courses) }
                         SettingRow(Icons.Outlined.Balance, t(R.string.promotion_points_2), "", uiPlus(total.total), trailingColor = if (total.total >= 0) LocalCompanionSemantics.current.success else MaterialTheme.colorScheme.error) { model.navigate(Page.Grades) }
                     }
-                    if (updatesShown) {
+                    if (absencesShown) {
                         if (gradesShown || pointsShown) FineDivider()
+                        val subtitle = if (absenceTally.estimated > 0) t(R.string.absence_points_summary, uiPoints(absenceTally.booked), "≈ ${absenceTally.estimated}") else t(R.string.absence_points_summary, uiPoints(absenceTally.booked), "0")
+                        SettingRow(Icons.Outlined.EventBusy, t(R.string.absence_points), subtitle, absencePointsLeft(absenceTally).orEmpty(),
+                            tone = if (absenceTally.estimated > 0) StateTone.Warning else StateTone.Neutral,
+                            trailingColor = if ((absenceTally.remaining ?: 0.0) < 0) MaterialTheme.colorScheme.error else if (absenceTally.estimated > 0) LocalCompanionSemantics.current.warning else null) { model.navigate(Page.Absences) }
+                    }
+                    if (updatesShown) {
+                        if (gradesShown || pointsShown || absencesShown) FineDivider()
                         SettingRow(Icons.Outlined.NotificationsNone, t(R.string.school_updates), tp(R.plurals.messages_announcements, updates, updates)) { model.navigate(Page.Updates) }
                     }
                 }

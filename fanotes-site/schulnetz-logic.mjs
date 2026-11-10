@@ -1231,12 +1231,14 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
     const stillListed = new Set((next.events || []).map((event) => event.id))
     diffExams([...(previous.exams || []), ...(previous.events || []).filter((event) => isExamLike(event) && !stillListed.has(event.id))], next.exams || [], changes, freshWeeks)
   }
-  if (prefs.absences) {
+  // The first read with the points parser gives the rows new ids: a baseline, not news.
+  if (prefs.absences && !absenceSeedRead(previous, next)) {
     const before = new Set((previous.absences || []).map((item) => item.id))
+    let tally = null
     for (const absence of next.absences || []) {
       if (before.has(absence.id)) continue
-      const whenText = [absence.dateFrom, absence.hourFrom].filter(Boolean).join(' ')
-      changes.push(linkedChange(`absence:${absence.id}`, 'absence', 'Neue Absenz', [absence.subject || 'Absenz', whenText, absence.reason, absence.excused ? 'entschuldigt' : 'nicht entschuldigt'].filter(Boolean).join(' · '), {
+      tally ||= absenceTally(next)
+      changes.push(linkedChange(`absence:${absence.id}`, 'absence', 'Neue Absenz', absenceNoticeBody(absence, tally), {
         targetId: absenceTargetId(absence),
         date: (absence.dateFrom || '').slice(0, 10),
       }))
@@ -2339,6 +2341,30 @@ export const keepServerLessons = (previous, upload) => {
   return { ...upload, events, weekFetched: stamps('weekFetched'), weekRead: stamps('weekRead') }
 }
 
+/** Header a client sends when it reads absences with [ABSENCE_PARSER_VERSION] (points and open reports). */
+export const ABSENCES_HEADER = 'x-kanti-absences'
+
+/**
+ * What an app before the points parser gets: the rows its own reader (`parseAbsencesByHeader`)
+ * makes of the same page, with the same ids, so adopting the server copy and then reading
+ * Schulnetz itself does not announce the same absences again. Points and quota are not part of it.
+ */
+export const legacyAbsenceView = (snapshot) => {
+  if (!snapshot || !(Number(snapshot.absenceParser) >= ABSENCE_PARSER_VERSION)) return snapshot
+  const absences = (snapshot.absences || []).map((row) => {
+    const reason = row.pending ? '' : String(row.reason || '').split(' · ')[0]
+    const subject = row.pending ? String(row.subject || '') : ''
+    return {
+      id: stableId('abs', row.dateFrom || '', reason, subject),
+      dateFrom: row.dateFrom || '', dateTo: row.dateFrom || '',
+      hourFrom: row.pending ? [row.hourFrom, row.hourTo].filter(Boolean).join(' - ') : '', hourTo: '',
+      subject, reason, excused: false, acknowledged: false, status: '', excuseUntil: '',
+    }
+  })
+  const { absenceQuota, absenceRemaining, absenceParser, ...rest } = snapshot
+  return { ...rest, absences }
+}
+
 /** Header a client sends when its own notification diff handles every timetable week. */
 export const TIMETABLE_WEEKS_HEADER = 'x-kanti-timetable'
 
@@ -2442,4 +2468,423 @@ export const webGradeView = (grades, hiddenIds, guessGrades) => {
     if (coveredCourses.has(courseKeyOf(grade))) return isSummaryGrade(grade) ? { ...grade, mark: null, courseGrade: null, withheld: true } : { ...grade, courseGrade: null }
     return grade
   })
+}
+
+// ---------------------------------------------------------------------------------------------
+// Absence points (Absenzpunkte). Same parser and estimate as the app's AbsencePoints.kt; both run
+// the cases in android/core/src/test/resources/schulnetz/absence-points-cases.json.
+//
+// The AKSA Absenzen page (pageid 21111) has the booked statement ("Absenzenauszug": points per row,
+// quota) and the open reports (table#offeneAbsenzen: date, time, course, no points). An open report
+// has no points yet, so they are estimated with the Absenzenreglement of the Alte Kantonsschule
+// Aarau (from August 2026) until Schulnetz books the real entry.
+
+export const ABSENCE_PARSER_VERSION = 2
+
+const ABS_SWISS_DATE = /(\d{1,2})\.(\d{1,2})\.(\d{4})/u
+const ABS_LEADING_DATE = /^\d{1,2}\.\d{1,2}\.\d{4}/u
+const ABS_CLOCK = /([01]?\d|2[0-3]):([0-5]\d)/gu
+const ABS_POINTS = /-?\d+(?:[.,]\d+)?/u
+
+const absText = (raw) => String(raw ?? '').replace(/ /gu, ' ').replace(/\s+/gu, ' ').trim()
+const absFold = (raw) => absText(raw).toLowerCase().replace(/ä/gu, 'ae').replace(/ö/gu, 'oe').replace(/ü/gu, 'ue').replace(/[^a-z0-9]+/gu, ' ').trim()
+const absEntity = (raw) => String(raw).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/giu, (all, name) => {
+  if (name[0] === '#') {
+    const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10)
+    return Number.isFinite(code) ? String.fromCodePoint(code) : all
+  }
+  return { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[name.toLowerCase()] ?? all
+})
+const swissDayOf = (raw) => {
+  const match = ABS_SWISS_DATE.exec(String(raw || ''))
+  return match ? `${match[1].padStart(2, '0')}.${match[2].padStart(2, '0')}.${match[3]}` : ''
+}
+const absClock = (raw, index = 0) => {
+  const match = [...String(raw || '').matchAll(ABS_CLOCK)][index]
+  return match ? `${match[1].padStart(2, '0')}:${match[2]}` : ''
+}
+const absPoints = (raw) => {
+  const match = ABS_POINTS.exec(absText(raw).replace(/ /gu, ''))
+  if (!match) return null
+  const value = Number(match[0].replace(',', '.'))
+  return Number.isFinite(value) ? value : null
+}
+
+/** Tables with their own rows and cells (colspan, th, text, lines split at <br>), nested tables kept apart. */
+const absenceTables = (html) => {
+  const tables = []
+  const stack = []
+  const BLOCK = /^<\/?(div|p|li|ul|ol|h\d|section)\b/iu
+  for (const token of String(html || '').matchAll(/<!--[\s\S]*?-->|<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>|<[^>]+>|[^<]+/giu)) {
+    const part = token[0]
+    if (part.startsWith('<!--') || /^<(script|style)\b/iu.test(part)) continue
+    const tag = /^<(\/)?(table|caption|tr|td|th|br)\b/iu.exec(part)
+    const table = stack.at(-1)
+    if (tag) {
+      const close = Boolean(tag[1])
+      const name = tag[2].toLowerCase()
+      if (name === 'table') {
+        if (close) stack.pop()
+        else {
+          const created = { id: /\sid\s*=\s*["']([^"']*)["']/iu.exec(part)?.[1] || '', caption: '', rows: [], inner: [], row: null, cell: null, inCaption: false, nested: Boolean(table) }
+          if (table?.cell) table.cell.hasTable = true
+          for (const outer of stack) outer.inner.push(created)
+          tables.push(created)
+          stack.push(created)
+        }
+      } else if (!table) continue
+      else if (name === 'caption') table.inCaption = !close
+      else if (name === 'tr') {
+        table.cell = null
+        table.row = close ? null : { cells: [] }
+        if (table.row) table.rows.push(table.row)
+      } else if (name === 'br') {
+        if (table.cell) { table.cell.text += ' '; table.cell.lines.push('') }
+        else if (table.inCaption) table.caption += ' '
+      } else if (close) table.cell = null
+      else if (table.row) {
+        const span = Number(/\bcolspan\s*=\s*["']?(\d+)/iu.exec(part)?.[1] || 1)
+        table.cell = { header: name === 'th', span: Math.min(20, Math.max(1, span || 1)), text: '', lines: [''], hasTable: false }
+        table.row.cells.push(table.cell)
+      }
+      continue
+    }
+    if (part.startsWith('<')) {
+      if (table?.cell && BLOCK.test(part)) table.cell.text += ' '
+      continue
+    }
+    if (!table) continue
+    const value = absEntity(part)
+    if (table.cell) {
+      table.cell.text += value
+      table.cell.lines[table.cell.lines.length - 1] += value
+      // Text of a nested table also belongs to the cells that contain it (as in the app's reader).
+      for (const outer of stack.slice(0, -1)) if (outer.cell) outer.cell.text += value
+    } else if (table.inCaption) table.caption += value
+  }
+  return tables
+}
+
+const absColumns = (row) => {
+  let at = 0
+  return row.cells.map((cell) => {
+    const column = { label: absText(cell.text), start: at, span: cell.span }
+    at += cell.span
+    return column
+  })
+}
+
+const distinctAbsenceIds = (rows) => {
+  const seen = new Map()
+  return rows.map((row) => {
+    const count = (seen.get(row.id) || 0) + 1
+    seen.set(row.id, count)
+    return count === 1 ? row : { ...row, id: `${row.id}-${count}` }
+  })
+}
+
+/** The statement and open reports, or null when the page has neither table. */
+export const parseAbsenceStatement = (html) => {
+  if (!html) return null
+  let read = false
+  let quota = null
+  let remaining = null
+  const booked = []
+  const open = []
+  for (const table of absenceTables(html)) {
+    if (table.nested) continue
+    const headerRow = table.rows.find((row) => row.cells.some((cell) => cell.header))
+    if (!headerRow) continue
+    const header = absColumns(headerRow)
+    const labels = header.map((column) => absFold(column.label))
+    const caption = absFold(table.caption)
+    const openTable = table.id === 'offeneAbsenzen' || caption.includes('offene absenzmeldungen') ||
+      (labels.includes('datum') && labels.includes('zeit') && labels.includes('kurs'))
+    const pointsAt = labels.findIndex((label) => label.startsWith('absenzpunkte') || label === 'punkte')
+    const statementTable = !openTable && labels[0] === 'datum von' && pointsAt >= 0
+    if (!openTable && !statementTable) continue
+    read = true
+    const body = table.rows.slice(table.rows.indexOf(headerRow) + 1)
+    if (openTable) {
+      const at = (name, fallback) => (labels.indexOf(name) >= 0 ? labels.indexOf(name) : fallback)
+      const dateAt = at('datum', 0)
+      const timeAt = at('zeit', 1)
+      const courseAt = at('kurs', 2)
+      for (const row of body) {
+        const cells = row.cells.map((cell) => absText(cell.text))
+        if (!ABS_LEADING_DATE.test(cells[dateAt] || '')) continue
+        const day = swissDayOf(cells[dateAt])
+        const time = cells[timeAt] || ''
+        const course = cells[courseAt] || ''
+        open.push({
+          id: stableId('abs-open', day, time, course),
+          dateFrom: day, dateTo: day, hourFrom: absClock(time, 0), hourTo: absClock(time, 1),
+          subject: course, reason: '', excused: false, acknowledged: false, status: 'offen', excuseUntil: '', pending: true,
+        })
+      }
+      continue
+    }
+    const headerSpan = header.reduce((sum, column) => sum + column.span, 0)
+    const point = header[pointsAt]
+    const reasonColumn = header.find((column) => absFold(column.label).startsWith('grund'))
+    for (const row of body) {
+      const cells = row.cells
+      const laid = absColumns(row)
+      if (!laid.length) continue
+      const firstText = absText(cells[0].text)
+      const day = swissDayOf(firstText)
+      if (!day || cells.length < 3) continue
+      const rowSpan = laid.reduce((sum, column) => sum + column.span, 0)
+      const shift = rowSpan > headerSpan ? rowSpan - headerSpan : 0
+      const cellAt = (column) => {
+        const index = laid.findIndex((item) => column >= item.start && column < item.start + item.span)
+        return index >= 0 ? cells[index] : null
+      }
+      const pointsCell = cellAt(point.start + shift)
+      let points = pointsCell ? absPoints(pointsCell.text) : null
+      if (points == null) {
+        const numbers = cells.slice(2).map((cell) => absText(cell.text)).filter((text) => !ABS_SWISS_DATE.test(text)).map(absPoints).filter((value) => value != null)
+        points = numbers.length ? numbers.at(-1) : null
+      }
+      let reason = ''
+      if (reasonColumn) {
+        const covered = []
+        for (let column = reasonColumn.start; column < reasonColumn.start + reasonColumn.span; column += 1) {
+          const cell = cellAt(column)
+          if (cell && !covered.includes(cell)) covered.push(cell)
+        }
+        reason = covered.map((cell) => absText(cell.text)).filter(Boolean).join(' · ')
+      }
+      const toText = absText(cells[1]?.text || '')
+      booked.push({
+        id: stableId('abs', firstText, toText, reason),
+        dateFrom: day, dateTo: swissDayOf(toText) || day, hourFrom: absClock(firstText), hourTo: absClock(toText),
+        subject: '', reason, excused: false, acknowledged: true, status: 'gebucht', excuseUntil: '', points,
+      })
+    }
+    // The footer (a nested table): "Kontingent:<br>Verbleibendes Kontingent:" next to "30<br>30".
+    for (const cellRow of [...table.rows, ...table.inner.flatMap((inner) => inner.rows)]) {
+      cellRow.cells.forEach((cell, index) => {
+        if (!cell.text.includes('Kontingent') || cell.hasTable) return
+        const lines = cell.lines.map(absText).filter(Boolean)
+        const values = (cellRow.cells[index + 1]?.lines || []).map(absText).filter(Boolean).map(absPoints).filter((value) => value != null)
+        lines.forEach((line, at) => {
+          const colon = line.indexOf(':')
+          const inline = colon >= 0 ? absPoints(line.slice(colon + 1)) : null
+          const value = inline ?? values[at] ?? null
+          const key = absFold(colon >= 0 ? line.slice(0, colon) : line)
+          if (key === 'kontingent') quota = value ?? quota
+          else if (key === 'verbleibendes kontingent') remaining = value ?? remaining
+        })
+      })
+    }
+  }
+  if (!read) return null
+  return { absences: [...distinctAbsenceIds(booked), ...distinctAbsenceIds(open)], quota, remaining, read: true }
+}
+
+/** The Absenzen page: `{absences, quota, remaining, read}`; `read` is false when it showed neither table. */
+export const readAbsenceStatement = (html) => {
+  if (!html || sessionProblem('', html)) return { absences: [], quota: null, remaining: null, read: false }
+  return parseAbsenceStatement(html) || { absences: [], quota: null, remaining: null, read: false }
+}
+
+/** [next] when it read the page or brought rows; otherwise the stored absences with their quota. */
+export const keepAbsenceRead = (previous, next) => {
+  if (Number(next?.absenceParser) >= ABSENCE_PARSER_VERSION) return next
+  if ((next?.absences || []).length && !(Number(previous?.absenceParser) >= ABSENCE_PARSER_VERSION)) return next
+  return {
+    ...next,
+    absences: previous?.absences || [],
+    absenceQuota: previous?.absenceQuota ?? null,
+    absenceRemaining: previous?.absenceRemaining ?? null,
+    absenceParser: Number(previous?.absenceParser) || 0,
+  }
+}
+
+/** The first read with the points parser gives rows new ids: a baseline, not news. */
+export const absenceSeedRead = (previous, next) =>
+  !(Number(previous?.absenceParser) >= ABSENCE_PARSER_VERSION) && Number(next?.absenceParser) >= ABSENCE_PARSER_VERSION
+
+const INSTRUMENT_WORDS = /(?<![\p{L}])(instrument\p{L}*|klavier|piano|gitarre|e-gitarre|e-bass|violine|geige|viola|bratsche|cello|violoncello|kontrabass|querflöte|blockflöte|flöte|oboe|fagott|klarinette|saxophon|saxofon|trompete|posaune|waldhorn|horn|tuba|schlagzeug|perkussion|harfe|orgel|akkordeon|gesang|sologesang|sologesangsunterricht|stimmbildung|einzelunterricht|einzellektion)(?![\p{L}])/iu
+const SPECIAL_WORDS = /(projektwoche|projekttag|klassenwoche|sonderwoche|studienwoche|spezialwoche|arbeitswoche|sporttag|sportwoche|exkursion|studienreise|maturareise|klassenlager|skilager|schneesportlager|lager|schulreise|besuchstag|ausflug)/iu
+
+const absMinutes = (clock) => {
+  const match = /([01]?\d|2[0-3]):([0-5]\d)/u.exec(String(clock || ''))
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null
+}
+const absDay = (raw) => eventDate(raw) || null
+const epochDay = (iso) => {
+  const [year, month, day] = iso.split('-').map(Number)
+  return Math.round(Date.UTC(year, month - 1, day) / 86400000)
+}
+const absOverlap = (aFrom, aTo, bFrom, bTo) => aFrom < bTo && bFrom < aTo
+const absWords = (event) => [event.courseName, event.courseId, event.text, event.timetableText].map((value) => String(value || '')).join(' ').toLowerCase()
+const compareNullable = (a, b) => (a === b ? 0 : a == null ? -1 : b == null ? 1 : a < b ? -1 : 1)
+
+/**
+ * Booked points, the estimate for open reports and the remaining quota (see AbsencePoints.kt):
+ * n lessons without an attended lesson in between cost n + 1 (free periods, cancelled lessons and
+ * the night are no interruption; a weekend is), an instrumental lesson alone 3, a block with an
+ * announced exam 10 (at most 10 per day), special days 5 (half) or 9 (full). Without a time or a
+ * timetable a report is 1 + 1. A report on a day with a booked entry is booked.
+ */
+export const absenceTally = (snapshot) => {
+  const absences = Array.isArray(snapshot?.absences) ? snapshot.absences : []
+  const pending = absences.filter((item) => item?.pending)
+  const booked = absences.filter((item) => item && !item.pending && Number.isFinite(item.points))
+  const quota = Number.isFinite(snapshot?.absenceQuota) ? snapshot.absenceQuota : null
+  const shownRemaining = Number.isFinite(snapshot?.absenceRemaining) ? snapshot.absenceRemaining : null
+  const bookedPoints = quota != null && shownRemaining != null ? Math.max(0, quota - shownRemaining) : booked.reduce((sum, item) => sum + (item.points || 0), 0)
+
+  const slots = pending.map((absence, index) => {
+    let from = absMinutes(absClock(absence.hourFrom))
+    let to = absMinutes(absClock(absence.hourTo))
+    if (to == null && absClock(absence.hourFrom, 1)) to = absMinutes(absClock(absence.hourFrom, 1))
+    if (from != null && to != null && to <= from) { from = null; to = null }
+    const lessons = from != null && to != null && to > from ? Math.max(1, Math.round((to - from + 5) / 50)) : 1
+    return { index, absence, date: absDay(absence.dateFrom), from, to, lessons }
+  })
+  const events = Array.isArray(snapshot?.events) ? snapshot.events : []
+  const examList = Array.isArray(snapshot?.exams) ? snapshot.exams : []
+  const lessons = events.filter((event) => isLesson(event) && !isCancelled(event)).map((event) => {
+    const date = absDay(event.start)
+    const from = absMinutes(schulnetzClock(event.start))
+    if (!date || from == null) return null
+    const end = absMinutes(schulnetzClock(event.end))
+    return { event, date, from, to: end != null && end > from ? end : from + 45 }
+  }).filter(Boolean)
+  const lessonWeeks = new Set(lessons.map((lesson) => weekMonday(lesson.date)))
+  const exams = [...examList.filter((event) => String(event.eventType || '').toLowerCase() === 'exam' || isExamLike(event)), ...events.filter((event) => isExamLike(event))]
+    .filter((event) => !isCancelled(event))
+  const appointments = [...events, ...examList].filter((event) => !isLesson(event) && !isExamLike(event) && String(event.eventType || '').toLowerCase() !== 'exam')
+
+  const lessonsAt = (slot) => (slot.date && slot.from != null && slot.to != null
+    ? lessons.filter((lesson) => lesson.date === slot.date && absOverlap(lesson.from, lesson.to, slot.from, slot.to)) : [])
+  const bookedCovers = (slot) => {
+    if (!slot.date) return false
+    return booked.some((entry) => {
+      const start = absDay(entry.dateFrom)
+      if (!start) return false
+      const endDay = absDay(entry.dateTo)
+      const end = endDay && endDay >= start ? endDay : start
+      if (slot.date < start || slot.date > end) return false
+      const bFrom = absMinutes(entry.hourFrom)
+      const bTo = absMinutes(entry.hourTo)
+      if (start === end && bFrom != null && bTo != null && bTo > bFrom && slot.from != null && slot.to != null) return absOverlap(bFrom, bTo, slot.from, slot.to)
+      return true
+    })
+  }
+  const special = (slot) => {
+    if (!slot.date) return false
+    if (SPECIAL_WORDS.test(String(slot.absence.subject || ''))) return true
+    if (lessonsAt(slot).length || slot.from == null) return false
+    return appointments.some((event) => {
+      if (absDay(event.start) !== slot.date || !SPECIAL_WORDS.test(absWords(event))) return false
+      const from = absMinutes(schulnetzClock(event.start))
+      const to = absMinutes(schulnetzClock(event.end))
+      return from == null || to == null || from === to || absOverlap(from, to, slot.from, slot.to ?? slot.from)
+    })
+  }
+  const examAt = (slot) => {
+    if (!slot.date) return false
+    const course = String(slot.absence.subject || '').trim().toLowerCase()
+    const courses = [...new Set([course, ...lessonsAt(slot).map((lesson) => String(lesson.event.courseName || '').trim().toLowerCase())].filter((value) => value.length >= 2))]
+    return exams.some((exam) => {
+      if (absDay(exam.start) !== slot.date) return false
+      const from = absMinutes(schulnetzClock(exam.start))
+      const to = absMinutes(schulnetzClock(exam.end))
+      if (from != null && to != null && to > from) {
+        return slot.from != null && slot.to != null ? absOverlap(from, to, slot.from, slot.to) : courses.some((value) => absWords(exam).includes(value))
+      }
+      return courses.some((value) => absWords(exam).includes(value))
+    })
+  }
+  const instrumental = (slot) => INSTRUMENT_WORDS.test(String(slot.absence.subject || '')) || lessonsAt(slot).some((lesson) => INSTRUMENT_WORDS.test(absWords(lesson.event)))
+
+  const estimates = {}
+  let block = 0
+  let estimated = 0
+  const assign = (group, points, rule) => {
+    const lessonCount = group.reduce((sum, slot) => sum + slot.lessons, 0)
+    group.forEach((slot, at) => { estimates[slot.absence.id] = { points, lessons: lessonCount, reports: group.length, rule, block, first: at === 0 } })
+    estimated += points
+    block += 1
+  }
+  const open = slots.filter((slot) => {
+    if (!bookedCovers(slot)) return true
+    estimates[slot.absence.id] = { points: 0, lessons: slot.lessons, reports: 1, rule: 'booked', block: -1, first: true }
+    return false
+  })
+  const specials = open.filter(special)
+  const known = open.filter((slot) => !specials.includes(slot) && slot.date && slot.from != null && slot.to != null && lessonWeeks.has(weekMonday(slot.date)))
+  const fallback = open.filter((slot) => !specials.includes(slot) && !known.includes(slot))
+  const missed = slots.filter((slot) => slot.date && slot.from != null && slot.to != null)
+  const attended = lessons.filter((lesson) => !missed.some((slot) => slot.date === lesson.date && absOverlap(slot.from, slot.to, lesson.from, lesson.to)))
+  const inChain = (a, b) => {
+    if (!a.date || !b.date || weekMonday(a.date) !== weekMonday(b.date) || a.to == null || b.from == null) return false
+    const aEnd = epochDay(a.date) * 1440 + a.to
+    const bStart = epochDay(b.date) * 1440 + b.from
+    return !attended.some((lesson) => {
+      const start = epochDay(lesson.date) * 1440 + lesson.from
+      return start >= aEnd && start < bStart
+    })
+  }
+  const ordered = [...known].sort((a, b) => compareNullable(a.date, b.date) || compareNullable(a.from, b.from) || a.index - b.index)
+  const chains = []
+  for (const slot of ordered) {
+    const last = chains.at(-1)?.at(-1)
+    if (last && inChain(last, slot)) chains.at(-1).push(slot)
+    else chains.push([slot])
+  }
+  const byDay = new Map()
+  for (const slot of specials) byDay.set(slot.date, [...(byDay.get(slot.date) || []), slot])
+  const items = [...chains.map((group) => [group, 'chain']), ...[...byDay.values()].map((group) => [group, 'special']), ...fallback.map((slot) => [[slot], 'fallback'])]
+  items.sort(([a], [b]) => compareNullable(a[0].date, b[0].date) || ((a[0].from ?? -1) - (b[0].from ?? -1)) || a[0].index - b[0].index)
+  const examDay = new Map()
+  for (const [group, kind] of items) {
+    if (kind === 'special') {
+      const froms = group.map((slot) => slot.from).filter((value) => value != null)
+      const tos = group.map((slot) => slot.to).filter((value) => value != null)
+      const from = froms.length ? Math.min(...froms) : null
+      const to = tos.length ? Math.max(...tos) : null
+      const fullDay = group.some((slot) => slot.from == null || slot.to == null) || (from != null && to != null && from < 12 * 60 && to > 13 * 60)
+      assign(group, fullDay ? 9 : 5, 'special')
+    } else if (kind === 'fallback') {
+      assign(group, group.reduce((sum, slot) => sum + slot.lessons, 0) + 1, 'fallback')
+    } else {
+      const examSlot = group.find(examAt)
+      if (examSlot) {
+        const used = examDay.get(examSlot.date) || 0
+        const points = Math.min(10, Math.max(0, 10 - used))
+        examDay.set(examSlot.date, used + points)
+        assign(group, points, 'exam')
+      } else if (group.every(instrumental)) assign(group, 3 * group.length, 'instrument')
+      else assign(group, group.reduce((sum, slot) => sum + slot.lessons, 0) + 1, 'lessons')
+    }
+  }
+  const remaining = shownRemaining != null ? shownRemaining - estimated : quota != null ? quota - bookedPoints - estimated : null
+  return { quota, booked: bookedPoints, estimated, remaining, total: bookedPoints + estimated, openReports: pending.length, estimates }
+}
+
+/** "3", "2,5": German number for notices. */
+export const pointsText = (value) => {
+  const rounded = Math.round(value * 10) / 10
+  return Math.abs(rounded - Math.round(rounded)) < 1e-9 ? String(Math.round(rounded)) : String(rounded).replace('.', ',')
+}
+
+/** Notice body for a new absence; the app builds the same text (AbsencePoints.kt `absenceNoticeBody`). */
+export const absenceNoticeBody = (absence, tally) => {
+  const whenText = [absence.dateFrom, absence.hourFrom].filter(Boolean).join(' ')
+  const left = tally?.quota != null && tally?.remaining != null ? `Kontingent noch ${pointsText(tally.remaining)} von ${pointsText(tally.quota)}` : ''
+  let parts
+  if (absence.pending) {
+    const estimate = tally?.estimates?.[absence.id]
+    parts = [absence.subject || 'Absenz', whenText, 'Absenzmeldung offen', estimate && estimate.rule !== 'booked' ? `geschätzt ${estimate.points} Punkte` : '', left]
+  } else if (Number.isFinite(absence.points)) {
+    parts = [absence.reason || 'Absenz', whenText, `${pointsText(absence.points)} Punkte gebucht`, left]
+  } else {
+    parts = [absence.subject || 'Absenz', whenText, absence.reason, absence.excused ? 'entschuldigt' : 'nicht entschuldigt']
+  }
+  return parts.filter(Boolean).join(' · ')
 }

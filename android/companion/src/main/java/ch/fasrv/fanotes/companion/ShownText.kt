@@ -67,8 +67,16 @@ private fun fragmentText(token: String): String = when (token) {
     "Gewicht", "Weight" -> t(R.string.frag_weight)
     "Raum ", "Room " -> t(R.string.frag_room)
     "Tippen zum Aufdecken", "Tap to reveal" -> t(R.string.phrase_tap_reveal)
-    else -> token
+    "Absenzmeldung offen" -> t(R.string.frag_absence_report_open)
+    else -> ESTIMATED_POINTS.matchEntire(token)?.let { t(R.string.frag_estimated_points, it.groupValues[1]) }
+        ?: BOOKED_POINTS.matchEntire(token)?.let { t(R.string.frag_booked_points, localizedNumber(it.groupValues[1])) }
+        ?: QUOTA_LEFT.matchEntire(token)?.let { t(R.string.absence_points_left, localizedNumber(it.groupValues[1]), localizedNumber(it.groupValues[2])) }
+        ?: token
 }
+
+private val ESTIMATED_POINTS = Regex("""geschätzt (\d+) Punkte""")
+private val BOOKED_POINTS = Regex("""(-?\d+(?:,\d+)?) Punkte gebucht""")
+private val QUOTA_LEFT = Regex("""Kontingent noch (-?\d+(?:,\d+)?) von (-?\d+(?:,\d+)?)""")
 
 private val COUNTED_DE = Regex("""^(\d+) neue Noten(?: – tippen zum Aufdecken)?$""")
 private val COUNTED_EN = Regex("""^(\d+) new grades?(?: – tap to reveal)?$""")
@@ -83,7 +91,7 @@ private val REJECTED_EN = Regex("""^Schulnetz rejected the sign-in \((.+)\)\.$""
 private val SYNC_STATUS = Regex("""^The sync server responded with (\d+)\.$""")
 private val SYNC_STATUS_DE = Regex("""^Der Sync-Server hat mit (\d+) geantwortet\.$""")
 private val FRAGMENTS = Regex(
-    """nicht entschuldigt|Tippen zum Aufdecken|Tap to reveal|unexcused|Neue Noten|new grades|Neue Note|New grade|fällt aus|(?<![\p{L}])Vertretung(?![\p{L}])|(?<![\p{L}])Substitution(?![\p{L}])|(?<![\p{L}])Gewicht(?![\p{L}])|(?<![\p{L}])Weight(?![\p{L}])|Raum |Room |(?<!un)entschuldigt|(?<!un)excused"""
+    """Absenzmeldung offen|geschätzt \d+ Punkte|-?\d+(?:,\d+)? Punkte gebucht|Kontingent noch -?\d+(?:,\d+)? von -?\d+(?:,\d+)?|nicht entschuldigt|Tippen zum Aufdecken|Tap to reveal|unexcused|Neue Noten|new grades|Neue Note|New grade|fällt aus|(?<![\p{L}])Vertretung(?![\p{L}])|(?<![\p{L}])Substitution(?![\p{L}])|(?<![\p{L}])Gewicht(?![\p{L}])|(?<![\p{L}])Weight(?![\p{L}])|Raum |Room |(?<!un)entschuldigt|(?<!un)excused"""
 )
 
 private val EXACT = mapOf(

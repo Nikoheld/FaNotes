@@ -1,7 +1,11 @@
 // The part of the server's schulnetz-logic.mjs the browser uses. The browser imports that file
 // itself (see vite.config.ts), so these are its real implementations, typed here.
 declare module '@shared/schulnetz-logic' {
-  import type { AgendaEvent, SchoolGrade } from '../types'
+  import type { AgendaEvent, SchoolAbsence, SchoolGrade, Snapshot } from '../types'
+  export interface AbsenceEstimate { points: number; lessons: number; reports: number; rule: 'lessons' | 'exam' | 'instrument' | 'special' | 'fallback' | 'booked'; block: number; first: boolean }
+  export interface AbsenceTally { quota: number | null; booked: number; estimated: number; remaining: number | null; total: number; openReports: number; estimates: Record<string, AbsenceEstimate> }
+  export function absenceTally(snapshot: Partial<Snapshot> | null | undefined): AbsenceTally
+  export function absenceNoticeBody(absence: SchoolAbsence, tally: AbsenceTally): string
   export interface Mark { mark: number; weight: number }
   export interface WishResult { achievable: boolean; alreadyMet: boolean; needed: number | null; neededHalf?: number }
   export function isLesson(event: Partial<AgendaEvent>): boolean

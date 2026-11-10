@@ -1118,4 +1118,36 @@
     <string name="web_browser_remove_failed">Could not remove the browser. Please try again.</string>
     <string name="web_access_needs_connection">Connect a school first. The browser shows connections of this app.</string>
     <string name="web_access_demo">Not available in the demo.</string>
+    <string name="absence_points">Absence points</string>
+    <string name="absence_points_remaining">Remaining</string>
+    <string name="absence_points_of">of %1$s</string>
+    <string name="absence_points_booked">Booked</string>
+    <string name="absence_points_estimated">Open (estimated)</string>
+    <string name="absence_points_left">%1$s of %2$s left</string>
+    <string name="absence_points_summary">%1$s booked · %2$s estimated</string>
+    <string name="absence_points_explain">Open reports have no points in Schulnetz yet. Kanti+ estimates them with the absence rules: n lessons in a row cost n + 1 points, a block with an announced exam 10, an instrumental lesson on its own 3. When Schulnetz books the entry, its points replace the estimate. Illness rules are not applied.</string>
+    <string name="absence_estimated_open">Estimated · open</string>
+    <string name="absence_booked_tag">Booked</string>
+    <string name="absence_points_value">%1$s points</string>
+    <string name="absence_points_estimate_value">≈ %1$s points</string>
+    <string name="absence_rule_lesson">1 lesson: 1 + 1 = %1$d points</string>
+    <string name="absence_rule_lessons">%1$d lessons in a row: %1$d + 1 = %2$d points</string>
+    <string name="absence_rule_exam">Announced exam in this block: 10 points</string>
+    <string name="absence_rule_exam_capped">Another exam that day: at most 10 points per day</string>
+    <string name="absence_rule_instrument">Instrumental lesson on its own: 3 points</string>
+    <string name="absence_rule_special_half">Special day, half: 5 points</string>
+    <string name="absence_rule_special_full">Special day, full: 9 points</string>
+    <string name="absence_rule_fallback">Without the timetable: %1$d + 1 = %2$d points</string>
+    <string name="absence_rule_booked">Already booked in Schulnetz, not counted again</string>
+    <plurals name="absence_same_block">
+        <item quantity="one">Same block as %d other report, counted once</item>
+        <item quantity="other">Same block as %d other reports, counted once</item>
+    </plurals>
+    <plurals name="absence_open_reports">
+        <item quantity="one">%d open report</item>
+        <item quantity="other">%d open reports</item>
+    </plurals>
+    <string name="frag_absence_report_open">absence report open</string>
+    <string name="frag_estimated_points">about %1$s points (estimate)</string>
+    <string name="frag_booked_points">%1$s points booked</string>
 </resources>

@@ -85,16 +85,9 @@ fun parseGradesPage(html: String): List<SchoolGrade> {
     return grades
 }
 
-fun readAbsencesPage(html: String): PageRead<List<SchoolAbsence>> {
-    if (html.isBlank()) return PageRead(emptyList(), null)
-    val problem = sessionProblem("", html)
-    if (problem == SessionProblem.INTERACTIVE) return PageRead(emptyList(), sessionProblemText(problem))
-    if (problem != SessionProblem.NONE) return PageRead(emptyList(), "Absenzen: ${sessionProblemText(problem)}", html)
-    val rows = parseAbsencesPage(html).ifEmpty { parseAbsencesByHeader(html) }
-    if (rows.isNotEmpty() || html.contains("Datum von")) return PageRead(rows, null)
-    if (html.isNotBlank()) return PageRead(emptyList(), "Absenzen: Seite geladen, aber nicht lesbar", html)
-    return PageRead(emptyList(), null)
-}
+/** The rows of the Absenzen page. [readAbsenceStatement] also returns the quota. */
+fun readAbsencesPage(html: String): PageRead<List<SchoolAbsence>> =
+    readAbsenceStatement(html).let { PageRead(it.value.absences, it.error, it.html) }
 
 fun parseAbsencesPage(html: String): List<SchoolAbsence> {
     if (html.isBlank()) return emptyList()

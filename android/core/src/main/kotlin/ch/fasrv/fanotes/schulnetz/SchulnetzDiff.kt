@@ -149,18 +149,17 @@ fun diffSnapshots(
         val stillListed = next.events.mapTo(HashSet()) { it.id }
         diffExams(previous.exams + previous.events.filter { it.isExamLike() && it.id !in stillListed }, next.exams, changes, freshWeeks)
     }
-    if (settings.absences) {
+    // The first read with the points parser gives the rows new ids: a baseline, not news.
+    if (settings.absences && !absenceSeedRead(previous, next)) {
         val before = previous.absences.associateBy { it.id }
+        val tally by lazy { absenceTally(next) }
         for (absence in next.absences) {
             if (before[absence.id] != null) continue
-            val whenText = listOf(absence.dateFrom, absence.hourFrom).filter { it.isNotBlank() }.joinToString(" ")
-            val subject = absence.subject.ifBlank { "Absenz" }
-            val excuse = if (absence.excused) "entschuldigt" else "nicht entschuldigt"
             changes += linkedChange(
                 id = "absence:${absence.id}",
                 category = "absence",
                 title = "Neue Absenz",
-                body = listOf(subject, whenText, absence.reason, excuse).filter { it.isNotBlank() }.joinToString(" · "),
+                body = absenceNoticeBody(absence, tally),
                 targetId = absenceTargetId(absence),
                 date = absence.dateFrom.take(10),
             )

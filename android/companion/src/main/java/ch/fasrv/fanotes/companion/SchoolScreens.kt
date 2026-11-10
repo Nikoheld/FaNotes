@@ -35,7 +35,8 @@ fun SchoolScreen(model: CompanionModel) {
     val online = LocalOnline.current
     val courses = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)).size }
     val exams = remember(model.snapshot.exams, model.snapshot.events) { (model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }).distinctBy(::lessonTargetId).size }
-    val openAbsences = model.snapshot.absences.count { !it.excused }
+    val openAbsences = model.snapshot.absences.count { it.isOpen() }
+    val absencePoints = remember(model.snapshot) { absenceTally(model.snapshot) }
     val updates = model.snapshot.messages.size + model.snapshot.startMessages.size
     val fetched = model.snapshot.fetchedAt.isNotBlank()
     ScreenList {
@@ -82,7 +83,7 @@ fun SchoolScreen(model: CompanionModel) {
                 FineDivider()
                 SettingRow(Icons.AutoMirrored.Outlined.Assignment, t(R.string.exams), t(R.string.prepare_for_what_s_coming), if (fetched) exams.toString() else "") { model.navigate(Page.Exams) }
                 FineDivider()
-                SettingRow(Icons.Outlined.EventBusy, t(R.string.absences), t(R.string.status_excuse_deadlines), if (fetched) t(R.string.open_2, openAbsences) else "",
+                SettingRow(Icons.Outlined.EventBusy, t(R.string.absences), t(R.string.status_excuse_deadlines), if (!fetched) "" else absencePointsLeft(absencePoints) ?: t(R.string.open_2, openAbsences),
                     tone = if (openAbsences > 0) StateTone.Warning else StateTone.Neutral, trailingColor = if (openAbsences > 0) LocalCompanionSemantics.current.warning else null) { model.navigate(Page.Absences) }
                 FineDivider()
                 SettingRow(Icons.Outlined.Forum, t(R.string.updates), t(R.string.messages_school_events_holidays), if (fetched) updates.toString() else "") { model.navigate(Page.Updates) }
@@ -321,6 +322,7 @@ fun CourseScreen(model: CompanionModel) {
 
 @Composable
 fun SchoolRecordScreen(model: CompanionModel, page: Page) {
+    val tally = remember(model.snapshot) { absenceTally(model.snapshot) }
     var query by rememberSaveable(page) { mutableStateOf("") }
     var filter by rememberSaveable(page) { mutableStateOf("all") }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
@@ -345,26 +347,48 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
                 schoolError(model, "Prüfungen:")
             }
             Page.Absences -> {
-                item(key = "filter") { ChoiceRow(listOf("all" to t(R.string.all), "open" to t(R.string.open), "excused" to t(R.string.excused)), filter, { filter = it }, Modifier.padding(vertical = 6.dp)) }
-                val absences = model.snapshot.absences.filter { "${it.subject} ${it.reason} ${it.dateFrom}".contains(query, true) && when (filter) { "open" -> !it.excused; "excused" -> it.excused; else -> true } }.sortedWith(compareBy<SchoolAbsence> { if (absenceTargetId(it) in model.highlightIds) 0 else 1 }.thenByDescending { parseDisplayDate(it.dateFrom) ?: java.time.LocalDate.MIN })
+                val withPoints = tally.quota != null || model.snapshot.absences.any { it.points != null || it.pending }
+                if (tally.shown && query.isBlank()) item(key = "points") { AbsencePointsSummary(tally) }
+                item(key = "filter") { ChoiceRow(listOf("all" to t(R.string.all), "open" to t(R.string.open), "excused" to if (withPoints) t(R.string.absence_booked_tag) else t(R.string.excused)), filter, { filter = it }, Modifier.padding(vertical = 6.dp)) }
+                val absences = model.snapshot.absences.filter { "${it.subject} ${it.reason} ${it.dateFrom}".contains(query, true) && when (filter) { "open" -> it.isOpen(); "excused" -> !it.isOpen(); else -> true } }
+                    .sortedWith(compareBy<SchoolAbsence> { if (absenceTargetId(it) in model.highlightIds) 0 else 1 }.thenByDescending { parseDisplayDate(it.dateFrom) ?: java.time.LocalDate.MIN }.thenBy { it.hourFrom })
+                // Older reads could give two reports of a double lesson the same id; keys stay unique.
+                val keyed = absences.withIndex().groupBy { absenceTargetId(it.value) }.flatMap { (key, rows) -> rows.mapIndexed { at, row -> row.index to if (at == 0) key else "$key:$at" } }.sortedBy { it.first }.map { it.second }
                 if (absences.isEmpty() && query.isBlank() && model.busy && model.snapshot.fetchedAt.isBlank()) item(key = "loading") { SkeletonRows(3, t(R.string.loading_absences)) }
                 else if (absences.isEmpty()) item(key = "empty") { EmptyState(Icons.Outlined.EventAvailable, t(R.string.no_absences_to_show), t(R.string.your_available_absence_records_and_deadlines_wil)) }
-                itemsIndexed(absences, key = { _, it -> absenceTargetId(it) }) { index, absence ->
+                itemsIndexed(absences, key = { index, _ -> keyed[index] }) { index, absence ->
                     val highlighted = absenceTargetId(absence) in model.highlightIds
+                    val estimate = tally.estimates[absence.id]
+                    val semantics = LocalCompanionSemantics.current
                     GroupItem(index, absences.size) {
                         Column(Modifier.fillMaxWidth().background(if (highlighted) MaterialTheme.colorScheme.primaryContainer else Color.Transparent).padding(horizontal = 16.dp, vertical = 14.dp)) {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(absence.subject.ifBlank { t(R.string.absence) }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Tag(if (absence.excused) t(R.string.excused) else t(R.string.open), if (absence.excused) LocalCompanionSemantics.current.success else LocalCompanionSemantics.current.warning)
+                                Text(absence.subject.ifBlank { absence.reason.ifBlank { t(R.string.absence) } }, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                when {
+                                    absence.pending -> Tag(t(R.string.absence_estimated_open), semantics.warning)
+                                    absence.points != null -> Tag(t(R.string.absence_booked_tag), MaterialTheme.colorScheme.primary)
+                                    else -> Tag(if (absence.excused) t(R.string.excused) else t(R.string.open), if (absence.excused) semantics.success else semantics.warning)
+                                }
                             }
-                            Text(listOf(absence.dateFrom, absence.dateTo.takeIf { it != absence.dateFrom }.orEmpty(), listOf(absence.hourFrom, absence.hourTo).filter { it.isNotBlank() }.joinToString("–")).filter { it.isNotBlank() }.joinToString("  ·  "),
-                                style = TimeSmallStyle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp))
-                            if (absence.reason.isNotBlank()) Text(absence.reason, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+                            Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(listOf(absence.dateFrom, absence.dateTo.takeIf { it != absence.dateFrom }.orEmpty(), listOf(absence.hourFrom, absence.hourTo).filter { it.isNotBlank() }.joinToString("–")).filter { it.isNotBlank() }.joinToString("  ·  "),
+                                    style = TimeSmallStyle, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                                val points = when {
+                                    absence.pending && estimate != null && estimate.rule != "booked" -> t(R.string.absence_points_estimate_value, estimate.points)
+                                    else -> absence.points?.let { t(R.string.absence_points_value, uiPoints(it)) }.orEmpty()
+                                }
+                                if (points.isNotBlank()) Text(points, style = MaterialTheme.typography.labelLarge, color = if (absence.pending) semantics.warning else MaterialTheme.colorScheme.onSurface)
+                            }
+                            if (absence.reason.isNotBlank() && absence.subject.isNotBlank()) Text(absence.reason, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+                            if (absence.pending && estimate != null) {
+                                Text(estimateRuleText(estimate), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                                if (estimate.reports > 1) Text(tp(R.plurals.absence_same_block, estimate.reports - 1, estimate.reports - 1), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             if (absence.excuseUntil.isNotBlank() && !absence.excused) Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Outlined.Schedule, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
                                 Text(t(R.string.excuse_by, absence.excuseUntil), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(start = 6.dp))
                             }
-                            if (absence.acknowledged) Text(t(R.string.acknowledged_by_school), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+                            if (absence.acknowledged && absence.points == null) Text(t(R.string.acknowledged_by_school), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
                         }
                     }
                 }
@@ -442,6 +466,44 @@ private fun ExpandableRecord(title: String, body: String, date: String = "", hig
         if (body.isNotBlank()) {
             if (expanded) SelectionContainer { Text(body, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp)) }
             else Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+/** "27 of 30 left" when Schulnetz shows a quota; the estimate for open reports is already subtracted. */
+@Composable
+fun absencePointsLeft(tally: AbsenceTally): String? {
+    val quota = tally.quota ?: return null
+    val remaining = tally.remaining ?: return null
+    return t(R.string.absence_points_left, uiPoints(remaining), uiPoints(quota))
+}
+
+@Composable
+private fun estimateRuleText(estimate: AbsenceEstimate): String = when (estimate.rule) {
+    "exam" -> if (estimate.points < 10) t(R.string.absence_rule_exam_capped) else t(R.string.absence_rule_exam)
+    "instrument" -> t(R.string.absence_rule_instrument)
+    "special" -> if (estimate.points >= 9) t(R.string.absence_rule_special_full) else t(R.string.absence_rule_special_half)
+    "fallback" -> t(R.string.absence_rule_fallback, estimate.lessons, estimate.points)
+    "booked" -> t(R.string.absence_rule_booked)
+    else -> if (estimate.lessons == 1) t(R.string.absence_rule_lesson, estimate.points) else t(R.string.absence_rule_lessons, estimate.lessons, estimate.points)
+}
+
+@Composable
+private fun AbsencePointsSummary(tally: AbsenceTally) {
+    val semantics = LocalCompanionSemantics.current
+    Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 12.dp)) {
+        Column(Modifier.padding(20.dp)) {
+            Text(t(R.string.absence_points), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            FlowRow(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                val quota = tally.quota
+                val remaining = tally.remaining
+                if (quota != null && remaining != null) MetricBlock(t(R.string.absence_points_remaining), "${uiPoints(remaining)} / ${uiPoints(quota)}", large = true,
+                    valueColor = when { remaining < 0 -> MaterialTheme.colorScheme.error; tally.estimated > 0 -> semantics.warning; else -> MaterialTheme.colorScheme.onSurface })
+                MetricBlock(t(R.string.absence_points_booked), uiPoints(tally.booked))
+                MetricBlock(t(R.string.absence_points_estimated), if (tally.estimated > 0) "≈ ${tally.estimated}" else "0", valueColor = if (tally.estimated > 0) semantics.warning else MaterialTheme.colorScheme.onSurface)
+            }
+            if (tally.openReports > 0) StatusLine(tp(R.plurals.absence_open_reports, tally.openReports, tally.openReports) + " · " + t(R.string.absence_points_estimate_value, tally.estimated), StateTone.Warning, Modifier.padding(top = 12.dp))
+            Text(t(R.string.absence_points_explain), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
         }
     }
 }

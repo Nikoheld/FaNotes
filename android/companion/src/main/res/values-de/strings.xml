@@ -1118,4 +1118,36 @@
     <string name="web_browser_remove_failed">Der Browser konnte nicht entfernt werden. Bitte nochmals versuchen.</string>
     <string name="web_access_needs_connection">Verbinde zuerst eine Schule. Der Browser zeigt Verbindungen dieser App.</string>
     <string name="web_access_demo">Im Demo-Modus nicht verfügbar.</string>
+    <string name="absence_points">Absenzpunkte</string>
+    <string name="absence_points_remaining">Verbleibend</string>
+    <string name="absence_points_of">von %1$s</string>
+    <string name="absence_points_booked">Gebucht</string>
+    <string name="absence_points_estimated">Offen (geschätzt)</string>
+    <string name="absence_points_left">noch %1$s von %2$s</string>
+    <string name="absence_points_summary">%1$s gebucht · %2$s geschätzt</string>
+    <string name="absence_points_explain">Offene Meldungen haben in Schulnetz noch keine Punkte. Kanti+ schätzt sie nach dem Absenzenreglement: n Lektionen am Stück zählen n + 1 Punkte, ein Block mit angekündigter Prüfung 10, eine einzelne Instrumentallektion 3. Sobald Schulnetz den Eintrag bucht, ersetzen seine Punkte die Schätzung. Regeln für Krankheit sind nicht berücksichtigt.</string>
+    <string name="absence_estimated_open">Geschätzt · offen</string>
+    <string name="absence_booked_tag">Gebucht</string>
+    <string name="absence_points_value">%1$s Punkte</string>
+    <string name="absence_points_estimate_value">≈ %1$s Punkte</string>
+    <string name="absence_rule_lesson">1 Lektion: 1 + 1 = %1$d Punkte</string>
+    <string name="absence_rule_lessons">%1$d Lektionen am Stück: %1$d + 1 = %2$d Punkte</string>
+    <string name="absence_rule_exam">Angekündigte Prüfung in diesem Block: 10 Punkte</string>
+    <string name="absence_rule_exam_capped">Weitere Prüfung am selben Tag: höchstens 10 Punkte pro Tag</string>
+    <string name="absence_rule_instrument">Einzelne Instrumentallektion: 3 Punkte</string>
+    <string name="absence_rule_special_half">Spezialanlass, halber Tag: 5 Punkte</string>
+    <string name="absence_rule_special_full">Spezialanlass, ganzer Tag: 9 Punkte</string>
+    <string name="absence_rule_fallback">Ohne Stundenplan: %1$d + 1 = %2$d Punkte</string>
+    <string name="absence_rule_booked">Schon in Schulnetz gebucht, zählt nicht doppelt</string>
+    <plurals name="absence_same_block">
+        <item quantity="one">Gleicher Block wie %d weitere Meldung, zählt einmal</item>
+        <item quantity="other">Gleicher Block wie %d weitere Meldungen, zählt einmal</item>
+    </plurals>
+    <plurals name="absence_open_reports">
+        <item quantity="one">%d offene Meldung</item>
+        <item quantity="other">%d offene Meldungen</item>
+    </plurals>
+    <string name="frag_absence_report_open">Absenzmeldung offen</string>
+    <string name="frag_estimated_points">geschätzt %1$s Punkte</string>
+    <string name="frag_booked_points">%1$s Punkte gebucht</string>
 </resources>

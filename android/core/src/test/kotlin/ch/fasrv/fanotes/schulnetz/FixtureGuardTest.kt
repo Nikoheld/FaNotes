@@ -14,6 +14,8 @@ class FixtureGuardTest {
     fun committedFixturesStaySynthetic() {
         val names = listOf(
             "absenzen.html",
+            "absenzen-aksa-open.html",
+            "absenzen-aksa-booked.html",
             "agenda.html",
             "kontoauszug.html",
             "noten.html",

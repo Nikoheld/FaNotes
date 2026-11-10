@@ -47,6 +47,10 @@ export interface SchoolAbsence {
   acknowledged: boolean
   status: string
   excuseUntil?: string
+  /** Booked Absenzpunkte from the statement. */
+  points?: number | null
+  /** An open absence report (no points yet; estimated). */
+  pending?: boolean
 }
 
 export interface SchoolMessage { id: string; title: string; body: string; at: string }
@@ -62,6 +66,10 @@ export interface Snapshot {
   events: AgendaEvent[]
   exams: AgendaEvent[]
   absences: SchoolAbsence[]
+  /** Kontingent and remaining quota as Schulnetz shows them. */
+  absenceQuota?: number | null
+  absenceRemaining?: number | null
+  absenceParser?: number
   homework: SchoolHomework[]
   messages: SchoolMessage[]
   vacations: SchoolVacation[]

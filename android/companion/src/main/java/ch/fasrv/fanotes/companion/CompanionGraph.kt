@@ -1664,9 +1664,8 @@ class CompanionGraph(private val context: Context) {
                 .putExtra(SchulnetzLoginActivity.EXTRA_PROVIDER, connection.provider.wire)
         }
 
-        private fun keepLoaded(previous: SchulnetzSnapshot, next: SchulnetzSnapshot): SchulnetzSnapshot = next.copy(
+        private fun keepLoaded(previous: SchulnetzSnapshot, next: SchulnetzSnapshot): SchulnetzSnapshot = ch.fasrv.fanotes.schulnetz.keepAbsenceRead(previous, next).copy(
             grades = ch.fasrv.fanotes.schulnetz.keepGradeRead(previous.grades, next.grades, next.trustedGradeRead()),
-            absences = next.absences.ifEmpty { previous.absences },
             events = next.events.ifEmpty { previous.events },
             exams = next.exams.ifEmpty { previous.exams },
             homework = next.homework.ifEmpty { previous.homework },

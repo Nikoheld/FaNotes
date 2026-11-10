@@ -338,7 +338,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          node --test ../fanotes-site/schulnetz-logic.test.mjs ../fanotes-site/sync-guard.test.mjs ../fanotes-site/kanti-web-api.test.mjs
+          node --test ../fanotes-site/schulnetz-logic.test.mjs ../fanotes-site/sync-guard.test.mjs ../fanotes-site/kanti-web-api.test.mjs ../fanotes-site/absence-points.test.mjs
           if [ -z "${FANOTES_ANDROID_KEYSTORE_B64}" ] || [ -z "${FANOTES_ANDROID_KEYSTORE_PASSWORD}" ]; then
             echo "The Android release keystore is not configured." >&2
             exit 1
