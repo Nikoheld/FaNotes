@@ -57,6 +57,8 @@ export const createApi = (transport: Transport = (input, init) => fetch(input, i
       csrf = answer.csrf
       return answer
     },
+    /** Today's Mensa menu; public, same body as the app gets. */
+    mensa: () => call<unknown>('GET', '/mensa'),
     logout: () => call<{ signedOut: boolean }>('POST', '/logout'),
     prelogin: (email: string) => call<{ kdf: { algorithm: string; iterations: number; salt: string } }>('POST', '/prelogin', { email }),
     login: (email: string, authKey: string) => call<{ ok: boolean }>('POST', '/login', { email, authKey }),

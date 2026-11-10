@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { allEntries, byDay, isRunning, nextCommitment, clockMinutes, type Entry } from '../lib/agenda'
 import { courseSummaries, latestGrades, plusLabel, promotionTotals } from '../lib/grades'
 import { dateLabel, pointsLabel } from '../lib/i18n'
+import { toMensaFeed, pickMensaDay, type MensaFeed } from '../lib/mensa'
+import { MensaCard } from '../components/MensaCard'
 import { useKanti } from '../state'
 import { Banner, Card, DayBand, Dialog, Empty, Icon, RoomPill, SectionLabel, Snowfall, Tag } from '../components/ui'
 import { EntryDetails, EntryRow, MarkBadge, relativeDay, useClock } from './common'
@@ -16,6 +18,17 @@ export const Today = () => {
   const days = useMemo(() => byDay(entries), [entries])
   const next = nextCommitment(entries, clock)
   const [selected, setSelected] = useState<Entry | null>(null)
+  const [mensa, setMensa] = useState<MensaFeed | null>(null)
+  // The menu is public and cached by the server; the page asks again every few hours at most.
+  useEffect(() => {
+    if (!prefs.showMensa || kanti.demo) return undefined
+    let alive = true
+    const load = () => { kanti.api.mensa().then((body) => { if (alive) setMensa(toMensaFeed(body)) }, () => { /* unavailable: no card */ }) }
+    load()
+    const timer = window.setInterval(load, 3 * 3_600_000)
+    return () => { alive = false; window.clearInterval(timer) }
+  }, [prefs.showMensa, kanti.demo, kanti.api])
+  const mensaDay = prefs.showMensa && mensa ? pickMensaDay(mensa.days, new Date()) : null
   const todays = days.get(clock.today) || []
   const courses = useMemo(() => courseSummaries(snapshot?.grades || []), [snapshot])
   const totals = promotionTotals(courses)
@@ -87,6 +100,8 @@ export const Today = () => {
               <small className="muted">{t.pointsSummary(pointsLabel(absencePoints.booked, language), absencePoints.estimated > 0 ? `≈ ${absencePoints.estimated}` : '0')}{absencePoints.openReports ? ` · ${t.openReports(absencePoints.openReports)}` : ''}</small>
             </button>
           ) : null}
+
+          {mensaDay ? <MensaCard day={mensaDay} t={t} language={language} /> : null}
 
           <SectionLabel action={<button type="button" className="link" onClick={() => kanti.navigate('agenda')}>{t.agenda} <Icon name="right" size={16} /></button>}>{t.comingUp}</SectionLabel>
           <Card className="list">

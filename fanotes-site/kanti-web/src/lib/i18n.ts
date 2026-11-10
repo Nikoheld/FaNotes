@@ -99,6 +99,8 @@ const de = {
   tam: 'TAM-Intranet', schulnetz: 'Schulnetz',
   readErrors: 'Nicht alles konnte gelesen werden',
   subjects: (count: number) => (count === 1 ? 'ein Fach' : `${count} Fächer`),
+  mensa: 'Mensa', mensaClosed: 'Mensa geschlossen', mensaStudentPrice: (price: string) => `Schüler CHF ${price}`,
+  mensaSetting: 'Mensa-Menü auf der Startseite',
   ownMarksNote: 'Eigene Noten und Anpassungen aus der App bleiben auf dem Handy; hier zählen die Noten der Schule.',
 }
 
@@ -203,6 +205,8 @@ const en: Strings = {
   tam: 'TAM intranet', schulnetz: 'Schulnetz',
   readErrors: 'Not everything could be read',
   subjects: (count: number) => (count === 1 ? 'one subject' : `${count} subjects`),
+  mensa: 'Mensa', mensaClosed: 'Mensa closed', mensaStudentPrice: (price: string) => `Students CHF ${price}`,
+  mensaSetting: 'Mensa menu on the start page',
   ownMarksNote: 'Own marks and adjustments from the app stay on the phone; here the school’s marks count.',
 }
 
