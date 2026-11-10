@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.22
+
+- Refresh instantly on opening and push school news within minutes, battery-friendly.
+
 ## 2026.11.2-beta.21
 
 - Count open absence reports as estimated absence points.
