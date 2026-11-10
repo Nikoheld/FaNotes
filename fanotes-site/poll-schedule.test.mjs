@@ -118,3 +118,25 @@ test('a failed school read reported by the poll counts like an error', async () 
   assert.equal(scheduler.failures.get('c'.repeat(32)), 1)
   assert.equal(scheduler.due.get('c'.repeat(32)) - clock, 300_000)
 })
+
+test('identities without a link are skipped at once; only real reads are spaced apart', async () => {
+  let clock = Date.parse('2026-11-10T08:00:00Z')
+  const accounts = ['0'.repeat(32), ...Array.from({ length: 18 }, (_, index) => String.fromCharCode(97 + index).repeat(32)), 'f'.repeat(32)]
+  const read = []
+  const scheduler = createPollScheduler({
+    listAccounts: async () => accounts,
+    // Only the first and the last identity have a link.
+    pollAccount: async (id) => (id === accounts[0] || id === accounts.at(-1) ? (read.push(clock), { revision: 1 }) : { skipped: true }),
+    readSnapshot: async () => schoolWeek,
+    now: () => new Date(clock),
+    random: middle,
+    sleep: async (ms) => { clock += ms },
+  })
+  await scheduler.tick() // a start staggers new identities
+  clock += 400_000 // now every identity is due
+  read.length = 0
+  await scheduler.tick()
+  assert.equal(read.length, 2)
+  // One spacing after the real read, none after the 18 skipped identities.
+  assert.ok(read[1] - read[0] <= 5_000, String(read[1] - read[0]))
+})
