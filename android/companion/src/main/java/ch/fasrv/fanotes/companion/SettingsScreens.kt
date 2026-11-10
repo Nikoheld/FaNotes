@@ -96,6 +96,8 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     else SettingRow(Icons.Outlined.School, t(R.string.schulnetz), t(R.string.connection_notifications_and_this_device)) { model.navigate(Page.Connections) }
                     FineDivider()
                     SettingRow(Icons.Outlined.NotificationsNone, t(R.string.notifications), t(R.string.what_reaches_you_and_when)) { model.navigate(Page.Notifications) }
+                    FineDivider()
+                    SettingRow(Icons.Outlined.Laptop, t(R.string.web_access), t(R.string.web_access_row)) { model.navigate(Page.WebAccess) }
                     if (!model.notesAccount) { FineDivider(); SettingRow(Icons.Outlined.EditNote, t(R.string.sync_notes_with_fanotes), t(R.string.optional_school_stays_available_either_way)) { model.navigate(Page.Auth) } }
                 }
             }
@@ -234,6 +236,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                 if (model.link.lastError.isNotBlank()) Box(Modifier.padding(top = 12.dp)) { InfoBanner(t(R.string.school_connection_needs_attention), shownText(model.link.lastError), t(R.string.diagnostics), true, onAction = { model.navigate(Page.Diagnostics) }) }
             }
         }
+        Page.WebAccess -> WebAccessSettings(model)
         Page.Appearance -> AppearanceSettings(model)
         Page.Navigation -> NavigationBarSettings(model)
         Page.Planning -> ScreenList {
@@ -814,4 +817,99 @@ private fun DiagnosticLine(label: String, value: String, last: Boolean = false) 
         Text(value, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, modifier = Modifier.padding(start = 12.dp).weight(1f))
     }
     if (!last) FineDivider()
+}
+
+/** Kanti+ im Browser: enter the browser's code, choose what it may show, see and remove browsers. */
+@Composable
+private fun WebAccessSettings(model: CompanionModel) {
+    var code by remember { mutableStateOf("") }
+    LaunchedEffect(model.connections, model.demo) { model.loadWebBrowsers() }
+    ScreenList {
+        item(key = "intro") {
+            Group(Modifier.padding(top = 4.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        IconTile(Icons.Outlined.Laptop, StateTone.Accent, 44.dp)
+                        Text(t(R.string.web_access), style = MaterialTheme.typography.titleLarge)
+                    }
+                    Text(t(R.string.web_access_body, WEB_APP_HOST), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 14.dp))
+                    when {
+                        model.demo -> Box(Modifier.padding(top = 14.dp)) { InfoBanner(t(R.string.demo_active_title), t(R.string.web_access_demo), tone = StateTone.Warning) }
+                        !model.webAccessAvailable -> Box(Modifier.padding(top = 14.dp)) { InfoBanner(t(R.string.web_access), t(R.string.web_access_needs_connection), tone = StateTone.Neutral) }
+                        else -> {
+                            OutlinedTextField(
+                                code,
+                                { next -> code = next.uppercase().filter { it.isLetterOrDigit() || it == '-' || it == ' ' }.take(11) },
+                                Modifier.fillMaxWidth().padding(top = 14.dp),
+                                label = { Text(t(R.string.web_pair_code)) },
+                                placeholder = { Text(t(R.string.web_pair_code_hint)) },
+                                singleLine = true,
+                                shape = MaterialTheme.shapes.small,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Characters),
+                            )
+                            PrimaryButton(t(R.string.web_pair_continue), { model.lookupWebPair(code) }, Modifier.fillMaxWidth().padding(top = 12.dp), enabled = !model.busy && normalizePairCode(code) != null)
+                        }
+                    }
+                }
+            }
+        }
+        if (model.webAccessAvailable) {
+            item(key = "browsers-head") { SectionLabel(t(R.string.web_browsers)) }
+            item(key = "browsers") {
+                Group {
+                    model.connections.connections.forEachIndexed { index, connection ->
+                        if (index > 0) FineDivider()
+                        val browsers = model.webBrowsers[connection.id].orEmpty()
+                        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 8.dp)) {
+                            Text(connection.label, style = MaterialTheme.typography.titleMedium)
+                            if (browsers.isEmpty()) Text(t(R.string.web_browsers_none), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
+                            browsers.forEach { browser ->
+                                Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(browser.browser.ifBlank { t(R.string.web_browser_unnamed) }, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(t(R.string.web_browser_seen, updatedLabel(browser.lastSeenAt.ifBlank { browser.createdAt })), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    TextButton(onClick = { model.revokeWebBrowser(connection.id, browser.id) }, enabled = !model.busy) { Text(t(R.string.web_browser_remove), color = MaterialTheme.colorScheme.error) }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    model.webPairPrompt?.let { prompt ->
+        var chosen by remember(prompt) { mutableStateOf(setOfNotNull(model.connections.active?.id)) }
+        val tamChosen = model.connections.connections.any { it.id in chosen && it.provider == SchoolProvider.TAM }
+        AlertDialog(
+            onDismissRequest = { model.dismissWebPair() },
+            shape = MaterialTheme.shapes.extraLarge,
+            title = { Text(t(R.string.web_pair_title), style = MaterialTheme.typography.headlineSmall) },
+            text = {
+                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                    Text(t(R.string.web_pair_browser, prompt.info.browser.ifBlank { t(R.string.web_browser_unnamed) }), style = MaterialTheme.typography.bodyLarge)
+                    Box(Modifier.padding(top = 12.dp)) { InfoBanner(t(R.string.web_pair_warning), "", tone = StateTone.Warning) }
+                    Text(t(R.string.web_pair_choose), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+                    model.connections.connections.forEach { connection ->
+                        val on = connection.id in chosen
+                        Row(
+                            Modifier.fillMaxWidth().selectable(selected = on, role = Role.Checkbox) { chosen = if (on) chosen - connection.id else chosen + connection.id }.padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(checked = on, onCheckedChange = null)
+                            Column(Modifier.padding(start = 8.dp)) {
+                                Text(connection.label, style = MaterialTheme.typography.bodyLarge)
+                                Text(if (connection.provider == SchoolProvider.TAM) t(R.string.connection_provider_tam) else t(R.string.connection_provider_schulnetz), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                    if (tamChosen) Text(t(R.string.web_pair_tam_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { model.approveWebPair(model.connections.connections.map { it.id }.filter { it in chosen }) }, enabled = chosen.isNotEmpty() && !model.busy) { Text(t(R.string.web_pair_approve)) }
+            },
+            dismissButton = { TextButton(onClick = { model.dismissWebPair() }) { Text(t(R.string.cancel)) } },
+        )
+    }
 }

@@ -1,0 +1,26 @@
+{
+  "name": "kanti-web",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Kanti+ im Browser (schulnetz.fasrv.ch)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "build": "npm run typecheck && vite build && node scripts/write-version.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "19.2.9",
+    "react-dom": "19.2.9"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "5.2.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "3.2.7"
+  }
+}

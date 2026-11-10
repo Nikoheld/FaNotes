@@ -18,7 +18,7 @@ enum class Page(val title: String) {
     Absences("Absences"), Updates("School updates"), Statement("School account"),
     Settings("Settings"), Connections("Account & sync"), Appearance("Appearance"), ArchivedSubjects("Archived subjects"),
     Navigation("Navigation bar"), Planning("Planning & grades"), Notifications("Notifications"),
-    Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted"), DocSearch("Document search")
+    Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted"), DocSearch("Document search"), WebAccess("Kanti+ in the browser")
 }
 data class CompanionRoute(val destination: Destination = Destination.Today, val page: Page? = null)
 
@@ -76,6 +76,7 @@ fun Page.uiTitle(): String = when (this) {
     Page.Auth -> t(R.string.connect_fanotes)
     Page.Trash -> t(R.string.recently_deleted)
     Page.DocSearch -> t(R.string.doc_search_title)
+    Page.WebAccess -> t(R.string.web_access)
 }
 fun navPlacement(id: String): NavPlacement = when (startTabId(id)) {
     "planner" -> NavPlacement(CompanionRoute(Destination.Planner))

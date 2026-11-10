@@ -5,6 +5,17 @@ import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.AKSA_SCHULNETZ_BASE
 import ch.fasrv.fanotes.schulnetz.NotifySettings
+import ch.fasrv.fanotes.schulnetz.RevealLedger
+import ch.fasrv.fanotes.schulnetz.SchoolProvider
+import ch.fasrv.fanotes.schulnetz.WebBrowserSession
+import ch.fasrv.fanotes.schulnetz.WebPairInfo
+import ch.fasrv.fanotes.schulnetz.deviceLinkBody
+import ch.fasrv.fanotes.schulnetz.displayPairCode
+import ch.fasrv.fanotes.schulnetz.parseRevealLedger
+import ch.fasrv.fanotes.schulnetz.parseWebPairInfo
+import ch.fasrv.fanotes.schulnetz.parseWebSessions
+import ch.fasrv.fanotes.schulnetz.revealsBody
+import ch.fasrv.fanotes.schulnetz.webPairBody
 import ch.fasrv.fanotes.schulnetz.notifySettingsFromStored
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_API_PATH
 import ch.fasrv.fanotes.schulnetz.SCHULNETZ_CLIENT_ID
@@ -133,6 +144,12 @@ data class SchulnetzLinkState(
     val pushUrl: String = "",
     val settings: NotifySettings = NotifySettings(),
     val reachable: Boolean = true,
+    /** "web" or "rest" for Schulnetz; "device" for a connection the phone reads and uploads (TAM). */
+    val mode: String = "",
+    /** Server time of the last alert-settings change, from the app or the browser. */
+    val settingsUpdatedAt: String = "",
+    /** Browsers (Kanti+ im Browser) that can read this connection. */
+    val webSessions: Int = 0,
 )
 
 class SchulnetzClient(
@@ -699,7 +716,8 @@ class SchulnetzClient(
         if (code !in 200..299 && code != 404) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 
-    fun saveSettings(session: SchoolAuth, settings: NotifySettings) {
+    /** Saves the alert settings; returns the server's settingsUpdatedAt (blank on an older server). */
+    fun saveSettings(session: SchoolAuth, settings: NotifySettings): String {
         val payload = buildString {
             append("{\"enabled\":").append(settings.enabled)
             append(",\"grades\":").append(settings.grades)
@@ -723,6 +741,56 @@ class SchulnetzClient(
         }
         val (code, body) = fanotes("PUT", "/settings", session, payload)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
+        return parseStatus(body).settingsUpdatedAt
+    }
+
+    /** Links a connection the phone reads itself (TAM): no school secret, the server never polls it. */
+    fun linkDevice(session: SchoolAuth, baseUrl: String, deviceId: String, displayName: String): SchulnetzLinkState {
+        val (code, body) = fanotes("PUT", "/link", session, deviceLinkBody(baseUrl, deviceId, displayName))
+        if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
+        return parseStatus(body)
+    }
+
+    /** The browser waiting behind a pairing code, or an exception with the server's status. */
+    fun webPairInfo(session: SchoolAuth, code: String): WebPairInfo {
+        val (status, body) = fanotes("GET", "/web-pair?code=${displayPairCode(code)}", session, null)
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+        return parseWebPairInfo(body) ?: throw SchulnetzHttpException(status, errorMessage(body, status))
+    }
+
+    /** Adds this connection to the pairing; [finish] approves it for the browser. */
+    fun webPair(session: SchoolAuth, code: String, connectionId: String, label: String, provider: SchoolProvider, finish: Boolean, unrevealed: Collection<String>) {
+        val (status, body) = fanotes("POST", "/web-pair", session, webPairBody(code, connectionId, label, provider, finish, unrevealed))
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+    }
+
+    fun webSessions(session: SchoolAuth): List<WebBrowserSession> {
+        val (status, body) = fanotes("GET", "/web-sessions", session, null)
+        if (status == 404) return emptyList()
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+        return parseWebSessions(body)
+    }
+
+    fun revokeWebSession(session: SchoolAuth, id: String) {
+        require(id.matches(Regex("^[A-Za-z0-9_-]{6,64}$")))
+        val (status, body) = fanotes("DELETE", "/web-sessions/$id", session, null)
+        if (status !in 200..299 && status != 404) throw SchulnetzHttpException(status, errorMessage(body, status))
+    }
+
+    /** The hidden-grade ledger; null on a server without it. */
+    fun reveals(session: SchoolAuth): RevealLedger? {
+        val (status, body) = fanotes("GET", "/reveals", session, null)
+        if (status == 404) return null
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+        return parseRevealLedger(body)
+    }
+
+    /** Union-merges ids into the server ledger and returns the merged ledger. */
+    fun saveReveals(session: SchoolAuth, hidden: Collection<String>, revealed: Collection<String>): RevealLedger? {
+        val (status, body) = fanotes("PUT", "/reveals", session, revealsBody(hidden, revealed))
+        if (status == 404) return null
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+        return parseRevealLedger(body)
     }
 
     fun snapshot(session: SchoolAuth): String {
@@ -941,6 +1009,9 @@ class SchulnetzClient(
             pushServer = push?.string("server").orEmpty(),
             pushUrl = push?.string("url").orEmpty(),
             settings = notifySettingsFromStored(storedAlertFlags(settings)),
+            mode = obj.string("mode").orEmpty(),
+            settingsUpdatedAt = obj.string("settingsUpdatedAt").orEmpty(),
+            webSessions = obj.double("webSessions")?.toInt() ?: 0,
         )
     }
 

@@ -16,6 +16,7 @@ import { credentialOr } from './credentials.mjs'
 import { handleMcpRequest } from './mcp-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
+import { createKantiWebApi, createKantiWebAppRoutes, createKantiWebStore } from './kanti-web-api.mjs'
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
 import { loadGithubReleases, pickGithubPackage } from './github-release.mjs'
@@ -54,8 +55,26 @@ const DELTA_MAGIC = Buffer.from('FANOTESDELTA1\0\0\0', 'ascii')
 const MAX_DELTA_HEADER_BYTES = 8 * 1024 * 1024
 
 const analytics = await createAnalyticsService({ directory: ANALYTICS_DIR })
-const schulnetz = createSchulnetzRuntime({ pruneOrphans: true })
-setAccountDeletedHook((accountId) => schulnetz.unlink(accountId))
+// Kanti+ im Browser (schulnetz.fasrv.ch) borrows the app's connections through the same runtime.
+const kantiWebStore = createKantiWebStore()
+const schulnetz = createSchulnetzRuntime({ pruneOrphans: true, web: createKantiWebAppRoutes(kantiWebStore) })
+setAccountDeletedHook(async (accountId) => {
+  await schulnetz.unlink(accountId)
+  await kantiWebStore.forgetAccount(accountId)
+})
+const KANTI_WEB_DIST = resolve(process.env.KANTI_WEB_DIST || join(ROOT, 'kanti-web', 'dist'))
+const kantiWeb = createKantiWebApi({
+  store: kantiWebStore,
+  access: schulnetz.webAccess,
+  readVersion: async () => {
+    try {
+      const parsed = JSON.parse(await fs.readFile(join(KANTI_WEB_DIST, 'version.json'), 'utf8'))
+      return { commit: String(parsed.commit || '').slice(0, 40), builtAt: String(parsed.builtAt || '').slice(0, 40) }
+    } catch {
+      return null
+    }
+  },
+})
 
 const MIME_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],
@@ -567,6 +586,7 @@ const server = createServer(async (request, response) => {
     if (await handleBackupRequest(request, response, url)) return
     if (await handleSyncRequest(request, response, url)) return
     if (await schulnetz.handle(request, response, url)) return
+    if (await kantiWeb.handle(request, response, url)) return
     if (await handleMcpRequest(request, response, url)) return
     if (await handleHomeworkRequest(request, response, url)) return
     if (await handleShareRequest(request, response, url)) return
