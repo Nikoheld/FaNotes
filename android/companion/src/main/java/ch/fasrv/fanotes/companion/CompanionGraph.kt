@@ -188,12 +188,14 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putBoolean(PLANNER_HOLD_PREF, hold).apply()
         busyPaths = if (hold) PLANNER_HOLD_PATHS else emptySet()
     }
-    /** Keep tasks, calendar and desk settings on this device until the user agrees to upload them. */
+    /**
+     * Keep calendar and desk settings on this device until the user agrees to upload them.
+     * Tasks are not held: the sync engine merges Hausaufgaben.md task by task, so nothing is lost.
+     */
     fun armPlannerHold(): Boolean {
-        val tasks = runCatching { homework().tasks.any { it.title.isNotBlank() } }.getOrDefault(true)
         val events = runCatching { calendar().events.isNotEmpty() }.getOrDefault(true)
         val deskCustom = vault.exists(DESK_PATH) && runCatching { deskPrefs() != DeskPrefs(theme = themeId()) }.getOrDefault(true)
-        val hold = tasks || events || deskCustom
+        val hold = events || deskCustom
         if (hold) setPlannerHold(true)
         return hold
     }
@@ -897,7 +899,7 @@ class CompanionGraph(private val context: Context) {
         const val DIAGNOSTIC_MODE_PREF = "diagnostic-mode"
         const val DEMO_PREF = "demo-mode"
         const val DIAGNOSTIC_SCENARIO_PREF = "diagnostic-scenario"
-        val PLANNER_HOLD_PATHS = setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH, DESK_PATH)
+        val PLANNER_HOLD_PATHS = setOf(CALENDAR_NOTE_PATH, DESK_PATH)
         const val SERVER_POLL_MS = 60_000L
         const val SILENT_AT = "schulnetz-silent-at"
         const val SEEN_CHANGES_PREF = "seen-changes"

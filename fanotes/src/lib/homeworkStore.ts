@@ -256,6 +256,56 @@ export const mergeHomeworkFromRemote = (
   return withPublishedIds({ ...local, tasks: merged }, merged)
 }
 
+const taskInstant = (task: HomeworkTask) => {
+  const at = Date.parse(task.updatedAt)
+  return Number.isFinite(at) ? at : null
+}
+
+/**
+ * File-sync merge of two `Hausaufgaben.md` documents (both sides changed).
+ * Union of tasks by id; for a task on both sides the newer `updatedAt` wins,
+ * a tie prefers `done`, then the remote one. The format has no tombstones, so
+ * a task missing on one side is kept. `publishedIds` is the union.
+ */
+export const mergeHomeworkDocuments = (local: HomeworkDocument, remote: HomeworkDocument): HomeworkDocument => {
+  const localById = new Map(local.tasks.map((task) => [task.id, task]))
+  const seen = new Set<string>()
+  const tasks: HomeworkTask[] = []
+  for (const theirs of remote.tasks) {
+    if (seen.has(theirs.id)) continue
+    seen.add(theirs.id)
+    const ours = localById.get(theirs.id)
+    if (!ours) {
+      tasks.push(theirs)
+      continue
+    }
+    const ourAt = taskInstant(ours)
+    const theirAt = taskInstant(theirs)
+    let pickLocal: boolean
+    if (ourAt !== null && theirAt === null) pickLocal = true
+    else if (ourAt === null && theirAt !== null) pickLocal = false
+    else if (ourAt !== null && theirAt !== null && ourAt !== theirAt) pickLocal = ourAt > theirAt
+    else pickLocal = ours.done && !theirs.done
+    tasks.push(pickLocal ? ours : theirs)
+  }
+  for (const ours of local.tasks) {
+    if (seen.has(ours.id)) continue
+    seen.add(ours.id)
+    tasks.push(ours)
+  }
+  const publishedIds = sanitizePublishedIds([...(remote.publishedIds ?? []), ...(local.publishedIds ?? [])])
+  return { version: 1, tasks, ...(publishedIds ? { publishedIds: [...new Set(publishedIds)] } : {}) }
+}
+
+/** Null when either file does not parse, so the caller keeps the ordinary conflict copy. */
+export const mergeHomeworkMarkdownBytes = (local: Uint8Array, remote: Uint8Array): Uint8Array | null => {
+  const decoder = new TextDecoder()
+  const ours = loadHomeworkMarkdown(decoder.decode(local))
+  const theirs = loadHomeworkMarkdown(decoder.decode(remote))
+  if (!ours.ok || !theirs.ok) return null
+  return new TextEncoder().encode(serializeHomeworkMarkdown(mergeHomeworkDocuments(ours.document, theirs.document)))
+}
+
 export const taskDueTimestamp = (task: HomeworkTask): number | null => {
   if (!isIsoDate(task.dueDate)) return null
   const [year, month, day] = task.dueDate.split('-').map(Number)
