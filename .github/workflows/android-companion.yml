@@ -47,6 +47,11 @@ jobs:
           npm ci --no-audit --no-fund
           npm test
           npm run build
+      - name: Kanti+ web app end-to-end (Playwright, local full stack)
+        working-directory: fanotes-site/kanti-web
+        run: |
+          npx playwright install --with-deps chromium
+          npm run e2e
       - name: Firebase config when the secret exists
         working-directory: android
         env:
