@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.20
+
+- Type-check the web app's tests with pinned Node types.
+- Add Kanti+ im Browser (schulnetz.fasrv.ch).
+
 ## 2026.11.2-beta.19
 
 - Add several school connections and the TAM intranet as a second provider.
