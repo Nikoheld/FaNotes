@@ -2984,19 +2984,24 @@ export const createPollScheduler = ({ listAccounts, pollAccount, readSnapshot, n
     })
     for (const accountId of [...due.keys()]) if (!accounts.includes(accountId)) { due.delete(accountId); gradeDue.delete(accountId); failures.delete(accountId) }
     let polled = 0
+    // Only reads that reached Schulnetz are spaced apart; an identity without a link is skipped at once.
+    let contacted = false
     for (const accountId of accounts) {
       const at = now().getTime()
       const full = due.get(accountId) <= at
       const gradesOnly = !full && gradeDue.get(accountId) <= at
       if (!full && !gradesOnly) continue
-      if (polled > 0 && spacingMs > 0) await sleep(spacingMs)
+      if (contacted && spacingMs > 0) await sleep(spacingMs)
       polled += 1
       let failed = false
+      contacted = false
       try {
         const result = await pollAccount(accountId, gradesOnly ? { gradesOnly: true } : {})
         failed = Boolean(result?.failed)
+        contacted = !result?.skipped
       } catch (error) {
         failed = true
+        contacted = true
         log('warn', `Konto ${accountId.slice(0, 8)} nicht aktualisiert (${error?.status || error?.name || 'error'})`)
       }
       // Grade checks never back off: the 10-minute promise holds through a failing read.

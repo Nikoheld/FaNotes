@@ -877,9 +877,14 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   let slaWarnedAt = 0
-  /** Logs a warning (at most every 10 minutes) while any account's grades were not read within the promise. */
+  const runtimeStarted = now().getTime()
+  /**
+   * Logs a warning (at most every 10 minutes) while any account's grades were not read within the
+   * promise. Not in the first 10 minutes after a start: the first round is still reading.
+   */
   const watchGradePromise = async () => {
     const state = await health()
+    if (now().getTime() - runtimeStarted < GRADE_SLA_MS) return state
     if (state.status === 'ok' || now().getTime() - slaWarnedAt < GRADE_SLA_MS) return state
     slaWarnedAt = now().getTime()
     log('warn', `Notenprüfung überfällig: ${state.gradeChecks.overdue} von ${state.gradeChecks.accounts} Konten seit über ${GRADE_SLA_MS / 60_000} Minuten nicht geprüft (älteste ${state.gradeChecks.maxAgeSeconds ?? '–'} s)`)
