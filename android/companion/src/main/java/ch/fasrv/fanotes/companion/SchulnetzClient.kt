@@ -9,6 +9,8 @@ import ch.fasrv.fanotes.schulnetz.RevealLedger
 import ch.fasrv.fanotes.schulnetz.SchoolProvider
 import ch.fasrv.fanotes.schulnetz.WebBrowserSession
 import ch.fasrv.fanotes.schulnetz.WebPairInfo
+import ch.fasrv.fanotes.schulnetz.WebPairOffer
+import ch.fasrv.fanotes.schulnetz.parseWebPairOffer
 import ch.fasrv.fanotes.schulnetz.deviceLinkBody
 import ch.fasrv.fanotes.schulnetz.displayPairCode
 import ch.fasrv.fanotes.schulnetz.parseRevealLedger
@@ -760,6 +762,13 @@ class SchulnetzClient(
         val (status, body) = fanotes("GET", "/web-pair?code=${displayPairCode(code)}", session, null)
         if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
         return parseWebPairInfo(body) ?: throw SchulnetzHttpException(status, errorMessage(body, status))
+    }
+
+    /** Asks the server for a code the app shows and the user types into the browser. */
+    fun webPairOffer(session: SchoolAuth): WebPairOffer {
+        val (status, body) = fanotes("POST", "/web-pair/offer", session, "{}")
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+        return parseWebPairOffer(body) ?: throw SchulnetzHttpException(status, "Ungültige Antwort des Servers.")
     }
 
     /** Adds this connection to the pairing; [finish] approves it for the browser. */

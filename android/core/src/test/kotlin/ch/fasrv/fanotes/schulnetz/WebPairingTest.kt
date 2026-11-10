@@ -100,4 +100,30 @@ class WebPairingTest {
         assertEquals(listOf("a", "b"), body.array("hidden")!!.items.map { (it as JsonValue.Str).value })
         assertEquals(listOf("c"), body.array("revealed")!!.items.map { (it as JsonValue.Str).value })
     }
+
+    @Test
+    fun parsesAnOffer() {
+        val offer = parseWebPairOffer("""{"code":"7k3qm9xr","expiresAt":"2026-01-01T10:10:00Z"}""")
+        assertEquals(WebPairOffer("7K3QM9XR", "2026-01-01T10:10:00Z"), offer)
+        assertEquals("7K3Q-M9XR", displayPairCode(offer!!.code))
+        assertNull(parseWebPairOffer("""{"code":"short"}"""))
+        assertNull(parseWebPairOffer("not json"))
+    }
+
+    @Test
+    fun countsSecondsLeft() {
+        val now = java.time.Instant.parse("2026-01-01T10:00:00Z")
+        assertEquals(600, pairSecondsLeft("2026-01-01T10:10:00Z", now))
+        assertEquals(0, pairSecondsLeft("2026-01-01T09:00:00Z", now))
+        assertEquals(0, pairSecondsLeft("", now))
+    }
+
+    @Test
+    fun errorTextShowsTheRealReason() {
+        assertEquals("Failed\nBad code (HTTP 404)", webPairErrorText("Failed", 404, "Bad code", false, "offline"))
+        assertEquals("Failed\nHTTP 500", webPairErrorText("Failed", 500, " ", false, "offline"))
+        assertEquals("Failed\nno server", webPairErrorText("Failed", 0, "x", true, "no server"))
+        assertEquals("Failed\nboom", webPairErrorText("Failed", 0, "boom", false, "offline"))
+        assertEquals("Failed", webPairErrorText("Failed", 0, null, false, "offline"))
+    }
 }

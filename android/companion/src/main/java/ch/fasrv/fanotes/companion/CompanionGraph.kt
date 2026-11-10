@@ -14,6 +14,7 @@ import ch.fasrv.fanotes.schulnetz.MAX_LEDGER_IDS
 import ch.fasrv.fanotes.schulnetz.SettingsSync
 import ch.fasrv.fanotes.schulnetz.WebBrowserSession
 import ch.fasrv.fanotes.schulnetz.WebPairInfo
+import ch.fasrv.fanotes.schulnetz.WebPairOffer
 import ch.fasrv.fanotes.schulnetz.mergeReveals
 import ch.fasrv.fanotes.schulnetz.gradeTargetId
 import ch.fasrv.fanotes.schulnetz.settingsSyncAction
@@ -317,6 +318,20 @@ class CompanionGraph(private val context: Context) {
             chosen.forEachIndexed { index, session -> session.joinWebPairing(code, finish = index == chosen.lastIndex) }
         }
         rearmSchoolDelivery()
+    }
+
+    /** Gets a code from the server and joins the connections with [ids] to it; the browser enters the code later. */
+    suspend fun offerWebPair(ids: List<String>): WebPairOffer {
+        if (demoActive()) throw DemoModeException()
+        val chosen = sessions().filter { it.id in ids }
+        require(chosen.isNotEmpty())
+        val asker = sessions().firstOrNull { it.serverShared() } ?: current()
+        val offer = client.webPairOffer(asker.schoolAuth())
+        gate.exclusive("web-pair") {
+            chosen.forEachIndexed { index, session -> session.joinWebPairing(offer.code, finish = index == chosen.lastIndex) }
+        }
+        rearmSchoolDelivery()
+        return offer
     }
 
     /** Browsers per connection id; a connection that could not be asked is left out. */

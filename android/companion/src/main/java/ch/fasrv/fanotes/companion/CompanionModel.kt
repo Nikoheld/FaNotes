@@ -687,7 +687,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun lookupWebPair(raw: String) {
         val code = ch.fasrv.fanotes.schulnetz.normalizePairCode(raw)
         if (code == null) { message = t(R.string.web_pair_code_invalid); return }
-        if (busy || !webAccessAvailable) return
+        if (busy) { message = t(R.string.web_pair_busy); return }
+        if (!webAccessAvailable) { message = t(R.string.web_pair_unavailable); return }
         busy = true
         viewModelScope.launch {
             try {
@@ -718,6 +719,34 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun dismissWebPair() { webPairPrompt = null }
 
+    /** The app-shows-a-code direction: choosing connections, then the offered code. */
+    var webOfferChoosing by mutableStateOf(false)
+    var webPairOffer by mutableStateOf<ch.fasrv.fanotes.schulnetz.WebPairOffer?>(null)
+
+    fun startWebOffer() {
+        if (busy) { message = t(R.string.web_pair_busy); return }
+        if (!webAccessAvailable) { message = t(R.string.web_pair_unavailable); return }
+        webOfferChoosing = true
+    }
+
+    fun dismissWebOfferChooser() { webOfferChoosing = false }
+    fun dismissWebOffer() { webPairOffer = null }
+
+    fun offerWebPair(connectionIds: List<String>) {
+        if (busy || connectionIds.isEmpty()) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                webPairOffer = graph.offerWebPair(connectionIds)
+                webOfferChoosing = false
+                webBrowsers = graph.webBrowsers()
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = webPairMessage(error)
+            } finally { busy = false }
+        }
+    }
+
     fun loadWebBrowsers() {
         if (!webAccessAvailable) { webBrowsers = emptyMap(); return }
         viewModelScope.launch {
@@ -746,7 +775,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             is java.io.IOException -> 0
             else -> -1
         }
-        return when (ch.fasrv.fanotes.schulnetz.webPairFailure(status)) {
+        val generic = when (ch.fasrv.fanotes.schulnetz.webPairFailure(status)) {
             ch.fasrv.fanotes.schulnetz.WebPairFailure.UNKNOWN_CODE -> t(R.string.web_pair_unknown)
             ch.fasrv.fanotes.schulnetz.WebPairFailure.ALREADY_FINISHED -> t(R.string.web_pair_finished)
             ch.fasrv.fanotes.schulnetz.WebPairFailure.TOO_MANY_TRIES -> t(R.string.web_pair_too_many)
@@ -754,6 +783,19 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             ch.fasrv.fanotes.schulnetz.WebPairFailure.OFFLINE -> t(R.string.web_pair_offline)
             ch.fasrv.fanotes.schulnetz.WebPairFailure.OTHER -> t(R.string.web_pair_failed)
         }
+        val offline = error is java.io.IOException
+        val text = ch.fasrv.fanotes.schulnetz.webPairErrorText(
+            generic = generic,
+            status = (error as? SchulnetzHttpException)?.status ?: 0,
+            serverMessage = error.message ?: error.javaClass.simpleName,
+            offline = offline,
+            offlineText = t(R.string.web_pair_no_server),
+        )
+        ch.fasrv.fanotes.schulnetz.DiagnosticTrace.record(
+            "pairing", "web-pair", 0, if (offline) "offline" else "error",
+            if (status > 0) "HTTP $status ${error.message.orEmpty()}" else error.javaClass.simpleName + " " + error.message.orEmpty(),
+        )
+        return text
     }
 
     fun saveTamCalendarLink(url: String) {
