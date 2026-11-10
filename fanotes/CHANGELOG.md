@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.23
+
+- Promise new grades on the phone within 10 minutes, around the clock.
+
 ## 2026.11.2-beta.22
 
 - Refresh instantly on opening and push school news within minutes, battery-friendly.
