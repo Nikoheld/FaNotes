@@ -260,7 +260,7 @@ export const App = () => {
         </div>
         {data.loading && !data.snapshot ? <div className="loading"><span className="spinner" /></div> : <Current />}
         <footer className="foot">
-          <span>{data.snapshot?.fetchedAt ? t.lastUpdated(dateLabel(data.snapshot.fetchedAt.slice(0, 10), kanti.language) + ' ' + new Date(data.snapshot.fetchedAt).toLocaleTimeString(kanti.language === 'de' ? 'de-CH' : 'en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Zurich' })) : ''}</span>
+          <span>{data.loading && data.snapshot ? <span className="updating" role="status"><span className="spinner spinner-small" aria-hidden="true" />{t.updating}</span> : data.snapshot?.fetchedAt ? t.lastUpdated(dateLabel(data.snapshot.fetchedAt.slice(0, 10), kanti.language) + ' ' + new Date(data.snapshot.fetchedAt).toLocaleTimeString(kanti.language === 'de' ? 'de-CH' : 'en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Zurich' })) : ''}</span>
           <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/" target="_blank" rel="noopener noreferrer">{t.privacy}</a>
         </footer>
       </main>

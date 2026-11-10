@@ -2,6 +2,11 @@ package ch.fasrv.fanotes.companion
 
 import ch.fasrv.fanotes.schulnetz.ConnectionRegistry
 import ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT
+import ch.fasrv.fanotes.schulnetz.backgroundCheckMinutes
+import ch.fasrv.fanotes.schulnetz.BackgroundMode
+import ch.fasrv.fanotes.schulnetz.parseSchulnetzInstant
+import ch.fasrv.fanotes.schulnetz.ownReadDue
+import ch.fasrv.fanotes.schulnetz.foregroundSyncDue
 import ch.fasrv.fanotes.schulnetz.SchoolConnection
 import ch.fasrv.fanotes.schulnetz.SchoolProvider
 import ch.fasrv.fanotes.schulnetz.MAX_LEDGER_IDS
@@ -435,10 +440,59 @@ class CompanionGraph(private val context: Context) {
      * New school changes after a push. [route] names the connection (fanotes-site sends it); without
      * one (older server, fallback check) every server-linked connection is asked.
      */
-    suspend fun pullChangeDelta(route: String? = null) {
+    suspend fun pullChangeDelta(route: String? = null): Boolean {
         val all = sessions().ifEmpty { listOf(current()) }.filter { it.connection.provider == SchoolProvider.SCHULNETZ }
         val targets = if (route.isNullOrBlank()) all else all.filter { it.routeKey() == route }.ifEmpty { all }
-        for (session in targets) session.pullChangeDelta()
+        var ok = true
+        for (session in targets) if (!session.pullChangeDelta()) ok = false
+        if (ok && targets.isNotEmpty()) markSynced()
+        return ok
+    }
+
+    fun backgroundRefresh(): BackgroundMode = backgroundMode(context)
+    fun setBackgroundRefresh(mode: BackgroundMode) = setBackgroundMode(context, mode)
+    fun backgroundCheckMinutesNow(): Long = backgroundCheckMinutes(backgroundMode(context), pushReady(context))
+    fun pushReadyNow(): Boolean = pushReady(context)
+
+    /** True while a foreground sync runs: the screens show "Aktualisiere…", never a blocking loader. */
+    val syncing = MutableStateFlow(false)
+
+    /** When the last sync succeeded ("Aktualisiert 14:32"). */
+    val lastSyncOk = MutableStateFlow(prefs.getLong(LAST_SYNC_OK_PREF, 0L))
+    private val foregroundRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private fun markSynced() {
+        val now = System.currentTimeMillis()
+        prefs.edit().putLong(LAST_SYNC_OK_PREF, now).apply()
+        lastSyncOk.value = now
+    }
+
+    /**
+     * Opening or returning to the app (and pull-to-refresh with [force]). The cached data is already on
+     * screen. Every connection first takes the server's change feed and snapshot (about a second); a
+     * connection reads Schulnetz itself only when [ownReadDue] says so, or when [force] asks for it on the
+     * shown connection. Skipped when a successful sync finished less than 30 seconds ago.
+     */
+    suspend fun syncOnForeground(caller: String, force: Boolean = false): Boolean {
+        // Skipped (debounced, or one already runs and its result is about to show): nothing failed.
+        if (!force && !foregroundSyncDue(lastSyncOk.value, System.currentTimeMillis(), foregroundRunning.get())) return true
+        if (!foregroundRunning.compareAndSet(false, true)) return true
+        syncing.value = true
+        try {
+            awaitBoot()
+            val shown = current()
+            val all = sessions().ifEmpty { listOf(shown) }
+            var ok = true
+            // The shown connection first, so the screen updates first.
+            for (session in listOf(shown) + all.filter { it !== shown }) {
+                if (!session.syncForeground(caller, ownRead = force && session === shown)) ok = false
+            }
+            if (ok) markSynced()
+            return ok
+        } finally {
+            syncing.value = false
+            foregroundRunning.set(false)
+        }
     }
 
     /** The FaNotes account belongs to connection one: its school data moves to a guest before sign-out. */
@@ -828,6 +882,9 @@ class CompanionGraph(private val context: Context) {
         const val SERVER_POLL_MS = 60_000L
         const val SILENT_AT = "schulnetz-silent-at"
         const val SEEN_CHANGES_PREF = "seen-changes"
+        const val LAST_SYNC_OK_PREF = "last-sync-ok"
+        const val SERVER_FETCHED_PREF = "server-fetched-at"
+        const val OWN_READ_PREF = "last-own-read"
         const val TAM_ICS_PREF = "tam-ics-url"
         const val TAM_PERSON_PREF = "tam-person-id"
         private const val SILENT_GAP_MS = 3 * 60 * 1000L
@@ -1188,7 +1245,7 @@ class CompanionGraph(private val context: Context) {
                     schulnetzLog.info("refresh running caller=$caller lockHeld=true holder=${gate.holder.orEmpty()}")
                     refreshLocked(caller)
                     lastRefreshAt = System.currentTimeMillis()
-                    prefs.edit().putLong("last-check", lastRefreshAt).apply()
+                    prefs.edit().putLong("last-check", lastRefreshAt).putLong(OWN_READ_PREF, lastRefreshAt).apply()
                 }
             }
         }
@@ -1320,16 +1377,17 @@ class CompanionGraph(private val context: Context) {
         fun nextCheckAt(): Long {
             val last = lastCheckAt()
             if (last <= 0L) return 0L
-            return last + schoolFallbackIntervalMs()
+            return last + schoolFallbackIntervalMs(context)
         }
 
         /**
          * One short read of new school changes. Used from FCM and the rare fallback.
          * Does not scrape Schulnetz and does not sync notes.
          */
-        suspend fun pullChangeDelta() {
-            if (demoActive() || schoolDisconnected()) return
+        suspend fun pullChangeDelta(): Boolean {
+            if (demoActive() || schoolDisconnected()) return true
             awaitBoot()
+            var ok = false
             withContext(Dispatchers.IO) {
                 withTimeoutOrNull(8_000) {
                     if (snapshot.value.fetchedAt.isBlank() && snapshot.value.grades.isEmpty() && snapshot.value.events.isEmpty()) {
@@ -1344,16 +1402,40 @@ class CompanionGraph(private val context: Context) {
                             prefs.edit().putLong("last-check", System.currentTimeMillis()).putString("last-check-error", "").apply()
                         }
                         val body = runCatching { client.snapshot(session) }.getOrNull()
+                        val server = body?.let { parseNormalizedSnapshot(it) }
+                        // When the server last read Schulnetz: decides whether the app reads it itself (ownReadDue).
+                        server?.fetchedAt?.let { parseSchulnetzInstant(it) }?.let { prefs.edit().putLong(SERVER_FETCHED_PREF, it.toEpochMilli()).apply() }
                         // Week by week: an empty, partial or older server week keeps the stored lessons.
-                        val next = body?.let { parseNormalizedSnapshot(it) }?.let { ch.fasrv.fanotes.schulnetz.adoptServerSnapshot(snapshot.value, it) }
+                        val next = server?.let { ch.fasrv.fanotes.schulnetz.adoptServerSnapshot(snapshot.value, it) }
                         if (next != null && next.fetchedAt.isNotBlank()) {
                             snapshot.value = next
                             writeCache(next)
                         }
+                        ok = changes != null && body != null
                     }
                     NextLessonWidget.update(context)
                 }
             }
+            return ok
+        }
+
+        /**
+         * One connection on opening the app: the server's copy first when it has one, then the app's own
+         * Schulnetz read when [ownReadDue] (or [ownRead]) asks for it. TAM connections read on the device.
+         */
+        suspend fun syncForeground(caller: String, ownRead: Boolean): Boolean {
+            if (demoActive()) { showDemo(); return true }
+            if (schoolDisconnected()) return true
+            val serverLinked = schoolLinked()
+            val pulled = if (serverLinked) pullChangeDelta() else true
+            val now = System.currentTimeMillis()
+            val due = ownRead || ownReadDue(serverLinked, prefs.getLong(SERVER_FETCHED_PREF, 0L), link.value.needsReauth, prefs.getLong(OWN_READ_PREF, 0L), now)
+            if (!due) return pulled
+            return runCatching { refreshSchulnetz(caller); true }.getOrElse { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                schulnetzLog.error(error)
+                false
+            } && pulled
         }
 
         internal suspend fun uploadFcmToken(token: String) {

@@ -2888,3 +2888,105 @@ export const absenceNoticeBody = (absence, tally) => {
   }
   return parts.filter(Boolean).join(' · ')
 }
+
+// ---------------------------------------------------------------------------------------------
+// When the server reads Schulnetz. News should reach the phone within a few minutes on school days
+// without loading Schulnetz (or the server) at night, on weekends or in holidays. Strictly read-only
+// as before: every read is the same GET sequence.
+
+/** School days, 06:00–22:00 Europe/Zurich: the configured base (FANOTES_SCHULNETZ_POLL_MS), kept within 2–5 minutes. */
+export const POLL_SCHOOL_MIN_MS = 2 * 60_000
+export const POLL_SCHOOL_MAX_MS = 5 * 60_000
+export const POLL_SCHOOL_DEFAULT_MS = 150_000
+/** Saturday and Sunday daytime. */
+export const POLL_WEEKEND_MS = 15 * 60_000
+/** 22:00–06:00 and school holidays. */
+export const POLL_QUIET_MS = 30 * 60_000
+/** Failed reads back off exponentially up to this. */
+export const POLL_MAX_BACKOFF_MS = 60 * 60_000
+/** Each wait varies by up to this share either way, so accounts never line up into bursts. */
+export const POLL_JITTER = 0.2
+/** At least this long between two accounts' reads in one round. */
+export const POLL_SPACING_MS = 5_000
+
+const zurichParts = (now) => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Zurich', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(now).map((part) => [part.type, part.value]))
+  return { weekday: parts.weekday, hour: Number(parts.hour), minute: Number(parts.minute) }
+}
+
+/**
+ * school, weekend, night or holiday for [now] (Europe/Zurich). A holiday is a day inside one of the
+ * snapshot's vacations, or a week the timetable was read for and that has no lessons.
+ */
+export const pollPhase = (now, snapshot = null) => {
+  const { weekday, hour } = zurichParts(now)
+  if (hour < 6 || hour >= 22) return 'night'
+  if (weekday === 'Sat' || weekday === 'Sun') return 'weekend'
+  const today = zurichToday(now)
+  const vacation = (snapshot?.vacations || []).some((item) => {
+    const start = eventDate(item?.start || '')
+    const end = eventDate(item?.end || '') || start
+    return start && today >= start && today <= end
+  })
+  if (vacation) return 'holiday'
+  const monday = weekMonday(today)
+  const lessons = (snapshot?.events || []).some((event) => isLesson(event) && weekMondayKey(event.start) === monday)
+  if (snapshot?.weekRead?.[monday] && !lessons) return 'holiday'
+  return 'school'
+}
+
+/**
+ * Milliseconds until the account's next read. [failures] consecutive failed reads double the wait
+ * (at most an hour). The last night hour never waits past 06:00, so the school day starts fresh.
+ */
+export const pollDelayMs = ({ now = new Date(), snapshot = null, failures = 0, baseMs = POLL_SCHOOL_DEFAULT_MS, random = Math.random } = {}) => {
+  const phase = pollPhase(now, snapshot)
+  const school = Math.min(POLL_SCHOOL_MAX_MS, Math.max(POLL_SCHOOL_MIN_MS, Number(baseMs) || POLL_SCHOOL_DEFAULT_MS))
+  let wait = phase === 'school' ? school : phase === 'weekend' ? POLL_WEEKEND_MS : POLL_QUIET_MS
+  if (failures > 0) wait = Math.min(POLL_MAX_BACKOFF_MS, wait * 2 ** Math.min(failures, 6))
+  wait = Math.round(wait * (1 + (random() * 2 - 1) * POLL_JITTER))
+  const { weekday, hour, minute } = zurichParts(now)
+  if (failures === 0 && hour === 5 && weekday !== 'Sat' && weekday !== 'Sun') {
+    const untilSix = (60 - minute) * 60_000
+    wait = Math.min(wait, untilSix + Math.round(random() * 60_000))
+  }
+  return Math.max(30_000, wait)
+}
+
+/**
+ * Due-time scheduler for the poller. [tick] reads every account whose time has come, one after the
+ * other with [spacingMs] between them, and plans each next read with [pollDelayMs]. New accounts
+ * start staggered, so a restart is not a burst.
+ */
+export const createPollScheduler = ({ listAccounts, pollAccount, readSnapshot, now = () => new Date(), baseMs = POLL_SCHOOL_DEFAULT_MS, random = Math.random, spacingMs = POLL_SPACING_MS, sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)), log = () => {} }) => {
+  const due = new Map()
+  const failures = new Map()
+  const tick = async () => {
+    const accounts = await listAccounts()
+    const started = now().getTime()
+    accounts.forEach((accountId, index) => { if (!due.has(accountId)) due.set(accountId, started + index * 10_000) })
+    for (const accountId of [...due.keys()]) if (!accounts.includes(accountId)) { due.delete(accountId); failures.delete(accountId) }
+    let polled = 0
+    for (const accountId of accounts) {
+      if (due.get(accountId) > now().getTime()) continue
+      if (polled > 0 && spacingMs > 0) await sleep(spacingMs)
+      polled += 1
+      let failed = false
+      try {
+        const result = await pollAccount(accountId)
+        failed = Boolean(result?.failed)
+      } catch (error) {
+        failed = true
+        log('warn', `Konto ${accountId.slice(0, 8)} nicht aktualisiert (${error?.status || error?.name || 'error'})`)
+      }
+      const count = failed ? (failures.get(accountId) || 0) + 1 : 0
+      failures.set(accountId, count)
+      const snapshot = await readSnapshot(accountId).catch(() => null)
+      due.set(accountId, now().getTime() + pollDelayMs({ now: now(), snapshot, failures: count, baseMs, random }))
+    }
+    return polled
+  }
+  return { tick, due, failures }
+}

@@ -60,13 +60,23 @@ const COLLAPSE_KEY = {
   sync: 'kanti-sync',
 }
 
-/** High priority wakes the phone. Timetable-only refreshes do not. */
-export const fcmPriorityForChanges = (changes) => {
-  const categories = (Array.isArray(changes) ? changes : [])
-    .map((change) => change?.category)
-    .filter((category) => typeof category === 'string' && category)
-  if (categories.some((category) => category !== 'timetable')) return 'HIGH'
-  return null
+const zurichDay = (now) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
+const plusDays = (iso, days) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86400000).toISOString().slice(0, 10)
+
+/**
+ * High priority wakes the phone right away. Every school change does, except timetable changes more
+ * than a week ahead: those are sent with normal priority and arrive when the phone is awake anyway.
+ * No change, no push.
+ */
+export const fcmPriorityForChanges = (changes, now = new Date()) => {
+  const list = (Array.isArray(changes) ? changes : []).filter((change) => typeof change?.category === 'string' && change.category)
+  if (!list.length) return null
+  if (list.some((change) => change.category !== 'timetable')) return 'HIGH'
+  const today = zurichDay(now)
+  const soon = plusDays(today, 7)
+  const day = (change) => /^\d{4}-\d{2}-\d{2}/u.exec(String(change.date || ''))?.[0] || ''
+  // A timetable change without a date counts as soon.
+  return list.some((change) => !day(change) || (day(change) >= today && day(change) <= soon)) ? 'HIGH' : 'NORMAL'
 }
 
 /**

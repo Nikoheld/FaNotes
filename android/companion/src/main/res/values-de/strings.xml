@@ -1150,4 +1150,14 @@
     <string name="frag_absence_report_open">Absenzmeldung offen</string>
     <string name="frag_estimated_points">geschätzt %1$s Punkte</string>
     <string name="frag_booked_points">%1$s Punkte gebucht</string>
+    <string name="sync_updating">Aktualisiere…</string>
+    <string name="sync_updated_at">Aktualisiert %1$s</string>
+    <string name="background_refresh">Hintergrund-Aktualisierung</string>
+    <string name="background_normal">Normal</string>
+    <string name="background_saver">Akku sparen</string>
+    <string name="background_refresh_body">Kanti+ liest Schulnetz nie im Hintergrund. Der Kanti+-Server liest es an Schultagen alle paar Minuten und schickt sofort einen Push, wenn sich etwas geändert hat. Die App fragt den Server nur ab und zu, ob ein Push verpasst wurde. Akku sparen fragt seltener.</string>
+    <string name="delivery_push_ready">Neue Schulmeldungen kommen sofort per Push. Zusätzlich prüft Kanti+ etwa alle %1$s, ob eine verpasst wurde.</string>
+    <string name="delivery_no_push">Push ist auf diesem Gerät nicht verfügbar. Kanti+ prüft etwa alle %1$s.</string>
+    <string name="interval_minutes">%1$d Minuten</string>
+    <string name="interval_hours">%1$d Stunden</string>
 </resources>

@@ -135,14 +135,15 @@ fun TodayScreen(model: CompanionModel) {
         if (granted) model.onNotificationsAllowed()
         model.dismissNotifyTip()
     }
-    ScreenList {
+    RefreshableScreenList(model.syncing, { model.pullRefresh() }) {
         // One item that is always first, so a status or banner that appears after the snapshot
         // loads is shown above the card instead of being inserted off-screen.
         item(key = "top") {
             Column(Modifier.fillMaxWidth()) {
                 if (schoolKnown) {
                     val stamp = updatedLabel(model.snapshot.fetchedAt)
-                    StatusLine(if (online) t(R.string.last_updated, stamp) else t(R.string.offline_last_updated, stamp), if (online) StateTone.Neutral else StateTone.Offline, Modifier.padding(bottom = 12.dp))
+                    if (online) SyncStamp(model.syncing, model.lastSyncOk, stamp, Modifier.padding(bottom = 12.dp))
+                    else StatusLine(t(R.string.offline_last_updated, stamp), StateTone.Offline, Modifier.padding(bottom = 12.dp))
                 }
                 val syncCopy = faNotesSyncCopy(sync.status, model.notesAccount)
                 if (model.demo) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(R.string.demo_active_title), t(R.string.demo_active_body), t(R.string.demo_end), tone = StateTone.Warning, onAction = { model.stopDemo() }) }
@@ -463,7 +464,7 @@ private fun ScheduleScreen(model: CompanionModel) {
         HorizontalDivider(color = LocalCompanionSemantics.current.hairline)
         // weight keeps the list in the space under the week header. fillMaxSize alone
         // extends past the screen, so the bottom padding never clears "Neuer Termin".
-        ScreenList(Modifier.weight(1f).pointerInput(compact, model.day) {
+        RefreshableScreenList(model.syncing, { model.pullRefresh() }, Modifier.weight(1f), listModifier = Modifier.pointerInput(compact, model.day) {
             var drag = 0f
             detectHorizontalDragGestures(
                 onHorizontalDrag = { _, amount -> drag += amount },
@@ -495,7 +496,7 @@ private fun ScheduleScreen(model: CompanionModel) {
                 Text(heading, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).padding(end = 8.dp).semantics { heading() }, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 SegmentedTabs(listOf("day" to t(R.string.seg_day), "week" to t(R.string.seg_week)), if (model.planWeek) "week" else "day", { model.planWeek = it == "week" }, Modifier.widthIn(min = 132.dp, max = 156.dp))
             } }
-            if (!model.schoolReady) { item(key = "loading") { SkeletonRows(4) }; return@ScreenList }
+            if (!model.schoolReady) { item(key = "loading") { SkeletonRows(4) }; return@RefreshableScreenList }
             val shownDays = if (model.planWeek) days.filter { model.desk.showWeekend || it.dayOfWeek.value < 6 || agenda[it].orEmpty().isNotEmpty() } else listOf(model.day)
             shownDays.forEach { day ->
                 val entries = agenda[day].orEmpty().filter { entry -> when (source) { "school" -> entry.school != null; "personal" -> entry.local != null; "due" -> entry.kind == AgendaKind.Task || entry.kind == AgendaKind.Exam; else -> true } }

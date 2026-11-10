@@ -27,7 +27,8 @@ Environment=FANOTES_MCP_DIR=/var/lib/fanotes-mcp
 Environment=FANOTES_SHARE_DIR=/var/lib/fanotes-shares
 Environment=FANOTES_PROFILE_DIR=/var/lib/fanotes-profiles
 Environment=FANOTES_SCHULNETZ_DIR=/var/lib/fanotes-schulnetz
-Environment=FANOTES_SCHULNETZ_POLL_MS=180000
+# School days 06:00–22:00 Zurich (2–5 min allowed, ±20 % jitter); nights, weekends and holidays are slower (pollDelayMs).
+Environment=FANOTES_SCHULNETZ_POLL_MS=150000
 # Encrypted X-FaNotes-Meta may be 8 KiB of bytes, about 11 KiB of Base64,
 # plus the session headers. The Node default of 16 KiB can reject that.
 Environment=NODE_OPTIONS=--max-http-header-size=65536
