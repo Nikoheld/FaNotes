@@ -1,5 +1,9 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.21
+
+- Count open absence reports as estimated absence points.
+
 ## 2026.11.2-beta.20
 
 - Type-check the web app's tests with pinned Node types.
