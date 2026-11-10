@@ -27,9 +27,9 @@
     <main id="main" class="paper-dots">
       <div class="wrap legal">
         <article>
-          <p class="kicker">Kanti+ für Android</p>
+          <p class="kicker">Kanti+ für Android und im Browser</p>
           <h1>Datenschutzerklärung</h1>
-          <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>) · Stand: 9. November 2026 · <a href="#english">English version</a></p>
+          <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>) und Kanti+ im Browser (<code>schulnetz.fasrv.ch</code>) · Stand: 10. November 2026 · <a href="#english">English version</a></p>
 
           <div class="note">
             <p><strong>Kanti+ ist eine inoffizielle App.</strong> Sie wird privat entwickelt und ist weder mit Schulnetz (dem Anbieter) noch mit einer Kantonsschule, dem Kanton oder Microsoft verbunden. Kanti+ liest deine Daten aus Schulnetz nur und verändert dort nichts.</p>
@@ -51,7 +51,8 @@
           <ul>
             <li>Kanti+ zeigt deine Schuldaten aus Schulnetz an (Noten, Stundenplan, Prüfungen, Absenzen, Termine, Mitteilungen) und meldet Änderungen per Benachrichtigung.</li>
             <li>Damit Benachrichtigungen auch bei geschlossener App ankommen, ruft der fasrv-Server Schulnetz in deinem Auftrag ab. Dafür speichert er deine Microsoft-Anmeldung für Schulnetz verschlüsselt, höchstens 14 Tage lang.</li>
-            <li>Keine Werbung, kein Tracking, keine Analyse-Werkzeuge in der App, kein Verkauf von Daten.</li>
+            <li>Kanti+ im Browser (<code>schulnetz.fasrv.ch</code>) zeigt dieselben Daten. Der Browser meldet sich nie selbst bei der Schule an, sondern leiht sich eine Verbindung der App oder deines FaNotes-Kontos und speichert nur ein Sitzungs-Cookie.</li>
+            <li>Keine Werbung, kein Tracking, keine Analyse-Werkzeuge in der App oder im Browser, kein Verkauf von Daten.</li>
             <li>Du kannst deine Daten in der App jederzeit löschen. Ohne App geht es per E-Mail, siehe <a href="/kantiplus/konto-loeschen/">Konto und Daten löschen</a>.</li>
           </ul>
 
@@ -74,7 +75,18 @@
 
           <h3>2a. TAM-Intranet und mehrere Verbindungen</h3>
           <p>Du kannst mehrere Schulverbindungen hinzufügen, auch für das TAM-Intranet (<code>intranet.tam.ch</code>). Jede Verbindung meldet sich einzeln an und hat auf dem Gerät eigene Anmeldedaten, Schuldaten, Einstellungen und Mitteilungen. Jede weitere Schulnetz-Verbindung erhält auf dem fasrv-Server eine eigene anonyme Kennung.</p>
-          <p>Beim TAM-Intranet meldest du dich auf der Seite deiner Schule an; Kanti+ sieht dein Passwort nicht. Kanti+ liest Stundenplan, Prüfungen, Absenzen, Noten und, wenn du ihn hinzufügst, deinen TAM-Kalenderlink <strong>nur auf deinem Gerät</strong>. Diese Daten und die TAM-Anmeldung werden nicht an den fasrv-Server gesendet. Der Kalenderlink wird auf dem Gerät verschlüsselt gespeichert.</p>
+          <p>Beim TAM-Intranet meldest du dich auf der Seite deiner Schule an; Kanti+ sieht dein Passwort nicht. Kanti+ liest Stundenplan, Prüfungen, Absenzen, Noten und, wenn du ihn hinzufügst, deinen TAM-Kalenderlink <strong>nur auf deinem Gerät</strong>. Die TAM-Anmeldung und der Kalenderlink werden nie an den fasrv-Server gesendet; der Kalenderlink wird auf dem Gerät verschlüsselt gespeichert. Die gelesenen TAM-Daten bleiben auf dem Gerät, ausser du gibst die Verbindung für Kanti+ im Browser frei (siehe 2b).</p>
+
+          <h3>2b. Kanti+ im Browser (schulnetz.fasrv.ch)</h3>
+          <p>Kanti+ im Browser zeigt deine Schuldaten auf Laptop und Desktop. Der Browser kann die Schulanmeldung nicht selbst durchführen und meldet sich nie bei Schulnetz oder TAM an. Er leiht sich eine Verbindung, auf zwei Arten:</p>
+          <ul>
+            <li><strong>Koppeln mit der App:</strong> Der Browser zeigt einen 8-stelligen Code, der 10 Minuten gilt. Du gibst ihn in der App ein und wählst, welche Verbindungen der Browser sehen darf. Der Server merkt sich dafür kurz den Code (als Hash), eine grobe Browserbeschreibung (z. B. «Firefox · Windows») und die gewählten Verbindungen.</li>
+            <li><strong>FaNotes-Konto:</strong> Aus deinem Passwort wird im Browser ein Anmeldeschlüssel abgeleitet, wie in der App. Das Passwort selbst verlässt den Browser nicht. Der Server prüft den Schlüssel und speichert ihn nicht.</li>
+          </ul>
+          <p>Danach hält der Browser nur ein Sitzungs-Cookie (<code>HttpOnly</code>, <code>Secure</code>, <code>SameSite=Strict</code>), das Skripte nicht lesen können. Auf dem Server liegt davon nur ein Hash, zusammen mit der Browserbeschreibung, dem Zeitpunkt der letzten Nutzung und den freigegebenen Verbindungen. Die Sitzung endet nach 30 Tagen ohne Nutzung, spätestens nach 90 Tagen, beim Abmelden im Browser, wenn du den Browser in der App entfernst, die Verbindung löschst oder dein FaNotes-Passwort änderst.</p>
+          <p>Im Browser geänderte Benachrichtigungs-Einstellungen und aufgedeckte Noten gelten auch in der App, weil beide dieselben Daten auf dem Server nutzen. Solange «Neue Noten verdecken» aktiv ist, sendet der Server eine verdeckte Note erst an den Browser, wenn du sie aufdeckst.</p>
+          <p><strong>TAM im Browser:</strong> Gibst du eine TAM-Verbindung für den Browser frei, lädt die App die TAM-Daten, die sie ohnehin liest (Stundenplan, Prüfungen, Absenzen, Noten), auf den fasrv-Server, damit der Browser sie zeigen kann. Die TAM-Anmeldung und der Kalenderlink bleiben auf dem Gerät. Liest kein Browser die Verbindung mehr, löscht die App diese Kopie wieder vom Server.</p>
+          <p>Im Browser speichert Kanti+ ausserdem deine Darstellungswahl (Design, Sprache) und, wenn du Benachrichtigungen im Browser erlaubst, den zuletzt gemeldeten Stand. Beides bleibt im Browser. Browser-Benachrichtigungen erscheinen nur, solange Kanti+ in einem Tab offen ist.</p>
 
           <h3>3. Geräte- und Benachrichtigungsdaten</h3>
           <ul>
@@ -124,6 +136,7 @@
           <h2 id="speicherung">Speicherung und Sicherheit</h2>
           <ul>
             <li>Der fasrv-Server wird vom Entwickler selbst betrieben.</li>
+            <li>Kanti+ im Browser wird nur über HTTPS ausgeliefert, mit strenger Content-Security-Policy, ohne Fremd-Skripte und ohne Einbettung in andere Seiten. Jede Änderung braucht zusätzlich einen Schutz gegen Cross-Site-Anfragen (CSRF-Token).</li>
             <li>Verbindungen sind mit TLS verschlüsselt. Anmeldecookies und Server-Sitzung sind zusätzlich mit AES-256-GCM verschlüsselt; Notizen mit FaNotes-Konto Ende-zu-Ende.</li>
             <li>Kanti+-Daten werden auf dem Server nicht in Backups kopiert.</li>
           </ul>
@@ -132,6 +145,7 @@
           <ul>
             <li><strong>Schuldaten und anonyme Kennung auf dem Server:</strong> bis du sie in der App löschst, die Schule trennst oder dein FaNotes-Konto löschst. Die Liste der gemeldeten Änderungen umfasst höchstens die letzten 200 Einträge.</li>
             <li><strong>Microsoft-Anmeldecookies:</strong> höchstens 14 Tage nach deiner letzten Anmeldung in der App.</li>
+            <li><strong>Browser-Sitzungen (Kanti+ im Browser):</strong> 30 Tage nach der letzten Nutzung, höchstens 90 Tage; Kopplungscodes 10 Minuten.</li>
             <li><strong>Protokolle:</strong> Webserver 14 Tage, Dienstprotokoll höchstens 90 Tage.</li>
             <li><strong>Daten auf dem Gerät:</strong> bis du sie in der App löschst oder die App entfernst.</li>
           </ul>
@@ -143,6 +157,7 @@
             <li><strong>«Meine Kanti+-Daten löschen»</strong> (ohne FaNotes-Konto) entfernt deine Schuldaten, die Schulnetz-Anmeldung, Push-Token und die anonyme Kennung vom Server und die Schuldaten von deinem Gerät.</li>
             <li><strong>«Schule trennen»</strong> löscht die Schulnetz-Verbindung und die Schuldaten auf dem Server.</li>
           </ul>
+          <p>Kanti+ im Browser: «In diesem Browser abmelden» (Einstellungen im Browser) beendet die Browser-Sitzung sofort. In der App unter Einstellungen → Schule → Kanti+ im Browser entfernst du einen Browser für eine Verbindung.</p>
           <p>Alle Wege, auch ohne App und für das FaNotes-Konto, findest du auf der Seite <a href="/kantiplus/konto-loeschen/">Konto und Daten löschen</a>.</p>
 
           <h2 id="rechte">Deine Rechte</h2>
@@ -155,7 +170,7 @@
           <hr />
           <section id="english" lang="en">
             <h2>Privacy policy (English)</h2>
-            <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>) · Last updated: 9 November 2026</p>
+            <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>) and Kanti+ in the browser (<code>schulnetz.fasrv.ch</code>) · Last updated: 10 November 2026</p>
             <p><strong>Kanti+ is an unofficial app</strong>, developed privately. It is not affiliated with Schulnetz, any Kantonsschule, the canton or Microsoft, and it only reads data from Schulnetz.</p>
             <p><strong>Controller:</strong> Fabio, developer of FaNotes and Kanti+ (private individual), <a href="mailto:fabiokunz2109@gmail.com">fabiokunz2109@gmail.com</a>. This policy follows the Swiss Federal Act on Data Protection (FADP) and, where applicable, the EU GDPR.</p>
 
@@ -163,7 +178,8 @@
             <ul>
               <li><strong>School data from Schulnetz:</strong> grades, timetable, appointments, exams, absences, messages, account statement and, if provided, name and class. It is stored on your device and on the fasrv server, so the server can detect changes and notify you. This includes a list of the last 200 notified changes.</li>
               <li><strong>Schulnetz sign-in:</strong> you sign in on Microsoft's page; Kanti+ never sees or stores your password. Selected Microsoft session cookies and the server's Schulnetz session are stored on the server, encrypted with AES-256-GCM, and used to read your data about every three minutes. The cookies are deleted at the latest 14 days after your last sign-in in the app.</li>
-              <li><strong>TAM intranet and several connections:</strong> you can add several school connections, including the TAM intranet (<code>intranet.tam.ch</code>). Each connection signs in on its own and keeps its own sign-in, school data, settings and notices on the device; each further Schulnetz connection has its own anonymous identity on the fasrv server. For the TAM intranet you sign in on your school's page and Kanti+ never sees your password. Timetable, exams, absences, grades and, if you add it, your TAM calendar link are read <strong>on your device only</strong> and are not sent to the fasrv server. The calendar link is stored encrypted on the device.</li>
+              <li><strong>TAM intranet and several connections:</strong> you can add several school connections, including the TAM intranet (<code>intranet.tam.ch</code>). Each connection signs in on its own and keeps its own sign-in, school data, settings and notices on the device; each further Schulnetz connection has its own anonymous identity on the fasrv server. For the TAM intranet you sign in on your school's page and Kanti+ never sees your password. Timetable, exams, absences, grades and, if you add it, your TAM calendar link are read <strong>on your device</strong>. The TAM sign-in and the calendar link are never sent to the fasrv server; the calendar link is stored encrypted on the device. The TAM data stays on the device unless you share the connection with Kanti+ in the browser (see below).</li>
+              <li><strong>Kanti+ in the browser (<code>schulnetz.fasrv.ch</code>):</strong> the browser never signs in to Schulnetz or TAM itself. It borrows a connection, either by <em>pairing with the app</em> (the browser shows an 8-character code valid for 10 minutes; you enter it in the app and choose which connections it may see; the server briefly keeps a hash of the code, a coarse browser description such as "Firefox · Windows" and the chosen connections) or by <em>signing in with your FaNotes account</em> (an authentication key is derived from your password in the browser, as in the app; the password never leaves the browser and the server does not store the key). The browser then holds one session cookie (<code>HttpOnly</code>, <code>Secure</code>, <code>SameSite=Strict</code>) that scripts cannot read; the server stores only its hash, the browser description, the last use and the shared connections. A session ends after 30 days without use (at most 90 days), when you sign out in the browser, remove the browser in the app, delete the connection or change your FaNotes password. Notification settings and revealed grades changed in the browser apply in the app too. While "hide new grades" is on, the server sends a hidden grade to the browser only once you reveal it. If you share a TAM connection with a browser, the app uploads the TAM data it reads anyway (timetable, exams, absences, grades) to the fasrv server so the browser can show it; the TAM sign-in and calendar link stay on the device, and the app deletes this copy again once no browser reads the connection. The browser also keeps your display choices and the last notified change locally; browser notifications appear only while Kanti+ is open in a tab.</li>
               <li><strong>Device and push data:</strong>
                 <ul>
                   <li>an anonymous identity created on first start, of which the server stores only a hash;</li>
@@ -200,13 +216,14 @@
                   <li>Wikimedia Commons serves portraits for the "Note erraten" game.</li>
                 </ul>
                 Google, Cloudflare and Wikimedia may process data outside Switzerland, for example in the USA.</li>
-              <li><strong>Storage and security:</strong> the server is operated by the developer. Kanti+ data on it is not copied to backups.</li>
+              <li><strong>Storage and security:</strong> the server is operated by the developer. Kanti+ data on it is not copied to backups. Kanti+ in the browser is served over HTTPS only, with a strict Content Security Policy, no third-party scripts, no framing, and a CSRF token on every change.</li>
             </ul>
 
             <h3>Retention</h3>
             <ul>
               <li>School data and the anonymous identity stay on the server until you delete them in the app, disconnect your school, or delete your FaNotes account.</li>
               <li>Microsoft cookies are kept at most 14 days after your last sign-in.</li>
+              <li>Browser sessions (Kanti+ in the browser) end 30 days after their last use, at most after 90 days; pairing codes after 10 minutes.</li>
               <li>Logs are kept 14 days (web server) and at most 90 days (service log).</li>
               <li>Data on your device stays until you delete it or remove the app.</li>
               <li>There is currently no automatic deletion after inactivity.</li>
@@ -218,6 +235,7 @@
               <li>"Meine Kanti+-Daten löschen" deletes your school data, Schulnetz sign-in, push tokens and the anonymous identity from the server.</li>
               <li>"Schule trennen" deletes the Schulnetz connection and the school data on the server.</li>
             </ul>
+            <p>Kanti+ in the browser: "Sign out of this browser" in the browser's settings ends that session at once; in the app, Settings → School → Kanti+ in the browser removes a browser from a connection.</p>
             <p>For all options, including deletion without the app and FaNotes account deletion, see <a href="/kantiplus/konto-loeschen/#english">Delete your account and data</a>.</p>
             <p>You may request access, correction, deletion or a copy of your data, and object to processing: write to <a href="mailto:fabiokunz2109@gmail.com">fabiokunz2109@gmail.com</a>. You may also complain to the Swiss FDPIC or, where the GDPR applies, to your local supervisory authority.</p>
           </section>

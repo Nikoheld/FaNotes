@@ -2365,3 +2365,81 @@ export const legacySnapshotView = (snapshot, today = zurichToday()) => {
     weekRead,
   }
 }
+
+// ── Kanti+ im Browser ──────────────────────────────────────────────────────
+
+const TAM_HOST = 'intranet.tam.ch'
+const TAM_SLUG = /^[a-z0-9][a-z0-9-]{1,19}$/u
+const TAM_RESERVED = new Set(['auth', 'themes', 'public', 'rest', 'js', 'css', 'img', 'images', 'default', 'logout'])
+
+/** "https://intranet.tam.ch/bmz" for that URL, a deeper page of it or the bare school code; the app's tamSchoolRoot. */
+export const tamSchoolRoot = (input) => {
+  const raw = String(input ?? '').trim()
+  if (!raw) return null
+  let slug
+  if (!raw.includes('/') && !raw.includes('.')) {
+    slug = raw.toLowerCase()
+  } else {
+    let url
+    try { url = new URL(raw.includes('://') ? raw : `https://${raw}`) } catch { return null }
+    if (url.hostname.toLowerCase() !== TAM_HOST || url.protocol !== 'https:') return null
+    slug = url.pathname.replace(/^\/+/u, '').split('/')[0].toLowerCase()
+  }
+  if (!TAM_SLUG.test(slug) || TAM_RESERVED.has(slug)) return null
+  return `https://${TAM_HOST}/${slug}`
+}
+
+/** Target ids of the grades a change list announces; the app's newGradeTargetIds. */
+export const newGradeTargetIds = (changes) => [...new Set((changes || [])
+  .filter((change) => change?.category === 'grade' && !isNotificationProbe(change.id))
+  .flatMap((change) => (Array.isArray(change.targetIds) && change.targetIds.length ? change.targetIds : String(change.targetId || '').split(',')))
+  .map((id) => String(id).trim())
+  .filter((id) => id && !id.includes(':')))]
+
+const REVEAL_LEDGER_MAX = 2000
+const ledgerIds = (list) => (Array.isArray(list) ? list : []).map((id) => String(id ?? '').trim()).filter((id) => /^[A-Za-z0-9_-]{1,64}$/u.test(id))
+
+/**
+ * Hidden-grade ledger shared by the app and the browser: ids that were hidden when they arrived and
+ * ids that were revealed since. Both lists only grow (newest kept), so two devices merge without loss.
+ */
+export const mergeRevealLedger = (stored, incoming = {}) => {
+  const keep = (before, added) => {
+    const seen = new Set()
+    const out = []
+    for (const id of [...ledgerIds(before), ...ledgerIds(added)].reverse()) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      out.push(id)
+    }
+    return out.slice(0, REVEAL_LEDGER_MAX).reverse()
+  }
+  return {
+    version: 1,
+    hidden: keep(stored?.hidden, incoming.hidden),
+    revealed: keep(stored?.revealed, incoming.revealed),
+  }
+}
+
+/** Ids still hidden: hidden and never revealed. */
+export const unrevealedGradeIds = (ledger) => {
+  const revealed = new Set(ledgerIds(ledger?.revealed))
+  return ledgerIds(ledger?.hidden).filter((id) => !revealed.has(id))
+}
+
+/**
+ * The grades the browser receives. Every grade carries its target id. While hidden grades are on, a
+ * hidden mark never leaves the server: the mark and its comment are withheld, and so is the school's
+ * course average for that course, which would give the mark away.
+ */
+export const webGradeView = (grades, hiddenIds, guessGrades) => {
+  const hidden = guessGrades ? new Set(hiddenIds || []) : new Set()
+  const list = (grades || []).map((grade) => ({ ...grade, targetId: gradeTargetId(grade) }))
+  const coveredCourses = new Set(list.filter((grade) => hidden.has(grade.targetId)).map(courseKeyOf))
+  return list.map((grade) => {
+    if (hidden.has(grade.targetId)) return { ...grade, mark: null, comment: '', courseGrade: null, hidden: true }
+    // A summary row (an average printed as a grade) of that course is withheld as well.
+    if (coveredCourses.has(courseKeyOf(grade))) return isSummaryGrade(grade) ? { ...grade, mark: null, courseGrade: null, withheld: true } : { ...grade, courseGrade: null }
+    return grade
+  })
+}

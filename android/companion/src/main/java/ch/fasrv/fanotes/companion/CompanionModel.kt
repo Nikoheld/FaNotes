@@ -320,6 +320,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
         viewModelScope.launch { graph.link.collect { link = it } }
         viewModelScope.launch { graph.connections.collect { connections = it } }
+        // Settings or hidden grades changed in the browser and were taken over.
+        viewModelScope.launch { graph.sharedChanges.collect { settings = graph.notifySettings(); unrevealedIds = graph.unrevealedGradeIds() } }
         viewModelScope.launch { graph.docSearch.status.collect { docStatus = it } }
         viewModelScope.launch { graph.snapshotReady.collect { ready -> if (ready && snapshot === graph.snapshot.value) schoolReady = true } }
         viewModelScope.launch {
@@ -642,6 +644,87 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 reloadShownConnection()
                 message = t(R.string.connection_removed)
             } finally { busy = false }
+        }
+    }
+
+    /** Kanti+ im Browser: the code being approved and what the server said about its browser. */
+    data class WebPairPrompt(val code: String, val info: ch.fasrv.fanotes.schulnetz.WebPairInfo)
+    var webPairPrompt by mutableStateOf<WebPairPrompt?>(null)
+    /** Browsers per connection id, as far as the server answered. */
+    var webBrowsers by mutableStateOf<Map<String, List<ch.fasrv.fanotes.schulnetz.WebBrowserSession>>>(emptyMap())
+
+    /** True when some connection can be shared with a browser. */
+    val webAccessAvailable: Boolean get() = !demo && connections.connections.isNotEmpty()
+
+    fun lookupWebPair(raw: String) {
+        val code = ch.fasrv.fanotes.schulnetz.normalizePairCode(raw)
+        if (code == null) { message = t(R.string.web_pair_code_invalid); return }
+        if (busy || !webAccessAvailable) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                webPairPrompt = WebPairPrompt(code, graph.webPairInfo(code))
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = webPairMessage(error)
+            } finally { busy = false }
+        }
+    }
+
+    fun approveWebPair(connectionIds: List<String>) {
+        val prompt = webPairPrompt ?: return
+        if (busy || connectionIds.isEmpty()) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                graph.approveWebPair(prompt.code, connectionIds)
+                webPairPrompt = null
+                message = t(R.string.web_pair_done)
+                webBrowsers = graph.webBrowsers()
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = webPairMessage(error)
+            } finally { busy = false }
+        }
+    }
+
+    fun dismissWebPair() { webPairPrompt = null }
+
+    fun loadWebBrowsers() {
+        if (!webAccessAvailable) { webBrowsers = emptyMap(); return }
+        viewModelScope.launch {
+            webBrowsers = runCatching { graph.webBrowsers() }.getOrDefault(emptyMap())
+        }
+    }
+
+    fun revokeWebBrowser(connectionId: String, sessionId: String) {
+        if (busy) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                graph.revokeWebBrowser(connectionId, sessionId)
+                message = t(R.string.web_browser_removed)
+                webBrowsers = graph.webBrowsers()
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = t(R.string.web_browser_remove_failed)
+            } finally { busy = false }
+        }
+    }
+
+    private fun webPairMessage(error: Throwable): String {
+        val status = when (error) {
+            is SchulnetzHttpException -> error.status
+            is java.io.IOException -> 0
+            else -> -1
+        }
+        return when (ch.fasrv.fanotes.schulnetz.webPairFailure(status)) {
+            ch.fasrv.fanotes.schulnetz.WebPairFailure.UNKNOWN_CODE -> t(R.string.web_pair_unknown)
+            ch.fasrv.fanotes.schulnetz.WebPairFailure.ALREADY_FINISHED -> t(R.string.web_pair_finished)
+            ch.fasrv.fanotes.schulnetz.WebPairFailure.TOO_MANY_TRIES -> t(R.string.web_pair_too_many)
+            ch.fasrv.fanotes.schulnetz.WebPairFailure.TOO_MANY_CONNECTIONS -> t(R.string.web_pair_too_many_connections)
+            ch.fasrv.fanotes.schulnetz.WebPairFailure.OFFLINE -> t(R.string.web_pair_offline)
+            ch.fasrv.fanotes.schulnetz.WebPairFailure.OTHER -> t(R.string.web_pair_failed)
         }
     }
 

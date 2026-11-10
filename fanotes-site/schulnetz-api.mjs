@@ -10,7 +10,7 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   applyEventWindow,
   diffSnapshots,
@@ -56,7 +56,7 @@ import {
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
-const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json']
+const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json']
 const GUEST_LIMIT = 30
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
@@ -84,6 +84,7 @@ const COOKIE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
 const SSO_HOSTS = new Set(['login.microsoftonline.com', 'login.microsoft.com', 'login.live.com', 'login.windows.net'])
 const SSO_COOKIE_NAMES = new Set(['ESTSAUTH', 'ESTSAUTHPERSISTENT', 'ESTSAUTHLIGHT', 'SignInStateCookie', 'x-ms-RefreshTokenCredential'])
 const LINK_LIMIT = 5
+const WEB_PAIR_LIMIT = 30
 const SNAPSHOT_LIMIT = 60
 const PUSH_TEST_LIMIT = 5
 const LIMIT_WINDOW_MS = 60 * 60 * 1000
@@ -139,6 +140,8 @@ const keptSsoHeader = (value) => String(value || '')
 
 export const createSchulnetzRuntime = (options = {}) => {
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz')
+  // Kanti+ im Browser (kanti-web-api.mjs): pairing codes and browser sessions. Optional.
+  const web = options.web || null
   const fetchImpl = options.fetch || globalThis.fetch
   const now = options.now || (() => new Date())
   const log = options.log || ((level, message) => {
@@ -206,7 +209,9 @@ export const createSchulnetzRuntime = (options = {}) => {
       lastError: link.lastError || '',
       revision: link.revision || 0,
       settings: { ...DEFAULT_SETTINGS, ...(link.settings || {}) },
+      settingsUpdatedAt: link.settingsUpdatedAt || '',
       mode: link.mode || 'rest',
+      provider: link.provider || 'schulnetz',
       push: { endpoints: (link.fcmTokens || []).length },
     }
   }
@@ -218,6 +223,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const linkAccount = async (accountId, body) => {
+    if (body?.mode === 'device') return linkDeviceAccount(accountId, body)
     const material = await requireKey()
     const baseUrl = normalizeSchoolBase(body?.baseUrl)
     if (!baseUrl) fail(400, 'Die Schulnetz-Adresse ist nicht erlaubt.')
@@ -283,6 +289,37 @@ export const createSchulnetzRuntime = (options = {}) => {
     return publicStatus(record)
   }
 
+  /**
+   * A connection the phone reads itself (TAM). The server holds no school secret, never polls it and
+   * only keeps what the app uploads with PUT /snapshot, so a paired browser can show it.
+   */
+  const linkDeviceAccount = async (accountId, body) => {
+    if (body?.provider !== 'tam') fail(400, 'Diese Verbindung wird nicht unterstützt.')
+    const baseUrl = tamSchoolRoot(body?.baseUrl)
+    if (!baseUrl) fail(400, 'Die Schuladresse ist nicht erlaubt.')
+    const deviceId = String(body?.deviceId || '')
+    if (!/^[a-f0-9]{24}$/u.test(deviceId)) fail(400, 'Die Gerätekennung fehlt.')
+    const existing = await readLink(accountId)
+    // A Schulnetz link carries sealed sign-in cookies; a device link must never replace it.
+    if (existing && existing.mode !== 'device') fail(409, 'Diese Verbindung ist bereits mit Schulnetz verknüpft.')
+    const record = {
+      mode: 'device',
+      provider: 'tam',
+      baseUrl,
+      deviceId,
+      displayName: String(body?.displayName || existing?.displayName || '').slice(0, 80),
+      needsReauth: false,
+      lastError: '',
+      lastPollAt: existing?.lastPollAt || '',
+      fcmTokens: storedFcmTokens(existing),
+      settings: { ...DEFAULT_SETTINGS, ...(existing?.settings || {}) },
+      settingsUpdatedAt: existing?.settingsUpdatedAt || '',
+      revision: existing?.revision || 0,
+    }
+    await saveLink(accountId, record)
+    return publicStatus(record)
+  }
+
   const storedFcmTokens = (existing) => (
     Array.isArray(existing?.fcmTokens) ? existing.fcmTokens.filter(isValidFcmToken).slice(-8) : []
   )
@@ -296,7 +333,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
     // The app reads every grade row; an upload whose grades were kept is stored as a complete list.
     snapshot.gradeParser = snapshot.grades === previous?.grades ? (Number(previous?.gradeParser) || 0) : GRADE_PARSER_VERSION
-    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, uploadDiffBase(gradeDiffBase(previous, snapshot), snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
+    // A device link's changes were already announced on the phone that read them: feed only, no push.
+    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, uploadDiffBase(gradeDiffBase(previous, snapshot), snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot), { push: link.mode !== 'device' })
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.needsReauth = false
@@ -315,8 +353,23 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (typeof body?.[name] === 'boolean') settings[name] = body[name]
     }
     link.settings = settings
+    // The app adopts settings changed elsewhere (the browser) when this stamp is newer than its own.
+    link.settingsUpdatedAt = now().toISOString()
     await saveLink(accountId, link)
     return publicStatus(link)
+  }
+
+  const revealsPath = (accountId) => resolve(accountDir(accountId), 'reveals.json')
+  const readReveals = async (accountId) => mergeRevealLedger(await readJson(revealsPath(accountId)))
+  const mergeReveals = async (accountId, incoming) => withAccount(accountId, async () => {
+    const merged = mergeRevealLedger(await readJson(revealsPath(accountId)), incoming || {})
+    await writeJson(revealsPath(accountId), merged)
+    return merged
+  })
+  const addHiddenGrades = async (accountId, ids) => {
+    if (!ids.length) return
+    const merged = mergeRevealLedger(await readJson(revealsPath(accountId)), { hidden: ids })
+    await writeJson(revealsPath(accountId), merged)
   }
 
   const addFcmToken = async (accountId, token) => {
@@ -484,6 +537,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     const guest = await readGuestRecord(accountId)
     if (!guest) fail(404, 'Dieses Kanti+-Konto gibt es nicht.')
     await fs.rm(accountDir(accountId), { recursive: true, force: true })
+    // Browsers that read this identity lose it now, not on their next request.
+    if (web?.forgetAccount) await web.forgetAccount(accountId).catch(() => undefined)
     return { deleted: true }
   }
 
@@ -696,16 +751,20 @@ export const createSchulnetzRuntime = (options = {}) => {
     await writeJson(resolve(accountDir(accountId), 'notified-grades.json'), { version: 1, keys: unique })
   }
 
-  const publishChanges = async (accountId, link, changes, revision, grades = []) => {
+  const publishChanges = async (accountId, link, changes, revision, grades = [], { push = true } = {}) => {
     // No allowed school alert means no row and no push. Callers still save the snapshot.
     const ledger = await readGradeLedger(accountId)
     const settled = settleGradeNotifications(changes, grades, ledger)
     await writeGradeLedger(accountId, settled.keys)
     const unseen = unseenChanges(settled.changes, await knownChangeIds(accountId))
     await appendChanges(accountId, unseen, revision)
+    // Hidden grades: a grade that arrives while they are on stays hidden in every browser until revealed.
+    if (link.settings?.guessGrades === true) {
+      try { await addHiddenGrades(accountId, newGradeTargetIds(unseen)) } catch (error) { log('warn', `Verdeckte Noten nicht gespeichert (${error?.name || 'error'})`) }
+    }
     const fresh = prepareGradeNotifications(unseen, link.settings?.guessGrades === true)
     const priority = fcmPriorityForChanges(fresh)
-    if (priority) await ping(accountId, link, 'sync', priority)
+    if (priority && push) await ping(accountId, link, 'sync', priority)
     return fresh
   }
 
@@ -733,6 +792,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     const material = await key()
     const link = await readLink(accountId)
     if (!material || !link || link.needsReauth) return { skipped: true }
+    // The phone reads a device link itself; there is nothing on the server to sign in with.
+    if (link.mode === 'device') return { skipped: true }
     if (link.mode === 'web') {
       const savedAt = Date.parse(link.cookiesSavedAt || '')
       if (!Number.isFinite(savedAt) || now().getTime() - savedAt > COOKIE_MAX_AGE_MS) {
@@ -1130,7 +1191,35 @@ export const createSchulnetzRuntime = (options = {}) => {
         send(response, 200, await deleteGuestAccount(accountId))
         return true
       }
-      if (route === '/status' && method === 'GET') { send(response, 200, publicStatus(await readLink(accountId))); return true }
+      if (route === '/status' && method === 'GET') {
+        const status = publicStatus(await readLink(accountId))
+        send(response, 200, web ? { ...status, webSessions: await web.countFor(accountId) } : status)
+        return true
+      }
+      // Kanti+ im Browser: this identity shares itself with a browser that shows a pairing code.
+      if (web && route === '/web-pair' && method === 'GET') {
+        accountRate(accountId, 'web-pair', WEB_PAIR_LIMIT)
+        send(response, 200, await web.lookupPairing(accountId, url.searchParams.get('code'), clientAddress(request)))
+        return true
+      }
+      if (web && route === '/web-pair' && method === 'POST') {
+        accountRate(accountId, 'web-pair', WEB_PAIR_LIMIT)
+        const body = await readBody(request)
+        const link = await readLink(accountId)
+        const joined = await web.joinPairing(accountId, body, clientAddress(request), {
+          provider: link?.provider || (body?.provider === 'tam' ? 'tam' : 'schulnetz'),
+          baseUrl: link?.baseUrl || '',
+        })
+        // Grades the app still hides stay hidden in the browser too.
+        if (Array.isArray(body?.unrevealed) && body.unrevealed.length) await mergeReveals(accountId, { hidden: body.unrevealed.slice(0, 2000) })
+        send(response, 200, joined)
+        return true
+      }
+      if (web && route === '/web-sessions' && method === 'GET') { send(response, 200, { sessions: await web.sessionsFor(accountId) }); return true }
+      const webSession = /^\/web-sessions\/([a-f0-9]{16})$/u.exec(route)
+      if (web && webSession && method === 'DELETE') { send(response, 200, { removed: await web.revoke(accountId, webSession[1]) }); return true }
+      if (route === '/reveals' && method === 'GET') { send(response, 200, await readReveals(accountId)); return true }
+      if (route === '/reveals' && method === 'PUT') { send(response, 200, await mergeReveals(accountId, await readBody(request))); return true }
       if (route === '/link' && method === 'PUT') {
         accountRate(accountId, 'link', LINK_LIMIT)
         send(response, 200, await linkAccount(accountId, await readBody(request)))
@@ -1236,9 +1325,23 @@ export const createSchulnetzRuntime = (options = {}) => {
     return true
   }
 
+  /** What the browser API may read and change for a connection a session holds. */
+  const webAccess = {
+    ownerExists: async (accountId) => {
+      try { return await ownerStillExists(accountId) } catch { return false }
+    },
+    readStatus: async (accountId) => publicStatus(await readLink(accountId)),
+    readSnapshot: async (accountId) => readJson(resolve(accountDir(accountId), 'snapshot.json')),
+    updateSettings: (accountId, body) => updateSettings(accountId, body),
+    changesSince: (accountId, since) => changesSince(accountId, since, ''),
+    readReveals,
+    mergeReveals,
+  }
+
   return {
     handle,
     start,
+    webAccess,
     pollAccount,
     linkAccount,
     addFcmToken,

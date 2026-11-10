@@ -4,6 +4,13 @@ import ch.fasrv.fanotes.schulnetz.ConnectionRegistry
 import ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT
 import ch.fasrv.fanotes.schulnetz.SchoolConnection
 import ch.fasrv.fanotes.schulnetz.SchoolProvider
+import ch.fasrv.fanotes.schulnetz.MAX_LEDGER_IDS
+import ch.fasrv.fanotes.schulnetz.SettingsSync
+import ch.fasrv.fanotes.schulnetz.WebBrowserSession
+import ch.fasrv.fanotes.schulnetz.WebPairInfo
+import ch.fasrv.fanotes.schulnetz.mergeReveals
+import ch.fasrv.fanotes.schulnetz.gradeTargetId
+import ch.fasrv.fanotes.schulnetz.settingsSyncAction
 import ch.fasrv.fanotes.schulnetz.connectionRouteKey
 import ch.fasrv.fanotes.schulnetz.defaultConnectionLabel
 import ch.fasrv.fanotes.schulnetz.migrateConnections
@@ -277,6 +284,45 @@ class CompanionGraph(private val context: Context) {
     }
 
     fun renameConnection(id: String, label: String) = saveRegistry(connections.value.rename(id, label))
+
+    /** Bumped when settings or hidden grades of a connection changed from the browser side. */
+    val sharedChanges = MutableStateFlow(0)
+    private fun sharedChanged() { sharedChanges.value = sharedChanges.value + 1 }
+
+    /*
+     * Kanti+ im Browser: the browser shows a code, the user approves it here for some connections.
+     * Each connection joins the pairing with its own server identity; the last one finishes it.
+     */
+    suspend fun webPairInfo(code: String): WebPairInfo {
+        if (demoActive()) throw DemoModeException()
+        // Any connection that already has a server identity can look the code up.
+        val asker = sessions().firstOrNull { it.serverShared() } ?: current()
+        return client.webPairInfo(asker.schoolAuth(), code)
+    }
+
+    /** Shares the connections with [ids] (in list order) with the browser behind [code]. */
+    suspend fun approveWebPair(code: String, ids: List<String>) {
+        if (demoActive()) throw DemoModeException()
+        val chosen = sessions().filter { it.id in ids }
+        require(chosen.isNotEmpty())
+        gate.exclusive("web-pair") {
+            chosen.forEachIndexed { index, session -> session.joinWebPairing(code, finish = index == chosen.lastIndex) }
+        }
+        rearmSchoolDelivery()
+    }
+
+    /** Browsers per connection id; a connection that could not be asked is left out. */
+    suspend fun webBrowsers(): Map<String, List<WebBrowserSession>> {
+        if (demoActive()) return emptyMap()
+        return sessions().mapNotNull { session ->
+            runCatching { session.id to session.webBrowsers() }.onFailure { schulnetzLog.error(it) }.getOrNull()
+        }.toMap()
+    }
+
+    suspend fun revokeWebBrowser(connectionId: String, sessionId: String) {
+        val session = sessionById(connectionId) ?: return
+        session.revokeWebBrowser(sessionId)
+    }
 
     /**
      * Starts a new connection. It is only listed once its first sign-in worked; a cancelled sign-in
@@ -821,7 +867,21 @@ class CompanionGraph(private val context: Context) {
             "web-session", "schulnetz-base", "school-linked", "school-disconnected", "push-topic", "push-server",
             "change-cursor", "last-check", "last-check-error", SILENT_AT, SEEN_CHANGES_PREF, UNREVEALED_PREF,
             "fcm-sent-token", "fcm-sent-account", "fcm-sent-at", "tam-signed-in-at", TAM_ICS_PREF, TAM_PERSON_PREF,
+            SETTINGS_DIRTY_PREF, SETTINGS_AT_PREF, REVEALED_PENDING_PREF, REVEALS_SYNCED_PREF, TAM_DEVICE_LINK_PREF, TAM_DEVICE_LINK_AT_PREF,
         )
+        /** Set after the first hidden-grade sync with the server. */
+        const val REVEALS_SYNCED_PREF = "reveals-synced"
+        /** The app changed its alert settings and the server has not confirmed them yet. */
+        const val SETTINGS_DIRTY_PREF = "notify-settings-pending"
+        /** The server's settingsUpdatedAt the stored alert settings last matched. */
+        const val SETTINGS_AT_PREF = "notify-settings-server-at"
+        /** Grades revealed on this phone that the server ledger does not list as revealed yet. */
+        const val REVEALED_PENDING_PREF = "revealed-pending"
+        /** A TAM connection shared with a browser: it has a device link and uploads its reads. */
+        const val TAM_DEVICE_LINK_PREF = "tam-device-linked"
+        const val TAM_DEVICE_LINK_AT_PREF = "tam-device-linked-at"
+        /** A fresh share waits this long for the browser to claim it before an unread share ends. */
+        const val TAM_SHARE_GRACE_MS = 60 * 60 * 1000L
     }
 
     /**
@@ -929,7 +989,8 @@ class CompanionGraph(private val context: Context) {
 
         /** Removes this connection: server identity and data first (best effort), then the device copy. */
         internal suspend fun forgetEverything() {
-            if (connection.provider == SchoolProvider.SCHULNETZ) {
+            // A TAM connection has server data only when it was shared with a browser.
+            if (connection.provider == SchoolProvider.SCHULNETZ || prefs.getBoolean(TAM_DEVICE_LINK_PREF, false) || readGuestFile() != null) {
                 val auth = runCatching { if (slot == PRIMARY_SLOT && engine.currentSession() != null) schoolAuth() else readGuestFile() }.getOrNull()
                 if (auth != null) {
                     runCatching { client.unlink(auth) }.onFailure { schulnetzLog.error(it) }
@@ -946,16 +1007,157 @@ class CompanionGraph(private val context: Context) {
         )
 
         fun setNotifySettings(settings: NotifySettings) {
+            writeNotifySettings(settings)
+            // Pending until the server confirms; a browser change never overwrites it meanwhile.
+            prefs.edit().putBoolean(SETTINGS_DIRTY_PREF, true).commit()
+            scope.launch { pushNotifySettings(null, settings) }
+        }
+
+        private fun writeNotifySettings(settings: NotifySettings) {
             val editor = prefs.edit()
             val values = settings.storedFields()
             for ((field, key) in NotifyPrefs.fields) {
                 editor.putBoolean(key, values[field] == true)
             }
             editor.commit()
+        }
+
+        /** True when this connection's data is on the server: a Schulnetz link, or TAM shared with a browser. */
+        fun serverShared(): Boolean = when (connection.provider) {
+            SchoolProvider.SCHULNETZ -> link.value.linked
+            SchoolProvider.TAM -> prefs.getBoolean(TAM_DEVICE_LINK_PREF, false)
+        }
+
+        /** Sends the alert settings; on success they match the server's stamp and are no longer pending. */
+        private suspend fun pushNotifySettings(known: SchoolAuth?, settings: NotifySettings): Boolean {
+            if (demoActive() || !serverShared()) return false
+            val auth = known ?: runCatching { schoolAuth() }.getOrNull() ?: return false
+            val stamp = runCatching { client.saveSettings(auth, settings) }.getOrElse { return false }
+            // A newer change made meanwhile stays pending and is sent on its own.
+            if (notifySettings() == settings) prefs.edit().putBoolean(SETTINGS_DIRTY_PREF, false).putString(SETTINGS_AT_PREF, stamp).apply()
+            return true
+        }
+
+        /**
+         * After a status read: the browser and the app share the alert settings and the hidden grades
+         * through the server. The app's own pending change is sent; a newer browser change is taken over.
+         */
+        private suspend fun syncShared(auth: SchoolAuth, remote: SchulnetzLinkState) {
+            if (demoActive() || !remote.linked) return
+            val action = settingsSyncAction(
+                dirty = prefs.getBoolean(SETTINGS_DIRTY_PREF, false),
+                localStamp = prefs.getString(SETTINGS_AT_PREF, "").orEmpty(),
+                serverStamp = remote.settingsUpdatedAt,
+            )
+            when (action) {
+                SettingsSync.PUSH -> pushNotifySettings(auth, notifySettings())
+                SettingsSync.ADOPT -> {
+                    writeNotifySettings(remote.settings)
+                    prefs.edit().putString(SETTINGS_AT_PREF, remote.settingsUpdatedAt).apply()
+                    schulnetzLog.info("alert settings taken over from the server slot=${slot.ifBlank { "primary" }}")
+                    sharedChanged()
+                }
+                SettingsSync.NONE -> Unit
+            }
+            if (notifySettings().guessGrades) syncReveals(auth)
+        }
+
+        /** Hidden grades: what the browser revealed is revealed here, what this phone hides the server learns. */
+        private fun syncReveals(auth: SchoolAuth) {
+            val server = runCatching { client.reveals(auth) }.onFailure { schulnetzLog.error(it) }.getOrNull() ?: return
+            val pending = prefs.getStringSet(REVEALED_PENDING_PREF, emptySet()).orEmpty().toSet()
+            val first = !prefs.getBoolean(REVEALS_SYNCED_PREF, false)
+            val known = if (first) snapshot.value.grades.map { gradeTargetId(it) }.filter { it.isNotBlank() }.toSet() else emptySet()
+            val merge = mergeReveals(unrevealedGradeIds(), pending, server, firstSync = first, known = known)
+            if (merge.local != unrevealedGradeIds()) {
+                prefs.edit().putStringSet(UNREVEALED_PREF, merge.local).apply()
+                sharedChanged()
+            }
+            val pushed = !merge.needsPush || runCatching { client.saveReveals(auth, merge.pushHidden, merge.pushRevealed) }.onFailure { schulnetzLog.error(it) }.isSuccess
+            val confirmed = server.revealed + (if (pushed) merge.pushRevealed else emptySet())
+            val left = pending - confirmed
+            val editor = prefs.edit()
+            if (left != pending) editor.putStringSet(REVEALED_PENDING_PREF, left)
+            if (first && pushed) editor.putBoolean(REVEALS_SYNCED_PREF, true)
+            editor.apply()
+        }
+
+        /** Tells the server about a grade revealed on this phone (best effort; retried on the next read). */
+        private fun shareReveal(id: String) {
+            if (demoActive() || !serverShared()) return
+            val pending = prefs.getStringSet(REVEALED_PENDING_PREF, emptySet()).orEmpty().toMutableSet()
+            if (pending.add(id)) prefs.edit().putStringSet(REVEALED_PENDING_PREF, pending.toList().takeLast(MAX_LEDGER_IDS).toSet()).apply()
             scope.launch {
                 val auth = runCatching { schoolAuth() }.getOrNull() ?: return@launch
-                if (link.value.linked) runCatching { client.saveSettings(auth, settings) }
+                val sent = runCatching { client.saveReveals(auth, emptyList(), listOf(id)) }.isSuccess
+                if (sent) {
+                    val now = prefs.getStringSet(REVEALED_PENDING_PREF, emptySet()).orEmpty().toMutableSet()
+                    if (now.remove(id)) prefs.edit().putStringSet(REVEALED_PENDING_PREF, now).apply()
+                }
             }
+        }
+
+        /** Every browser that can read this connection (Kanti+ im Browser). */
+        suspend fun webBrowsers(): List<WebBrowserSession> {
+            if (demoActive() || !serverShared()) return emptyList()
+            val auth = schoolAuth()
+            return client.webSessions(auth)
+        }
+
+        suspend fun revokeWebBrowser(id: String) {
+            val auth = schoolAuth()
+            client.revokeWebSession(auth, id)
+            // A TAM connection no browser reads any more leaves the server at once.
+            if (connection.provider == SchoolProvider.TAM && prefs.getBoolean(TAM_DEVICE_LINK_PREF, false)) {
+                val left = runCatching { client.webSessions(auth) }.getOrNull()
+                if (left != null && left.isEmpty()) {
+                    runCatching { client.unlink(auth) }.onFailure { schulnetzLog.error(it) }.onSuccess {
+                        prefs.edit().remove(TAM_DEVICE_LINK_PREF).remove(TAM_DEVICE_LINK_AT_PREF).apply()
+                    }
+                }
+            }
+        }
+
+        /**
+         * Adds this connection to a browser pairing. A TAM connection first gets a device link and its
+         * current read, so the browser has something to show; nothing TAM-related was on the server before.
+         */
+        internal suspend fun joinWebPairing(code: String, finish: Boolean) {
+            val auth = schoolAuth()
+            if (connection.provider == SchoolProvider.TAM) {
+                client.linkDevice(auth, baseUrl(), deviceId(), connection.label)
+                prefs.edit().putBoolean(TAM_DEVICE_LINK_PREF, true).putLong(TAM_DEVICE_LINK_AT_PREF, System.currentTimeMillis()).commit()
+                pushNotifySettings(auth, notifySettings())
+                val current = snapshot.value
+                if (current.fetchedAt.isNotBlank() && !current.isDemo()) runCatching { client.uploadSnapshot(auth, current) }.onFailure { schulnetzLog.error(it) }
+            }
+            client.webPair(auth, code, connection.id, connection.label, connection.provider, finish, unrevealedGradeIds())
+        }
+
+        /**
+         * After a TAM read: a connection shared with a browser uploads what it read. When no browser
+         * reads it any more, the server copy is removed and nothing is uploaded again.
+         */
+        private suspend fun shareTamRead() {
+            if (!prefs.getBoolean(TAM_DEVICE_LINK_PREF, false) || demoActive()) return
+            val auth = runCatching { schoolAuth() }.getOrNull() ?: return
+            val remote = runCatching { client.status(auth) }.onFailure { schulnetzLog.error(it) }.getOrNull() ?: return
+            if (!remote.reachable) return
+            if (!remote.linked || remote.mode != "device") {
+                // The server no longer keeps this connection for a browser.
+                prefs.edit().remove(TAM_DEVICE_LINK_PREF).remove(TAM_DEVICE_LINK_AT_PREF).apply()
+                return
+            }
+            val linkedAt = prefs.getLong(TAM_DEVICE_LINK_AT_PREF, 0L)
+            if (remote.webSessions <= 0 && System.currentTimeMillis() - linkedAt > TAM_SHARE_GRACE_MS) {
+                runCatching { client.unlink(auth) }.onFailure { schulnetzLog.error(it) }.onSuccess {
+                    prefs.edit().remove(TAM_DEVICE_LINK_PREF).remove(TAM_DEVICE_LINK_AT_PREF).apply()
+                    schulnetzLog.info("tam share ended reason=no-browser")
+                }
+                return
+            }
+            runCatching { client.uploadSnapshot(auth, snapshot.value) }.onFailure { schulnetzLog.error(it) }
+            syncShared(auth, remote)
         }
 
         fun unrevealedGradeIds(): Set<String> = prefs.getStringSet(UNREVEALED_PREF, emptySet()).orEmpty().toSet()
@@ -973,6 +1175,7 @@ class CompanionGraph(private val context: Context) {
             val stored = prefs.getStringSet(UNREVEALED_PREF, emptySet()).orEmpty().toMutableSet()
             if (!stored.remove(id)) return
             prefs.edit().putStringSet(UNREVEALED_PREF, stored).apply()
+            shareReveal(id)
         }
 
         suspend fun refreshSchulnetz(caller: String = "unspecified") {
@@ -1010,6 +1213,7 @@ class CompanionGraph(private val context: Context) {
                 }
             }
             link.value = remote.copy(needsReauth = false)
+            if (remote.linked) syncShared(session, remote)
             if (usesWebsiteSession(baseUrl())) {
                 val scraped = refreshWebsite(previous)
                 if (scraped != null) {
@@ -1551,6 +1755,7 @@ class CompanionGraph(private val context: Context) {
                     CompanionAlerts.forget(alerts, context, "schulnetz-login-required")
                     link.value = SchulnetzLinkState(linked = true, baseUrl = root, displayName = connection.label, lastPollAt = read.snapshot.fetchedAt, settings = notifySettings())
                     publishSnapshot(previous, read.snapshot, notifySettings())
+                    shareTamRead()
                 }
             }
             NextLessonWidget.update(context)

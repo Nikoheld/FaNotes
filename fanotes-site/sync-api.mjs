@@ -445,15 +445,15 @@ const sendEmpty = (request, response, status, extra = {}) => {
 const handlePrelogin = async (request, response) => {
   rateLimit(`sync:prelogin:${clientAddress(request)}`, 60, 15 * 60 * 1000)
   const body = await readJsonBody(request)
-  const email = normalizeEmail(body.email)
+  sendJson(request, response, 200, { kdf: await preloginKdf(normalizeEmail(body.email)) })
+}
+
+const preloginKdf = async (email) => {
   const account = await loadAccountByEmail(email)
-  if (account) {
-    sendJson(request, response, 200, { kdf: account.kdf })
-    return
-  }
+  if (account) return account.kdf
   // Unknown addresses get a deterministic salt so the response does not reveal whether an account exists.
   const fakeSalt = createHmac('sha256', await serverSecret()).update(`salt:${email}`).digest().subarray(0, 16).toString('base64')
-  sendJson(request, response, 200, { kdf: { algorithm: 'pbkdf2-sha256', iterations: 600_000, salt: fakeSalt } })
+  return { algorithm: 'pbkdf2-sha256', iterations: 600_000, salt: fakeSalt }
 }
 
 const handleRegister = async (request, response) => {
@@ -815,6 +815,24 @@ export const withVerifiedSyncAuth = async (accountId, authKey, task) => withAcco
   if (!account || !await accountAcceptsAuthKey(account, authKey)) return { ok: false }
   return { ok: true, value: await task(account) }
 })
+
+/** The /prelogin answer for an e-mail (a stable fake one for unknown addresses), or null when the address is invalid. */
+export const syncPreloginKdf = async (email) => {
+  let normalized
+  try { normalized = normalizeEmail(email) } catch { return null }
+  return preloginKdf(normalized)
+}
+
+/**
+ * A fingerprint of the account's current authentication key, or '' when the account is gone.
+ * Sessions outside the sync API (the Kanti+ web app) keep it and end when it changes, the same way
+ * a password change signs every other sync session out.
+ */
+export const syncAuthStamp = async (accountId) => {
+  const account = await loadAccountById(String(accountId || ''))
+  if (!account?.auth?.hash) return ''
+  return sha256(`kanti-web:${account.auth.salt}:${account.auth.hash}`)
+}
 
 export const accountAcceptsAuthKey = async (account, authKey) => {
   let key

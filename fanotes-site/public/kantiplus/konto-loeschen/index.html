@@ -29,7 +29,7 @@
         <article>
           <p class="kicker">Kanti+ für Android</p>
           <h1>Konto und Daten löschen</h1>
-          <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>), entwickelt von Fabio (FaNotes) · Stand: 9. November 2026 · <a href="#english">English version</a></p>
+          <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>) und Kanti+ im Browser (<code>schulnetz.fasrv.ch</code>), entwickelt von Fabio (FaNotes) · Stand: 10. November 2026 · <a href="#english">English version</a></p>
           <p class="lead">Du kannst deine Kanti+-Daten und dein optionales FaNotes-Konto jederzeit löschen: direkt in der App oder ohne App per E-Mail.</p>
 
           <h2 id="app">In der App</h2>
@@ -46,6 +46,9 @@
           <h3>Nur die Schulverbindung entfernen</h3>
           <p>Einstellungen → Schulnetz bzw. Konto und Sync → <strong>«Schule trennen»</strong>.</p>
           <p>Auf dem Server werden die Schulnetz-Anmeldung, deine Schuldaten, Push-Token und die Änderungsliste gelöscht. Auf dem Gerät bleibt der letzte Stand sichtbar, bis du ihn löschst oder die App entfernst.</p>
+
+          <h3>Kanti+ im Browser</h3>
+          <p>Im Browser unter Einstellungen → <strong>«In diesem Browser abmelden»</strong>: Die Browser-Sitzung wird sofort auf dem Server gelöscht. In der App unter Einstellungen → Schule → <strong>Kanti+ im Browser</strong> entfernst du einen Browser für eine Verbindung. Löschst du deine Kanti+-Daten oder dein FaNotes-Konto, verlieren alle Browser den Zugriff sofort.</p>
 
           <h3>Mit FaNotes-Konto</h3>
           <p>Kanti+ erhält dafür mit dem nächsten Update die Funktion Einstellungen → Konto und Sync → <strong>«FaNotes-Konto löschen»</strong> (mit Passwort bestätigt). Bis dahin löschst du das Konto in der FaNotes-Web-App:</p>
@@ -71,7 +74,8 @@
               <tbody>
                 <tr><td>Schuldaten auf dem Server (Noten, Stundenplan, Prüfungen, Absenzen, Termine, Mitteilungen) und Änderungsliste</td><td>sofort gelöscht</td></tr>
                 <tr><td>Gespeicherte Schulnetz-/Microsoft-Anmeldung</td><td>sofort gelöscht (sonst ohnehin spätestens 14 Tage nach der letzten Anmeldung)</td></tr>
-                <tr><td>Geräte-ID, Push-Token, Benachrichtigungseinstellungen, anonyme Kennung</td><td>sofort gelöscht</td></tr>
+                <tr><td>Geräte-ID, Push-Token, Benachrichtigungseinstellungen, verdeckte Noten, anonyme Kennung</td><td>sofort gelöscht</td></tr>
+                <tr><td>Browser-Sitzungen von Kanti+ im Browser und für den Browser hochgeladene TAM-Daten</td><td>sofort gelöscht (sonst 30 Tage nach der letzten Nutzung, höchstens nach 90 Tagen)</td></tr>
                 <tr><td>FaNotes-Konto: E-Mail, Passwort-Hash, Geräte, Sitzungen, verschlüsselte Notizen und Dateien, Kanti+-Schuldaten des Kontos</td><td>sofort gelöscht; andere Geräte werden abgemeldet</td></tr>
                 <tr><td>Daten auf deinem Gerät (Aufgaben, Termine, Notizen, letzter Schulstand)</td><td>bleiben, bis du sie in der App löschst oder die App entfernst</td></tr>
                 <tr><td>Server-Protokolle (keine Schuldaten: Adresse, Zeit, User-Agent, Cloudflare-IP; gekürzte Konto-Kennung, Fehlerart)</td><td>werden nicht einzeln gelöscht; sie laufen nach 14 Tagen (Webserver) bzw. höchstens 90 Tagen (Dienstprotokoll) automatisch ab</td></tr>
@@ -85,7 +89,7 @@
           <hr />
           <section id="english" lang="en">
             <h2>Delete your account and data (English)</h2>
-            <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>), developed by Fabio (FaNotes) · Last updated: 9 November 2026</p>
+            <p class="meta">App: Kanti+ (<code>ch.fasrv.kantiplus</code>) and Kanti+ in the browser (<code>schulnetz.fasrv.ch</code>), developed by Fabio (FaNotes) · Last updated: 10 November 2026</p>
 
             <h3>In the app</h3>
             <ul>
@@ -98,6 +102,8 @@
               <li><strong>Remove only the school connection:</strong> Settings → "Schule trennen". It deletes the Schulnetz sign-in, school data, push tokens and change list from the server.</li>
               <li><strong>With a FaNotes account:</strong> the next Kanti+ update adds Settings → Konto und Sync → "FaNotes-Konto löschen" (confirmed with your password). Until then, delete the account in the FaNotes web app: sign in at <a href="https://fanotes.fasrv.ch/notes/">fanotes.fasrv.ch/notes</a>, then Settings → Sync → "Konto löschen". This works without the Kanti+ app.</li>
             </ul>
+
+            <p><strong>Kanti+ in the browser:</strong> in the browser, Settings → "Sign out of this browser" deletes the browser session on the server at once. In the app, Settings → School → Kanti+ in the browser removes a browser from a connection. Deleting your Kanti+ data or your FaNotes account ends every browser's access at once.</p>
 
             <h3>Without the app: by email</h3>
             <p>Write to <a href="mailto:fabiokunz2109@gmail.com?subject=Kanti%2B%20delete%20my%20data">fabiokunz2109@gmail.com</a>.</p>
@@ -113,7 +119,8 @@
                 <ul>
                   <li>school data on the server and the change list;</li>
                   <li>the stored Schulnetz/Microsoft sign-in;</li>
-                  <li>device ID, push tokens, notification settings and the anonymous identity;</li>
+                  <li>device ID, push tokens, notification settings, hidden grades and the anonymous identity;</li>
+                  <li>browser sessions of Kanti+ in the browser and TAM data uploaded for a browser;</li>
                   <li>for a FaNotes account: email, password hash, devices, sessions, encrypted notes and files, and the account's school data.</li>
                 </ul>
               </li>
