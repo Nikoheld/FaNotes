@@ -10,7 +10,7 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   applyEventWindow,
   diffSnapshots,
@@ -124,6 +124,14 @@ export const openToken = (key, sealed) => {
   decipher.setAuthTag(Buffer.from(sealed.tag, 'base64'))
   return Buffer.concat([decipher.update(Buffer.from(sealed.data, 'base64')), decipher.final()]).toString('utf8')
 }
+
+/** The absence fields of a snapshot, for copying a kept statement. */
+const absenceFields = (snapshot) => ({
+  absences: snapshot?.absences || [],
+  absenceQuota: snapshot?.absenceQuota ?? null,
+  absenceRemaining: snapshot?.absenceRemaining ?? null,
+  absenceParser: Number(snapshot?.absenceParser) || 0,
+})
 
 const fail = (status, message) => {
   const error = new Error('schulnetz')
@@ -333,6 +341,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
     // The app reads every grade row; an upload whose grades were kept is stored as a complete list.
     snapshot.gradeParser = snapshot.grades === previous?.grades ? (Number(previous?.gradeParser) || 0) : GRADE_PARSER_VERSION
+    // An app before the points parser uploads other ids; the server's own statement read stays.
+    Object.assign(snapshot, absenceFields(keepAbsenceRead(previous || {}, snapshot)))
     // A device link's changes were already announced on the phone that read them: feed only, no push.
     const changes = await publishChanges(accountId, link, await agendaDiff(accountId, uploadDiffBase(gradeDiffBase(previous, snapshot), snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot), { push: link.mode !== 'device' })
     link.revision = snapshot.revision
@@ -996,6 +1006,11 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
     const failed = Boolean(scraped.problem)
+    // The Absenzen page with points, quota and open reports. An unread page keeps the stored statement.
+    const statement = failed ? null : readAbsenceStatement(scraped.absencesHtml || '')
+    const absencePart = statement?.read
+      ? { absences: statement.absences, absenceQuota: statement.quota, absenceRemaining: statement.remaining, absenceParser: ABSENCE_PARSER_VERSION }
+      : absenceFields(keepAbsenceRead(previous || {}, { absences: [] }))
     const parsedNotes = parseStartMessages(scraped.startHtml || '').map((body, index) => ({ id: `start-${index}`, title: 'Mitteilung', body, at: '' }))
     const keepMessages = failed || parsedNotes.length === 0
     const snapshot = {
@@ -1006,7 +1021,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       gradeParser: failed ? (Number(previous?.gradeParser) || 0) : (scraped.gradeParser || 0),
       events: failed ? (previous?.events || []) : (scraped.events || []),
       exams: failed ? (previous?.exams || []) : (scraped.exams || previous?.exams || []),
-      absences: previous?.absences || [],
+      ...absencePart,
       homework: previous?.homework || [],
       messages: keepMessages ? (previous?.messages || []) : parsedNotes,
       vacations: previous?.vacations || [],
@@ -1235,7 +1250,9 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (route === '/snapshot' && method === 'GET') {
         const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
         // Apps that handle every timetable week say so; older ones get this week only.
-        const snapshot = String(request.headers?.[TIMETABLE_WEEKS_HEADER] || '') === 'weeks' ? stored : legacySnapshotView(stored, zurichToday(now()))
+        const weeks = String(request.headers?.[TIMETABLE_WEEKS_HEADER] || '') === 'weeks' ? stored : legacySnapshotView(stored, zurichToday(now()))
+        // Apps before the points parser get the absences their own reader produces, so their diff stays quiet.
+        const snapshot = String(request.headers?.[ABSENCES_HEADER] || '') === String(ABSENCE_PARSER_VERSION) ? weeks : legacyAbsenceView(weeks)
         send(response, 200, snapshot || { revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], startMessages: [] })
         return true
       }

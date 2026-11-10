@@ -13,6 +13,8 @@ import { loadPrefs } from '../src/lib/prefs'
 import { parseRoute, routeHref } from '../src/lib/route'
 import { search } from '../src/lib/search'
 import { shortcutFor } from '../src/lib/shortcuts'
+import { absenceTally } from '@shared/schulnetz-logic'
+import { pointsLabel } from '../src/lib/i18n'
 import type { Change, SchoolGrade } from '../src/types'
 
 const grade = (fields: Partial<SchoolGrade>): SchoolGrade => ({ id: 'g', course: 'M-2a', courseId: 'M-2a', subject: 'Mathematik', title: 'Test', date: '2026-10-01', mark: 5, weight: 1, ...fields })
@@ -204,5 +206,22 @@ describe('page and assets', () => {
     const icon = readFileSync(new URL('../public/kanti-icon.svg', import.meta.url))
     const master = readFileSync(new URL('../../../android/companion/docs/brand/kanti.svg', import.meta.url))
     expect(icon.equals(master)).toBe(true)
+  })
+})
+
+describe('absence points (AbsencePoints.kt through the server logic)', () => {
+  it('estimates the demo like the app: booked 5, open double lesson 3, 22 of 30 left', () => {
+    const tally = absenceTally(demoSnapshot('2026-11-11'))
+    expect(tally.booked).toBe(5)
+    expect(tally.estimated).toBe(3)
+    expect(tally.remaining).toBe(22)
+    expect(Object.values(tally.estimates).map((estimate) => estimate.rule)).toEqual(['lessons', 'lessons'])
+  })
+
+  it('labels points like the app', () => {
+    expect(pointsLabel(3, 'de')).toBe('3')
+    expect(pointsLabel(2.5, 'de')).toBe('2,5')
+    expect(pointsLabel(2.5, 'en')).toBe('2.5')
+    expect(STRINGS.de.ruleLessons(2, 3)).toBe('2 Lektionen am Stück: 2 + 1 = 3 Punkte')
   })
 })

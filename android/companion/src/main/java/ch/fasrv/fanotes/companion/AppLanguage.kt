@@ -110,7 +110,9 @@ fun uiMark(value: Double?, decimals: Int = 2): String = localizedNumber(formatMa
 
 fun uiPlus(value: Double): String = localizedNumber(formatPluspunkte(value))
 
-private fun localizedNumber(text: String): String {
+fun uiPoints(value: Double): String = localizedNumber(ch.fasrv.fanotes.schulnetz.pointsText(value))
+
+internal fun localizedNumber(text: String): String {
     if (AppLanguage.formatLocale().language == "de") return text
     return text.replace(',', '.')
 }

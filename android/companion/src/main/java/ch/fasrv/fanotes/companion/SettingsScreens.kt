@@ -245,7 +245,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item(key = "today-head") { SectionLabel(t(R.string.on_today)) }
             itemsIndexed(TODAY_CARD_IDS, key = { _, it -> "card:$it" }) { index, id ->
                 GroupItem(index, TODAY_CARD_IDS.size) {
-                    ToggleRow(when (id) { "lessons" -> t(R.string.next_commitment); "exam" -> t(R.string.upcoming_exam); "grades" -> t(R.string.grade_overview); "pluspunkte" -> t(R.string.promotion_points_2); "events" -> t(R.string.school_updates); else -> t(R.string.tasks) }, checked = id !in model.desk.hiddenCards) { show ->
+                    ToggleRow(when (id) { "lessons" -> t(R.string.next_commitment); "exam" -> t(R.string.upcoming_exam); "grades" -> t(R.string.grade_overview); "pluspunkte" -> t(R.string.promotion_points_2); "absences" -> t(R.string.absence_points); "events" -> t(R.string.school_updates); else -> t(R.string.tasks) }, checked = id !in model.desk.hiddenCards) { show ->
                         model.updateDesk(model.desk.copy(hiddenCards = if (show) model.desk.hiddenCards - id else (model.desk.hiddenCards + id).distinct()))
                     }
                 }

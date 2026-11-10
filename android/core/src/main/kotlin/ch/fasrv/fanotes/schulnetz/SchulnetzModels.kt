@@ -172,6 +172,10 @@ data class SchoolAbsence(
     val acknowledged: Boolean,
     val status: String,
     val excuseUntil: String = "",
+    /** Booked Absenzpunkte from the statement. Null when Schulnetz shows none (open reports, older layouts). */
+    val points: Double? = null,
+    /** An open absence report (Offene Absenzmeldung): not booked yet, its points are estimated. */
+    val pending: Boolean = false,
 )
 
 data class SchoolHomework(
@@ -238,6 +242,11 @@ data class SchulnetzSnapshot(
      * keeps its own grade list instead of adopting theirs.
      */
     val gradeParser: Int = 0,
+    /** Semester quota (Kontingent) and remaining quota as the statement shows them. Null when not shown. */
+    val absenceQuota: Double? = null,
+    val absenceRemaining: Double? = null,
+    /** [ABSENCE_PARSER_VERSION] of the page read that produced [absences]; 0 for REST and older reads. */
+    val absenceParser: Int = 0,
 )
 
 /** 2: marks with an info tooltip and rows still waiting for a mark are read. */

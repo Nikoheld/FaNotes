@@ -144,13 +144,13 @@ fun keepStoredRead(
 ): SchulnetzSnapshot {
     val trustedGrades = !blocked && okPages > 0 && gradesComplete
     val grades = keepGradeRead(previous?.grades.orEmpty(), next.grades, trustedGrades)
-    val guarded = next.copy(grades = grades, gradesReadComplete = trustedGrades)
+    val guarded = (if (previous != null) keepAbsenceRead(previous, next) else next).copy(grades = grades, gradesReadComplete = trustedGrades)
     val prior = previous ?: return guarded
     if (!blocked && okPages > 0 && !timetableFailed) return guarded
     var events = next.events
     var exams = next.exams
     var messages = next.messages
-    var absences = next.absences
+    var absences = guarded.absences
     var startMessages = next.startMessages
     var konto = next.konto
     var weekFetched = next.weekFetched

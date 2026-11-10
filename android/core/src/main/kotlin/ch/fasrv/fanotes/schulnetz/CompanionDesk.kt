@@ -64,7 +64,7 @@ data class HiddenLesson(
     val start: String,
 )
 
-val TODAY_CARD_IDS = listOf("pluspunkte", "lessons", "exam", "grades", "events", "tasks")
+val TODAY_CARD_IDS = listOf("pluspunkte", "lessons", "exam", "grades", "absences", "events", "tasks")
 
 data class DeskPrefs(
     val accent: String = "#2a6f97",

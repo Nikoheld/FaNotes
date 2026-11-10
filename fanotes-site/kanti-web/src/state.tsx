@@ -67,12 +67,12 @@ export const useKanti = () => {
 
 const demoConnection = (): Connection => ({ id: DEMO_ID, provider: 'schulnetz', label: 'Demo', source: 'demo', linked: true, baseUrl: '', needsReauth: false, lastPollAt: '', lastError: '', mode: 'demo' })
 
-export const KantiProvider = ({ children, api: injected }: { children: ReactNode; api?: Api }) => {
+export const KantiProvider = ({ children, api: injected, demo: startInDemo = false }: { children: ReactNode; api?: Api; demo?: boolean }) => {
   const api = useMemo(() => injected || createApi(), [injected])
   const [phase, setPhase] = useState<Phase>('loading')
   const [session, setSession] = useState<Session | null>(null)
   // "?demo" opens the demo straight away (a link for reviewers); it never reaches the server.
-  const [demo, setDemo] = useState(() => typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demo'))
+  const [demo, setDemo] = useState(() => startInDemo || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demo')))
   const [store, setStore] = useState<Record<string, ConnectionData>>({})
   const [offline, setOffline] = useState(false)
   const [news, setNews] = useState<Record<string, Change[]>>({})

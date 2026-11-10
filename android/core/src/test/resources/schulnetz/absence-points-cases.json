@@ -1,0 +1,4284 @@
+{
+ "note": "Synthetic. Shared by AbsencePointsTest.kt and fanotes-site/absence-points.test.mjs.",
+ "fixtures": {
+  "absenzen-aksa-open.html": {
+   "quota": 30,
+   "remaining": 30,
+   "absences": [
+    {
+     "id": "abs-open-c6cb4d50",
+     "dateFrom": "03.11.2026",
+     "dateTo": "03.11.2026",
+     "hourFrom": "08:00",
+     "hourTo": "08:45",
+     "subject": "geo 2.3",
+     "reason": "",
+     "status": "offen",
+     "pending": true
+    },
+    {
+     "id": "abs-open-17bdab9a",
+     "dateFrom": "03.11.2026",
+     "dateTo": "03.11.2026",
+     "hourFrom": "08:45",
+     "hourTo": "09:30",
+     "subject": "geo 2.3",
+     "reason": "",
+     "status": "offen",
+     "pending": true
+    }
+   ]
+  },
+  "absenzen-aksa-booked.html": {
+   "quota": 30,
+   "remaining": 27,
+   "absences": [
+    {
+     "id": "abs-2191f926",
+     "dateFrom": "27.10.2026",
+     "dateTo": "27.10.2026",
+     "hourFrom": "",
+     "hourTo": "",
+     "subject": "",
+     "reason": "Krankheit",
+     "status": "gebucht",
+     "pending": false,
+     "points": 3
+    },
+    {
+     "id": "abs-open-a259ae00",
+     "dateFrom": "05.11.2026",
+     "dateTo": "05.11.2026",
+     "hourFrom": "10:30",
+     "hourTo": "11:15",
+     "subject": "mat 2.1",
+     "reason": "",
+     "status": "offen",
+     "pending": true
+    }
+   ]
+  }
+ },
+ "cases": [
+  {
+   "name": "single lesson: 1 + 1 = 2",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "09:45",
+      "hourTo": "10:30",
+      "subject": "bio 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4004",
+      "start": "2026-11-03T10:30:00",
+      "end": "2026-11-03T11:15:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1004",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 2,
+    "booked": 0,
+    "remaining": 28,
+    "points": {
+     "a1": 2
+    },
+    "rules": {
+     "a1": "lessons"
+    },
+    "blocks": [
+     [
+      "a1"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "double lesson reported as two rows: 2 + 1 = 3",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:45",
+      "hourTo": "09:30",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4004",
+      "start": "2026-11-03T10:30:00",
+      "end": "2026-11-03T11:15:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1004",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 3,
+    "booked": 0,
+    "remaining": 27,
+    "points": {
+     "a1": 3,
+     "a2": 3
+    },
+    "rules": {
+     "a1": "lessons",
+     "a2": "lessons"
+    },
+    "blocks": [
+     [
+      "a1",
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "double lesson reported as one row",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "09:30",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4004",
+      "start": "2026-11-03T10:30:00",
+      "end": "2026-11-03T11:15:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1004",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 3,
+    "booked": 0,
+    "remaining": 27,
+    "points": {
+     "a1": 3
+    },
+    "rules": {
+     "a1": "lessons"
+    },
+    "blocks": [
+     [
+      "a1"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "a free period in the timetable is no interruption",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:45",
+      "hourTo": "09:30",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "10:30",
+      "hourTo": "11:15",
+      "subject": "mat 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4004",
+      "start": "2026-11-03T10:30:00",
+      "end": "2026-11-03T11:15:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1004",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 3,
+    "booked": 0,
+    "remaining": 27,
+    "points": {
+     "a1": 3,
+     "a2": 3
+    },
+    "rules": {
+     "a1": "lessons",
+     "a2": "lessons"
+    },
+    "blocks": [
+     [
+      "a1",
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "an attended lesson in between makes two blocks",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "09:45",
+      "hourTo": "10:30",
+      "subject": "mat 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 4,
+    "booked": 0,
+    "remaining": 26,
+    "points": {
+     "a1": 2,
+     "a2": 2
+    },
+    "rules": {
+     "a1": "lessons",
+     "a2": "lessons"
+    },
+    "blocks": [
+     [
+      "a1"
+     ],
+     [
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "a cancelled lesson in between is no interruption",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "09:45",
+      "hourTo": "10:30",
+      "subject": "mat 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "eng 2.2",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "eng 2.2",
+      "status": "cancelled",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "eng 2.2"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 3,
+    "booked": 0,
+    "remaining": 27,
+    "points": {
+     "a1": 3,
+     "a2": 3
+    },
+    "rules": {
+     "a1": "lessons",
+     "a2": "lessons"
+    },
+    "blocks": [
+     [
+      "a1",
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "the night is no interruption",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "02.11.2026",
+      "dateTo": "02.11.2026",
+      "hourFrom": "14:00",
+      "hourTo": "14:45",
+      "subject": "mat 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 3,
+    "booked": 0,
+    "remaining": 27,
+    "points": {
+     "a1": 3,
+     "a2": 3
+    },
+    "rules": {
+     "a1": "lessons",
+     "a2": "lessons"
+    },
+    "blocks": [
+     [
+      "a1",
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "before and after a weekend count separately",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "06.11.2026",
+      "dateTo": "06.11.2026",
+      "hourFrom": "08:45",
+      "hourTo": "09:30",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "09.11.2026",
+      "dateTo": "09.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-09T08:00:00",
+      "end": "2026-11-09T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-09T08:45:00",
+      "end": "2026-11-09T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 4,
+    "booked": 0,
+    "remaining": 26,
+    "points": {
+     "a1": 2,
+     "a2": 2
+    },
+    "rules": {
+     "a1": "lessons",
+     "a2": "lessons"
+    },
+    "blocks": [
+     [
+      "a1"
+     ],
+     [
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "an announced exam in the block costs 10 flat",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:45",
+      "hourTo": "09:30",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4004",
+      "start": "2026-11-03T10:30:00",
+      "end": "2026-11-03T11:15:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1004",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [
+     {
+      "id": "exam-2026-11-03-2",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3 Prüfung Kapitel 4",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "geo 2.3 Prüfung Kapitel 4",
+      "status": "",
+      "eventType": "exam",
+      "color": "",
+      "timetableText": "geo 2.3 Prüfung Kapitel 4"
+     }
+    ],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 10,
+    "booked": 0,
+    "remaining": 20,
+    "points": {
+     "a1": 10,
+     "a2": 10
+    },
+    "rules": {
+     "a1": "exam",
+     "a2": "exam"
+    },
+    "blocks": [
+     [
+      "a1",
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "an exam in another slot that day does not count",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:45",
+      "hourTo": "09:30",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4004",
+      "start": "2026-11-03T10:30:00",
+      "end": "2026-11-03T11:15:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1004",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [
+     {
+      "id": "exam-2026-11-03-4",
+      "start": "2026-11-03T10:30:00",
+      "end": "2026-11-03T11:15:00",
+      "text": "mat 2.1 Prüfung Kapitel 4",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "mat 2.1 Prüfung Kapitel 4",
+      "status": "",
+      "eventType": "exam",
+      "color": "",
+      "timetableText": "mat 2.1 Prüfung Kapitel 4"
+     }
+    ],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 3,
+    "booked": 0,
+    "remaining": 27,
+    "points": {
+     "a1": 3,
+     "a2": 3
+    },
+    "rules": {
+     "a1": "lessons",
+     "a2": "lessons"
+    },
+    "blocks": [
+     [
+      "a1",
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "at most 10 exam points per day",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "10:30",
+      "hourTo": "11:15",
+      "subject": "mat 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4004",
+      "start": "2026-11-03T10:30:00",
+      "end": "2026-11-03T11:15:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1004",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [
+     {
+      "id": "exam-2026-11-03-1",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3 Prüfung Kapitel 4",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "geo 2.3 Prüfung Kapitel 4",
+      "status": "",
+      "eventType": "exam",
+      "color": "",
+      "timetableText": "geo 2.3 Prüfung Kapitel 4"
+     },
+     {
+      "id": "exam-2026-11-03-4",
+      "start": "2026-11-03T10:30:00",
+      "end": "2026-11-03T11:15:00",
+      "text": "mat 2.1 Prüfung Kapitel 4",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "mat 2.1 Prüfung Kapitel 4",
+      "status": "",
+      "eventType": "exam",
+      "color": "",
+      "timetableText": "mat 2.1 Prüfung Kapitel 4"
+     }
+    ],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 10,
+    "booked": 0,
+    "remaining": 20,
+    "points": {
+     "a1": 10,
+     "a2": 0
+    },
+    "rules": {
+     "a1": "exam",
+     "a2": "exam"
+    },
+    "blocks": [
+     [
+      "a1"
+     ],
+     [
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "an instrumental lesson alone costs 3",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "04.11.2026",
+      "dateTo": "04.11.2026",
+      "hourFrom": "10:30",
+      "hourTo": "11:15",
+      "subject": "IU Klavier",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-04T09:45:00",
+      "end": "2026-11-04T10:30:00",
+      "text": "mus 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mus 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mus 2.1"
+     },
+     {
+      "id": "4004",
+      "start": "2026-11-04T10:30:00",
+      "end": "2026-11-04T11:15:00",
+      "text": "Instrumentalunterricht Klavier",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1004",
+      "courseName": "Instrumentalunterricht Klavier",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "Instrumentalunterricht Klavier"
+     },
+     {
+      "id": "4005",
+      "start": "2026-11-04T11:25:00",
+      "end": "2026-11-04T12:10:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1005",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 3,
+    "booked": 0,
+    "remaining": 27,
+    "points": {
+     "a1": 3
+    },
+    "rules": {
+     "a1": "instrument"
+    },
+    "blocks": [
+     [
+      "a1"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "an instrumental lesson in a chain is an ordinary lesson",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "04.11.2026",
+      "dateTo": "04.11.2026",
+      "hourFrom": "09:45",
+      "hourTo": "10:30",
+      "subject": "mus 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "04.11.2026",
+      "dateTo": "04.11.2026",
+      "hourFrom": "10:30",
+      "hourTo": "11:15",
+      "subject": "IU Klavier",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a3",
+      "dateFrom": "04.11.2026",
+      "dateTo": "04.11.2026",
+      "hourFrom": "11:25",
+      "hourTo": "12:10",
+      "subject": "mat 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-04T09:45:00",
+      "end": "2026-11-04T10:30:00",
+      "text": "mus 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mus 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mus 2.1"
+     },
+     {
+      "id": "4004",
+      "start": "2026-11-04T10:30:00",
+      "end": "2026-11-04T11:15:00",
+      "text": "Instrumentalunterricht Klavier",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1004",
+      "courseName": "Instrumentalunterricht Klavier",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "Instrumentalunterricht Klavier"
+     },
+     {
+      "id": "4005",
+      "start": "2026-11-04T11:25:00",
+      "end": "2026-11-04T12:10:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1005",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 4,
+    "booked": 0,
+    "remaining": 26,
+    "points": {
+     "a1": 4,
+     "a2": 4,
+     "a3": 4
+    },
+    "rules": {
+     "a1": "lessons",
+     "a2": "lessons",
+     "a3": "lessons"
+    },
+    "blocks": [
+     [
+      "a1",
+      "a2",
+      "a3"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "a booked entry replaces the estimate for its day",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "b1",
+      "dateFrom": "27.10.2026",
+      "dateTo": "27.10.2026",
+      "hourFrom": "",
+      "hourTo": "",
+      "subject": "",
+      "reason": "Krankheit",
+      "excused": false,
+      "acknowledged": true,
+      "status": "gebucht",
+      "points": 3
+     },
+     {
+      "id": "a1",
+      "dateFrom": "27.10.2026",
+      "dateTo": "27.10.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-10-27T08:00:00",
+      "end": "2026-10-27T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-10-27T08:45:00",
+      "end": "2026-10-27T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 27
+   },
+   "expect": {
+    "estimated": 2,
+    "booked": 3,
+    "remaining": 25,
+    "points": {
+     "a1": 0,
+     "a2": 2
+    },
+    "rules": {
+     "a1": "booked",
+     "a2": "lessons"
+    },
+    "blocks": [
+     [
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "without a timetable or a time each report is 1 + 1 = 2",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "17.11.2026",
+      "dateTo": "17.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "08:45",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "",
+      "hourTo": "",
+      "subject": "geo 2.3",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 4,
+    "booked": 0,
+    "remaining": 26,
+    "points": {
+     "a1": 2,
+     "a2": 2
+    },
+    "rules": {
+     "a1": "fallback",
+     "a2": "fallback"
+    },
+    "blocks": [
+     [
+      "a2"
+     ],
+     [
+      "a1"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "a half special day costs 5",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "05.11.2026",
+      "dateTo": "05.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "11:15",
+      "subject": "Sporttag",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "trm-2026-11-05",
+      "start": "2026-11-05T00:00:00",
+      "end": "2026-11-05T00:00:00",
+      "text": "Sporttag",
+      "comment": "",
+      "room": "",
+      "teachers": [],
+      "courseId": "",
+      "courseName": "Sporttag",
+      "status": "",
+      "eventType": "5_trm",
+      "color": "",
+      "timetableText": "Sporttag"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 5,
+    "booked": 0,
+    "remaining": 25,
+    "points": {
+     "a1": 5
+    },
+    "rules": {
+     "a1": "special"
+    },
+    "blocks": [
+     [
+      "a1"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "a full special day costs 9",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "05.11.2026",
+      "dateTo": "05.11.2026",
+      "hourFrom": "08:00",
+      "hourTo": "12:00",
+      "subject": "Exkursion",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     },
+     {
+      "id": "a2",
+      "dateFrom": "05.11.2026",
+      "dateTo": "05.11.2026",
+      "hourFrom": "13:30",
+      "hourTo": "16:00",
+      "subject": "Exkursion",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30,
+    "absenceRemaining": 30
+   },
+   "expect": {
+    "estimated": 9,
+    "booked": 0,
+    "remaining": 21,
+    "points": {
+     "a1": 9,
+     "a2": 9
+    },
+    "rules": {
+     "a1": "special",
+     "a2": "special"
+    },
+    "blocks": [
+     [
+      "a1",
+      "a2"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "without a shown remainder the quota minus booked rows counts",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "b1",
+      "dateFrom": "27.10.2026",
+      "dateTo": "27.10.2026",
+      "hourFrom": "",
+      "hourTo": "",
+      "subject": "",
+      "reason": "Krankheit",
+      "excused": false,
+      "acknowledged": true,
+      "status": "gebucht",
+      "points": 4
+     },
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "09:45",
+      "hourTo": "10:30",
+      "subject": "bio 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2,
+    "absenceQuota": 30
+   },
+   "expect": {
+    "estimated": 2,
+    "booked": 4,
+    "remaining": 24,
+    "points": {
+     "a1": 2
+    },
+    "rules": {
+     "a1": "lessons"
+    },
+    "blocks": [
+     [
+      "a1"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "without a quota there is no remainder",
+   "snapshot": {
+    "absences": [
+     {
+      "id": "a1",
+      "dateFrom": "03.11.2026",
+      "dateTo": "03.11.2026",
+      "hourFrom": "09:45",
+      "hourTo": "10:30",
+      "subject": "bio 2.1",
+      "reason": "",
+      "excused": false,
+      "acknowledged": false,
+      "status": "offen",
+      "pending": true
+     }
+    ],
+    "events": [
+     {
+      "id": "4001",
+      "start": "2026-11-02T08:00:00",
+      "end": "2026-11-02T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-02T08:45:00",
+      "end": "2026-11-02T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4006",
+      "start": "2026-11-02T13:15:00",
+      "end": "2026-11-02T14:00:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1006",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4007",
+      "start": "2026-11-02T14:00:00",
+      "end": "2026-11-02T14:45:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1007",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-04T08:00:00",
+      "end": "2026-11-04T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-04T08:45:00",
+      "end": "2026-11-04T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-06T08:00:00",
+      "end": "2026-11-06T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-06T08:45:00",
+      "end": "2026-11-06T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4001",
+      "start": "2026-11-03T08:00:00",
+      "end": "2026-11-03T08:45:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1001",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4002",
+      "start": "2026-11-03T08:45:00",
+      "end": "2026-11-03T09:30:00",
+      "text": "geo 2.3",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1002",
+      "courseName": "geo 2.3",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "geo 2.3"
+     },
+     {
+      "id": "4003",
+      "start": "2026-11-03T09:45:00",
+      "end": "2026-11-03T10:30:00",
+      "text": "mat 2.1",
+      "comment": "",
+      "room": "B12",
+      "teachers": [],
+      "courseId": "1003",
+      "courseName": "mat 2.1",
+      "status": "",
+      "eventType": "0_stp",
+      "color": "",
+      "timetableText": "mat 2.1"
+     }
+    ],
+    "exams": [],
+    "absenceParser": 2
+   },
+   "expect": {
+    "estimated": 2,
+    "booked": 0,
+    "remaining": null,
+    "points": {
+     "a1": 2
+    },
+    "rules": {
+     "a1": "lessons"
+    },
+    "blocks": [
+     [
+      "a1"
+     ]
+    ]
+   }
+  }
+ ]
+}

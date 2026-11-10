@@ -38,6 +38,11 @@ class DemoDataTest {
         assertTrue(demo.events.any { it.isLesson() && it.isSubstitution() })
         assertTrue(demo.events.any { !it.isLesson() && !it.isExamLike() })
         assertTrue(demo.absences.any { !it.excused && it.excuseUntil.isNotBlank() })
+        // A booked entry (5) and an open double lesson (estimated 3) of a 30-point quota.
+        val points = absenceTally(demo)
+        assertEquals(5.0, points.booked)
+        assertEquals(3, points.estimated)
+        assertEquals(22.0, points.remaining)
         assertTrue(demo.messages.isNotEmpty() && demo.konto.isNotEmpty())
         // No exam or lesson falls on a weekend.
         assertTrue((demo.events + demo.exams).all { eventDate(eventDay(it))!!.dayOfWeek.value <= 5 })

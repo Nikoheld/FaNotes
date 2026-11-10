@@ -53,6 +53,19 @@ const de = {
   upcoming: 'Kommend', past: 'Vergangen', exams: 'Prüfungen', appointments: 'Termine', noExams: 'Keine Prüfungen eingetragen.', noAppointments: 'Keine Termine eingetragen.',
   showPast: 'Vergangene zeigen',
   excused: 'Entschuldigt', open: 'Offen', reason: 'Grund', subject: 'Fach', status: 'Status', noAbsences: 'Keine Absenzen.',
+  absencePoints: 'Absenzpunkte', pointsRemaining: 'Verbleibend', pointsBooked: 'Gebucht', pointsEstimated: 'Offen (geschätzt)', pointsColumn: 'Punkte',
+  estimatedOpen: 'Geschätzt · offen', bookedTag: 'Gebucht',
+  pointsValue: (points: string) => `${points} Punkte`, estimateValue: (points: number) => `≈ ${points} Punkte`,
+  pointsLeft: (left: string, quota: string) => `noch ${left} von ${quota}`,
+  pointsSummary: (booked: string, estimated: string) => `${booked} gebucht · ${estimated} geschätzt`,
+  openReports: (count: number) => (count === 1 ? '1 offene Meldung' : `${count} offene Meldungen`),
+  absenceExplain: 'Offene Meldungen haben in Schulnetz noch keine Punkte. Kanti+ schätzt sie nach dem Absenzenreglement: n Lektionen am Stück zählen n + 1 Punkte, ein Block mit angekündigter Prüfung 10, eine einzelne Instrumentallektion 3. Sobald Schulnetz den Eintrag bucht, ersetzen seine Punkte die Schätzung. Regeln für Krankheit sind nicht berücksichtigt.',
+  ruleLesson: (points: number) => `1 Lektion: 1 + 1 = ${points} Punkte`,
+  ruleLessons: (lessons: number, points: number) => `${lessons} Lektionen am Stück: ${lessons} + 1 = ${points} Punkte`,
+  ruleExam: 'Angekündigte Prüfung in diesem Block: 10 Punkte', ruleExamCapped: 'Weitere Prüfung am selben Tag: höchstens 10 Punkte pro Tag',
+  ruleInstrument: 'Einzelne Instrumentallektion: 3 Punkte', ruleSpecialHalf: 'Spezialanlass, halber Tag: 5 Punkte', ruleSpecialFull: 'Spezialanlass, ganzer Tag: 9 Punkte',
+  ruleFallback: (lessons: number, points: number) => `Ohne Stundenplan: ${lessons} + 1 = ${points} Punkte`, ruleBooked: 'Schon in Schulnetz gebucht, zählt nicht doppelt',
+  sameBlock: (others: number) => (others === 1 ? 'Gleicher Block wie 1 weitere Meldung, zählt einmal' : `Gleicher Block wie ${others} weitere Meldungen, zählt einmal`),
   messages: 'Mitteilungen', noMessages: 'Keine Mitteilungen.', statement: 'Kontoauszug', amount: 'Betrag', balance: 'Saldo', news: 'Neuigkeiten', noNews: 'Noch keine Neuigkeiten in diesem Browser.',
   appearance: 'Erscheinungsbild', theme: 'Design', accent: 'Akzentfarbe', snowfall: 'Schneefall im Schnee-Design', language: 'Sprache', languageAuto: 'Wie der Browser',
   themeNames: { system: 'System', light: 'Hell', sepia: 'Sepia', snow: 'Schnee', dark: 'Dunkel', midnight: 'Mitternacht', forest: 'Wald', aurora: 'Aurora' } as Record<string, string>,
@@ -144,6 +157,19 @@ const en: Strings = {
   upcoming: 'Upcoming', past: 'Past', exams: 'Exams', appointments: 'Events', noExams: 'No exams listed.', noAppointments: 'No events listed.',
   showPast: 'Show past',
   excused: 'Excused', open: 'Open', reason: 'Reason', subject: 'Subject', status: 'Status', noAbsences: 'No absences.',
+  absencePoints: 'Absence points', pointsRemaining: 'Remaining', pointsBooked: 'Booked', pointsEstimated: 'Open (estimated)', pointsColumn: 'Points',
+  estimatedOpen: 'Estimated · open', bookedTag: 'Booked',
+  pointsValue: (points: string) => `${points} points`, estimateValue: (points: number) => `≈ ${points} points`,
+  pointsLeft: (left: string, quota: string) => `${left} of ${quota} left`,
+  pointsSummary: (booked: string, estimated: string) => `${booked} booked · ${estimated} estimated`,
+  openReports: (count: number) => (count === 1 ? '1 open report' : `${count} open reports`),
+  absenceExplain: 'Open reports have no points in Schulnetz yet. Kanti+ estimates them with the absence rules: n lessons in a row cost n + 1 points, a block with an announced exam 10, an instrumental lesson on its own 3. When Schulnetz books the entry, its points replace the estimate. Illness rules are not applied.',
+  ruleLesson: (points: number) => `1 lesson: 1 + 1 = ${points} points`,
+  ruleLessons: (lessons: number, points: number) => `${lessons} lessons in a row: ${lessons} + 1 = ${points} points`,
+  ruleExam: 'Announced exam in this block: 10 points', ruleExamCapped: 'Another exam that day: at most 10 points per day',
+  ruleInstrument: 'Instrumental lesson on its own: 3 points', ruleSpecialHalf: 'Special day, half: 5 points', ruleSpecialFull: 'Special day, full: 9 points',
+  ruleFallback: (lessons: number, points: number) => `Without the timetable: ${lessons} + 1 = ${points} points`, ruleBooked: 'Already booked in Schulnetz, not counted again',
+  sameBlock: (others: number) => (others === 1 ? 'Same block as 1 other report, counted once' : `Same block as ${others} other reports, counted once`),
   messages: 'Messages', noMessages: 'No messages.', statement: 'Account statement', amount: 'Amount', balance: 'Balance', news: 'News', noNews: 'No news in this browser yet.',
   appearance: 'Appearance', theme: 'Theme', accent: 'Accent colour', snowfall: 'Snowfall in the Snow theme', language: 'Language', languageAuto: 'Like the browser',
   themeNames: { system: 'System', light: 'Light', sepia: 'Sepia', snow: 'Snow', dark: 'Dark', midnight: 'Midnight', forest: 'Forest', aurora: 'Aurora' },
@@ -193,6 +219,13 @@ export const dateLabel = (iso: string, language: Language, options: Intl.DateTim
   if (!/^\d{4}-\d{2}-\d{2}/u.test(iso)) return iso
   const [year, month, day] = iso.slice(0, 10).split('-').map(Number)
   return new Intl.DateTimeFormat(language === 'de' ? 'de-CH' : 'en-GB', { ...options, timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, day)))
+}
+
+/** "3", "2,5" (German) or "2.5". */
+export const pointsLabel = (value: number, language: Language) => {
+  const rounded = Math.round(value * 10) / 10
+  const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
+  return language === 'de' ? text.replace('.', ',') : text
 }
 
 export const markLabel = (mark: number | null | undefined, digits = 2) => {

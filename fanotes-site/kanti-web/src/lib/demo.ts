@@ -112,6 +112,8 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
   const monday = weekMonday(today)
   const nextMonday = addDays(monday, 7)
   const stamp = now.toISOString()
+  const reportDay = weekday(addDays(today, -3))
+  const reportSubjects = WEEK[(new Date(`${reportDay}T00:00:00Z`).getUTCDay() + 6) % 7]
   const weeks = Array.from({ length: WEEKS_BACK + WEEKS_AHEAD + 1 }, (_, index) => addDays(monday, (index - WEEKS_BACK) * 7))
   const lessons = weeks.flatMap((week) => WEEK.flatMap((slots, dayIndex) => {
     const day = addDays(week, dayIndex)
@@ -157,10 +159,15 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
     grades,
     events: [...lessons, ...appointments],
     exams,
+    // As in the app's demo: a booked entry and an open double lesson (estimated 2 + 1 = 3) of 30.
     absences: [
-      { id: `${DEMO_ID_PREFIX}absence-1`, dateFrom: weekday(addDays(today, -18)), dateTo: weekday(addDays(today, -18)), hourFrom: '07:45', hourTo: '12:10', subject: 'Mehrere Fächer', reason: 'Krankheit', excused: true, acknowledged: true, status: 'entschuldigt' },
-      { id: `${DEMO_ID_PREFIX}absence-2`, dateFrom: weekday(addDays(today, -3)), dateTo: weekday(addDays(today, -3)), hourFrom: '09:40', hourTo: '10:25', subject: 'Chemie', reason: 'Arzttermin', excused: false, acknowledged: false, status: 'offen', excuseUntil: weekday(addDays(today, 4)) },
+      { id: `${DEMO_ID_PREFIX}absence-1`, dateFrom: weekday(addDays(today, -18)), dateTo: weekday(addDays(today, -18)), hourFrom: '', hourTo: '', subject: '', reason: 'Krankheit', excused: false, acknowledged: true, status: 'gebucht', points: 5 },
+      { id: `${DEMO_ID_PREFIX}absence-2`, dateFrom: reportDay, dateTo: reportDay, hourFrom: SLOTS[0][0], hourTo: SLOTS[0][1], subject: reportSubjects[0] || 'Lektion', reason: '', excused: false, acknowledged: false, status: 'offen', excuseUntil: weekday(addDays(today, 4)), pending: true },
+      { id: `${DEMO_ID_PREFIX}absence-3`, dateFrom: reportDay, dateTo: reportDay, hourFrom: SLOTS[1][0], hourTo: SLOTS[1][1], subject: reportSubjects[1] || 'Lektion', reason: '', excused: false, acknowledged: false, status: 'offen', pending: true },
     ],
+    absenceQuota: 30,
+    absenceRemaining: 25,
+    absenceParser: 2,
     homework: [],
     messages: [{ id: `${DEMO_ID_PREFIX}message-1`, title: 'Willkommen im Demo-Modus', body: 'Alle Angaben in diesem Modus sind erfunden. Kanti+ liest im Demo-Modus nichts aus Schulnetz und sendet nichts an einen Server.', at: stamp }],
     vacations: [],

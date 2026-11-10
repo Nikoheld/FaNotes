@@ -173,11 +173,16 @@ fun demoSnapshot(today: LocalDate, now: ZonedDateTime = today.atTime(7, 0).atZon
         grade("g1", "Geschichte", "Antike", today.minusDays(38), 5.0),
         grade("w1", "Wirtschaft und Recht", "Marktformen", today.minusDays(16), 4.5),
     )
+    // A booked entry with its points and an open report of a double lesson (estimated 2 + 1 = 3).
+    val reportDay = weekday(today.minusDays(3))
+    val reportSubjects = WEEK[reportDay.dayOfWeek.value - 1]
     val absences = listOf(
-        SchoolAbsence("${DEMO_ID_PREFIX}absence-1", weekday(today.minusDays(18)).toString(), weekday(today.minusDays(18)).toString(), "07:45", "12:10",
-            "Mehrere Fächer", "Krankheit", excused = true, acknowledged = true, status = "entschuldigt"),
-        SchoolAbsence("${DEMO_ID_PREFIX}absence-2", weekday(today.minusDays(3)).toString(), weekday(today.minusDays(3)).toString(), "09:40", "10:25",
-            "Chemie", "Arzttermin", excused = false, acknowledged = false, status = "offen", excuseUntil = weekday(today.plusDays(4)).toString()),
+        SchoolAbsence("${DEMO_ID_PREFIX}absence-1", weekday(today.minusDays(18)).toString(), weekday(today.minusDays(18)).toString(), "", "",
+            "", "Krankheit", excused = false, acknowledged = true, status = "gebucht", points = 5.0),
+        SchoolAbsence("${DEMO_ID_PREFIX}absence-2", reportDay.toString(), reportDay.toString(), SLOTS[0].first, SLOTS[0].second,
+            reportSubjects[0] ?: "Lektion", "", excused = false, acknowledged = false, status = "offen", excuseUntil = weekday(today.plusDays(4)).toString(), pending = true),
+        SchoolAbsence("${DEMO_ID_PREFIX}absence-3", reportDay.toString(), reportDay.toString(), SLOTS[1].first, SLOTS[1].second,
+            reportSubjects[1] ?: "Lektion", "", excused = false, acknowledged = false, status = "offen", pending = true),
     )
     val messages = listOf(
         SchoolMessage("${DEMO_ID_PREFIX}message-1", "Willkommen im Demo-Modus",
@@ -196,6 +201,9 @@ fun demoSnapshot(today: LocalDate, now: ZonedDateTime = today.atTime(7, 0).atZon
         events = lessons + appointments,
         exams = exams,
         absences = absences,
+        absenceQuota = 30.0,
+        absenceRemaining = 25.0,
+        absenceParser = ABSENCE_PARSER_VERSION,
         messages = messages,
         konto = konto,
         weekFetched = read,

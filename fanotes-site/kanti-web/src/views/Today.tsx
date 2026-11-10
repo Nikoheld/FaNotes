@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { allEntries, byDay, isRunning, nextCommitment, clockMinutes, type Entry } from '../lib/agenda'
 import { courseSummaries, latestGrades, plusLabel, promotionTotals } from '../lib/grades'
-import { dateLabel } from '../lib/i18n'
+import { dateLabel, pointsLabel } from '../lib/i18n'
 import { useKanti } from '../state'
 import { Banner, Card, DayBand, Dialog, Empty, Icon, RoomPill, SectionLabel, Snowfall, Tag } from '../components/ui'
 import { EntryDetails, EntryRow, MarkBadge, relativeDay, useClock } from './common'
-import { addDays } from '@shared/schulnetz-logic'
+import { absenceTally, addDays, eventDate } from '@shared/schulnetz-logic'
 
 export const Today = () => {
   const kanti = useKanti()
@@ -22,7 +22,8 @@ export const Today = () => {
   const recent = latestGrades(snapshot?.grades || [], 5)
   const exams = entries.filter((entry) => entry.kind === 'exam' && !entry.cancelled && entry.key !== next?.key && (entry.day > clock.today || (entry.day === clock.today && (clockMinutes(entry.end) ?? 1440) > clock.minutes))).slice(0, 4)
   const appointments = entries.filter((entry) => entry.kind === 'appointment' && entry.day >= clock.today && entry.day <= addDays(clock.today, 21)).slice(0, 3)
-  const excuses = (snapshot?.absences || []).filter((absence) => !absence.excused && absence.excuseUntil && absence.excuseUntil >= clock.today)
+  const excuses = (snapshot?.absences || []).filter((absence) => !absence.excused && absence.excuseUntil && (eventDate(absence.excuseUntil) || absence.excuseUntil) >= clock.today)
+  const absencePoints = useMemo(() => absenceTally(snapshot), [snapshot])
   const snow = prefs.theme === 'snow' && prefs.snowfall
   const running = next ? isRunning(next, clock) : false
   const dayLessons = next ? (days.get(next.day) || []).filter((entry) => entry.kind === 'lesson' && entry.start) : []
@@ -75,8 +76,16 @@ export const Today = () => {
           {excuses.length ? (
             <Banner tone="warning" icon="warning" action={<button type="button" className="link" onClick={() => kanti.navigate('absences')}>{t.absences}</button>}>
               <strong>{t.openExcuses}</strong>
-              {excuses.map((absence) => <span key={absence.id}>{absence.subject} · {t.excuseUntil(dateLabel(absence.excuseUntil || '', language))}</span>)}
+              {excuses.map((absence) => <span key={absence.id}>{absence.subject} · {t.excuseUntil(dateLabel(eventDate(absence.excuseUntil || '') || absence.excuseUntil || '', language))}</span>)}
             </Banner>
+          ) : null}
+
+          {absencePoints.quota != null && absencePoints.remaining != null ? (
+            <button type="button" className={`card points-card${absencePoints.estimated > 0 ? ' points-card-open' : ''}`} title={t.absenceExplain} onClick={() => kanti.navigate('absences')}>
+              <span className="stat-label">{t.absencePoints}</span>
+              <span className={`points-left tabular${absencePoints.remaining < 0 ? ' negative' : ''}`}>{t.pointsLeft(pointsLabel(absencePoints.remaining, language), pointsLabel(absencePoints.quota, language))}</span>
+              <small className="muted">{t.pointsSummary(pointsLabel(absencePoints.booked, language), absencePoints.estimated > 0 ? `≈ ${absencePoints.estimated}` : '0')}{absencePoints.openReports ? ` · ${t.openReports(absencePoints.openReports)}` : ''}</small>
+            </button>
           ) : null}
 
           <SectionLabel action={<button type="button" className="link" onClick={() => kanti.navigate('agenda')}>{t.agenda} <Icon name="right" size={16} /></button>}>{t.comingUp}</SectionLabel>

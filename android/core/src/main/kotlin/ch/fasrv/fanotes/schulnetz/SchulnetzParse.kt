@@ -205,6 +205,9 @@ fun SchulnetzSnapshot.toNormalizedJson(): String = buildString {
     }
     append(",\"gradesReadComplete\":").append(gradesReadComplete)
     if (gradeParser > 0) append(",\"gradeParser\":").append(gradeParser)
+    absenceQuota?.let { append(",\"absenceQuota\":").append(jsonNumberOrNull(it)) }
+    absenceRemaining?.let { append(",\"absenceRemaining\":").append(jsonNumberOrNull(it)) }
+    if (absenceParser > 0) append(",\"absenceParser\":").append(absenceParser)
     append(",\"grades\":").appendGrades(grades)
     append(",\"events\":").appendEvents(events)
     append(",\"exams\":").appendEvents(exams)
@@ -260,6 +263,9 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
         },
         gradesReadComplete = obj.bool("gradesReadComplete") != false,
         gradeParser = obj.double("gradeParser")?.toInt() ?: 0,
+        absenceQuota = obj.double("absenceQuota"),
+        absenceRemaining = obj.double("absenceRemaining"),
+        absenceParser = obj.double("absenceParser")?.toInt() ?: 0,
         grades = obj.array("grades")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toGrade() }.withoutSummaryGrades(),
         events = obj.array("events")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toEvent() },
         exams = obj.array("exams")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toEvent() },
@@ -333,7 +339,7 @@ private fun JsonValue.Obj.toAbsence(): SchoolAbsence? {
     return SchoolAbsence(
         id, flexString("dateFrom"), flexString("dateTo"), flexString("hourFrom"), flexString("hourTo"),
         flexString("subject"), flexString("reason"), flexBool("excused"), flexBool("acknowledged"), flexString("status"),
-        flexString("excuseUntil"),
+        flexString("excuseUntil"), double("points"), flexBool("pending"),
     )
 }
 
@@ -424,6 +430,8 @@ private fun StringBuilder.appendAbsences(items: List<SchoolAbsence>) {
         append(",\"acknowledged\":").append(item.acknowledged)
         append(",\"status\":").append(escapeJson(item.status))
         append(",\"excuseUntil\":").append(escapeJson(item.excuseUntil))
+        item.points?.let { append(",\"points\":").append(jsonNumberOrNull(it)) }
+        if (item.pending) append(",\"pending\":true")
         append('}')
     }
     append(']')
