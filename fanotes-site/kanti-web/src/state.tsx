@@ -75,6 +75,8 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
   // "?demo" opens the demo straight away (a link for reviewers); it never reaches the server.
   const [demo, setDemo] = useState(() => startInDemo || (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('demo')))
   const [store, setStore] = useState<Record<string, ConnectionData>>({})
+  const storeRef = useRef(store)
+  storeRef.current = store
   const [offline, setOffline] = useState(false)
   const [news, setNews] = useState<Record<string, Change[]>>({})
   const [prefs, setPrefsState] = useState<Prefs>(() => (typeof window === 'undefined' ? { ...DEFAULT_PREFS } : loadPrefs()))
@@ -83,6 +85,8 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
   const t = STRINGS[language]
   const prefsRef = useRef(prefs)
   prefsRef.current = prefs
+  const tRef = useRef(t)
+  tRef.current = t
 
   const setPrefs = useCallback((patch: Partial<Prefs>) => {
     setPrefsState((current) => {
@@ -117,19 +121,34 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
   const load = useCallback(async (id: string) => {
     if (id === DEMO_ID) return
     patchData(id, { loading: true, error: '' })
-    try {
-      const [snapshot, status, reveals] = await Promise.all([api.snapshot(id), api.status(id), api.reveals(id)])
-      patchData(id, { snapshot, status, reveals, loading: false, error: '', loadedAt: Date.now() })
-      setOffline(false)
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        setSession(null)
-        setPhase('signedOut')
-        return
-      }
-      if (error instanceof ApiError && error.status === 0) setOffline(true)
-      patchData(id, { loading: false, error: error instanceof Error ? error.message : 'error' })
+    // Each section on its own: one failing request must not hide the others, and the banner names the
+    // section and the server's actual reason (not just "load failed").
+    const parts = await Promise.allSettled([api.snapshot(id), api.status(id), api.reveals(id)])
+    const failures = parts.map((part) => (part.status === 'rejected' ? part.reason : null))
+    if (failures.some((error) => error instanceof ApiError && error.status === 401)) {
+      setSession(null)
+      setPhase('signedOut')
+      return
     }
+    const strings = tRef.current
+    const sections = [strings.sectionSnapshot, strings.sectionStatus, strings.sectionReveals]
+    const reasons = failures.map((error, index) => {
+      if (!error) return ''
+      if (error instanceof ApiError && error.status === 0) return `${sections[index]}: ${strings.reasonOffline}`
+      if (error instanceof ApiError) return `${sections[index]}: ${strings.failureReason(error.message, error.status)}`
+      return `${sections[index]}: ${error instanceof Error ? error.message : String(error)}`
+    }).filter(Boolean)
+    setOffline(failures.some((error) => error instanceof ApiError && error.status === 0))
+    const value = <T,>(index: number, fallback: T): T => (parts[index].status === 'fulfilled' ? (parts[index] as PromiseFulfilledResult<T>).value : fallback)
+    const previous = storeRef.current[id] || EMPTY_DATA
+    patchData(id, {
+      snapshot: value(0, previous.snapshot),
+      status: value(1, previous.status),
+      reveals: value(2, previous.reveals),
+      loading: false,
+      error: reasons.join(' · '),
+      loadedAt: reasons.length ? previous.loadedAt : Date.now(),
+    })
   }, [api, patchData])
 
   const start = useCallback(async () => {

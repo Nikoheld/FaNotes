@@ -543,3 +543,56 @@ test.after(async () => {
   await rm(syncDir, { recursive: true, force: true })
   await writeFile(join(tmpdir(), '.kanti-web-test-done'), '').catch(() => undefined)
 })
+
+test('the other direction: the app shows a code, the browser types it in (also on a phone)', async () => {
+  const env = await start()
+  try {
+    const phone = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
+    const app = await appIdentity(env.base)
+    assert.equal((await linkSchulnetz(app)).status, 200)
+    const offer = await app.call('POST', '/web-pair/offer', {})
+    assert.equal(offer.status, 200)
+    assert.match(offer.body.code, /^[0-9A-HJKMNP-TV-Z]{8}$/u)
+    const client = browser(env.base, phone)
+    // Not approved yet: the browser is told to confirm in the app.
+    assert.equal((await client.call('POST', '/pair/claim', { code: offer.body.code })).status, 409)
+    // An app cannot look an offer up as if a browser waited for it.
+    assert.equal((await app.call('GET', `/web-pair?code=${offer.body.code}`)).status, 404)
+    assert.equal((await app.call('POST', '/web-pair', { code: offer.body.code, connectionId: 'c0', label: 'Kanti', provider: 'schulnetz', finish: true })).status, 200)
+    // Typed with a dash, lower case and a misread O: still the same code.
+    const typed = `${offer.body.code.slice(0, 4)}-${offer.body.code.slice(4)}`.toLowerCase().replace(/0/gu, 'o')
+    const claimed = await client.call('POST', '/pair/claim', { code: typed })
+    assert.equal(claimed.status, 200, JSON.stringify(claimed.body))
+    assert.equal(claimed.body.added, 1)
+    const session = await client.session()
+    assert.equal(session.status, 200)
+    assert.equal(session.body.connections.length, 1)
+    // Single use; a foreign origin is refused; wrong codes are counted.
+    assert.equal((await client.call('POST', '/pair/claim', { code: offer.body.code })).status, 404)
+    assert.equal((await browser(env.base, phone).call('POST', '/pair/claim', { code: offer.body.code }, { Origin: 'https://evil.example' })).status, 403)
+    const walker = browser(env.base, phone)
+    let last = 0
+    for (let index = 0; index < 22; index += 1) last = (await walker.call('POST', '/pair/claim', { code: 'ZZZZZZZZ' })).status
+    assert.equal(last, 429)
+  } finally {
+    await env.close()
+  }
+})
+
+test('the phone’s own read errors stay with the phone when the server reads the school itself', async () => {
+  const env = await start()
+  try {
+    const app = await appIdentity(env.base)
+    assert.equal((await linkSchulnetz(app)).status, 200)
+    const upload = await app.call('PUT', '/snapshot', snapshotWith([grade('g1', 'Probe', 5)], { readErrors: Array(10).fill('Laden fehlgeschlagen') }))
+    assert.equal(upload.status, 200)
+    const { client } = await pairBrowser(env.base, [app])
+    const id = (await client.session()).body.connections[0].id
+    const snapshot = await client.call('GET', `/connections/${id}/snapshot`)
+    assert.equal(snapshot.status, 200)
+    assert.deepEqual(snapshot.body.readErrors, [])
+    assert.equal(snapshot.body.deviceReadErrors.length, 10)
+  } finally {
+    await env.close()
+  }
+})

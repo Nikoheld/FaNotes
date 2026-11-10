@@ -63,6 +63,8 @@ export const createApi = (transport: Transport = (input, init) => fetch(input, i
     startPairing: () => call<{ code: string; expiresAt: string }>('POST', '/pair'),
     pairingStatus: () => call<{ status: 'waiting' | 'approved' | 'expired'; added?: number; expiresAt?: string; browser?: string }>('GET', '/pair'),
     cancelPairing: () => call<{ status: string }>('DELETE', '/pair'),
+    /** A code the Kanti+ app showed (the other direction). */
+    claimPairing: (code: string) => call<{ status: 'approved'; added: number }>('POST', '/pair/claim', { code }),
     snapshot: (id: string) => call<Snapshot>('GET', `${connection(id)}/snapshot`),
     status: (id: string) => call<LinkStatus>('GET', `${connection(id)}/status`),
     saveSettings: (id: string, settings: Partial<AlertSettings>) => call<LinkStatus>('PUT', `${connection(id)}/settings`, settings),

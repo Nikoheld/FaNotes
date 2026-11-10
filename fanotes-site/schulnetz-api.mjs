@@ -343,6 +343,14 @@ export const createSchulnetzRuntime = (options = {}) => {
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
     // The app reads every grade row; an upload whose grades were kept is stored as a complete list.
     snapshot.gradeParser = snapshot.grades === previous?.grades ? (Number(previous?.gradeParser) || 0) : GRADE_PARSER_VERSION
+    // The phone's own read errors describe its read, not what the server holds: when the server reads
+    // Schulnetz itself, its own errors stay, and the phone's are kept apart (the browser showed them as
+    // if every section had failed).
+    if (link.mode === 'web' || (link.mode !== 'device' && link.refresh)) {
+      snapshot.deviceReadErrors = Array.isArray(body.readErrors) ? body.readErrors.filter((item) => typeof item === 'string').slice(0, 20) : []
+      snapshot.deviceReadAt = snapshot.fetchedAt
+      snapshot.readErrors = Array.isArray(previous?.readErrors) ? previous.readErrors : []
+    }
     // An app before the points parser uploads other ids; the server's own statement read stays.
     Object.assign(snapshot, absenceFields(keepAbsenceRead(previous || {}, snapshot)))
     // A device link's changes were already announced on the phone that read them: feed only, no push.
@@ -1342,6 +1350,13 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (web && route === '/web-pair' && method === 'GET') {
         accountRate(accountId, 'web-pair', WEB_PAIR_LIMIT)
         send(response, 200, await web.lookupPairing(accountId, url.searchParams.get('code'), clientAddress(request)))
+        return true
+      }
+      // The app shows a code the user types into the browser; its connections then join with POST /web-pair.
+      if (web && route === '/web-pair/offer' && method === 'POST') {
+        accountRate(accountId, 'web-pair', WEB_PAIR_LIMIT)
+        await readBody(request)
+        send(response, 200, await web.createOffer())
         return true
       }
       if (web && route === '/web-pair' && method === 'POST') {
