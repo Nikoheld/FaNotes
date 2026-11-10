@@ -10,7 +10,8 @@ Group=www-data
 WorkingDirectory=/opt/fanotes-site
 Environment=NODE_ENV=production
 Environment=FANOTES_SCHULNETZ_DIR=/var/lib/fanotes-schulnetz
-Environment=FANOTES_SCHULNETZ_POLL_MS=180000
+# School days 06:00–22:00 Zurich (2–5 min allowed, ±20 % jitter); nights, weekends and holidays are slower (pollDelayMs).
+Environment=FANOTES_SCHULNETZ_POLL_MS=150000
 LoadCredential=schulnetz-token:/etc/fanotes/schulnetz-token.key
 LoadCredential=fcm-service-account:/etc/fanotes/fcm-service-account.json
 ExecStart=/usr/bin/node /opt/fanotes-site/schulnetz-poller.mjs

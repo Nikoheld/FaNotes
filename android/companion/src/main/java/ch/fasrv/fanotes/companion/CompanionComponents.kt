@@ -35,6 +35,13 @@ import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -106,6 +113,32 @@ fun Modifier.sheetKeyboardPadding(): Modifier = windowInsetsPadding(WindowInsets
 @Composable
 fun ScreenList(modifier: Modifier = Modifier, state: LazyListState = rememberLazyListState(), content: LazyListScope.() -> Unit) {
     LazyColumn(state = state, modifier = modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(start = Space.page, end = Space.page, top = 4.dp, bottom = LocalPageBottomPadding.current), content = content)
+}
+
+/** [ScreenList] with pull-to-refresh. The indicator shows only while the pull's own refresh runs. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RefreshableScreenList(refreshing: Boolean, onRefresh: () -> Unit, modifier: Modifier = Modifier, listModifier: Modifier = Modifier, state: LazyListState = rememberLazyListState(), content: LazyListScope.() -> Unit) {
+    var pulled by remember { mutableStateOf(false) }
+    LaunchedEffect(refreshing) { if (!refreshing) pulled = false }
+    PullToRefreshBox(isRefreshing = pulled && refreshing, onRefresh = { pulled = true; onRefresh() }, modifier = modifier.fillMaxSize()) {
+        ScreenList(listModifier, state = state, content = content)
+    }
+}
+
+/** "Aktualisiere…" while a sync runs, otherwise "Aktualisiert 14:32". Quiet, never blocks the screen. */
+@Composable
+fun SyncStamp(syncing: Boolean, lastSyncOk: Long, fallback: String, modifier: Modifier = Modifier) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(modifier.semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite }, verticalAlignment = Alignment.CenterVertically) {
+        if (syncing) {
+            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = color)
+            Text(t(R.string.sync_updating), style = MaterialTheme.typography.labelMedium, color = color, modifier = Modifier.padding(start = 6.dp))
+        } else {
+            val stamp = if (lastSyncOk > 0L) formatSchoolStamp(java.time.Instant.ofEpochMilli(lastSyncOk).atZone(java.time.ZoneId.systemDefault()), "HH:mm") else fallback
+            if (stamp.isNotBlank()) Text(t(R.string.sync_updated_at, stamp), style = MaterialTheme.typography.labelMedium, color = color)
+        }
+    }
 }
 
 /** A rounded surface that holds related rows. Rows inside get a 16 dp inset and inset dividers. */

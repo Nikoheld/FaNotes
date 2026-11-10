@@ -192,8 +192,8 @@ class CompanionPresentationTest {
         assertEquals(WeekCoverage.LOADED, lessonWeekCoverage(unread.copy(weekRead = mapOf("2026-11-16" to "2026-11-04T12:00:00Z")), LocalDate.of(2026, 11, 16), today))
     }
 
-    @Test fun `school fallback waits hours and stays off while push is healthy`() {
-        assertEquals(6 * 60 * 60_000L, schoolFallbackIntervalMs())
+    @Test fun `the background check is hourly with push and the delivery label follows push receipts`() {
+        assertEquals(60L, backgroundCheckMinutes(BackgroundMode.NORMAL, pushReady = true))
         val now = 1_700_000_000_000L
         assertEquals("Fallback", deliveryModeLabel(false, now, now))
         assertEquals("Fallback", deliveryModeLabel(true, 0L, now))

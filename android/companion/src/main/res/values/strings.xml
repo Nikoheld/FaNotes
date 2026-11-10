@@ -1150,4 +1150,14 @@
     <string name="frag_absence_report_open">absence report open</string>
     <string name="frag_estimated_points">about %1$s points (estimate)</string>
     <string name="frag_booked_points">%1$s points booked</string>
+    <string name="sync_updating">Updating…</string>
+    <string name="sync_updated_at">Updated %1$s</string>
+    <string name="background_refresh">Background refresh</string>
+    <string name="background_normal">Normal</string>
+    <string name="background_saver">Save battery</string>
+    <string name="background_refresh_body">Kanti+ never reads Schulnetz in the background. The Kanti+ server reads it every few minutes on school days and sends a push as soon as something changed. The app only asks the server now and then whether it missed a push. Save battery asks less often.</string>
+    <string name="delivery_push_ready">New school changes arrive instantly by push. Kanti+ also checks about every %1$s for a missed one.</string>
+    <string name="delivery_no_push">Push is not available on this device. Kanti+ checks about every %1$s.</string>
+    <string name="interval_minutes">%1$d minutes</string>
+    <string name="interval_hours">%1$d hours</string>
 </resources>

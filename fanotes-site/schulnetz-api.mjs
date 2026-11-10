@@ -10,7 +10,7 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, createPollScheduler, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   applyEventWindow,
   diffSnapshots,
@@ -773,7 +773,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       try { await addHiddenGrades(accountId, newGradeTargetIds(unseen)) } catch (error) { log('warn', `Verdeckte Noten nicht gespeichert (${error?.name || 'error'})`) }
     }
     const fresh = prepareGradeNotifications(unseen, link.settings?.guessGrades === true)
-    const priority = fcmPriorityForChanges(fresh)
+    const priority = fcmPriorityForChanges(fresh, now())
     if (priority && push) await ping(accountId, link, 'sync', priority)
     return fresh
   }
@@ -1042,7 +1042,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     link.needsReauth = false
     await writeJson(resolve(accountDir(accountId), 'snapshot.json'), snapshot)
     await saveLink(accountId, link)
-    return { revision: snapshot.revision, changes: changes.length }
+    // A failed school read (sign-in wall, read error) counts for the poller's backoff.
+    return { revision: snapshot.revision, changes: changes.length, failed }
   }
 
   const listAccounts = async () => {
@@ -1056,10 +1057,21 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   let started = false
   let lockHandle = null
+  /** Due-time poller: every account on its own schedule (pollDelayMs), checked every [tickMs]. */
+  const scheduler = createPollScheduler({
+    listAccounts: () => listAccounts(),
+    pollAccount: (accountId) => pollAccount(accountId),
+    readSnapshot: (accountId) => readJson(resolve(accountDir(accountId), 'snapshot.json')),
+    now,
+    baseMs: Number(process.env.FANOTES_SCHULNETZ_POLL_MS || options.intervalMs || POLL_SCHOOL_DEFAULT_MS),
+    spacingMs: options.spacingMs ?? POLL_SPACING_MS,
+    log,
+  })
+
   const start = () => {
     if (options.autostart === false || process.env.FANOTES_SCHULNETZ_POLL === '0' || started) return
     started = true
-    const interval = Number(process.env.FANOTES_SCHULNETZ_POLL_MS || options.intervalMs || 60_000)
+    const tickMs = Number(options.tickMs || 15_000)
     const loop = async () => {
       const acquired = await acquireLock()
       if (!acquired) {
@@ -1067,16 +1079,10 @@ export const createSchulnetzRuntime = (options = {}) => {
         return
       }
       for (;;) {
-        try {
-          for (const accountId of await listAccounts()) {
-            try { await pollAccount(accountId) } catch (error) {
-              log('warn', `Konto ${accountId.slice(0, 8)} nicht aktualisiert (${error?.status || error?.name || 'error'})`)
-            }
-          }
-        } catch (error) {
+        try { await scheduler.tick() } catch (error) {
           log('warn', `Poller-Durchlauf fehlgeschlagen (${error?.name || 'error'})`)
         }
-        await new Promise((resolveDelay) => setTimeout(resolveDelay, interval))
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, tickMs))
       }
     }
     loop().catch((error) => log('warn', `Poller gestoppt (${error?.name || 'error'})`))

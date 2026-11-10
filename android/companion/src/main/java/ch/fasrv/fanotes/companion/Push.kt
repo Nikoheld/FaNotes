@@ -1,5 +1,9 @@
 package ch.fasrv.fanotes.companion
 
+import ch.fasrv.fanotes.schulnetz.NoticeLedger
+import ch.fasrv.fanotes.schulnetz.backgroundFlexMinutes
+import ch.fasrv.fanotes.schulnetz.backgroundCheckMinutes
+import ch.fasrv.fanotes.schulnetz.BackgroundMode
 import ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT
 import ch.fasrv.fanotes.schulnetz.SchoolProvider
 import ch.fasrv.fanotes.schulnetz.parseConnectionRegistry
@@ -110,6 +114,7 @@ object CompanionAlerts {
     const val EXTRA_DATE = "ch.fasrv.fanotes.companion.NOTIFY_DATE"
     const val EXTRA_PAYLOAD = "ch.fasrv.fanotes.companion.NOTIFY_PAYLOAD"
     private const val SEEN = "seen-changes"
+    private val SEEN_LOCK = Any()
     private val portraitLoader = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "kanti-portrait").apply { isDaemon = true }
     }
@@ -407,23 +412,17 @@ object CompanionAlerts {
         prefs.edit().putStringSet(SEEN, seen).apply()
     }
 
-    private fun remember(context: Context, id: String, scope: AlertScope): Boolean {
+    /**
+     * True the first time [id] is shown on this connection. The server push and the app's own read
+     * give one school change the same id, so whichever arrives second is dropped. Both can run at
+     * once (FCM thread and a foreground refresh), hence the lock around read-modify-write.
+     */
+    private fun remember(context: Context, id: String, scope: AlertScope): Boolean = synchronized(SEEN_LOCK) {
         val prefs = slotPrefs(context, scope)
-        val seen = prefs.getStringSet(SEEN, emptySet()).orEmpty().toMutableSet()
-        if (!seen.add(id)) return false
-        val stored = if (seen.size > 2000) {
-            val kept = LinkedHashSet<String>()
-            kept.add(id)
-            for (old in seen) {
-                if (kept.size >= 2000) break
-                kept.add(old)
-            }
-            kept
-        } else {
-            seen
-        }
-        prefs.edit().putStringSet(SEEN, stored).apply()
-        return true
+        val ledger = NoticeLedger(prefs.getStringSet(SEEN, emptySet()).orEmpty())
+        if (!ledger.firstTime(id)) return@synchronized false
+        prefs.edit().putStringSet(SEEN, ledger.ids().toSet()).commit()
+        true
     }
 }
 
@@ -472,7 +471,24 @@ internal const val SCHOOL_FALLBACK_MS = 6 * 60 * 60_000L
 internal const val FCM_HEALTHY_MS = 12 * 60 * 60_000L
 internal const val WIDGET_WINDOW_MS = 10 * 60_000L
 
-fun schoolFallbackIntervalMs(): Long = SCHOOL_FALLBACK_MS
+/** The periodic background check's interval for the chosen mode (see backgroundCheckMinutes). */
+fun schoolFallbackIntervalMs(context: Context): Long = backgroundCheckMinutes(backgroundMode(context), pushReady(context)) * 60_000L
+
+internal const val BACKGROUND_MODE_PREF = "background-mode"
+private const val ARMED_MINUTES_PREF = "school-check-minutes"
+internal const val SCHOOL_PUSH = "schulnetz-push"
+
+fun backgroundMode(context: Context): BackgroundMode =
+    BackgroundMode.of(context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getString(BACKGROUND_MODE_PREF, null))
+
+/** Push can reach this device: Firebase runs and the app holds an FCM token (sent to the server on every refresh). */
+fun pushReady(context: Context): Boolean =
+    firebaseConfigured(context) && !context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getString("fcm-token", null).isNullOrBlank()
+
+fun setBackgroundMode(context: Context, mode: BackgroundMode) {
+    context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).edit().putString(BACKGROUND_MODE_PREF, mode.wire).apply()
+    armSchoolDelivery(context)
+}
 
 fun fcmPushHealthy(lastPushAt: Long, now: Long, firebaseReady: Boolean): Boolean =
     firebaseReady && lastPushAt > 0L && now - lastPushAt in 0 until FCM_HEALTHY_MS
@@ -486,6 +502,7 @@ fun cancelSchoolDelivery(context: Context) {
     work.cancelUniqueWork(SCHOOL_WORK_FAST)
     work.cancelUniqueWork(SCHOOL_FALLBACK)
     work.cancelUniqueWork(SCHOOL_WATCH)
+    context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).edit().remove(ARMED_MINUTES_PREF).apply()
 }
 
 fun firebaseConfigured(context: Context): Boolean =
@@ -543,28 +560,53 @@ internal fun lockScreenNotice(): LockScreenNotice = LockScreenNotice(
     "Neue Schulnetz-Meldung",
 )
 
-/** Periodic fallback only when push is missing. A healthy push cancels it and arms a far-off check. */
-private fun armSchoolDelivery(context: Context) {
+/**
+ * One periodic background check, only while a connection is linked. It asks the Kanti+ server for its
+ * change feed (never Schulnetz), needs a network and a battery that is not low, and WorkManager may
+ * batch it with other jobs (flex) and defer it in Doze. Push is the fast path; this check catches a
+ * missed push. KEEP leaves a running schedule alone; UPDATE applies a new interval (mode, push).
+ */
+internal fun armSchoolDelivery(context: Context) {
     val work = WorkManager.getInstance(context)
     if (!linkedForPush(context)) {
         cancelSchoolDelivery(context)
         return
     }
+    // Earlier versions armed a 12-hour watch instead of a steady check.
+    work.cancelUniqueWork(SCHOOL_WATCH)
     val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
-    val healthy = fcmPushHealthy(prefs.getLong(LAST_PUSH_PREF, 0L), System.currentTimeMillis(), firebaseConfigured(context))
-    if (healthy) {
-        work.cancelUniqueWork(SCHOOL_FALLBACK)
-        val watch = OneTimeWorkRequestBuilder<FcmWatchWorker>()
-            .setInitialDelay(12, TimeUnit.HOURS)
-            .setConstraints(schoolConstraints())
-            .build()
-        work.enqueueUniqueWork(SCHOOL_WATCH, ExistingWorkPolicy.REPLACE, watch)
-    } else {
-        work.cancelUniqueWork(SCHOOL_WATCH)
-        val request = PeriodicWorkRequestBuilder<SchulnetzWorker>(6, TimeUnit.HOURS, 1, TimeUnit.HOURS)
-            .setConstraints(schoolConstraints())
-            .build()
-        work.enqueueUniquePeriodicWork(SCHOOL_FALLBACK, ExistingPeriodicWorkPolicy.KEEP, request)
+    val minutes = backgroundCheckMinutes(backgroundMode(context), pushReady(context))
+    val request = PeriodicWorkRequestBuilder<SchulnetzWorker>(minutes, TimeUnit.MINUTES, backgroundFlexMinutes(minutes), TimeUnit.MINUTES)
+        .setConstraints(schoolConstraints())
+        .build()
+    val changed = prefs.getLong(ARMED_MINUTES_PREF, 0L) != minutes
+    work.enqueueUniquePeriodicWork(SCHOOL_FALLBACK, if (changed) ExistingPeriodicWorkPolicy.UPDATE else ExistingPeriodicWorkPolicy.KEEP, request)
+    if (changed) prefs.edit().putLong(ARMED_MINUTES_PREF, minutes).apply()
+}
+
+/**
+ * The push's own pull did not finish (no network yet, timeout): one more try as soon as the network
+ * allows. Expedited on Android 12 and later; older versions would need a foreground service for
+ * expedited work, so they get ordinary one-off work. One unique name per connection: a newer push
+ * replaces a waiting try instead of adding another.
+ */
+fun enqueuePushSync(context: Context, route: String?) {
+    val builder = OneTimeWorkRequestBuilder<SchoolPushWorker>()
+        .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+        .setInputData(workDataOf("route" to route.orEmpty()))
+        .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+    if (android.os.Build.VERSION.SDK_INT >= 31) builder.setExpedited(androidx.work.OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+    WorkManager.getInstance(context).enqueueUniqueWork(pushWorkName(route), ExistingWorkPolicy.REPLACE, builder.build())
+}
+
+internal fun pushWorkName(route: String?): String = if (route.isNullOrBlank()) SCHOOL_PUSH else "$SCHOOL_PUSH-$route"
+
+class SchoolPushWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val app = applicationContext as? CompanionApplication ?: return Result.success()
+        val route = inputData.getString("route")?.takeIf { it.isNotBlank() }
+        val ok = withTimeoutOrNull(20_000) { app.graph.pullChangeDelta(route) } == true
+        return if (ok || runAttemptCount >= 3) Result.success() else Result.retry()
     }
 }
 
@@ -606,10 +648,11 @@ fun scheduleDelayedProbe(context: Context, scenario: String) {
     WorkManager.getInstance(context).enqueueUniqueWork("kanti-probe-delay", ExistingWorkPolicy.REPLACE, request)
 }
 
+/** The periodic background check: the server's change feed for every connection (never Schulnetz). */
 class SchulnetzWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val app = applicationContext as? CompanionApplication ?: return Result.success()
-        withTimeoutOrNull(8_000) { app.graph.pullChangeDelta() }
+        withTimeoutOrNull(20_000) { app.graph.pullChangeDelta() }
         return Result.success()
     }
 }
@@ -640,21 +683,10 @@ internal fun armTamRefresh(context: Context, any: Boolean) {
     work.enqueueUniquePeriodicWork(TAM_REFRESH, androidx.work.ExistingPeriodicWorkPolicy.KEEP, request)
 }
 
+/** Armed by versions before beta.22; a queued one now only re-arms the steady check. */
 class FcmWatchWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val prefs = applicationContext.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
-        val healthy = fcmPushHealthy(prefs.getLong(LAST_PUSH_PREF, 0L), System.currentTimeMillis(), firebaseConfigured(applicationContext))
-        if (healthy) {
-            armSchoolDelivery(applicationContext)
-            return Result.success()
-        }
-        WorkManager.getInstance(applicationContext).cancelUniqueWork(SCHOOL_WATCH)
-        val request = PeriodicWorkRequestBuilder<SchulnetzWorker>(6, TimeUnit.HOURS, 1, TimeUnit.HOURS)
-            .setConstraints(schoolConstraints())
-            .build()
-        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(SCHOOL_FALLBACK, ExistingPeriodicWorkPolicy.KEEP, request)
-        val app = applicationContext as? CompanionApplication
-        if (app != null) withTimeoutOrNull(8_000) { app.graph.pullChangeDelta() }
+        armSchoolDelivery(applicationContext)
         return Result.success()
     }
 }
@@ -685,7 +717,13 @@ class CompanionFcmService : FirebaseMessagingService() {
         when (message.data["event"].orEmpty()) {
             // Data-only message. Foreground and background both reach pullChangeDelta, which filters before display.
             // The push names its connection by route key; pull only that one.
-            "sync" -> runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta(message.data["route"]) } }
+            // The pull runs right here (a high-priority message gives the app a few seconds); when it
+            // does not finish, expedited work tries again as soon as the network allows.
+            "sync" -> {
+                val route = message.data["route"]
+                val ok = runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta(route) } } == true
+                if (!ok) enqueuePushSync(applicationContext, route)
+            }
             "reauth" -> CompanionAlerts.showReauth(applicationContext, runBlocking { app.graph.alertScopeForRoute(message.data["route"]) })
             "test" -> CompanionAlerts.showTest(applicationContext)
         }

@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ApiError, createApi, type Api } from './lib/api'
 import { demoSnapshot } from './lib/demo'
+import { refreshDue } from './lib/refresh'
 import { freshChanges, showNotification } from './lib/notify'
 import { DEFAULT_PREFS, loadPrefs, readCursor, savePrefs, writeCursor, type Prefs } from './lib/prefs'
 import { parseRoute, routeHref, type Route } from './lib/route'
@@ -156,17 +157,24 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
   useEffect(() => {
     if (!active || active.id === DEMO_ID || phase !== 'ready') return
     const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void load(active.id) }, SNAPSHOT_EVERY_MS)
-    const onFocus = () => {
-      const loadedAt = store[active.id]?.loadedAt || 0
-      if (Date.now() - loadedAt > 60_000) void load(active.id)
+    // Back to the tab (or the window): refresh at once, at most every 30 seconds, and ask for news too.
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      const entry = store[active.id]
+      if (!refreshDue(entry?.loadedAt || 0, Date.now(), Boolean(entry?.loading))) return
+      void load(active.id)
+      pollNowRef.current()
     }
-    window.addEventListener('focus', onFocus)
-    return () => { window.clearInterval(timer); window.removeEventListener('focus', onFocus) }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible) }
   }, [active, phase, load, store])
 
   // The change feed of every connection: news in the page, and browser notifications when allowed.
   const connectionsRef = useRef(connections)
   connectionsRef.current = connections
+  // Set by the change-feed loop below: ask for news now instead of at the next timer.
+  const pollNowRef = useRef<() => void>(() => {})
   useEffect(() => {
     if (phase !== 'ready' || demo) return
     let stopped = false
@@ -188,6 +196,13 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
         }
       }
       if (!stopped) timer = window.setTimeout(poll, document.visibilityState === 'visible' ? CHANGES_VISIBLE_MS : CHANGES_HIDDEN_MS)
+    }
+    let running = false
+    pollNowRef.current = () => {
+      if (stopped || running) return
+      window.clearTimeout(timer)
+      running = true
+      void poll().finally(() => { running = false })
     }
     void poll()
     return () => { stopped = true; window.clearTimeout(timer) }

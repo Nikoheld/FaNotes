@@ -250,6 +250,11 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
     var message by mutableStateOf<String?>(null)
     var busy by mutableStateOf(false)
+    /** A sync runs (opening the app, a pull, a push): a quiet "Aktualisiere…", never a blocking loader. */
+    var syncing by mutableStateOf(false)
+    /** When the last sync succeeded, for "Aktualisiert 14:32". */
+    var lastSyncOk by mutableStateOf(graph.lastSyncOk.value)
+    var backgroundRefresh by mutableStateOf(graph.backgroundRefresh())
     var email by mutableStateOf("")
     var password by mutableStateOf("")
     var snapshot by mutableStateOf(graph.snapshot.value)
@@ -319,6 +324,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             }
         }
         viewModelScope.launch { graph.link.collect { link = it } }
+        viewModelScope.launch { graph.syncing.collect { syncing = it } }
+        viewModelScope.launch { graph.lastSyncOk.collect { lastSyncOk = it } }
         viewModelScope.launch { graph.connections.collect { connections = it } }
         // Settings or hidden grades changed in the browser and were taken over.
         viewModelScope.launch { graph.sharedChanges.collect { settings = graph.notifySettings(); unrevealedIds = graph.unrevealedGradeIds() } }
@@ -504,6 +511,27 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun declineUpload() { offerUpload = false }
+
+    /** Cold start and every return to the foreground: cached data is on screen; sync behind it (debounced). */
+    fun onForeground() {
+        if (demo) return
+        // The app's process scope: leaving the app right away does not cancel a sync half way.
+        graph.scope.launch { runCatching { graph.syncOnForeground("resume") } }
+    }
+
+    /** Pull-to-refresh: the server's copy and the shown connection's own Schulnetz read, without a blocking loader. */
+    fun pullRefresh() {
+        if (demo) { graph.showDemo(); return }
+        viewModelScope.launch {
+            val ok = runCatching { graph.syncOnForeground("pull", force = true) }.getOrDefault(false)
+            if (!ok) message = t(R.string.could_not_refresh_school)
+        }
+    }
+
+    fun chooseBackgroundRefresh(mode: ch.fasrv.fanotes.schulnetz.BackgroundMode) {
+        graph.setBackgroundRefresh(mode)
+        backgroundRefresh = mode
+    }
 
     fun refreshSchool() {
         if (demo) { graph.showDemo(); message = t(R.string.demo_refreshed); return }

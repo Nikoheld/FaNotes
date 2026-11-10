@@ -132,14 +132,8 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         model.graph.engine.resumeAutomaticSync()
         if (model.notesAccount) model.graph.docSearch.request()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        val graph = (application as CompanionApplication).graph
-        if (System.currentTimeMillis() - graph.lastCheckAt() > 60_000L) {
-            graph.scope.launch { runCatching { graph.refreshSchulnetz("resume") } }
-        }
+        // Cold start and every return to the foreground: the cached data is already shown; sync behind it.
+        model.onForeground()
     }
 
     override fun onStop() {

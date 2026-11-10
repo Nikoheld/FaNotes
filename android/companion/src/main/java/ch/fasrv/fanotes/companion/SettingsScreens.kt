@@ -368,7 +368,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     DiagnosticLine(t(R.string.delivery), if (delivery == "Instant via push") t(R.string.instant_via_push) else t(R.string.fallback_mode))
                     DiagnosticLine(t(R.string.last_push), at(model.graph.lastPushAt()))
                     DiagnosticLine(t(R.string.last_school_check), at(model.graph.lastCheckAt()))
-                    DiagnosticLine(t(R.string.next_scheduled_check), if (delivery == "Instant via push") t(R.string.not_scheduled_while_push_is_healthy) else at(model.graph.nextCheckAt()))
+                    DiagnosticLine(t(R.string.next_scheduled_check), at(model.graph.nextCheckAt()))
                     DiagnosticLine(t(R.string.cached_school_data), updatedLabel(model.snapshot.fetchedAt), last = true)
                 }
                 val error = model.graph.lastCheckError().ifBlank { model.link.lastError }
@@ -767,14 +767,18 @@ private fun NotificationSettings(model: CompanionModel) {
                 ToggleRow(t(R.string.excuse_deadlines), checked = model.settings.deadlines, enabled = on) { model.toggleSetting("deadlines") }
             }
         }
+        item(key = "background-head") { SectionLabel(t(R.string.background_refresh)) }
+        item(key = "background") {
+            ChoiceRow(listOf(BackgroundMode.NORMAL.wire to t(R.string.background_normal), BackgroundMode.SAVER.wire to t(R.string.background_saver)), model.backgroundRefresh.wire,
+                { model.chooseBackgroundRefresh(BackgroundMode.of(it)) }, Modifier.padding(bottom = 6.dp))
+            Text(t(R.string.background_refresh_body), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp))
+        }
         item(key = "delivery-head") { SectionLabel(t(R.string.delivery)) }
         item(key = "delivery") {
+            val minutes = remember(model.backgroundRefresh) { model.graph.backgroundCheckMinutesNow() }
+            val every = if (minutes >= 120 && minutes % 60 == 0L) t(R.string.interval_hours, (minutes / 60).toInt()) else t(R.string.interval_minutes, minutes.toInt())
             StatusLine(
-                when (deliveryModeLabel(firebaseConfigured(context), model.graph.lastPushAt(), System.currentTimeMillis())) {
-                    "Instant via push" -> t(R.string.new_grades_arrive_instantly_no_background_check)
-                    else -> if (firebaseConfigured(context)) t(R.string.push_has_been_quiet_kanti_checks_about_every_6_h)
-                    else t(R.string.school_updates_are_checked_about_every_6_hours)
-                },
+                if (model.graph.pushReadyNow()) t(R.string.delivery_push_ready, every) else t(R.string.delivery_no_push, every),
                 StateTone.Neutral,
                 Modifier.padding(bottom = 12.dp),
             )

@@ -39,7 +39,7 @@ fun SchoolScreen(model: CompanionModel) {
     val absencePoints = remember(model.snapshot) { absenceTally(model.snapshot) }
     val updates = model.snapshot.messages.size + model.snapshot.startMessages.size
     val fetched = model.snapshot.fetchedAt.isNotBlank()
-    ScreenList {
+    RefreshableScreenList(model.syncing, { model.pullRefresh() }) {
         item(key = "identity") {
             Row(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 val initials = listOfNotNull(profile?.firstName?.firstOrNull(), profile?.lastName?.firstOrNull()).joinToString("").uppercase()
@@ -119,7 +119,7 @@ fun GradesScreen(model: CompanionModel) {
     }
     val totals = remember(official) { promotionTotals(official) }
     val hiddenCount = remember(model.snapshot.grades, model.unrevealedIds, model.settings.guessGrades) { model.snapshot.grades.count { model.isUnrevealed(gradeTargetId(it)) } }
-    ScreenList {
+    RefreshableScreenList(model.syncing, { model.pullRefresh() }) {
         item(key = "summary") {
             if (query.isBlank()) {
                 Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 16.dp)) {
@@ -328,7 +328,7 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
     val today = LocalDate.now()
     val online = LocalOnline.current
-    ScreenList {
+    RefreshableScreenList(model.syncing, { model.pullRefresh() }) {
         item(key = "head") {
             val stamp = updatedLabel(model.snapshot.fetchedAt)
             StatusLine(if (online) t(R.string.read_only_last_updated, stamp) else t(R.string.offline_last_updated, stamp), if (online) StateTone.Neutral else StateTone.Offline, Modifier.padding(bottom = 12.dp))

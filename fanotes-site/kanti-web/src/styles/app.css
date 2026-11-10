@@ -445,3 +445,7 @@ tr:last-child td { border-bottom: none; }
 .points-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .points-card-open { box-shadow: inset 3px 0 0 var(--warning); }
 .points-left { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+
+/* Refresh */
+.updating { display: inline-flex; align-items: center; gap: 6px; }
+.spinner-small { width: 12px; height: 12px; border-width: 2px; }

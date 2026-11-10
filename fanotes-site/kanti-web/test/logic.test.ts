@@ -10,6 +10,7 @@ import { pickLanguage, STRINGS } from '../src/lib/i18n'
 import { freshChanges } from '../src/lib/notify'
 import { contrastRatio, hex, kantiPalette, mixColor, THEME_IDS } from '../src/lib/palette'
 import { loadPrefs } from '../src/lib/prefs'
+import { REFRESH_DEBOUNCE_MS, refreshDue } from '../src/lib/refresh'
 import { parseRoute, routeHref } from '../src/lib/route'
 import { search } from '../src/lib/search'
 import { shortcutFor } from '../src/lib/shortcuts'
@@ -223,5 +224,17 @@ describe('absence points (AbsencePoints.kt through the server logic)', () => {
     expect(pointsLabel(2.5, 'de')).toBe('2,5')
     expect(pointsLabel(2.5, 'en')).toBe('2.5')
     expect(STRINGS.de.ruleLessons(2, 3)).toBe('2 Lektionen am Stück: 2 + 1 = 3 Punkte')
+  })
+})
+
+describe('refresh on return to the tab', () => {
+  it('refreshes at once, but not twice within 30 seconds and not while loading', () => {
+    const now = 1_000_000_000
+    expect(refreshDue(0, now, false)).toBe(true)
+    expect(refreshDue(now - 10_000, now, false)).toBe(false)
+    expect(refreshDue(now - REFRESH_DEBOUNCE_MS, now, false)).toBe(true)
+    expect(refreshDue(now - 120_000, now, true)).toBe(false)
+    // A clock that went back never blocks refreshing.
+    expect(refreshDue(now + 60_000, now, false)).toBe(true)
   })
 })
