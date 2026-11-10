@@ -218,6 +218,12 @@ class SchulnetzClient(
         )
     }
 
+    /** Today's Mensa menu from the Kanti+ server (public, no sign-in). null when it cannot be read. */
+    fun mensa(): String? {
+        val (code, body) = call("GET", "$SYNC_ORIGIN$SCHULNETZ_API_PATH/mensa", mapOf("Accept" to "application/json"), null, quickHttp)
+        return body.takeIf { code in 200..299 }
+    }
+
     fun status(session: SchoolAuth): SchulnetzLinkState {
         val (code, body) = fanotes("GET", "/status", session, null)
         if (code == 404) return SchulnetzLinkState(reachable = false)
