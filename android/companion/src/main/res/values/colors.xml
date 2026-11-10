@@ -4,5 +4,6 @@
     <color name="widget_text">#151C22</color>
     <color name="widget_muted">#505B64</color>
     <color name="widget_accent">#245F82</color>
+    <color name="widget_alert">#B3261E</color>
     <color name="widget_outline">#DCE0DA</color>
 </resources>

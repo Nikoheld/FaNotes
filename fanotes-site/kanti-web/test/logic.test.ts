@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { pbkdf2Sync, webcrypto } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { allEntries, nextCommitment, weekRange, weekState, weekDays } from '../src/lib/agenda'
+import { allEntries, examsInLessonSlots, nextCommitment, weekRange, weekState, weekDays } from '../src/lib/agenda'
 import { createApi } from '../src/lib/api'
 import { deriveAuthKey, kdfSupported } from '../src/lib/auth'
 import { demoSnapshot } from '../src/lib/demo'
@@ -16,7 +16,7 @@ import { search } from '../src/lib/search'
 import { shortcutFor } from '../src/lib/shortcuts'
 import { absenceTally } from '@shared/schulnetz-logic'
 import { pointsLabel } from '../src/lib/i18n'
-import type { Change, SchoolGrade } from '../src/types'
+import type { AgendaEvent, Change, SchoolGrade } from '../src/types'
 
 const grade = (fields: Partial<SchoolGrade>): SchoolGrade => ({ id: 'g', course: 'M-2a', courseId: 'M-2a', subject: 'Mathematik', title: 'Test', date: '2026-10-01', mark: 5, weight: 1, ...fields })
 
@@ -236,5 +236,47 @@ describe('refresh on return to the tab', () => {
     expect(refreshDue(now - 120_000, now, true)).toBe(false)
     // A clock that went back never blocks refreshing.
     expect(refreshDue(now + 60_000, now, false)).toBe(true)
+  })
+})
+
+describe('exams take the place of their lesson (examsInLessonSlots)', () => {
+  const lesson = (id: string, start: string, end: string, extra: Partial<AgendaEvent> = {}): AgendaEvent => ({
+    id, start: `2026-11-10T${start}:00`, end: `2026-11-10T${end}:00`, text: '', comment: '', room: 'B12', teachers: ['Nord'],
+    courseId: 'c-mat', courseName: 'mat 2.1', status: '', eventType: '', color: '', timetableText: '', ...extra,
+  })
+  const exam = (start: string, end: string, extra: Partial<AgendaEvent> = {}): AgendaEvent =>
+    lesson('x1', start, end, { text: 'mat 2.1 Prüfung Kapitel 4', courseId: '', courseName: '', room: '', eventType: 'exam', ...extra })
+  const l1 = lesson('l1', '08:00', '08:45')
+  const l2 = lesson('l2', '08:50', '09:35')
+
+  it('replaces one lesson with the exam title and the lesson room', () => {
+    const merge = examsInLessonSlots([l1, l2], [exam('08:00', '08:45')])
+    expect([...merge.dropped]).toEqual([`l1|${l1.start}`])
+    expect(merge.exams[0].shown).toMatchObject({ start: l1.start, end: l1.end, room: 'B12', text: 'mat 2.1 Prüfung Kapitel 4' })
+  })
+
+  it('replaces a double lesson', () => {
+    const merge = examsInLessonSlots([l1, l2], [exam('08:00', '09:35', { room: 'A1' })])
+    expect(merge.dropped.size).toBe(2)
+    expect(merge.exams[0].shown).toMatchObject({ start: l1.start, end: l2.end, room: 'A1' })
+  })
+
+  it('does not merge an exam over two courses, three lessons, no time, another course or a cancelled lesson', () => {
+    const other = lesson('l2', '08:50', '09:35', { courseId: 'c-deu', courseName: 'deu 2.1' })
+    expect(examsInLessonSlots([l1, other], [exam('08:00', '09:35')]).exams).toHaveLength(0)
+    const l3 = lesson('l3', '09:40', '10:25')
+    expect(examsInLessonSlots([l1, l2, l3], [exam('08:00', '10:25')]).exams).toHaveLength(0)
+    expect(examsInLessonSlots([l1, l2], [exam('08:00', '08:45', { start: '2026-11-10', end: '2026-11-10' })]).exams).toHaveLength(0)
+    expect(examsInLessonSlots([l1], [exam('08:00', '08:45', { text: 'Prüfung Geschichte', courseId: 'c-his' })]).exams).toHaveLength(0)
+    expect(examsInLessonSlots([lesson('l1', '08:00', '08:45', { status: 'cancelled' })], [exam('08:00', '08:45')]).exams).toHaveLength(0)
+  })
+
+  it('shows the exam instead of the lesson in the agenda', () => {
+    const snapshot = { events: [l1, l2], exams: [exam('08:00', '08:45')] } as never
+    const entries = allEntries(snapshot)
+    expect(entries.map((entry) => [entry.kind, entry.start, entry.end, entry.room])).toEqual([
+      ['exam', '08:00', '08:45', 'B12'],
+      ['lesson', '08:50', '09:35', 'B12'],
+    ])
   })
 })

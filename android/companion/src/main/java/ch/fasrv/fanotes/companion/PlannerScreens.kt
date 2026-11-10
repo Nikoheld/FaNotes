@@ -11,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -171,6 +172,8 @@ fun TodayScreen(model: CompanionModel) {
                         if (LocalCompanionSemantics.current.snow && model.snowfall && !LocalKantiMotion.current.reduced) Snowfall(Modifier.matchParentSize().clip(MaterialTheme.shapes.extraLarge))
                     }
                     if (gapUnread) StatusLine(t(R.string.unread_before_next), StateTone.Warning, Modifier.padding(top = 10.dp, start = 4.dp))
+                    val strip = remember(model.snapshot, model.hidden, now.epochSecond / 60) { widgetRows(model.snapshot.events, model.snapshot.exams, model.hidden, now, zone) }
+                    if (strip.count { !it.heading } >= 2) LessonStrip(strip, today, Modifier.padding(top = 12.dp))
                 }
                 TodayLead.Unread -> LeadCard(Icons.Outlined.EventBusy, StateTone.Warning, t(R.string.timetable_not_loaded), if (online) t(R.string.timetable_not_loaded_body) else t(R.string.offline_waiting),
                     if (!model.busy) t(R.string.refresh_school_data) else null) { model.refreshSchool() }
@@ -316,6 +319,34 @@ private fun NextHero(model: CompanionModel, entry: AgendaEntry, now: Instant, zo
                 if (cancelled) Tag(t(R.string.cancelled), scheme.error) else Tag(t(R.string.substitution), s.warning)
             }
             if (dayLessons.size >= 2) DayBand(dayLessons, if (entry.day == today) clock else -1, entry.key, Modifier.padding(top = 18.dp))
+        }
+    }
+}
+
+/** All remaining lessons of today, then the next school day, as one sideways scroll under the hero. */
+@Composable
+private fun LessonStrip(rows: List<WidgetRow>, today: LocalDate, modifier: Modifier = Modifier) {
+    val scheme = MaterialTheme.colorScheme
+    val s = LocalCompanionSemantics.current
+    LazyRow(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        itemsIndexed(rows, key = { index, row -> "strip:$index:${row.day}:${row.event?.id.orEmpty()}" }) { _, row ->
+            if (row.heading) {
+                val heading = if (row.day == today.plusDays(1)) t(R.string.tomorrow) else row.day.dayOfWeek.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())
+                Box(Modifier.height(64.dp).padding(horizontal = 4.dp), contentAlignment = Alignment.CenterStart) {
+                    Text(heading, style = MaterialTheme.typography.labelLarge, color = scheme.primary, maxLines = 1)
+                }
+            } else {
+                val accent = when { row.cancelled -> scheme.error; row.exam -> s.warning; else -> scheme.onSurfaceVariant }
+                Surface(color = scheme.surfaceVariant.copy(alpha = 0.5f), shape = MaterialTheme.shapes.large) {
+                    Column(Modifier.widthIn(min = 112.dp, max = 168.dp).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        Text(row.clock.ifBlank { t(R.string.all_day) }, style = TimeStyle, color = accent, maxLines = 1)
+                        Text(row.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            textDecoration = if (row.cancelled) TextDecoration.LineThrough else TextDecoration.None)
+                        Text(listOf(row.room.takeIf { it.isNotBlank() }, if (row.exam) t(R.string.exam) else null).filterNotNull().joinToString(" · ").ifBlank { " " },
+                            style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
         }
     }
 }

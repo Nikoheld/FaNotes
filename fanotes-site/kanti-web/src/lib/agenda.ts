@@ -52,6 +52,59 @@ const toEntry = (event: AgendaEvent, kind = kindOf(event)): Entry => {
 
 const examTitle = (event: AgendaEvent) => cleanSchulnetzText(event.text) || cleanSchulnetzText(event.timetableText) || eventLabel(event)
 
+const lessonKey = (event: AgendaEvent) => `${event.id}|${event.start}`
+const examKey = (event: AgendaEvent) => `${event.id}|${event.start}|${eventLabel(event)}`
+
+export interface ExamInSlot { original: AgendaEvent; shown: AgendaEvent }
+export interface ExamSlotMerge { dropped: Set<string>; exams: ExamInSlot[] }
+
+const lowerClean = (...parts: string[]) => parts.map((part) => cleanSchulnetzText(part)).join(' ').toLowerCase()
+
+const belongsToCourse = (exam: AgendaEvent, lesson: AgendaEvent): boolean => {
+  if (exam.courseId && exam.courseId === lesson.courseId) return true
+  const name = cleanSchulnetzText(lesson.courseName).toLowerCase()
+  if (name && lowerClean(exam.text, exam.courseName, exam.timetableText).includes(name)) return true
+  const full = eventLabel(lesson).trim().toLowerCase()
+  const token = full.split(' ')[0].split('(')[0].trim()
+  return token.length >= 2 && eventLabel(exam).toLowerCase().startsWith(token)
+}
+
+/**
+ * Exams scheduled for exactly one lesson, or two consecutive lessons, of one course take that slot
+ * (Kotlin: examsInLessonSlots). The lessons are dropped; the exam starts with the first lesson, ends
+ * with the last and borrows the lesson's room when it has none.
+ */
+export const examsInLessonSlots = (lessons: AgendaEvent[], exams: AgendaEvent[]): ExamSlotMerge => {
+  const byDay = new Map<string, { from: number; to: number; event: AgendaEvent }[]>()
+  for (const event of lessons) {
+    if (!isLesson(event) || isCancelled(event)) continue
+    const day = eventDate(event.start)
+    const from = clockMinutes(schulnetzClock(event.start))
+    const to = clockMinutes(schulnetzClock(event.end))
+    if (!day || from === null || to === null || to <= from) continue
+    byDay.set(day, [...(byDay.get(day) || []), { from, to, event }])
+  }
+  for (const list of byDay.values()) list.sort((a, b) => a.from - b.from)
+  const dropped = new Set<string>()
+  const merged: ExamInSlot[] = []
+  for (const exam of exams) {
+    const day = eventDate(exam.start)
+    const from = clockMinutes(schulnetzClock(exam.start))
+    const to = clockMinutes(schulnetzClock(exam.end))
+    if (!day || from === null || to === null || to <= from) continue
+    const hits = (byDay.get(day) || []).map((item, index) => ({ ...item, index })).filter((item) => item.from < to && item.to > from)
+    if (hits.length < 1 || hits.length > 2) continue
+    if (hits.length === 2 && hits[1].index !== hits[0].index + 1) continue
+    const first = hits[0].event
+    const last = hits[hits.length - 1].event
+    if (hits.some((hit) => eventLabel(hit.event) !== eventLabel(first))) continue
+    if (!belongsToCourse(exam, first)) continue
+    for (const hit of hits) dropped.add(lessonKey(hit.event))
+    merged.push({ original: exam, shown: { ...exam, start: first.start, end: last.end, room: exam.room || first.room, eventType: isExamLike(exam) ? exam.eventType : 'exam' } })
+  }
+  return { dropped, exams: merged }
+}
+
 /** Every dated entry of the snapshot, exams once even when a lesson row and the exam list both carry it. */
 export const allEntries = (snapshot: Snapshot | null): Entry[] => {
   if (!snapshot) return []
@@ -64,8 +117,15 @@ export const allEntries = (snapshot: Snapshot | null): Entry[] => {
     seen.add(identity)
     out.push(entry)
   }
-  for (const exam of snapshot.exams || []) push(toEntry(exam, 'exam'))
-  for (const event of snapshot.events || []) push(toEntry(event))
+  const events = snapshot.events || []
+  const exams = snapshot.exams || []
+  const merge = examsInLessonSlots(events.filter(isLesson), [...exams, ...events.filter(isExamLike)])
+  const shown = (exam: AgendaEvent) => merge.exams.find((item) => examKey(item.original) === examKey(exam))?.shown || exam
+  for (const exam of exams) push(toEntry(shown(exam), 'exam'))
+  for (const event of events) {
+    if (merge.dropped.has(lessonKey(event)) && !isExamLike(event)) continue
+    push(toEntry(shown(event)))
+  }
   return out.sort(compareEntries)
 }
 

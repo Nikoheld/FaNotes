@@ -328,7 +328,13 @@ fun agendaForDay(
 ): List<AgendaEntry> {
     val clock = DateTimeFormatter.ofPattern("HH:mm")
     val imported = calendar.events.map { it.id }.toSet()
-    val school = (if (schoolByDay != null) schoolByDay[day].orEmpty() else eventsOn(visibleEvents(snapshot.events + snapshot.exams, hidden, zone), day, zone))
+    val daySchool = if (schoolByDay != null) schoolByDay[day].orEmpty() else eventsOn(visibleEvents(snapshot.events + snapshot.exams, hidden, zone), day, zone)
+    // An exam over one lesson, or two consecutive lessons of its course, takes that slot.
+    val examKeys = snapshot.exams.map { "${it.id}|${it.start}" }.toSet()
+    val slots = examsInLessonSlots(daySchool.filter { it.isLesson() }, daySchool.filter { it.isExamLike() || "${it.id}|${it.start}" in examKeys }, zone)
+    val school = (slots.apply(daySchool) + slots.exams.map { it.shown })
+        .distinctBy { Triple(it.start, it.end, it.label.lowercase()) }
+        .sortedBy { it.startsAt(zone) ?: java.time.Instant.EPOCH }
         .distinctBy(::lessonTargetId)
         .filterNot { "schulnetz-${it.id}" in imported }
         .map { event ->
