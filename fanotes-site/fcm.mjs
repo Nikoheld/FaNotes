@@ -1,7 +1,7 @@
 // Firebase Cloud Messaging HTTP v1. A missing service account skips the send.
 // Payloads are data messages: an event name, never a grade.
 
-import { createHash, createSign } from 'node:crypto'
+import { createCipheriv, createHash, createSign, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { credentialOr } from './credentials.mjs'
 
@@ -86,11 +86,49 @@ export const fcmPriorityForChanges = (changes, now = new Date()) => {
  */
 export const connectionRouteKey = (accountId) => createHash('sha256').update(`kanti-route:${String(accountId || '')}`).digest('hex').slice(0, 16)
 
+/** The notice text of a push, sealed for one device. Only that device's push key opens it. */
+export const PUSH_PAYLOAD_LIMIT = 3000
+
+/** A device push key: 32 random bytes the app generated and sent with its push token (base64). */
+export const pushKeyBytes = (text) => {
+  if (typeof text !== 'string' || !/^[A-Za-z0-9+/]{43}=$/u.test(text)) return null
+  const bytes = Buffer.from(text, 'base64')
+  return bytes.length === 32 ? bytes : null
+}
+
+/** AES-256-GCM: base64(iv 12 bytes | ciphertext | tag 16 bytes). The app opens it with `openPushPayload`. */
+export const sealPushPayload = (key, plain, iv = randomBytes(12)) => {
+  const cipher = createCipheriv('aes-256-gcm', key, iv)
+  const body = Buffer.concat([cipher.update(Buffer.from(String(plain), 'utf8')), cipher.final()])
+  return Buffer.concat([iv, body, cipher.getAuthTag()]).toString('base64')
+}
+
+/**
+ * The changes a push carries, newest grade first, as many as fit into the FCM data limit once sealed.
+ * Returns the sealed text and whether some were left out (the app then also asks the server).
+ */
+export const sealPushChanges = (key, changes, limit = PUSH_PAYLOAD_LIMIT, iv) => {
+  const fields = ['id', 'category', 'title', 'body', 'targetId', 'targetIds', 'date', 'courseId', 'gradeKeys', 'revision']
+  const list = (Array.isArray(changes) ? changes : []).map((change) => Object.fromEntries(fields.filter((name) => change?.[name] !== undefined).map((name) => [name, change[name]])))
+  const ordered = [...list.filter((change) => change.category === 'grade'), ...list.filter((change) => change.category !== 'grade')]
+  for (let count = ordered.length; count > 0; count -= 1) {
+    const sealed = sealPushPayload(key, JSON.stringify({ changes: ordered.slice(0, count) }), iv)
+    if (sealed.length <= limit) return { sealed, more: count < ordered.length }
+  }
+  return { sealed: '', more: ordered.length > 0 }
+}
+
 export const fcmDataMessage = (token, event, options = {}) => {
   const priority = options.priority === 'NORMAL' ? 'NORMAL' : 'HIGH'
   const data = { event: String(event) }
   const route = typeof options.route === 'string' && /^[a-f0-9]{16}$/u.test(options.route) ? options.route : ''
   if (route) data.route = route
+  // The notice itself, end-to-end sealed for this device, so the app can show it without asking first.
+  if (typeof options.sealed === 'string' && options.sealed && /^[A-Za-z0-9+/=]+$/u.test(options.sealed)) {
+    data.n = options.sealed
+    data.v = '1'
+    if (options.more === true) data.more = '1'
+  }
   if (options.probe === true) data.probe = '1'
   if (typeof options.serverAt === 'string' && options.serverAt) data.serverAt = options.serverAt
   if (typeof options.correlation === 'string' && /^probe:[0-9]{1,20}$/u.test(options.correlation)) data.correlation = options.correlation

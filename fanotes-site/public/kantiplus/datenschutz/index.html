@@ -93,7 +93,7 @@
           <ul>
             <li><strong>Anonyme Kennung:</strong> Beim ersten Start legt die App auf dem Server eine anonyme Kennung an, auch ohne Schulnetz-Verbindung. Der Server speichert davon nur einen Hash-Wert.</li>
             <li><strong>Geräte-ID:</strong> eine zufällige ID, die mit der Schulnetz-Verbindung gespeichert wird.</li>
-            <li><strong>Push-Token</strong> von Firebase Cloud Messaging (höchstens 8 pro Konto).</li>
+            <li><strong>Push-Token</strong> von Firebase Cloud Messaging (höchstens 8 pro Konto) und je Gerät ein <strong>Push-Schlüssel</strong>, den die App erzeugt; der Server speichert ihn verschlüsselt.</li>
             <li><strong>Einstellungen:</strong> welche Benachrichtigungen du erhalten möchtest.</li>
           </ul>
 
@@ -127,7 +127,7 @@
 
           <h2 id="empfaenger">Dienstleister und Empfänger</h2>
           <ul>
-            <li><strong>Google Firebase Cloud Messaging</strong> stellt Benachrichtigungen zu. Google erhält das Push-Token und eine Firebase-Installations-ID. Die Nachricht selbst ist nur ein Weckruf ohne Schulinhalte; die Details holt die App danach vom fasrv-Server.</li>
+            <li><strong>Google Firebase Cloud Messaging</strong> stellt Benachrichtigungen zu. Google erhält das Push-Token und eine Firebase-Installations-ID. Eine Benachrichtigung enthält die Meldung (etwa eine neue Note) Ende-zu-Ende verschlüsselt mit dem Push-Schlüssel deines Geräts, damit sie sofort erscheint; Google kann sie nicht lesen. Ohne Push-Schlüssel ist die Nachricht nur ein Weckruf, und die App holt die Details beim fasrv-Server.</li>
             <li><strong>Cloudflare</strong> leitet die Verbindungen zum fasrv-Server weiter und schützt ihn (TLS). Cloudflare sieht dabei IP-Adresse und Anfragen.</li>
             <li><strong>Microsoft und Schulnetz</strong> sind die Quelle deiner Daten. Die App und der Server melden sich dort mit deiner Sitzung an und lesen deine Daten.</li>
             <li><strong>Wikimedia Commons:</strong> Für das Spiel «Note erraten» lädt die App Porträtbilder von dort; dabei sieht Wikimedia deine IP-Adresse.</li>
@@ -185,7 +185,7 @@
                 <ul>
                   <li>an anonymous identity created on first start, of which the server stores only a hash;</li>
                   <li>a random device ID;</li>
-                  <li>Firebase Cloud Messaging push tokens (at most 8 per account);</li>
+                  <li>Firebase Cloud Messaging push tokens (at most 8 per account) and one push key per device, made by the app and stored encrypted on the server;</li>
                   <li>your notification settings.</li>
                 </ul>
               </li>
@@ -211,7 +211,7 @@
               <li><strong>No commercial use:</strong> no ads, no tracking, no analytics or crash-reporting SDKs, no profiling, no sale of data.</li>
               <li><strong>Service providers:</strong>
                 <ul>
-                  <li>Google Firebase Cloud Messaging delivers wake-up messages without school content (push token, Firebase installation ID).</li>
+                  <li>Google Firebase Cloud Messaging delivers notifications (push token, Firebase installation ID). A notification carries its notice (for example a new grade) end-to-end encrypted with your device's push key, so it shows at once; Google cannot read it. Without a push key it is only a wake-up and the app fetches the details from the fasrv server.</li>
                   <li>Cloudflare proxies connections.</li>
                   <li>Microsoft and Schulnetz are the data source.</li>
                   <li>Wikimedia Commons serves portraits for the "Note erraten" game.</li>

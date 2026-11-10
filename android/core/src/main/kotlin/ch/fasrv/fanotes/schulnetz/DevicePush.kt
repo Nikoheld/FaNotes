@@ -49,3 +49,23 @@ fun upcomingLessons(events: List<AgendaEvent>, now: Instant, zone: ZoneId = Zone
         if (end.isBefore(now) || event.isCancelled()) null else event
     }.sortedBy { it.startsAt(zone) ?: Instant.EPOCH }.take(limit)
 }
+
+/*
+ * The grade promise: a push carries its notices sealed for this device (AES-256-GCM with a key only
+ * this device and the Kanti+ server hold), so the app shows a new grade straight from the push,
+ * without asking the server first, and Google never reads it. fanotes-site/fcm.mjs `sealPushPayload`.
+ */
+
+/** A new random device push key (32 bytes, base64), made once per install. */
+fun newPushKey(random: java.security.SecureRandom = java.security.SecureRandom()): String =
+    java.util.Base64.getEncoder().encodeToString(ByteArray(32).also(random::nextBytes))
+
+/** The notices of a push (`{"changes":[...]}` as in the change feed), or null when it does not open with [keyBase64]. */
+fun openPushPayload(keyBase64: String, sealedBase64: String): String? = runCatching {
+    val key = java.util.Base64.getDecoder().decode(keyBase64)
+    val bytes = java.util.Base64.getDecoder().decode(sealedBase64)
+    if (key.size != 32 || bytes.size < 12 + 16) return null
+    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(javax.crypto.Cipher.DECRYPT_MODE, javax.crypto.spec.SecretKeySpec(key, "AES"), javax.crypto.spec.GCMParameterSpec(128, bytes, 0, 12))
+    cipher.doFinal(bytes, 12, bytes.size - 12).toString(Charsets.UTF_8)
+}.getOrNull()

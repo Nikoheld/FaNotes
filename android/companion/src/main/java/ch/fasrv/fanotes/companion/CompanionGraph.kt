@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.companion
 
 import ch.fasrv.fanotes.schulnetz.ConnectionRegistry
 import ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT
+import ch.fasrv.fanotes.schulnetz.newPushKey
 import ch.fasrv.fanotes.schulnetz.backgroundCheckMinutes
 import ch.fasrv.fanotes.schulnetz.BackgroundMode
 import ch.fasrv.fanotes.schulnetz.parseSchulnetzInstant
@@ -454,6 +455,24 @@ class CompanionGraph(private val context: Context) {
     fun backgroundCheckMinutesNow(): Long = backgroundCheckMinutes(backgroundMode(context), pushReady(context))
     fun pushReadyNow(): Boolean = pushReady(context)
 
+    /** This install's push key, made once. Pushes carry their notices sealed with it (openPushPayload). */
+    fun pushKey(): String = synchronized(this) {
+        prefs.getString(PUSH_KEY_PREF, null)?.takeIf { it.length == 44 }
+            ?: newPushKey().also { prefs.edit().putString(PUSH_KEY_PREF, it).commit() }
+    }
+
+    /**
+     * The notices a push carried (already opened): shown at once, before any request, so a new grade is
+     * on the screen as soon as the push arrives. The pull that follows moves the change cursor; shown
+     * ids keep it from showing them twice.
+     */
+    suspend fun showPushedChanges(route: String?, json: String) {
+        awaitBoot()
+        val all = sessions().ifEmpty { listOf(current()) }.filter { it.connection.provider == SchoolProvider.SCHULNETZ }
+        val target = all.firstOrNull { !route.isNullOrBlank() && it.routeKey() == route } ?: all.singleOrNull() ?: return
+        target.showPushedChanges(json)
+    }
+
     /** True while a foreground sync runs: the screens show "Aktualisiere…", never a blocking loader. */
     val syncing = MutableStateFlow(false)
 
@@ -883,6 +902,7 @@ class CompanionGraph(private val context: Context) {
         const val SILENT_AT = "schulnetz-silent-at"
         const val SEEN_CHANGES_PREF = "seen-changes"
         const val LAST_SYNC_OK_PREF = "last-sync-ok"
+        const val PUSH_KEY_PREF = "push-key"
         const val SERVER_FETCHED_PREF = "server-fetched-at"
         const val OWN_READ_PREF = "last-own-read"
         const val TAM_ICS_PREF = "tam-ics-url"
@@ -1445,13 +1465,17 @@ class CompanionGraph(private val context: Context) {
             val sentToken = prefs.getString("fcm-sent-token", "").orEmpty()
             val sentAccount = prefs.getString("fcm-sent-account", "").orEmpty()
             val sentAt = prefs.getLong("fcm-sent-at", 0L)
-            if (!fcmTokenNeedsUpload(token, session.accountId, sentToken, sentAccount, sentAt, now, false)) return
-            val uploaded = runCatching { client.registerFcmToken(session, token) }.onFailure { schulnetzLog.error(it) }.isSuccess
+            val key = pushKey()
+            // An install that registered before push keys existed sends its key once.
+            val keyMissing = prefs.getString("fcm-sent-key", "").orEmpty() != key
+            if (!keyMissing && !fcmTokenNeedsUpload(token, session.accountId, sentToken, sentAccount, sentAt, now, false)) return
+            val uploaded = runCatching { client.registerFcmToken(session, token, key) }.onFailure { schulnetzLog.error(it) }.isSuccess
             if (!uploaded) return
             prefs.edit()
                 .putString("fcm-sent-token", token)
                 .putString("fcm-sent-account", session.accountId)
                 .putLong("fcm-sent-at", now)
+                .putString("fcm-sent-key", key)
                 .apply()
         }
 
@@ -1939,7 +1963,13 @@ class CompanionGraph(private val context: Context) {
             NextLessonWidget.update(context)
         }
 
-        private fun applyServerChanges(json: String) {
+        /** Notices from a push, shown before any request; the cursor moves with the pull that follows. */
+        fun showPushedChanges(json: String) {
+            if (demoActive() || schoolDisconnected()) return
+            applyServerChanges(json, advanceCursor = false)
+        }
+
+        private fun applyServerChanges(json: String, advanceCursor: Boolean = true) {
             val obj = parseJson(json) as? JsonValue.Obj ?: return
             val mine = probeDeviceKey(fcmToken().orEmpty())
             val items = obj.array("changes")?.items.orEmpty().mapNotNull { item ->
@@ -1969,7 +1999,7 @@ class CompanionGraph(private val context: Context) {
             val maxRevision = obj.array("changes")?.items.orEmpty().mapNotNull { item ->
                 (item as? JsonValue.Obj)?.double("revision")?.toLong()
             }.maxOrNull()
-            if (maxRevision != null) prefs.edit().putLong("change-cursor", maxRevision).apply()
+            if (advanceCursor && maxRevision != null) prefs.edit().putLong("change-cursor", maxRevision).apply()
         }
 
         private fun readCachedSnapshot(): SchulnetzSnapshot {

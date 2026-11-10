@@ -630,7 +630,14 @@ const server = createServer(async (request, response) => {
     }
     if (url.pathname === '/api/health') {
       const releases = await discoverReleases()
-      json(response, 200, { status: 'ok', version: releases.linux.version, windowsVersion: releases.windows?.version ?? null })
+      // Kanti+ grade promise: max age of the last successful grade check across linked accounts (< 600 s).
+      const kanti = await schulnetz.health().catch(() => null)
+      json(response, 200, {
+        status: 'ok',
+        version: releases.linux.version,
+        windowsVersion: releases.windows?.version ?? null,
+        ...(kanti ? { schulnetz: { status: kanti.status, gradeCheckMaxAgeSeconds: kanti.gradeChecks.maxAgeSeconds, overdue: kanti.gradeChecks.overdue, slaSeconds: kanti.slaSeconds } } : {}),
+      })
       return
     }
     if (url.pathname === '/api/release') {
