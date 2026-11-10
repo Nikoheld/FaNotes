@@ -10,6 +10,7 @@ export const PairingPanel = ({ onDone }: { onDone: (added: number) => void | Pro
   const [code, setCode] = useState('')
   const [expiresAt, setExpiresAt] = useState(0)
   const [state, setState] = useState<'idle' | 'waiting' | 'expired' | 'error'>('idle')
+  const [failure, setFailure] = useState('')
   const [now, setNow] = useState(Date.now())
   const finished = useRef(false)
 
@@ -19,7 +20,8 @@ export const PairingPanel = ({ onDone }: { onDone: (added: number) => void | Pro
       setCode(started.code)
       setExpiresAt(Date.parse(started.expiresAt))
       setState('waiting')
-    } catch {
+    } catch (error) {
+      setFailure(error instanceof ApiError ? (error.status === 0 ? t.reasonOffline : t.failureReason(error.message, error.status)) : error instanceof Error ? error.message : t.error)
       setState('error')
     }
   }
@@ -62,9 +64,42 @@ export const PairingPanel = ({ onDone }: { onDone: (added: number) => void | Pro
           <p className="muted small">{t.pairNeedsApp}</p>
         </>
       ) : state === 'error' ? (
-        <Banner tone="danger" icon="warning" action={<Button tone="outline" onClick={() => void begin()}>{t.tryAgain}</Button>}>{t.error}</Banner>
+        <Banner tone="danger" icon="warning" action={<Button tone="outline" onClick={() => void begin()}>{t.tryAgain}</Button>}>{failure || t.error}</Banner>
       ) : <p className="muted"><span className="spinner" aria-hidden="true" /></p>}
     </div>
+  )
+}
+
+/** The other direction: the app shows a code, the user types it here. */
+export const ClaimCode = ({ onDone }: { onDone: (added: number) => void | Promise<void> }) => {
+  const { api, t } = useKanti()
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const cleaned = code.toUpperCase().replace(/[^0-9A-Z]/gu, '')
+  const submit = async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const claimed = await api.claimPairing(cleaned)
+      setCode('')
+      await onDone(claimed.added || 0)
+    } catch (failure) {
+      setError(failure instanceof ApiError ? (failure.status === 0 ? t.reasonOffline : failure.message) : failure instanceof Error ? failure.message : t.error)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form className="form claim-form" onSubmit={(event) => { event.preventDefault(); void submit() }}>
+      <label className="field">
+        <span className="field-label">{t.claimTitle}</span>
+        <input inputMode="text" autoCapitalize="characters" autoComplete="one-time-code" spellCheck={false} maxLength={11} placeholder={t.claimHint} value={code} onChange={(event) => setCode(event.target.value)} />
+      </label>
+      <p className="muted small">{t.claimSteps}</p>
+      {error ? <Banner tone="danger" icon="warning">{error}</Banner> : null}
+      <Button type="submit" icon="phone" disabled={busy || cleaned.length !== 8}>{t.claimButton}</Button>
+    </form>
   )
 }
 
@@ -122,6 +157,8 @@ export const SignIn = () => {
           <div className="signin-card-head"><Icon name="phone" size={24} /><h2>{t.pairTitle}</h2></div>
           <p className="muted">{t.pairBody}</p>
           {pairing ? <PairingPanel onDone={async (added) => { setApproved(added); setPairing(false); await kanti.start() }} /> : <Button icon="phone" onClick={() => setPairing(true)}>{t.pairStart}</Button>}
+          <p className="claim-or muted small">{t.claimOr}</p>
+          <ClaimCode onDone={async (added) => { setApproved(added); setPairing(false); await kanti.start() }} />
         </Card>
         <Card className="signin-card">
           <div className="signin-card-head"><Icon name="key" size={24} /><h2>{t.fanotesTitle}</h2></div>

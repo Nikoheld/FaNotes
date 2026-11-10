@@ -270,7 +270,7 @@ export const createKantiWebStore = (options = {}) => {
   /** App side: the browser description for a code, before the user approves. */
   const lookupPairing = async (rawCode) => {
     const found = await readPairing(rawCode)
-    if (!found || found.record.finished) return null
+    if (!found || found.record.finished || found.record.offer === true) return null
     return { browser: found.record.browser, expiresAt: found.record.expiresAt, added: found.record.connections.length }
   }
 
@@ -290,6 +290,46 @@ export const createKantiWebStore = (options = {}) => {
       if (finish) record.finished = true
       await writeJson(file, record)
       return { record }
+    })
+  }
+
+  /**
+   * App side, the other direction: the app shows a code and the user types it into the browser. The
+   * offer has no browser secret; the app adds its connections with joinPairing and finishes it, and
+   * the browser claims it with the code alone (single use, 10 minutes, failed claims rate-limited).
+   */
+  const createOffer = async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const code = newPairingCode()
+      const expiresAt = new Date(nowMs() + PAIR_TTL_MS).toISOString()
+      const record = { v: 1, offer: true, secretHash: '', browser: '', createdAt: now().toISOString(), expiresAt, connections: [], finished: false }
+      try {
+        await writeJson(pairingPath(sha256(`code:${code}`)), record, 'wx')
+        return { code, expiresAt }
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error
+      }
+    }
+    fail(503, 'Bitte gleich nochmals versuchen.')
+  }
+
+  /** Browser side: the code an app showed. Only a finished offer is claimed; anything else is unknown. */
+  const claimOffer = async (rawCode, browser, current) => {
+    const code = normalizePairingCode(rawCode)
+    if (!code) return null
+    return locked(`pair:${code}`, async () => {
+      const fresh = await readPairing(code)
+      if (!fresh || fresh.record.offer !== true) return null
+      if (!fresh.record.finished) return { waiting: true }
+      await deletePairing(fresh)
+      const incoming = fresh.record.connections.map((connection) => ({ ...connection, source: 'pair' }))
+      if (!incoming.length) return null
+      if (current) {
+        const updated = await updateSession(current.hash, (session) => ({ ...session, connections: mergeConnections(session, incoming) }))
+        if (updated) return { hash: current.hash, session: updated, token: null, added: incoming.length }
+      }
+      const created = await createSession(browser, mergeConnections({ connections: [] }, incoming))
+      return { ...created, added: incoming.length }
     })
   }
 
@@ -390,6 +430,8 @@ export const createKantiWebStore = (options = {}) => {
     pairingFromCookie,
     deletePairing,
     claimPairing,
+    createOffer,
+    claimOffer,
     lookupPairing,
     joinPairing,
     sessionsFor,
@@ -424,6 +466,8 @@ export const createKantiWebAppRoutes = (store, options = {}) => {
   const unknownCode = () => fail(404, 'Dieser Code ist unbekannt oder abgelaufen.')
 
   return {
+    /** The app shows this code; the user types it into the browser (POST /pair/claim). */
+    createOffer: async () => store.createOffer(),
     lookupPairing: async (accountId, rawCode, address) => {
       assertNotWalking(address)
       const found = await store.lookupPairing(rawCode)
@@ -473,6 +517,21 @@ export const createKantiWebApi = (options = {}) => {
   const readVersion = options.readVersion || (async () => null)
 
   const windows = new Map()
+  // Failed code claims per address: a code is 40 random bits, valid 10 minutes; 20 misses per window.
+  const claimMisses = new Map()
+  const recentClaimMisses = (address) => {
+    const key = String(address || 'unknown').slice(0, 80)
+    const at = now().getTime()
+    const recent = (claimMisses.get(key) || []).filter((stamp) => at - stamp < LIMIT_WINDOW_MS)
+    claimMisses.set(key, recent)
+    if (claimMisses.size > 10_000) claimMisses.clear()
+    return recent
+  }
+  const noteClaimMiss = (address) => { recentClaimMisses(address).push(now().getTime()) }
+  const assertClaimNotWalking = (address) => {
+    if (recentClaimMisses(address).length >= 20) fail(429, 'Zu viele falsche Codes. Bitte später erneut versuchen.')
+  }
+
   const rate = (key, maximum, windowMs = LIMIT_WINDOW_MS) => {
     const at = now().getTime()
     if (windows.size > 50_000) for (const [name, window] of windows) if (window.until <= at) windows.delete(name)
@@ -792,6 +851,21 @@ export const createKantiWebApi = (options = {}) => {
         const cookies = [clearCookie(PAIR_COOKIE)]
         if (claimed.token) cookies.push(sessionCookie(claimed.token, claimed.session))
         send(response, 200, { status: 'approved', added: claimed.added }, cookies)
+        return true
+      }
+      // The other direction: a code the app showed, typed into this browser.
+      if (route === '/pair/claim' && method === 'POST') {
+        assertSameOrigin(request)
+        rate(`pair-claim:${address}`, 20)
+        assertClaimNotWalking(address)
+        const body = await readBody(request)
+        const claimed = await store.claimOffer(body?.code, browserLabel(request.headers['user-agent']), await optionalSession(request))
+        if (!claimed) {
+          noteClaimMiss(address)
+          fail(404, 'Dieser Code ist unbekannt oder abgelaufen. Zeige in der App einen neuen Code an.')
+        }
+        if (claimed.waiting) fail(409, 'Bestätige die Freigabe zuerst in der App.')
+        send(response, 200, { status: 'approved', added: claimed.added }, claimed.token ? [sessionCookie(claimed.token, claimed.session)] : [])
         return true
       }
       if (route === '/pair' && method === 'DELETE') {
