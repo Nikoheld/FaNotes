@@ -12,6 +12,7 @@
 // as "Name (Konflikt <Gerät> <Datum>).ext", which is then uploaded as a new
 // file so every device ends up with both.
 import type { SyncHostApi, SyncScanEntry } from '../../types'
+import { HOMEWORK_NOTE_PATH, mergeHomeworkMarkdownBytes } from '../homeworkStore'
 import { canonicalSyncBytes, identitySyncBytes, isFamdSyncPath, noteSyncKind, withLocalPageStats, type NoteSyncKind } from '../famd'
 
 const syncText = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
@@ -759,6 +760,25 @@ export class SyncEngine {
     }
     const remoteKind = noteSyncKind(path, plain)
     let result: 'written' | 'conflict' = 'written'
+    if (path === HOMEWORK_NOTE_PATH && local && localChanged && local.kind === 'present' && remoteKind === 'present') {
+      // Task-by-task merge instead of a conflict copy. The base stays the remote revision, so the next push uploads the merge.
+      const merged = mergeHomeworkMarkdownBytes(local.bytes, plain)
+      if (merged) {
+        await this.host.write(path, merged, Date.now())
+        // Size and mtime of the remote copy, so the push scan sees the merged file as changed.
+        this.state.files[path] = {
+          id: entry.id,
+          revision: download.revision,
+          sha256: meta.sha256,
+          size: plain.byteLength,
+          mtimeMs: 0,
+          ...(plainIdentity ? { contentSha256: plainIdentity } : {}),
+        }
+        idIndex.set(entry.id, path)
+        this.log('info', `„${path}“ wurde Aufgabe für Aufgabe zusammengeführt.`)
+        return { result: 'written', path }
+      }
+    }
     if (local && (localChanged || (remoteKind === 'blank' && local.kind !== 'blank'))) {
       const at = new Date(this.options?.now?.() ?? Date.now())
       const copyPath = conflictCopyPath(path, this.deviceInfo().name, at)
