@@ -10,7 +10,7 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, createPollScheduler, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   applyEventWindow,
   diffSnapshots,
@@ -49,6 +49,8 @@ import {
   exchangeServiceAccount,
   fcmDataMessage,
   fcmPriorityForChanges,
+  pushKeyBytes,
+  sealPushChanges,
   fcmDropToken,
   isValidFcmToken,
   readServiceAccount,
@@ -56,7 +58,7 @@ import {
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
-const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json']
+const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json', 'monitor.json']
 const GUEST_LIMIT = 30
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
@@ -382,11 +384,22 @@ export const createSchulnetzRuntime = (options = {}) => {
     await writeJson(revealsPath(accountId), merged)
   }
 
-  const addFcmToken = async (accountId, token) => {
+  const tokenKey = (token) => createHash('sha256').update(`kanti-push:${token}`).digest('hex').slice(0, 24)
+
+  /**
+   * [pushKey]: 32 random bytes the app made for this device. Pushes to this token then carry their
+   * notices sealed with it, so the app shows them at once and Google never reads them. Sealed at rest.
+   */
+  const addFcmToken = async (accountId, token, pushKey = '') => {
     if (!isValidFcmToken(token)) fail(400, 'Das Push-Token ist ungültig.')
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
     link.fcmTokens = [...(link.fcmTokens || []).filter((item) => item !== token), token].slice(-8)
+    const kept = new Set(link.fcmTokens.map(tokenKey))
+    const keys = Object.fromEntries(Object.entries(link.pushKeys || {}).filter(([name]) => kept.has(name)))
+    const material = pushKeyBytes(pushKey) ? await key() : null
+    if (material) keys[tokenKey(token)] = sealToken(material, pushKey)
+    link.pushKeys = keys
     await saveLink(accountId, link)
     return publicStatus(link)
   }
@@ -636,14 +649,22 @@ export const createSchulnetzRuntime = (options = {}) => {
     return { status: response.status, drop: fcmDropToken(response.status, body) }
   }
 
-  const ping = async (accountId, link, event, priority = 'HIGH') => {
+  const ping = async (accountId, link, event, priority = 'HIGH', changes = []) => {
     if (event !== 'sync' && event !== 'reauth' && event !== 'test') return
     const tokens = (link.fcmTokens || []).filter(isValidFcmToken)
     if (!tokens.length) return
     let dropped = false
+    const material = event === 'sync' && changes.length ? await key() : null
     for (const token of tokens) {
       try {
-        const result = await sendFcm(token, event, priority, { route: connectionRouteKey(accountId) })
+        let sealed = null
+        if (material && link.pushKeys?.[tokenKey(token)]) {
+          let pushKey = ''
+          try { pushKey = openToken(material, link.pushKeys[tokenKey(token)]) } catch { pushKey = '' }
+          const bytes = pushKeyBytes(pushKey)
+          if (bytes) sealed = sealPushChanges(bytes, changes)
+        }
+        const result = await sendFcm(token, event, priority, { route: connectionRouteKey(accountId), ...(sealed?.sealed ? { sealed: sealed.sealed, more: sealed.more } : {}) })
         if (result?.drop) {
           link.fcmTokens = (link.fcmTokens || []).filter((item) => item !== token)
           dropped = true
@@ -761,7 +782,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     await writeJson(resolve(accountDir(accountId), 'notified-grades.json'), { version: 1, keys: unique })
   }
 
-  const publishChanges = async (accountId, link, changes, revision, grades = [], { push = true } = {}) => {
+  const publishChanges = async (accountId, link, changes, revision, grades = [], { push = true, detectedAt = 0 } = {}) => {
     // No allowed school alert means no row and no push. Callers still save the snapshot.
     const ledger = await readGradeLedger(accountId)
     const settled = settleGradeNotifications(changes, grades, ledger)
@@ -774,7 +795,11 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     const fresh = prepareGradeNotifications(unseen, link.settings?.guessGrades === true)
     const priority = fcmPriorityForChanges(fresh, now())
-    if (priority && push) await ping(accountId, link, 'sync', priority)
+    if (priority && push) {
+      await ping(accountId, link, 'sync', priority, fresh)
+      // Detection (the school page that showed the change was read) to push sent.
+      if (detectedAt > 0) await recordPush(accountId, now().getTime() - detectedAt, fresh.filter((change) => change.category === 'grade').length)
+    }
     return fresh
   }
 
@@ -794,7 +819,75 @@ export const createSchulnetzRuntime = (options = {}) => {
     return accountStillExists(accountId)
   }
 
-  const pollAccount = async (accountId) => withAccount(accountId, async () => {
+  const alertReauthOnce = async (accountId, link) => {
+    if (link.loginPushSent === true) return
+    await ping(accountId, link, 'reauth')
+    link.loginPushSent = true
+    await saveLink(accountId, link)
+  }
+
+  // The grade promise (a new grade on the phone within 10 minutes): when each account's grades page
+  // was last read, and how long each push took from detection. Counts and times only.
+  const monitorPath = (accountId) => resolve(accountDir(accountId), 'monitor.json')
+  const readMonitor = async (accountId) => (await readJson(monitorPath(accountId))) || {}
+  const recordGradeCheck = async (accountId, ok, ms, kind) => {
+    const monitor = await readMonitor(accountId)
+    const at = now().toISOString()
+    monitor.gradeCheckAt = at
+    monitor.gradeCheckMs = Math.max(0, Math.round(ms))
+    if (ok) monitor.gradeCheckOkAt = at
+    await writeJson(monitorPath(accountId), monitor)
+    log('info', `Noten geprüft ${accountId.slice(0, 8)} ${kind} ${ok ? 'ok' : 'fehlgeschlagen'} ${Math.round(ms)} ms`)
+  }
+  const recordPush = async (accountId, latencyMs, grades) => {
+    const monitor = await readMonitor(accountId)
+    monitor.pushes = [...(monitor.pushes || []), { at: now().toISOString(), latencyMs: Math.max(0, Math.round(latencyMs)), grades }].slice(-100)
+    await writeJson(monitorPath(accountId), monitor)
+    log('info', `Push gesendet ${accountId.slice(0, 8)} ${Math.round(latencyMs)} ms nach Erkennung${grades ? ` (${grades} Noten)` : ''}`)
+  }
+
+  /** The grade promise across accounts. No account ids: counts, ages and latencies only. */
+  const health = async () => {
+    const nowMs = now().getTime()
+    let accounts = 0
+    let overdue = 0
+    let needsReauth = 0
+    let maxAge = 0
+    const latencies = []
+    for (const accountId of await listAccounts()) {
+      const link = await readLink(accountId)
+      // A device link (TAM) is read on the phone; the server has nothing to check.
+      if (!link || link.mode === 'device') continue
+      if (link.needsReauth) { needsReauth += 1; continue }
+      accounts += 1
+      const monitor = await readMonitor(accountId)
+      const okAt = Date.parse(monitor.gradeCheckOkAt || '')
+      const age = Number.isFinite(okAt) ? Math.max(0, nowMs - okAt) : Number.POSITIVE_INFINITY
+      maxAge = Math.max(maxAge, age)
+      if (age > GRADE_SLA_MS) overdue += 1
+      for (const push of monitor.pushes || []) if (nowMs - Date.parse(push.at) <= 86_400_000) latencies.push(push.latencyMs)
+    }
+    latencies.sort((a, b) => a - b)
+    return {
+      status: overdue ? 'degraded' : 'ok',
+      slaSeconds: GRADE_SLA_MS / 1000,
+      gradeChecks: { accounts, maxAgeSeconds: Number.isFinite(maxAge) ? Math.round(maxAge / 1000) : null, overdue, needsReauth },
+      pushes24h: { count: latencies.length, maxLatencyMs: latencies.at(-1) ?? null, medianLatencyMs: latencies.length ? latencies[Math.floor(latencies.length / 2)] : null },
+    }
+  }
+
+  let slaWarnedAt = 0
+  /** Logs a warning (at most every 10 minutes) while any account's grades were not read within the promise. */
+  const watchGradePromise = async () => {
+    const state = await health()
+    if (state.status === 'ok' || now().getTime() - slaWarnedAt < GRADE_SLA_MS) return state
+    slaWarnedAt = now().getTime()
+    log('warn', `Notenprüfung überfällig: ${state.gradeChecks.overdue} von ${state.gradeChecks.accounts} Konten seit über ${GRADE_SLA_MS / 60_000} Minuten nicht geprüft (älteste ${state.gradeChecks.maxAgeSeconds ?? '–'} s)`)
+    return state
+  }
+
+  const pollAccount = async (accountId, { gradesOnly = false } = {}) => withAccount(accountId, async () => {
+    const pollStarted = now().getTime()
     if (options.pruneOrphans === true && !(await ownerStillExists(accountId))) {
       await unlink(accountId)
       return { skipped: true }
@@ -813,9 +906,11 @@ export const createSchulnetzRuntime = (options = {}) => {
         link.needsReauth = true
         link.lastError = 'cookie-expired'
         await saveLink(accountId, link)
+        // The grade promise cannot hold without a sign-in: tell the user once instead of going quiet.
+        await alertReauthOnce(accountId, link)
         return { needsReauth: true }
       }
-      return pollWeb(accountId, link, material)
+      return pollWeb(accountId, link, material, { gradesOnly })
     }
     const baseUrl = normalizeSchoolBase(link.baseUrl)
     if (!baseUrl) return { skipped: true }
@@ -825,6 +920,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       link.needsReauth = true
       link.lastError = 'token'
       await saveLink(accountId, link)
+      await alertReauthOnce(accountId, link)
       return { skipped: true }
     }
     let access = ''
@@ -898,6 +994,7 @@ export const createSchulnetzRuntime = (options = {}) => {
           link.needsReauth = true
           link.lastError = 'reauth'
           await saveLink(accountId, link)
+          await alertReauthOnce(accountId, link)
           return { needsReauth: true }
         }
         await storeRefresh(tokens)
@@ -941,17 +1038,21 @@ export const createSchulnetzRuntime = (options = {}) => {
     snapshot.icalFetchedAt = previous?.icalFetchedAt || ''
     snapshot.gradeParser = GRADE_PARSER_VERSION
     snapshot.revision = (link.revision || 0) + 1
-    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, gradeDiffBase(previous, snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
+    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, gradeDiffBase(previous, snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot), { detectedAt: now().getTime() })
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
     link.needsReauth = false
     await writeJson(resolve(accountDir(accountId), 'snapshot.json'), snapshot)
     await saveLink(accountId, link)
-    return { revision: snapshot.revision, changes: changes.length }
+    // The app's REST API reads every list in one go; a successful read is also a grade check.
+    await recordGradeCheck(accountId, true, now().getTime() - pollStarted, 'rest')
+    return { revision: snapshot.revision, changes: changes.length, gradesOk: true }
   })
 
-  const pollWeb = async (accountId, link, material) => {
+  const pollWeb = async (accountId, link, material, { gradesOnly = false } = {}) => {
+    const started = now().getTime()
+    const kind = gradesOnly ? 'kurz' : 'voll'
     let cookies = {}
     try { cookies = JSON.parse(openToken(material, link.sso)) } catch { cookies = {} }
     const userAgent = link.userAgent || USER_AGENT
@@ -961,6 +1062,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const scrape = async (session) => {
       const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
       return scrapeWithSession(baseUrl, { ...session, userAgent }, fetchImpl, {
+        gradesOnly,
         previousEvents: stored?.events || [],
         previousExams: stored?.exams || [],
         vacations: stored?.vacations || [],
@@ -987,6 +1089,7 @@ export const createSchulnetzRuntime = (options = {}) => {
           link.loginPushSent = true
           await saveLink(accountId, link)
         }
+        await recordGradeCheck(accountId, false, now().getTime() - started, kind)
         return { needsReauth: true }
       }
       link.serverSession = sealToken(material, JSON.stringify({ php: established.php, id: established.id, transid: established.transid }))
@@ -1001,6 +1104,7 @@ export const createSchulnetzRuntime = (options = {}) => {
           link.loginPushSent = true
         }
         await saveLink(accountId, link)
+        await recordGradeCheck(accountId, false, now().getTime() - started, kind)
         return { needsReauth: true }
       }
     }
@@ -1015,7 +1119,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     const keepMessages = failed || parsedNotes.length === 0
     const snapshot = {
       revision: (link.revision || 0) + 1,
-      fetchedAt: now().toISOString(),
+      // A grade check reads the grades page only; the full read time stays what it was.
+      fetchedAt: gradesOnly ? (previous?.fetchedAt || now().toISOString()) : now().toISOString(),
+      gradesFetchedAt: scraped.gradesRead && !failed ? now().toISOString() : (previous?.gradesFetchedAt || ''),
       grades: keepLoadedGrades(previous?.grades, scraped.grades || [], !failed),
       gradesReadComplete: !failed,
       gradeParser: failed ? (Number(previous?.gradeParser) || 0) : (scraped.gradeParser || 0),
@@ -1025,7 +1131,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       homework: previous?.homework || [],
       messages: keepMessages ? (previous?.messages || []) : parsedNotes,
       vacations: previous?.vacations || [],
-      konto: parseKontoauszug(scraped.kontoHtml || ''),
+      konto: gradesOnly ? (previous?.konto || []) : parseKontoauszug(scraped.kontoHtml || ''),
       startMessages: keepMessages ? (previous?.startMessages || []) : parseStartMessages(scraped.startHtml || ''),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
       weekFetched: failed ? (previous?.weekFetched || {}) : (scraped.weekFetched || {}),
@@ -1035,7 +1141,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       weekSpanEnd: scraped.weekSpanEnd || previous?.weekSpanEnd || '',
       icalFetchedAt: scraped.icalFetchedAt || previous?.icalFetchedAt || '',
     }
-    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, gradeDiffBase(previous, snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot))
+    const detectedAt = now().getTime()
+    const changes = await publishChanges(accountId, link, await agendaDiff(accountId, gradeDiffBase(previous, snapshot), snapshot, link.settings || DEFAULT_SETTINGS), snapshot.revision, gradePool(previous, snapshot), { detectedAt })
     link.revision = snapshot.revision
     link.lastPollAt = snapshot.fetchedAt
     link.lastError = ''
@@ -1043,7 +1150,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     await writeJson(resolve(accountDir(accountId), 'snapshot.json'), snapshot)
     await saveLink(accountId, link)
     // A failed school read (sign-in wall, read error) counts for the poller's backoff.
-    return { revision: snapshot.revision, changes: changes.length, failed }
+    const gradesOk = Boolean(scraped.gradesRead) && !failed
+    await recordGradeCheck(accountId, gradesOk, now().getTime() - started, kind)
+    return { revision: snapshot.revision, changes: changes.length, failed, gradesOk }
   }
 
   const listAccounts = async () => {
@@ -1060,7 +1169,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   /** Due-time poller: every account on its own schedule (pollDelayMs), checked every [tickMs]. */
   const scheduler = createPollScheduler({
     listAccounts: () => listAccounts(),
-    pollAccount: (accountId) => pollAccount(accountId),
+    pollAccount: (accountId, mode) => pollAccount(accountId, mode),
     readSnapshot: (accountId) => readJson(resolve(accountDir(accountId), 'snapshot.json')),
     now,
     baseMs: Number(process.env.FANOTES_SCHULNETZ_POLL_MS || options.intervalMs || POLL_SCHOOL_DEFAULT_MS),
@@ -1082,6 +1191,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         try { await scheduler.tick() } catch (error) {
           log('warn', `Poller-Durchlauf fehlgeschlagen (${error?.name || 'error'})`)
         }
+        try { await watchGradePromise() } catch { /* the next round checks again */ }
         await new Promise((resolveDelay) => setTimeout(resolveDelay, tickMs))
       }
     }
@@ -1181,6 +1291,12 @@ export const createSchulnetzRuntime = (options = {}) => {
         response.end()
         return true
       }
+      // Public: whether every linked account's grades were read within the 10-minute promise (counts only).
+      if (route === '/health' && method === 'GET') {
+        const state = await health()
+        send(response, state.status === 'ok' ? 200 : 503, state)
+        return true
+      }
       if (route === '/guest' && method === 'POST') {
         await readBody(request)
         send(response, 200, await createGuest(clientAddress(request)))
@@ -1271,7 +1387,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (route === '/settings' && method === 'PUT') { send(response, 200, await updateSettings(accountId, await readBody(request))); return true }
       if (route === '/push-token' && method === 'PUT') {
         const body = await readBody(request)
-        send(response, 200, await addFcmToken(accountId, body?.token))
+        send(response, 200, await addFcmToken(accountId, body?.token, body?.key))
         return true
       }
       if (route === '/push/test' && method === 'POST') {
@@ -1366,6 +1482,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     start,
     webAccess,
     pollAccount,
+    scheduler,
+    health,
+    watchGradePromise,
     linkAccount,
     addFcmToken,
     createGuest,

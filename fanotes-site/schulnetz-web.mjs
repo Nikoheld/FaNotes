@@ -126,7 +126,8 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     if (!url.includes('scheduler_processor')) openPage = url
     return body
   }
-  const order = ['1', '21311', '21111', '21411', '21200', '22202', '22108', '21312']
+  // A grade check (the 10-minute grade promise) reads the start page and the grades page only.
+  const order = options.gradesOnly ? ['1', '21311'] : ['1', '21311', '21111', '21411', '21200', '22202', '22108', '21312']
   for (const pageId of order) {
     const body = await get(`/index.php?pageid=${pageId}&id=${session.id}&transid=${transid}`)
     pages[pageId] = body
@@ -277,6 +278,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     problem: pages.problem || '',
     grades: parseGradesHtml(pages['21311'] || ''),
     gradeParser: GRADE_PARSER_VERSION,
+    gradesRead: !pages.problem && Boolean(pages['21311']),
     events,
     exams,
     startHtml: pages['1'] || '',

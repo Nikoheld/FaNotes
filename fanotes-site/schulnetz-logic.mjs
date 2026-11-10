@@ -2956,31 +2956,52 @@ export const pollDelayMs = ({ now = new Date(), snapshot = null, failures = 0, b
 }
 
 /**
+ * The grade promise: a new grade reaches the phone within 10 minutes of appearing in Schulnetz, every
+ * day and every hour. Between full reads each account gets a grade check (start page and grades page,
+ * GET only) at most every 3.5 min ±12.5 % (≤ 4 min), with no backoff, so even with a scheduler tick
+ * (15 s), a queue of accounts, a sign-in refresh and the push there is room left in the 10 minutes.
+ */
+export const GRADE_SLA_MS = 10 * 60_000
+export const GRADE_CHECK_MS = 210_000
+export const GRADE_CHECK_JITTER = 0.125
+export const gradeCheckDelayMs = (random = Math.random) => Math.round(GRADE_CHECK_MS * (1 + (random() * 2 - 1) * GRADE_CHECK_JITTER))
+
+/**
  * Due-time scheduler for the poller. [tick] reads every account whose time has come, one after the
  * other with [spacingMs] between them, and plans each next read with [pollDelayMs]. New accounts
  * start staggered, so a restart is not a burst.
  */
 export const createPollScheduler = ({ listAccounts, pollAccount, readSnapshot, now = () => new Date(), baseMs = POLL_SCHOOL_DEFAULT_MS, random = Math.random, spacingMs = POLL_SPACING_MS, sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)), log = () => {} }) => {
   const due = new Map()
+  const gradeDue = new Map()
   const failures = new Map()
   const tick = async () => {
     const accounts = await listAccounts()
     const started = now().getTime()
-    accounts.forEach((accountId, index) => { if (!due.has(accountId)) due.set(accountId, started + index * 10_000) })
-    for (const accountId of [...due.keys()]) if (!accounts.includes(accountId)) { due.delete(accountId); failures.delete(accountId) }
+    accounts.forEach((accountId, index) => {
+      if (!due.has(accountId)) due.set(accountId, started + index * 10_000)
+      if (!gradeDue.has(accountId)) gradeDue.set(accountId, started + index * 10_000)
+    })
+    for (const accountId of [...due.keys()]) if (!accounts.includes(accountId)) { due.delete(accountId); gradeDue.delete(accountId); failures.delete(accountId) }
     let polled = 0
     for (const accountId of accounts) {
-      if (due.get(accountId) > now().getTime()) continue
+      const at = now().getTime()
+      const full = due.get(accountId) <= at
+      const gradesOnly = !full && gradeDue.get(accountId) <= at
+      if (!full && !gradesOnly) continue
       if (polled > 0 && spacingMs > 0) await sleep(spacingMs)
       polled += 1
       let failed = false
       try {
-        const result = await pollAccount(accountId)
+        const result = await pollAccount(accountId, gradesOnly ? { gradesOnly: true } : {})
         failed = Boolean(result?.failed)
       } catch (error) {
         failed = true
         log('warn', `Konto ${accountId.slice(0, 8)} nicht aktualisiert (${error?.status || error?.name || 'error'})`)
       }
+      // Grade checks never back off: the 10-minute promise holds through a failing read.
+      gradeDue.set(accountId, now().getTime() + gradeCheckDelayMs(random))
+      if (!full) continue
       const count = failed ? (failures.get(accountId) || 0) + 1 : 0
       failures.set(accountId, count)
       const snapshot = await readSnapshot(accountId).catch(() => null)
@@ -2988,5 +3009,5 @@ export const createPollScheduler = ({ listAccounts, pollAccount, readSnapshot, n
     }
     return polled
   }
-  return { tick, due, failures }
+  return { tick, due, gradeDue, failures }
 }

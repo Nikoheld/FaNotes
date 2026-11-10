@@ -810,8 +810,10 @@ class SchulnetzClient(
         return body
     }
 
-    fun registerFcmToken(session: SchoolAuth, token: String) {
-        val (code, body) = fanotes("PUT", "/push-token", session, "{\"token\":${escapeJson(token)}}")
+    /** [pushKey]: this install's key; pushes then carry their notices sealed with it (see openPushPayload). */
+    fun registerFcmToken(session: SchoolAuth, token: String, pushKey: String = "") {
+        val keyPart = if (pushKey.isNotBlank()) ",\"key\":${escapeJson(pushKey)}" else ""
+        val (code, body) = fanotes("PUT", "/push-token", session, "{\"token\":${escapeJson(token)}$keyPart}")
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
     }
 

@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.companion
 
 import ch.fasrv.fanotes.schulnetz.NoticeLedger
+import ch.fasrv.fanotes.schulnetz.openPushPayload
 import ch.fasrv.fanotes.schulnetz.backgroundFlexMinutes
 import ch.fasrv.fanotes.schulnetz.backgroundCheckMinutes
 import ch.fasrv.fanotes.schulnetz.BackgroundMode
@@ -721,6 +722,15 @@ class CompanionFcmService : FirebaseMessagingService() {
             // does not finish, expedited work tries again as soon as the network allows.
             "sync" -> {
                 val route = message.data["route"]
+                // The notices themselves, sealed for this device: shown right away, with no request
+                // first (the grade promise). Older servers send none; the pull below shows them then.
+                val sealed = message.data["n"].orEmpty()
+                if (sealed.isNotBlank() && message.data["v"] == "1") {
+                    val opened = openPushPayload(app.graph.pushKey(), sealed)
+                    if (opened != null) runBlocking { withTimeoutOrNull(4_000) { app.graph.showPushedChanges(route, opened) } }
+                    DiagnosticTrace.record("push", "sealed", 0, if (opened != null) "ok" else "unopened", if (message.data["more"] == "1") "more" else "all")
+                }
+                // Then the change cursor, the snapshot and the widgets; already shown notices stay single.
                 val ok = runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta(route) } } == true
                 if (!ok) enqueuePushSync(applicationContext, route)
             }
