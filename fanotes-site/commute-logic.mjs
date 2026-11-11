@@ -258,6 +258,31 @@ const point = (name, stopId, plannedText, delayRaw, trackRaw) => {
   }
 }
 
+/** A stop time: planned, real (planned + delay) and the delay; delay null = no real-time data for it. */
+const stopTime = (plannedText, delayMinutes) => {
+  const planned = parseLocal(plannedText)
+  if (!Number.isFinite(planned)) return null
+  return { planned: isoZurich(planned), time: isoZurich(delayMinutes != null ? planned + delayMinutes * MINUTE : planned), delay: delayMinutes }
+}
+
+/**
+ * One intermediate stop of a search.ch leg. search.ch reports the departure delay per stop (and 'X'
+ * for a cancelled stop); an arrival delay or a platform per stop it does not have, so those stay
+ * empty here and are never guessed.
+ */
+const searchChStop = (raw) => {
+  const delay = parseDelay(raw?.dep_delay)
+  const departure = stopTime(raw?.departure, delay.minutes)
+  return {
+    name: text(raw?.name, 80), stopId: String(raw?.stopid || ''),
+    arrival: stopTime(raw?.arrival, null), departure,
+    platform: '', platformChanged: false,
+    realtime: delay.minutes != null || delay.cancelled,
+    cancelled: delay.cancelled,
+    occupancy: parseOccupancy(raw?.occupancy),
+  }
+}
+
 /** One search.ch route answer → Trip[] (evaluated). */
 export const parseSearchChRoute = (json) => (Array.isArray(json?.connections) ? json.connections : []).map((connection) => {
   const legs = []
@@ -284,10 +309,36 @@ export const parseSearchChRoute = (json) => (Array.isArray(json?.connections) ? 
       cancelled: !walk && (from.cancelled || to.cancelled || leg.cancelled === true || notes.some((note) => CANCELLED_NOTE.test(note))),
       notes,
       minutes: Math.max(0, Math.round(Number(leg.runningtime || leg.normal_time || 0) / 60)),
+      journeyId: walk ? '' : text(leg.tripid, 80),
+      stops: walk ? [] : (Array.isArray(leg.stops) ? leg.stops : []).map(searchChStop).filter((stop) => stop.name),
     })
   }
   return evaluateTrip({ legs })
 }).filter((trip) => trip.legs.length)
+
+/** One transport.opendata.ch passList entry: planned platform and real-time forecasts per stop. */
+const transportStop = (raw) => {
+  const time = (key) => {
+    const planned = parseLocal(raw?.[key])
+    if (!Number.isFinite(planned)) return null
+    const forecast = parseLocal(raw?.prognosis?.[key])
+    const delay = Number.isFinite(forecast) ? Math.round((forecast - planned) / MINUTE) : null
+    return { planned: isoZurich(planned), time: isoZurich(Number.isFinite(forecast) ? forecast : planned), delay }
+  }
+  const arrival = time('arrival')
+  const departure = time('departure')
+  const platform = platformOf(raw?.platform).platform
+  const forecastPlatform = String(raw?.prognosis?.platform || '').trim()
+  return {
+    name: text(raw?.station?.name || raw?.location?.name, 80), stopId: String(raw?.station?.id || ''),
+    arrival, departure,
+    platform: forecastPlatform || platform,
+    platformChanged: Boolean(forecastPlatform && platform && forecastPlatform !== platform),
+    realtime: arrival?.delay != null || departure?.delay != null,
+    cancelled: false,
+    occupancy: { first: null, second: null },
+  }
+}
 
 /** transport.opendata.ch /v1/connections answer → Trip[] (fallback provider). */
 export const parseTransportRoute = (json) => (Array.isArray(json?.connections) ? json.connections : []).map((connection) => {
@@ -306,7 +357,10 @@ export const parseTransportRoute = (json) => (Array.isArray(json?.connections) ?
       }
     }
     const cap = (value) => (Number.isInteger(value) && value >= 1 && value <= 3 ? value : null)
+    const pass = Array.isArray(journey.passList) ? journey.passList : []
     return {
+      journeyId: '',
+      stops: walk ? [] : pass.slice(1, -1).map(transportStop).filter((stop) => stop.name),
       kind: walk ? 'walk' : 'ride',
       line: walk ? '' : text(`${journey.category || ''}${journey.number && !/^\d{4,}$/u.test(journey.number) ? journey.number : ''}`, 16),
       category: walk ? '' : text(journey.category, 8),
@@ -652,6 +706,107 @@ export const pinMissingAlert = ({ route, target, nearest, state = {} }) => {
   const hint = nearest ? `Nächste Verbindung: ${tripLine(nearest)}.` : 'Keine Verbindung in der Nähe gefunden.'
   const change = linkedChange(id, 'commute', 'Verbindung fehlt', `${pinLabel(target.pin)} ist am ${target.day.slice(8, 10)}.${target.day.slice(5, 7)}. nicht im Fahrplan. ${hint} Du kannst die Verbindung in der Strecke neu wählen.`, extra)
   return { changes: [change], state: { ...state, pinMissing: { ...(state.pinMissing || {}), [key]: true } } }
+}
+
+// ── Connection detail: every stop, real time and where the vehicle is ──────
+
+/** A board trip without its stop lists (the boards stay small; the detail asks for them). */
+export const slimTrip = (trip) => (trip ? { ...trip, legs: trip.legs.map(({ stops, ...leg }) => ({ ...leg, stopCount: Array.isArray(stops) ? stops.length : leg.stopCount || 0 })) } : trip)
+
+const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
+const digits = (value) => String(value || '').replace(/\D/gu, '').replace(/^0+/u, '')
+
+/**
+ * Adds what transport.opendata.ch knows per stop to a search.ch leg: the platform (and a change) and
+ * the real arrival/departure where search.ch has none. [other] is the matching leg from
+ * transport.opendata.ch (same vehicle and planned departure) or null. Nothing is invented: a value
+ * neither source has stays empty.
+ */
+export const mergeLegDetail = (leg, other) => {
+  if (!other || leg.kind !== 'ride') return leg
+  const merge = (mine, theirs) => {
+    if (!theirs) return mine
+    const pick = (a, b) => (a && a.delay != null ? a : b && b.delay != null ? { ...b, planned: a?.planned || b.planned } : a || b)
+    return {
+      ...mine,
+      stopId: mine.stopId || theirs.stopId,
+      arrival: pick(mine.arrival, theirs.arrival),
+      departure: pick(mine.departure, theirs.departure),
+      platform: mine.platform || theirs.platform,
+      platformChanged: mine.platformChanged || theirs.platformChanged,
+      realtime: mine.realtime || theirs.realtime,
+    }
+  }
+  const theirs = other.stops || []
+  const stops = (leg.stops || []).map((stop) => merge(stop, theirs.find((item) => (stop.stopId && item.stopId && digits(stop.stopId) === digits(item.stopId)) || sameName(item.name, stop.name))))
+  const end = (mine, them) => ({
+    ...mine,
+    platform: mine.platform || them?.platform || '',
+    platformChanged: mine.platformChanged || Boolean(them?.platformChanged),
+  })
+  return { ...leg, stops, from: end(leg.from, other.from), to: end(leg.to, other.to), platformsFrom: 'transport.opendata.ch' }
+}
+
+/** The transport.opendata.ch leg that is the same vehicle as [leg]: same boarding stop and planned departure, same number when known. */
+export const matchTransportLeg = (leg, trips) => {
+  const planned = parseLocal(leg.from.planned)
+  for (const trip of trips) {
+    for (const other of trip.legs) {
+      if (other.kind !== 'ride') continue
+      if (Math.abs(parseLocal(other.from.planned) - planned) >= MINUTE) continue
+      if (!sameName(other.from.name, leg.from.name) && !(other.from.stopId && leg.from.stopId && digits(other.from.stopId) === digits(leg.from.stopId))) continue
+      const number = digits(leg.trainNo)
+      if (number && digits(other.trainNo) && digits(other.trainNo) !== number && digits(other.line) !== digits(leg.line)) continue
+      return other
+    }
+  }
+  return null
+}
+
+/**
+ * Where the trip is at [now], from the real times (planned where a stop has none). Points of a leg:
+ * 0 = boarding stop, 1..n = intermediate stops, n+1 = the stop where it is left.
+ * state: 'notStarted' | 'atStop' (point) | 'between' (point → point + 1, progress 0–1) |
+ * 'transfer' (after leg, before the next) | 'arrived'. [estimated] when a time it relies on has no real-time data.
+ */
+export const tripPosition = (trip, now) => {
+  const rides = trip.legs.map((leg, index) => ({ leg, index })).filter(({ leg }) => leg.kind === 'ride')
+  if (!rides.length) return { state: 'notStarted', legIndex: 0, point: 0, progress: 0, estimated: true }
+  const ms = (value) => parseLocal(value)
+  for (let r = 0; r < rides.length; r += 1) {
+    const { leg, index } = rides[r]
+    const points = [
+      { arrive: null, leave: { at: ms(leg.from.time), real: leg.from.delay != null } },
+      ...(leg.stops || []).filter((stop) => !stop.cancelled).map((stop) => ({
+        arrive: stop.arrival ? { at: ms(stop.arrival.time), real: stop.arrival.delay != null } : null,
+        leave: stop.departure ? { at: ms(stop.departure.time), real: stop.departure.delay != null } : null,
+        original: (leg.stops || []).indexOf(stop) + 1,
+      })),
+      { arrive: { at: ms(leg.to.time), real: leg.to.delay != null }, leave: null, original: (leg.stops || []).length + 1 },
+    ]
+    points[0].original = 0
+    const startAt = points[0].leave.at
+    if (now < startAt) {
+      return r === 0
+        ? { state: 'notStarted', legIndex: index, point: 0, progress: 0, estimated: !points[0].leave.real }
+        : { state: 'transfer', legIndex: rides[r - 1].index, point: (rides[r - 1].leg.stops || []).length + 1, progress: 0, estimated: !points[0].leave.real }
+    }
+    for (let p = 0; p < points.length - 1; p += 1) {
+      const here = points[p]
+      const next = points[p + 1]
+      const leaveAt = here.leave?.at ?? here.arrive?.at
+      const arriveAt = next.arrive?.at ?? next.leave?.at
+      if (here.arrive && now >= here.arrive.at && now < leaveAt) return { state: 'atStop', legIndex: index, point: here.original, progress: 0, estimated: !(here.arrive.real && here.leave?.real) }
+      if (now >= leaveAt && now < arriveAt) {
+        const span = Math.max(1, arriveAt - leaveAt)
+        return { state: 'between', legIndex: index, point: here.original, progress: Math.min(1, Math.max(0, (now - leaveAt) / span)), estimated: !((here.leave?.real ?? false) && (next.arrive?.real ?? false)) }
+      }
+    }
+    const last = points[points.length - 1]
+    if (now >= last.arrive.at && r === rides.length - 1) return { state: 'arrived', legIndex: index, point: last.original, progress: 1, estimated: !last.arrive.real }
+  }
+  const final = rides[rides.length - 1]
+  return { state: 'arrived', legIndex: final.index, point: (final.leg.stops || []).length + 1, progress: 1, estimated: true }
 }
 
 export const routeLabel = (route) => route.name || `${route.from.name} → ${route.to.name}`

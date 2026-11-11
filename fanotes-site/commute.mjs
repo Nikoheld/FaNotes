@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs'
 import { resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
-  CHECK_IMMINENT_MS, MAX_VIAS, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
+  CHECK_IMMINENT_MS, MAX_VIAS, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
   parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizeRoutes,
   sanitizeSettings, sanitizeStop, tripAlerts, usable, zurichWall,
 } from './commute-logic.mjs'
@@ -15,6 +15,8 @@ export const TRANSPORT = 'https://transport.opendata.ch/v1'
 /** search.ch allows 1000 route queries and 10080 boards a day; keep a margin for other users of the IP. */
 export const ROUTE_BUDGET = 850
 export const COMPLETION_BUDGET = 3000
+/** transport.opendata.ch lookups for the connection detail (platforms and arrival forecasts per stop). */
+export const DETAIL_BUDGET = 900
 export const ROUTE_CACHE_MS = 30_000
 export const STOP_CACHE_MS = 24 * 60 * 60_000
 const USER_AGENT = 'KantiPlus/1.0 (+https://fanotes.fasrv.ch; commute)'
@@ -36,7 +38,7 @@ const searchDate = (ms) => {
 export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(), log = () => {}, budgetFile = '' } = {}) => {
   const cache = new Map()
   const inflight = new Map()
-  let budget = { day: '', route: 0, completion: 0, fallback: 0 }
+  let budget = { day: '', route: 0, completion: 0, fallback: 0, detail: 0 }
   let budgetLoaded = false
   const loadBudget = async () => {
     if (budgetLoaded || !budgetFile) return
@@ -46,7 +48,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   const spend = async (kind) => {
     await loadBudget()
     const day = zurichWall(now().getTime()).day
-    if (budget.day !== day) budget = { day, route: 0, completion: 0, fallback: 0 }
+    if (budget.day !== day) budget = { day, route: 0, completion: 0, fallback: 0, detail: 0 }
     budget[kind] += 1
     if (budgetFile) await fs.writeFile(budgetFile, JSON.stringify(budget), { mode: 0o600 }).catch(() => undefined)
   }
@@ -125,7 +127,31 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     })
   }
 
-  return { stops, trips, budget: () => ({ ...budget }), clear: () => cache.clear() }
+  /**
+   * The same vehicle from transport.opendata.ch, for its platforms and arrival forecasts per stop:
+   * one query for the leg's own stops at its planned departure. Null when the budget is spent or the
+   * provider has no match; the detail then shows what search.ch has.
+   */
+  const legDetail = async (leg) => {
+    const at = parseLocal(leg.from.planned)
+    if (!Number.isFinite(at)) return null
+    const when = searchDate(at)
+    const key = `detail:${leg.from.stopId || leg.from.name}>${leg.to.stopId || leg.to.name}@${when.isoDay}T${when.time}:${leg.trainNo || leg.line}`
+    try {
+      const answer = await cached(key, ROUTE_CACHE_MS, async () => {
+        if (!(await left('detail', DETAIL_BUDGET))) throw Object.assign(new Error('budget'), { status: 429 })
+        await spend('detail')
+        const params = new URLSearchParams({ from: leg.from.stopId || leg.from.name, to: leg.to.stopId || leg.to.name, date: when.isoDay, time: when.time, limit: '3' })
+        return { trips: parseTransportRoute(await getJson(`${TRANSPORT}/connections?${params}`)) }
+      })
+      return matchTransportLeg(leg, answer.trips || [])
+    } catch (error) {
+      if (error?.status !== 429) log('warn', `Haltestellen-Details transport.opendata.ch fehlgeschlagen (${error?.status || error?.name || 'error'})`)
+      return null
+    }
+  }
+
+  return { stops, trips, legDetail, budget: () => ({ ...budget }), clear: () => cache.clear() }
 }
 
 /** For an arrive target: trips arriving in time, the latest departure first (no needless early start). */
@@ -268,7 +294,9 @@ export const createCommute = (options = {}) => {
         change = list.find((trip) => usable(trip, at)) || null
       } catch { /* the pinned board still stands */ }
     }
-    return { routeId: route.id, target, trips: ranked, alternatives, viaDropped, pinned, change, updatedAt: answer.at || now().toISOString(), stale: Boolean(answer.stale) }
+    // Boards carry no stop lists (they are polled often); the connection detail asks for them.
+    const slimPinned = pinned ? { ...pinned, trip: slimTrip(pinned.trip), nearest: slimTrip(pinned.nearest) } : null
+    return { routeId: route.id, target, trips: ranked.map(slimTrip), alternatives: alternatives.map(slimTrip), viaDropped, pinned: slimPinned, change: slimTrip(change), updatedAt: answer.at || now().toISOString(), stale: Boolean(answer.stale) }
   }
 
   const board = async (accountId, routeId = '') => {
@@ -406,5 +434,44 @@ export const createCommute = (options = {}) => {
     due.delete(accountId)
   }
 
-  return { view, save, board, tripsFor, connections, stops: provider.stops, checkAccount, tick, remove, provider, due, isoZurich }
+  /**
+   * The connection detail: one trip of a route with every leg, every intermediate stop, real times,
+   * platforms and where the vehicle is now. [tripId] and [plannedDeparture] come from a board.
+   * `gone` when the timetable no longer has that trip.
+   */
+  const tripDetail = async (accountId, routeId, tripId, plannedDeparture) => {
+    const { routes } = await read(accountId)
+    const route = routes.find((item) => item.id === routeId)
+    if (!route) return null
+    const planned = parseLocal(plannedDeparture)
+    if (!tripId || !Number.isFinite(planned)) return { trip: null, gone: true }
+    const at = now().getTime()
+    let answer
+    try {
+      answer = await provider.trips({ from: route.from, to: route.to, vias: route.vias, at: planned - 2 * 60_000, timeType: 'depart' })
+    } catch {
+      return { trip: null, gone: false, stale: true, updatedAt: now().toISOString() }
+    }
+    const found = (answer.trips || []).find((trip) => trip.id === tripId)
+    if (!found) return { trip: null, gone: true, updatedAt: answer.at || now().toISOString(), stale: Boolean(answer.stale) }
+    const legs = []
+    let platforms = false
+    for (const leg of found.legs) {
+      if (leg.kind !== 'ride' || !provider.legDetail) { legs.push(leg); continue }
+      const other = await provider.legDetail(leg)
+      if (other) platforms = true
+      legs.push(mergeLegDetail(leg, other))
+    }
+    const trip = { ...found, legs }
+    return {
+      trip,
+      position: tripPosition(trip, at),
+      updatedAt: answer.at || now().toISOString(),
+      stale: Boolean(answer.stale),
+      sources: { realtime: answer.provider || 'search.ch', platforms: platforms ? 'transport.opendata.ch' : null, formation: null },
+      gone: false,
+    }
+  }
+
+  return { view, save, board, tripsFor, tripDetail, connections, stops: provider.stops, checkAccount, tick, remove, provider, due, isoZurich }
 }
