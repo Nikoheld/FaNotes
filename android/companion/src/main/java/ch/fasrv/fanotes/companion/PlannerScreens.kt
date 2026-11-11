@@ -197,7 +197,7 @@ fun TodayScreen(model: CompanionModel) {
             }
         }
         if ("commute" in cards && !model.demo) item(key = "commute") {
-            CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail,
+            CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail, onOpenTrip = model::openCommuteTrip,
                 onAdd = { model.editCommuteRoute(null) }, modifier = Modifier.padding(top = 12.dp), onRepick = { model.editCommuteRoute(it, openPicker = true) })
         }
         if ("tasks" in cards) {

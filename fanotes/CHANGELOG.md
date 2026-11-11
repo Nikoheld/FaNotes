@@ -1,5 +1,11 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.29
+
+- Pendeln: tap a connection (on the route, on Heute or in the widget) to see every train, bus and tram of it with all stops in between, like the SBB app: planned and real times per stop, delays in colour, platforms and platform changes, cancelled stops, transfers with "Anschluss gefährdet/verpasst" and walking time, occupancy per leg.
+- The connection detail shows where the vehicle is now (at a stop or between two stops) and refreshes every 30 seconds while it is open.
+- Stops without real-time data show their planned time only, marked; nothing is guessed.
+
 ## 2026.11.2-beta.28
 
 - Fix: pairing Kanti+ im Browser failed with "NetworkOnMainThreadException". Pairing, the browser list and removing a browser now run in the background, with a progress row and a clear error after 15 seconds instead of a hang.

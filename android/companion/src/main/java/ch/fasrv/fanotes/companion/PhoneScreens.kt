@@ -203,7 +203,7 @@ fun CompanionRoot(model: CompanionModel) {
                                 Page.Course -> CourseScreen(model)
                                 Page.Exams, Page.Absences, Page.Updates, Page.Statement -> SchoolRecordScreen(model, current.page)
                                 Page.Settings, Page.Connections, Page.Appearance, Page.Navigation, Page.Planning, Page.Notifications, Page.Diagnostics, Page.Profile, Page.WebAccess -> SettingsScreen(model, current.page)
-                                Page.Commute, Page.CommuteEdit, Page.CommuteDetail -> CommuteScreen(model, current.page)
+                                Page.Commute, Page.CommuteEdit, Page.CommuteDetail, Page.CommuteTrip -> CommuteScreen(model, current.page)
                                 Page.DocSearch -> if (model.notesAccount) DocSearchSettings(model) else TodayScreen(model)
                                 Page.Trash -> if (model.notesAccount) TrashScreen(model) else TodayScreen(model)
                                 else -> when (current.destination) {

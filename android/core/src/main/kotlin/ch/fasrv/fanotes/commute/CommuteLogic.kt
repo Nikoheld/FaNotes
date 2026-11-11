@@ -203,6 +203,8 @@ data class CommuteRow(
     val transfers: Int,
     /** A replacement offered for a cancelled or broken first trip. */
     val alternative: Boolean = false,
+    /** ISO planned departure of the trip, with [tripId] the key of the connection detail. */
+    val plannedDeparture: String = "",
 )
 
 fun commuteRow(trip: Trip, alternative: Boolean = false, zone: ZoneId = COMMUTE_ZONE): CommuteRow {
@@ -223,6 +225,7 @@ fun commuteRow(trip: Trip, alternative: Boolean = false, zone: ZoneId = COMMUTE_
         status = trip.status,
         transfers = trip.transfers,
         alternative = alternative,
+        plannedDeparture = trip.plannedDeparture,
     )
 }
 

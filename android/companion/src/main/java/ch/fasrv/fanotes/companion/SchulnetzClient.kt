@@ -826,6 +826,10 @@ class SchulnetzClient(
     fun commuteConnections(session: SchoolAuth, path: String): List<ch.fasrv.fanotes.commute.Trip> =
         ch.fasrv.fanotes.commute.parseTrips(commuteGet(session, path))
 
+    /** One connection with every stop, platforms and the vehicle position (connection detail). Null when the answer is unreadable. */
+    fun commuteTripDetail(session: SchoolAuth, routeId: String, tripId: String, plannedDeparture: String): ch.fasrv.fanotes.commute.TripDetail? =
+        ch.fasrv.fanotes.commute.parseTripDetail(commuteGet(session, ch.fasrv.fanotes.commute.tripDetailPath(routeId, tripId, plannedDeparture)))
+
     /** Links a connection the phone reads itself (TAM): no school secret, the server never polls it. */
     fun linkDevice(session: SchoolAuth, baseUrl: String, deviceId: String, displayName: String): SchulnetzLinkState {
         val (code, body) = fanotes("PUT", "/link", session, deviceLinkBody(baseUrl, deviceId, displayName))

@@ -55,6 +55,7 @@ import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
 import ch.fasrv.fanotes.schulnetz.webLoginUrl
 import ch.fasrv.fanotes.commute.Route
 import ch.fasrv.fanotes.commute.Schedule
+import ch.fasrv.fanotes.commute.Trip
 import ch.fasrv.fanotes.commute.commuteHiddenLabels
 import ch.fasrv.fanotes.commute.movedItem
 import ch.fasrv.fanotes.commute.newRouteId
@@ -306,6 +307,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     // Pendelstrecken (see CommuteStore): routes and boards, the open route, the editor draft.
     var commute by mutableStateOf(CommuteUi())
     var commuteDetailId by mutableStateOf("")
+    /** The connection the detail page shows (route id is [commuteDetailId]). */
+    var commuteTrip by mutableStateOf(CommuteTripRef("", "", ""))
     var commuteDraft by mutableStateOf<Route?>(null)
     var commuteDraftNew by mutableStateOf(true)
     var commuteSaving by mutableStateOf(false)
@@ -573,6 +576,21 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun openCommuteDetail(routeId: String) {
         commuteDetailId = routeId
         navigate(Page.CommuteDetail)
+    }
+
+    /** Opens the connection detail of [trip] on [routeId]. */
+    fun openCommuteTrip(routeId: String, trip: Trip) {
+        commuteDetailId = routeId
+        commuteTrip = CommuteTripRef(routeId, trip.id, trip.plannedDeparture)
+        navigate(Page.CommuteTrip)
+    }
+
+    /** From the connection detail to the route's connection list, replacing the detail so Back does not return to it. */
+    fun showCommuteRoute(routeId: String) {
+        commuteDetailId = routeId
+        if (route.page == Page.CommuteTrip && history.lastOrNull()?.page == Page.CommuteDetail) { back(); return }
+        navMove = NavMove.Forward
+        route = route.copy(page = Page.CommuteDetail)
     }
 
     /** Opens the editor for [routeId], or for a new route. */
@@ -1311,6 +1329,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         this.route = companionRoute(route)
         if (route.section == "Pendeln") {
             commuteDetailId = route.highlightIds.firstOrNull().orEmpty()
+            commuteTripLink(route.highlightIds)?.let { commuteTrip = it }
             refreshCommute(force = true)
         }
         focusCourseId = route.courseId
