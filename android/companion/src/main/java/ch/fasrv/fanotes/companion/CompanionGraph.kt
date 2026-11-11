@@ -143,6 +143,7 @@ class CompanionGraph(private val context: Context) {
     val snapshot = MutableStateFlow(SchulnetzSnapshot())
     val link = MutableStateFlow(SchulnetzLinkState())
     val client = SchulnetzClient()
+    val mensaStore by lazy { MensaStore(File(context.filesDir, "mensa.json"), client) }
     val schulnetzLog = SchulnetzLog(File(context.filesDir, "schulnetz"))
     val trail = DiagnosticTrail()
     val browser = SchulnetzBrowser(context, schulnetzLog)

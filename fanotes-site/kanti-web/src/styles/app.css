@@ -453,3 +453,11 @@ tr:last-child td { border-bottom: none; }
 /* Code from the app */
 .claim-or { text-align: center; margin: 14px 0 4px; }
 .claim-form input { font-variant-numeric: tabular-nums; letter-spacing: 0.08em; text-transform: uppercase; }
+/* Mensa card in the Heute side column */
+.mensa-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; margin-bottom: 16px; }
+.mensa-day { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+.mensa-closed { margin: 0; }
+.mensa-menu { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.mensa-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mensa-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.mensa-price { font-size: 13px; color: var(--muted); white-space: nowrap; }

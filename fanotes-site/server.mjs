@@ -16,6 +16,7 @@ import { credentialOr } from './credentials.mjs'
 import { handleMcpRequest } from './mcp-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
+import { createMensa } from './mensa.mjs'
 import { createKantiWebApi, createKantiWebAppRoutes, createKantiWebStore } from './kanti-web-api.mjs'
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
@@ -62,6 +63,7 @@ setAccountDeletedHook(async (accountId) => {
   await schulnetz.unlink(accountId)
   await kantiWebStore.forgetAccount(accountId)
 })
+const mensa = createMensa({})
 const KANTI_WEB_DIST = resolve(process.env.KANTI_WEB_DIST || join(ROOT, 'kanti-web', 'dist'))
 const kantiWeb = createKantiWebApi({
   store: kantiWebStore,
@@ -585,6 +587,7 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost')
     if (await handleBackupRequest(request, response, url)) return
     if (await handleSyncRequest(request, response, url)) return
+    if (await mensa.handle(request, response, url)) return
     if (await schulnetz.handle(request, response, url)) return
     if (await kantiWeb.handle(request, response, url)) return
     if (await handleMcpRequest(request, response, url)) return

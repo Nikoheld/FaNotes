@@ -1172,4 +1172,9 @@
     <string name="delivery_no_push">Push is not available on this device. Kanti+ checks about every %1$s.</string>
     <string name="interval_minutes">%1$d minutes</string>
     <string name="interval_hours">%1$d hours</string>
+    <string name="mensa_setting">Mensa menu on the start page</string>
+    <string name="mensa_setting_body">Shows today\'s menu of the Mensa Alte Kanti on Today. Off by default.</string>
+    <string name="mensa_title">Mensa</string>
+    <string name="mensa_closed">Mensa closed</string>
+    <string name="mensa_student_price">Students CHF %1$s</string>
 </resources>

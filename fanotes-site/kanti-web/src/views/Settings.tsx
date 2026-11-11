@@ -57,6 +57,7 @@ export const Settings = () => {
             </label>
             <Toggle checked={prefs.snowfall} onChange={(value) => setPrefs({ snowfall: value })} label={t.snowfall} disabled={prefs.theme !== 'snow'} />
             <Toggle checked={prefs.showWeekend} onChange={(value) => setPrefs({ showWeekend: value })} label={kanti.language === 'de' ? 'Wochenende im Stundenplan' : 'Weekend in the timetable'} />
+            <Toggle checked={prefs.showMensa} onChange={(value) => setPrefs({ showMensa: value })} label={t.mensaSetting} />
             <label className="field">
               <span className="field-label">{t.language}</span>
               <select value={prefs.language} onChange={(event) => setPrefs({ language: event.target.value as 'auto' | 'de' | 'en' })}>

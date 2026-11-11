@@ -11,6 +11,7 @@ export interface Prefs {
   browserAlerts: boolean
   compactTimetable: boolean
   showWeekend: boolean
+  showMensa: boolean
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -23,6 +24,7 @@ export const DEFAULT_PREFS: Prefs = {
   browserAlerts: false,
   compactTimetable: false,
   showWeekend: false,
+  showMensa: false,
 }
 
 const KEY = 'kanti-web:prefs'

@@ -1,0 +1,308 @@
+{
+ "unit": {
+  "status": "OK",
+  "cache": true,
+  "data": {
+   "unit-query": [
+    {
+     "ID": 472,
+     "UnitName1": "Mensa Alte Kanti"
+    }
+   ]
+  }
+ },
+ "outlet": {
+  "status": "OK",
+  "cache": true,
+  "data": {
+   "outlet-query": [
+    {
+     "ID": 706,
+     "OutletName1": "{\"DE\":\"Mensa Alte Kanti\"}",
+     "OutletWeekdays1": "1,2,3,4,5"
+    }
+   ]
+  }
+ },
+ "menu": {
+  "status": "OK",
+  "cache": true,
+  "data": {
+   "menu-query": [
+    {
+     "ID": 490696,
+     "MenuDate1": "2026-11-08T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Cheesburger im Bun\"}",
+     "MenuIngredients2": "{\"DE\":\"BBQ Sauce\"}",
+     "MenuIngredients3": "{\"DE\":\"Pommes Frites\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 490697,
+     "MenuDate1": "2026-11-08T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Spätzlipfanne\"}",
+     "MenuIngredients2": "{\"DE\":\"Waldpilzsauce, Zwiebelschweizi\"}",
+     "MenuIngredients3": "{\"DE\":\"Tagessalat\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 2,
+     "Menuline": {
+      "ID": 1608,
+      "MenulineLabel1": "{\"DE\":\"Vegi\"}"
+     }
+    },
+    {
+     "ID": 490698,
+     "MenuDate1": "2026-11-09T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Pouletgeschnetzeltes ( CH )\"}",
+     "MenuIngredients2": "{\"DE\":\"Zürcher Art, Teigwaren\"}",
+     "MenuIngredients3": "{\"DE\":\"und Tagesgemüse\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 490749,
+     "MenuDate1": "2026-11-09T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Weissweinrisotto\"}",
+     "MenuIngredients2": "{\"DE\":\"mit Antipastigemüse\"}",
+     "MenuIngredients3": "{\"DE\":\"Parmesan und Salat\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 2,
+     "Menuline": {
+      "ID": 1608,
+      "MenulineLabel1": "{\"DE\":\"Vegi\"}"
+     }
+    },
+    {
+     "ID": 490751,
+     "MenuDate1": "2026-11-10T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Fleischkäse ( CH ) Bratensauce\"}",
+     "MenuIngredients2": "{\"DE\":\"Kartoffelstock und Gemüse\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 490752,
+     "MenuDate1": "2026-11-10T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Fetataschen im Brickteig\"}",
+     "MenuIngredients2": "{\"DE\":\"Joghurt-Minzendip\"}",
+     "MenuIngredients3": "{\"DE\":\"Griechisches Gemüse\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 2,
+     "Menuline": {
+      "ID": 1608,
+      "MenulineLabel1": "{\"DE\":\"Vegi\"}"
+     }
+    },
+    {
+     "ID": 490754,
+     "MenuDate1": "2026-11-11T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Scharbenfilet  ( D ) gebacken\"}",
+     "MenuIngredients2": "{\"DE\":\"Zitronenmayo, Salzkartoffeln\"}",
+     "MenuIngredients3": "{\"DE\":\"und Blattspinat\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 490755,
+     "MenuDate1": "2026-11-11T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Pasta an\"}",
+     "MenuIngredients2": "{\"DE\":\"Zucchini-Basilikumsauce\"}",
+     "MenuIngredients3": "{\"DE\":\"Parmesan und Tagessalat\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 490757,
+     "MenuDate1": "2026-11-12T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Schlemmerbuffet\"}",
+     "MenuIngredients2": "{\"DE\":\"zum selber zusammenstellen\"}",
+     "MenuIngredients3": "{\"DE\":\"es hät, solangs hät\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 490759,
+     "MenuDate1": "2026-11-12T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"als Vegivariante\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 2,
+     "Menuline": {
+      "ID": 1608,
+      "MenulineLabel1": "{\"DE\":\"Vegi\"}"
+     }
+    },
+    {
+     "ID": 492052,
+     "MenuDate1": "2026-11-15T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Rinder/Lamm Meatballs ( CH )\"}",
+     "MenuIngredients2": "{\"DE\":\"Gemüsetaboulet´ und Minzdip\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 492053,
+     "MenuDate1": "2026-11-15T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Kartoffel - Lauchgratin\"}",
+     "MenuIngredients2": "{\"DE\":\"Gebackene Aubergine\"}",
+     "MenuIngredients3": "{\"DE\":\"Tomatencoulis und Salat\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 2,
+     "Menuline": {
+      "ID": 1608,
+      "MenulineLabel1": "{\"DE\":\"Vegi\"}"
+     }
+    },
+    {
+     "ID": 492054,
+     "MenuDate1": "2026-11-16T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Älpler Maccronen mit Schinken ( CH )\"}",
+     "MenuIngredients2": "{\"DE\":\"Kartoffeln und Zwiebelschweizi\"}",
+     "MenuIngredients3": "{\"DE\":\"Apfelmus und Salat\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 492055,
+     "MenuDate1": "2026-11-16T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Kürbispiccata\"}",
+     "MenuIngredients2": "{\"DE\":\"Tomatenrisotto\"}",
+     "MenuIngredients3": "{\"DE\":\"Parmesan und Salat\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 492057,
+     "MenuDate1": "2026-11-17T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Geflügelragout ( CH ) an \"}",
+     "MenuIngredients2": "{\"DE\":\"Waldpilzsauce\"}",
+     "MenuIngredients3": "{\"DE\":\"Erbsen und Pilawreis\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 492079,
+     "MenuDate1": "2026-11-17T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Riithaler Schupfnudeln\"}",
+     "MenuIngredients2": "{\"DE\":\"Birnen, Lauch und Appenzeller\"}",
+     "MenuIngredients3": "{\"DE\":\"Tagessalat\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 2,
+     "Menuline": {
+      "ID": 1608,
+      "MenulineLabel1": "{\"DE\":\"Vegi\"}"
+     }
+    },
+    {
+     "ID": 492081,
+     "MenuDate1": "2026-11-18T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Pizza mit Thunfisch, Kapern\"}",
+     "MenuIngredients2": "{\"DE\":\"und Zwiebeln, Tagessalat\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 492082,
+     "MenuDate1": "2026-11-18T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Tortellini mit\"}",
+     "MenuIngredients2": "{\"DE\":\"Zucchetti und Tomaten, Kräutersauce\"}",
+     "MenuIngredients3": "{\"DE\":\"Parmesan und Salat\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 2,
+     "Menuline": {
+      "ID": 1608,
+      "MenulineLabel1": "{\"DE\":\"Vegi\"}"
+     }
+    },
+    {
+     "ID": 492083,
+     "MenuDate1": "2026-11-19T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"Schlemmerbuffet \"}",
+     "MenuIngredients2": "{\"DE\":\"zum selber zusammenstellen\"}",
+     "MenuIngredients3": "{\"DE\":\"es hät, solangs hät\"}",
+     "MenuPrice1": 13.5,
+     "MenuPrice2": 10.5,
+     "MenuOrder1": 1,
+     "Menuline": {
+      "ID": 1607,
+      "MenulineLabel1": "{\"DE\":\"Daily\"}"
+     }
+    },
+    {
+     "ID": 492084,
+     "MenuDate1": "2026-11-19T23:00:00.000Z",
+     "MenuIngredients1": "{\"DE\":\"als Vegivariante\"}",
+     "MenuPrice1": 12.5,
+     "MenuPrice2": 9.5,
+     "MenuOrder1": 2,
+     "Menuline": {
+      "ID": 1608,
+      "MenulineLabel1": "{\"DE\":\"Vegi\"}"
+     }
+    }
+   ]
+  }
+ }
+}

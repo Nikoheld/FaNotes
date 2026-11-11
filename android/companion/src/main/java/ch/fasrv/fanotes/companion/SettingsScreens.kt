@@ -251,6 +251,11 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     }
                 }
             }
+            item(key = "mensa-toggle") {
+                Group(Modifier.padding(top = 8.dp)) {
+                    ToggleRow(t(R.string.mensa_setting), t(R.string.mensa_setting_body), model.desk.showMensa) { model.updateDesk(model.desk.copy(showMensa = it)); if (it) model.refreshMensa() }
+                }
+            }
             item(key = "timetable-head") { SectionLabel(t(R.string.timetable)) }
             item(key = "timetable") {
                 Group {

@@ -67,6 +67,8 @@ import java.util.UUID
 class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var desk by mutableStateOf(ch.fasrv.fanotes.schulnetz.DeskPrefs(theme = graph.themeId()))
     var hidden by mutableStateOf(emptyList<ch.fasrv.fanotes.schulnetz.HiddenLesson>())
+    /** Last known Mensa menu (only read while the start-page card is switched on). */
+    var mensa by mutableStateOf<ch.fasrv.fanotes.schulnetz.MensaFeed?>(null)
     var route by mutableStateOf(CompanionRoute())
         private set
     private var startTabApplied = false
@@ -517,6 +519,16 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         if (demo) return
         // The app's process scope: leaving the app right away does not cancel a sync half way.
         graph.scope.launch { runCatching { graph.syncOnForeground("resume") } }
+        refreshMensa()
+    }
+
+    /** Shows the cached Mensa menu and refreshes it when it is a few hours old. Does nothing while the card is off. */
+    fun refreshMensa(force: Boolean = false) {
+        if (demo || !desk.showMensa) return
+        viewModelScope.launch {
+            val feed = withContext(Dispatchers.IO) { runCatching { graph.mensaStore.refresh(force) }.getOrNull() }
+            if (feed != null) mensa = feed
+        }
     }
 
     /** Pull-to-refresh: the server's copy and the shown connection's own Schulnetz read, without a blocking loader. */
