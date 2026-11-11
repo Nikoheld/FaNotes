@@ -187,6 +187,9 @@ const parseEvent = (obj) => {
     eventType: text(obj, 'eventType', 'type'),
     color: text(obj, 'color'),
     timetableText: text(obj, 'timetableText'),
+    // Lesson marks (lessonMarker) when a client sends them; absent stays absent (seedLessonMarks).
+    ...(Object.hasOwn(obj || {}, 'marker') ? { marker: text(obj, 'marker') } : {}),
+    ...(text(obj, 'substitute') ? { substitute: text(obj, 'substitute') } : {}),
   }
 }
 
@@ -300,7 +303,7 @@ const cancelledBlob = (event) => `${event.status} ${event.eventType} ${event.tex
 export const isCancelled = (event) => ['cancel', 'cancelled', 'canceled', 'abgesagt', 'fällt', 'faellt', 'entfällt', 'entfaellt', 'ausgefallen', 'cancellation', 'annull']
   .some((word) => cancelledBlob(event).includes(word))
 
-export const isSubstitution = (event) => ['substitution', 'vertretung', 'suppl', 'supply', 'stellvertretung']
+export const isSubstitution = (event) => Boolean(cleanSchulnetzText(event?.substitute)) || ['substitution', 'vertretung', 'suppl', 'supply', 'stellvertretung']
   .some((word) => cancelledBlob(event).includes(word))
 
 const cdataWrapped = /^<!\[CDATA\[([\s\S]*)\]\]>$/iu
@@ -426,6 +429,8 @@ const eventKey = (event) => [
   cleanSchulnetzText(event.status), cleanSchulnetzText(event.text),
   (event.teachers || []).map((teacher) => cleanSchulnetzText(teacher)).join(','),
   isCancelled(event) ? 'aus' : 'da', cleanSchulnetzText(event.courseName),
+  // A substitute teacher (`neuerlehrer`) is part of the lesson; absent, the key stays as before.
+  ...(cleanSchulnetzText(event.substitute) ? [cleanSchulnetzText(event.substitute)] : []),
 ].join('|')
 
 const formatMark = (value) => {
@@ -1222,7 +1227,8 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   if (prefs.grades) diffGradeList(previous.grades || [], next.grades || [], changes)
   if (prefs.timetable) {
     const lessonChanges = []
-    diffAgenda((previous.events || []).filter(isLesson), (next.events || []).filter(isLesson), 'timetable', 'Stundenplan geändert', 'Lektion entfernt', lessonChanges, freshWeeks, next.exams || [])
+    const nextLessons = (next.events || []).filter(isLesson)
+    diffAgenda(seedLessonMarks((previous.events || []).filter(isLesson), nextLessons, now), nextLessons, 'timetable', 'Stundenplan geändert', 'Lektion entfernt', lessonChanges, freshWeeks, next.exams || [])
     // So many lesson changes in one read is the timetable reloading, not news.
     if (lessonChanges.length <= TIMETABLE_BURST) changes.push(...lessonChanges)
   }
@@ -1328,6 +1334,33 @@ const diffGradeList = (previous, next, changes) => {
       gradeKeys: gradeNotifyKeys(grade, nextLooseCounts.get(loose) === 1),
     }))
   }
+}
+
+/** A mark the first read with marks finds on a lesson up to this far ahead is still news. */
+export const LESSON_MARK_NEWS_MS = 14 * 24 * 60 * 60 * 1000
+
+/**
+ * Lessons read before [lessonMarker] existed carry no `marker` field, so they cannot say whether they
+ * were already cancelled. For those, the first read with marks is the baseline: its cancellation and
+ * substitute count as known, except for lessons still to come within [LESSON_MARK_NEWS_MS], which
+ * nobody has been told about yet. So the first read does not announce a semester of past changes.
+ */
+export const seedLessonMarks = (previous, next, now = new Date()) => {
+  const at = now instanceof Date ? now.getTime() : Date.parse(now)
+  const marked = next.filter((event) => Object.hasOwn(event, 'marker'))
+  if (!marked.length) return previous
+  const weekId = (event) => `${event.id}|${weekMondayKey(event.start) || ''}`
+  const byWeekId = new Map(marked.map((event) => [weekId(event), event]))
+  return previous.map((event) => {
+    if (Object.hasOwn(event, 'marker')) return event
+    const fresh = byWeekId.get(weekId(event)) || marked.find((candidate) => sameLessonSlot(event, candidate))
+    if (!fresh) return event
+    const start = schoolStamp(fresh.start)
+    const end = schoolStamp(fresh.end || fresh.start)
+    const upcoming = Number.isFinite(start) && Number.isFinite(end) && end > at && start - at <= LESSON_MARK_NEWS_MS
+    if (upcoming) return { ...event, marker: '' }
+    return { ...event, status: fresh.status, marker: fresh.marker, substitute: fresh.substitute || '' }
+  })
 }
 
 const diffAgenda = (previous, next, category, created, removed, changes, skipWeeks = new Set(), spareAgainst = []) => {
@@ -1721,6 +1754,7 @@ export const parseSchedulerXml = (xml) => {
     if (!start) continue
     const end = schedulerStamp(field('end_date'), field('bdatum'), field('bzeit')) || start
     const comment = field('kommentar')
+    const marker = lessonMarker(field('event_type'), field('markierung'), field('textdeco'))
     const named = ['fachbezeichnung', 'kursbezeichnung', 'bezeichnung', 'fach'].map((name) => field(name)).find((value) => value && !looksLikeCourseCode(value)) || ''
     const rawText = field('text')
     const text = named && (!rawText || looksLikeCourseCode(rawText)) ? named : rawText
@@ -1737,13 +1771,33 @@ export const parseSchedulerXml = (xml) => {
       teachers: field('lehrerkuerzelname') ? [field('lehrerkuerzelname')] : [],
       courseId: field('kursid'),
       courseName: course,
-      status: /fällt|faellt/iu.test(comment) ? 'cancelled' : '',
+      status: marker === 'cancelled' || /fällt|faellt/iu.test(comment) ? 'cancelled' : '',
       eventType: canonicalEventType(field('event_type')),
       color: field('color'),
       timetableText: text,
+      marker,
+      substitute: marker ? field('neuerlehrername') || field('neuerlehrer') : '',
     })
   }
   return events
+}
+
+/**
+ * The mark a school puts on a timetable lesson (`markierung`, offered as "Keine Markierung", "Neu
+ * eingefügt", "Verschoben", "Gelöscht" and school-defined labels such as "Geändert"). Schulnetz draws
+ * a deleted lesson struck through (`textdeco` line-through). Only lessons carry these marks: on an
+ * exam the same field holds the exam material.
+ */
+export const LESSON_MARKERS = ['cancelled', 'added', 'moved', 'changed']
+export const lessonMarker = (eventType, markierung, textdeco) => {
+  const kind = cleanSchulnetzText(eventType).toLowerCase()
+  if (kind && kind !== '0_stp' && kind !== 'lesson') return ''
+  const mark = cleanSchulnetzText(markierung).toLowerCase()
+  if (mark === 'deleted' || /line-through/iu.test(cleanSchulnetzText(textdeco))) return 'cancelled'
+  if (!mark || mark === 'none') return ''
+  if (mark === 'new') return 'added'
+  if (mark === 'moved') return 'moved'
+  return 'changed'
 }
 
 /** Next Terminliste page (`sRow`), not a filter, sort, show-all, or the page just loaded. */
@@ -1803,6 +1857,11 @@ export const extractWebIds = (url, html) => {
 }
 
 export const WEEK_ADJACENT_MS = 30 * 60 * 1000
+/**
+ * This week and the next are read again after at most this long, by a full read or by a grade check,
+ * so a cancelled or changed lesson reaches the phone within the same 10 minutes as a grade.
+ */
+export const LESSON_CHECK_MS = 8 * 60 * 1000
 export const WEEK_FAR_MS = 24 * 60 * 60 * 1000
 export const WEEK_CAP = 48
 /** Mondays tried on each side when the page has no start or end. Not a school year. */
@@ -1972,7 +2031,8 @@ export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = 
     const distance = Math.abs(weekDistance(monday, current))
     const stamp = fetchedAt?.[monday]
     const soon = distance <= 1 || unreadWeeks.has(monday) || (monday > current && distance <= WEEK_PROBE && emptyWeeks.has(monday))
-    const wanted = monday === current || !stamp || (soon ? stampAge(stamp, now) >= WEEK_ADJACENT_MS : stampAge(stamp, now) >= WEEK_FAR_MS)
+    const refresh = weekDistance(monday, current) === 1 ? LESSON_CHECK_MS : soon ? WEEK_ADJACENT_MS : WEEK_FAR_MS
+    const wanted = monday === current || !stamp || stampAge(stamp, now) >= refresh
     if (!wanted) continue
     if (distance <= WEEK_PROBE) due.push(monday)
     else beyond.push(monday)
@@ -1988,6 +2048,20 @@ export const planWeekFetches = ({ mondays = [], fetchedAt = {}, icalFetchedAt = 
   const first = Object.keys(fetchedAt || {}).length === 0 && !icalFetchedAt
   const icalDue = Boolean(icalAvailable && (first || stampAge(icalFetchedAt, now) >= WEEK_FAR_MS))
   return { fetch: due, fetchIcal: icalDue }
+}
+
+/**
+ * The lesson weeks a grade check reads too: this week and the next, when their last read is
+ * [LESSON_CHECK_MS] old. Between full reads (evenings, nights, weekends) this keeps cancellations
+ * inside the grade window. Weeks outside the semester Schulnetz offers are left out.
+ */
+export const lessonCheckWeeks = ({ weekFetched = {}, today, now, spanStart = '', spanEnd = '' } = {}) => {
+  const current = weekMonday(today)
+  if (!current) return []
+  return [current, addDays(current, 7)].filter((monday) => {
+    if (parsedDay(spanStart) && parsedDay(spanEnd) && (addDays(monday, 6) < spanStart || monday > spanEnd)) return false
+    return stampAge(weekFetched?.[monday], now) >= LESSON_CHECK_MS
+  })
 }
 
 export const eventQueryWindow = ({ spanStart = '', spanEnd = '', weekFetched = {}, icalFetchedAt = '', today, now } = {}) => {
@@ -2130,7 +2204,9 @@ export const prepareAgendaRead = (stored = {}, next = {}) => {
   const knownExams = distinctExams(Object.entries(stored).filter(([key, value]) => Number.isFinite(Date.parse(value.examWeekFetched?.[key] || ''))).flatMap(([, week]) => week.exams || []))
   const keys = new Set([...Object.keys(stored), ...Object.keys(next.weekFetched || {}), ...Object.keys(next.examWeekFetched || {}),
     ...(next.events || []).concat(next.exams || []).map((event) => weekMondayKey(eventDay(event))).filter(Boolean)])
-  const at = Date.parse(next.fetchedAt || '')
+  // A grade check that also read lesson weeks keeps fetchedAt (the full read) and stamps lessonsFetchedAt.
+  const readAt = [next.fetchedAt, next.lessonsFetchedAt].map((stamp) => Date.parse(stamp || '')).filter(Number.isFinite)
+  const at = readAt.length ? Math.max(...readAt) : Number.NaN
   const fresh = (stamp, old) => {
     const value = Date.parse(stamp || '')
     const prior = Date.parse(old || '')

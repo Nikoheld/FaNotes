@@ -354,8 +354,12 @@ private fun NextHero(model: CompanionModel, entry: AgendaEntry, now: Instant, zo
                 textDecoration = if (cancelled) TextDecoration.LineThrough else TextDecoration.None, modifier = Modifier.padding(top = 2.dp))
             val meta = listOfNotNull(entry.end.takeIf { it.isNotBlank() && it != entry.start }?.let { t(R.string.until_time, it) }, people.takeIf { it.isNotBlank() }, if (entry.kind != AgendaKind.Lesson) entry.kind.uiLabel() else null)
             if (meta.isNotEmpty()) Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-            if (cancelled || entry.school?.isSubstitution() == true) Row(Modifier.padding(top = 10.dp)) {
-                if (cancelled) Tag(t(R.string.cancelled), scheme.error) else Tag(t(R.string.substitution), s.warning)
+            val heroMark = if (cancelled) null else entry.school?.let { lessonMarkTag(it, s.warning) }
+            if (cancelled || entry.school?.isSubstitution() == true || heroMark != null) Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (cancelled) Tag(t(R.string.cancelled), scheme.error) else {
+                    if (entry.school?.isSubstitution() == true) Tag(t(R.string.substitution), s.warning)
+                    heroMark?.let { Tag(it.first, it.second) }
+                }
             }
             if (dayLessons.size >= 2) DayBand(dayLessons, if (entry.day == today) clock else -1, entry.key, Modifier.padding(top = 18.dp))
         }
@@ -751,6 +755,7 @@ fun AgendaRow(model: CompanionModel, entry: AgendaEntry, position: RailPosition 
                 if (entry.school?.let { plannedFor(it, model.plannedAbsences) } != null) add(t(R.string.planned_absence_tag) to s.warning)
                 if (cancelled) add(t(R.string.cancelled) to scheme.error)
                 else if (entry.school?.isSubstitution() == true) add(t(R.string.substitution) to s.warning)
+                else if (entry.school?.let { lessonMarkTag(it, s.warning) } != null) add(entry.school.let { lessonMarkTag(it, s.warning)!! })
                 else if (entry.kind != AgendaKind.Lesson && (entry.kind != AgendaKind.Task || entry.start.isNotBlank())) add(entry.kind.uiLabel() to accent)
             }
             if (tags.isNotEmpty()) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { tags.forEach { (label, color) -> Tag(label, color) } }
@@ -858,6 +863,7 @@ fun AgendaDetails(model: CompanionModel, entry: AgendaEntry, onDismiss: () -> Un
                 Tag(if (entry.school != null) t(R.string.schulnetz_kind, entry.kind.uiLabel()) else t(R.string.app_name), if (entry.kind == AgendaKind.Exam) LocalCompanionSemantics.current.warning else scheme.primary)
                 if (entry.school?.isCancelled() == true) Tag(t(R.string.cancelled), scheme.error)
                 else if (entry.school?.isSubstitution() == true) Tag(t(R.string.substitution), LocalCompanionSemantics.current.warning)
+                else entry.school?.let { lessonMarkTag(it, LocalCompanionSemantics.current.warning) }?.let { Tag(it.first, it.second) }
             }
             SheetTitle(courseAlias(entry.title, model.desk.courseAliases), onDismiss)
             val schoolStart = entry.school?.start.orEmpty()
@@ -867,6 +873,7 @@ fun AgendaDetails(model: CompanionModel, entry: AgendaEntry, onDismiss: () -> Un
             if (room.isNotBlank()) DetailLine(if (entry.local != null) Icons.Outlined.Place else Icons.Outlined.MeetingRoom, if (entry.school != null) t(R.string.room_named, room) else room)
             val people = entryPeople(entry)
             if (people.isNotBlank()) DetailLine(Icons.Outlined.PersonOutline, people)
+            entry.school?.substitute?.let(::cleanSchulnetzText)?.takeIf { it.isNotBlank() }?.let { DetailLine(Icons.Outlined.PersonOutline, t(R.string.substitute_named, it)) }
             val description = entry.school?.comment ?: entry.local?.notes.orEmpty()
             if (description.isNotBlank()) DetailLine(Icons.AutoMirrored.Outlined.Notes, description)
             if (entry.school?.isCancelled() == true) Box(Modifier.padding(top = 10.dp)) { InfoBanner(t(R.string.this_lesson_is_cancelled), "", tone = StateTone.Error) }
@@ -898,3 +905,11 @@ fun AgendaDetails(model: CompanionModel, entry: AgendaEntry, onDismiss: () -> Un
     }
 }
 
+
+/** Small tag for the school's changed, moved or extra-lesson mark; cancelled and substitute have their own tags. */
+internal fun lessonMarkTag(event: AgendaEvent, color: Color): Pair<String, Color>? = when {
+    event.isMovedLesson() -> t(R.string.lesson_moved) to color
+    event.isAddedLesson() -> t(R.string.lesson_added) to color
+    event.isChangedLesson() -> t(R.string.lesson_changed) to color
+    else -> null
+}

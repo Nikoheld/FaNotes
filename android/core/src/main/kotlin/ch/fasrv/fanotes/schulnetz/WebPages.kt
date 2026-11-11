@@ -539,6 +539,7 @@ fun parseSchedulerXml(xml: String): List<AgendaEvent> {
         val teacher = field("lehrerkuerzelname")
         val comment = field("kommentar")
         val kind = field("event_type")
+        val marker = lessonMarker(kind, field("markierung"), field("textdeco"))
         val idAttr = Regex("""\bid\s*=\s*["']([^"']+)["']""").find(attrs)?.groupValues?.get(1).orEmpty()
         AgendaEvent(
             id = idAttr.ifBlank { field("identity") }.ifBlank { stableId("sched", start, text, course) },
@@ -550,10 +551,12 @@ fun parseSchedulerXml(xml: String): List<AgendaEvent> {
             teachers = listOf(teacher).filter { it.isNotBlank() },
             courseId = field("kursid"),
             courseName = course.ifBlank { text },
-            status = if (comment.lowercase().contains("fällt") || comment.lowercase().contains("faellt")) "cancelled" else "",
+            status = if (marker == "cancelled" || comment.lowercase().contains("fällt") || comment.lowercase().contains("faellt")) "cancelled" else "",
             eventType = canonicalEventType(kind),
             color = field("color"),
             timetableText = text,
+            marker = marker,
+            substitute = if (marker.isNotBlank()) field("neuerlehrername").ifBlank { field("neuerlehrer") } else "",
         )
     }.toList()
 }

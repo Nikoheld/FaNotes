@@ -37,7 +37,7 @@ fun mergedScheduleEvents(events: List<AgendaEvent>, exams: List<AgendaEvent>, hi
     val visible = visibleEvents(events, hidden, zone, activeGroupSets(events, groupChoices), groupChoices)
     val visibleExams = visibleEvents(exams, hidden, zone)
     val merge = examsInLessonSlots(visible.filter { it.isLesson() }, visibleExams + visible.filter { it.isExamLike() }, zone)
-    return (merge.apply(visible) + merge.exams.map { it.shown }).distinctBy { Triple(it.start, it.end, it.label.lowercase()) }
+    return (merge.apply(visible) + merge.exams.map { it.shown }).distinctBy(::slotDedupKey)
 }
 
 /**

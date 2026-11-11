@@ -641,6 +641,10 @@
     <string name="subject_order">Fachreihenfolge</string>
     <string name="subject_unavailable">Fach nicht verfügbar</string>
     <string name="subjects">Fächer</string>
+    <string name="lesson_changed">Geändert</string>
+    <string name="lesson_moved">Verschoben</string>
+    <string name="lesson_added">Zusätzlich</string>
+    <string name="substitute_named">Vertretung: %1$s</string>
     <string name="substitution">Vertretung</string>
     <string name="support_exports">Support-Exporte</string>
     <string name="swiss_marks_are_1_to_6_higher_is_better">Schweizer Noten gehen von 1 bis 6. Höher ist besser.</string>

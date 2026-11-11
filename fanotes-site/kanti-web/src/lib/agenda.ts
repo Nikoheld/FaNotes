@@ -21,6 +21,9 @@ export interface Entry {
   comment: string
   cancelled: boolean
   substitution: boolean
+  /** '' | 'cancelled' | 'added' | 'moved' | 'changed' */
+  marker: string
+  substitute: string
   event: AgendaEvent
 }
 
@@ -45,8 +48,10 @@ const toEntry = (event: AgendaEvent, kind = kindOf(event)): Entry => {
     room: cleanSchulnetzText(event.room),
     teachers: (event.teachers || []).map((teacher) => cleanSchulnetzText(teacher)).filter(Boolean),
     comment: cleanSchulnetzText(event.comment),
-    cancelled: isCancelled(event),
+    cancelled: isCancelled(event) || event.marker === 'cancelled',
     substitution: isSubstitution(event),
+    marker: cleanSchulnetzText(event.marker).toLowerCase(),
+    substitute: cleanSchulnetzText(event.substitute),
     event,
   }
 }

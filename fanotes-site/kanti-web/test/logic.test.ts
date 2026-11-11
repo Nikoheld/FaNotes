@@ -110,6 +110,29 @@ describe('agenda', () => {
     const later = nextCommitment(entries, { today, minutes: 15 * 60 })
     expect(later?.day).toBe('2026-11-11')
   })
+  it('carries the lesson marker and substitute into entries', () => {
+    const cancelled = entries.find((entry) => entry.cancelled)
+    expect(cancelled?.marker).toBe('cancelled')
+    const changed = entries.find((entry) => entry.substitution)
+    expect(changed?.marker).toBe('changed')
+    expect(changed?.substitute).toBe('Lehrperson Z')
+    expect(entries.find((entry) => entry.kind === 'exam')?.marker).toBe('')
+  })
+  it('treats a cancelled marker as cancelled even without a status, and old lessons as unmarked', () => {
+    const base = demo.events[0]
+    const [marked] = allEntries({ ...demo, exams: [], events: [{ ...base, status: '', marker: 'cancelled' }] })
+    expect(marked.cancelled).toBe(true)
+    const { marker: _marker, substitute: _substitute, ...old } = base
+    const [plain] = allEntries({ ...demo, exams: [], events: [old] })
+    expect(plain).toMatchObject({ cancelled: false, marker: '', substitute: '', substitution: false })
+  })
+  it('keeps a cancelled lesson in the day list but not in the next-lesson hero', () => {
+    const friday = entries.filter((entry) => entry.day === entries.find((item) => item.cancelled)?.day)
+    expect(friday.some((entry) => entry.cancelled)).toBe(true)
+    const day = friday[0].day
+    const hero = nextCommitment(entries, { today: day, minutes: 0 })
+    expect(hero?.cancelled).toBe(false)
+  })
   it('never shows an unread week as free', () => {
     const week = '2027-03-01'
     expect(weekState(demo, week, entries)).toBe('unread')
@@ -322,6 +345,22 @@ describe('half-class groups (HalfClassGroups.kt)', () => {
     const entries = allEntries({ events, exams: [] } as never, { [key]: ['Hche_G26D'] })
     expect(entries.some((entry) => entry.title === 'Hbio_G26D')).toBe(false)
     expect(entries.some((entry) => entry.title === 'Hche_G26D')).toBe(true)
+  })
+
+  it('keeps a cancelled lesson of the chosen group and an exam beside it', () => {
+    const events = [...weekly('Hbio_G26D', 8), ...weekly('Hche_G26D', 8), ...weekly('Mathematik', 9)]
+    const key = detectGroupSets(events)[0].key
+    const target = events.find((event) => event.courseName === 'Hbio_G26D')!
+    const other = events.find((event) => event.courseName === 'Hche_G26D' && event.start === target.start)!
+    const marked = events.map((event) => (event.id === target.id ? { ...event, status: 'cancelled', marker: 'cancelled' } : event.id === other.id ? { ...event, status: 'cancelled', marker: 'cancelled' } : event))
+    const exam: AgendaEvent = { ...target, id: 'exam-1', eventType: 'exam', text: 'Hbio_G26D: Test', status: '', marker: '' }
+    const entries = allEntries({ events: marked, exams: [exam] } as never, { [key]: ['Hbio_G26D'] })
+    const day = target.start.slice(0, 10)
+    const sameDay = entries.filter((entry) => entry.day === day)
+    expect(sameDay.some((entry) => entry.kind === 'lesson' && entry.title === 'Hbio_G26D' && entry.cancelled)).toBe(true)
+    expect(sameDay.some((entry) => entry.title === 'Hche_G26D')).toBe(false)
+    // The cancelled lesson neither takes the exam's slot nor is dropped for it.
+    expect(sameDay.some((entry) => entry.kind === 'exam')).toBe(true)
   })
 
   it('stores choices in prefs and ignores bad data', () => {

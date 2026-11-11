@@ -101,6 +101,10 @@ data class AgendaEvent(
     val eventType: String,
     val color: String,
     val timetableText: String,
+    /** Lesson mark from [lessonMarker]. null = stored before marks were read; "" = read with marks, none set. */
+    val marker: String? = null,
+    /** Substitute teacher named with a lesson mark; blank when none. */
+    val substitute: String = "",
 ) {
     /** Computed once per event: lists, filters and exam slots read it for every lesson on every pass. */
     val label: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
@@ -528,6 +532,30 @@ fun AgendaEvent.startsAt(zone: ZoneId = ZoneId.of("Europe/Zurich")): Instant? = 
 
 fun AgendaEvent.endsAt(zone: ZoneId = ZoneId.of("Europe/Zurich")): Instant? = parseSchulnetzInstant(end.ifBlank { start }, zone)
 
+fun AgendaEvent.isChangedLesson(): Boolean = marker == "changed"
+fun AgendaEvent.isMovedLesson(): Boolean = marker == "moved"
+fun AgendaEvent.isAddedLesson(): Boolean = marker == "added"
+
+val LESSON_MARKERS = listOf("cancelled", "added", "moved", "changed")
+
+/**
+ * The mark a school puts on a timetable lesson (`markierung`: none, new, moved, deleted and school-defined
+ * labels such as "Geändert"). A deleted lesson is also drawn struck through (`textdeco` line-through).
+ * Only lessons carry marks: on an exam the same field holds the exam material. Mirrors the server.
+ */
+fun lessonMarker(eventType: String, markierung: String, textdeco: String): String {
+    val kind = cleanSchulnetzText(eventType).lowercase()
+    if (kind.isNotBlank() && kind != "0_stp" && kind != "lesson") return ""
+    val mark = cleanSchulnetzText(markierung).lowercase()
+    if (mark == "deleted" || cleanSchulnetzText(textdeco).contains("line-through", ignoreCase = true)) return "cancelled"
+    return when (mark) {
+        "", "none" -> ""
+        "new" -> "added"
+        "moved" -> "moved"
+        else -> "changed"
+    }
+}
+
 fun AgendaEvent.isCancelled(): Boolean {
     val blob = "$status $eventType $text $comment $timetableText".lowercase()
     return listOf(
@@ -537,6 +565,7 @@ fun AgendaEvent.isCancelled(): Boolean {
 }
 
 fun AgendaEvent.isSubstitution(): Boolean {
+    if (cleanSchulnetzText(substitute).isNotBlank()) return true
     val blob = "$status $eventType $comment $text $timetableText".lowercase()
     return listOf("substitution", "vertretung", "suppl", "supply", "stellvertretung").any { blob.contains(it) }
 }

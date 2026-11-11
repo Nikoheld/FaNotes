@@ -6,6 +6,9 @@ export const GRADE_TITLE = 'E2E Prüfung Alpha'
 export const EXAM_TOPIC = 'E2E Klausur Beta'
 export const ABSENCE_REASON = 'E2E Arztbesuch'
 export const MESSAGE_TITLE = 'E2E Mitteilung Gamma'
+export const CANCELLED_SUBJECT = 'E2E Entfall Delta'
+export const CHANGED_SUBJECT = 'E2E Vertretung Epsilon'
+export const SUBSTITUTE = 'Lehrperson Y'
 export const PASSWORD = 'e2e-synthetic-password'
 
 const DEVICE = '0123456789abcdef01234567'
@@ -19,10 +22,19 @@ const day = (offset: number) => {
 export const snapshot = () => {
   const weekday = (new Date().getDay() + 6) % 7
   const monday = -weekday
-  const lessons = [0, 1, 2, 3, 4, weekday].map((offset, index) => ({
+  const lessons: Record<string, unknown>[] = [0, 1, 2, 3, 4, weekday].map((offset, index) => ({
     id: `e2e-lesson-${index}`, eventType: 'lesson', start: `${day(monday + (index === 5 ? weekday : offset))}T09:40:00`, end: `${day(monday + (index === 5 ? weekday : offset))}T10:25:00`,
     text: SUBJECT, courseName: SUBJECT, courseId: 'ALPHA-1', room: 'X101', teachers: ['Lehrperson X'], status: '', comment: '',
   }))
+  // Two more lessons today: one cancelled (struck through in Schulnetz) and one changed with a substitute.
+  const marked = (id: string, subject: string, hour: string, fields: Record<string, unknown>) => ({
+    id, eventType: 'lesson', start: `${day(0)}T${hour}:00:00`, end: `${day(0)}T${hour}:45:00`,
+    text: subject, courseName: subject, courseId: id.toUpperCase(), room: 'X103', teachers: ['Lehrperson X'], status: '', comment: '', ...fields,
+  })
+  lessons.push(
+    marked('e2e-cancelled', CANCELLED_SUBJECT, '11', { status: 'cancelled', marker: 'cancelled' }),
+    marked('e2e-changed', CHANGED_SUBJECT, '12', { marker: 'changed', substitute: SUBSTITUTE }),
+  )
   return {
     fetchedAt: new Date().toISOString(),
     gradesReadComplete: true,

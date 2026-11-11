@@ -131,9 +131,10 @@ fun diffSnapshots(
     if (settings.grades) diffGrades(previous.grades.withoutSummaryGrades(), next.grades.withoutSummaryGrades(), changes)
     if (settings.timetable) {
         val lessonChanges = mutableListOf<SchulnetzChange>()
+        val nextLessons = next.events.filter { it.isLesson() }
         diffAgenda(
-            previous.events.filter { it.isLesson() },
-            next.events.filter { it.isLesson() },
+            seedLessonMarks(previous.events.filter { it.isLesson() }, nextLessons, now),
+            nextLessons,
             category = "timetable",
             created = "Stundenplan geändert",
             removed = "Lektion entfernt",
@@ -246,6 +247,33 @@ private fun diffExams(previous: List<AgendaEvent>, next: List<AgendaEvent>, chan
     }
 }
 
+/** A mark the first read with marks finds on a lesson up to this far ahead is still news. */
+internal const val LESSON_MARK_NEWS_MS: Long = 14L * 24 * 60 * 60 * 1000
+
+/**
+ * Lessons stored before marks existed carry no [AgendaEvent.marker], so they cannot say whether they were
+ * already cancelled. For those, the first read with marks is the baseline: its status and substitute count
+ * as known, except for lessons still to come within [LESSON_MARK_NEWS_MS]. So the first read does not
+ * announce a semester of past changes. Mirrors `seedLessonMarks` on the server.
+ */
+internal fun seedLessonMarks(previous: List<AgendaEvent>, next: List<AgendaEvent>, now: java.time.ZonedDateTime): List<AgendaEvent> {
+    val marked = next.filter { it.marker != null }
+    if (marked.isEmpty()) return previous
+    fun weekId(event: AgendaEvent) = "${event.id}|${weekMondayKey(event.start).orEmpty()}"
+    val byWeekId = HashMap<String, AgendaEvent>()
+    for (event in marked) byWeekId[weekId(event)] = event
+    val at = now.toInstant().toEpochMilli()
+    return previous.map { event ->
+        if (event.marker != null) return@map event
+        val fresh = byWeekId[weekId(event)] ?: marked.firstOrNull { sameLessonSlot(event, it) } ?: return@map event
+        val start = fresh.startsAt()?.toEpochMilli()
+        val end = fresh.endsAt()?.toEpochMilli()
+        val upcoming = start != null && end != null && end > at && start - at <= LESSON_MARK_NEWS_MS
+        if (upcoming) event.copy(marker = "")
+        else event.copy(status = fresh.status, marker = fresh.marker, substitute = fresh.substitute)
+    }
+}
+
 private fun diffAgenda(
     previous: List<AgendaEvent>,
     next: List<AgendaEvent>,
@@ -321,6 +349,8 @@ internal fun eventKey(event: AgendaEvent): String = listOf(
     event.teachers.joinToString(",") { cleanSchulnetzText(it) },
     if (event.isCancelled()) "aus" else "da",
     cleanSchulnetzText(event.courseName),
+    // A substitute teacher is part of the lesson; absent, the key stays as before.
+    *listOfNotNull(cleanSchulnetzText(event.substitute).ifBlank { null }).toTypedArray(),
 ).joinToString("|")
 
 private fun eventBody(event: AgendaEvent): String {
