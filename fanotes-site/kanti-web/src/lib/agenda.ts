@@ -5,7 +5,6 @@ import {
   schulnetzClock, weekMonday, weekMondayKey, zurichClock, zurichToday,
 } from '@shared/schulnetz-logic'
 import type { AgendaEvent, Snapshot } from '../types'
-import { visibleLessons, type GroupChoices } from './groups'
 
 export type EntryKind = 'lesson' | 'exam' | 'appointment'
 
@@ -112,7 +111,7 @@ export const examsInLessonSlots = (lessons: AgendaEvent[], exams: AgendaEvent[])
 }
 
 /** Every dated entry of the snapshot, exams once even when a lesson row and the exam list both carry it. */
-export const allEntries = (snapshot: Snapshot | null, groupChoices: GroupChoices = {}): Entry[] => {
+export const allEntries = (snapshot: Snapshot | null): Entry[] => {
   if (!snapshot) return []
   const out: Entry[] = []
   const seen = new Set<string>()
@@ -123,7 +122,7 @@ export const allEntries = (snapshot: Snapshot | null, groupChoices: GroupChoices
     seen.add(identity)
     out.push(entry)
   }
-  const events = visibleLessons(snapshot.events || [], groupChoices)
+  const events = snapshot.events || []
   const exams = snapshot.exams || []
   const merge = examsInLessonSlots(events.filter(isLesson), [...exams, ...events.filter(isExamLike)])
   const shown = (exam: AgendaEvent) => merge.exams.find((item) => examKey(item.original) === examKey(exam))?.shown || exam

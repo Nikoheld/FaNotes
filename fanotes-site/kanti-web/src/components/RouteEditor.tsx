@@ -1,23 +1,42 @@
 // Add or edit one commute route in a dialog. Saving sends the whole list (the parent does that).
 import { useState } from 'react'
-import { emptySchedule, isClock, MAX_TIMES, normalizeRoute, THRESHOLDS, validateRoute, type RouteError } from '../lib/commute'
+import { emptySchedule, isClock, MAX_TIMES, normalizeRoute, pinModeOf, routeVias, stopsKey, THRESHOLDS, travelDays, validateRoute, type PinMode, type RouteError } from '../lib/commute'
 import type { Strings } from '../lib/i18n'
-import type { CommuteRoute, ScheduleMode, Stop } from '../types'
+import type { CommuteRoute, Pin, ScheduleMode, Stop } from '../types'
+import { PinSection, type ConnectionsFn } from './PinPicker'
 import { StopPicker } from './StopPicker'
 import { Banner, Button, Dialog, Icon, Toggle } from './ui'
 
 const MODES: ScheduleMode[] = ['none', 'times', 'firstLesson', 'lastLesson']
 
-export const RouteEditor = ({ initial, isNew, globalThreshold, search, onSave, onClose, t }: {
+export const RouteEditor = ({ initial, isNew, globalThreshold, search, connections, pickDay, onSave, onClose, t }: {
   initial: CommuteRoute
   isNew: boolean
   globalThreshold: number
   search: (query: string) => Promise<Stop[]>
+  connections: ConnectionsFn
+  /** Opens the connection picker for this weekday at once. */
+  pickDay?: number
   onSave: (route: CommuteRoute) => Promise<void>
   onClose: () => void
   t: Strings
 }) => {
-  const [draft, setDraft] = useState<CommuteRoute>(initial)
+  // Two via slots; a route read without `vias` has [via].
+  const [draft, setDraftRaw] = useState<CommuteRoute>(() => ({ ...initial, vias: routeVias(initial), pins: initial.pins || [] }))
+  const [pinMode, setPinMode] = useState<PinMode>(() => pinModeOf({ pins: initial.pins || [], schedule: initial.schedule }))
+  const [pinsCleared, setPinsCleared] = useState(false)
+  const [slots, setSlots] = useState<(Stop | null)[]>(() => { const list = routeVias(initial); return [list[0] ?? null, list[1] ?? null] })
+  const [secondVia, setSecondVia] = useState(() => routeVias(initial).length > 1)
+  // Changing the stops makes a picked connection meaningless: the pins go, with a note.
+  const setDraft = (next: CommuteRoute) => {
+    if (next.pins.length && stopsKey(next) !== stopsKey(draft)) {
+      setDraftRaw({ ...next, pins: [] })
+      setPinMode('none')
+      setPinsCleared(true)
+      return
+    }
+    setDraftRaw(next)
+  }
   const [tried, setTried] = useState(false)
   const [swapped, setSwapped] = useState(0)
   const [saving, setSaving] = useState(false)
@@ -25,7 +44,21 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, onSave, o
   const errors = validateRoute(draft)
   const shown = (key: RouteError) => (tried && errors.includes(key) ? t.commuteErrors[key] : '')
   const schedule = draft.schedule
-  const setSchedule = (patch: Partial<CommuteRoute['schedule']>) => setDraft({ ...draft, schedule: { ...schedule, ...patch } })
+  const setSchedule = (patch: Partial<CommuteRoute['schedule']>) => {
+    const next = { ...draft, schedule: { ...schedule, ...patch } }
+    // "The same every day" follows the travel days.
+    if (pinMode === 'daily' && next.pins[0]) next.pins = [{ ...next.pins[0], days: travelDays(next.schedule) }]
+    setDraft(next)
+  }
+  // The via fields keep their own slots (typing clears a slot without moving the other one); the route gets them in order.
+  const setVia = (index: number, stop: Stop | null) => {
+    const next = slots.map((slot, at) => (at === index ? stop : slot))
+    setSlots(next)
+    const vias = next.filter((slot): slot is Stop => slot != null && slot.id !== '')
+    setDraft({ ...draft, vias, via: vias[0] || null })
+  }
+  const setPins = (pins: Pin[]) => { setPinsCleared(false); setDraftRaw({ ...draft, pins }) }
+  const changeMode = (mode: PinMode) => { setPinsCleared(false); setPinMode(mode); setDraftRaw({ ...draft, pins: [] }) }
 
   const submit = async () => {
     setTried(true)
@@ -56,7 +89,12 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, onSave, o
           <button type="button" className="icon-button swap-button" onClick={swap} aria-label={t.commuteSwap} title={t.commuteSwap}><Icon name="swap" /></button>
           <StopPicker key={`to${swapped}`} label={t.commuteTo} value={draft.to.id ? draft.to : null} onChange={(stop) => setDraft({ ...draft, to: stop || { id: '', name: '', type: 'other' } })} search={search} t={t} invalid={Boolean(shown('to'))} error={shown('to')} />
         </div>
-        <StopPicker label={t.commuteVia} value={draft.via} onChange={(stop) => setDraft({ ...draft, via: stop })} search={search} t={t} optional />
+        <StopPicker label={t.commuteVia} value={slots[0]} onChange={(stop) => setVia(0, stop)} search={search} t={t} optional />
+        {secondVia || slots[1] ? (
+          <StopPicker label={t.commuteVia2} value={slots[1]} onChange={(stop) => setVia(1, stop)} search={search} t={t} optional />
+        ) : slots[0] ? (
+          <div><Button tone="outline" icon="plus" onClick={() => setSecondVia(true)}>{t.commuteAddVia}</Button></div>
+        ) : null}
 
         <fieldset className="field schedule-field">
           <legend className="field-label">{t.commuteSchedule}</legend>
@@ -104,6 +142,9 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, onSave, o
             </div>
           ) : null}
         </fieldset>
+
+        <PinSection route={draft} mode={pinMode} onMode={changeMode} onPins={setPins} connections={connections} t={t} startDay={pickDay} />
+        {pinsCleared ? <Banner tone="warning" icon="info">{t.pinCleared}</Banner> : null}
 
         <label className="field">
           <span className="field-label">{t.commuteThreshold}</span>

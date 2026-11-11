@@ -6,6 +6,7 @@ import ch.fasrv.fanotes.commute.Provider
 import ch.fasrv.fanotes.commute.Route
 import ch.fasrv.fanotes.commute.RouteBoard
 import ch.fasrv.fanotes.commute.commuteBody
+import ch.fasrv.fanotes.commute.connectionsPath
 import ch.fasrv.fanotes.commute.hiddenLabelsChanged
 import ch.fasrv.fanotes.commute.parseBoardAnswer
 import ch.fasrv.fanotes.commute.parseCommuteState
@@ -143,6 +144,13 @@ class CommuteStore(
     suspend fun trips(routeId: String, at: String, arrive: Boolean): List<ch.fasrv.fanotes.commute.Trip> {
         val session = auth()
         return withContext(Dispatchers.IO) { client.commuteTrips(session, routeId, at, arrive) }
+    }
+
+    /** The connection picker's trips from [atIso] for the draft's ends and via stops. Nothing is stored. */
+    suspend fun connections(route: Route, atIso: String): List<ch.fasrv.fanotes.commute.Trip> {
+        val session = auth()
+        val path = connectionsPath(route.from, route.to, route.vias, atIso)
+        return withContext(Dispatchers.IO) { client.commuteConnections(session, path) }
     }
 
     /** Forgets everything on this phone (the server keeps its copy). */

@@ -71,8 +71,8 @@ import java.time.LocalDate
 import java.util.UUID
 
 /** Identity-compared inputs of the hidden-labels sync, so the flow never compares whole snapshots. */
-private class HiddenLabelsKey(val snapshot: SchulnetzSnapshot, val hidden: List<HiddenLesson>, val choices: Map<String, List<String>>, val hasRoutes: Boolean) {
-    override fun equals(other: Any?) = other is HiddenLabelsKey && snapshot === other.snapshot && hidden == other.hidden && choices == other.choices && hasRoutes == other.hasRoutes
+private class HiddenLabelsKey(val snapshot: SchulnetzSnapshot, val hidden: List<HiddenLesson>, val hasRoutes: Boolean) {
+    override fun equals(other: Any?) = other is HiddenLabelsKey && snapshot === other.snapshot && hidden == other.hidden && hasRoutes == other.hasRoutes
     override fun hashCode() = 0
 }
 
@@ -309,6 +309,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var commuteDraft by mutableStateOf<Route?>(null)
     var commuteDraftNew by mutableStateOf(true)
     var commuteSaving by mutableStateOf(false)
+    /** Set by "Neu wählen" on a missing pinned connection: the editor opens its connection picker right away. */
+    var commuteOpenPicker by mutableStateOf(false)
     /** The editor shown over the first-run onboarding (its step "Pendelstrecke hinzufügen"). */
     var onboardingCommute by mutableStateOf(false)
 
@@ -337,12 +339,11 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 val cal = calendar
                 val taskList = tasks
                 val hiddenList = hidden
-                val choices = desk.groupChoices
                 val planned = plannedAbsences
                 val built = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     val days = ((0L..14L).map { today.plusDays(it) } + ch.fasrv.fanotes.schulnetz.schoolWeek(selected, true)).distinct()
                     runCatching { warmDerived(incoming, planned, today) }
-                    agendaForDays(days, incoming, cal, taskList, hiddenList, zone, choices)
+                    agendaForDays(days, incoming, cal, taskList, hiddenList, zone)
                 }
                 snapshot = incoming
                 rememberAgenda(incoming, cal, taskList, hiddenList, built)
@@ -353,10 +354,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         viewModelScope.launch { graph.commute.loadCache(); graph.commute.state.collect { commute = it } }
         // Lessons the user does not attend go to the server so it does not plan trips around them.
         viewModelScope.launch {
-            snapshotFlow { HiddenLabelsKey(snapshot, hidden, desk.groupChoices, commute.routes.isNotEmpty()) }.collectLatest { key ->
+            snapshotFlow { HiddenLabelsKey(snapshot, hidden, commute.routes.isNotEmpty()) }.collectLatest { key ->
                 if (!key.hasRoutes || demo) return@collectLatest
                 kotlinx.coroutines.delay(1_500)
-                val labels = withContext(Dispatchers.Default) { commuteHiddenLabels(key.snapshot.events, key.hidden, key.choices) }
+                val labels = withContext(Dispatchers.Default) { commuteHiddenLabels(key.snapshot.events, key.hidden) }
                 graph.commute.syncHiddenLabels(labels)
             }
         }
@@ -575,7 +576,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     /** Opens the editor for [routeId], or for a new route. */
-    fun editCommuteRoute(routeId: String?) {
+    fun editCommuteRoute(routeId: String?, openPicker: Boolean = false) {
+        commuteOpenPicker = openPicker
         val existing = routeId?.let { id -> commute.routes.firstOrNull { it.id == id } }
         commuteDraftNew = existing == null
         commuteDraft = existing ?: Route(id = newRouteId(), schedule = Schedule())
@@ -1358,9 +1360,9 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     // a screen that asks first builds it once and every later frame, scroll and tab return reuses it.
     private class TallyMemo(val snapshot: SchulnetzSnapshot, val tally: ch.fasrv.fanotes.schulnetz.AbsenceTally)
     private class ProvisionalMemo(val snapshot: SchulnetzSnapshot, val planned: List<ch.fasrv.fanotes.schulnetz.PlannedAbsence>, val day: java.time.LocalDate, val tally: ch.fasrv.fanotes.schulnetz.ProvisionalTally)
-    private class StripMemo(val snapshot: SchulnetzSnapshot, val hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, val choices: Map<String, List<String>>, val minute: Long, val rows: List<ch.fasrv.fanotes.schulnetz.WidgetRow>) {
-        fun matches(snap: SchulnetzSnapshot, hiddenList: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, groupChoices: Map<String, List<String>>, at: Long) =
-            snapshot === snap && minute == at && hidden == hiddenList && choices == groupChoices
+    private class StripMemo(val snapshot: SchulnetzSnapshot, val hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, val minute: Long, val rows: List<ch.fasrv.fanotes.schulnetz.WidgetRow>) {
+        fun matches(snap: SchulnetzSnapshot, hiddenList: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, at: Long) =
+            snapshot === snap && minute == at && hidden == hiddenList
     }
     @Volatile private var tallyMemo: TallyMemo? = null
     @Volatile private var provisionalMemo: ProvisionalMemo? = null
@@ -1383,17 +1385,16 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     /** The Heute lesson strip for this minute, if it is already built. */
     fun cachedLessonStrip(minute: Long): List<ch.fasrv.fanotes.schulnetz.WidgetRow>? =
-        stripMemo?.takeIf { it.matches(snapshot, hidden, desk.groupChoices, minute) }?.rows
+        stripMemo?.takeIf { it.matches(snapshot, hidden, minute) }?.rows
 
     /** Builds the Heute lesson strip off the main thread; once per snapshot, setting change and minute. */
     suspend fun lessonStrip(now: java.time.Instant, zone: java.time.ZoneId): List<ch.fasrv.fanotes.schulnetz.WidgetRow> {
         val minute = now.epochSecond / 60
         val snap = snapshot
         val hiddenList = hidden
-        val choices = desk.groupChoices
-        stripMemo?.takeIf { it.matches(snap, hiddenList, choices, minute) }?.let { return it.rows }
-        val rows = withContext(Dispatchers.Default) { ch.fasrv.fanotes.schulnetz.widgetRows(snap.events, snap.exams, hiddenList, now, zone, choices) }
-        stripMemo = StripMemo(snap, hiddenList, choices, minute, rows)
+        stripMemo?.takeIf { it.matches(snap, hiddenList, minute) }?.let { return it.rows }
+        val rows = withContext(Dispatchers.Default) { ch.fasrv.fanotes.schulnetz.widgetRows(snap.events, snap.exams, hiddenList, now, zone) }
+        stripMemo = StripMemo(snap, hiddenList, minute, rows)
         return rows
     }
 
@@ -1410,7 +1411,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val tasks = taskList.fold(1) { acc, task -> 31 * acc + task.updatedAt.hashCode() + task.title.hashCode() + task.done.hashCode() + task.dueDate.hashCode() }
         val local = cal.events.fold(1) { acc, event -> 31 * acc + event.id.hashCode() + event.start.hashCode() + event.title.hashCode() }
         val hiddenHash = hiddenList.fold(1) { acc, item -> 31 * acc + item.hashCode() }
-        return "${snap.fetchedAt}|${snap.revision}|${snap.events.size}|${snap.exams.size}|$hiddenHash|${desk.groupChoices.hashCode()}|$local|$tasks"
+        return "${snap.fetchedAt}|${snap.revision}|${snap.events.size}|${snap.exams.size}|$hiddenHash|$local|$tasks"
     }
 
     private fun rememberAgenda(snap: SchulnetzSnapshot, cal: ch.fasrv.fanotes.desk.CalendarDocument, taskList: List<ch.fasrv.fanotes.desk.HomeworkTask>, hiddenList: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, built: Map<java.time.LocalDate, List<AgendaEntry>>) {
@@ -1424,7 +1425,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun cachedAgenda(days: List<java.time.LocalDate>, zone: java.time.ZoneId): Map<java.time.LocalDate, List<AgendaEntry>> {
         val id = agendaIdentity(snapshot, calendar, tasks, hidden)
         if (agendaCacheId == id && days.all { it in agendaCacheDays }) return days.associateWith { agendaCacheDays[it].orEmpty() }
-        val built = agendaForDays(days, snapshot, calendar, tasks, hidden, zone, desk.groupChoices)
+        val built = agendaForDays(days, snapshot, calendar, tasks, hidden, zone)
         rememberAgenda(snapshot, calendar, tasks, hidden, built)
         return days.associateWith { agendaCacheDays[it].orEmpty() }
     }
@@ -1434,13 +1435,12 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val cal = calendar
         val taskList = tasks
         val hiddenList = hidden
-        val choices = desk.groupChoices
         val selected = day
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val zone = java.time.ZoneId.systemDefault()
             val today = java.time.LocalDate.now(zone)
             val days = ((0L..14L).map { today.plusDays(it) } + ch.fasrv.fanotes.schulnetz.schoolWeek(selected, true)).distinct()
-            val built = agendaForDays(days, snap, cal, taskList, hiddenList, zone, choices)
+            val built = agendaForDays(days, snap, cal, taskList, hiddenList, zone)
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                 if (agendaIdentity(snapshot, calendar, tasks, hidden) == agendaIdentity(snap, cal, taskList, hiddenList)) {
                     rememberAgenda(snap, cal, taskList, hiddenList, built)

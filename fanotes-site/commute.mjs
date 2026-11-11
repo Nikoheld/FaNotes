@@ -5,9 +5,9 @@ import { promises as fs } from 'node:fs'
 import { resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
-  CHECK_IMMINENT_MS, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, nextCheckAt, parseCompletion,
-  parseLocal, parseSearchChRoute, parseTransportRoute, rankTrips, routeTarget, sanitizeRoutes, sanitizeSettings, tripAlerts,
-  usable, zurichWall,
+  CHECK_IMMINENT_MS, MAX_VIAS, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
+  parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizeRoutes,
+  sanitizeSettings, sanitizeStop, tripAlerts, usable, zurichWall,
 } from './commute-logic.mjs'
 
 export const SEARCH_CH = 'https://timetable.search.ch/api'
@@ -100,25 +100,27 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     })
   }
 
-  /** Trips around [at] (ms) for from → to (via), departing or arriving at that time. */
-  const trips = ({ from, to, via = null, at, timeType = 'depart' }) => {
+  /** Trips around [at] (ms) for from → to (through [vias] in order), departing or arriving at that time. */
+  const trips = ({ from, to, vias = [], at, timeType = 'depart', num = 0 }) => {
     const when = searchDate(at)
     const stopKey = (stop) => stop?.id || stop?.name || ''
+    vias = (vias || []).filter(Boolean).slice(0, MAX_VIAS)
     // Cached per minute of the asked time: equal questions from several people share one answer.
-    const key = `route:${stopKey(from)}>${stopKey(via)}>${stopKey(to)}@${when.isoDay}T${when.time}:${timeType}`
+    const key = `route:${stopKey(from)}>${vias.map(stopKey).join('>')}>${stopKey(to)}@${when.isoDay}T${when.time}:${timeType}:${num}`
     return cached(key, ROUTE_CACHE_MS, async () => {
       if (await left('route', ROUTE_BUDGET)) {
         try {
           await spend('route')
           // search.ch reads an arrival time as the earliest arrival; `pre` adds the trips that arrive in time.
-          const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.date, time: when.time, time_type: timeType === 'arrive' ? 'arrival' : 'depart', num: timeType === 'arrive' ? '2' : '5', pre: timeType === 'arrive' ? '4' : '1', show_delays: '1', show_trackchanges: '1' })
-          if (via) params.set('via', stopKey(via))
+          const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.date, time: when.time, time_type: timeType === 'arrive' ? 'arrival' : 'depart', num: String(num || (timeType === 'arrive' ? 2 : 5)), pre: timeType === 'arrive' ? '4' : '1', show_delays: '1', show_trackchanges: '1' })
+          // search.ch reads repeated via[] in order (a plain repeated via keeps only the last one).
+          for (const via of vias) params.append('via[]', stopKey(via))
           return { trips: parseSearchChRoute(await getJson(`${SEARCH_CH}/route.json?${params}`)), provider: 'search.ch', at: now().toISOString() }
         } catch (error) { log('warn', `Verbindungen search.ch fehlgeschlagen (${error?.status || error?.name || 'error'})`) }
       }
       await spend('fallback')
-      const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.isoDay, time: when.time, isArrivalTime: timeType === 'arrive' ? '1' : '0', limit: '5' })
-      if (via) params.append('via[]', stopKey(via))
+      const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.isoDay, time: when.time, isArrivalTime: timeType === 'arrive' ? '1' : '0', limit: String(Math.min(num || 5, 6)) })
+      for (const via of vias) params.append('via[]', stopKey(via))
       return { trips: parseTransportRoute(await getJson(`${TRANSPORT}/connections?${params}`)), provider: 'transport.opendata.ch', at: now().toISOString() }
     })
   }
@@ -163,35 +165,78 @@ export const createCommute = (options = {}) => {
 
   const read = async (accountId) => {
     const stored = await readJson(file(accountId))
-    return { routes: sanitizeRoutes(stored?.routes), settings: sanitizeSettings(stored?.settings) }
+    const settings = sanitizeSettings(stored?.settings)
+    // Version 1 hidden labels mixed half-class choices (removed) with hidden lessons; the app sends
+    // the hidden lessons again, so no lesson stays left out of the first/last lesson.
+    if (stored && Number(stored.version || 1) < 2) settings.hiddenLabels = []
+    return { routes: sanitizeRoutes(stored?.routes), settings }
   }
   const view = async (accountId) => ({ ...(await read(accountId)), provider: PROVIDERS['search.ch'] })
   const save = async (accountId, body) => {
-    const routes = sanitizeRoutes(body?.routes)
+    // A client older than pins/two vias sends routes without those keys: keep what is stored.
+    const known = new Map((await read(accountId)).routes.map((route) => [route.id, route]))
+    const incoming = (Array.isArray(body?.routes) ? body.routes : []).map((raw) => {
+      const stored = raw && typeof raw === 'object' ? known.get(raw.id) : null
+      if (!stored) return raw
+      const sameFirst = (stored.vias[0]?.id || stored.vias[0]?.name || '') === (raw.via?.id || raw.via?.name || '')
+      return {
+        ...raw,
+        ...(!('pins' in raw) ? { pins: stored.pins } : {}),
+        ...(!('vias' in raw) && sameFirst ? { vias: stored.vias } : {}),
+      }
+    })
+    const routes = sanitizeRoutes(incoming)
     const settings = sanitizeSettings(body?.settings)
-    await writeJson(file(accountId), { version: 1, routes, settings, updatedAt: now().toISOString() })
+    await writeJson(file(accountId), { version: 2, routes, settings, updatedAt: now().toISOString() })
     due.delete(accountId)
     return { routes, settings, provider: PROVIDERS['search.ch'] }
   }
 
-  /** The live board of one route: target, ranked trips, alternatives when the first is unusable. */
-  const routeBoard = async (route, settings, events) => {
+  /**
+   * The live board of one route: target, ranked trips, alternatives when the first is unusable. A
+   * pinned route puts its pinned connection first ([pinned] says whether it was found); [seen] is
+   * the pinned trip the server already saw today, so one that vanished on its day reads as cancelled.
+   */
+  const routeBoard = async (route, settings, events, seen = null) => {
     const at = now().getTime()
     const target = routeTarget(route, { now: at, events, hiddenLabels: settings.hiddenLabels })
-    if (!target) return { routeId: route.id, target: null, trips: [], alternatives: [], viaDropped: false, updatedAt: now().toISOString(), stale: false }
+    const empty = { routeId: route.id, target, trips: [], alternatives: [], viaDropped: false, pinned: null, change: null, updatedAt: now().toISOString(), stale: false }
+    if (!target) return empty
     const targetMs = parseLocal(target.at)
     let answer
     try {
-      answer = await provider.trips({ from: route.from, to: route.to, via: route.via, at: target.timeType === 'arrive' ? targetMs : Math.max(targetMs, at), timeType: target.timeType })
+      // A pinned connection: ask from two minutes before it (a leading walk starts earlier).
+      const askAt = target.kind === 'pinned' ? targetMs - 2 * 60_000 : target.timeType === 'arrive' ? targetMs : Math.max(targetMs, at)
+      answer = await provider.trips({ from: route.from, to: route.to, vias: route.vias, at: askAt, timeType: target.timeType })
     } catch {
-      return { routeId: route.id, target, trips: [], alternatives: [], viaDropped: false, updatedAt: now().toISOString(), stale: true }
+      return { ...empty, stale: true }
     }
-    const ranked = target.timeType === 'arrive' ? rankArrive(answer.trips, targetMs, at) : rankTrips(answer.trips, at)
+    let ranked = target.timeType === 'arrive' ? rankArrive(answer.trips, targetMs, at) : rankTrips(answer.trips, target.kind === 'pinned' ? Math.min(at, targetMs) : at)
+    let pinned = null
+    if (target.kind === 'pinned') {
+      const found = matchPin(answer.trips, target.pin, target.day)
+      let trip = found.trip
+      let status = found.status
+      if (!trip && seen && seen.day === target.day && seen.trip) {
+        // Seen earlier today, gone now: search.ch drops some cancelled trips instead of marking them.
+        trip = { ...seen.trip, status: 'cancelled', issues: [{ kind: 'cancelled', text: 'Nicht mehr im Fahrplan – fällt vermutlich aus' }, ...(seen.trip.issues || []).filter((issue) => issue.kind !== 'cancelled')] }
+        status = 'gone'
+      }
+      pinned = { status, day: target.day, pin: target.pin, trip, nearest: found.nearest }
+      ranked = trip ? [trip, ...ranked.filter((item) => item.id !== trip.id)].slice(0, 5) : ranked
+    }
     let alternatives = []
     let viaDropped = false
     const first = ranked[0]
     if (first && !usable(first, at)) {
       alternatives = ranked.filter((trip) => trip !== first && usable(trip, at))
+      if (target.kind === 'pinned') {
+        // The pinned trip's own answer starts at it; alternatives are what leaves from now on.
+        try {
+          const later = await provider.trips({ from: route.from, to: route.to, vias: route.vias, at: Math.max(at, parseLocal(first.plannedDeparture) || at), timeType: 'depart' })
+          alternatives = rankTrips(later.trips, at).filter((trip) => trip.id !== first.id && usable(trip, at))
+        } catch { /* keep the ones from the board */ }
+      }
       // Already on the way and a transfer broke: go on from the transfer stop.
       const broken = first.changes.find((change) => change.broken)
       if (first.status === 'broken' && broken && parseLocal(first.departure) <= at) {
@@ -204,7 +249,7 @@ export const createCommute = (options = {}) => {
           } catch { /* keep the whole-route alternatives */ }
         }
       }
-      if (alternatives.length < 2 && route.via) {
+      if (alternatives.length < 2 && route.vias.length) {
         try {
           const direct = await provider.trips({ from: route.from, to: route.to, at: Math.max(parseLocal(first.departure), at), timeType: 'depart' })
           const extra = rankTrips(direct.trips, at).filter((trip) => usable(trip, at) && !alternatives.some((known) => known.id === trip.id))
@@ -213,15 +258,26 @@ export const createCommute = (options = {}) => {
       }
       alternatives = alternatives.slice(0, 3)
     }
-    return { routeId: route.id, target, trips: ranked, alternatives, viaDropped, updatedAt: answer.at || now().toISOString(), stale: Boolean(answer.stale) }
+    // A pinned route on a day with a lesson change: the earlier way home / later way to school.
+    let change = null
+    if (target.kind === 'pinned' && target.changeAt) {
+      try {
+        const changeMs = parseLocal(target.changeAt)
+        const other = await provider.trips({ from: route.from, to: route.to, vias: route.vias, at: target.changeTimeType === 'arrive' ? changeMs : Math.max(changeMs, at), timeType: target.changeTimeType })
+        const list = target.changeTimeType === 'arrive' ? rankArrive(other.trips, changeMs, at) : rankTrips(other.trips, at)
+        change = list.find((trip) => usable(trip, at)) || null
+      } catch { /* the pinned board still stands */ }
+    }
+    return { routeId: route.id, target, trips: ranked, alternatives, viaDropped, pinned, change, updatedAt: answer.at || now().toISOString(), stale: Boolean(answer.stale) }
   }
 
   const board = async (accountId, routeId = '') => {
     const { routes, settings } = await read(accountId)
     const events = await lessonsFor(accountId).catch(() => [])
     const chosen = routeId ? routes.filter((route) => route.id === routeId) : routes
+    const state = chosen.some((route) => route.pins.length) ? (await readJson(stateFile(accountId))) : null
     const boards = []
-    for (const route of chosen) boards.push(await routeBoard(route, settings, events))
+    for (const route of chosen) boards.push(await routeBoard(route, settings, events, state?.routes?.[route.id]?.pinSeen || null))
     return { boards, provider: PROVIDERS['search.ch'] }
   }
 
@@ -230,8 +286,29 @@ export const createCommute = (options = {}) => {
     const route = routes.find((item) => item.id === routeId)
     if (!route) return null
     const at = Number.isFinite(parseLocal(atIso)) ? parseLocal(atIso) : now().getTime()
-    const answer = await provider.trips({ from: route.from, to: route.to, via: route.via, at, timeType: timeType === 'arrive' ? 'arrive' : 'depart' })
+    const answer = await provider.trips({ from: route.from, to: route.to, vias: route.vias, at, timeType: timeType === 'arrive' ? 'arrive' : 'depart' })
     return { trips: timeType === 'arrive' ? rankArrive(answer.trips, at, now().getTime()) : rankTrips(answer.trips, Math.min(at, now().getTime()), 6) }
+  }
+
+  /**
+   * The connection picker: trips for stops that need not be saved yet (the route editor), in
+   * departure order from [at] on. Past trips of a future day are fine; that is what is picked.
+   */
+  const connections = async ({ from, to, vias = [], at, timeType = 'depart' }) => {
+    const stop = (value) => {
+      const raw = String(value || '').trim().slice(0, 80)
+      if (!raw) return null
+      return /^[A-Za-z0-9:_.-]{1,32}$/u.test(raw) && /\d/u.test(raw) ? { id: raw, name: raw } : sanitizeStop({ name: raw })
+    }
+    const start = stop(from)
+    const end = stop(to)
+    if (!start || !end) return null
+    const when = Number.isFinite(parseLocal(at)) ? parseLocal(at) : now().getTime()
+    const answer = await provider.trips({ from: start, to: end, vias: vias.map(stop).filter(Boolean).slice(0, MAX_VIAS), at: when, timeType: timeType === 'arrive' ? 'arrive' : 'depart', num: 8 })
+    const seen = new Set()
+    const trips = answer.trips.filter((trip) => trip.pin && (seen.has(trip.id) ? false : seen.add(trip.id)))
+      .sort((a, b) => parseLocal(a.plannedDeparture) - parseLocal(b.plannedDeparture))
+    return { trips: markQuietest(trips, Math.min(when, now().getTime())), stale: Boolean(answer.stale) }
   }
 
   /**
@@ -250,10 +327,11 @@ export const createCommute = (options = {}) => {
     const alerts = []
     let moved = false
     for (const route of routes) {
-      if (route.schedule.mode === 'none') continue
+      // Without a schedule or a pinned connection there is nothing to watch.
+      if (route.schedule.mode === 'none' && !route.pins.length) continue
       const target = routeTarget(route, { now: at, events, hiddenLabels: settings.hiddenLabels })
       const routeState = state.routes[route.id] || {}
-      const lessonNews = target && target.lessonChange !== 'none' && !routeState.lessons?.[`${target.at.slice(0, 10)}|${target.lessonChange}|${target.at}`] && parseLocal(target.at) - at <= 36 * 3600_000
+      const lessonNews = target && target.lessonChange !== 'none' && !routeState.lessons?.[`${target.at.slice(0, 10)}|${target.lessonChange}|${target.changeAt || target.at}`] && parseLocal(target.changeAt || target.at) - at <= 36 * 3600_000
       const guess = routeState.tracked && routeState.tracked.targetAt === target?.at ? routeState.tracked : null
       const opens = target ? (guess ? parseLocal(guess.departure) : parseLocal(target.at) - (target.timeType === 'arrive' ? 90 * 60_000 : 0)) - WINDOW_BEFORE_MS : Number.POSITIVE_INFINITY
       if (!target || (!lessonNews && at < opens)) {
@@ -261,11 +339,25 @@ export const createCommute = (options = {}) => {
         continue
       }
       checked += 1
-      const live = await routeBoard(route, settings, events)
-      const tracked = live.trips[0] || null
+      const live = await routeBoard(route, settings, events, routeState.pinSeen || null)
+      // A pinned route tracks its pinned connection only; when it is missing, nothing is tracked.
+      const tracked = live.pinned ? live.pinned.trip : live.trips[0] || null
       let updated = { ...routeState }
-      if (lessonNews && tracked) {
-        const result = lessonChangeAlert({ route, target, trip: usable(tracked, at) ? tracked : live.alternatives[0] || tracked, state: updated, now: at })
+      if (live.pinned) {
+        if (live.pinned.trip && live.pinned.status !== 'gone') {
+          updated.pinSeen = { day: live.pinned.day, trip: live.pinned.trip }
+          // Found again: a later disappearance alerts again.
+          const pinKey = `${target.pin.line}|${target.pin.stop}|${target.pin.departure}`
+          if (updated.pinMissing?.[pinKey]) { updated.pinMissing = { ...updated.pinMissing }; delete updated.pinMissing[pinKey] }
+        } else if (live.pinned.status === 'missing' && !live.stale && at >= parseLocal(target.at) - WINDOW_BEFORE_MS) {
+          const result = pinMissingAlert({ route, target, nearest: live.pinned.nearest, state: updated })
+          alerts.push(...result.changes)
+          updated = result.state
+        }
+      }
+      const lessonTrip = live.pinned ? live.change : tracked && (usable(tracked, at) ? tracked : live.alternatives[0] || tracked)
+      if (lessonNews && lessonTrip) {
+        const result = lessonChangeAlert({ route, target, trip: lessonTrip, state: updated, now: at })
         alerts.push(...result.changes)
         updated = result.state
       }
@@ -279,7 +371,7 @@ export const createCommute = (options = {}) => {
       }
       updated.tracked = tracked ? { id: tracked.id, departure: tracked.departure, arrival: tracked.arrival, targetAt: target.at } : null
       state.routes[route.id] = updated
-      next = Math.min(next, nextCheckAt(target, tracked, at))
+      next = Math.min(next, nextCheckAt(target, tracked || (live.pinned ? { departure: target.at, arrival: target.at } : null), at))
     }
     for (const id of Object.keys(state.routes)) if (!routes.some((route) => route.id === id)) delete state.routes[id]
     await writeJson(stateFile(accountId), state)
@@ -314,5 +406,5 @@ export const createCommute = (options = {}) => {
     due.delete(accountId)
   }
 
-  return { view, save, board, tripsFor, stops: provider.stops, checkAccount, tick, remove, provider, due, isoZurich }
+  return { view, save, board, tripsFor, connections, stops: provider.stops, checkAccount, tick, remove, provider, due, isoZurich }
 }

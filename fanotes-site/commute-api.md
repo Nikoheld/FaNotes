@@ -24,16 +24,36 @@ Schedule = {
 Route = {
   id: string               // 12 hex chars, made by the client
   name: string             // e.g. 'Schule', max 40 chars; '' → client shows "from → to"
-  from: Stop; to: Stop; via: Stop | null
+  from: Stop; to: Stop
+  vias: Stop[]             // 0–2 ordered via stops (search.ch via[] in order); duplicates and the ends are dropped
+  via: Stop | null         // = vias[0], read-only compatibility for clients older than two vias.
+                           // PUT: `vias` wins; a body with only `via` (old client) is read as [via].
   schedule: Schedule
+  pins: Pin[]              // the fixed connection(s) Fabio always takes; [] = no fixed connection
   delayThreshold: number | null   // minutes; null → settings.delayThreshold
   notify: boolean                  // alerts for this route
 }
 
+Pin = {                    // a fixed connection; copy Trip.pin and add the days
+  days: number[]           // weekdays it is used (1 = Mon … 7 = Sun); disjoint across one route's pins,
+                           // a later pin loses days an earlier one has. One pin for all days = days [1..5].
+  line: string             // first ride leg's line, 'IR 16' / 'S 29' / '366'
+  trainNo: string          // first ride leg's train or journey number ('' if unknown)
+  stop: string; stopId: string   // boarding stop of the first ride leg
+  departure: 'HH:MM'       // planned departure of the first ride leg
+  arrival: 'HH:MM'         // planned arrival (display, and how long the target stays current)
+  transfers: number        // display
+}
+// A route with pins is planned around them: on a weekday with a pin the target is that connection
+// (Target.kind 'pinned'); weekdays without a pin are skipped. schedule.mode still matters for
+// lesson-tied routes: days with all lessons cancelled are skipped, and a lesson change is reported
+// (Target.lessonChange + changeAt) with RouteBoard.change as the suggested other trip.
+
 CommuteSettings = {
   delayThreshold: number          // 2 | 3 | 5 | 10 (any 1–30 accepted), default 3
-  hiddenLabels: string[]          // lesson labels the user does not attend (half-class choices + hidden lessons),
-                                  // lower-case eventLabel(); the client keeps this current. Max 200.
+  hiddenLabels: string[]          // labels of lessons the user hid (HiddenLesson rules), lower-case eventLabel();
+                                  // the client keeps this current. Max 200. Half-class choices are gone: a file
+                                  // stored before version 2 reads with hiddenLabels [] until the client sends them.
 }
 
 Occupancy = { first: 1 | 2 | 3 | null; second: 1 | 2 | 3 | null }   // 1 low, 2 medium, 3 high, null unknown
@@ -66,16 +86,30 @@ Trip = {
   legs: Leg[]; changes: Transfer[]
   occupancy: Occupancy     // worst (highest) level over the ride legs, per class
   issues: { kind: 'cancelled' | 'missedTransfer' | 'platformChange' | 'delay' | 'disruption'; text: string }[]
+  pin: Omit<Pin, 'days'> | null   // what to store to pin this trip (null for a walk-only trip)
   quietest: boolean        // least crowded (2nd class, then 1st) among the trips of this answer that are not worse by >10 min arrival
 }
 
 Target = {
-  kind: 'now' | 'time' | 'firstLesson' | 'lastLesson'
+  kind: 'now' | 'time' | 'firstLesson' | 'lastLesson' | 'pinned'
   at: string                // the moment the trips are planned around
   timeType: 'depart' | 'arrive'
   lesson: { start: string; end: string; label: string } | null   // the lesson it is tied to
   lessonChange: 'none' | 'lastCancelled' | 'firstCancelled'      // school ends earlier / starts later than planned
   plannedAt: string | null  // the moment before the change (for "statt 16:15")
+  // kind 'pinned' only:
+  pin?: Pin; day?: 'YYYY-MM-DD'          // the pin that applies and its travel day; `at` = its planned departure
+  changeAt?: string | null; changeTimeType?: 'depart' | 'arrive' | null   // lesson change: the earlier/later moment
+}
+
+PinnedState = {
+  status: 'ok'        // found as pinned
+        | 'moved'     // same train number within 15 min (no numbers: same line within 3 min), a timetable change; show "neu HH:MM"
+        | 'missing'   // not in the timetable that day: tell the user, offer `nearest`, let them re-pick
+        | 'gone'      // seen earlier today, now gone: treated as cancelled (trip has status 'cancelled')
+  day: string; pin: Pin
+  trip: Trip | null         // the pinned connection live (also trips[0]); null when missing
+  nearest: Trip | null      // missing only: the trip leaving closest to the pinned time
 }
 
 RouteBoard = {
@@ -83,7 +117,9 @@ RouteBoard = {
   target: Target
   trips: Trip[]             // up to 4 next usable trips for the target, best first
   alternatives: Trip[]      // when trips[0] is cancelled/broken: the next best trips (via kept if possible)
-  viaDropped: boolean       // alternatives had to leave out the via stop
+  viaDropped: boolean       // alternatives had to leave out the via stops
+  pinned: PinnedState | null    // pinned routes only; the UI focuses on pinned.trip, `trips` minus it = "andere Verbindungen"
+  change: Trip | null       // pinned + lesson change: the earlier way home / later way to school
   updatedAt: string
   stale: boolean            // provider unavailable; data is the last good answer
 }
@@ -99,6 +135,7 @@ Provider = { name: 'search.ch' | 'transport.opendata.ch'; occupancy: 'train-clas
 | PUT | `/commute` | `{ routes, settings }` (max 8 routes; invalid fields are dropped or reset) | same as GET |
 | GET | `/commute/stops` | `?q=Scherz` (≥ 2 chars) | `{ stops: Stop[] }` (max 10, small bus stops included) |
 | GET | `/commute/board` | `?route=<id>` optional | `{ boards: RouteBoard[], provider: Provider }` — live, for every route (or one) |
+| GET | `/commute/connections` | `?from=<stop id or name>&to=…&via=…&via=…&at=<ISO>&timeType=depart\|arrive` | `{ trips: Trip[], stale }` — the connection picker (editor, works before saving): up to 8 trips from `at`, in planned departure order. Page with the last trip's plannedDeparture + 1 min. |
 | GET | `/commute/trips` | `?route=<id>&at=<ISO>&timeType=depart\|arrive` | `{ trips: Trip[] }` — browse later/earlier |
 
 `GET /commute/board` is what the app calls on open, on pull-to-refresh, and when a commute push
@@ -113,6 +150,7 @@ app localizes by title like the school alerts):
   reaches the threshold; again only if it grows by ≥ 5 more minutes. Body: `07:05 Bus 366 ab Scherz, Dorfplatz · +6 min · Gleis 4 → Aarau 07:41`.
 - `Fällt aus` — a tracked trip or one of its legs is cancelled; body names the best alternative.
 - `Anschluss verpasst` — a transfer breaks (delay > transfer time); body names the alternative.
+- `Verbindung fehlt` — a pinned connection is not in the timetable on its day (from 75 min before it): names the nearest connection and asks to re-pick. Once per pin until it is found again (switch: cancelled).
 - `Gleisänderung` — platform change of a tracked leg within 30 min of departure (fine switch shared with delay).
 - `Früher nach Hause` — the last lesson(s) of a day are cancelled: `Letzte Stunde fällt aus – du kannst den Zug um 14:43 nehmen (S29 ab Aarau, an Scherz 15:20)`.
 - `Später zur Schule` — the first lesson(s) are cancelled: later connection to school.
@@ -122,6 +160,8 @@ Notification preferences (in the existing settings object, `PUT /settings`): `co
 Dedup: one notice per (route, trip, kind[, delay step]); ids are stable, so an app and the server
 never show the same alert twice.
 
+A pinned route tracks only its pinned connection (no alerts about other trains); a pinned
+connection that vanishes on its day after being seen is alerted as `Fällt aus`.
 Tracked trip = the trip `/commute/board` would put first for a route's next target within its
 travel window (from 75 minutes before departure until arrival). The server checks tracked trips
 every 60 s in the last 20 minutes before departure, every 3 minutes before that, and once at

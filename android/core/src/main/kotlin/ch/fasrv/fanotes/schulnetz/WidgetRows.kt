@@ -33,8 +33,8 @@ fun lessonClockText(event: AgendaEvent, zone: ZoneId = SCHOOL_ZONE): String {
 }
 
 /** Lessons and exam-slot entries of the schedule after hiding rules, with replaced lessons removed. */
-fun mergedScheduleEvents(events: List<AgendaEvent>, exams: List<AgendaEvent>, hidden: List<HiddenLesson>, zone: ZoneId = SCHOOL_ZONE, groupChoices: Map<String, List<String>> = emptyMap()): List<AgendaEvent> {
-    val visible = visibleEvents(events, hidden, zone, activeGroupSets(events, groupChoices), groupChoices)
+fun mergedScheduleEvents(events: List<AgendaEvent>, exams: List<AgendaEvent>, hidden: List<HiddenLesson>, zone: ZoneId = SCHOOL_ZONE): List<AgendaEvent> {
+    val visible = visibleEvents(events, hidden, zone)
     val visibleExams = visibleEvents(exams, hidden, zone)
     val merge = examsInLessonSlots(visible.filter { it.isLesson() }, visibleExams + visible.filter { it.isExamLike() }, zone)
     return (merge.apply(visible) + merge.exams.map { it.shown }).distinctBy(::slotDedupKey)
@@ -50,10 +50,9 @@ fun widgetRows(
     hidden: List<HiddenLesson>,
     now: Instant,
     zone: ZoneId = SCHOOL_ZONE,
-    groupChoices: Map<String, List<String>> = emptyMap(),
 ): List<WidgetRow> {
     DerivedWorkProbe.hit("widgetRows")
-    val merged = mergedScheduleEvents(events, exams, hidden, zone, groupChoices)
+    val merged = mergedScheduleEvents(events, exams, hidden, zone)
     val today = now.atZone(zone).toLocalDate()
     val dated = merged.mapNotNull { event ->
         val start = event.startsAt(zone) ?: return@mapNotNull null

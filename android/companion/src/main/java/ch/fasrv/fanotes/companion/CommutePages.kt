@@ -1,6 +1,7 @@
 package ch.fasrv.fanotes.companion
 
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -66,6 +67,9 @@ private fun CommuteEditPage(model: CompanionModel) {
     CommuteEditor(
         route = draft, isNew = model.commuteDraftNew, defaultThreshold = model.commute.settings.delayThreshold, saving = model.commuteSaving,
         searchStops = { model.graph.commute.searchStops(it) },
+        loadConnections = { route, at -> model.graph.commute.connections(route, at) },
+        openPicker = model.commuteOpenPicker,
+        onPickerHandled = { model.commuteOpenPicker = false },
         onChange = { model.commuteDraft = it },
         onSave = model::saveCommuteDraft,
         onDelete = if (model.commuteDraftNew) null else ({ model.deleteCommuteRoute(draft.id) }),
@@ -86,6 +90,7 @@ private fun CommuteDetailPage(model: CompanionModel) {
     var extra by remember(route.id) { mutableStateOf(emptyList<Trip>()) }
     var loading by remember { mutableStateOf(false) }
     var failed by remember { mutableStateOf(false) }
+    var othersOpen by rememberSaveable(route.id) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     fun more(earlier: Boolean) {
         val shown = (board?.trips.orEmpty() + extra)
@@ -104,6 +109,7 @@ private fun CommuteDetailPage(model: CompanionModel) {
     }
     CommuteRefreshTimer(model, board, now)
     RefreshableScreenList(model.commute.refreshing, { model.refreshCommute(force = true, withRoutes = true) }) {
-        commuteDetailItems(route, board, extra, ui.provider, now, loading, failed, { more(true) }, { more(false) }, { model.editCommuteRoute(route.id) })
+        commuteDetailItems(route, board, extra, ui.provider, now, loading, failed, { more(true) }, { more(false) }, { model.editCommuteRoute(route.id) },
+            othersOpen, { othersOpen = !othersOpen }, { model.editCommuteRoute(route.id, openPicker = true) })
     }
 }

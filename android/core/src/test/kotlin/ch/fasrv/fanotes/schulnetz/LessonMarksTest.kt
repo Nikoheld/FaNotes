@@ -124,24 +124,6 @@ class LessonMarksTest {
     }
 
     @Test
-    fun `half class choice keeps own cancelled lesson visible and hides the other group`() {
-        fun l(name: String, week: Int, cancelled: Boolean = false) =
-            lesson("$name-$week", LocalDate.parse("2026-11-02").plusWeeks(week.toLong()).toString(), if (cancelled) "cancelled" else "",
-                status = if (cancelled) "cancelled" else "", name = name)
-        val events = (0 until 4).map { l("Hbio_TstAa", it, cancelled = it == 2) } + (0 until 4).map { l("Hche_TstAa", it) }
-        val sets = detectGroupSets(events)
-        assertEquals(1, sets.size)
-        val choices = mapOf(sets.single().key to listOf("Hbio_TstAa"))
-        val own = events.first { it.id == "Hbio_TstAa-2" }
-        assertTrue(own.isCancelled())
-        assertFalse(lessonHiddenByGroup(own, sets, choices))
-        assertTrue(lessonHiddenByGroup(events.first { it.id == "Hche_TstAa-2" }, sets, choices))
-        val shown = mergedScheduleEvents(events, emptyList(), emptyList(), groupChoices = choices)
-        assertTrue(shown.any { it.id == "Hbio_TstAa-2" && it.isCancelled() })
-        assertFalse(shown.any { it.id.startsWith("Hche") })
-    }
-
-    @Test
     fun `cancelled lesson is neither replaced by nor hides an exam`() {
         val cancelled = lesson("l1", "2026-11-10", "cancelled", status = "cancelled", name = "mat 2.1")
             .copy(start = "2026-11-10T08:00:00", end = "2026-11-10T08:45:00")

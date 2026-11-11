@@ -1,5 +1,12 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.27
+
+- Pendelstrecken: pick the one connection you always take (for every day or per weekday); the route card, Heute, the widget, the web app and the alerts then follow exactly that train or bus, and the other connections are one tap away.
+- A pinned connection that no longer runs (timetable change) is reported once with the nearest one, so you can pick it again; one that drops out on the day counts as cancelled, with an alternative.
+- Up to two via stops per route, in order, in the app and on the web.
+- Remove the half-class choice: all lessons show again in the timetable, Heute, the widget and the web app; the old choice is deleted on update.
+
 ## 2026.11.2-beta.26
 
 - Pendelstrecken: add your routes to and from school (with an optional via stop) and see the next connections live with delays, platforms, transfers and occupancy, on Heute, in a new widget and on the web.

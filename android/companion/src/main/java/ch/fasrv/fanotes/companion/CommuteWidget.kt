@@ -93,7 +93,8 @@ class CommuteWidget : AppWidgetProvider() {
 
         private fun views(context: Context, id: Int, ui: CommuteUi, route: Route?, board: RouteBoard?, now: Long, wide: Boolean): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_commute)
-            val first = board?.trips?.firstOrNull()
+            val first = board?.headTrip()
+            val focus = board?.let(::boardFocus)
             when {
                 !ui.loaded || ui.routes.isEmpty() -> {
                     views.setTextViewText(R.id.widget_title, t(R.string.commute_widget_empty_title))
@@ -108,7 +109,14 @@ class CommuteWidget : AppWidgetProvider() {
                     val minutes = first?.takeIf { !it.unusable }?.let { minutesUntil(it.departure.ifBlank { it.plannedDeparture }, now) }
                     val stale = board.stale || ui.boardAt == 0L || now - ui.boardAt > 15 * 60_000L
                     val updated = if (stale && ui.boardAt > 0) t(R.string.commute_stale_since, clockOf(ui.boardAt)) else ""
-                    views.setTextViewText(R.id.widget_detail, listOf(commuteInText(minutes).takeIf { it.isNotBlank() }, updated.takeIf { it.isNotBlank() }, commuteTargetText(board.target).takeIf { wide }).filterNotNull().joinToString(" · "))
+                    // A pinned route says what is wrong with its connection; the rows below show the pinned trip only.
+                    val pinNote = when (focus?.kind) {
+                        FocusKind.MISSING -> t(R.string.commute_widget_pin_missing)
+                        FocusKind.UNUSABLE -> if (board.pinned?.status == PinStatus.GONE) t(R.string.commute_pin_gone_title) else t(R.string.commute_trip_cancelled)
+                        FocusKind.MOVED -> t(R.string.commute_pin_moved, focus.movedClock)
+                        else -> ""
+                    }
+                    views.setTextViewText(R.id.widget_detail, listOf(pinNote.takeIf { it.isNotBlank() }, commuteInText(minutes).takeIf { it.isNotBlank() }, updated.takeIf { it.isNotBlank() }, commuteTargetText(board.target).takeIf { wide }).filterNotNull().joinToString(" · "))
                 }
             }
             val service = Intent(context, CommuteWidgetService::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)

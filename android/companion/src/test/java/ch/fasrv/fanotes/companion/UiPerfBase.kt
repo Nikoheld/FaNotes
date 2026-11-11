@@ -31,7 +31,6 @@ import androidx.test.core.app.ApplicationProvider
 import ch.fasrv.fanotes.desk.HomeworkTask
 import ch.fasrv.fanotes.schulnetz.DeskPrefs
 import ch.fasrv.fanotes.schulnetz.PlannedAbsence
-import ch.fasrv.fanotes.schulnetz.detectGroupSets
 import ch.fasrv.fanotes.schulnetz.hideSeries
 import ch.fasrv.fanotes.schulnetz.preferredEventTitle
 import ch.fasrv.fanotes.schulnetz.toNormalizedJson
@@ -219,9 +218,9 @@ abstract class UiPerfBase {
 
     /**
      * Builds the graph and model over the synthetic year (as a real start does: cached snapshot file and link flag exist
-     * first), waits until the model has loaded, and renders Heute. [groupChoice] picks the first option of every half-class set.
+     * first), waits until the model has loaded, and renders Heute.
      */
-    protected fun launchApp(groupChoice: Boolean) {
+    protected fun launchApp() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         AppLanguage.install(app)
         val today = LocalDate.now()
@@ -241,9 +240,7 @@ abstract class UiPerfBase {
         graph.commuteRequestsAllowed = false
         val waitStart = System.currentTimeMillis()
         while (!graph.snapshotReady.value && System.currentTimeMillis() - waitStart < 20_000) { idleMain(); Thread.sleep(10) }
-        val sets = detectGroupSets(graph.snapshot.value.events)
-        val choices = if (groupChoice) sets.associate { it.key to listOf(it.options.first().label) } else emptyMap()
-        graph.saveDeskPrefs(DeskPrefs(theme = "system", showMensa = true, groupChoices = choices))
+        graph.saveDeskPrefs(DeskPrefs(theme = "system", showMensa = true))
         val firstTask = today.plusDays(1)
         (0 until 30).forEach { index ->
             val subject = PerfFixture.courses.values.toList()[index % 12].title
@@ -260,7 +257,7 @@ abstract class UiPerfBase {
         model = CompanionModel(graph)
         sampler = Sampler(Thread.currentThread()).also { it.start() }
         val readyStart = System.currentTimeMillis()
-        while ((!model.schoolReady || model.loading || model.tasks.isEmpty() || model.desk.groupChoices != choices) && System.currentTimeMillis() - readyStart < 20_000) { idleMain(); Thread.sleep(10) }
+        while ((!model.schoolReady || model.loading || model.tasks.isEmpty()) && System.currentTimeMillis() - readyStart < 20_000) { idleMain(); Thread.sleep(10) }
         model.mensa = graph.mensaStore.cached()
         val commuteBy = System.currentTimeMillis() + 10_000
         while (!model.commute.loaded && System.currentTimeMillis() < commuteBy) { idleMain(); Thread.sleep(10) }
@@ -326,6 +323,6 @@ abstract class UiPerfBase {
     }
 
     companion object {
-        val TAG_METHODS = setOf("widgetRows", "absenceTally", "provisionalTally", "cleanSchulnetzText", "detectGroupSets")
+        val TAG_METHODS = setOf("widgetRows", "absenceTally", "provisionalTally", "cleanSchulnetzText")
     }
 }

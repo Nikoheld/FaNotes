@@ -24,9 +24,9 @@ import java.io.File
  * Regression guard for the lag fixed in "Stop recomputing school data on the main thread" (runs in CI with the unit tests).
  * It renders the app over the synthetic full school year of [PerfFixture], waits for the snapshot and the background warm-up,
  * then drives Heute scrolling, three Heute -> Planer -> Schule -> Heute round trips and a tap on an exam row, once as a warm-up
- * and three more times as timed rounds. It checks two things, for no group choice and for a half-class choice.
+ * and three more times as timed rounds. It checks two things.
  *
- * 1. Deterministic: the derived-data builders (widgetRows, absenceTally, provisionalTally, detectGroupSets, agendaForDays)
+ * 1. Deterministic: the derived-data builders (widgetRows, absenceTally, provisionalTally, agendaForDays)
  *    report to [ch.fasrv.fanotes.schulnetz.DerivedWorkProbe]; none may run on the main thread during these interactions.
  *    A first entry into Planer may legitimately build an agenda week that was never warmed, so agendaForDays only counts when
  *    its days overlap what the model warms in the background: today to +14 days and the current school week.
@@ -38,16 +38,14 @@ import java.io.File
 @Config(sdk = [34], application = Application::class, qualifiers = "w411dp-h891dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class UiRegressionGuardTest : UiPerfBase() {
-    @Test fun fullSchoolYearNoGroupChoice() = guard("no group choice", groupChoice = false)
-
-    @Test fun fullSchoolYearHalfClassChoice() = guard("half-class choice", groupChoice = true)
+    @Test fun fullSchoolYear() = guard("full year")
 
     // PROBE-BEGIN
     private class Hit(val name: String, val detail: Any?, val where: String, val round: Int, val action: String)
     // PROBE-END
 
-    private fun guard(variant: String, groupChoice: Boolean) {
-        launchApp(groupChoice)
+    private fun guard(variant: String) {
+        launchApp()
         // PROBE-BEGIN
         val mainThread = Looper.getMainLooper().thread
         val mainHits = ConcurrentLinkedQueue<Hit>()

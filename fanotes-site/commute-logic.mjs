@@ -5,6 +5,14 @@ import { cleanSchulnetzText, eventLabel, isCancelled, isLesson, linkedChange } f
 
 export const MAX_ROUTES = 8
 export const MAX_TIMES = 6
+/** Ordered via stops per route. */
+export const MAX_VIAS = 2
+/** Pinned connections per route (one per weekday at most). */
+export const MAX_PINS = 7
+/** A pinned connection found within this many minutes of its planned time counts as moved, not missing. */
+export const PIN_MOVED_MIN = 15
+/** Without train numbers only the same line this close counts as moved (buses run every few minutes). */
+export const PIN_MOVED_LINE_MIN = 3
 export const DELAY_STEPS = [2, 3, 5, 10]
 export const DEFAULT_DELAY_THRESHOLD = 3
 /** A delay alert repeats only when the delay grew by this much since the last one. */
@@ -107,6 +115,61 @@ const threshold = (value, fallback) => {
   return Number.isFinite(number) && number >= 1 && number <= 30 ? Math.round(number) : fallback
 }
 
+/** The fixed connection of a route: matched by line (or train number), boarding stop and planned departure. */
+export const sanitizePin = (input) => {
+  if (!input || typeof input !== 'object') return null
+  const line = text(input.line, 16)
+  const departure = clockOk(input.departure)
+  const stop = text(input.stop, 80)
+  if (!line || !departure || !stop) return null
+  const stopId = text(input.stopId, 32)
+  const days = [...new Set((Array.isArray(input.days) ? input.days : []).map(Number).filter((day) => Number.isInteger(day) && day >= 1 && day <= 7))].sort()
+  const transfers = Number(input.transfers)
+  return {
+    days,
+    line,
+    trainNo: text(input.trainNo, 16),
+    stop,
+    stopId: /^[A-Za-z0-9:_.-]{1,32}$/u.test(stopId) ? stopId : '',
+    departure,
+    arrival: clockOk(input.arrival),
+    transfers: Number.isInteger(transfers) && transfers >= 0 && transfers <= 9 ? transfers : 0,
+  }
+}
+
+/** Pins with disjoint weekdays; a pin without days is dropped. */
+export const sanitizePins = (input) => {
+  const taken = new Set()
+  const out = []
+  for (const raw of Array.isArray(input) ? input : []) {
+    if (out.length >= MAX_PINS) break
+    const pin = sanitizePin(raw)
+    if (!pin) continue
+    pin.days = pin.days.filter((day) => !taken.has(day))
+    if (!pin.days.length) continue
+    for (const day of pin.days) taken.add(day)
+    out.push(pin)
+  }
+  return out
+}
+
+/** Up to two ordered vias; an old single [via] still reads. Duplicates and the route ends are dropped. */
+export const sanitizeVias = (raw, from, to) => {
+  const list = Array.isArray(raw?.vias) ? raw.vias : raw?.via ? [raw.via] : []
+  const key = (stop) => (stop.id || stop.name).toLowerCase()
+  const ends = new Set([from, to].filter(Boolean).map(key))
+  const out = []
+  for (const item of list) {
+    const stop = sanitizeStop(item)
+    if (!stop || ends.has(key(stop)) || out.some((known) => key(known) === key(stop))) continue
+    out.push(stop)
+    if (out.length >= MAX_VIAS) break
+  }
+  return out
+}
+
+export const pinFor = (route, weekday) => (route.pins || []).find((pin) => pin.days.includes(weekday)) || null
+
 export const sanitizeRoutes = (input) => {
   const out = []
   for (const raw of Array.isArray(input) ? input : []) {
@@ -116,13 +179,17 @@ export const sanitizeRoutes = (input) => {
     if (!from || !to) continue
     const id = /^[a-f0-9]{12}$/u.test(String(raw?.id || '')) ? raw.id : ''
     if (!id || out.some((route) => route.id === id)) continue
+    const vias = sanitizeVias(raw, from, to)
     out.push({
       id,
       name: text(raw.name, 40),
       from,
       to,
-      via: sanitizeStop(raw.via),
+      vias,
+      // The first via for clients older than two vias.
+      via: vias[0] || null,
       schedule: sanitizeSchedule(raw.schedule),
+      pins: sanitizePins(raw.pins),
       delayThreshold: raw.delayThreshold == null ? null : threshold(raw.delayThreshold, null),
       notify: raw.notify !== false,
     })
@@ -305,8 +372,43 @@ export const evaluateTrip = ({ legs }) => {
     minutes: Math.max(0, Math.round((parseLocal(arrival) - parseLocal(departure)) / MINUTE)) || 0,
     transfers: Math.max(0, rides.length - 1),
     status, legs, changes, occupancy, issues, quietest: false,
+    // What a client stores to pin this connection (see sanitizePin).
+    pin: rides.length ? {
+      line: first.line, trainNo: first.trainNo || '', stop: first.from.name, stopId: first.from.stopId || '',
+      departure: clockOf(first.from.planned), arrival: clockOf(last.to.planned), transfers: Math.max(0, rides.length - 1),
+    } : null,
   }
 }
+
+const sameStop = (leg, pin) => (pin.stopId && leg.from.stopId ? leg.from.stopId === pin.stopId : leg.from.name.toLowerCase() === pin.stop.toLowerCase())
+const sameLine = (leg, pin) => leg.line.replace(/\s+/gu, '').toLowerCase() === pin.line.replace(/\s+/gu, '').toLowerCase()
+const sameNumber = (leg, pin) => Boolean(pin.trainNo && leg.trainNo && leg.trainNo.replace(/^0+/u, '') === pin.trainNo.replace(/^0+/u, ''))
+const sameVehicle = (leg, pin) => sameLine(leg, pin) || sameNumber(leg, pin)
+/** Moved by a timetable change: the same train number, or without numbers the same line a few minutes off. */
+const movedVehicle = (leg, pin, offset) => (pin.trainNo && leg.trainNo
+  ? sameNumber(leg, pin) && offset <= PIN_MOVED_MIN * MINUTE
+  : sameLine(leg, pin) && offset <= PIN_MOVED_LINE_MIN * MINUTE)
+
+/**
+ * Finds a route's pinned connection on [day] among [trips]. 'ok': same line or train number, same
+ * boarding stop and planned departure; 'moved': the same train number within PIN_MOVED_MIN
+ * minutes (a timetable change; without numbers the same line within PIN_MOVED_LINE_MIN); 'missing': not there, [nearest] is the trip that leaves closest to it.
+ */
+export const matchPin = (trips, pin, day) => {
+  const planned = zurichMs(day, pin.departure)
+  const firstRide = (trip) => trip.legs.find((leg) => leg.kind === 'ride')
+  const offset = (trip) => Math.abs(parseLocal(firstRide(trip)?.from.planned) - planned)
+  const rides = trips.filter((trip) => firstRide(trip))
+  const exact = rides.find((trip) => offset(trip) < MINUTE && sameVehicle(firstRide(trip), pin) && sameStop(firstRide(trip), pin))
+  if (exact) return { status: 'ok', trip: exact, nearest: null }
+  // The next bus of the same line ten minutes later is another vehicle, not the pinned one moved.
+  const moved = rides.filter((trip) => movedVehicle(firstRide(trip), pin, offset(trip))).sort((a, b) => offset(a) - offset(b))[0]
+  if (moved) return { status: 'moved', trip: moved, nearest: null }
+  const nearest = [...rides].filter((trip) => trip.status !== 'cancelled').sort((a, b) => offset(a) - offset(b))[0] || null
+  return { status: 'missing', trip: null, nearest }
+}
+
+export const pinLabel = (pin) => `${pin.departure} ${pin.line} ab ${pin.stop}`
 
 export const usable = (trip, now) => trip.status !== 'cancelled' && trip.status !== 'broken' && parseLocal(trip.departure) >= now - MINUTE
 
@@ -373,6 +475,7 @@ const lessonRef = (lesson) => (lesson ? { start: iso(lesson.start), end: iso(les
  */
 export const routeTarget = (route, { now, events = [], hiddenLabels = [] }) => {
   const schedule = route.schedule || { mode: 'none' }
+  if (route.pins?.length) return pinnedTarget(route, { now, events, hiddenLabels })
   if (schedule.mode === 'none') return { kind: 'now', at: iso(now), timeType: 'depart', lesson: null, lessonChange: 'none', plannedAt: null }
   const today = zurichWall(now).day
   for (let offset = 0; offset <= LOOKAHEAD_DAYS; offset += 1) {
@@ -399,6 +502,41 @@ export const routeTarget = (route, { now, events = [], hiddenLabels = [] }) => {
     if (at < now - MINUTE) continue
     const earlier = info.heldLastEnd < info.plannedLastEnd
     return { kind: 'lastLesson', at: iso(at), timeType: 'depart', lesson: lessonRef(info.last), lessonChange: earlier ? 'lastCancelled' : 'none', plannedAt: earlier ? iso(info.plannedLastEnd + buffer) : null }
+  }
+  return null
+}
+
+/**
+ * A pinned route's next target: its pinned connection on the next day a pin applies. A
+ * lesson-tied route also skips days without held lessons and reports a lesson change, with
+ * [changeAt]/[changeTimeType] for the earlier way home or the later way to school. The target
+ * stays current until the pinned connection's planned arrival.
+ */
+const pinnedTarget = (route, { now, events, hiddenLabels }) => {
+  const schedule = route.schedule
+  const today = zurichWall(now).day
+  for (let offset = 0; offset <= LOOKAHEAD_DAYS; offset += 1) {
+    const day = addDays(today, offset)
+    const weekday = zurichWall(zurichMs(day, '12:00')).weekday
+    const pin = pinFor(route, weekday)
+    if (!pin) continue
+    const at = zurichMs(day, pin.departure)
+    let until = pin.arrival ? zurichMs(day, pin.arrival) : at + 60 * MINUTE
+    if (until < at) until += 24 * 60 * MINUTE
+    if (until < now - MINUTE) continue
+    const base = { kind: 'pinned', at: iso(at), timeType: 'depart', lesson: null, lessonChange: 'none', plannedAt: null, changeAt: null, changeTimeType: null, pin, day }
+    if (schedule.mode !== 'firstLesson' && schedule.mode !== 'lastLesson') return base
+    const info = schoolDay(events, day, hiddenLabels)
+    // No lessons known for that day (holidays, data not read yet): the pinned train still counts.
+    if (!info) return base
+    if (info.allCancelled) continue
+    const buffer = schedule.bufferMinutes * MINUTE
+    if (schedule.mode === 'firstLesson') {
+      const moved = info.first.start > info.plannedFirst.start
+      return { ...base, lesson: lessonRef(info.first), lessonChange: moved ? 'firstCancelled' : 'none', plannedAt: moved ? iso(info.plannedFirst.start - buffer) : null, changeAt: moved ? iso(info.first.start - buffer) : null, changeTimeType: moved ? 'arrive' : null }
+    }
+    const earlier = info.heldLastEnd < info.plannedLastEnd
+    return { ...base, lesson: lessonRef(info.last), lessonChange: earlier ? 'lastCancelled' : 'none', plannedAt: earlier ? iso(info.plannedLastEnd + buffer) : null, changeAt: earlier ? iso(info.heldLastEnd + buffer) : null, changeTimeType: earlier ? 'depart' : null }
   }
   return null
 }
@@ -488,16 +626,32 @@ export const tripAlerts = ({ route, target, tracked, alternatives = [], state = 
 export const lessonChangeAlert = ({ route, target, trip, state = {}, now }) => {
   if (!route.notify || !target || target.lessonChange === 'none' || !trip) return { changes: [], state }
   const day = String(target.at).slice(0, 10)
-  const key = `${day}|${target.lessonChange}|${target.at}`
+  const moment = target.changeAt || target.at
+  const key = `${day}|${target.lessonChange}|${moment}`
   if (state.lessons?.[key]) return { changes: [], state }
-  if (parseLocal(target.at) < now - 5 * MINUTE) return { changes: [], state }
+  if (parseLocal(moment) < now - 5 * MINUTE) return { changes: [], state }
   const extra = { target: 'commute', targetId: route.id, date: day }
-  const id = `commute:${route.id}:${day}:lesson:${target.lessonChange}:${clockOf(target.at).replace(':', '')}`
+  const id = `commute:${route.id}:${day}:lesson:${target.lessonChange}:${clockOf(moment).replace(':', '')}`
   const change = target.lessonChange === 'lastCancelled'
     ? linkedChange(id, 'commute', 'Früher nach Hause', `Letzte Stunde fällt aus – du kannst den ${tripLine(trip)} nehmen.`, extra)
     : linkedChange(id, 'commute', 'Später zur Schule', `Erste Stunde fällt aus – es reicht der ${tripLine(trip)}.`, extra)
   const lessons = Object.fromEntries(Object.entries({ ...(state.lessons || {}), [key]: true }).filter(([name]) => name.slice(0, 10) >= addDays(zurichWall(now).day, -2)))
   return { changes: [change], state: { ...state, lessons } }
+}
+
+/**
+ * "Verbindung fehlt": the pinned connection is not in the timetable on its day (a timetable change).
+ * Once per pin until it is found again; names the nearest connection.
+ */
+export const pinMissingAlert = ({ route, target, nearest, state = {} }) => {
+  if (!route.notify || !target?.pin) return { changes: [], state }
+  const key = `${target.pin.line}|${target.pin.stop}|${target.pin.departure}`
+  if (state.pinMissing?.[key]) return { changes: [], state }
+  const extra = { target: 'commute', targetId: route.id, date: target.day }
+  const id = `commute:${route.id}:${target.day}:pin:${key.replace(/[^A-Za-z0-9|:+-]/gu, '')}`
+  const hint = nearest ? `Nächste Verbindung: ${tripLine(nearest)}.` : 'Keine Verbindung in der Nähe gefunden.'
+  const change = linkedChange(id, 'commute', 'Verbindung fehlt', `${pinLabel(target.pin)} ist am ${target.day.slice(8, 10)}.${target.day.slice(5, 7)}. nicht im Fahrplan. ${hint} Du kannst die Verbindung in der Strecke neu wählen.`, extra)
+  return { changes: [change], state: { ...state, pinMissing: { ...(state.pinMissing || {}), [key]: true } } }
 }
 
 export const routeLabel = (route) => route.name || `${route.from.name} → ${route.to.name}`

@@ -1,10 +1,10 @@
 // Pieces of the Pendeln view and the Today card: line chips, delay badges, occupancy, trips with
 // their leg timeline, and the board body with its status banners.
 import { useState } from 'react'
-import { chipColors, clockOf, delayClass, departureDelay, departurePlatform, durationLabel, hasOccupancy, lessonChange, occupancyLevel, rideLegs, tripCancelled } from '../lib/commute'
+import { boardFocus, chipColors, clockOf, dayLabel, delayClass, departureDelay, departurePlatform, durationLabel, hasOccupancy, lessonChange, occupancyLevel, rideLegs, tripCancelled } from '../lib/commute'
 import type { Strings } from '../lib/i18n'
 import type { CommuteRoute, CommuteTarget, Leg, Occupancy, RouteBoard, Stop, Trip, TripPoint } from '../types'
-import { Banner, Icon, Tag, type IconName } from './ui'
+import { Banner, Button, Icon, Tag, type IconName } from './ui'
 
 export const stopIcon = (type: Stop['type'] | string): IconName => (type === 'train' ? 'train' : type === 'bus' ? 'bus' : type === 'tram' ? 'tram' : type === 'ship' ? 'ship' : type === 'cableway' ? 'cableway' : 'stop')
 
@@ -115,7 +115,7 @@ export const TransferNote = ({ change, t }: { change: Trip['changes'][number]; t
 )
 
 /** One connection: departure (planned struck when late), arrival, lines, platform, changes and forecast; opens into the legs. */
-export const TripCard = ({ trip, t, open: startOpen = false, compact = false }: { trip: Trip; t: Strings; open?: boolean; compact?: boolean }) => {
+export const TripCard = ({ trip, t, open: startOpen = false, compact = false, pinned = false, note }: { trip: Trip; t: Strings; open?: boolean; compact?: boolean; pinned?: boolean; note?: string }) => {
   const [open, setOpen] = useState(startOpen)
   const cancelled = tripCancelled(trip)
   const delay = departureDelay(trip)
@@ -131,7 +131,8 @@ export const TripCard = ({ trip, t, open: startOpen = false, compact = false }: 
     </>
   )
   return (
-    <article className={`trip trip-${kind}${cancelled ? ' trip-cancelled' : ''}${trip.quietest ? ' trip-quietest' : ''}`} data-trip={trip.id}>
+    <article className={`trip trip-${kind}${cancelled ? ' trip-cancelled' : ''}${trip.quietest ? ' trip-quietest' : ''}${pinned ? ' trip-pinned' : ''}`} data-trip={trip.id}>
+      {pinned ? <p className="trip-pinned-label"><Icon name="pin" size={14} />{t.pinnedBadge}{note ? <span className="trip-pinned-note"> · {note}</span> : null}</p> : null}
       <button type="button" className="trip-head" aria-expanded={open} onClick={() => setOpen(!open)} aria-label={`${clockOf(trip.departure)} ${label}. ${open ? t.tripHideDetails : t.tripShowDetails}`}>
         <span className="trip-times tabular">
           <span className="trip-dep">
@@ -176,6 +177,11 @@ export const targetLine = (target: CommuteTarget, t: Strings): string => {
     case 'firstLesson': return target.lesson ? t.targetFirst(at, clockOf(target.lesson.start)) : t.targetArriveBy(at)
     case 'lastLesson': return target.lesson ? t.targetLast(at, clockOf(target.lesson.end)) : t.targetDepartAt(at)
     case 'time': return target.timeType === 'arrive' ? t.targetArriveBy(at) : t.targetDepartAt(at)
+    case 'pinned': {
+      // "Feste Verbindung · Fr 07:12" (the pinned departure on its travel day).
+      const weekday = target.day ? (new Date(`${target.day}T12:00:00Z`).getUTCDay() + 6) % 7 : -1
+      return [t.pinnedBadge, [weekday >= 0 ? t.weekdays[weekday] : '', target.pin?.departure || at].filter(Boolean).join(' ')].join(' · ')
+    }
     default: return t.targetNow
   }
 }
@@ -186,7 +192,9 @@ export const LessonChangeBanner = ({ board, t }: { board: RouteBoard | undefined
   if (!change) return null
   return (
     <Banner tone="accent" icon="info">
-      {change.kind === 'lastCancelled'
+      {change.pinned
+        ? <strong>{change.kind === 'lastCancelled' ? t.pinnedLastCancelled(change.line, change.time, change.arrival) : t.pinnedFirstCancelled(change.line, change.time, change.arrival)}</strong>
+        : change.kind === 'lastCancelled'
         ? <strong>{t.lastCancelled(change.line, change.time, change.plannedTime)}</strong>
         : <><strong>{t.firstCancelled}</strong><span>{t.firstCancelledBody(change.line, change.time)}</span></>}
     </Banner>
@@ -202,7 +210,7 @@ export const StatusBanner = ({ board, route, t }: { board: RouteBoard; route?: C
       <Banner tone="danger" icon="warning">
         <strong>{first.status === 'broken' ? t.bannerBroken : t.bannerCancelled}: {clockOf(first.plannedDeparture)}</strong>
         {first.issues[0]?.text ? <span>{first.issues[0].text}</span> : null}
-        {board.alternatives.length && board.viaDropped ? <span>{route?.via ? `${t.viaDropped} (${route.via.name})` : t.viaDropped}</span> : null}
+        {board.alternatives.length && board.viaDropped ? <span>{route && route.vias.length ? `${t.viaDropped} (${route.vias.map((stop) => stop.name).join(', ')})` : t.viaDropped}</span> : null}
       </Banner>
       {board.alternatives.length ? (
         <div className="alternatives">
@@ -214,26 +222,85 @@ export const StatusBanner = ({ board, route, t }: { board: RouteBoard; route?: C
   )
 }
 
+/** Alternatives of a cancelled pinned connection, with the via note. */
+const Alternatives = ({ board, route, t }: { board: RouteBoard; route?: CommuteRoute; t: Strings }) => (
+  board.alternatives.length ? (
+    <div className="alternatives">
+      <h3>{t.alternatives}</h3>
+      {board.alternatives.map((trip) => <TripCard key={trip.id} trip={trip} t={t} compact />)}
+      {board.viaDropped ? <p className="muted small">{route && route.vias.length ? `${t.viaDropped} (${route.vias.map((stop) => stop.name).join(', ')})` : t.viaDropped}</p> : null}
+    </div>
+  ) : null
+)
+
+/** The focus of a pinned route: the fixed connection live, a moved/missing notice, alternatives when it fails. */
+export const PinnedFocus = ({ board, route, t, onRepick }: { board: RouteBoard; route?: CommuteRoute; t: Strings; onRepick?: () => void }) => {
+  const focus = boardFocus(board)
+  if (focus.mode !== 'pinned' || !focus.pin) return null
+  const { pin, trip } = focus
+  return (
+    <div className="pinned-focus">
+      {focus.status === 'moved' && focus.movedTo ? <Banner tone="warning" icon="warning"><strong>{t.pinMoved(focus.movedTo)}</strong></Banner> : null}
+      {focus.status === 'missing' || !trip ? (
+        <div className="status-block">
+          <Banner tone="danger" icon="warning" action={onRepick ? <Button tone="outline" onClick={onRepick}>{t.pinRepick}</Button> : undefined}>
+            <strong>{t.pinMissing(pin.departure, pin.line, pin.stop, dayLabel(focus.day))}</strong>
+          </Banner>
+          {focus.nearest ? <><h3 className="pinned-nearest">{t.pinNearest}</h3><TripCard trip={focus.nearest} t={t} /></> : null}
+        </div>
+      ) : (
+        <div className="status-block">
+          {focus.broken ? (
+            <Banner tone="danger" icon="warning">
+              <strong>{trip.status === 'broken' ? t.bannerBroken : t.bannerCancelled}: {clockOf(trip.plannedDeparture)}</strong>
+              {trip.issues[0]?.text ? <span>{trip.issues[0].text}</span> : null}
+            </Banner>
+          ) : null}
+          <TripCard trip={trip} t={t} pinned open={!focus.broken} />
+          {focus.broken ? <Alternatives board={board} route={route} t={t} /> : null}
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Everything under the route header: banners, the trips, browsing buttons and the occupancy note. */
-export const BoardBody = ({ route, board, trips, t, onEarlier, onLater, busy = '', browseError = false, noMore = false }: {
+export const BoardBody = ({ route, board, trips, t, onEarlier, onLater, onRepick, busy = '', browseError = false, noMore = false }: {
   route?: CommuteRoute
   board: RouteBoard
   trips: Trip[]
   t: Strings
   onEarlier?: () => void
   onLater?: () => void
+  onRepick?: () => void
   busy?: '' | 'earlier' | 'later'
   browseError?: boolean
   noMore?: boolean
-}) => (
-  <div className="board-body">
-    <LessonChangeBanner board={board} t={t} />
-    <StatusBanner board={board} route={route} t={t} />
-    {board.stale ? <Banner tone="warning" icon="warning">{t.boardStale(clockOf(board.updatedAt))}</Banner> : null}
-    {onEarlier ? <button type="button" className="button button-outline browse" onClick={onEarlier} disabled={busy !== ''}>{busy === 'earlier' ? <span className="spinner spinner-small" aria-hidden="true" /> : <Icon name="up" size={18} />}{t.boardEarlier}</button> : null}
-    {trips.length ? <div className="trips">{trips.map((trip) => <TripCard key={trip.id} trip={trip} t={t} />)}</div> : <p className="muted board-empty">{t.boardNoTrips}</p>}
-    {onLater ? <button type="button" className="button button-outline browse" onClick={onLater} disabled={busy !== ''}>{busy === 'later' ? <span className="spinner spinner-small" aria-hidden="true" /> : <Icon name="down" size={18} />}{t.boardLater}</button> : null}
-    {browseError ? <p className="muted small" role="status">{t.boardMoreFailed}</p> : noMore ? <p className="muted small" role="status">{t.boardNoMore}</p> : null}
-    <p className="muted small occupancy-note">{t.occupancyNote}</p>
-  </div>
-)
+}) => {
+  const focus = boardFocus(board, trips)
+  const [showOthers, setShowOthers] = useState(false)
+  const list = (
+    <>
+      {onEarlier ? <button type="button" className="button button-outline browse" onClick={onEarlier} disabled={busy !== ''}>{busy === 'earlier' ? <span className="spinner spinner-small" aria-hidden="true" /> : <Icon name="up" size={18} />}{t.boardEarlier}</button> : null}
+      {focus.others.length ? <div className="trips">{focus.others.map((trip) => <TripCard key={trip.id} trip={trip} t={t} />)}</div> : <p className="muted board-empty">{t.boardNoTrips}</p>}
+      {onLater ? <button type="button" className="button button-outline browse" onClick={onLater} disabled={busy !== ''}>{busy === 'later' ? <span className="spinner spinner-small" aria-hidden="true" /> : <Icon name="down" size={18} />}{t.boardLater}</button> : null}
+      {browseError ? <p className="muted small" role="status">{t.boardMoreFailed}</p> : noMore ? <p className="muted small" role="status">{t.boardNoMore}</p> : null}
+    </>
+  )
+  return (
+    <div className="board-body">
+      <LessonChangeBanner board={board} t={t} />
+      {focus.mode === 'pinned' ? <PinnedFocus board={board} route={route} t={t} onRepick={onRepick} /> : <StatusBanner board={board} route={route} t={t} />}
+      {board.stale ? <Banner tone="warning" icon="warning">{t.boardStale(clockOf(board.updatedAt))}</Banner> : null}
+      {focus.mode === 'pinned' ? (
+        <div className="others">
+          <button type="button" className="button button-quiet others-toggle" aria-expanded={showOthers} onClick={() => setShowOthers(!showOthers)}>
+            <Icon name={showOthers ? 'up' : 'down'} size={18} />{showOthers ? t.othersHide : t.othersShow}
+          </button>
+          {showOthers ? <div className="others-body">{list}</div> : null}
+        </div>
+      ) : list}
+      <p className="muted small occupancy-note">{t.occupancyNote}</p>
+    </div>
+  )
+}

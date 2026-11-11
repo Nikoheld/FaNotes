@@ -98,6 +98,7 @@ private val EXACT = mapOf(
     "Verspätung" to R.string.commute_alert_delay,
     "Fällt aus" to R.string.commute_alert_cancelled,
     "Anschluss verpasst" to R.string.commute_alert_missed,
+    "Verbindung fehlt" to R.string.commute_alert_pin_missing,
     "Gleisänderung" to R.string.commute_alert_platform,
     "Früher nach Hause" to R.string.commute_alert_home_early,
     "Später zur Schule" to R.string.commute_alert_school_late,

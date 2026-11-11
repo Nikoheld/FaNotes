@@ -1,5 +1,5 @@
 // The Today card for the commute route that matters now: next connection and its status.
-import { clockOf, delayClass, departureDelay, departurePlatform, lessonChange, nextTrip, relevantRoute, rideLegs, routeLabel, tripCancelled } from '../lib/commute'
+import { boardFocus, clockOf, dayLabel, delayClass, departureDelay, departurePlatform, lessonChange, nextTrip, relevantRoute, rideLegs, routeLabel, tripCancelled } from '../lib/commute'
 import { useCommuteLive } from '../lib/useCommuteLive'
 import { useKanti } from '../state'
 import { useClock } from '../views/common'
@@ -31,8 +31,13 @@ export const CommuteCard = () => {
   const route = relevantRoute({ routes: commute.routes, boards: commute.boards, now: Date.now(), clockMinutes: clock.minutes })
   if (!route) return null
   const board = commute.boards[route.id]
-  const trip = nextTrip(board, Date.now())
-  const first = board?.trips[0]
+  const focus = boardFocus(board)
+  const pinned = focus.mode === 'pinned' && focus.pin
+  // A pinned route shows its fixed connection; when that fails, the first usable alternative; when it is missing, the nearest trip.
+  const trip = pinned
+    ? (focus.broken ? board?.alternatives.find((alt) => !tripCancelled(alt)) || null : focus.trip || focus.nearest)
+    : nextTrip(board, Date.now())
+  const first = pinned ? (focus.broken ? focus.trip : null) : board?.trips[0]
   const change = lessonChange(board)
   const open = () => kanti.navigate('commute', { strecke: route.id })
   const delay = trip ? departureDelay(trip) : null
@@ -48,7 +53,13 @@ export const CommuteCard = () => {
           <strong>{routeLabel(route)}</strong>
           <small className="muted">{route.from.name} → {route.to.name}</small>
         </div>
-        {change ? <p className="commute-card-change"><Icon name="info" size={15} />{change.kind === 'lastCancelled' ? t.lastCancelled(change.line, change.time, change.plannedTime) : `${t.firstCancelled}: ${t.firstCancelledBody(change.line, change.time)}`}</p> : null}
+        {pinned ? <p className="commute-card-pin"><Icon name="pin" size={14} />{t.pinnedBadge}</p> : null}
+        {pinned && focus.status === 'moved' && focus.movedTo ? <p className="commute-card-alert commute-card-warn"><Icon name="warning" size={15} />{t.pinMoved(focus.movedTo)}</p> : null}
+        {pinned && focus.status === 'missing' && focus.pin ? (
+          <p className="commute-card-alert"><Icon name="warning" size={15} /><span>{t.pinMissing(focus.pin.departure, focus.pin.line, focus.pin.stop, dayLabel(focus.day))}{' '}
+            <button type="button" className="link" onClick={(event) => { event.stopPropagation(); kanti.navigate('commute', { wahl: route.id }) }}>{t.pinRepick}</button></span></p>
+        ) : null}
+        {change ? <p className="commute-card-change"><Icon name="info" size={15} />{change.pinned ? (change.kind === 'lastCancelled' ? t.pinnedLastCancelled(change.line, change.time, change.arrival) : t.pinnedFirstCancelled(change.line, change.time, change.arrival)) : change.kind === 'lastCancelled' ? t.lastCancelled(change.line, change.time, change.plannedTime) : `${t.firstCancelled}: ${t.firstCancelledBody(change.line, change.time)}`}</p> : null}
         {first && tripCancelled(first) ? <p className="commute-card-alert"><Icon name="warning" size={15} />{t.bannerCancelled}: {clockOf(first.plannedDeparture)}</p> : null}
         {trip ? (
           <>

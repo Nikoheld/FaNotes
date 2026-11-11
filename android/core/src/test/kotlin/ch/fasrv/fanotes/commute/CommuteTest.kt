@@ -101,14 +101,21 @@ class CommuteTest {
         val route = Route(
             id = "a1b2c3d4e5f6", name = "Schule \"früh\"",
             from = Stop("9000001", "Testdorf, Dorfplatz", StopType.BUS), to = Stop("9000004", "Schulstadt", StopType.TRAIN),
-            via = Stop("9000003", "Knoten", StopType.TRAIN),
+            vias = listOf(Stop("9000003", "Knoten", StopType.TRAIN), Stop("9000005", "Zwischen", StopType.BUS)),
+            pins = listOf(Pin(listOf(1, 2, 3), "IR 16", "1234", "Testdorf", "9000001", "07:12", "07:41", 1)),
             schedule = Schedule(ScheduleMode.FIRST_LESSON, emptyList(), listOf(1, 2, 3), 15), delayThreshold = 5, notify = false,
         )
-        val settings = CommuteSettings(5, listOf("informatik 1.2"))
+        val settings = CommuteSettings(5, listOf("informatik"))
         val parsed = parseCommuteState(commuteBody(listOf(route), settings))!!
         assertEquals(listOf(route), parsed.routes)
         assertEquals(settings, parsed.settings)
-        val plain = route.copy(via = null, delayThreshold = null)
+        // Both `vias` and the first `via` (older servers) go out.
+        val body = commuteBody(listOf(route), settings)
+        assertTrue(body.contains("\"vias\":[{"))
+        assertTrue(body.contains("\"via\":{\"id\":\"9000003\""))
+        assertTrue(body.contains("\"pins\":[{\"days\":[1,2,3],\"line\":\"IR 16\""))
+        assertEquals("Knoten", route.via?.name)
+        val plain = route.copy(vias = emptyList(), pins = emptyList(), delayThreshold = null)
         assertEquals(plain, parseCommuteState(commuteBody(listOf(plain), settings))!!.routes.single())
     }
 
@@ -188,26 +195,28 @@ class CommuteTest {
         AgendaEvent(id, start, end, label, "", "T01", emptyList(), "", label, "confirmed", "lesson", "", "")
 
     @Test
-    fun hiddenLabelsComeFromGroupChoicesAndHideRules() {
+    fun hiddenLabelsComeFromHideRules() {
         val zone = ZoneId.of("Europe/Zurich")
         val events = listOf(
-            lesson("a1", "Informatik 1.1", "2026-11-02T08:15:00"), lesson("a2", "Informatik 1.1", "2026-11-04T08:15:00"),
-            lesson("b1", "Informatik 1.2", "2026-11-02T08:15:00"), lesson("b2", "Informatik 1.2", "2026-11-04T08:15:00"),
+            lesson("a1", "Physik", "2026-11-02T08:15:00"), lesson("a2", "Physik", "2026-11-04T08:15:00"),
+            lesson("b1", "Informatik", "2026-11-02T08:15:00"), lesson("b2", "Informatik", "2026-11-04T08:15:00"),
             lesson("m1", "Mathe", "2026-11-02T10:10:00"), lesson("m2", "Mathe", "2026-11-04T10:10:00"),
             lesson("z1", "Zeichnen", "2026-11-03T13:30:00"), lesson("z2", "Zeichnen", "2026-11-10T13:30:00"),
         )
-        assertEquals(emptyList(), commuteHiddenLabels(events, emptyList(), emptyMap(), zone))
-        val choices = mapOf("informatik 1.1|informatik 1.2" to listOf("Informatik 1.1"))
-        assertEquals(listOf("informatik 1.2"), commuteHiddenLabels(events, emptyList(), choices, zone))
+        assertEquals(emptyList(), commuteHiddenLabels(events, emptyList(), zone))
+        val info = HiddenLesson("series:informatik|1|08:15", "series", "b1", "", "Informatik", 1, "08:15")
+        val info2 = HiddenLesson("series:informatik|3|08:15", "series", "b2", "", "Informatik", 3, "08:15")
+        val rules = listOf(info, info2)
+        assertEquals(listOf("informatik"), commuteHiddenLabels(events, rules, zone))
         // Mathe is hidden on Mondays only: Wednesday's lesson still counts, so it is not listed.
         val monday = HiddenLesson("series:mathe|1|10:10", "series", "m1", "", "Mathe", 1, "10:10")
-        assertEquals(listOf("informatik 1.2"), commuteHiddenLabels(events, listOf(monday), choices, zone))
+        assertEquals(listOf("informatik"), commuteHiddenLabels(events, rules + monday, zone))
         // Zeichnen has one slot a week; hiding that slot hides the subject.
         val zeichnen = HiddenLesson("series:zeichnen|2|13:30", "series", "z1", "", "Zeichnen", 2, "13:30")
-        assertEquals(listOf("informatik 1.2", "zeichnen"), commuteHiddenLabels(events, listOf(zeichnen), choices, zone))
+        assertEquals(listOf("informatik", "zeichnen"), commuteHiddenLabels(events, rules + zeichnen, zone))
         // A single hidden lesson of a series with more lessons hides nothing.
         val once = HiddenLesson("once:z1:2026-11-03", "once", "z1", "2026-11-03", "Zeichnen", 2, "13:30")
-        assertEquals(listOf("informatik 1.2"), commuteHiddenLabels(events, listOf(once), choices, zone))
+        assertEquals(listOf("informatik"), commuteHiddenLabels(events, rules + once, zone))
         assertTrue(hiddenLabelsChanged(listOf("a"), listOf("a", "b")))
         assertFalse(hiddenLabelsChanged(listOf("B", "a"), listOf("a", "b")))
     }

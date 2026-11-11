@@ -55,9 +55,24 @@ fun commuteTargetText(target: TripTarget): String {
         "firstLesson" -> if (lesson.isNotBlank()) t(R.string.commute_target_first, at, lesson) else t(R.string.commute_target_arrive, at)
         "lastLesson" -> if (lesson.isNotBlank()) t(R.string.commute_target_last, at, lesson) else t(R.string.commute_target_time, at)
         "time" -> t(R.string.commute_target_time, at)
+        "pinned" -> t(R.string.commute_target_pinned, commutePinDayText(target.day.orEmpty()))
         else -> t(R.string.commute_target_now)
     }
 }
+
+/** "Wednesday, 13 November" for a `YYYY-MM-DD` travel day; the raw text when it cannot be read. */
+fun commutePinDayText(day: String): String =
+    runCatching { java.time.LocalDate.parse(day).format(java.time.format.DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.getDefault())) }.getOrDefault(day)
+
+/** The words a pin summary needs, in the app language. */
+fun commutePinWords(): PinWords = PinWords(t(R.string.commute_pin_summary_from), t(R.string.commute_pin_summary_arrive)) { commuteTransfersText(it) }
+
+/** `07:12 IR 16 ab Aarau · an 07:41 · 1 Umstieg`. */
+fun commutePinSummary(pin: Pin): String = pinSummary(pin, commutePinWords())
+
+/** A trip in a few words: its departure and first line, for notices. */
+fun commuteTripBrief(trip: Trip): String =
+    listOf(isoClock(trip.departure.ifBlank { trip.plannedDeparture }), trip.firstRide()?.line.orEmpty()).filter { it.isNotBlank() }.joinToString(" ")
 
 fun commuteInText(minutes: Int?): String = when {
     minutes == null -> ""

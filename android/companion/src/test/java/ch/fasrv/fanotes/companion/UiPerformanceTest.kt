@@ -6,7 +6,6 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isSelectable
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import ch.fasrv.fanotes.schulnetz.detectGroupSets
 import ch.fasrv.fanotes.schulnetz.preferredEventTitle
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,12 +25,10 @@ import java.io.File
 @Config(sdk = [34], application = Application::class, qualifiers = "w411dp-h891dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class UiPerformanceTest : UiPerfBase() {
-    @Test fun fullSchoolYear() = runHarness("full year, no group choice", groupChoice = false)
+    @Test fun fullSchoolYear() = runHarness("full year")
 
-    @Test fun fullSchoolYearWithHalfClassChoice() = runHarness("full year, half-class choice set", groupChoice = true)
-
-    private fun runHarness(variant: String, groupChoice: Boolean) {
-        launchApp(groupChoice)
+    private fun runHarness(variant: String) {
+        launchApp()
         // Warm-up pass: every action once, discarded, so the JIT is warm for the measured rounds.
         round = -1; profiling = false
         runPass("A ")
@@ -75,7 +72,7 @@ class UiPerformanceTest : UiPerfBase() {
         out.appendLine("=== UI performance: $variant ===")
         out.appendLine("Events=${model.snapshot.events.size} exams=${model.snapshot.exams.size} grades=${model.snapshot.grades.size} absences=${model.snapshot.absences.size} " +
             "homework=${model.snapshot.homework.size} tasks=${model.tasks.size} planned=${model.plannedAbsences.size} hidden=${model.hidden.size} " +
-            "groupSets=${detectGroupSets(model.snapshot.events).size} groupChoices=${model.desk.groupChoices.size} mensa=${model.mensa?.days?.size ?: 0}d  JVM=${System.getProperty("java.version")}")
+            "mensa=${model.mensa?.days?.size ?: 0}d  JVM=${System.getProperty("java.version")}")
         out.appendLine("Method: 1 discarded warm-up pass, then $ROUNDS timed rounds (phase A, no profiler), then 1 profiled round (phase P, frame times inflated).")
         out.appendLine("best/median = total frame ms of the best / median round; max, >16, >32 are those of the best round; tap = best tap-to-response ms (injection to the first frame with the sheet visible).")
         out.appendLine()
