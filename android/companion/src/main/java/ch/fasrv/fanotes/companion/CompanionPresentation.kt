@@ -18,7 +18,8 @@ enum class Page(val title: String) {
     Absences("Absences"), Updates("School updates"), Statement("School account"),
     Settings("Settings"), Connections("Account & sync"), Appearance("Appearance"), ArchivedSubjects("Archived subjects"),
     Navigation("Navigation bar"), Planning("Planning & grades"), HalfClass("Half-class groups"), Notifications("Notifications"),
-    Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted"), DocSearch("Document search"), WebAccess("Kanti+ in the browser")
+    Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted"), DocSearch("Document search"), WebAccess("Kanti+ in the browser"),
+    Commute("Commute routes"), CommuteEdit("Commute route"), CommuteDetail("Commute")
 }
 data class CompanionRoute(val destination: Destination = Destination.Today, val page: Page? = null)
 
@@ -78,6 +79,9 @@ fun Page.uiTitle(): String = when (this) {
     Page.Trash -> t(R.string.recently_deleted)
     Page.DocSearch -> t(R.string.doc_search_title)
     Page.WebAccess -> t(R.string.web_access)
+    Page.Commute -> t(R.string.commute_title)
+    Page.CommuteEdit -> t(R.string.commute_route)
+    Page.CommuteDetail -> t(R.string.commute_route)
 }
 fun navPlacement(id: String): NavPlacement = when (startTabId(id)) {
     "planner" -> NavPlacement(CompanionRoute(Destination.Planner))
@@ -135,6 +139,7 @@ fun companionRoute(route: NotifyRoute): CompanionRoute = when {
     route.section == "Pruefungen" -> CompanionRoute(Destination.School, Page.Exams)
     route.section == "Absenzen" -> CompanionRoute(Destination.School, Page.Absences)
     route.section == "Termine" -> CompanionRoute(Destination.School, Page.Updates)
+    route.section == "Pendeln" -> CompanionRoute(Destination.Today, if (route.highlightIds.isNotEmpty()) Page.CommuteDetail else Page.Commute)
     else -> CompanionRoute(destinationFor(route.tab))
 }
 

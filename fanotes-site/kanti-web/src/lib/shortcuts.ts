@@ -1,7 +1,7 @@
 // Keyboard shortcuts. The mapping is pure (key event in, action out) so it is tested without a page.
 
-export type View = 'today' | 'timetable' | 'grades' | 'agenda' | 'absences' | 'updates' | 'settings'
-export const VIEWS: View[] = ['today', 'timetable', 'grades', 'agenda', 'absences', 'updates', 'settings']
+export type View = 'today' | 'timetable' | 'grades' | 'agenda' | 'absences' | 'updates' | 'commute' | 'settings'
+export const VIEWS: View[] = ['today', 'timetable', 'grades', 'agenda', 'absences', 'updates', 'commute', 'settings']
 
 export type Action =
   | { type: 'view'; view: View }
@@ -26,7 +26,7 @@ export interface KeyInput {
   typing?: boolean
 }
 
-const LETTERS: Record<string, View> = { h: 'today', s: 'timetable', n: 'grades', p: 'agenda', a: 'absences', m: 'updates', e: 'settings' }
+const LETTERS: Record<string, View> = { h: 'today', s: 'timetable', n: 'grades', p: 'agenda', a: 'absences', m: 'updates', w: 'commute', e: 'settings' }
 
 /** `pending` is true right after a lone "g": the next letter picks a view (g h, g s, …). */
 export const shortcutFor = (input: KeyInput, pending = false): Action | 'g' | null => {
@@ -35,7 +35,7 @@ export const shortcutFor = (input: KeyInput, pending = false): Action | 'g' | nu
   if ((input.ctrlKey || input.metaKey) && !input.altKey && key.toLowerCase() === 'k') return { type: 'search' }
   if (input.typing || input.ctrlKey || input.metaKey || input.altKey) return null
   if (pending) return LETTERS[key.toLowerCase()] ? { type: 'view', view: LETTERS[key.toLowerCase()] } : null
-  if (/^[1-7]$/u.test(key)) return { type: 'view', view: VIEWS[Number(key) - 1] }
+  if (/^[1-8]$/u.test(key)) return { type: 'view', view: VIEWS[Number(key) - 1] }
   if (key === ',') return { type: 'view', view: 'settings' }
   switch (key) {
     case 'g': return 'g'

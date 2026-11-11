@@ -1,0 +1,504 @@
+// Pendelstrecken (commute routes): pure logic. Contract: commute-api.md.
+// Times inside the module are milliseconds (UTC); the API speaks ISO 8601 with the Zurich offset.
+
+import { cleanSchulnetzText, eventLabel, isCancelled, isLesson, linkedChange } from './schulnetz-logic.mjs'
+
+export const MAX_ROUTES = 8
+export const MAX_TIMES = 6
+export const DELAY_STEPS = [2, 3, 5, 10]
+export const DEFAULT_DELAY_THRESHOLD = 3
+/** A delay alert repeats only when the delay grew by this much since the last one. */
+export const DELAY_REPEAT_MIN = 5
+/** Tracked trips are watched from this long before departure until arrival. */
+export const WINDOW_BEFORE_MS = 75 * 60_000
+/** Inside this many minutes before departure the server checks every minute. */
+export const IMMINENT_MS = 20 * 60_000
+export const CHECK_IMMINENT_MS = 60_000
+export const CHECK_EARLY_MS = 3 * 60_000
+/** A transfer with less slack than this (after delays) is tight, below zero it is broken. */
+export const TIGHT_TRANSFER_MIN = 2
+/** Lesson-tied targets look this many days ahead for the next school day. */
+const LOOKAHEAD_DAYS = 10
+const MINUTE = 60_000
+
+// ── Zurich time ─────────────────────────────────────────────────────────────
+
+const zurichFormat = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', weekday: 'short',
+})
+
+/** Zurich wall clock of an instant: { day: 'YYYY-MM-DD', clock: 'HH:MM', weekday: 1..7, offset: minutes east of UTC }. */
+export const zurichWall = (ms) => {
+  const parts = Object.fromEntries(zurichFormat.formatToParts(new Date(ms)).map((part) => [part.type, part.value]))
+  const day = `${parts.year}-${parts.month}-${parts.day}`
+  const clock = `${parts.hour}:${parts.minute}`
+  const asUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second))
+  const weekday = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(parts.weekday) + 1
+  return { day, clock, weekday, offset: Math.round((asUtc - Math.floor(ms / 1000) * 1000) / MINUTE) }
+}
+
+/** Instant of a Zurich wall-clock time ('YYYY-MM-DD', 'HH:MM[:SS]'). NaN when unreadable. */
+export const zurichMs = (day, clock) => {
+  const date = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(String(day || ''))
+  const time = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/u.exec(String(clock || ''))
+  if (!date || !time) return Number.NaN
+  const guess = Date.UTC(Number(date[1]), Number(date[2]) - 1, Number(date[3]), Number(time[1]), Number(time[2]), Number(time[3] || 0))
+  let ms = guess - zurichWall(guess).offset * MINUTE
+  // Around a DST switch the first guess can be one hour off.
+  ms = guess - zurichWall(ms).offset * MINUTE
+  return ms
+}
+
+/** 'YYYY-MM-DD HH:MM[:SS]' or 'YYYY-MM-DDTHH:MM[:SS]' Zurich local, or ISO with offset → ms. */
+export const parseLocal = (text) => {
+  const value = String(text || '').trim()
+  if (!value) return Number.NaN
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/u.test(value)) return Date.parse(value.replace(/([+-]\d{2})(\d{2})$/u, '$1:$2'))
+  const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2}(?::\d{2})?)/u.exec(value)
+  return match ? zurichMs(match[1], match[2]) : Number.NaN
+}
+
+/** ms → '2026-11-13T07:05:00+01:00'. */
+export const isoZurich = (ms) => {
+  if (!Number.isFinite(ms)) return ''
+  const wall = zurichWall(ms)
+  const sign = wall.offset >= 0 ? '+' : '-'
+  const abs = Math.abs(wall.offset)
+  const seconds = String(new Date(ms).getUTCSeconds()).padStart(2, '0')
+  return `${wall.day}T${wall.clock}:${seconds}${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
+}
+
+const addDays = (day, count) => new Date(Date.parse(`${day}T12:00:00Z`) + count * 86_400_000).toISOString().slice(0, 10)
+
+// ── Validation ──────────────────────────────────────────────────────────────
+
+const STOP_TYPES = ['train', 'bus', 'tram', 'ship', 'cableway', 'other']
+const text = (value, max) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, max)
+
+export const sanitizeStop = (input) => {
+  if (!input || typeof input !== 'object') return null
+  const id = text(input.id, 32)
+  const name = text(input.name, 80)
+  if (!name || (id && !/^[A-Za-z0-9:_.-]{1,32}$/u.test(id))) return null
+  return { id, name, type: STOP_TYPES.includes(input.type) ? input.type : 'other' }
+}
+
+const clockOk = (value) => {
+  const match = /^(\d{1,2}):(\d{2})$/u.exec(String(value || '').trim())
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return ''
+  return `${match[1].padStart(2, '0')}:${match[2]}`
+}
+
+export const sanitizeSchedule = (input = {}) => {
+  const mode = ['none', 'times', 'firstLesson', 'lastLesson'].includes(input?.mode) ? input.mode : 'none'
+  const times = mode === 'times' ? [...new Set((Array.isArray(input.times) ? input.times : []).map(clockOk).filter(Boolean))].sort().slice(0, MAX_TIMES) : []
+  const days = [...new Set((Array.isArray(input?.days) ? input.days : [1, 2, 3, 4, 5]).map(Number).filter((day) => Number.isInteger(day) && day >= 1 && day <= 7))].sort()
+  const buffer = Number(input?.bufferMinutes)
+  return {
+    mode: mode === 'times' && !times.length ? 'none' : mode,
+    times,
+    days: days.length ? days : [1, 2, 3, 4, 5],
+    bufferMinutes: Number.isFinite(buffer) ? Math.max(0, Math.min(60, Math.round(buffer))) : 10,
+  }
+}
+
+const threshold = (value, fallback) => {
+  const number = Number(value)
+  return Number.isFinite(number) && number >= 1 && number <= 30 ? Math.round(number) : fallback
+}
+
+export const sanitizeRoutes = (input) => {
+  const out = []
+  for (const raw of Array.isArray(input) ? input : []) {
+    if (out.length >= MAX_ROUTES) break
+    const from = sanitizeStop(raw?.from)
+    const to = sanitizeStop(raw?.to)
+    if (!from || !to) continue
+    const id = /^[a-f0-9]{12}$/u.test(String(raw?.id || '')) ? raw.id : ''
+    if (!id || out.some((route) => route.id === id)) continue
+    out.push({
+      id,
+      name: text(raw.name, 40),
+      from,
+      to,
+      via: sanitizeStop(raw.via),
+      schedule: sanitizeSchedule(raw.schedule),
+      delayThreshold: raw.delayThreshold == null ? null : threshold(raw.delayThreshold, null),
+      notify: raw.notify !== false,
+    })
+  }
+  return out
+}
+
+export const sanitizeSettings = (input = {}) => ({
+  delayThreshold: threshold(input?.delayThreshold, DEFAULT_DELAY_THRESHOLD),
+  hiddenLabels: [...new Set((Array.isArray(input?.hiddenLabels) ? input.hiddenLabels : []).map((label) => text(label, 80).toLowerCase()).filter(Boolean))].slice(0, 200),
+})
+
+// ── search.ch answers ───────────────────────────────────────────────────────
+
+const typeOf = (raw) => {
+  const value = String(raw || '').toLowerCase()
+  if (/train|zug|strain|express|bahn|rail/u.test(value)) return 'train'
+  if (/tram/u.test(value)) return 'tram'
+  if (/bus|post|night/u.test(value)) return 'bus'
+  if (/ship|boat|schiff/u.test(value)) return 'ship'
+  if (/cable|gondola|funi|seilbahn|standseil/u.test(value)) return 'cableway'
+  return 'other'
+}
+
+/** search.ch completion → Stop[]. Addresses and points of interest are not stops. */
+export const parseCompletion = (json) => (Array.isArray(json) ? json : [])
+  .filter((item) => item && item.id && /sl-icon-type-(?:train|strain|bus|tram|ship|cableway|funicular|gondola|zug|express)/u.test(String(item.iconclass || '')))
+  .map((item) => sanitizeStop({ id: String(item.id), name: item.label, type: typeOf(String(item.iconclass).replace('sl-icon-type-', '')) }))
+  .filter(Boolean)
+  .slice(0, 10)
+
+/** search.ch delay field: '+3' → { minutes: 3 }, 'X' → cancelled, missing → no real-time data. */
+export const parseDelay = (raw) => {
+  const value = String(raw ?? '').trim()
+  if (!value) return { minutes: null, cancelled: false }
+  if (/^x$/iu.test(value) || /ausfall|cancel/iu.test(value)) return { minutes: null, cancelled: true }
+  const number = Number(value.replace(/^\+/u, ''))
+  return { minutes: Number.isFinite(number) ? Math.round(number) : null, cancelled: false }
+}
+
+/** search.ch occupancy forecast '12' → 1st class 1 (low), 2nd class 2 (medium). Per train and class only. */
+export const parseOccupancy = (raw) => {
+  const match = /^([0-3])([0-3])$/u.exec(String(raw ?? '').trim())
+  const level = (digit) => (digit >= 1 && digit <= 3 ? digit : null)
+  return match ? { first: level(Number(match[1])), second: level(Number(match[2])) } : { first: null, second: null }
+}
+
+const platformOf = (raw) => {
+  const value = String(raw ?? '').trim()
+  return { platform: value.replace(/!$/u, ''), changed: value.endsWith('!') }
+}
+
+const CANCELLED_NOTE = /fällt aus|faellt aus|ausfall|annul|cancel|entfällt/iu
+
+const point = (name, stopId, plannedText, delayRaw, trackRaw) => {
+  const planned = parseLocal(plannedText)
+  const delay = parseDelay(delayRaw)
+  const track = platformOf(trackRaw)
+  return {
+    point: {
+      name: text(name, 80), stopId: String(stopId || ''),
+      time: isoZurich(Number.isFinite(planned) && delay.minutes != null ? planned + delay.minutes * MINUTE : planned),
+      planned: isoZurich(planned), delay: delay.minutes, platform: track.platform, platformChanged: track.changed,
+    },
+    cancelled: delay.cancelled,
+  }
+}
+
+/** One search.ch route answer → Trip[] (evaluated). */
+export const parseSearchChRoute = (json) => (Array.isArray(json?.connections) ? json.connections : []).map((connection) => {
+  const legs = []
+  for (const leg of Array.isArray(connection.legs) ? connection.legs : []) {
+    if (!leg?.exit) continue // the final arrival entry
+    const walk = leg.type === 'walk' || !leg.line
+    const from = point(leg.name, leg.stopid, leg.departure, leg.dep_delay, leg.track)
+    const to = point(leg.exit.name, leg.exit.stopid, leg.exit.arrival, leg.exit.arr_delay, leg.exit.track)
+    const notes = (Array.isArray(leg.disruptions) ? leg.disruptions : Object.values(leg.disruptions || {}))
+      .map((item) => text(typeof item === 'string' ? item : item?.text || item?.header || item?.lead || '', 300)).filter(Boolean)
+    legs.push({
+      kind: walk ? 'walk' : 'ride',
+      line: walk ? '' : text(leg.line, 16),
+      category: walk ? '' : text(leg['*G'] || '', 8),
+      trainNo: walk ? '' : text(leg['*Z'] || '', 16),
+      type: walk ? 'other' : typeOf(leg.type_name || leg.type),
+      operator: text(leg.operator, 24),
+      direction: text(leg.terminal, 80),
+      fgColor: /^[0-9a-f]{3,6}$/iu.test(leg.fgcolor || '') ? leg.fgcolor : '',
+      bgColor: /^[0-9a-f]{3,6}$/iu.test(leg.bgcolor || '') ? leg.bgcolor : '',
+      from: from.point,
+      to: to.point,
+      occupancy: walk ? { first: null, second: null } : parseOccupancy(leg.occupancy),
+      cancelled: !walk && (from.cancelled || to.cancelled || leg.cancelled === true || notes.some((note) => CANCELLED_NOTE.test(note))),
+      notes,
+      minutes: Math.max(0, Math.round(Number(leg.runningtime || leg.normal_time || 0) / 60)),
+    })
+  }
+  return evaluateTrip({ legs })
+}).filter((trip) => trip.legs.length)
+
+/** transport.opendata.ch /v1/connections answer → Trip[] (fallback provider). */
+export const parseTransportRoute = (json) => (Array.isArray(json?.connections) ? json.connections : []).map((connection) => {
+  const legs = (connection.sections || []).map((section) => {
+    const walk = !section.journey
+    const journey = section.journey || {}
+    const mk = (end, plannedKey) => {
+      const planned = parseLocal(end?.[plannedKey])
+      const realtime = parseLocal(end?.prognosis?.[plannedKey])
+      const delay = Number.isFinite(end?.delay) ? end.delay : Number.isFinite(realtime) && Number.isFinite(planned) ? Math.round((realtime - planned) / MINUTE) : null
+      const platform = platformOf(end?.platform)
+      return {
+        name: text(end?.station?.name || end?.location?.name, 80), stopId: String(end?.station?.id || ''),
+        time: isoZurich(Number.isFinite(planned) && delay != null ? planned + delay * MINUTE : planned), planned: isoZurich(planned), delay,
+        platform: platform.platform, platformChanged: Boolean(end?.prognosis?.platform && end.prognosis.platform !== end.platform),
+      }
+    }
+    const cap = (value) => (Number.isInteger(value) && value >= 1 && value <= 3 ? value : null)
+    return {
+      kind: walk ? 'walk' : 'ride',
+      line: walk ? '' : text(`${journey.category || ''}${journey.number && !/^\d{4,}$/u.test(journey.number) ? journey.number : ''}`, 16),
+      category: walk ? '' : text(journey.category, 8),
+      trainNo: walk ? '' : text(journey.number, 16),
+      type: walk ? 'other' : typeOf(journey.category === 'B' ? 'bus' : journey.category === 'T' ? 'tram' : 'train'),
+      operator: text(journey.operator, 24), direction: text(journey.to, 80), fgColor: '', bgColor: '',
+      from: mk(section.departure, 'departure'), to: mk(section.arrival, 'arrival'),
+      occupancy: { first: cap(journey.capacity1st), second: cap(journey.capacity2nd) },
+      cancelled: false, notes: [],
+      minutes: Math.max(0, Math.round((parseLocal(section.arrival?.arrival) - parseLocal(section.departure?.departure)) / MINUTE)) || 0,
+    }
+  })
+  return evaluateTrip({ legs })
+}).filter((trip) => trip.legs.length)
+
+// ── Trip evaluation ─────────────────────────────────────────────────────────
+
+const worse = (left, right) => (left == null ? right : right == null ? left : Math.max(left, right))
+const clockOf = (iso) => (/T(\d{2}:\d{2})/u.exec(String(iso || ''))?.[1] || '')
+
+/** Fills status, transfers, occupancy and issues of a trip from its legs. */
+export const evaluateTrip = ({ legs }) => {
+  const rides = legs.filter((leg) => leg.kind === 'ride')
+  const first = rides[0] || legs[0]
+  const last = rides[rides.length - 1] || legs[legs.length - 1]
+  const changes = []
+  for (let index = 0; index < rides.length - 1; index += 1) {
+    const arriving = rides[index]
+    const leaving = rides[index + 1]
+    const between = legs.slice(legs.indexOf(arriving) + 1, legs.indexOf(leaving))
+    const walk = between.reduce((sum, leg) => sum + leg.minutes, 0)
+    const plannedMinutes = Math.round((parseLocal(leaving.from.planned) - parseLocal(arriving.to.planned)) / MINUTE) - walk
+    const minutes = Math.round((parseLocal(leaving.from.time) - parseLocal(arriving.to.time)) / MINUTE) - walk
+    changes.push({ at: leaving.from.name, minutes, plannedMinutes, broken: minutes < 0, tight: minutes >= 0 && minutes < TIGHT_TRANSFER_MIN && minutes < plannedMinutes })
+  }
+  const issues = []
+  for (const leg of rides) {
+    if (leg.cancelled) issues.push({ kind: 'cancelled', text: `${leg.line} ${clockOf(leg.from.planned)} ab ${leg.from.name} fällt aus` })
+    if (leg.from.platformChanged) issues.push({ kind: 'platformChange', text: `${leg.line} ab ${leg.from.name}: neu Gleis ${leg.from.platform}` })
+    for (const note of leg.notes) if (!issues.some((issue) => issue.text === note)) issues.push({ kind: 'disruption', text: note })
+  }
+  for (const change of changes) if (change.broken) issues.push({ kind: 'missedTransfer', text: `Anschluss in ${change.at} nicht mehr erreichbar` })
+  const depDelay = first?.from.delay ?? null
+  const arrDelay = last?.to.delay ?? null
+  const delayed = Math.max(depDelay || 0, arrDelay || 0)
+  if (delayed > 0) issues.push({ kind: 'delay', text: `+${delayed} min` })
+  const status = rides.some((leg) => leg.cancelled) ? 'cancelled' : changes.some((change) => change.broken) ? 'broken' : delayed >= 1 ? 'delayed' : 'ok'
+  const occupancy = rides.reduce((acc, leg) => ({ first: worse(acc.first, leg.occupancy.first), second: worse(acc.second, leg.occupancy.second) }), { first: null, second: null })
+  // A walk to another stop before the first ride (or after the last) is part of the trip.
+  const start = legs[0]
+  const end = legs[legs.length - 1]
+  const lead = start && start.kind === 'walk' && first !== start ? start.minutes * MINUTE : 0
+  const departure = start ? isoZurich(parseLocal(first?.from.time) - lead) : ''
+  const plannedDeparture = start ? isoZurich(parseLocal(first?.from.planned) - lead) : ''
+  const tail = end && end.kind === 'walk' && last !== end ? end.minutes * MINUTE : 0
+  const arrival = isoZurich(parseLocal(last?.to.time) + tail)
+  const plannedArrival = isoZurich(parseLocal(last?.to.planned) + tail)
+  return {
+    id: `${first?.line || 'walk'}|${first?.trainNo || ''}|${first?.from.planned || ''}|${last?.to.planned || ''}`,
+    departure, arrival,
+    plannedDeparture, plannedArrival,
+    depDelay, arrDelay,
+    minutes: Math.max(0, Math.round((parseLocal(arrival) - parseLocal(departure)) / MINUTE)) || 0,
+    transfers: Math.max(0, rides.length - 1),
+    status, legs, changes, occupancy, issues, quietest: false,
+  }
+}
+
+export const usable = (trip, now) => trip.status !== 'cancelled' && trip.status !== 'broken' && parseLocal(trip.departure) >= now - MINUTE
+
+/** Marks the least crowded trip among those arriving within 10 minutes of the earliest usable one. */
+export const markQuietest = (trips, now) => {
+  const candidates = trips.filter((trip) => usable(trip, now))
+  if (candidates.length < 2) return trips
+  const earliest = Math.min(...candidates.map((trip) => parseLocal(trip.arrival)))
+  const near = candidates.filter((trip) => parseLocal(trip.arrival) <= earliest + 10 * MINUTE)
+  const score = (trip) => (trip.occupancy.second ?? 9) * 10 + (trip.occupancy.first ?? 9)
+  const known = near.filter((trip) => trip.occupancy.second != null || trip.occupancy.first != null)
+  if (known.length < 2) return trips
+  const best = Math.min(...known.map(score))
+  // Only when it actually differs: all equally full is no recommendation.
+  if (known.every((trip) => score(trip) === best)) return trips
+  const pick = known.find((trip) => score(trip) === best)
+  return trips.map((trip) => ({ ...trip, quietest: trip === pick }))
+}
+
+/** Usable trips first (by arrival), then the rest; at most [limit]. */
+export const rankTrips = (trips, now, limit = 4) => {
+  const seen = new Set()
+  const distinct = trips.filter((trip) => (seen.has(trip.id) ? false : seen.add(trip.id)))
+  const live = distinct.filter((trip) => parseLocal(trip.arrival) >= now)
+  const good = live.filter((trip) => usable(trip, now)).sort((a, b) => parseLocal(a.arrival) - parseLocal(b.arrival) || parseLocal(b.departure) - parseLocal(a.departure))
+  const bad = live.filter((trip) => !usable(trip, now))
+  return markQuietest([...good, ...bad].slice(0, limit), now)
+}
+
+// ── Lessons and targets ─────────────────────────────────────────────────────
+
+const lessonOf = (event) => ({ start: parseLocal(event.start), end: parseLocal(event.end || event.start), label: eventLabel(event) })
+
+/**
+ * A school day's lessons for this user: lessons of hidden groups left out. [planned] includes
+ * cancelled lessons, [held] does not.
+ */
+export const schoolDay = (events, day, hiddenLabels = []) => {
+  const hidden = new Set(hiddenLabels.map((label) => String(label).toLowerCase()))
+  const lessons = (Array.isArray(events) ? events : []).filter((event) => isLesson(event) && String(event.start || '').slice(0, 10) === day && !hidden.has(eventLabel(event).trim().toLowerCase()))
+  const planned = lessons.map(lessonOf).filter((lesson) => Number.isFinite(lesson.start)).sort((a, b) => a.start - b.start)
+  const held = lessons.filter((event) => !isCancelled(event)).map(lessonOf).filter((lesson) => Number.isFinite(lesson.start)).sort((a, b) => a.start - b.start)
+  if (!planned.length) return null
+  const lastEnd = (list) => Math.max(...list.map((lesson) => lesson.end))
+  return {
+    day,
+    first: held[0] || null,
+    last: held.length ? held.reduce((a, b) => (b.end >= a.end ? b : a)) : null,
+    plannedFirst: planned[0],
+    plannedLastEnd: lastEnd(planned),
+    heldLastEnd: held.length ? lastEnd(held) : null,
+    allCancelled: !held.length,
+  }
+}
+
+const iso = (ms) => isoZurich(ms)
+const lessonRef = (lesson) => (lesson ? { start: iso(lesson.start), end: iso(lesson.end), label: lesson.label } : null)
+
+/**
+ * The moment a route is planned around next. firstLesson: arrive [buffer] minutes before the first
+ * held lesson; lastLesson: leave [buffer] minutes after the last held lesson. A lesson-tied day that
+ * has no held lessons is skipped. A target stays current until its trip should have left
+ * (depart) or the lesson began (arrive).
+ */
+export const routeTarget = (route, { now, events = [], hiddenLabels = [] }) => {
+  const schedule = route.schedule || { mode: 'none' }
+  if (schedule.mode === 'none') return { kind: 'now', at: iso(now), timeType: 'depart', lesson: null, lessonChange: 'none', plannedAt: null }
+  const today = zurichWall(now).day
+  for (let offset = 0; offset <= LOOKAHEAD_DAYS; offset += 1) {
+    const day = addDays(today, offset)
+    const weekday = zurichWall(zurichMs(day, '12:00')).weekday
+    if (!schedule.days.includes(weekday)) continue
+    if (schedule.mode === 'times') {
+      for (const time of schedule.times) {
+        const at = zurichMs(day, time)
+        if (at >= now - MINUTE) return { kind: 'time', at: iso(at), timeType: 'depart', lesson: null, lessonChange: 'none', plannedAt: null }
+      }
+      continue
+    }
+    const info = schoolDay(events, day, hiddenLabels)
+    if (!info || info.allCancelled) continue
+    const buffer = schedule.bufferMinutes * MINUTE
+    if (schedule.mode === 'firstLesson') {
+      const at = info.first.start - buffer
+      if (info.first.start <= now) continue
+      const moved = info.first.start > info.plannedFirst.start
+      return { kind: 'firstLesson', at: iso(at), timeType: 'arrive', lesson: lessonRef(info.first), lessonChange: moved ? 'firstCancelled' : 'none', plannedAt: moved ? iso(info.plannedFirst.start - buffer) : null }
+    }
+    const at = info.heldLastEnd + buffer
+    if (at < now - MINUTE) continue
+    const earlier = info.heldLastEnd < info.plannedLastEnd
+    return { kind: 'lastLesson', at: iso(at), timeType: 'depart', lesson: lessonRef(info.last), lessonChange: earlier ? 'lastCancelled' : 'none', plannedAt: earlier ? iso(info.plannedLastEnd + buffer) : null }
+  }
+  return null
+}
+
+/** When the server should look at a tracked route again (ms), or Infinity outside its window. */
+export const nextCheckAt = (target, tracked, now) => {
+  if (!target || target.kind === 'now') return Number.POSITIVE_INFINITY
+  const departure = tracked ? parseLocal(tracked.departure) : parseLocal(target.at) - (target.timeType === 'arrive' ? 60 * MINUTE : 0)
+  const arrival = tracked ? parseLocal(tracked.arrival) : departure
+  if (now > arrival) return now + CHECK_EARLY_MS
+  const opens = departure - WINDOW_BEFORE_MS
+  if (now < opens) return opens
+  return now + (departure - now <= IMMINENT_MS ? CHECK_IMMINENT_MS : CHECK_EARLY_MS)
+}
+
+export const inWindow = (target, tracked, now) => {
+  if (!target || target.kind === 'now' || !tracked) return false
+  return now >= parseLocal(tracked.departure) - WINDOW_BEFORE_MS && now <= parseLocal(tracked.arrival)
+}
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+
+const rideLegs = (trip) => trip.legs.filter((leg) => leg.kind === 'ride')
+const tripLabel = (trip) => {
+  const ride = rideLegs(trip)[0]
+  if (!ride) return ''
+  const mode = ride.type === 'bus' ? 'Bus ' : ride.type === 'tram' ? 'Tram ' : ''
+  return `${clockOf(ride.from.planned)} ${mode}${ride.line} ab ${ride.from.name}`
+}
+const tripLine = (trip) => {
+  const ride = rideLegs(trip)[0]
+  const last = rideLegs(trip).slice(-1)[0]
+  if (!ride) return ''
+  const mode = ride.type === 'bus' ? 'Bus' : ride.type === 'tram' ? 'Tram' : 'Zug'
+  return `${mode} um ${clockOf(ride.from.time)} (${ride.line} ab ${ride.from.name}${ride.from.platform ? `, Gleis ${ride.from.platform}` : ''}, an ${last.to.name} ${clockOf(last.to.time)})`
+}
+export const tripDelay = (trip) => Math.max(rideLegs(trip)[0]?.from.delay || 0, rideLegs(trip).slice(-1)[0]?.to.delay || 0)
+
+/**
+ * Alerts for one route's tracked trip. [state] is the route's stored alert state; the result
+ * carries the next one. Every alert id is stable, so a repeat never shows twice.
+ */
+export const tripAlerts = ({ route, target, tracked, alternatives = [], state = {}, delayThreshold, now }) => {
+  const changes = []
+  if (!tracked || !route.notify) return { changes, state }
+  delayThreshold = route.delayThreshold ?? delayThreshold
+  const day = zurichWall(parseLocal(tracked.plannedDeparture || tracked.departure)).day
+  const key = `${day}|${tracked.id}`
+  const record = { ...(state.trips?.[key] || {}) }
+  const base = `commute:${route.id}:${day}:${tracked.id.replace(/[^A-Za-z0-9|:+-]/gu, '')}`
+  const extra = { target: 'commute', targetId: route.id, date: day }
+  const alternative = alternatives.find((trip) => usable(trip, now))
+  const instead = alternative ? `Alternative: ${tripLine(alternative)}` : 'Keine Alternative gefunden'
+  const arrived = parseLocal(tracked.arrival) < now
+  if (!arrived) {
+    if (tracked.status === 'cancelled' && !record.cancelled) {
+      record.cancelled = true
+      changes.push(linkedChange(`${base}:cancelled`, 'commute', 'Fällt aus', `${tripLabel(tracked)} fällt aus. ${instead}`, extra))
+    } else if (tracked.status === 'broken' && !record.broken) {
+      record.broken = true
+      const where = tracked.changes.find((change) => change.broken)?.at || ''
+      changes.push(linkedChange(`${base}:broken`, 'commute', 'Anschluss verpasst', `${tripLabel(tracked)}: Anschluss in ${where} nicht erreichbar. ${instead}`, extra))
+    } else if (tracked.status !== 'cancelled' && tracked.status !== 'broken') {
+      const delay = tripDelay(tracked)
+      const last = Number(record.delay || 0)
+      if (delay >= delayThreshold && (!last || delay >= last + DELAY_REPEAT_MIN)) {
+        record.delay = delay
+        const lastRide = rideLegs(tracked).slice(-1)[0]
+        const platform = rideLegs(tracked)[0]?.from.platform
+        changes.push(linkedChange(`${base}:delay:${delay}`, 'commute', 'Verspätung', `${tripLabel(tracked)} · +${delay} min${platform ? ` · Gleis ${platform}` : ''} → ${lastRide.to.name} ${clockOf(lastRide.to.time)}`, extra))
+      }
+      const firstRide = rideLegs(tracked)[0]
+      if (firstRide?.from.platformChanged && parseLocal(firstRide.from.time) - now <= 30 * MINUTE && record.platform !== firstRide.from.platform) {
+        record.platform = firstRide.from.platform
+        changes.push(linkedChange(`${base}:platform:${firstRide.from.platform}`, 'commute', 'Gleisänderung', `${tripLabel(tracked)} fährt neu ab Gleis ${firstRide.from.platform}`, extra))
+      }
+    }
+  }
+  const trips = Object.fromEntries(Object.entries({ ...(state.trips || {}), [key]: record }).filter(([name]) => name.slice(0, 10) >= addDays(zurichWall(now).day, -2)))
+  return { changes, state: { ...state, trips } }
+}
+
+/**
+ * "Letzte Stunde fällt aus – du kannst den Zug um 14:43 nehmen" (and the later way to school).
+ * Once per route, day and new time.
+ */
+export const lessonChangeAlert = ({ route, target, trip, state = {}, now }) => {
+  if (!route.notify || !target || target.lessonChange === 'none' || !trip) return { changes: [], state }
+  const day = String(target.at).slice(0, 10)
+  const key = `${day}|${target.lessonChange}|${target.at}`
+  if (state.lessons?.[key]) return { changes: [], state }
+  if (parseLocal(target.at) < now - 5 * MINUTE) return { changes: [], state }
+  const extra = { target: 'commute', targetId: route.id, date: day }
+  const id = `commute:${route.id}:${day}:lesson:${target.lessonChange}:${clockOf(target.at).replace(':', '')}`
+  const change = target.lessonChange === 'lastCancelled'
+    ? linkedChange(id, 'commute', 'Früher nach Hause', `Letzte Stunde fällt aus – du kannst den ${tripLine(trip)} nehmen.`, extra)
+    : linkedChange(id, 'commute', 'Später zur Schule', `Erste Stunde fällt aus – es reicht der ${tripLine(trip)}.`, extra)
+  const lessons = Object.fromEntries(Object.entries({ ...(state.lessons || {}), [key]: true }).filter(([name]) => name.slice(0, 10) >= addDays(zurichWall(now).day, -2)))
+  return { changes: [change], state: { ...state, lessons } }
+}
+
+export const routeLabel = (route) => route.name || `${route.from.name} → ${route.to.name}`
+export const cleanText = cleanSchulnetzText

@@ -1,7 +1,7 @@
 // The one way the page talks to the server: same origin, the session cookie, JSON, and the
 // session's CSRF token on every request that changes something.
 import type { AdminIndex, AdminUploadResult, ClassWeek, RoomWeek, TimetableSummary } from './timetables'
-import type { AlertSettings, Change, Connection, LinkStatus, Reveals, Session, Snapshot } from '../types'
+import type { AlertSettings, Change, CommuteBoards, CommuteConfig, CommuteRoute, CommuteSettings, Connection, LinkStatus, Reveals, Session, Snapshot, Stop, Trip } from '../types'
 
 export const API = '/api/v1/kanti-web'
 
@@ -78,6 +78,13 @@ export const createApi = (transport: Transport = (input, init) => fetch(input, i
     timetables: (id: string) => call<TimetableSummary>('GET', `${connection(id)}/timetables`),
     timetableRoom: (id: string, room: string) => call<RoomWeek>('GET', `${connection(id)}/timetables/room/${encodeURIComponent(room)}`),
     timetableClass: (id: string, code: string) => call<ClassWeek>('GET', `${connection(id)}/timetables/class/${encodeURIComponent(code)}`),
+    /** Pendelstrecken: the stored routes and settings. */
+    commute: (id: string) => call<CommuteConfig>('GET', `${connection(id)}/commute`),
+    /** Saves the full list (the server drops or resets invalid fields and answers with what it kept). */
+    saveCommute: (id: string, routes: CommuteRoute[], settings: Partial<CommuteSettings>) => call<CommuteConfig>('PUT', `${connection(id)}/commute`, { routes, settings }),
+    commuteStops: (id: string, query: string) => call<{ stops: Stop[] }>('GET', `${connection(id)}/commute/stops?q=${encodeURIComponent(query)}`),
+    commuteBoard: (id: string, route = '') => call<CommuteBoards>('GET', `${connection(id)}/commute/board${route ? `?route=${encodeURIComponent(route)}` : ''}`),
+    commuteTrips: (id: string, route: string, at: string, timeType: 'depart' | 'arrive') => call<{ trips: Trip[] }>('GET', `${connection(id)}/commute/trips?route=${encodeURIComponent(route)}&at=${encodeURIComponent(at)}&timeType=${timeType}`),
     rename: (id: string, label: string) => call<Connection>('PATCH', connection(id), { label }),
     remove: (id: string) => call<{ removed: boolean; signedOut: boolean }>('DELETE', connection(id)),
   }

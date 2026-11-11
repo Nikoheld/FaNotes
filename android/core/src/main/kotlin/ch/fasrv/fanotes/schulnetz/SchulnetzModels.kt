@@ -282,6 +282,11 @@ data class NotifySettings(
     val examRoom: Boolean = true,
     val appointmentNew: Boolean = true,
     val messageNew: Boolean = true,
+    /** Pendelstrecken alerts: the parent switch and its fine switches. Independent of [enabled]. */
+    val commute: Boolean = true,
+    val commuteDelay: Boolean = true,
+    val commuteCancelled: Boolean = true,
+    val commuteLessonEnd: Boolean = true,
 )
 
 /** Category flags follow the subtypes so an older server still receives a coherent switch. */
@@ -290,6 +295,7 @@ fun NotifySettings.aligned(): NotifySettings = copy(
     timetable = lessonCancelled || lessonChanged,
     exams = examNew || examMoved || examCancelled || examRoom,
     events = appointmentNew || messageNew,
+    commute = commuteDelay || commuteCancelled || commuteLessonEnd,
 )
 
 /**
@@ -316,6 +322,10 @@ object NotifyPrefs {
     const val MESSAGE_NEW = "notify-message-new"
     const val DEADLINES = "notify-deadlines"
     const val GUESS = "notify-guess-grades"
+    const val COMMUTE = "notify-commute"
+    const val COMMUTE_DELAY = "notify-commute-delay"
+    const val COMMUTE_CANCELLED = "notify-commute-cancelled"
+    const val COMMUTE_LESSON_END = "notify-commute-lesson-end"
 
     val fields: List<Pair<String, String>> = listOf(
         "enabled" to ENABLED,
@@ -336,6 +346,10 @@ object NotifyPrefs {
         "messageNew" to MESSAGE_NEW,
         "deadlines" to DEADLINES,
         "guessGrades" to GUESS,
+        "commute" to COMMUTE,
+        "commuteDelay" to COMMUTE_DELAY,
+        "commuteCancelled" to COMMUTE_CANCELLED,
+        "commuteLessonEnd" to COMMUTE_LESSON_END,
     )
 }
 
@@ -359,6 +373,10 @@ fun NotifySettings.storedFields(): Map<String, Boolean> = mapOf(
     "messageNew" to messageNew,
     "deadlines" to deadlines,
     "guessGrades" to guessGrades,
+    "commute" to commute,
+    "commuteDelay" to commuteDelay,
+    "commuteCancelled" to commuteCancelled,
+    "commuteLessonEnd" to commuteLessonEnd,
 )
 
 /**
@@ -373,6 +391,7 @@ fun notifySettingsFromStored(stored: Map<String, Boolean>): NotifySettings {
     val timetable = parent("timetable")
     val exams = parent("exams")
     val events = parent("events")
+    val commute = parent("commute")
     fun fine(name: String, fallback: Boolean): Boolean = stored[name] ?: fallback
     return NotifySettings(
         grades = grades,
@@ -393,6 +412,10 @@ fun notifySettingsFromStored(stored: Map<String, Boolean>): NotifySettings {
         examRoom = fine("examRoom", exams),
         appointmentNew = fine("appointmentNew", events),
         messageNew = fine("messageNew", events),
+        commute = commute,
+        commuteDelay = fine("commuteDelay", commute),
+        commuteCancelled = fine("commuteCancelled", commute),
+        commuteLessonEnd = fine("commuteLessonEnd", commute),
     )
 }
 

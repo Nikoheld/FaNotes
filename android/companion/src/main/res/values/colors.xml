@@ -6,4 +6,6 @@
     <color name="widget_accent">#245F82</color>
     <color name="widget_alert">#B3261E</color>
     <color name="widget_outline">#DCE0DA</color>
+    <color name="widget_success">#1D6A46</color>
+    <color name="widget_warning">#875100</color>
 </resources>

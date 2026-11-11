@@ -95,6 +95,12 @@ private val FRAGMENTS = Regex(
 )
 
 private val EXACT = mapOf(
+    "Verspätung" to R.string.commute_alert_delay,
+    "Fällt aus" to R.string.commute_alert_cancelled,
+    "Anschluss verpasst" to R.string.commute_alert_missed,
+    "Gleisänderung" to R.string.commute_alert_platform,
+    "Früher nach Hause" to R.string.commute_alert_home_early,
+    "Später zur Schule" to R.string.commute_alert_school_late,
     "a subject" to R.string.phrase_a_subject,
     "Absences: the page loaded, but it could not be read" to R.string.phrase_absences_unreadable,
     "Absenzen: Seite geladen, aber nicht lesbar" to R.string.phrase_absences_unreadable,

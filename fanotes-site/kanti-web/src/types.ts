@@ -132,6 +132,11 @@ export interface AlertSettings {
   messageNew: boolean
   deadlines: boolean
   guessGrades: boolean
+  /** Pendelstrecken alerts: the parent switch and its three fine switches (default on). */
+  commute: boolean
+  commuteDelay: boolean
+  commuteCancelled: boolean
+  commuteLessonEnd: boolean
 }
 
 export interface LinkStatus {
@@ -160,3 +165,105 @@ export interface Change {
   targetId: string
   courseId: string
 }
+
+// Pendelstrecken (commute routes): the contract in fanotes-site/commute-api.md. All times are ISO 8601
+// with the Zurich offset; minutes are integers.
+
+export type StopType = 'train' | 'bus' | 'tram' | 'ship' | 'cableway' | 'other'
+export interface Stop { id: string; name: string; type: StopType }
+
+export type ScheduleMode = 'none' | 'times' | 'firstLesson' | 'lastLesson'
+export interface Schedule {
+  mode: ScheduleMode
+  /** 'HH:MM' departure times (mode 'times' only, at most 6). */
+  times: string[]
+  /** 1 = Monday ... 7 = Sunday. */
+  days: number[]
+  /** firstLesson: arrive this early; lastLesson: leave this long after the end (0-60). */
+  bufferMinutes: number
+}
+
+export interface CommuteRoute {
+  id: string
+  name: string
+  from: Stop
+  to: Stop
+  via: Stop | null
+  schedule: Schedule
+  /** Minutes; null follows the global threshold. */
+  delayThreshold: number | null
+  notify: boolean
+}
+
+export interface CommuteSettings { delayThreshold: number; hiddenLabels: string[] }
+
+/** 1 low, 2 medium, 3 high, null unknown. */
+export type OccupancyLevel = 1 | 2 | 3 | null
+export interface Occupancy { first: OccupancyLevel; second: OccupancyLevel }
+
+export interface TripPoint { name: string; stopId: string; time: string; planned: string; delay: number | null; platform: string; platformChanged: boolean }
+
+export interface Leg {
+  kind: 'ride' | 'walk'
+  line: string
+  category: string
+  type: StopType
+  operator: string
+  direction: string
+  /** Hex without '#', may be empty. */
+  fgColor: string
+  bgColor: string
+  from: TripPoint
+  to: TripPoint
+  occupancy: Occupancy
+  cancelled: boolean
+  notes: string[]
+  minutes: number
+}
+
+export interface Transfer { at: string; minutes: number; plannedMinutes: number; broken: boolean; tight: boolean }
+
+export type TripStatus = 'ok' | 'delayed' | 'cancelled' | 'broken'
+export interface TripIssue { kind: 'cancelled' | 'missedTransfer' | 'platformChange' | 'delay' | 'disruption'; text: string }
+
+export interface Trip {
+  id: string
+  departure: string
+  arrival: string
+  plannedDeparture: string
+  plannedArrival: string
+  depDelay: number | null
+  arrDelay: number | null
+  minutes: number
+  transfers: number
+  status: TripStatus
+  legs: Leg[]
+  changes: Transfer[]
+  occupancy: Occupancy
+  issues: TripIssue[]
+  quietest: boolean
+}
+
+export interface CommuteTarget {
+  kind: 'now' | 'time' | 'firstLesson' | 'lastLesson'
+  at: string
+  timeType: 'depart' | 'arrive'
+  lesson: { start: string; end: string; label: string } | null
+  lessonChange: 'none' | 'lastCancelled' | 'firstCancelled'
+  plannedAt: string | null
+}
+
+export interface RouteBoard {
+  routeId: string
+  target: CommuteTarget
+  trips: Trip[]
+  alternatives: Trip[]
+  viaDropped: boolean
+  updatedAt: string
+  stale: boolean
+}
+
+export interface CommuteProvider { name: 'search.ch' | 'transport.opendata.ch'; occupancy: 'train-class'; formation: false }
+
+export interface CommuteConfig { routes: CommuteRoute[]; settings: CommuteSettings; provider: CommuteProvider }
+export interface CommuteBoards { boards: RouteBoard[]; provider: CommuteProvider }

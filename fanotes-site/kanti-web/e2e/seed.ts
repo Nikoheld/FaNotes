@@ -91,3 +91,38 @@ export const fanotesAccount = async (base: string) => {
   await request(base, headers, 'PUT', '/api/v1/schulnetz/snapshot', snapshot())
   return { email }
 }
+
+// ---- Pendelstrecken: mocked commute endpoints (synthetic stops, one cancelled trip with an alternative) ----
+
+const iso = (minutes: number) => {
+  const date = new Date(Math.ceil(Date.now() / 60_000) * 60_000 + minutes * 60_000)
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(date)
+  const p: Record<string, string> = {}
+  for (const part of parts) p[part.type] = part.value
+  const offset = Math.round((Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(date.getTime() / 1000) * 1000) / 60_000)
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}${offset < 0 ? '-' : '+'}${String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0')}:${String(Math.abs(offset) % 60).padStart(2, '0')}`
+}
+
+export const COMMUTE_STOPS = [
+  { id: 'e2e-testdorf', name: 'Testdorf Bahnhof', type: 'train' },
+  { id: 'e2e-schulstadt', name: 'Schulstadt Bahnhof', type: 'train' },
+]
+
+const point = (stop: { id: string; name: string }, minutes: number, platform: string) => ({ name: stop.name, stopId: stop.id, time: iso(minutes), planned: iso(minutes), delay: 0, platform, platformChanged: false })
+const trip = (id: string, minutes: number, extra: Record<string, unknown> = {}) => ({
+  id, departure: iso(minutes), arrival: iso(minutes + 20), plannedDeparture: iso(minutes), plannedArrival: iso(minutes + 20), depDelay: 0, arrDelay: 0, minutes: 20, transfers: 0,
+  status: 'ok', changes: [], occupancy: { first: 1, second: 2 }, issues: [], quietest: false,
+  legs: [{ kind: 'ride', line: 'S29', category: 'S', type: 'train', operator: 'E2E', direction: 'Schulstadt', fgColor: 'ffffff', bgColor: '1f6fb5', from: point(COMMUTE_STOPS[0], minutes, '3'), to: point(COMMUTE_STOPS[1], minutes + 20, '1'), occupancy: { first: 1, second: 2 }, cancelled: false, notes: [], minutes: 20 }],
+  ...extra,
+})
+
+/** The board for a saved route: the first trip is cancelled, the second is the alternative. */
+export const commuteBoard = (routeId: string) => {
+  const cancelled = trip('e2e-cancelled', 10, { status: 'cancelled', issues: [{ kind: 'cancelled', text: 'Zug fällt aus (E2E)' }] })
+  const alternative = trip('e2e-alt', 25, { quietest: true })
+  return {
+    routeId,
+    target: { kind: 'now', at: iso(0), timeType: 'depart', lesson: null, lessonChange: 'none', plannedAt: null },
+    trips: [cancelled, alternative], alternatives: [alternative], viaDropped: false, updatedAt: iso(0), stale: false,
+  }
+}

@@ -58,6 +58,8 @@ const COLLAPSE_KEY = {
   reauth: 'kanti-reauth',
   test: 'kanti-test',
   sync: 'kanti-sync',
+  // Live commute updates for the widget: their own slot, so they never replace a pending sync push.
+  commute: 'kanti-commute',
 }
 
 const zurichDay = (now) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)

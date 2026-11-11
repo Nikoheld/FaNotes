@@ -184,6 +184,7 @@ fun routeNotify(link: NotifyLink, snapshot: SchulnetzSnapshot, zone: ZoneId = Zo
     return when (link.kind) {
         "settings" -> NotifyRoute(tab = "Mehr", section = "Einstellungen")
         "home" -> NotifyRoute(tab = "Heute", section = "Menu")
+        "commute" -> NotifyRoute(tab = "Heute", section = "Pendeln", highlightIds = link.ids)
         "grade" -> routeGrades(link, snapshot)
         "timetable" -> routeLesson(link, snapshot, zone)
         "exam" -> routeExam(link, snapshot, zone)

@@ -108,6 +108,7 @@ data class AlertScope(val slot: String = PRIMARY_SLOT, val connectionId: String 
 
 object CompanionAlerts {
     const val CHANNEL = "schulnetz-alerts"
+    const val COMMUTE_CHANNEL = "commute-alerts"
     const val EXTRA_CONNECTION = "ch.fasrv.fanotes.companion.NOTIFY_CONNECTION"
     const val EXTRA_CATEGORY = "ch.fasrv.fanotes.companion.NOTIFY_CATEGORY"
     const val EXTRA_TARGET_ID = "ch.fasrv.fanotes.companion.NOTIFY_TARGET_ID"
@@ -134,6 +135,7 @@ object CompanionAlerts {
         channel("schulnetz-absence", R.string.channel_absence, NotificationManager.IMPORTANCE_DEFAULT)
         channel("schulnetz-deadline", R.string.channel_deadline, NotificationManager.IMPORTANCE_HIGH)
         channel("schulnetz-event", R.string.channel_event, NotificationManager.IMPORTANCE_DEFAULT)
+        channel(COMMUTE_CHANNEL, R.string.channel_commute, NotificationManager.IMPORTANCE_HIGH)
     }
 
     fun retireLegacyPush(context: Context) {
@@ -312,6 +314,7 @@ object CompanionAlerts {
             "absence" -> "schulnetz-absence"
             "deadline" -> "schulnetz-deadline"
             "event" -> "schulnetz-event"
+            "commute" -> COMMUTE_CHANNEL
             else -> CHANNEL
         }
         // The same change id in two connections is two notices.
@@ -737,6 +740,15 @@ class CompanionFcmService : FirebaseMessagingService() {
                 // Then the change cursor, the snapshot and the widgets; already shown notices stay single.
                 val ok = runBlocking { withTimeoutOrNull(8_000) { app.graph.pullChangeDelta(route) } } == true
                 if (!ok) enqueuePushSync(applicationContext, route)
+            }
+            // Silent data push: a tracked trip changed. Refresh the board and the widget; the alert itself, when there is one,
+            // comes as an ordinary notice through the change feed.
+            "commute" -> runBlocking {
+                withTimeoutOrNull(8_000) {
+                    app.graph.awaitBoot()
+                    app.graph.commute.loadCache()
+                    app.graph.commute.refresh(force = true)
+                }
             }
             "reauth" -> CompanionAlerts.showReauth(applicationContext, runBlocking { app.graph.alertScopeForRoute(message.data["route"]) })
             "test" -> CompanionAlerts.showTest(applicationContext)

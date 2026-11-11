@@ -659,6 +659,30 @@ export const createKantiWebApi = (options = {}) => {
   }
 
   /** Other classes' and rooms' timetables, per connection; only for Alte Kanti (/aksa) links. */
+  const commuteRoute = async (request, response, url, session, id, part, method) => {
+    const connection = connectionOf(session, id)
+    const commute = access.commuteFor ? await access.commuteFor(connection.accountId) : null
+    if (!commute) fail(404, 'Diesen Endpunkt gibt es nicht.')
+    rate(`commute:${connection.accountId}`, 240, 60 * 60 * 1000)
+    const accountId = connection.accountId
+    if (!part && method === 'GET') { send(response, 200, await commute.view(accountId)); return }
+    if (!part && method === 'PUT') {
+      assertSameOrigin(request)
+      assertCsrf(request, session)
+      send(response, 200, await commute.save(accountId, await readBody(request)))
+      return
+    }
+    if (part === 'stops' && method === 'GET') { send(response, 200, await commute.stops(url.searchParams.get('q') || '')); return }
+    if (part === 'board' && method === 'GET') { send(response, 200, await commute.board(accountId, String(url.searchParams.get('route') || ''))); return }
+    if (part === 'trips' && method === 'GET') {
+      const found = await commute.tripsFor(accountId, String(url.searchParams.get('route') || ''), String(url.searchParams.get('at') || ''), String(url.searchParams.get('timeType') || 'depart'))
+      if (!found) fail(404, 'Diese Pendelstrecke gibt es nicht.')
+      send(response, 200, found)
+      return
+    }
+    fail(404, 'Diesen Endpunkt gibt es nicht.')
+  }
+
   const timetableRoute = async (response, session, id, kind, rawName) => {
     const connection = connectionOf(session, id)
     const status = await access.readStatus(connection.accountId)
@@ -1010,6 +1034,12 @@ export const createKantiWebApi = (options = {}) => {
       const timetableMatch = /^\/connections\/([^/]+)\/timetables(?:\/(class|room)\/([^/]+))?$/u.exec(route)
       if (timetableMatch && method === 'GET') {
         await timetableRoute(response, session, timetableMatch[1], timetableMatch[2] || '', timetableMatch[3] || '')
+        return true
+      }
+      // Pendelstrecken (commute-api.md): the same routes, boards and alerts the app uses.
+      const commuteMatch = /^\/connections\/([^/]+)\/commute(?:\/(stops|board|trips))?$/u.exec(route)
+      if (commuteMatch) {
+        await commuteRoute(request, response, url, session, commuteMatch[1], commuteMatch[2] || '', method)
         return true
       }
       const match = /^\/connections\/([^/]+)(\/[a-z]+)?$/u.exec(route)

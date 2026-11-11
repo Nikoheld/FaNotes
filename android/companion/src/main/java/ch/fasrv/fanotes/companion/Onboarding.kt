@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import ch.fasrv.fanotes.commute.routeTitle
 import kotlinx.coroutines.launch
 
 const val ONBOARDING_VERSION = 1
@@ -43,7 +44,7 @@ const val NOTIFY_TIP_PREF = "notify-tip-dismissed"
 fun needsOnboarding(storedVersion: Int, localAccess: Boolean, hasAccount: Boolean): Boolean =
     storedVersion < ONBOARDING_VERSION && !localAccess && !hasAccount
 
-private const val PAGES = 4
+private const val PAGES = 5
 
 @Composable
 fun OnboardingScreen(model: CompanionModel, modifier: Modifier = Modifier) {
@@ -78,7 +79,8 @@ fun OnboardingScreen(model: CompanionModel, modifier: Modifier = Modifier) {
                             when (page) {
                                 0 -> DayArt()
                                 1 -> LinkArt()
-                                2 -> PrivacyArt()
+                                2 -> CommuteArt()
+                                3 -> PrivacyArt()
                                 else -> AlertArt()
                             }
                         }
@@ -86,7 +88,8 @@ fun OnboardingScreen(model: CompanionModel, modifier: Modifier = Modifier) {
                     val (title, body) = when (page) {
                         0 -> t(R.string.onboarding_day_title) to t(R.string.onboarding_day_body)
                         1 -> t(R.string.onboarding_school_title) to t(R.string.onboarding_school_body)
-                        2 -> t(R.string.onboarding_privacy_title) to t(R.string.onboarding_privacy_body)
+                        2 -> t(R.string.onboarding_commute_title) to t(R.string.onboarding_commute_body)
+                        3 -> t(R.string.onboarding_privacy_title) to t(R.string.onboarding_privacy_body)
                         else -> t(R.string.onboarding_alerts_title) to t(R.string.onboarding_alerts_body)
                     }
                     Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
@@ -110,9 +113,14 @@ fun OnboardingScreen(model: CompanionModel, modifier: Modifier = Modifier) {
                         }
                         2 -> {
                             Spacer(Modifier.height(Space.lg))
-                            Group { ToggleRow(t(R.string.onboarding_hide_marks), t(R.string.hide_new_marks_until_you_reveal_them_notificatio), model.settings.guessGrades) { model.toggleSetting("guessGrades") } }
+                            val added = model.commute.routes.firstOrNull()
+                            StatusLine(if (added == null) t(R.string.onboarding_commute_none) else t(R.string.onboarding_commute_added, routeTitle(added)), if (added == null) StateTone.Neutral else StateTone.Accent)
                         }
                         3 -> {
+                            Spacer(Modifier.height(Space.lg))
+                            Group { ToggleRow(t(R.string.onboarding_hide_marks), t(R.string.hide_new_marks_until_you_reveal_them_notificatio), model.settings.guessGrades) { model.toggleSetting("guessGrades") } }
+                        }
+                        else -> {
                             Spacer(Modifier.height(Space.lg))
                             StatusLine(if (allowed) t(R.string.notifications_are_allowed) else t(R.string.onboarding_alerts_off), if (allowed) StateTone.Accent else StateTone.Neutral)
                         }
@@ -129,7 +137,11 @@ fun OnboardingScreen(model: CompanionModel, modifier: Modifier = Modifier) {
                         // For app review and trying Kanti+ without Schulnetz: invented data only.
                         if (model.canStartDemo()) TextButton(onClick = { model.startDemo() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(t(R.string.demo_view)) }
                     } else PrimaryButton(t(R.string.onboarding_next), { go(2) }, Modifier.fillMaxWidth())
-                    3 -> {
+                    2 -> if (model.commute.routes.isEmpty()) {
+                        PrimaryButton(t(R.string.commute_add_route), { model.onboardingCommute = true; model.editCommuteRoute(null) }, Modifier.fillMaxWidth(), enabled = !model.demo, icon = Icons.Outlined.DirectionsBus)
+                        TextButton(onClick = { go(3) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(t(R.string.onboarding_skip_step)) }
+                    } else PrimaryButton(t(R.string.onboarding_next), { go(3) }, Modifier.fillMaxWidth())
+                    4 -> {
                         if (!allowed && Build.VERSION.SDK_INT >= 33) {
                             PrimaryButton(t(R.string.allow_notifications), { permission.launch(Manifest.permission.POST_NOTIFICATIONS) }, Modifier.fillMaxWidth(), icon = Icons.Outlined.NotificationsActive)
                             TextButton(onClick = { model.finishOnboarding() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(t(R.string.not_now)) }
@@ -141,6 +153,45 @@ fun OnboardingScreen(model: CompanionModel, modifier: Modifier = Modifier) {
                     else -> PrimaryButton(t(R.string.onboarding_next), { go(page + 1) }, Modifier.fillMaxWidth())
                 }
             }
+        }
+    }
+    if (model.onboardingCommute) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { model.onboardingCommute = false; model.commuteDraft = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Column(Modifier.fillMaxSize().safeDrawingPadding().widthIn(max = 560.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        ActionIcon(Icons.Outlined.Close, t(R.string.close)) { model.onboardingCommute = false; model.commuteDraft = null }
+                    }
+                    CommuteScreen(model, Page.CommuteEdit)
+                }
+            }
+        }
+    }
+}
+
+/** Abstract preview of a commute card: departure time, line chips, a delay pill. No real stops. */
+@Composable
+private fun CommuteArt() {
+    val scheme = MaterialTheme.colorScheme
+    val s = LocalCompanionSemantics.current
+    Column(Modifier.widthIn(max = 300.dp).background(scheme.surface, MaterialTheme.shapes.large).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            IconTile(Icons.Outlined.DirectionsBus, StateTone.Accent, 36.dp)
+            Box(Modifier.fillMaxWidth(0.5f).height(10.dp).background(scheme.onSurface.copy(alpha = 0.75f), CircleShape))
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("07:05", style = MaterialTheme.typography.displaySmall)
+            Text("+3", style = MaterialTheme.typography.labelMedium, color = s.warning, modifier = Modifier.background(s.warningSoft, CircleShape).padding(horizontal = 10.dp, vertical = 3.dp))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(width = 40.dp, height = 22.dp).background(scheme.primary, MaterialTheme.shapes.extraSmall))
+            Icon(Icons.Outlined.ChevronRight, null, Modifier.size(16.dp), tint = scheme.outline)
+            Box(Modifier.size(width = 52.dp, height = 22.dp).background(scheme.secondary, MaterialTheme.shapes.extraSmall))
+            Spacer(Modifier.weight(1f))
+            repeat(3) { Icon(Icons.Outlined.Person, null, Modifier.size(16.dp), tint = if (it < 2) s.success else scheme.outlineVariant) }
         }
     }
 }

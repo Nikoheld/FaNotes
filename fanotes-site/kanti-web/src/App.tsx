@@ -9,6 +9,7 @@ import { useKanti } from './state'
 import { Banner, Button, Dialog, Icon, IconButton, Kbd, Logo, type IconName } from './components/ui'
 import { ago } from './views/common'
 import { AdminTimetable } from './views/AdminTimetable'
+import { Commute } from './views/Commute'
 import { Absences } from './views/Absences'
 import { Agenda } from './views/Agenda'
 import { Grades } from './views/Grades'
@@ -19,7 +20,7 @@ import { Today } from './views/Today'
 import { Updates } from './views/Updates'
 import { zurichToday } from '@shared/schulnetz-logic'
 
-const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', settings: 'settings' }
+const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', commute: 'train', settings: 'settings' }
 
 /** The theme as CSS variables on the root, following the system light/dark switch for "system". */
 const useTheme = () => {
@@ -51,7 +52,7 @@ const Onboarding = ({ onDone }: { onDone: () => void }) => {
         <div className="onboarding-dots" aria-hidden="true">{t.onboardingTitles.map((title, index) => <span key={title} className={index === step ? 'on' : ''} />)}</div>
         <h1>{t.onboardingTitles[step]}</h1>
         <p>{t.onboardingBodies[step]}</p>
-        {step === 2 ? <p className="muted small"><Kbd>1</Kbd>–<Kbd>7</Kbd> {t.keyNav} · <Kbd>←</Kbd> <Kbd>→</Kbd> {t.keyWeek} · <Kbd>/</Kbd> {t.keySearch} · <Kbd>?</Kbd> {t.keyHelp}</p> : null}
+        {step === 2 ? <p className="muted small"><Kbd>1</Kbd>–<Kbd>8</Kbd> {t.keyNav} · <Kbd>←</Kbd> <Kbd>→</Kbd> {t.keyWeek} · <Kbd>/</Kbd> {t.keySearch} · <Kbd>?</Kbd> {t.keyHelp}</p> : null}
         <div className="onboarding-actions">
           <Button tone="quiet" onClick={onDone}>{t.skip}</Button>
           <Button onClick={() => (last ? onDone() : setStep(step + 1))} autoFocus>{last ? t.start : t.next}</Button>
@@ -64,8 +65,8 @@ const Onboarding = ({ onDone }: { onDone: () => void }) => {
 const ShortcutHelp = ({ onClose }: { onClose: () => void }) => {
   const { t } = useKanti()
   const rows: [string[], string][] = [
-    [['1', '…', '7'], t.keyNav],
-    [['g', 'h / s / n / p / a / m / e'], t.keyNav],
+    [['1', '…', '8'], t.keyNav],
+    [['g', 'h / s / n / p / a / m / w / e'], t.keyNav],
     [['←', '→'], t.keyWeek],
     [['↑', '↓'], t.grades],
     [['t'], t.keyToday],
@@ -233,7 +234,7 @@ export const App = () => {
     )
   }
 
-  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, settings: Settings }
+  const views: Record<View, ComponentType> = { today: Today, timetable: Timetable, grades: Grades, agenda: Agenda, absences: Absences, updates: Updates, commute: Commute, settings: Settings }
   const Current = views[route.view]
   const status = data.status
   return (
