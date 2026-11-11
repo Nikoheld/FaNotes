@@ -619,7 +619,9 @@ tr:last-child td { border-bottom: none; }
 .commute-card-alert { color: var(--danger); }
 
 @media (max-width: 640px) {
-  .trip-head { grid-template-columns: minmax(0, 1fr) auto 18px; grid-template-areas: 'times status toggle' 'chips chips chips' 'meta meta meta' 'occ occ occ'; }
+  /* The times keep their width; the badges take what is left and wrap (no overlap at phone width). */
+  .trip-head { grid-template-columns: auto minmax(0, 1fr) 18px; grid-template-areas: 'times status toggle' 'chips chips chips' 'meta meta meta' 'occ occ occ'; }
+  .trip-times { font-size: 18px; white-space: nowrap; }
   .trip-occupancy { justify-self: start; }
   .route-editor .route-stops { grid-template-columns: minmax(0, 1fr); }
   .route-editor .swap-button { margin: 0; justify-self: end; transform: rotate(90deg); }
