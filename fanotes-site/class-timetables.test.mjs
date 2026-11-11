@@ -15,69 +15,120 @@ process.env.FANOTES_SYNC_DIR = syncDir
 const { handleSyncRequest } = await import('./sync-api.mjs')
 const { createSchulnetzRuntime } = await import('./schulnetz-api.mjs')
 const { createKantiWebApi, createKantiWebAppRoutes, createKantiWebStore } = await import('./kanti-web-api.mjs')
-const { createClassTimetables, expandClassList, isAksaBase, parseTimetableText } = await import('./class-timetables.mjs')
-const { buildPdf, SYNTHETIC_PAGES } = await import('./test-fixtures/synthetic-timetable-pdf.mjs')
+const { CLASS_CODE, createClassTimetables, expandClassList, expandClassListInfo, isAksaBase, parseTimetableBbox } = await import('./class-timetables.mjs')
+const { buildBboxXhtml, buildPdf, SYNTHETIC_PAGES } = await import('./test-fixtures/synthetic-timetable-pdf.mjs')
 
-const fixture = (name) => readFile(new URL(`./test-fixtures/${name}`, import.meta.url), 'utf8')
 const have = (tool) => { try { execFileSync(tool, ['-v'], { stdio: 'ignore' }); return true } catch (error) { return error?.code !== 'ENOENT' } }
 const entryText = (slot) => slot.entries.map((e) => `${e.subject}|${e.teacher}|${e.room}|${e.footnote}`).join(';')
 const slotOf = (cls, day, start) => cls.slots.find((s) => s.day === day && s.start === start)
+const BBOX = buildBboxXhtml(SYNTHETIC_PAGES)
 
-test('parser reads classes, teachers, cells, half classes, footnotes and rooms from layout text', async () => {
-  const parsed = parseTimetableText(await fixture('synthetic-layout.txt'))
+test('parser places centred single and double lessons, stacks and side-by-side entries by coordinates', () => {
+  const parsed = parseTimetableBbox(BBOX)
   assert.deepEqual(parsed.warnings, [])
   assert.equal(parsed.semester, 'SJ 2026-27')
-  assert.deepEqual(parsed.classes.map((c) => [c.code, c.teacher, c.page]), [['G26A', 'ZimLu', 1], ['G26D', 'PfeMa', 2], ['G26B', 'KelAn', 3]])
+  assert.deepEqual(parsed.classes.map((c) => [c.code, c.teacher, c.page]), [['G26A', 'Anna Muster', 1], ['G26D', 'Peter Probe', 2], ['I26B', 'Eva Beispiel', 3]])
   const a = parsed.classes[0]
-  assert.equal(entryText(slotOf(a, 1, '07:45')), 'deu|ZimLu|516|')
-  assert.equal(entryText(slotOf(a, 2, '07:45')), 'Heng-Sem1|WeiSa|Telli|')
-  assert.equal(entryText(slotOf(a, 3, '10:30')), 'Heng-Sem1|WeiSa|Wed_A|;Heng-Sem2|OttPa|305|')
-  assert.equal(entryText(slotOf(a, 4, '11:25')), 'Amos 1.2|BauAn|210|')
-  assert.equal(entryText(slotOf(a, 2, '08:35')), 'spf|||1')
   assert.equal(a.slots.length, 8)
-  assert.deepEqual(parsed.footnotes.map((f) => [f.page, f.nr, f.teacher, f.subject, f.room, f.classes.join(',')]), [
-    [1, '1', 'BauAn', 'spf', 'Telli', 'G26A,G26B,G26F,G26G,G26K,G26L'],
-    [2, '1', 'BauAn', 'spf', 'Telli', 'G26D'],
+  // Double lesson (centred between two labels) with two stacked half-class entries and a marker on the first.
+  assert.deepEqual(slotOf(a, 1, '07:45'), { day: 1, start: '07:45', end: '09:20', entries: [
+    { subject: 'spf', teacher: 'BauAn', room: 'Telli', footnote: '1' },
+    { subject: 'spm', teacher: 'SolSi', room: 'Telli', footnote: '' },
+  ] })
+  // Six lines centred on one label stay a single lesson (45 minutes); subjects may contain a space.
+  assert.equal(slotOf(a, 1, '10:30').end, '11:15')
+  assert.equal(entryText(slotOf(a, 1, '10:30')), 'Amos 1.2|GreTo|036|2;Amos 1.1|SanAn|025|')
+  assert.equal(entryText(slotOf(a, 2, '07:45')), 'abt|KapCh|228|')
+  assert.equal(slotOf(a, 2, '08:35'), undefined)
+  assert.equal(slotOf(a, 2, '12:15').end, '13:50')
+  // Side by side entries stay separate, left to right; three of them fit one lesson.
+  assert.equal(entryText(slotOf(a, 4, '07:45')), 'eng-Sem2|KapCh|227|;Heng-Sem1|KapCh|227|')
+  assert.equal(entryText(slotOf(a, 4, '09:30')), 'deu|PfeMa|516|;fra|ZimJu|507|;wir|LauMi|035|')
+  // An entry without teacher and room keeps its marker; entities in the XHTML are decoded.
+  assert.equal(entryText(slotOf(a, 5, '12:15')), 'sit|||3')
+  assert.equal(entryText(slotOf(a, 3, '14:00')), 'B&W|HugTi|T49|')
+  assert.equal(a.slots.every((slot) => slot.entries.length > 0), true)
+  assert.equal(parsed.classes[1].slots.find((slot) => slot.day === 2 && slot.start === '13:05').end, '14:45')
+  assert.equal(parsed.classes[2].slots.length, 2)
+})
+
+test('parser reads the footnote table in three column groups with continuations and compressed class lists', () => {
+  const parsed = parseTimetableBbox(BBOX)
+  const rows = parsed.footnotes.map((f) => [f.page, f.nr, f.teacher, f.subject, f.room, f.classes.join(','), Boolean(f.classesTruncated)])
+  assert.deepEqual(rows.slice(0, 5), [
+    [1, '1', 'BauAn', 'spf', 'Telli', 'G26A', false],
+    [1, '1', 'SolSi', 'spm', 'Telli', 'G26A,G26B,G26I', false],
+    [1, '2', 'GreTo', 'Amos 1.2', '036', 'G26A,G26B,G26K', false],
+    [1, '2', 'SanAn', 'Amos 1.1', '025', 'G26A,G26B,G26K', false],
+    [1, '3', '', 'sit', '', 'G23D,G23L,G24B,G24D,G24E,G24K,G24L,G25B,G25K,G25L,G26A', true],
   ])
-  // Rooms: own cells plus footnote entries for every listed class.
-  const telli = parsed.rooms.Telli
-  assert.ok(telli.some((e) => e.class === 'G26A' && e.day === 2 && e.start === '07:45' && e.end === '08:35' && e.subject === 'Heng-Sem1'))
-  assert.deepEqual(telli.filter((e) => e.start === '08:35' && e.day === 2).map((e) => e.class), ['G26A', 'G26B', 'G26F', 'G26G', 'G26K', 'G26L'])
-  assert.ok(telli.some((e) => e.class === 'G26D' && e.day === 2 && e.start === '13:05' && e.end === '14:00'))
-  assert.equal(parsed.rooms['516'].length, 4)
-  assert.deepEqual(Object.keys(parsed.rooms).sort(), ['207', '208', '210', '212', '305', '516', 'T49', 'Telli', 'Wed_A'])
+  assert.deepEqual(rows.slice(5).map((row) => row.slice(0, 3)), [[2, '1', 'BauAn'], [2, '2', 'LanFr'], [2, '2', 'RotEv']])
+  assert.deepEqual(parsed.footnotes[6].classes, ['G26D', 'G26E'])
+  assert.equal('classesTruncated' in parsed.footnotes[0], false)
 })
 
-test('parser assigns shifted columns to the nearest day', async () => {
-  const parsed = parseTimetableText(await fixture('synthetic-layout-shifted.txt'))
-  assert.deepEqual(parsed.warnings, [])
-  const d = parsed.classes[0]
-  assert.equal(d.code, 'G26D')
-  assert.equal(entryText(slotOf(d, 2, '08:35')), 'phy|LanFr|T49|')
-  assert.equal(entryText(slotOf(d, 3, '07:45')), 'Heng-Sem2|OttPa|305|')
+test('rooms merge the same lesson across class pages and add footnote classes at the marker slot', () => {
+  const parsed = parseTimetableBbox(BBOX)
+  // spf/BauAn/Telli: G26A page (double lesson, marker 1 lists G26A) and G26D page (a different slot).
+  assert.deepEqual(parsed.rooms.Telli.filter((e) => e.day === 1), [
+    { day: 1, start: '07:45', end: '09:20', subject: 'spf', teacher: 'BauAn', class: 'G26A' },
+    { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'SolSi', class: 'G26A' },
+    { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'SolSi', class: 'G26B' },
+    { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'SolSi', class: 'G26I' },
+  ])
+  assert.deepEqual(parsed.rooms.Telli.filter((e) => e.day === 2).map((e) => [e.start, e.end, e.class]), [['13:05', '14:45', 'G26D']])
+  // Footnote 2 (marker on Monday 10:30) puts the half classes of G26B and G26K into rooms 036 and 025 too.
+  assert.deepEqual(parsed.rooms['036'].map((e) => [e.subject, e.class]), [['Amos 1.2', 'G26A'], ['Amos 1.2', 'G26B'], ['Amos 1.2', 'G26K']])
+  assert.deepEqual(parsed.rooms.Wed_A.map((e) => [e.day, e.start, e.end, e.class]), [[5, '11:25', '12:10', 'G26D']])
+  assert.deepEqual(Object.keys(parsed.rooms).sort(), ['025', '035', '036', '207', '212', '227', '228', '305', '505', '507', '516', 'T49', 'Telli', 'Wed_A'])
+  // The same lesson in two pages is listed once per class.
+  const twice = parseTimetableBbox(buildBboxXhtml([SYNTHETIC_PAGES[0], { ...SYNTHETIC_PAGES[0], code: 'G26B', footnotes: [] }]))
+  assert.equal(twice.rooms['227'].filter((e) => e.subject === 'eng-Sem2').length, 2)
+  assert.equal(new Set(twice.rooms['227'].map((e) => `${e.day}${e.start}${e.subject}${e.class}`)).size, twice.rooms['227'].length)
 })
 
-test('parser never throws on odd input and counts what it skipped', async () => {
-  for (const input of [undefined, null, '', '\f\f', 'x'.repeat(5000), '\u0000\u0001 G26A\nMontag Dienstag Mittwoch Donnerstag Freitag\n7:45 deu']) {
-    const parsed = parseTimetableText(input)
+test('parser warns with counts only and never throws on odd input', () => {
+  for (const input of [undefined, null, '', '<page></page>', 'x'.repeat(5000), '<page width="1" height="1"><word xMin="a" yMin="1" xMax="2" yMax="3">q</word></page>']) {
+    const parsed = parseTimetableBbox(input)
     assert.ok(Array.isArray(parsed.classes) && Array.isArray(parsed.warnings))
   }
-  const odd = parseTimetableText(await fixture('synthetic-layout-odd.txt'))
-  assert.equal(odd.classes.length, 1)
-  assert.equal(odd.classes[0].code, 'G26X')
-  assert.equal(entryText(slotOf(odd.classes[0], 1, '07:45')), 'deu|ZimLu|516|')
-  assert.ok(odd.warnings.length >= 3)
-  assert.ok(odd.warnings.some((w) => w.includes('no class code')))
-  // Warnings carry page numbers, never page text.
-  assert.ok(odd.warnings.every((w) => /^page \d+: /u.test(w) && !w.includes('deu') && !w.includes('kaputt')))
-  assert.equal(odd.footnotes.length, 1)
+  const odd = parseTimetableBbox(buildBboxXhtml([
+    SYNTHETIC_PAGES[2],
+    { ...SYNTHETIC_PAGES[0], code: 'G26X', omit: ['header'] },
+    { ...SYNTHETIC_PAGES[0], code: 'G26Y', omit: ['code'] },
+    { ...SYNTHETIC_PAGES[0], code: 'G26Z', omit: ['labels'] },
+    SYNTHETIC_PAGES[2],
+    // Entries far from every lesson centre are not placed; markers with no footnote row are counted.
+    { code: 'G26U', teacher: 'Un Bekannt', cells: [{ day: 1, row: 11.5, tracks: [[['mat', 'KelAn', '207']]] }, { day: 2, row: 1, tracks: [[['deu', 'ZimLu', '516', '7']]] }], footnotes: [] },
+  ]))
+  assert.deepEqual(odd.classes.map((c) => c.code), ['I26B', 'G26U'])
+  assert.deepEqual(odd.warnings, [
+    '2 pages without a weekday header or time rows',
+    '1 pages without a class code',
+    '1 pages repeating a class',
+    '1 entries not placed in a lesson',
+    '1 footnote markers without a footnote row',
+  ])
+  assert.ok(odd.warnings.every((w) => !/deu|mat|KelAn|G26/u.test(w)))
 })
 
-test('class lists expand compact letters and prefer known two-letter classes', () => {
+test('class lists expand the compressed notation', () => {
   assert.deepEqual(expandClassList('G26A, G26BFGKL'), ['G26A', 'G26B', 'G26F', 'G26G', 'G26K', 'G26L'])
+  assert.deepEqual(expandClassList('G26ADL'), ['G26A', 'G26D', 'G26L'])
+  assert.deepEqual(expandClassList('G26ABI'), ['G26A', 'G26B', 'G26I'])
+  assert.deepEqual(expandClassList('G23DL4B4D4E4K4L5B5K5L6A..'), ['G23D', 'G23L', 'G24B', 'G24D', 'G24E', 'G24K', 'G24L', 'G25B', 'G25K', 'G25L', 'G26A'])
+  assert.deepEqual(expandClassListInfo('G23DL4B4..').truncated, true)
+  assert.deepEqual(expandClassListInfo('G23DL4').classes, ['G23D', 'G23L'])
+  assert.deepEqual(expandClassListInfo('G26ABI').truncated, false)
+  // Other schools' prefixes, glued lists, and trailing noise.
+  assert.deepEqual(expandClassList('I26AW26AC 1-6,10-19'), ['I26A', 'W26A', 'W26C'])
+  // Known multi-letter classes win over single letters.
   assert.deepEqual(expandClassList('G26BFG', new Set(['G26FG'])), ['G26B', 'G26FG'])
-  assert.deepEqual(expandClassList('G26FM G25S'), ['G26FM', 'G25S'])
+  assert.deepEqual(expandClassList('G26FM G25S'), ['G26F', 'G26M', 'G25S'])
+  assert.deepEqual(expandClassList('G26FM G25S', new Set(['G26FM'])), ['G26FM', 'G25S'])
   assert.deepEqual(expandClassList('x'), [])
+  assert.ok(['G26A', 'G26FM', 'I26A', 'W25C', 'G22S'].every((code) => CLASS_CODE.test(code)))
+  assert.ok(['G26', 'g26a', 'G26ABCD', 'GG26A', 'G26A/../', '../G26A'].every((code) => !CLASS_CODE.test(code)))
   assert.equal(isAksaBase('https://www.schulnetz-ag.ch/aksa'), true)
   assert.equal(isAksaBase('https://www.schulnetz-ag.ch/aksa/'), true)
   assert.equal(isAksaBase('https://www.schulnetz-ag.ch/kska'), false)
@@ -96,7 +147,7 @@ const PDF = Buffer.from('%PDF-1.4\nsynthetic\n')
 test('ingest stores a version, switches the pointer, keeps three versions and rejects bad input', async () => {
   const root = await mkdtemp(join(tmpdir(), 'timetables-'))
   try {
-    const text = await fixture('synthetic-layout.txt')
+    const text = BBOX
     const calls = []
     let tick = 0
     const store = createClassTimetables({ root, run: fakeRun(text, calls), log: () => {}, now: () => new Date(Date.UTC(2026, 10, 11, 8, 0, tick++)) })
@@ -104,15 +155,15 @@ test('ingest stores a version, switches the pointer, keeps three versions and re
     assert.equal(await store.classPdf('G26A'), null)
 
     const result = await store.ingest(PDF)
-    assert.deepEqual([result.classes, result.rooms, result.warnings], [3, 9, []])
+    assert.deepEqual([result.classes, result.rooms, result.warnings], [3, 14, []])
     // No shell, arguments only; the page number selects the page.
-    assert.deepEqual(calls.find((c) => c[0] === 'pdftotext').slice(0, 2), ['pdftotext', '-layout'])
+    assert.deepEqual(calls.find((c) => c[0] === 'pdftotext').slice(0, 2), ['pdftotext', '-bbox-layout'])
     assert.ok(calls.some((c) => c[0] === 'qpdf' && c.includes('--empty') && c.includes('--pages') && c[4] === '2'))
     assert.ok(calls.some((c) => c[0] === 'pdftoppm' && c.includes('-r') && c.includes('110') && c.includes('-singlefile')))
 
     const summary = await store.summary()
     assert.equal(summary.available, true)
-    assert.deepEqual(summary.classes.map((c) => c.code), ['G26A', 'G26B', 'G26D'])
+    assert.deepEqual(summary.classes.map((c) => c.code), ['G26A', 'G26D', 'I26B'])
     assert.ok(summary.rooms.includes('Telli') && !('warnings' in summary))
     assert.equal((await store.classPdf('G26D')).toString().startsWith('%PDF-fake 2'), true)
     assert.equal((await store.classPng('G26D')).toString(), 'png')
@@ -134,7 +185,7 @@ test('ingest stores a version, switches the pointer, keeps three versions and re
     const before = (await readdir(store.root)).sort()
     await assert.rejects(store.ingest(Buffer.from('not a pdf at all')), { status: 400 })
     await assert.rejects(store.ingest(Buffer.alloc(25 * 1024 * 1024 + 1, 1)), { status: 413 })
-    const manyPages = createClassTimetables({ root, log: () => {}, run: fakeRun('x\f'.repeat(201), []) })
+    const manyPages = createClassTimetables({ root, log: () => {}, run: fakeRun('<page></page>'.repeat(201), []) })
     await assert.rejects(manyPages.ingest(PDF), { status: 413 })
     const noClasses = createClassTimetables({ root, log: () => {}, run: fakeRun('nothing here\f', []) })
     await assert.rejects(noClasses.ingest(PDF), { status: 422 })
@@ -162,9 +213,13 @@ test('real pipeline on a synthetic PDF: pdftotext, qpdf split, pdftoppm PNG', { 
     const split = join(root, 'check.pdf')
     await writeFile(split, pdf)
     assert.match(execFileSync('pdfinfo', [split], { encoding: 'utf8' }), /Pages:\s+1\b/u)
-    assert.match(execFileSync('pdftotext', ['-layout', split, '-'], { encoding: 'utf8' }), /G26D/u)
+    assert.match(execFileSync('pdftotext', ['-bbox-layout', split, '-'], { encoding: 'utf8' }), /G26D/u)
     const room = await store.room('Telli')
     assert.ok(room.entries.some((e) => e.class === 'G26D' && e.subject === 'spf'))
+    // The real poppler output parses to the same rooms as the coordinate fixture.
+    const expected = parseTimetableBbox(BBOX).rooms
+    for (const name of ['Telli', '036', 'Wed_A', '227']) assert.deepEqual((await store.room(name)).entries, expected[name], name)
+    assert.deepEqual((await store.summary()).rooms.length, Object.keys(expected).length)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -180,7 +235,7 @@ const DEVICE = '0123456789abcdef01234567'
 
 const startServer = async ({ adminHash = sha(TOKEN) } = {}) => {
   const root = await mkdtemp(join(tmpdir(), 'timetables-http-'))
-  const text = await fixture('synthetic-layout.txt')
+  const text = BBOX
   const timetables = createClassTimetables({ root, log: () => {}, run: fakeRun(text, []) })
   const store = createKantiWebStore({ root })
   const schulnetz = createSchulnetzRuntime({
@@ -258,7 +313,7 @@ test('admin route: token hash, origin, content type, rate limit, upload and inde
     const ok = await admin(env.base, 'POST')
     assert.equal(ok.status, 200)
     const body = await ok.json()
-    assert.deepEqual([body.classes, body.rooms, body.warnings], [3, 9, []])
+    assert.deepEqual([body.classes, body.rooms, body.warnings], [3, 14, []])
     const index = await (await admin(env.base, 'GET')).json()
     assert.equal(index.available, true)
     assert.equal(index.classes.length, 3)
@@ -296,7 +351,7 @@ test('timetables are served only to Alte Kanti identities, in the app and in the
 
     const summary = await (await aksa.call('/timetables')).json()
     assert.equal(summary.available, true)
-    assert.deepEqual(summary.classes.map((c) => c.code), ['G26A', 'G26B', 'G26D'])
+    assert.deepEqual(summary.classes.map((c) => c.code), ['G26A', 'G26D', 'I26B'])
     const pdf = await aksa.call('/timetables/class/G26D.pdf')
     assert.equal(pdf.status, 200)
     assert.equal(pdf.headers.get('content-type'), 'application/pdf')
