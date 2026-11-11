@@ -10,9 +10,11 @@ import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
+import { createCommute } from './commute.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
 import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
+  alertAllowed,
   applyEventWindow,
   diffSnapshots,
   resolvedAlertSettings,
@@ -81,6 +83,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   appointmentNew: true,
   messageNew: true,
   deadlines: true,
+  commute: true,
+  commuteDelay: true,
+  commuteCancelled: true,
+  commuteLessonEnd: true,
   guessGrades: false,
 })
 const COOKIE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000
@@ -88,6 +94,8 @@ const SSO_HOSTS = new Set(['login.microsoftonline.com', 'login.microsoft.com', '
 const SSO_COOKIE_NAMES = new Set(['ESTSAUTH', 'ESTSAUTHPERSISTENT', 'ESTSAUTHLIGHT', 'SignInStateCookie', 'x-ms-RefreshTokenCredential'])
 const LINK_LIMIT = 5
 const WEB_PAIR_LIMIT = 30
+// Pendelstrecken: app open, widget refresh and stop search together, per account and window.
+const COMMUTE_LIMIT = 240
 const SNAPSHOT_LIMIT = 60
 const PUSH_TEST_LIMIT = 5
 const LIMIT_WINDOW_MS = 60 * 60 * 1000
@@ -661,7 +669,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const ping = async (accountId, link, event, priority = 'HIGH', changes = []) => {
-    if (event !== 'sync' && event !== 'reauth' && event !== 'test') return
+    if (event !== 'sync' && event !== 'reauth' && event !== 'test' && event !== 'commute') return
     const tokens = (link.fcmTokens || []).filter(isValidFcmToken)
     if (!tokens.length) return
     let dropped = false
@@ -1173,6 +1181,32 @@ export const createSchulnetzRuntime = (options = {}) => {
     return { revision: snapshot.revision, changes: changes.length, failed, gradesOk }
   }
 
+  // Pendelstrecken: routes, live boards and alerts (commute.mjs). Never sent to Schulnetz.
+  // Pendelstrecken alerts: through the account queue, so a commute alert and a school read never share a revision.
+  const commutePublish = (accountId, changes) => withAccount(accountId, async () => {
+    const link = await readLink(accountId)
+    if (!link) return []
+    const settings = resolvedAlertSettings(link.settings || DEFAULT_SETTINGS)
+    const allowed = settings.enabled === false ? [] : changes.filter((change) => alertAllowed(settings, change))
+    if (!allowed.length) return []
+    link.revision = (link.revision || 0) + 1
+    await saveLink(accountId, link)
+    return publishChanges(accountId, link, allowed, link.revision)
+  })
+  const commute = options.commute === false ? null : createCommute({
+    root,
+    fetch: options.commuteFetch || globalThis.fetch,
+    provider: options.commuteProvider,
+    now,
+    log,
+    lessonsFor: async (accountId) => (await readJson(resolve(accountDir(accountId), 'snapshot.json')))?.events || [],
+    publish: commutePublish,
+    ping: async (accountId) => {
+      const link = await readLink(accountId)
+      if (link) await ping(accountId, link, 'commute', 'NORMAL')
+    },
+  })
+
   const listAccounts = async () => {
     try {
       const entries = await fs.readdir(resolve(root, 'accounts'))
@@ -1205,6 +1239,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         log('info', 'Poller übersprungen, eine andere Instanz hält die Sperre.')
         return
       }
+      commuteLoop().catch((error) => log('warn', `Pendel-Prüfung gestoppt (${error?.name || 'error'})`))
       for (;;) {
         try { await scheduler.tick() } catch (error) {
           log('warn', `Poller-Durchlauf fehlgeschlagen (${error?.name || 'error'})`)
@@ -1214,6 +1249,15 @@ export const createSchulnetzRuntime = (options = {}) => {
       }
     }
     loop().catch((error) => log('warn', `Poller gestoppt (${error?.name || 'error'})`))
+  }
+
+  /** Commute checks run beside the school poller (own loop, so a slow school read never delays a departure alert). */
+  const commuteLoop = async () => {
+    if (!commute) return
+    for (;;) {
+      try { await commute.tick() } catch (error) { log('warn', `Pendel-Durchlauf fehlgeschlagen (${error?.name || 'error'})`) }
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, Number(options.commuteTickMs || 20_000)))
+    }
   }
 
   const acquireLock = async () => {
@@ -1404,6 +1448,21 @@ export const createSchulnetzRuntime = (options = {}) => {
         send(response, 200, found)
         return true
       }
+      // Pendelstrecken (commute-api.md). Stored for this identity on our server only.
+      if (commute && route.startsWith('/commute')) {
+        accountRate(accountId, 'commute', COMMUTE_LIMIT)
+        if (route === '/commute' && method === 'GET') { send(response, 200, await commute.view(accountId)); return true }
+        if (route === '/commute' && method === 'PUT') { send(response, 200, await commute.save(accountId, await readBody(request))); return true }
+        if (route === '/commute/stops' && method === 'GET') { send(response, 200, await commute.stops(url.searchParams.get('q') || '')); return true }
+        if (route === '/commute/board' && method === 'GET') { send(response, 200, await commute.board(accountId, String(url.searchParams.get('route') || ''))); return true }
+        if (route === '/commute/trips' && method === 'GET') {
+          const found = await commute.tripsFor(accountId, String(url.searchParams.get('route') || ''), String(url.searchParams.get('at') || ''), String(url.searchParams.get('timeType') || 'depart'))
+          if (!found) fail(404, 'Diese Pendelstrecke gibt es nicht.')
+          send(response, 200, found)
+          return true
+        }
+        fail(404, 'Diesen Endpunkt gibt es nicht.')
+      }
       if (route === '/reveals' && method === 'GET') { send(response, 200, await readReveals(accountId)); return true }
       if (route === '/reveals' && method === 'PUT') { send(response, 200, await mergeReveals(accountId, await readBody(request))); return true }
       if (route === '/link' && method === 'PUT') {
@@ -1524,6 +1583,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     changesSince: (accountId, since) => changesSince(accountId, since, ''),
     readReveals,
     mergeReveals,
+    commuteFor: async () => commute,
     timetablesFor: async (accountId) => {
       const link = await readLink(accountId)
       return timetables && isAksaBase(link?.baseUrl) ? timetables : null
@@ -1546,6 +1606,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     deleteGuestAccount,
     unlink,
     publicStatusOf: async (accountId) => publicStatus(await readLink(accountId)),
+    commute,
+    commutePublish,
     root,
   }
 }

@@ -836,6 +836,7 @@ export const defaultTarget = (category) => {
   if (category === 'exam') return 'exams'
   if (category === 'absence' || category === 'deadline') return 'absences'
   if (category === 'settings') return 'settings'
+  if (category === 'commute') return 'commute'
   return 'events'
 }
 
@@ -1120,6 +1121,9 @@ const ALERT_PARENT = {
   'message-new': 'events',
   'absence-new': 'absences',
   deadline: 'deadlines',
+  'commute-delay': 'commute',
+  'commute-cancelled': 'commute',
+  'commute-lesson': 'commute',
 }
 
 const ALERT_FINE = {
@@ -1133,6 +1137,9 @@ const ALERT_FINE = {
   'exam-room': 'examRoom',
   'appointment-new': 'appointmentNew',
   'message-new': 'messageNew',
+  'commute-delay': 'commuteDelay',
+  'commute-cancelled': 'commuteCancelled',
+  'commute-lesson': 'commuteLessonEnd',
 }
 
 /** Real school-alert kind. Blank for probes, tests, and categories this diff does not emit. */
@@ -1154,6 +1161,11 @@ export const notifyAlertKind = (change) => {
   if (category === 'event') return title === 'Neuer Termin' ? 'appointment-new' : 'message-new'
   if (category === 'absence') return 'absence-new'
   if (category === 'deadline') return 'deadline'
+  if (category === 'commute') {
+    if (title === 'Fällt aus' || title === 'Anschluss verpasst') return 'commute-cancelled'
+    if (title === 'Früher nach Hause' || title === 'Später zur Schule') return 'commute-lesson'
+    return 'commute-delay'
+  }
   return ''
 }
 
@@ -1188,6 +1200,10 @@ export const resolvedAlertSettings = (stored = {}) => {
     appointmentNew: fine('appointmentNew', events),
     messageNew: fine('messageNew', events),
     deadlines: parent('deadlines'),
+    commute: parent('commute'),
+    commuteDelay: fine('commuteDelay', parent('commute')),
+    commuteCancelled: fine('commuteCancelled', parent('commute')),
+    commuteLessonEnd: fine('commuteLessonEnd', parent('commute')),
     guessGrades: source.guessGrades === true,
   }
 }
