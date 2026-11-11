@@ -38,6 +38,8 @@ LoadCredential=fcm-service-account:/etc/fanotes/fcm-service-account.json
 LoadCredential=update-signing-key:/etc/fanotes/update-signing-private.pem
 LoadCredential=release-checksum-signature:/etc/fanotes/SHA256SUMS.sig
 LoadCredential=backup-enrollment-token:/etc/fanotes/backup-enrollment-token
+# SHA-256 (hex) of the operator's timetable-upload token; the route answers 503 without it.
+LoadCredential=kanti-admin-token:/etc/fanotes/kanti-admin-token.sha256
 ExecStart=/usr/bin/node /opt/fanotes-site/server.mjs
 Restart=on-failure
 RestartSec=3s

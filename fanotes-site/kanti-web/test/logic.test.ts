@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { pbkdf2Sync, webcrypto } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { allEntries, nextCommitment, weekRange, weekState, weekDays } from '../src/lib/agenda'
+import { detectGroupSets, visibleLessons } from '../src/lib/groups'
+import { allEntries, examsInLessonSlots, nextCommitment, weekRange, weekState, weekDays } from '../src/lib/agenda'
 import { createApi } from '../src/lib/api'
 import { deriveAuthKey, kdfSupported } from '../src/lib/auth'
 import { demoSnapshot } from '../src/lib/demo'
@@ -16,7 +17,7 @@ import { search } from '../src/lib/search'
 import { shortcutFor } from '../src/lib/shortcuts'
 import { absenceTally } from '@shared/schulnetz-logic'
 import { pointsLabel } from '../src/lib/i18n'
-import type { Change, SchoolGrade } from '../src/types'
+import type { AgendaEvent, Change, SchoolGrade } from '../src/types'
 
 const grade = (fields: Partial<SchoolGrade>): SchoolGrade => ({ id: 'g', course: 'M-2a', courseId: 'M-2a', subject: 'Mathematik', title: 'Test', date: '2026-10-01', mark: 5, weight: 1, ...fields })
 
@@ -236,5 +237,96 @@ describe('refresh on return to the tab', () => {
     expect(refreshDue(now - 120_000, now, true)).toBe(false)
     // A clock that went back never blocks refreshing.
     expect(refreshDue(now + 60_000, now, false)).toBe(true)
+  })
+})
+
+describe('exams take the place of their lesson (examsInLessonSlots)', () => {
+  const lesson = (id: string, start: string, end: string, extra: Partial<AgendaEvent> = {}): AgendaEvent => ({
+    id, start: `2026-11-10T${start}:00`, end: `2026-11-10T${end}:00`, text: '', comment: '', room: 'B12', teachers: ['Nord'],
+    courseId: 'c-mat', courseName: 'mat 2.1', status: '', eventType: '', color: '', timetableText: '', ...extra,
+  })
+  const exam = (start: string, end: string, extra: Partial<AgendaEvent> = {}): AgendaEvent =>
+    lesson('x1', start, end, { text: 'mat 2.1 Prüfung Kapitel 4', courseId: '', courseName: '', room: '', eventType: 'exam', ...extra })
+  const l1 = lesson('l1', '08:00', '08:45')
+  const l2 = lesson('l2', '08:50', '09:35')
+
+  it('replaces one lesson with the exam title and the lesson room', () => {
+    const merge = examsInLessonSlots([l1, l2], [exam('08:00', '08:45')])
+    expect([...merge.dropped]).toEqual([`l1|${l1.start}`])
+    expect(merge.exams[0].shown).toMatchObject({ start: l1.start, end: l1.end, room: 'B12', text: 'mat 2.1 Prüfung Kapitel 4' })
+  })
+
+  it('replaces a double lesson', () => {
+    const merge = examsInLessonSlots([l1, l2], [exam('08:00', '09:35', { room: 'A1' })])
+    expect(merge.dropped.size).toBe(2)
+    expect(merge.exams[0].shown).toMatchObject({ start: l1.start, end: l2.end, room: 'A1' })
+  })
+
+  it('does not merge an exam over two courses, three lessons, no time, another course or a cancelled lesson', () => {
+    const other = lesson('l2', '08:50', '09:35', { courseId: 'c-deu', courseName: 'deu 2.1' })
+    expect(examsInLessonSlots([l1, other], [exam('08:00', '09:35')]).exams).toHaveLength(0)
+    const l3 = lesson('l3', '09:40', '10:25')
+    expect(examsInLessonSlots([l1, l2, l3], [exam('08:00', '10:25')]).exams).toHaveLength(0)
+    expect(examsInLessonSlots([l1, l2], [exam('08:00', '08:45', { start: '2026-11-10', end: '2026-11-10' })]).exams).toHaveLength(0)
+    expect(examsInLessonSlots([l1], [exam('08:00', '08:45', { text: 'Prüfung Geschichte', courseId: 'c-his' })]).exams).toHaveLength(0)
+    expect(examsInLessonSlots([lesson('l1', '08:00', '08:45', { status: 'cancelled' })], [exam('08:00', '08:45')]).exams).toHaveLength(0)
+  })
+
+  it('shows the exam instead of the lesson in the agenda', () => {
+    const snapshot = { events: [l1, l2], exams: [exam('08:00', '08:45')] } as never
+    const entries = allEntries(snapshot)
+    expect(entries.map((entry) => [entry.kind, entry.start, entry.end, entry.room])).toEqual([
+      ['exam', '08:00', '08:45', 'B12'],
+      ['lesson', '08:50', '09:35', 'B12'],
+    ])
+  })
+})
+
+describe('half-class groups (HalfClassGroups.kt)', () => {
+  const monday = new Date('2026-09-07T00:00:00Z')
+  const lesson = (name: string, week: number, day: number, hour: number, extra: Partial<AgendaEvent> = {}): AgendaEvent => {
+    const d = new Date(monday.getTime() + (week * 7 + day) * 86400000).toISOString().slice(0, 10)
+    const h = String(hour).padStart(2, '0')
+    return { id: `${name}-${week}-${day}-${hour}`, start: `${d}T${h}:00:00`, end: `${d}T${h}:45:00`, text: '', comment: '', room: 'B12', teachers: ['Nord'], courseId: `c-${name}`, courseName: name, status: '', eventType: '', color: '', timetableText: '', ...extra }
+  }
+  const weekly = (name: string, hour: number, day = 0, extra: Partial<AgendaEvent> = {}) => [0, 1, 2, 3].map((week) => lesson(name, week, day, hour, extra))
+
+  it('detects an H-subject pair in the same slot as one set', () => {
+    const sets = detectGroupSets([...weekly('Hbio_G26D', 8, 0, { teachers: ['Aebi'] }), ...weekly('Hche_G26D', 8, 0, { teachers: ['Bader'] }), ...weekly('Mathematik', 9)])
+    expect(sets.map((set) => set.key)).toEqual(['hbio_g26d|hche_g26d'])
+    expect(sets[0].options.map((option) => option.teacher)).toEqual(['Aebi', 'Bader'])
+    expect(sets[0].options.map((option) => option.lessonsPerWeek)).toEqual([1, 1])
+  })
+
+  it('detects numbered, semester and sport families', () => {
+    expect(detectGroupSets([...weekly('Amos 1.1', 8), ...weekly('Amos 1.2', 10, 2), ...weekly('Amos 2.1', 13)]).map((set) => set.key)).toEqual(['amos 1.1|amos 1.2'])
+    expect(detectGroupSets([...weekly('Heng-Sem1', 8), ...weekly('Heng-Sem2', 10, 1)]).map((set) => set.key)).toEqual(['heng-sem1|heng-sem2'])
+    expect(detectGroupSets([...weekly('spf', 8), ...weekly('spm', 10, 3)]).map((set) => set.key)).toEqual(['spf|spm'])
+    expect(detectGroupSets([...weekly('SPF_G26D_1', 8), ...weekly('SPM_G26D_1', 10, 3)])).toHaveLength(1)
+  })
+
+  it('ignores a single overlap, cancelled lessons and tiny options', () => {
+    expect(detectGroupSets([...weekly('Mathematik', 8), ...weekly('Deutsch', 9), lesson('Physik', 0, 0, 8)])).toEqual([])
+    expect(detectGroupSets([...weekly('Hbio_G26D', 8), ...weekly('Hche_G26D', 8, 0, { status: 'cancelled' })])).toEqual([])
+    expect(detectGroupSets([...weekly('Amos 1.1', 8), lesson('Amos 1.2', 0, 1, 8)])).toEqual([])
+  })
+
+  it('hides non-chosen groups only with a valid choice and keeps exams', () => {
+    const events = [...weekly('Hbio_G26D', 8), ...weekly('Hche_G26D', 8), ...weekly('Mathematik', 9)]
+    const key = detectGroupSets(events)[0].key
+    const shown = (choices: Record<string, string[]>) => visibleLessons(events, choices).map((event) => event.courseName)
+    expect(new Set(shown({ [key]: ['Hbio_G26D'] }))).toEqual(new Set(['Hbio_G26D', 'Mathematik']))
+    expect(shown({})).toHaveLength(12)
+    expect(shown({ 'gone|set': ['Gone'] })).toHaveLength(12)
+    expect(shown({ [key]: ['Nope'] })).toHaveLength(12)
+    const entries = allEntries({ events, exams: [] } as never, { [key]: ['Hche_G26D'] })
+    expect(entries.some((entry) => entry.title === 'Hbio_G26D')).toBe(false)
+    expect(entries.some((entry) => entry.title === 'Hche_G26D')).toBe(true)
+  })
+
+  it('stores choices in prefs and ignores bad data', () => {
+    const storage = { getItem: () => JSON.stringify({ groupChoices: { 'a|b': ['A'], c: 'x', d: [] } }) }
+    expect(loadPrefs(storage).groupChoices).toEqual({ 'a|b': ['A'] })
+    expect(loadPrefs({ getItem: () => JSON.stringify({ theme: 'snow' }) }).groupChoices).toEqual({})
   })
 })

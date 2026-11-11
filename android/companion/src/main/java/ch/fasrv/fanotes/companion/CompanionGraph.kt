@@ -1,5 +1,8 @@
 package ch.fasrv.fanotes.companion
 
+import ch.fasrv.fanotes.schulnetz.PlannedAbsence
+import ch.fasrv.fanotes.schulnetz.parsePlannedAbsences
+import ch.fasrv.fanotes.schulnetz.serializePlannedAbsences
 import ch.fasrv.fanotes.schulnetz.ConnectionRegistry
 import ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT
 import ch.fasrv.fanotes.schulnetz.newPushKey
@@ -14,6 +17,7 @@ import ch.fasrv.fanotes.schulnetz.MAX_LEDGER_IDS
 import ch.fasrv.fanotes.schulnetz.SettingsSync
 import ch.fasrv.fanotes.schulnetz.WebBrowserSession
 import ch.fasrv.fanotes.schulnetz.WebPairInfo
+import ch.fasrv.fanotes.schulnetz.WebPairOffer
 import ch.fasrv.fanotes.schulnetz.mergeReveals
 import ch.fasrv.fanotes.schulnetz.gradeTargetId
 import ch.fasrv.fanotes.schulnetz.settingsSyncAction
@@ -88,6 +92,7 @@ import ch.fasrv.fanotes.schulnetz.HiddenLesson
 import ch.fasrv.fanotes.schulnetz.changeFromObj
 import ch.fasrv.fanotes.schulnetz.isNotificationProbe
 import ch.fasrv.fanotes.schulnetz.probeDeviceKey
+import ch.fasrv.fanotes.schulnetz.activeGroupSets
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
 import ch.fasrv.fanotes.schulnetz.parseGradeBook
@@ -142,6 +147,7 @@ class CompanionGraph(private val context: Context) {
     val snapshot = MutableStateFlow(SchulnetzSnapshot())
     val link = MutableStateFlow(SchulnetzLinkState())
     val client = SchulnetzClient()
+    val mensaStore by lazy { MensaStore(File(context.filesDir, "mensa.json"), client) }
     val schulnetzLog = SchulnetzLog(File(context.filesDir, "schulnetz"))
     val trail = DiagnosticTrail()
     val browser = SchulnetzBrowser(context, schulnetzLog)
@@ -188,12 +194,14 @@ class CompanionGraph(private val context: Context) {
         prefs.edit().putBoolean(PLANNER_HOLD_PREF, hold).apply()
         busyPaths = if (hold) PLANNER_HOLD_PATHS else emptySet()
     }
-    /** Keep tasks, calendar and desk settings on this device until the user agrees to upload them. */
+    /**
+     * Keep calendar and desk settings on this device until the user agrees to upload them.
+     * Tasks are not held: the sync engine merges Hausaufgaben.md task by task, so nothing is lost.
+     */
     fun armPlannerHold(): Boolean {
-        val tasks = runCatching { homework().tasks.any { it.title.isNotBlank() } }.getOrDefault(true)
         val events = runCatching { calendar().events.isNotEmpty() }.getOrDefault(true)
         val deskCustom = vault.exists(DESK_PATH) && runCatching { deskPrefs() != DeskPrefs(theme = themeId()) }.getOrDefault(true)
-        val hold = tasks || events || deskCustom
+        val hold = events || deskCustom
         if (hold) setPlannerHold(true)
         return hold
     }
@@ -317,6 +325,20 @@ class CompanionGraph(private val context: Context) {
         rearmSchoolDelivery()
     }
 
+    /** Gets a code from the server and joins the connections with [ids] to it; the browser enters the code later. */
+    suspend fun offerWebPair(ids: List<String>): WebPairOffer {
+        if (demoActive()) throw DemoModeException()
+        val chosen = sessions().filter { it.id in ids }
+        require(chosen.isNotEmpty())
+        val asker = sessions().firstOrNull { it.serverShared() } ?: current()
+        val offer = client.webPairOffer(asker.schoolAuth())
+        gate.exclusive("web-pair") {
+            chosen.forEachIndexed { index, session -> session.joinWebPairing(offer.code, finish = index == chosen.lastIndex) }
+        }
+        rearmSchoolDelivery()
+        return offer
+    }
+
     /** Browsers per connection id; a connection that could not be asked is left out. */
     suspend fun webBrowsers(): Map<String, List<WebBrowserSession>> {
         if (demoActive()) return emptyMap()
@@ -408,6 +430,8 @@ class CompanionGraph(private val context: Context) {
     fun setSubjectColor(subject: String, color: String) = current().setSubjectColor(subject, color)
     fun hiddenLessons(): List<HiddenLesson> = current().hiddenLessons()
     fun saveHiddenLessons(rules: List<HiddenLesson>) = current().saveHiddenLessons(rules)
+    fun plannedAbsences(): List<PlannedAbsence> = current().plannedAbsences()
+    fun savePlannedAbsences(items: List<PlannedAbsence>) = current().savePlannedAbsences(items)
     fun lastCheckAt(): Long = current().lastCheckAt()
     fun lastCheckError(): String = current().lastCheckError()
     fun nextCheckAt(): Long = current().nextCheckAt()
@@ -416,6 +440,20 @@ class CompanionGraph(private val context: Context) {
     fun disconnectSchool() = current().disconnectSchool()
     fun clearLoginPrompt() = current().clearLoginPrompt()
     suspend fun schoolAuth(): SchoolAuth = current().schoolAuth()
+    /** Other classes and rooms of the Alte Kanti; empty (not available) for any other connection. */
+    suspend fun classTimetables(): ch.fasrv.fanotes.schulnetz.ClassTimetableSummary = withContext(Dispatchers.IO) { client.classTimetables(schoolAuth()) }
+    suspend fun roomTimetable(room: String): ch.fasrv.fanotes.schulnetz.RoomWeek = withContext(Dispatchers.IO) { client.roomTimetable(schoolAuth(), room) }
+    /** The class page PDF in the cache dir; a file from the same upload is reused. */
+    suspend fun classTimetableFile(code: String, uploadedAt: String): java.io.File = withContext(Dispatchers.IO) {
+        val directory = java.io.File(context.cacheDir, "class-timetables")
+        val file = java.io.File(directory, ch.fasrv.fanotes.schulnetz.classPdfCacheName(code, uploadedAt))
+        if (!file.isFile || file.length() < 8) {
+            // Older uploads are of no use any more.
+            directory.listFiles()?.filter { it.name.endsWith("-$code.pdf") || it.name.endsWith(".part") }?.forEach { it.delete() }
+            client.classTimetablePdf(schoolAuth(), code, file)
+        }
+        file
+    }
     val viewingSession: Boolean get() = loginSession?.viewingSession == true
     fun consumeOauthPermit(): Boolean = loginSession?.consumeOauthPermit() == true
     fun finishVisibleLogin(session: WebSession?) { (loginSession ?: current()).finishVisibleLogin(session) }
@@ -890,6 +928,7 @@ class CompanionGraph(private val context: Context) {
         const val COLORS_PATH = ".fanotes/schulnetz/colors.json"
         const val DESK_PATH = ".fanotes/schulnetz/desk.json"
         const val HIDDEN_PATH = ".fanotes/schulnetz/hidden-lessons.json"
+        const val PLANNED_PATH = ".fanotes/schulnetz/planned-absences.json"
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
         const val GUESS_GRADES_PREF = NotifyPrefs.GUESS
         const val UNREVEALED_PREF = "unrevealed-grades"
@@ -897,7 +936,7 @@ class CompanionGraph(private val context: Context) {
         const val DIAGNOSTIC_MODE_PREF = "diagnostic-mode"
         const val DEMO_PREF = "demo-mode"
         const val DIAGNOSTIC_SCENARIO_PREF = "diagnostic-scenario"
-        val PLANNER_HOLD_PATHS = setOf(HOMEWORK_NOTE_PATH, CALENDAR_NOTE_PATH, DESK_PATH)
+        val PLANNER_HOLD_PATHS = setOf(CALENDAR_NOTE_PATH, DESK_PATH)
         const val SERVER_POLL_MS = 60_000L
         const val SILENT_AT = "schulnetz-silent-at"
         const val SEEN_CHANGES_PREF = "seen-changes"
@@ -1048,7 +1087,7 @@ class CompanionGraph(private val context: Context) {
             clearSchoolCache()
             deleteGuestFile()
             secrets.clear()
-            for (path in listOf(HYPOTHETICAL_PATH, GRADE_BOOK_PATH, COLORS_PATH, HIDDEN_PATH)) if (slot != PRIMARY_SLOT && vault.exists(sp(path))) vault.delete(sp(path))
+            for (path in listOf(HYPOTHETICAL_PATH, GRADE_BOOK_PATH, COLORS_PATH, HIDDEN_PATH, PLANNED_PATH)) if (slot != PRIMARY_SLOT && vault.exists(sp(path))) vault.delete(sp(path))
             val editor = prefs.edit()
             if (slot == PRIMARY_SLOT) {
                 for (key in SLOT_KEYS + NotifyPrefs.fields.map { it.second }) editor.remove(key)
@@ -1388,6 +1427,17 @@ class CompanionGraph(private val context: Context) {
             vault.write(sp(HIDDEN_PATH), serializeHiddenLessons(rules).encodeToByteArray())
             engine.notifyLocalChange()
             NextLessonWidget.update(context)
+        }
+
+        fun plannedAbsences(): List<PlannedAbsence> {
+            val text = vault.read(sp(PLANNED_PATH))?.decodeToString() ?: return emptyList()
+            return parsePlannedAbsences(text)
+        }
+
+        /** Stored on the device and in the user's own vault sync only; never sent to Schulnetz. */
+        fun savePlannedAbsences(items: List<PlannedAbsence>) {
+            vault.write(sp(PLANNED_PATH), serializePlannedAbsences(items).encodeToByteArray())
+            engine.notifyLocalChange()
         }
 
         fun lastCheckAt(): Long = prefs.getLong("last-check", 0L)
@@ -1929,6 +1979,8 @@ class CompanionGraph(private val context: Context) {
             if (demoActive() || incoming.isDemo()) return
             val next = incoming.copy(grades = ch.fasrv.fanotes.schulnetz.keepGradeRead(previous?.grades.orEmpty(), incoming.grades, incoming.trustedGradeRead()))
             val hidden = hiddenLessons()
+            val groupChoices = deskPrefs().groupChoices
+            val groupSets = activeGroupSets((next.events + previous?.events.orEmpty()).distinctBy { it.id + it.start }, groupChoices)
             val local = notifySettings()
             val effective = settings.copy(guessGrades = local.guessGrades)
             val prior = previous?.takeIf { it.fetchedAt.isNotBlank() || it.grades.isNotEmpty() || it.events.isNotEmpty() }
@@ -1949,7 +2001,7 @@ class CompanionGraph(private val context: Context) {
             // Fallback check: drop a disabled school alert before it can be posted. An empty list still stores the snapshot below.
             val raw = diffSnapshots(before, next, effective)
                 .filter { schoolAlertGate(effective, it, notificationsPermitted = true) == AlertGate.DELIVER }
-                .filterNot { changeIsHidden(it, hidden) }
+                .filterNot { changeIsHidden(it, hidden, groupSets, groupChoices) }
             val allowed = CompanionAlerts.notificationsAllowed(context)
             val changes = if (allowed || readGradeLedger(context, slot) == null) {
                 CompanionAlerts.settledChanges(alerts, context, raw, prior?.grades.orEmpty() + next.grades)
@@ -1991,7 +2043,7 @@ class CompanionGraph(private val context: Context) {
             val visible = CompanionAlerts.settledChanges(
                 context,
                 items.filter { schoolAlertGate(settings, it, notificationsPermitted = true) == AlertGate.DELIVER }
-                    .filterNot { changeIsHidden(it, hiddenLessons()) },
+                    .filterNot { changeIsHidden(it, hiddenLessons(), activeGroupSets(snapshot.value.events, deskPrefs().groupChoices), deskPrefs().groupChoices) },
                 snapshot.value.grades,
             )
             if (guess) addUnrevealedGrades(newGradeTargetIds(visible))

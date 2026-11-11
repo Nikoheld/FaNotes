@@ -3,7 +3,9 @@ import { allEntries, clockMinutes, vacationOn, weekDays, weekMonday, weekRange, 
 import { dateLabel } from '../lib/i18n'
 import { useKanti } from '../state'
 import { Banner, Button, Card, Empty, IconButton, Tag } from '../components/ui'
+import { isAksaConnection, readSummary, type TimetableSummary } from '../lib/timetables'
 import { EntryDetails, kindLabel, useClock } from './common'
+import { OtherTimetables } from './OtherTimetables'
 
 const DAY_START = 7 * 60
 const DAY_END = 16 * 60
@@ -11,9 +13,9 @@ const DAY_END = 16 * 60
 /** Mon–Fri as columns, the day as a measured axis, every week of the semester one keypress away. */
 export const Timetable = () => {
   const kanti = useKanti()
-  const { t, language, data, prefs, route } = kanti
+  const { t, language, data, prefs, route, active, demo, api } = kanti
   const clock = useClock()
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
+  const entries = useMemo(() => allEntries(data.snapshot, prefs.groupChoices), [data.snapshot, prefs.groupChoices])
   const weeks = useMemo(() => weekRange(data.snapshot, entries, clock.today), [data.snapshot, entries, clock.today])
   const requested = route.params.get('woche') || ''
   const monday = /^\d{4}-\d{2}-\d{2}$/u.test(requested) ? weekMonday(requested) : weekMonday(clock.today)
@@ -51,6 +53,18 @@ export const Timetable = () => {
     return () => window.removeEventListener('kanti:action', onAction)
   })
 
+  // The school's PDF of other classes and rooms: only asked for on the Alte Kanti, shown only when uploaded.
+  const [others, setOthers] = useState<TimetableSummary>({ available: false })
+  const activeId = active?.id || ''
+  const aksa = !demo && isAksaConnection(active?.baseUrl)
+  useEffect(() => {
+    setOthers({ available: false })
+    if (!aksa || !activeId) return undefined
+    let live = true
+    api.timetables(activeId).then((value) => { if (live) setOthers(readSummary(value)) }).catch(() => undefined)
+    return () => { live = false }
+  }, [api, aksa, activeId])
+
   const index = weeks.indexOf(monday)
   const span = bounds.high - bounds.low
   const hours = Array.from({ length: span / 60 + 1 }, (_, hour) => bounds.low + hour * 60)
@@ -78,6 +92,8 @@ export const Timetable = () => {
     return placed
   }
 
+  if (others.available && route.params.get('ansicht') === 'andere') return <OtherTimetables summary={others} />
+
   return (
     <div className="view view-timetable">
       <div className="toolbar">
@@ -88,6 +104,7 @@ export const Timetable = () => {
           {monday !== weekMonday(clock.today) ? <Button tone="outline" onClick={() => go(weekMonday(clock.today))}>{t.thisWeek}</Button> : <Tag tone="accent">{t.thisWeek}</Tag>}
         </div>
         <div className="toolbar-group">
+          {others.available ? <Button tone="quiet" icon="timetable" onClick={() => kanti.navigate('timetable', { ansicht: 'andere' })}>{t.otherTimetables}</Button> : null}
           <label className="select">
             <span className="sr-only">{t.week}</span>
             <select value={index >= 0 ? monday : ''} onChange={(event) => go(event.target.value)}>

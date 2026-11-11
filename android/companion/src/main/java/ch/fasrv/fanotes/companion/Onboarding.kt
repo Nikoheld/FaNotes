@@ -92,6 +92,10 @@ fun OnboardingScreen(model: CompanionModel, modifier: Modifier = Modifier) {
                     Text(title, style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
                     Text(body, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Space.md))
                     when (page) {
+                        0 -> {
+                            Spacer(Modifier.height(Space.lg))
+                            Group { ToggleRow(t(R.string.mensa_setting), t(R.string.mensa_setting_body), model.desk.showMensa) { model.updateDesk(model.desk.copy(showMensa = it)) } }
+                        }
                         1 -> {
                             Spacer(Modifier.height(Space.lg))
                             StatusLine(
@@ -102,6 +106,7 @@ fun OnboardingScreen(model: CompanionModel, modifier: Modifier = Modifier) {
                                 },
                                 if (model.link.linked && !model.link.needsReauth) StateTone.Accent else StateTone.Neutral,
                             )
+                            if (model.link.linked) HalfClassChoices(model, compact = true)
                         }
                         2 -> {
                             Spacer(Modifier.height(Space.lg))

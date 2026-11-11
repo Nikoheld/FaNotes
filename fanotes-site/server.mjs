@@ -16,6 +16,8 @@ import { credentialOr } from './credentials.mjs'
 import { handleMcpRequest } from './mcp-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
+import { createMensa } from './mensa.mjs'
+import { createClassTimetables } from './class-timetables.mjs'
 import { createKantiWebApi, createKantiWebAppRoutes, createKantiWebStore } from './kanti-web-api.mjs'
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
@@ -57,15 +59,19 @@ const MAX_DELTA_HEADER_BYTES = 8 * 1024 * 1024
 const analytics = await createAnalyticsService({ directory: ANALYTICS_DIR })
 // Kanti+ im Browser (schulnetz.fasrv.ch) borrows the app's connections through the same runtime.
 const kantiWebStore = createKantiWebStore()
-const schulnetz = createSchulnetzRuntime({ pruneOrphans: true, web: createKantiWebAppRoutes(kantiWebStore) })
+// The school's timetable PDF (other classes and rooms) lives beside the Schulnetz accounts.
+const classTimetables = createClassTimetables({ root: process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz' })
+const schulnetz = createSchulnetzRuntime({ pruneOrphans: true, web: createKantiWebAppRoutes(kantiWebStore), timetables: classTimetables })
 setAccountDeletedHook(async (accountId) => {
   await schulnetz.unlink(accountId)
   await kantiWebStore.forgetAccount(accountId)
 })
+const mensa = createMensa({})
 const KANTI_WEB_DIST = resolve(process.env.KANTI_WEB_DIST || join(ROOT, 'kanti-web', 'dist'))
 const kantiWeb = createKantiWebApi({
   store: kantiWebStore,
   access: schulnetz.webAccess,
+  timetables: classTimetables,
   readVersion: async () => {
     try {
       const parsed = JSON.parse(await fs.readFile(join(KANTI_WEB_DIST, 'version.json'), 'utf8'))
@@ -585,6 +591,7 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost')
     if (await handleBackupRequest(request, response, url)) return
     if (await handleSyncRequest(request, response, url)) return
+    if (await mensa.handle(request, response, url)) return
     if (await schulnetz.handle(request, response, url)) return
     if (await kantiWeb.handle(request, response, url)) return
     if (await handleMcpRequest(request, response, url)) return

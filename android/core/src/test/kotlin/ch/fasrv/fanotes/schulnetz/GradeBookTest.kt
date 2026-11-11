@@ -126,6 +126,14 @@ class GradeBookTest {
     }
 
     @Test
+    fun mensaCardIsOptionalAndOffByDefault() {
+        assertFalse(DeskPrefs().showMensa)
+        assertTrue(parseDeskPrefs(serializeDeskPrefs(DeskPrefs(showMensa = true))).showMensa)
+        assertFalse(parseDeskPrefs(serializeDeskPrefs(DeskPrefs())).showMensa)
+        assertFalse(parseDeskPrefs("{\"theme\":\"system\"}").showMensa)
+    }
+
+    @Test
     fun longPressRevealIsOptionalAndOffByDefault() {
         assertFalse(DeskPrefs().revealLongPress)
         val stored = parseDeskPrefs(serializeDeskPrefs(DeskPrefs(revealLongPress = true)))

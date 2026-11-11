@@ -1,5 +1,10 @@
 package ch.fasrv.fanotes.sync
 
+import ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH
+import ch.fasrv.fanotes.desk.HomeworkDocument
+import ch.fasrv.fanotes.desk.HomeworkTask
+import ch.fasrv.fanotes.desk.parseHomeworkMarkdown
+import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
 import ch.fasrv.fanotes.famd.MAX_SYNC_DOCUMENT_BYTES
 import ch.fasrv.fanotes.famd.emptyFamdPayload
 import ch.fasrv.fanotes.famd.serializeFamd
@@ -95,6 +100,43 @@ class SyncEngineTest {
             assertTrue(hostA.files.keys.any { it.contains("Konflikt") })
             assertEquals(SyncStatus.IDLE, engineA.state.value.status)
             assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun conflictingHomeworkFilesMergeTaskByTaskWithoutAConflictCopy() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Kanti+")
+        val engineB = engine(SyncApi(server), hostB, "FaNotes")
+        fun doc(vararg tasks: HomeworkTask) = serializeHomeworkMarkdown(HomeworkDocument(tasks.toList())).encodeToByteArray()
+        fun hw(id: String, done: Boolean, at: String) = HomeworkTask(id, id, done = done, createdAt = "2026-10-01T00:00:00Z", updatedAt = at)
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            hostA.put(HOMEWORK_NOTE_PATH, doc(hw("x", false, "2026-10-01T10:00:00Z"), hw("y", false, "2026-10-01T10:00:00Z")), 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            // A (Kanti+) ticks x later; B (FaNotes) ticks y later than A's y and adds z.
+            hostA.put(HOMEWORK_NOTE_PATH, doc(hw("x", true, "2026-10-02T10:00:00Z"), hw("y", false, "2026-10-01T10:00:00Z")), 2_000)
+            hostB.put(HOMEWORK_NOTE_PATH, doc(hw("x", false, "2026-10-01T10:00:00Z"), hw("y", true, "2026-10-02T09:00:00Z"), hw("z", false, "2026-10-02T09:00:00Z")), 3_000)
+            engineA.syncNow()
+            engineB.syncNow()
+            engineA.syncNow()
+            engineB.syncNow()
+            for (host in listOf(hostA, hostB)) {
+                val tasks = parseHomeworkMarkdown(host.read(HOMEWORK_NOTE_PATH).decodeToString()).tasks.associateBy { it.id }
+                assertEquals(setOf("x", "y", "z"), tasks.keys)
+                assertTrue(tasks.getValue("x").done)
+                assertTrue(tasks.getValue("y").done)
+            }
+            assertTrue(hostA.files.keys.none { it.contains("Konflikt") })
+            assertTrue(hostB.files.keys.none { it.contains("Konflikt") })
+            assertTrue(engineA.state.value.conflicts.isEmpty() && engineB.state.value.conflicts.isEmpty())
         } finally {
             engineA.close()
             engineB.close()

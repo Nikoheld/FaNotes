@@ -1,5 +1,7 @@
 package ch.fasrv.fanotes.sync
 
+import ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH
+import ch.fasrv.fanotes.desk.mergeHomeworkMarkdownBytes
 import ch.fasrv.fanotes.famd.NoteSyncKind
 import ch.fasrv.fanotes.famd.SyncDocumentLimitException
 import ch.fasrv.fanotes.famd.requireSyncDocumentBudget
@@ -653,6 +655,18 @@ class SyncEngine(
                 // Finish all fallible document transforms before replacing the last good file.
                 val storedIdentity = if (body === plain) plainIdentity else remoteIdentity(path, body, "stored")
                 val storedKind = if (body === plain) remoteKind else noteSyncKind(path, body)
+                val mergedHomework = if (path == HOMEWORK_NOTE_PATH && local != null && changedLocal != null &&
+                    local.kind == NoteSyncKind.PRESENT && remoteKind == NoteSyncKind.PRESENT
+                ) mergeHomeworkMarkdownBytes(local.bytes, plain) else null
+                if (mergedHomework != null) {
+                    // Task-by-task merge instead of a conflict copy. The base is the remote revision, so the next push uploads the merge.
+                    log("info", "“$path” was merged task by task.")
+                    currentHost.write(path, mergedHomework, options.now())
+                    // Size and mtime of the remote copy, so the push scan sees the merged file as changed.
+                    table.files[path] = LocalBase(entry.id, download.revision, meta.sha256, plain.size.toLong(), 0L, plainIdentity, false)
+                    idIndex[entry.id] = path
+                    return ApplyResult("written", path)
+                }
                 if (local != null && (changedLocal != null || (remoteKind == NoteSyncKind.BLANK && local.kind != NoteSyncKind.BLANK))) {
                     val at = java.time.Instant.ofEpochMilli(options.now())
                     val copyPath = conflictCopyPath(path, deviceInfo().first, at)

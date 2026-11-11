@@ -50,6 +50,7 @@ const vite = await createServer({ root: appRoot, appType: 'custom', logLevel: 'e
 const crypto = await vite.ssrLoadModule('/src/lib/sync/crypto.ts')
 const { SyncApi } = await vite.ssrLoadModule('/src/lib/sync/api.ts')
 const { SyncEngine, isSyncablePath, conflictCopyPath } = await vite.ssrLoadModule('/src/lib/sync/engine.ts')
+const homework = await vite.ssrLoadModule('/src/lib/homeworkStore.ts')
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -268,6 +269,42 @@ try {
   await B.engine.syncNow()
   await A.engine.syncNow()
   assert.equal(hostA.text(copies[0]), '# Algebra\n\nTablet-Fassung.', 'the conflict copy reaches the other device too')
+
+  // Hausaufgaben.md: concurrent edits merge task by task (newest updatedAt wins), no conflict copy.
+  {
+    const task = (id, done, updatedAt) => ({ id, title: id, notes: '', subject: '', dueDate: null, dueTime: null, done, kind: 'homework', priority: 'normal', createdAt: '2026-10-01T00:00:00.000Z', updatedAt })
+    const doc = (...tasks) => homework.serializeHomeworkMarkdown({ version: 1, tasks })
+    hostA.put('Hausaufgaben.md', doc(task('x', false, '2026-10-01T10:00:00.000Z'), task('y', false, '2026-10-01T10:00:00.000Z')))
+    await A.engine.syncNow()
+    await B.engine.syncNow()
+    assert.equal(homework.parseHomeworkMarkdown(hostB.text('Hausaufgaben.md')).tasks.length, 2)
+    // A (Kanti+) ticks x later; B (FaNotes) ticks y later than A's y and adds z.
+    hostA.put('Hausaufgaben.md', doc(task('x', true, '2026-10-02T10:00:00.000Z'), task('y', false, '2026-10-01T10:00:00.000Z')))
+    hostB.put('Hausaufgaben.md', doc(task('x', false, '2026-10-01T10:00:00.000Z'), task('y', true, '2026-10-02T09:00:00.000Z'), task('z', false, '2026-10-02T09:00:00.000Z')))
+    const conflictsBefore = B.events.conflicts.length
+    await A.engine.syncNow()
+    await B.engine.syncNow()
+    await A.engine.syncNow()
+    await B.engine.syncNow()
+    for (const host of [hostA, hostB]) {
+      const tasks = new Map(homework.parseHomeworkMarkdown(host.text('Hausaufgaben.md')).tasks.map((item) => [item.id, item]))
+      assert.deepEqual([...tasks.keys()].sort(), ['x', 'y', 'z'], 'union of tasks, none lost')
+      assert.equal(tasks.get('x').done, true, 'the later tick on A reaches B')
+      assert.equal(tasks.get('y').done, true, 'the later tick on B reaches A')
+    }
+    assert.equal([...hostA.files.keys(), ...hostB.files.keys()].filter((path) => path.startsWith('Hausaufgaben (Konflikt')).length, 0, 'no conflict copy for the homework note')
+    assert.equal(B.events.conflicts.length, conflictsBefore)
+    // The pure merge: ties prefer done, then remote; publishedIds union; unparseable files are not merged.
+    const at = '2026-10-02T10:00:00.000Z'
+    const tie = homework.mergeHomeworkDocuments(
+      { version: 1, tasks: [task('t', true, at), task('u', false, at)], publishedIds: ['p1'] },
+      { version: 1, tasks: [task('t', false, at), { ...task('u', false, at), title: 'remote' }], publishedIds: ['p2'] },
+    )
+    assert.equal(tie.tasks.find((item) => item.id === 't').done, true)
+    assert.equal(tie.tasks.find((item) => item.id === 'u').title, 'remote')
+    assert.deepEqual([...tie.publishedIds].sort(), ['p1', 'p2'])
+    assert.equal(homework.mergeHomeworkMarkdownBytes(encoder.encode(doc()), encoder.encode('<!-- fanotes-homework-v1 {')), null)
+  }
 
   // Delete on A → gone on B; delete + concurrent edit keeps the edit.
   hostA.files.delete('Physik/Bild.png')

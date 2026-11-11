@@ -67,6 +67,9 @@ import java.util.UUID
 class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var desk by mutableStateOf(ch.fasrv.fanotes.schulnetz.DeskPrefs(theme = graph.themeId()))
     var hidden by mutableStateOf(emptyList<ch.fasrv.fanotes.schulnetz.HiddenLesson>())
+    /** Last known Mensa menu (only read while the start-page card is switched on). */
+    var mensa by mutableStateOf<ch.fasrv.fanotes.schulnetz.MensaFeed?>(null)
+    var plannedAbsences by mutableStateOf(emptyList<ch.fasrv.fanotes.schulnetz.PlannedAbsence>())
     var route by mutableStateOf(CompanionRoute())
         private set
     private var startTabApplied = false
@@ -313,9 +316,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 val cal = calendar
                 val taskList = tasks
                 val hiddenList = hidden
+                val choices = desk.groupChoices
                 val built = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     val days = ((0L..14L).map { today.plusDays(it) } + ch.fasrv.fanotes.schulnetz.schoolWeek(selected, true)).distinct()
-                    agendaForDays(days, incoming, cal, taskList, hiddenList, zone)
+                    agendaForDays(days, incoming, cal, taskList, hiddenList, zone, choices)
                 }
                 snapshot = incoming
                 rememberAgenda(incoming, cal, taskList, hiddenList, built)
@@ -367,11 +371,11 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     val nextTree = graph.store.tree()
                     val folder = if (ch.fasrv.fanotes.vault.folderExists(nextTree, noteFolder)) noteFolder else ""
                     Reloaded(nextTree, folder, ch.fasrv.fanotes.vault.folderChildren(nextTree, folder).filter { it.path !in setOf(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH) },
-                        runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.gradeBook(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons(), graph.subjectColors())
+                        runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.gradeBook(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons(), graph.subjectColors(), graph.plannedAbsences())
                 }
                 tree = data.tree; noteFolder = data.folder; notes = data.notes
                 data.tasks.getOrNull()?.let { tasks = it }; data.calendar.getOrNull()?.let { calendar = it }
-                hypothetical = data.guesses; gradeBook = data.book; writtenNotes = data.count; hidden = data.hidden; colors = data.colors
+                hypothetical = data.guesses; gradeBook = data.book; writtenNotes = data.count; hidden = data.hidden; colors = data.colors; plannedAbsences = data.planned
                 if (generation == deskGeneration && deskPending == 0) {
                     desk = data.desk
                     if (!startTabApplied && history.isEmpty() && highlightIds.isEmpty() && route.page == null && route.destination == Destination.Today) {
@@ -398,7 +402,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     private data class Reloaded(val tree: List<VaultNode>, val folder: String, val notes: List<VaultNode>, val tasks: Result<List<HomeworkTask>>,
-        val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val book: GradeBook, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>, val colors: Map<String, String>)
+        val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val book: GradeBook, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>, val colors: Map<String, String>, val planned: List<ch.fasrv.fanotes.schulnetz.PlannedAbsence> = emptyList())
 
     suspend fun loadPreview(node: VaultNode): NotePreview = withContext(Dispatchers.IO) {
         val hit = previewCache.get(node.path)
@@ -517,6 +521,16 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         if (demo) return
         // The app's process scope: leaving the app right away does not cancel a sync half way.
         graph.scope.launch { runCatching { graph.syncOnForeground("resume") } }
+        refreshMensa()
+    }
+
+    /** Shows the cached Mensa menu and refreshes it when it is a few hours old. Does nothing while the card is off. */
+    fun refreshMensa(force: Boolean = false) {
+        if (demo || !desk.showMensa) return
+        viewModelScope.launch {
+            val feed = withContext(Dispatchers.IO) { runCatching { graph.mensaStore.refresh(force) }.getOrNull() }
+            if (feed != null) mensa = feed
+        }
     }
 
     /** Pull-to-refresh: the server's copy and the shown connection's own Schulnetz read, without a blocking loader. */
@@ -687,7 +701,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun lookupWebPair(raw: String) {
         val code = ch.fasrv.fanotes.schulnetz.normalizePairCode(raw)
         if (code == null) { message = t(R.string.web_pair_code_invalid); return }
-        if (busy || !webAccessAvailable) return
+        if (busy) { message = t(R.string.web_pair_busy); return }
+        if (!webAccessAvailable) { message = t(R.string.web_pair_unavailable); return }
         busy = true
         viewModelScope.launch {
             try {
@@ -718,6 +733,34 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun dismissWebPair() { webPairPrompt = null }
 
+    /** The app-shows-a-code direction: choosing connections, then the offered code. */
+    var webOfferChoosing by mutableStateOf(false)
+    var webPairOffer by mutableStateOf<ch.fasrv.fanotes.schulnetz.WebPairOffer?>(null)
+
+    fun startWebOffer() {
+        if (busy) { message = t(R.string.web_pair_busy); return }
+        if (!webAccessAvailable) { message = t(R.string.web_pair_unavailable); return }
+        webOfferChoosing = true
+    }
+
+    fun dismissWebOfferChooser() { webOfferChoosing = false }
+    fun dismissWebOffer() { webPairOffer = null }
+
+    fun offerWebPair(connectionIds: List<String>) {
+        if (busy || connectionIds.isEmpty()) return
+        busy = true
+        viewModelScope.launch {
+            try {
+                webPairOffer = graph.offerWebPair(connectionIds)
+                webOfferChoosing = false
+                webBrowsers = graph.webBrowsers()
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = webPairMessage(error)
+            } finally { busy = false }
+        }
+    }
+
     fun loadWebBrowsers() {
         if (!webAccessAvailable) { webBrowsers = emptyMap(); return }
         viewModelScope.launch {
@@ -746,7 +789,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             is java.io.IOException -> 0
             else -> -1
         }
-        return when (ch.fasrv.fanotes.schulnetz.webPairFailure(status)) {
+        val generic = when (ch.fasrv.fanotes.schulnetz.webPairFailure(status)) {
             ch.fasrv.fanotes.schulnetz.WebPairFailure.UNKNOWN_CODE -> t(R.string.web_pair_unknown)
             ch.fasrv.fanotes.schulnetz.WebPairFailure.ALREADY_FINISHED -> t(R.string.web_pair_finished)
             ch.fasrv.fanotes.schulnetz.WebPairFailure.TOO_MANY_TRIES -> t(R.string.web_pair_too_many)
@@ -754,6 +797,19 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             ch.fasrv.fanotes.schulnetz.WebPairFailure.OFFLINE -> t(R.string.web_pair_offline)
             ch.fasrv.fanotes.schulnetz.WebPairFailure.OTHER -> t(R.string.web_pair_failed)
         }
+        val offline = error is java.io.IOException
+        val text = ch.fasrv.fanotes.schulnetz.webPairErrorText(
+            generic = generic,
+            status = (error as? SchulnetzHttpException)?.status ?: 0,
+            serverMessage = error.message ?: error.javaClass.simpleName,
+            offline = offline,
+            offlineText = t(R.string.web_pair_no_server),
+        )
+        ch.fasrv.fanotes.schulnetz.DiagnosticTrace.record(
+            "pairing", "web-pair", 0, if (offline) "offline" else "error",
+            if (status > 0) "HTTP $status ${error.message.orEmpty()}" else error.javaClass.simpleName + " " + error.message.orEmpty(),
+        )
+        return text
     }
 
     fun saveTamCalendarLink(url: String) {
@@ -884,6 +940,20 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val next = if (series) hideSeries(event, hidden) else hideOnce(event, hidden)
         hidden = next
         perform { graph.saveHiddenLessons(next) }
+    }
+
+    /** Marks a future lesson as a planned absence, or removes the mark. Local only; Schulnetz is never written. */
+    fun togglePlannedAbsence(event: AgendaEvent) {
+        val existing = ch.fasrv.fanotes.schulnetz.plannedFor(event, plannedAbsences)
+        val next = if (existing != null) plannedAbsences.filterNot { it.id == existing.id } else ch.fasrv.fanotes.schulnetz.planAbsence(event, plannedAbsences)
+        plannedAbsences = next
+        perform { graph.savePlannedAbsences(next) }
+    }
+
+    fun removePlannedAbsence(id: String) {
+        val next = plannedAbsences.filterNot { it.id == id }
+        plannedAbsences = next
+        perform { graph.savePlannedAbsences(next) }
     }
 
     fun restoreLesson(id: String) {
@@ -1182,7 +1252,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val tasks = taskList.fold(1) { acc, task -> 31 * acc + task.updatedAt.hashCode() + task.title.hashCode() + task.done.hashCode() + task.dueDate.hashCode() }
         val local = cal.events.fold(1) { acc, event -> 31 * acc + event.id.hashCode() + event.start.hashCode() + event.title.hashCode() }
         val hiddenHash = hiddenList.fold(1) { acc, item -> 31 * acc + item.hashCode() }
-        return "${snap.fetchedAt}|${snap.revision}|${snap.events.size}|${snap.exams.size}|$hiddenHash|$local|$tasks"
+        return "${snap.fetchedAt}|${snap.revision}|${snap.events.size}|${snap.exams.size}|$hiddenHash|${desk.groupChoices.hashCode()}|$local|$tasks"
     }
 
     private fun rememberAgenda(snap: SchulnetzSnapshot, cal: ch.fasrv.fanotes.desk.CalendarDocument, taskList: List<ch.fasrv.fanotes.desk.HomeworkTask>, hiddenList: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, built: Map<java.time.LocalDate, List<AgendaEntry>>) {
@@ -1196,7 +1266,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun cachedAgenda(days: List<java.time.LocalDate>, zone: java.time.ZoneId): Map<java.time.LocalDate, List<AgendaEntry>> {
         val id = agendaIdentity(snapshot, calendar, tasks, hidden)
         if (agendaCacheId == id && days.all { it in agendaCacheDays }) return days.associateWith { agendaCacheDays[it].orEmpty() }
-        val built = agendaForDays(days, snapshot, calendar, tasks, hidden, zone)
+        val built = agendaForDays(days, snapshot, calendar, tasks, hidden, zone, desk.groupChoices)
         rememberAgenda(snapshot, calendar, tasks, hidden, built)
         return days.associateWith { agendaCacheDays[it].orEmpty() }
     }
@@ -1206,12 +1276,13 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val cal = calendar
         val taskList = tasks
         val hiddenList = hidden
+        val choices = desk.groupChoices
         val selected = day
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val zone = java.time.ZoneId.systemDefault()
             val today = java.time.LocalDate.now(zone)
             val days = ((0L..14L).map { today.plusDays(it) } + ch.fasrv.fanotes.schulnetz.schoolWeek(selected, true)).distinct()
-            val built = agendaForDays(days, snap, cal, taskList, hiddenList, zone)
+            val built = agendaForDays(days, snap, cal, taskList, hiddenList, zone, choices)
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                 if (agendaIdentity(snapshot, calendar, tasks, hidden) == agendaIdentity(snap, cal, taskList, hiddenList)) {
                     rememberAgenda(snap, cal, taskList, hiddenList, built)

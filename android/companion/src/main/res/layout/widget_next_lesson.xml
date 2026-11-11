@@ -6,44 +6,49 @@
     android:background="@drawable/widget_surface"
     android:orientation="vertical"
     android:padding="16dp">
-    <TextView
-        android:id="@+id/widget_kicker"
+    <LinearLayout
+        android:id="@+id/widget_header"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/widget_kicker"
-        android:textColor="@color/widget_accent"
-        android:textSize="13sp"
-        android:fontFamily="sans-serif-medium" />
-    <TextView
-        android:id="@+id/widget_title"
+        android:orientation="vertical">
+        <TextView
+            android:id="@+id/widget_kicker"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/widget_kicker"
+            android:textColor="@color/widget_accent"
+            android:textSize="13sp"
+            android:fontFamily="sans-serif-medium" />
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:text="@string/app_name"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:textColor="@color/widget_text"
+            android:textSize="19sp"
+            android:fontFamily="sans-serif-medium" />
+        <TextView
+            android:id="@+id/widget_detail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:text=""
+            android:maxLines="3"
+            android:ellipsize="end"
+            android:textColor="@color/widget_muted"
+            android:textSize="14sp" />
+    </LinearLayout>
+    <ListView
+        android:id="@+id/widget_list"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingTop="4dp"
-        android:text="@string/app_name"
-        android:maxLines="2"
-        android:ellipsize="end"
-        android:textColor="@color/widget_text"
-        android:textSize="19sp"
-        android:fontFamily="sans-serif-medium" />
-    <TextView
-        android:id="@+id/widget_detail"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingTop="4dp"
-        android:text=""
-        android:maxLines="3"
-        android:ellipsize="end"
-        android:textColor="@color/widget_muted"
-        android:textSize="14sp" />
-    <TextView
-        android:id="@+id/widget_more"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:paddingTop="8dp"
-        android:text=""
-        android:maxLines="4"
-        android:ellipsize="end"
-        android:visibility="gone"
-        android:textColor="@color/widget_muted"
-        android:textSize="14sp" />
+        android:clipToPadding="false"
+        android:divider="@null"
+        android:dividerHeight="0dp"
+        android:scrollbars="none" />
 </LinearLayout>

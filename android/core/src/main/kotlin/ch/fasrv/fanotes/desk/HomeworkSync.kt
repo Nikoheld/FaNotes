@@ -49,3 +49,48 @@ private fun parseHomeworkInstant(value: String): Instant? {
     return runCatching { Instant.parse(text) }.getOrNull()
         ?: runCatching { OffsetDateTime.parse(text).toInstant() }.getOrNull()
 }
+
+/**
+ * Two-way merge used by file sync when both sides changed `Hausaufgaben.md`.
+ * Tasks are united by id. For a task on both sides the newer `updatedAt` wins;
+ * a tie prefers the done task, then the remote one. The file has no tombstones,
+ * so a task missing on one side is kept (union). `publishedIds` is the union.
+ */
+fun mergeHomeworkDocuments(local: HomeworkDocument, remote: HomeworkDocument): HomeworkDocument {
+    val localById = local.tasks.associateBy { it.id }
+    val seen = HashSet<String>()
+    val merged = ArrayList<HomeworkTask>(local.tasks.size + remote.tasks.size)
+    for (theirs in remote.tasks) {
+        if (!seen.add(theirs.id)) continue
+        val ours = localById[theirs.id]
+        merged.add(if (ours == null) theirs else pickNewerHomeworkTask(ours, theirs))
+    }
+    for (ours in local.tasks) {
+        if (seen.add(ours.id)) merged.add(ours)
+    }
+    val published = sanitizePublishedHomeworkIds((remote.publishedIds + local.publishedIds).distinct())
+    return HomeworkDocument(merged, published)
+}
+
+private fun pickNewerHomeworkTask(local: HomeworkTask, remote: HomeworkTask): HomeworkTask {
+    val l = parseHomeworkInstant(local.updatedAt)
+    val r = parseHomeworkInstant(remote.updatedAt)
+    return when {
+        l != null && r == null -> local
+        l == null && r != null -> remote
+        l != null && r != null && l.isAfter(r) -> local
+        l != null && r != null && r.isAfter(l) -> remote
+        local.done && !remote.done -> local
+        else -> remote
+    }
+}
+
+/**
+ * Merges two `Hausaufgaben.md` files. Null when either side does not parse,
+ * so the caller falls back to the ordinary conflict copy and loses nothing.
+ */
+fun mergeHomeworkMarkdownBytes(local: ByteArray, remote: ByteArray): ByteArray? {
+    val ours = (loadHomeworkMarkdown(local.decodeToString()) as? NoteMarkdownLoad.Ready)?.document ?: return null
+    val theirs = (loadHomeworkMarkdown(remote.decodeToString()) as? NoteMarkdownLoad.Ready)?.document ?: return null
+    return serializeHomeworkMarkdown(mergeHomeworkDocuments(ours, theirs)).encodeToByteArray()
+}

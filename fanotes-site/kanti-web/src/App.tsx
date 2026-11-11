@@ -8,6 +8,7 @@ import { isTypingTarget, shortcutFor, VIEWS, type View } from './lib/shortcuts'
 import { useKanti } from './state'
 import { Banner, Button, Dialog, Icon, IconButton, Kbd, Logo, type IconName } from './components/ui'
 import { ago } from './views/common'
+import { AdminTimetable } from './views/AdminTimetable'
 import { Absences } from './views/Absences'
 import { Agenda } from './views/Agenda'
 import { Grades } from './views/Grades'
@@ -87,10 +88,10 @@ const ShortcutHelp = ({ onClose }: { onClose: () => void }) => {
 
 const CommandPalette = ({ onClose }: { onClose: () => void }) => {
   const kanti = useKanti()
-  const { t, data, language } = kanti
+  const { t, data, language, prefs } = kanti
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
+  const entries = useMemo(() => allEntries(data.snapshot, prefs.groupChoices), [data.snapshot, prefs.groupChoices])
   const courses = useMemo(() => courseSummaries(data.snapshot?.grades || []), [data.snapshot])
   const today = zurichToday()
   const hits = useMemo(() => search(query, { entries, courses, snapshot: data.snapshot, today, views: VIEWS.map((view) => ({ id: view, title: t[view] })) }), [query, entries, courses, data.snapshot, today, t])
@@ -220,6 +221,8 @@ export const App = () => {
     return () => window.removeEventListener('keydown', onKey)
   }, [phase, kanti, route.view])
 
+  // The operator's upload page needs no Kanti+ session and is in no menu.
+  if (route.admin === 'timetable') return <AdminTimetable />
   if (phase === 'loading') return <div className="boot"><Logo size={56} /></div>
   if (phase === 'signedOut') {
     return (

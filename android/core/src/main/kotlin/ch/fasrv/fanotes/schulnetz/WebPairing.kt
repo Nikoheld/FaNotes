@@ -48,6 +48,36 @@ fun parseWebPairInfo(json: String): WebPairInfo? {
     )
 }
 
+/** A code the app offers to a browser (POST /web-pair/offer). [code] holds the 8 normalized characters. */
+data class WebPairOffer(val code: String, val expiresAt: String)
+
+fun parseWebPairOffer(json: String): WebPairOffer? {
+    val obj = runCatching { parseJson(json) as? JsonValue.Obj }.getOrNull() ?: return null
+    val code = normalizePairCode(obj.string("code")) ?: return null
+    return WebPairOffer(code, obj.string("expiresAt").orEmpty())
+}
+
+/** Seconds left until [expiresAt] (ISO instant); 0 when past or unreadable. */
+fun pairSecondsLeft(expiresAt: String, now: Instant = Instant.now()): Long {
+    val end = runCatching { Instant.parse(expiresAt) }.getOrNull() ?: return 0
+    return (end.epochSecond - now.epochSecond).coerceAtLeast(0)
+}
+
+/**
+ * The text shown when a pairing step failed: [generic] says what failed, the reason says why.
+ * [status] is the HTTP status (0 = none), [serverMessage] the server's or exception's own text,
+ * [offline] an IO error ([offlineText] is its localized reason).
+ */
+fun webPairErrorText(generic: String, status: Int, serverMessage: String?, offline: Boolean, offlineText: String): String {
+    val message = serverMessage?.trim().orEmpty().take(200)
+    val reason = when {
+        offline -> offlineText
+        status > 0 -> if (message.isEmpty()) "HTTP $status" else "$message (HTTP $status)"
+        else -> message
+    }
+    return if (reason.isEmpty() || reason == generic) generic else "$generic\n$reason"
+}
+
 /** Body of POST /web-pair for one connection. [finish] is true on the last connection only. */
 fun webPairBody(code: String, connectionId: String, label: String, provider: SchoolProvider, finish: Boolean, unrevealed: Collection<String>): String = buildString {
     append("{\"code\":").append(escapeJson(displayPairCode(code)))

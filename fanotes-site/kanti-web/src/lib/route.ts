@@ -11,10 +11,14 @@ export const PATHS: Record<View, string> = {
   settings: '/einstellungen',
 }
 
-export interface Route { view: View; params: URLSearchParams }
+/** The operator's upload page. Reachable by URL only; it is in no menu and works without a session. */
+export const ADMIN_TIMETABLE_PATH = '/admin/stundenplan'
+
+export interface Route { view: View; params: URLSearchParams; admin?: 'timetable' }
 
 export const parseRoute = (pathname: string, search = ''): Route => {
   const clean = pathname.replace(/\/+$/u, '') || '/'
+  if (clean === ADMIN_TIMETABLE_PATH) return { view: 'today', params: new URLSearchParams(search), admin: 'timetable' }
   const view = (Object.entries(PATHS).find(([, path]) => path === clean)?.[0] as View | undefined) || 'today'
   return { view, params: new URLSearchParams(search) }
 }

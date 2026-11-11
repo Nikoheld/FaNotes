@@ -53,6 +53,7 @@ import ch.fasrv.fanotes.schulnetz.hiddenGradePortraitUrl
 import ch.fasrv.fanotes.schulnetz.changeFromPayload
 import ch.fasrv.fanotes.schulnetz.gradeTargetId
 import ch.fasrv.fanotes.schulnetz.settleGradeNotifications
+import ch.fasrv.fanotes.schulnetz.activeGroupSets
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.hiddenGradeBody
 import ch.fasrv.fanotes.schulnetz.hiddenGradeTitle
@@ -269,10 +270,13 @@ object CompanionAlerts {
             val file = java.io.File(context.filesDir, "vault/${slotVaultPath(scope.slot, CompanionGraph.HIDDEN_PATH)}")
             if (!file.isFile) emptyList() else parseHiddenLessons(file.readText())
         }.getOrDefault(emptyList())
-        if (changeIsHidden(change, hidden)) return
         val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
         val guess = slotPrefs(context, scope).getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
         val snapshot = CompanionGraph.snapshotFile(context, scope.slot).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
+        val groupChoices = runCatching {
+            java.io.File(context.filesDir, "vault/${CompanionGraph.DESK_PATH}").takeIf { it.isFile }?.readText()?.let { parseDeskPrefs(it).groupChoices }
+        }.getOrNull().orEmpty()
+        if (changeIsHidden(change, hidden, activeGroupSets(snapshot?.events.orEmpty(), groupChoices), groupChoices)) return
         var shown = change
         if (guess && change.category == "grade" && !isNotificationProbe(change.id)) {
             rememberUnrevealed(context, change.linkIds(), scope)
@@ -766,7 +770,10 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             update(context, manager, ids)
         }
 
-        fun update(context: Context, manager: AppWidgetManager, ids: IntArray) {
+        /** What the widget and its list factory both read: the shown connection's snapshot, hidden lessons and the compact setting. */
+        internal class WidgetData(val snapshot: SchulnetzSnapshot?, val hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, val compact: Boolean, val groupChoices: Map<String, List<String>> = emptyMap())
+
+        internal fun loadData(context: Context): WidgetData {
             val demo = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean(CompanionGraph.DEMO_PREF, false)
             // Demo mode never writes the cache; the widget builds the same invented week itself.
             // The widget shows the connection the app shows, from that connection's own cache.
@@ -774,10 +781,26 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             val snapshot = if (demo) ch.fasrv.fanotes.schulnetz.demoSnapshot(java.time.LocalDate.now(ch.fasrv.fanotes.schulnetz.SCHOOL_ZONE))
                 else CompanionGraph.snapshotFile(context, slot).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
             val hidden = java.io.File(context.filesDir, "vault/${slotVaultPath(slot, CompanionGraph.HIDDEN_PATH)}").takeIf { it.isFile }?.readText()?.let { parseHiddenLessons(it) }.orEmpty()
-            val compact = java.io.File(context.filesDir, "vault/${CompanionGraph.DESK_PATH}").takeIf { it.isFile }?.readText()?.let { parseDeskPrefs(it).widgetCompact } == true
+            val desk = java.io.File(context.filesDir, "vault/${CompanionGraph.DESK_PATH}").takeIf { it.isFile }?.readText()?.let { parseDeskPrefs(it) }
+            return WidgetData(snapshot, hidden, desk?.widgetCompact == true, desk?.groupChoices.orEmpty())
+        }
+
+        internal fun rowsFor(data: WidgetData, zone: ZoneId): List<ch.fasrv.fanotes.schulnetz.WidgetRow> =
+            data.snapshot?.let { ch.fasrv.fanotes.schulnetz.widgetRows(it.events, it.exams, data.hidden, java.time.Instant.now(), zone, data.groupChoices) }.orEmpty()
+
+        /** Template for the list rows; each row's fill-in intent carries its own target. */
+        internal fun rowTemplate(context: Context): PendingIntent =
+            PendingIntent.getActivity(context, 2, Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW),
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
+
+        fun update(context: Context, manager: AppWidgetManager, ids: IntArray) {
+            val data = loadData(context)
+            val snapshot = data.snapshot
+            val hidden = data.hidden
+            val compact = data.compact
             val zone = ZoneId.systemDefault()
-            val events = snapshot?.let { visibleEvents(it.events, hidden, zone) }.orEmpty()
-            val lessons = upcomingLessons(events, java.time.Instant.now(), zone, 4)
+            val rows = rowsFor(data, zone)
+            val lessons = rows.filter { !it.heading && !it.cancelled }.mapNotNull { it.event }.take(1)
             val unread = snapshot != null && lessons.isEmpty() && upcomingTimetableUnread(snapshot, java.time.LocalDate.now(zone))
             val portrait = context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
             ids.forEach { id ->
@@ -790,12 +813,14 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
                     portrait,
                 )
                 val span = if (compact) WidgetSpan.SMALL else widgetSpan(width, height)
-                manager.updateAppWidget(id, widgetViews(context, span, lessons, zone, unread))
+                manager.updateAppWidget(id, widgetViews(context, id, span, lessons, zone, unread))
             }
-            scheduleWidgetTick(context, snapshot, hidden, zone)
+            // The list factory reloads its rows from the same cache.
+            if (ids.isNotEmpty()) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
+            scheduleWidgetTick(context, snapshot, hidden, zone, data.groupChoices)
         }
 
-        private fun widgetViews(context: Context, span: WidgetSpan, lessons: List<ch.fasrv.fanotes.schulnetz.AgendaEvent>, zone: ZoneId, unread: Boolean = false): RemoteViews {
+        private fun widgetViews(context: Context, widgetId: Int, span: WidgetSpan, lessons: List<ch.fasrv.fanotes.schulnetz.AgendaEvent>, zone: ZoneId, unread: Boolean = false): RemoteViews {
             val views = RemoteViews(context.packageName, R.layout.widget_next_lesson)
             val next = lessons.firstOrNull()
             val small = span == WidgetSpan.SMALL
@@ -807,37 +832,34 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             if (next == null) {
                 views.setTextViewText(R.id.widget_title, t(if (unread) R.string.timetable_not_loaded else R.string.no_upcoming_lesson))
                 views.setTextViewText(R.id.widget_detail, t(R.string.open_kanti))
-                views.setViewVisibility(R.id.widget_more, android.view.View.GONE)
             } else {
                 val time = lessonClock(next, zone)
                 val roomText = cleanSchulnetzText(next.room)
                 val room = if (roomText.isBlank()) "" else t(R.string.room_named, roomText)
                 val state = if (next.isCancelled()) t(R.string.cancelled) else if (next.isSubstitution()) t(R.string.substitution) else ""
-                views.setTextViewText(R.id.widget_title, next.label)
+                views.setTextViewText(R.id.widget_title, ch.fasrv.fanotes.schulnetz.preferredEventTitle(next))
                 views.setTextViewText(R.id.widget_detail, if (small) time else listOf(time, room, state).filter { it.isNotBlank() }.joinToString(" · "))
-                val extra = if (span == WidgetSpan.LARGE) lessons.drop(1).joinToString("\n") { lesson ->
-                    listOf(lessonClock(lesson, zone), lesson.label, cleanSchulnetzText(lesson.room)).filter { it.isNotBlank() }.joinToString(" · ")
-                } else ""
-                views.setViewVisibility(R.id.widget_more, if (extra.isBlank()) android.view.View.GONE else android.view.View.VISIBLE)
-                views.setTextViewText(R.id.widget_more, extra)
+            }
+            // The scrolling list shows every remaining lesson; the compact size keeps the header only.
+            views.setViewVisibility(R.id.widget_list, if (small) android.view.View.GONE else android.view.View.VISIBLE)
+            if (!small) {
+                val service = Intent(context, NextLessonWidgetService::class.java)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+                service.data = android.net.Uri.parse(service.toUri(Intent.URI_INTENT_SCHEME))
+                views.setRemoteAdapter(R.id.widget_list, service)
+                views.setPendingIntentTemplate(R.id.widget_list, rowTemplate(context))
             }
             val target = if (next == null) Intent(context, MainActivity::class.java) else CompanionAlerts.notifyIntent(context,
                 ch.fasrv.fanotes.schulnetz.linkedChange("widget-next", "timetable", "", "", ch.fasrv.fanotes.schulnetz.lessonTargetId(next), date = ch.fasrv.fanotes.schulnetz.eventDay(next)))
             val open = PendingIntent.getActivity(context, 1, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            views.setOnClickPendingIntent(R.id.widget_root, open)
+            views.setOnClickPendingIntent(R.id.widget_header, open)
             return views
         }
 
-        private fun lessonClock(event: ch.fasrv.fanotes.schulnetz.AgendaEvent, zone: ZoneId): String {
-            val zoned = event.start.contains('Z') || Regex("""[+-]\d{2}:\d{2}$""").containsMatchIn(event.start)
-            if (!zoned) return displayClock(event.start, event.end)
-            val start = event.startsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
-            val end = event.endsAt(zone)?.atZone(zone)?.toLocalTime()?.format(CLOCK).orEmpty()
-            if (start.isBlank() || (start == "00:00" && (end.isBlank() || end == "00:00"))) return ""
-            return if (end.isBlank() || end == start) start else "$start–$end"
-        }
+        private fun lessonClock(event: ch.fasrv.fanotes.schulnetz.AgendaEvent, zone: ZoneId): String =
+            ch.fasrv.fanotes.schulnetz.lessonClockText(event, zone)
 
-        private fun scheduleWidgetTick(context: Context, snapshot: SchulnetzSnapshot?, hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, zone: ZoneId) {
+        private fun scheduleWidgetTick(context: Context, snapshot: SchulnetzSnapshot?, hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, zone: ZoneId, groupChoices: Map<String, List<String>> = emptyMap()) {
             val alarm = context.getSystemService(AlarmManager::class.java) ?: return
             val pending = widgetTickIntent(context)
             val ids = AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, NextLessonWidget::class.java))
@@ -845,7 +867,7 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
                 alarm.cancel(pending)
                 return
             }
-            val boundary = snapshot?.let { nextLessonBoundary(visibleEvents(it.events, hidden, zone), java.time.Instant.now(), zone) }
+            val boundary = snapshot?.let { nextLessonBoundary(ch.fasrv.fanotes.schulnetz.mergedScheduleEvents(it.events, it.exams, hidden, zone, groupChoices), java.time.Instant.now(), zone) }
             if (boundary == null) {
                 alarm.cancel(pending)
                 return

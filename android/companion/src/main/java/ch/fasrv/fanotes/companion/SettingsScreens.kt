@@ -35,6 +35,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -239,6 +240,9 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
         Page.WebAccess -> WebAccessSettings(model)
         Page.Appearance -> AppearanceSettings(model)
         Page.Navigation -> NavigationBarSettings(model)
+        Page.HalfClass -> ScreenList {
+            item(key = "half-class") { HalfClassChoices(model) }
+        }
         Page.Planning -> ScreenList {
             item(key = "start-head") { SectionLabel(t(R.string.when_you_open_kanti)) }
             item(key = "start") { ChoiceRow((if (model.notesAccount) NAV_BAR_IDS else NAV_BAR_IDS.filter { it != "notes" }).map { it to navBarLabel(it) }, startTabId(model.desk.startTab).let { if (!model.notesAccount && it == "notes") "today" else it }, { model.updateDesk(model.desk.copy(startTab = it)) }) }
@@ -250,10 +254,17 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     }
                 }
             }
+            item(key = "mensa-toggle") {
+                Group(Modifier.padding(top = 8.dp)) {
+                    ToggleRow(t(R.string.mensa_setting), t(R.string.mensa_setting_body), model.desk.showMensa) { model.updateDesk(model.desk.copy(showMensa = it)); if (it) model.refreshMensa() }
+                }
+            }
             item(key = "timetable-head") { SectionLabel(t(R.string.timetable)) }
             item(key = "timetable") {
                 Group {
                     ToggleRow(t(R.string.compact_rows), t(R.string.show_more_lessons_at_a_glance), model.desk.planCompact) { model.updateDesk(model.desk.copy(planCompact = it)) }
+                    FineDivider()
+                    SettingRow(null, t(R.string.half_class_groups), t(R.string.half_class_row)) { model.navigate(Page.HalfClass) }
                     FineDivider()
                     ToggleRow(t(R.string.include_weekends), t(R.string.show_empty_weekend_days_in_week_view), model.desk.showWeekend) { model.updateDesk(model.desk.copy(showWeekend = it)) }
                     FineDivider()
@@ -852,6 +863,7 @@ private fun WebAccessSettings(model: CompanionModel) {
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Characters),
                             )
                             PrimaryButton(t(R.string.web_pair_continue), { model.lookupWebPair(code) }, Modifier.fillMaxWidth().padding(top = 12.dp), enabled = !model.busy && normalizePairCode(code) != null)
+                            TextButton(onClick = { model.startWebOffer() }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text(t(R.string.web_offer_show)) }
                         }
                     }
                 }
@@ -883,37 +895,104 @@ private fun WebAccessSettings(model: CompanionModel) {
         }
     }
     model.webPairPrompt?.let { prompt ->
-        var chosen by remember(prompt) { mutableStateOf(setOfNotNull(model.connections.active?.id)) }
-        val tamChosen = model.connections.connections.any { it.id in chosen && it.provider == SchoolProvider.TAM }
-        AlertDialog(
-            onDismissRequest = { model.dismissWebPair() },
-            shape = MaterialTheme.shapes.extraLarge,
-            title = { Text(t(R.string.web_pair_title), style = MaterialTheme.typography.headlineSmall) },
-            text = {
-                Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                    Text(t(R.string.web_pair_browser, prompt.info.browser.ifBlank { t(R.string.web_browser_unnamed) }), style = MaterialTheme.typography.bodyLarge)
-                    Box(Modifier.padding(top = 12.dp)) { InfoBanner(t(R.string.web_pair_warning), "", tone = StateTone.Warning) }
-                    Text(t(R.string.web_pair_choose), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
-                    model.connections.connections.forEach { connection ->
-                        val on = connection.id in chosen
-                        Row(
-                            Modifier.fillMaxWidth().selectable(selected = on, role = Role.Checkbox) { chosen = if (on) chosen - connection.id else chosen + connection.id }.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(checked = on, onCheckedChange = null)
-                            Column(Modifier.padding(start = 8.dp)) {
-                                Text(connection.label, style = MaterialTheme.typography.bodyLarge)
-                                Text(if (connection.provider == SchoolProvider.TAM) t(R.string.connection_provider_tam) else t(R.string.connection_provider_schulnetz), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                    if (tamChosen) Text(t(R.string.web_pair_tam_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { model.approveWebPair(model.connections.connections.map { it.id }.filter { it in chosen }) }, enabled = chosen.isNotEmpty() && !model.busy) { Text(t(R.string.web_pair_approve)) }
-            },
-            dismissButton = { TextButton(onClick = { model.dismissWebPair() }) { Text(t(R.string.cancel)) } },
+        WebPairChooser(
+            model,
+            title = t(R.string.web_pair_title),
+            intro = t(R.string.web_pair_browser, prompt.info.browser.ifBlank { t(R.string.web_browser_unnamed) }),
+            warning = true,
+            confirm = t(R.string.web_pair_approve),
+            key = prompt,
+            onConfirm = { ids -> model.approveWebPair(ids) },
+            onDismiss = { model.dismissWebPair() },
         )
     }
+    if (model.webOfferChoosing) {
+        WebPairChooser(
+            model,
+            title = t(R.string.web_offer_title),
+            intro = t(R.string.web_offer_intro),
+            warning = false,
+            confirm = t(R.string.web_offer_create),
+            key = "offer",
+            onConfirm = { ids -> model.offerWebPair(ids) },
+            onDismiss = { model.dismissWebOfferChooser() },
+        )
+    }
+    model.webPairOffer?.let { offer -> WebOfferDialog(model, offer) }
+}
+
+/** The connection chooser shared by both pairing directions. */
+@Composable
+private fun WebPairChooser(model: CompanionModel, title: String, intro: String, warning: Boolean, confirm: String, key: Any, onConfirm: (List<String>) -> Unit, onDismiss: () -> Unit) {
+    var chosen by remember(key) { mutableStateOf(setOfNotNull(model.connections.active?.id)) }
+    val tamChosen = model.connections.connections.any { it.id in chosen && it.provider == SchoolProvider.TAM }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = MaterialTheme.shapes.extraLarge,
+        title = { Text(title, style = MaterialTheme.typography.headlineSmall) },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                Text(intro, style = MaterialTheme.typography.bodyLarge)
+                if (warning) Box(Modifier.padding(top = 12.dp)) { InfoBanner(t(R.string.web_pair_warning), "", tone = StateTone.Warning) }
+                Text(t(R.string.web_pair_choose), style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+                model.connections.connections.forEach { connection ->
+                    val on = connection.id in chosen
+                    Row(
+                        Modifier.fillMaxWidth().selectable(selected = on, role = Role.Checkbox) { chosen = if (on) chosen - connection.id else chosen + connection.id }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(checked = on, onCheckedChange = null)
+                        Column(Modifier.padding(start = 8.dp)) {
+                            Text(connection.label, style = MaterialTheme.typography.bodyLarge)
+                            Text(if (connection.provider == SchoolProvider.TAM) t(R.string.connection_provider_tam) else t(R.string.connection_provider_schulnetz), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                if (tamChosen) Text(t(R.string.web_pair_tam_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(model.connections.connections.map { it.id }.filter { it in chosen }) }, enabled = chosen.isNotEmpty() && !model.busy) { Text(confirm) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(t(R.string.cancel)) } },
+    )
+}
+
+/** The code the app offers, big, with a countdown and a new-code button after expiry. */
+@Composable
+private fun WebOfferDialog(model: CompanionModel, offer: ch.fasrv.fanotes.schulnetz.WebPairOffer) {
+    var left by remember(offer) { mutableStateOf(pairSecondsLeft(offer.expiresAt)) }
+    LaunchedEffect(offer) {
+        while (left > 0) {
+            kotlinx.coroutines.delay(1000)
+            left = pairSecondsLeft(offer.expiresAt)
+        }
+    }
+    AlertDialog(
+        onDismissRequest = { model.dismissWebOffer() },
+        shape = MaterialTheme.shapes.extraLarge,
+        title = { Text(t(R.string.web_offer_title), style = MaterialTheme.typography.headlineSmall) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    displayPairCode(offer.code),
+                    style = MaterialTheme.typography.displaySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, letterSpacing = 2.sp),
+                    color = if (left > 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 12.dp),
+                )
+                Text(t(R.string.web_offer_enter, WEB_APP_HOST), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+                Text(
+                    if (left > 0) t(R.string.web_offer_left, "%d:%02d".format(left / 60, left % 60)) else t(R.string.web_offer_expired),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (left > 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+        },
+        confirmButton = {
+            if (left > 0) TextButton(onClick = { model.dismissWebOffer() }) { Text(t(R.string.web_offer_close)) }
+            else TextButton(onClick = { model.dismissWebOffer(); model.startWebOffer() }) { Text(t(R.string.web_offer_new)) }
+        },
+        dismissButton = if (left > 0) null else ({ TextButton(onClick = { model.dismissWebOffer() }) { Text(t(R.string.web_offer_close)) } }),
+    )
 }
