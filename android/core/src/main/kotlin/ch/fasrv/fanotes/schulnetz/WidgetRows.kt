@@ -52,6 +52,7 @@ fun widgetRows(
     zone: ZoneId = SCHOOL_ZONE,
     groupChoices: Map<String, List<String>> = emptyMap(),
 ): List<WidgetRow> {
+    DerivedWorkProbe.hit("widgetRows")
     val merged = mergedScheduleEvents(events, exams, hidden, zone, groupChoices)
     val today = now.atZone(zone).toLocalDate()
     val dated = merged.mapNotNull { event ->

@@ -92,6 +92,7 @@ fun matchPlanned(planned: List<PlannedAbsence>, snapshot: SchulnetzSnapshot, tod
 
 /** The points the student would have with the planned absences entered as open reports. */
 fun provisionalTally(snapshot: SchulnetzSnapshot, planned: List<PlannedAbsence>, today: LocalDate = LocalDate.now()): ProvisionalTally {
+    DerivedWorkProbe.hit("provisionalTally")
     val items = matchPlanned(planned, snapshot, today)
     val rows = items.filter { it.state == PlannedState.Upcoming }.map { (item, _) ->
         SchoolAbsence(

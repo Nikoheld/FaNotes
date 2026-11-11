@@ -349,6 +349,7 @@ private fun inChain(a: Slot, b: Slot, attended: List<Lesson>): Boolean {
  * its own block (one lesson: 2 points). A report on a day that already has a booked entry is booked.
  */
 fun absenceTally(snapshot: SchulnetzSnapshot): AbsenceTally {
+    DerivedWorkProbe.hit("absenceTally")
     val pending = snapshot.absences.filter { it.pending }
     val booked = snapshot.absences.filter { !it.pending && it.points != null }
     val quota = snapshot.absenceQuota

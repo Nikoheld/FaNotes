@@ -32,6 +32,7 @@ private fun slotDate(event: AgendaEvent): LocalDate? = runCatching { LocalDate.p
  * Cancelled lessons and non-lessons are ignored; sets with an option under two lessons are dropped.
  */
 fun detectGroupSets(lessons: List<AgendaEvent>): List<GroupSet> {
+    DerivedWorkProbe.hit("detectGroupSets")
     val byLabel = linkedMapOf<String, MutableList<AgendaEvent>>()
     val names = hashMapOf<String, String>()
     for (event in lessons) {

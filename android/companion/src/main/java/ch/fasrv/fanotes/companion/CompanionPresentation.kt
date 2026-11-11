@@ -315,6 +315,7 @@ fun agendaForDays(
     zone: ZoneId = ZoneId.systemDefault(),
     groupChoices: Map<String, List<String>> = emptyMap(),
 ): Map<LocalDate, List<AgendaEntry>> {
+    ch.fasrv.fanotes.schulnetz.DerivedWorkProbe.hit("agendaForDays", days)
     val sets = activeGroupSets(snapshot.events, groupChoices)
     val schoolByDay = eventsByLocalDay(visibleEvents(snapshot.events + snapshot.exams, hidden, zone, sets, groupChoices), zone)
     return days.associateWith { day -> agendaForDay(day, snapshot, calendar, tasks, hidden, zone, schoolByDay, groupChoices) }
