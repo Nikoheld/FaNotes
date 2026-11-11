@@ -323,6 +323,7 @@ fun CourseScreen(model: CompanionModel) {
 @Composable
 fun SchoolRecordScreen(model: CompanionModel, page: Page) {
     val tally = remember(model.snapshot) { absenceTally(model.snapshot) }
+    val provisional = remember(model.snapshot, model.plannedAbsences) { provisionalTally(model.snapshot, model.plannedAbsences, LocalDate.now()) }
     var query by rememberSaveable(page) { mutableStateOf("") }
     var filter by rememberSaveable(page) { mutableStateOf("all") }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
@@ -348,7 +349,28 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
             }
             Page.Absences -> {
                 val withPoints = tally.quota != null || model.snapshot.absences.any { it.points != null || it.pending }
-                if (tally.shown && query.isBlank()) item(key = "points") { AbsencePointsSummary(tally) }
+                if (tally.shown && query.isBlank()) item(key = "points") { AbsencePointsSummary(tally, provisional) }
+                if (query.isBlank() && provisional.items.any { it.state != PlannedState.Matched }) {
+                    val listed = provisional.items.filter { it.state != PlannedState.Matched }.sortedBy { it.absence.date + it.absence.start }
+                    item(key = "planned-head") { SectionLabel(t(R.string.planned_absences), count = listed.size) }
+                    itemsIndexed(listed, key = { _, it -> "planned:${it.absence.id}" }) { index, item ->
+                        val semantics = LocalCompanionSemantics.current
+                        GroupItem(index, listed.size) {
+                            Row(Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(item.absence.subject.ifBlank { t(R.string.absence) }, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    val day = runCatching { LocalDate.parse(item.absence.date) }.getOrNull()
+                                    Text(listOf(day?.let { formatSchoolDate(it, "EEE, d MMM yyyy") } ?: item.absence.date, listOf(item.absence.start, item.absence.end).filter { it.isNotBlank() }.joinToString("–")).filter { it.isNotBlank() }.joinToString("  ·  "),
+                                        style = TimeSmallStyle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (item.state == PlannedState.NotEntered) Text(t(R.string.planned_absence_not_entered), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                    else provisional.blockPoints(item.absence)?.let { Text(t(R.string.absence_points_estimate_value, it), style = MaterialTheme.typography.labelLarge, color = semantics.warning) }
+                                }
+                                IconButton(onClick = { model.removePlannedAbsence(item.absence.id) }) { Icon(Icons.Outlined.Close, t(R.string.planned_absence_remove)) }
+                            }
+                        }
+                    }
+                    item(key = "planned-gap") { Spacer(Modifier.height(8.dp)) }
+                }
                 item(key = "filter") { ChoiceRow(listOf("all" to t(R.string.all), "open" to t(R.string.open), "excused" to if (withPoints) t(R.string.absence_booked_tag) else t(R.string.excused)), filter, { filter = it }, Modifier.padding(vertical = 6.dp)) }
                 val absences = model.snapshot.absences.filter { "${it.subject} ${it.reason} ${it.dateFrom}".contains(query, true) && when (filter) { "open" -> it.isOpen(); "excused" -> !it.isOpen(); else -> true } }
                     .sortedWith(compareBy<SchoolAbsence> { if (absenceTargetId(it) in model.highlightIds) 0 else 1 }.thenByDescending { parseDisplayDate(it.dateFrom) ?: java.time.LocalDate.MIN }.thenBy { it.hourFrom })
@@ -489,7 +511,7 @@ private fun estimateRuleText(estimate: AbsenceEstimate): String = when (estimate
 }
 
 @Composable
-private fun AbsencePointsSummary(tally: AbsenceTally) {
+private fun AbsencePointsSummary(tally: AbsenceTally, provisional: ProvisionalTally? = null) {
     val semantics = LocalCompanionSemantics.current
     Surface(color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.extraLarge, modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 12.dp)) {
         Column(Modifier.padding(20.dp)) {
@@ -501,6 +523,12 @@ private fun AbsencePointsSummary(tally: AbsenceTally) {
                     valueColor = when { remaining < 0 -> MaterialTheme.colorScheme.error; tally.estimated > 0 -> semantics.warning; else -> MaterialTheme.colorScheme.onSurface })
                 MetricBlock(t(R.string.absence_points_booked), uiPoints(tally.booked))
                 MetricBlock(t(R.string.absence_points_estimated), if (tally.estimated > 0) "≈ ${tally.estimated}" else "0", valueColor = if (tally.estimated > 0) semantics.warning else MaterialTheme.colorScheme.onSurface)
+                if (provisional != null && provisional.upcoming.isNotEmpty()) {
+                    MetricBlock(t(R.string.absence_points_provisional), uiPoints(provisional.tally.total), valueColor = semantics.warning)
+                    val left = provisional.tally.remaining
+                    if (quota != null && left != null) MetricBlock(t(R.string.absence_points_provisional_remaining), "${uiPoints(left)} / ${uiPoints(quota)}",
+                        valueColor = if (left < 0) MaterialTheme.colorScheme.error else semantics.warning)
+                }
             }
             if (tally.openReports > 0) StatusLine(tp(R.plurals.absence_open_reports, tally.openReports, tally.openReports) + " · " + t(R.string.absence_points_estimate_value, tally.estimated), StateTone.Warning, Modifier.padding(top = 12.dp))
             Text(t(R.string.absence_points_explain), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))

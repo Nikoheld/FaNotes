@@ -1187,4 +1187,13 @@
         <item quantity="one">%d lesson per week</item>
         <item quantity="other">%d lessons per week</item>
     </plurals>
+    <string name="planned_absence">Planned absence</string>
+    <string name="planned_absences">Planned absences</string>
+    <string name="planned_absence_tag">planned</string>
+    <string name="planned_absence_mark">Mark as planned absence</string>
+    <string name="planned_absence_remove">Remove planned absence</string>
+    <string name="planned_absence_hint">Only stored on this device and in your own sync. Nothing is sent to Schulnetz; it only adds to the provisional absence points.</string>
+    <string name="planned_absence_not_entered">not entered</string>
+    <string name="absence_points_provisional">Provisional</string>
+    <string name="absence_points_provisional_remaining">Provisional remaining</string>
 </resources>

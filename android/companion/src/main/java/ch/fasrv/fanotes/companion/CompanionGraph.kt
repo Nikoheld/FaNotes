@@ -1,5 +1,8 @@
 package ch.fasrv.fanotes.companion
 
+import ch.fasrv.fanotes.schulnetz.PlannedAbsence
+import ch.fasrv.fanotes.schulnetz.parsePlannedAbsences
+import ch.fasrv.fanotes.schulnetz.serializePlannedAbsences
 import ch.fasrv.fanotes.schulnetz.ConnectionRegistry
 import ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT
 import ch.fasrv.fanotes.schulnetz.newPushKey
@@ -427,6 +430,8 @@ class CompanionGraph(private val context: Context) {
     fun setSubjectColor(subject: String, color: String) = current().setSubjectColor(subject, color)
     fun hiddenLessons(): List<HiddenLesson> = current().hiddenLessons()
     fun saveHiddenLessons(rules: List<HiddenLesson>) = current().saveHiddenLessons(rules)
+    fun plannedAbsences(): List<PlannedAbsence> = current().plannedAbsences()
+    fun savePlannedAbsences(items: List<PlannedAbsence>) = current().savePlannedAbsences(items)
     fun lastCheckAt(): Long = current().lastCheckAt()
     fun lastCheckError(): String = current().lastCheckError()
     fun nextCheckAt(): Long = current().nextCheckAt()
@@ -909,6 +914,7 @@ class CompanionGraph(private val context: Context) {
         const val COLORS_PATH = ".fanotes/schulnetz/colors.json"
         const val DESK_PATH = ".fanotes/schulnetz/desk.json"
         const val HIDDEN_PATH = ".fanotes/schulnetz/hidden-lessons.json"
+        const val PLANNED_PATH = ".fanotes/schulnetz/planned-absences.json"
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
         const val GUESS_GRADES_PREF = NotifyPrefs.GUESS
         const val UNREVEALED_PREF = "unrevealed-grades"
@@ -1067,7 +1073,7 @@ class CompanionGraph(private val context: Context) {
             clearSchoolCache()
             deleteGuestFile()
             secrets.clear()
-            for (path in listOf(HYPOTHETICAL_PATH, GRADE_BOOK_PATH, COLORS_PATH, HIDDEN_PATH)) if (slot != PRIMARY_SLOT && vault.exists(sp(path))) vault.delete(sp(path))
+            for (path in listOf(HYPOTHETICAL_PATH, GRADE_BOOK_PATH, COLORS_PATH, HIDDEN_PATH, PLANNED_PATH)) if (slot != PRIMARY_SLOT && vault.exists(sp(path))) vault.delete(sp(path))
             val editor = prefs.edit()
             if (slot == PRIMARY_SLOT) {
                 for (key in SLOT_KEYS + NotifyPrefs.fields.map { it.second }) editor.remove(key)
@@ -1407,6 +1413,17 @@ class CompanionGraph(private val context: Context) {
             vault.write(sp(HIDDEN_PATH), serializeHiddenLessons(rules).encodeToByteArray())
             engine.notifyLocalChange()
             NextLessonWidget.update(context)
+        }
+
+        fun plannedAbsences(): List<PlannedAbsence> {
+            val text = vault.read(sp(PLANNED_PATH))?.decodeToString() ?: return emptyList()
+            return parsePlannedAbsences(text)
+        }
+
+        /** Stored on the device and in the user's own vault sync only; never sent to Schulnetz. */
+        fun savePlannedAbsences(items: List<PlannedAbsence>) {
+            vault.write(sp(PLANNED_PATH), serializePlannedAbsences(items).encodeToByteArray())
+            engine.notifyLocalChange()
         }
 
         fun lastCheckAt(): Long = prefs.getLong("last-check", 0L)

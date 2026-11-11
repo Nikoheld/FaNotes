@@ -726,6 +726,7 @@ fun AgendaRow(model: CompanionModel, entry: AgendaEntry, position: RailPosition 
             if (meta.isNotEmpty() && !model.desk.planCompact) Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
             val tags = buildList {
                 if (running) add(t(R.string.now_label) to scheme.primary)
+                if (entry.school?.let { plannedFor(it, model.plannedAbsences) } != null) add(t(R.string.planned_absence_tag) to s.warning)
                 if (cancelled) add(t(R.string.cancelled) to scheme.error)
                 else if (entry.school?.isSubstitution() == true) add(t(R.string.substitution) to s.warning)
                 else if (entry.kind != AgendaKind.Lesson && (entry.kind != AgendaKind.Task || entry.start.isNotBlank())) add(entry.kind.uiLabel() to accent)
@@ -855,6 +856,13 @@ fun AgendaDetails(model: CompanionModel, entry: AgendaEntry, onDismiss: () -> Un
                 val imported = model.calendar.events.any { it.id == "schulnetz-${entry.school.id}" }
                 PrimaryButton(if (imported) t(R.string.already_in_your_calendar) else t(R.string.add_to_my_calendar), { model.importExam(entry.school); onDismiss() },
                     Modifier.fillMaxWidth().padding(top = 20.dp), enabled = !imported, icon = if (imported) Icons.Outlined.Check else Icons.Outlined.EventAvailable)
+            }
+            if (entry.school?.isLesson() == true && entry.kind == AgendaKind.Lesson && entry.school.isCancelled().not() && !entry.day.isBefore(java.time.LocalDate.now())) {
+                val marked = plannedFor(entry.school, model.plannedAbsences) != null
+                SectionLabel(t(R.string.planned_absence))
+                Text(t(R.string.planned_absence_hint), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+                SecondaryButton(if (marked) t(R.string.planned_absence_remove) else t(R.string.planned_absence_mark), { model.togglePlannedAbsence(entry.school); onDismiss() },
+                    Modifier.fillMaxWidth().padding(top = 12.dp), icon = Icons.Outlined.EventBusy)
             }
             if (entry.school?.isLesson() == true && entry.kind == AgendaKind.Lesson) {
                 SectionLabel(t(R.string.personal_timetable))

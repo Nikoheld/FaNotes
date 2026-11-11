@@ -1187,4 +1187,13 @@
         <item quantity="one">%d Lektion pro Woche</item>
         <item quantity="other">%d Lektionen pro Woche</item>
     </plurals>
+    <string name="planned_absence">Geplante Absenz</string>
+    <string name="planned_absences">Geplante Absenzen</string>
+    <string name="planned_absence_tag">geplant</string>
+    <string name="planned_absence_mark">Als geplante Absenz markieren</string>
+    <string name="planned_absence_remove">Geplante Absenz entfernen</string>
+    <string name="planned_absence_hint">Nur auf diesem Gerät und in deiner eigenen Synchronisierung gespeichert. Nichts wird an Schulnetz gesendet; es fliesst nur in die provisorischen Absenzpunkte ein.</string>
+    <string name="planned_absence_not_entered">nicht eingetragen</string>
+    <string name="absence_points_provisional">Provisorisch</string>
+    <string name="absence_points_provisional_remaining">Provisorisch verbleibend</string>
 </resources>
