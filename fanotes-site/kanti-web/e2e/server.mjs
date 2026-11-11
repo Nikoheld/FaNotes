@@ -34,14 +34,19 @@ const web = createKantiWebApi({ store, access: schulnetz.webAccess, hosts: ['127
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml',
-  '.json': 'application/json', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
+  '.json': 'application/json', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.png': 'image/png', '.webp': 'image/webp', '.xml': 'application/xml', '.txt': 'text/plain', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
 }
 
 const serveStatic = async (url, response) => {
   const relative = normalize(decodeURIComponent(url.pathname)).replace(/^([/\\])+/u, '')
   let file = join(dist, relative)
   if (!file.startsWith(dist)) { response.writeHead(403).end(); return }
-  const info = await stat(file).catch(() => null)
+  let info = await stat(file).catch(() => null)
+  // Like nginx: a directory serves its index.html (the static /about/ page).
+  if (info?.isDirectory()) {
+    file = join(file, 'index.html')
+    info = await stat(file).catch(() => null)
+  }
   // Single-page app: unknown paths without an extension fall back to index.html.
   if (!info?.isFile()) {
     if (extname(relative)) { response.writeHead(404).end('not found'); return }

@@ -1,5 +1,8 @@
 (() => {
   const root = document.documentElement
+  // Pages may point at a smaller catalogue (data-catalog); the statistics page
+  // and older callers keep the full shared catalogue.
+  const catalogUrl = document.currentScript?.dataset.catalog || '/i18n/en.json'
   const languages = navigator.languages?.length ? navigator.languages : [navigator.language]
   const language = languages.some((value) => /^de(?:-|$)/iu.test(value || '')) ? 'de' : 'en'
   root.lang = language === 'de' ? 'de-CH' : 'en'
@@ -7,6 +10,11 @@
   if (language === 'de') return
 
   root.classList.add('i18n-loading')
+  // Never keep the page hidden for long, even on a slow or failed request.
+  const revealTimer = window.setTimeout(() => root.classList.remove('i18n-loading'), 2500)
+  const domReady = document.readyState === 'loading'
+    ? new Promise((resolve) => document.addEventListener('DOMContentLoaded', resolve, { once: true }))
+    : Promise.resolve()
   const attributes = ['aria-label', 'alt', 'placeholder', 'title']
   let replacements = []
   let replacementExpression = null
@@ -77,11 +85,12 @@
     }
   }
 
-  fetch('/i18n/en.json', { cache: 'force-cache' })
+  fetch(catalogUrl, { cache: 'force-cache' })
     .then((response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       return response.json()
     })
+    .then((loaded) => domReady.then(() => loaded))
     .then((loaded) => {
       catalog = loaded
       replacements = Object.entries(catalog)
@@ -107,5 +116,8 @@
       }).observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: attributes })
     })
     .catch(() => undefined)
-    .finally(() => root.classList.remove('i18n-loading'))
+    .finally(() => {
+      window.clearTimeout(revealTimer)
+      root.classList.remove('i18n-loading')
+    })
 })()

@@ -1,13 +1,33 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="de" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f5f0">
+  <meta name="robots" content="noindex">
   <title>FaNotes Freigabe</title>
-  <link rel="stylesheet" href="share.css?v=6">
+  <link rel="icon" href="/assets/fanotes.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/fanotes-base.css?v=20261108.1">
+  <link rel="stylesheet" href="share.css?v=7">
 </head>
 <body>
-  <main id="share-view"><p class="share-loading">Freigabe wird geladen …</p></main>
+  <a class="skip-link" href="#share-main">Zum Inhalt springen</a>
+  <header class="site-header is-solid share-header">
+    <div class="wrap site-header-inner">
+      <a class="brand" href="/" aria-label="FaNotes Startseite">
+        <img src="/assets/fanotes.svg" alt="" width="32" height="32">
+        <span>FaNotes</span>
+      </a>
+      <span class="share-badge">Geteilte Notiz</span>
+    </div>
+  </header>
+  <main id="share-main" tabindex="-1">
+    <h1 class="sr-only">Geteilte Notiz</h1>
+    <div id="share-view"><p class="share-loading">Freigabe wird geladen …</p></div>
+  </main>
+  <footer class="share-footer">
+    <p>Diese Notiz wurde mit FaNotes geteilt. <a href="/">Was ist FaNotes?</a></p>
+  </footer>
   <script src="share-link.js?v=4"></script>
   <script src="share.js?v=6"></script>
 </body>

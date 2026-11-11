@@ -223,7 +223,8 @@ describe('keyboard, search, routes, notifications, prefs', () => {
 describe('page and assets', () => {
   it('needs no inline script or style, so the strict CSP holds', () => {
     const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
-    expect(html).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/u)
+    // JSON-LD data blocks are not executable and stay allowed.
+    expect(html).not.toMatch(/<script(?![^>]*\bsrc=)(?![^>]*type="application\/ld\+json")[^>]*>/u)
     expect(html).not.toMatch(/<style|\sstyle=/u)
   })
   it('uses the app brand mark as the favicon, byte for byte', () => {
