@@ -67,6 +67,7 @@ import java.util.UUID
 class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var desk by mutableStateOf(ch.fasrv.fanotes.schulnetz.DeskPrefs(theme = graph.themeId()))
     var hidden by mutableStateOf(emptyList<ch.fasrv.fanotes.schulnetz.HiddenLesson>())
+    var plannedAbsences by mutableStateOf(emptyList<ch.fasrv.fanotes.schulnetz.PlannedAbsence>())
     var route by mutableStateOf(CompanionRoute())
         private set
     private var startTabApplied = false
@@ -367,11 +368,11 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                     val nextTree = graph.store.tree()
                     val folder = if (ch.fasrv.fanotes.vault.folderExists(nextTree, noteFolder)) noteFolder else ""
                     Reloaded(nextTree, folder, ch.fasrv.fanotes.vault.folderChildren(nextTree, folder).filter { it.path !in setOf(ch.fasrv.fanotes.desk.HOMEWORK_NOTE_PATH, ch.fasrv.fanotes.desk.CALENDAR_NOTE_PATH) },
-                        runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.gradeBook(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons(), graph.subjectColors())
+                        runCatching { graph.homework().tasks }, runCatching { graph.calendar() }, graph.hypothetical(), graph.gradeBook(), graph.writtenNoteCount(), graph.deskPrefs(), graph.hiddenLessons(), graph.subjectColors(), graph.plannedAbsences())
                 }
                 tree = data.tree; noteFolder = data.folder; notes = data.notes
                 data.tasks.getOrNull()?.let { tasks = it }; data.calendar.getOrNull()?.let { calendar = it }
-                hypothetical = data.guesses; gradeBook = data.book; writtenNotes = data.count; hidden = data.hidden; colors = data.colors
+                hypothetical = data.guesses; gradeBook = data.book; writtenNotes = data.count; hidden = data.hidden; colors = data.colors; plannedAbsences = data.planned
                 if (generation == deskGeneration && deskPending == 0) {
                     desk = data.desk
                     if (!startTabApplied && history.isEmpty() && highlightIds.isEmpty() && route.page == null && route.destination == Destination.Today) {
@@ -398,7 +399,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     private data class Reloaded(val tree: List<VaultNode>, val folder: String, val notes: List<VaultNode>, val tasks: Result<List<HomeworkTask>>,
-        val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val book: GradeBook, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>, val colors: Map<String, String>)
+        val calendar: Result<CalendarDocument>, val guesses: List<HypotheticalGrade>, val book: GradeBook, val count: Int, val desk: DeskPrefs, val hidden: List<HiddenLesson>, val colors: Map<String, String>, val planned: List<ch.fasrv.fanotes.schulnetz.PlannedAbsence> = emptyList())
 
     suspend fun loadPreview(node: VaultNode): NotePreview = withContext(Dispatchers.IO) {
         val hit = previewCache.get(node.path)
@@ -926,6 +927,20 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val next = if (series) hideSeries(event, hidden) else hideOnce(event, hidden)
         hidden = next
         perform { graph.saveHiddenLessons(next) }
+    }
+
+    /** Marks a future lesson as a planned absence, or removes the mark. Local only; Schulnetz is never written. */
+    fun togglePlannedAbsence(event: AgendaEvent) {
+        val existing = ch.fasrv.fanotes.schulnetz.plannedFor(event, plannedAbsences)
+        val next = if (existing != null) plannedAbsences.filterNot { it.id == existing.id } else ch.fasrv.fanotes.schulnetz.planAbsence(event, plannedAbsences)
+        plannedAbsences = next
+        perform { graph.savePlannedAbsences(next) }
+    }
+
+    fun removePlannedAbsence(id: String) {
+        val next = plannedAbsences.filterNot { it.id == id }
+        plannedAbsences = next
+        perform { graph.savePlannedAbsences(next) }
     }
 
     fun restoreLesson(id: String) {
