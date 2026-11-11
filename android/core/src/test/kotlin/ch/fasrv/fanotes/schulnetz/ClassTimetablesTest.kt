@@ -26,9 +26,9 @@ class ClassTimetablesTest {
     }
 
     @Test fun theSummaryKeepsOnlyUsableEntries() {
-        val summary = parseClassTimetableSummary("""{"available":true,"uploadedAt":"2026-11-11T08:00:00.000Z","semester":"SJ 2026-27","classes":[{"code":"G26A","teacher":"ZimLu"},{"code":"../x","teacher":"X"},{"teacher":"none"}],"rooms":["516","Wed_A","<b>",7]}""")
+        val summary = parseClassTimetableSummary("""{"available":true,"uploadedAt":"2026-11-11T08:00:00.000Z","semester":"SJ 2026-27","classes":[{"code":"G26A","teacher":"TstOo"},{"code":"../x","teacher":"X"},{"teacher":"none"}],"rooms":["516","Wed_A","<b>",7]}""")
         assertTrue(summary.available)
-        assertEquals(listOf(TimetableClass("G26A", "ZimLu")), summary.classes)
+        assertEquals(listOf(TimetableClass("G26A", "TstOo")), summary.classes)
         assertEquals(listOf("516", "Wed_A"), summary.rooms)
         assertEquals("SJ 2026-27", summary.semester)
     }
@@ -44,8 +44,8 @@ class ClassTimetablesTest {
     @Test fun aRoomWeekGroupsClassesThatShareALesson() {
         val week = parseRoomWeek(
             """{"room":"Telli","entries":[
-            {"day":2,"start":"08:35","end":"09:30","class":"G26B","subject":"spf","teacher":"BauAn"},
-            {"day":2,"start":"08:35","end":"09:30","class":"G26A","subject":"spf","teacher":"BauAn"},
+            {"day":2,"start":"08:35","end":"09:30","class":"G26B","subject":"spf","teacher":"TstAa"},
+            {"day":2,"start":"08:35","end":"09:30","class":"G26A","subject":"spf","teacher":"TstAa"},
             {"day":1,"start":"07:45","end":"08:35","class":"G26A","subject":"Heng-Sem1","teacher":"WeiSa"},
             {"day":9,"start":"07:45","end":"08:35","class":"G26A","subject":"x","teacher":"y"},
             {"day":3,"start":"7:45","class":"G26A"}]}""",
@@ -55,7 +55,7 @@ class ClassTimetablesTest {
         val days = roomWeekByDay(week)
         assertEquals(listOf(1, 2, 3, 4, 5), days.map { it.first })
         assertEquals(listOf("Heng-Sem1"), days[0].second.map { it.subject })
-        assertEquals(listOf(RoomSlot("08:35", "09:30", "spf", "BauAn", listOf("G26A", "G26B"))), days[1].second)
+        assertEquals(listOf(RoomSlot("08:35", "09:30", "spf", "TstAa", listOf("G26A", "G26B"))), days[1].second)
         assertTrue(days[2].second.isEmpty())
     }
 

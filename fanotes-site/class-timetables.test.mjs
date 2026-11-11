@@ -32,21 +32,21 @@ test('parser places centred single and double lessons, stacks and side-by-side e
   assert.equal(a.slots.length, 8)
   // Double lesson (centred between two labels) with two stacked half-class entries and a marker on the first.
   assert.deepEqual(slotOf(a, 1, '07:45'), { day: 1, start: '07:45', end: '09:20', entries: [
-    { subject: 'spf', teacher: 'BauAn', room: 'Telli', footnote: '1' },
-    { subject: 'spm', teacher: 'SolSi', room: 'Telli', footnote: '' },
+    { subject: 'spf', teacher: 'TstAa', room: 'Telli', footnote: '1' },
+    { subject: 'spm', teacher: 'TstMm', room: 'Telli', footnote: '' },
   ] })
   // Six lines centred on one label stay a single lesson (45 minutes); subjects may contain a space.
   assert.equal(slotOf(a, 1, '10:30').end, '11:15')
-  assert.equal(entryText(slotOf(a, 1, '10:30')), 'Amos 1.2|GreTo|036|2;Amos 1.1|SanAn|025|')
-  assert.equal(entryText(slotOf(a, 2, '07:45')), 'abt|KapCh|228|')
+  assert.equal(entryText(slotOf(a, 1, '10:30')), 'Amos 1.2|TstBb|036|2;Amos 1.1|TstKk|025|')
+  assert.equal(entryText(slotOf(a, 2, '07:45')), 'abt|TstDd|228|')
   assert.equal(slotOf(a, 2, '08:35'), undefined)
   assert.equal(slotOf(a, 2, '12:15').end, '13:50')
   // Side by side entries stay separate, left to right; three of them fit one lesson.
-  assert.equal(entryText(slotOf(a, 4, '07:45')), 'eng-Sem2|KapCh|227|;Heng-Sem1|KapCh|227|')
-  assert.equal(entryText(slotOf(a, 4, '09:30')), 'deu|PfeMa|516|;fra|ZimJu|507|;wir|LauMi|035|')
+  assert.equal(entryText(slotOf(a, 4, '07:45')), 'eng-Sem2|TstDd|227|;Heng-Sem1|TstDd|227|')
+  assert.equal(entryText(slotOf(a, 4, '09:30')), 'deu|TstIi|516|;fra|TstNn|507|;wir|TstGg|035|')
   // An entry without teacher and room keeps its marker; entities in the XHTML are decoded.
   assert.equal(entryText(slotOf(a, 5, '12:15')), 'sit|||3')
-  assert.equal(entryText(slotOf(a, 3, '14:00')), 'B&W|HugTi|T49|')
+  assert.equal(entryText(slotOf(a, 3, '14:00')), 'B&W|TstCc|T49|')
   assert.equal(a.slots.every((slot) => slot.entries.length > 0), true)
   assert.equal(parsed.classes[1].slots.find((slot) => slot.day === 2 && slot.start === '13:05').end, '14:45')
   assert.equal(parsed.classes[2].slots.length, 2)
@@ -56,25 +56,25 @@ test('parser reads the footnote table in three column groups with continuations 
   const parsed = parseTimetableBbox(BBOX)
   const rows = parsed.footnotes.map((f) => [f.page, f.nr, f.teacher, f.subject, f.room, f.classes.join(','), Boolean(f.classesTruncated)])
   assert.deepEqual(rows.slice(0, 5), [
-    [1, '1', 'BauAn', 'spf', 'Telli', 'G26A', false],
-    [1, '1', 'SolSi', 'spm', 'Telli', 'G26A,G26B,G26I', false],
-    [1, '2', 'GreTo', 'Amos 1.2', '036', 'G26A,G26B,G26K', false],
-    [1, '2', 'SanAn', 'Amos 1.1', '025', 'G26A,G26B,G26K', false],
+    [1, '1', 'TstAa', 'spf', 'Telli', 'G26A', false],
+    [1, '1', 'TstMm', 'spm', 'Telli', 'G26A,G26B,G26I', false],
+    [1, '2', 'TstBb', 'Amos 1.2', '036', 'G26A,G26B,G26K', false],
+    [1, '2', 'TstKk', 'Amos 1.1', '025', 'G26A,G26B,G26K', false],
     [1, '3', '', 'sit', '', 'G23D,G23L,G24B,G24D,G24E,G24K,G24L,G25B,G25K,G25L,G26A', true],
   ])
-  assert.deepEqual(rows.slice(5).map((row) => row.slice(0, 3)), [[2, '1', 'BauAn'], [2, '2', 'LanFr'], [2, '2', 'RotEv']])
+  assert.deepEqual(rows.slice(5).map((row) => row.slice(0, 3)), [[2, '1', 'TstAa'], [2, '2', 'TstFf'], [2, '2', 'TstJj']])
   assert.deepEqual(parsed.footnotes[6].classes, ['G26D', 'G26E'])
   assert.equal('classesTruncated' in parsed.footnotes[0], false)
 })
 
 test('rooms merge the same lesson across class pages and add footnote classes at the marker slot', () => {
   const parsed = parseTimetableBbox(BBOX)
-  // spf/BauAn/Telli: G26A page (double lesson, marker 1 lists G26A) and G26D page (a different slot).
+  // spf/TstAa/Telli: G26A page (double lesson, marker 1 lists G26A) and G26D page (a different slot).
   assert.deepEqual(parsed.rooms.Telli.filter((e) => e.day === 1), [
-    { day: 1, start: '07:45', end: '09:20', subject: 'spf', teacher: 'BauAn', class: 'G26A' },
-    { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'SolSi', class: 'G26A' },
-    { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'SolSi', class: 'G26B' },
-    { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'SolSi', class: 'G26I' },
+    { day: 1, start: '07:45', end: '09:20', subject: 'spf', teacher: 'TstAa', class: 'G26A' },
+    { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'TstMm', class: 'G26A' },
+    { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'TstMm', class: 'G26B' },
+    { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'TstMm', class: 'G26I' },
   ])
   assert.deepEqual(parsed.rooms.Telli.filter((e) => e.day === 2).map((e) => [e.start, e.end, e.class]), [['13:05', '14:45', 'G26D']])
   // Footnote 2 (marker on Monday 10:30) puts the half classes of G26B and G26K into rooms 036 and 025 too.
@@ -99,7 +99,7 @@ test('parser warns with counts only and never throws on odd input', () => {
     { ...SYNTHETIC_PAGES[0], code: 'G26Z', omit: ['labels'] },
     SYNTHETIC_PAGES[2],
     // Entries far from every lesson centre are not placed; markers with no footnote row are counted.
-    { code: 'G26U', teacher: 'Un Bekannt', cells: [{ day: 1, row: 11.5, tracks: [[['mat', 'KelAn', '207']]] }, { day: 2, row: 1, tracks: [[['deu', 'ZimLu', '516', '7']]] }], footnotes: [] },
+    { code: 'G26U', teacher: 'Un Bekannt', cells: [{ day: 1, row: 11.5, tracks: [[['mat', 'TstEe', '207']]] }, { day: 2, row: 1, tracks: [[['deu', 'TstOo', '516', '7']]] }], footnotes: [] },
   ]))
   assert.deepEqual(odd.classes.map((c) => c.code), ['I26B', 'G26U'])
   assert.deepEqual(odd.warnings, [
@@ -109,7 +109,7 @@ test('parser warns with counts only and never throws on odd input', () => {
     '1 entries not placed in a lesson',
     '1 footnote markers without a footnote row',
   ])
-  assert.ok(odd.warnings.every((w) => !/deu|mat|KelAn|G26/u.test(w)))
+  assert.ok(odd.warnings.every((w) => !/deu|mat|TstEe|G26/u.test(w)))
 })
 
 test('class lists expand the compressed notation', () => {
