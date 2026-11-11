@@ -327,6 +327,48 @@ class CommuteUiTest {
         return commuteRowViews(context, row, wide, "a1b2c3d4e5f6").apply(context, FrameLayout(context))
     }
 
+    @Test fun widgetOpensTheTripDetailThroughALinkWithRouteTripAndPlannedDeparture() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val trip = CommuteSamples.trip()
+        val intent = CommuteWidget.commuteOpenIntent(context, "a1b2c3d4e5f6", trip.id, trip.plannedDeparture)
+        val ids = intent.getStringArrayListExtra(CompanionAlerts.EXTRA_TARGET_IDS).orEmpty()
+        assertEquals(listOf("a1b2c3d4e5f6", trip.id, trip.plannedDeparture), ids)
+        val link = ch.fasrv.fanotes.schulnetz.NotifyLink("commute", ids)
+        val route = companionRoute(ch.fasrv.fanotes.schulnetz.NotifyRoute("Heute", "Pendeln", highlightIds = link.ids))
+        assertEquals(Page.CommuteTrip, route.page)
+        assertEquals(CommuteTripRef("a1b2c3d4e5f6", trip.id, trip.plannedDeparture), commuteTripLink(ids))
+        // The row of the widget carries the same ids.
+        assertEquals(trip.plannedDeparture, commuteRows(CommuteSamples.board(trip)).first().plannedDeparture)
+    }
+
+    @Test fun linksWithoutATripStillOpenTheRouteBoard() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val intent = CommuteWidget.commuteOpenIntent(context, "a1b2c3d4e5f6", "", "")
+        val ids = intent.getStringArrayListExtra(CompanionAlerts.EXTRA_TARGET_IDS).orEmpty()
+        assertEquals(listOf("a1b2c3d4e5f6"), ids)
+        assertEquals(Page.CommuteDetail, companionRoute(ch.fasrv.fanotes.schulnetz.NotifyRoute("Heute", "Pendeln", highlightIds = ids)).page)
+        assertEquals(Page.Commute, companionRoute(ch.fasrv.fanotes.schulnetz.NotifyRoute("Heute", "Pendeln")).page)
+        assertEquals(null, commuteTripLink(listOf("a", "", "c")))
+    }
+
+    @Test fun tappingTheHeuteCardOpensTheTripItShows() {
+        val opened = mutableListOf<String>()
+        val trip = CommuteSamples.trip(quietest = true)
+        show(false, { CommuteCard(CommuteSamples.ui(CommuteSamples.board(trip)), CommuteSamples.NOW, true, { opened += "route:$it" }, {}, onOpenTrip = { r, t -> opened += "trip:$r:${t.id}" }) })
+        rule.onNodeWithText("Schule").performClick()
+        assertEquals(listOf("trip:a1b2c3d4e5f6:${trip.id}"), opened)
+    }
+
+    @Test fun tripCardsOfTheRouteBoardOpenTheDetail() {
+        val opened = mutableListOf<String>()
+        val trip = CommuteSamples.trip(id = "t-board")
+        show(false, {
+            androidx.compose.runtime.CompositionLocalProvider(LocalOpenCommuteTrip provides { opened += it.id }) { CommuteTripCard(trip, CommuteSamples.NOW) }
+        })
+        rule.onNodeWithText("07:05").performClick()
+        assertEquals(listOf("t-board"), opened)
+    }
+
     private fun View.text(id: Int) = (findViewById<TextView>(id)).text.toString()
 
     @Test fun widgetRowsShowDepartureDelayLinePlatformAndStatus() {

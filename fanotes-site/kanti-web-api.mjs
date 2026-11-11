@@ -674,6 +674,13 @@ export const createKantiWebApi = (options = {}) => {
     }
     if (part === 'stops' && method === 'GET') { send(response, 200, await commute.stops(url.searchParams.get('q') || '')); return }
     if (part === 'board' && method === 'GET') { send(response, 200, await commute.board(accountId, String(url.searchParams.get('route') || ''))); return }
+    if (part === 'trip' && method === 'GET') {
+      const params = url.searchParams
+      const found = await commute.tripDetail(accountId, String(params.get('route') || ''), String(params.get('trip') || '').slice(0, 200), String(params.get('at') || ''))
+      if (!found) fail(404, 'Diese Pendelstrecke gibt es nicht.')
+      send(response, 200, found)
+      return
+    }
     if (part === 'connections' && method === 'GET') {
       const params = url.searchParams
       const found = await commute.connections({ from: params.get('from'), to: params.get('to'), vias: params.getAll('via').slice(0, 2), at: String(params.get('at') || ''), timeType: String(params.get('timeType') || 'depart') })
@@ -1044,7 +1051,7 @@ export const createKantiWebApi = (options = {}) => {
         return true
       }
       // Pendelstrecken (commute-api.md): the same routes, boards and alerts the app uses.
-      const commuteMatch = /^\/connections\/([^/]+)\/commute(?:\/(stops|board|trips|connections))?$/u.exec(route)
+      const commuteMatch = /^\/connections\/([^/]+)\/commute(?:\/(stops|board|trips|connections|trip))?$/u.exec(route)
       if (commuteMatch) {
         await commuteRoute(request, response, url, session, commuteMatch[1], commuteMatch[2] || '', method)
         return true

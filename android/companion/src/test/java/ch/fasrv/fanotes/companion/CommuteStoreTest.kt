@@ -27,6 +27,9 @@ class CommuteStoreTest {
     private var routesBody = commuteBody(listOf(CommuteSamples.route()), CommuteSettings(5, listOf("informatik 1.2")))
     private var boardBody = ""
     private var failBoard = false
+    private var tripBody = """{"trip":{"id":"t1","legs":[{"kind":"ride","line":"S29","stopCount":1,"stops":[{"name":"Mitte","realtime":true}]}]},"position":{"state":"atStop","legIndex":0,"point":1},"updatedAt":"2026-11-13T07:00:00+01:00","stale":false,"gone":false,"sources":{"realtime":"search.ch","platforms":null,"formation":null}}"""
+    /** Treats every thread outside the IO pool as the main thread, like StrictMode does for the real one. */
+    private var strictThreads = false
     private val auth = SchoolAuth("0123456789abcdef0123456789abcdef", "t".repeat(43), guest = true)
     private lateinit var dir: File
     private var account = ""
@@ -51,6 +54,7 @@ class CommuteStoreTest {
             val (code, text) = when {
                 row.path.endsWith("/commute/board") -> if (failBoard) 502 to "{}" else 200 to boardBody
                 row.path.endsWith("/commute/stops") -> 200 to """{"stops":[{"id":"9000001","name":"Testdorf, Dorfplatz","type":"bus"}]}"""
+                row.path.endsWith("/commute/trip") -> 200 to tripBody
                 row.path.endsWith("/commute/trips") -> 200 to """{"trips":[{"id":"t1","departure":"2026-11-13T07:35:00+01:00"}]}"""
                 row.path.endsWith("/commute") && row.method == "PUT" -> { routesBody = row.body; 200 to row.body }
                 row.path.endsWith("/commute") -> 200 to routesBody
@@ -59,7 +63,7 @@ class CommuteStoreTest {
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code).message("x")
                 .body(text.toResponseBody("application/json".toMediaType())).build()
         }
-        return SchulnetzClient(OkHttpClient.Builder().addInterceptor(fake).build()).apply { onMainThread = { false } }
+        return SchulnetzClient(OkHttpClient.Builder().addInterceptor(fake).build()).apply { onMainThread = { strictThreads && !Thread.currentThread().name.startsWith("DefaultDispatcher") } }
     }
 
     private fun store(accountId: String = auth.accountId) = CommuteStore(
@@ -203,5 +207,23 @@ class CommuteStoreTest {
         assertFalse(store.state.value.loaded)
         assertFalse(CommuteStore.readCache(dir).loaded)
         assertEquals("", account)
+    }
+
+    @Test fun tripDetailAsksTheTripEndpointOnTheIoDispatcher() = runBlocking {
+        strictThreads = true
+        val detail = store().tripDetail("a1b2c3d4e5f6", "S29|07:05", "2026-11-13T07:05:00+01:00")
+        val call = sent.single()
+        assertEquals("GET", call.method)
+        assertEquals("$api/trip", call.path)
+        assertEquals("route=a1b2c3d4e5f6&trip=S29%7C07%3A05&at=2026-11-13T07%3A05%3A00%2B01%3A00", call.query)
+        assertEquals("Bearer ${auth.token}", call.headers["Authorization"])
+        assertEquals(PositionState.AT_STOP, detail.position?.state)
+        assertEquals("Mitte", detail.trip?.legs?.single()?.stops?.single()?.name)
+    }
+
+    @Test fun tripDetailFailsLoudlyOnAnUnreadableAnswer() {
+        tripBody = "not json"
+        val failed = runCatching { runBlocking { store().tripDetail("a1b2c3d4e5f6", "t", "2026-11-13T07:05:00+01:00") } }
+        assertTrue(failed.isFailure)
     }
 }

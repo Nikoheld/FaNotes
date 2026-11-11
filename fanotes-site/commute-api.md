@@ -73,6 +73,28 @@ Leg = {
   cancelled: boolean
   notes: string[]          // disruption texts for this leg
   minutes: number          // running or walking time
+  journeyId: string        // search.ch trip id of this vehicle ('' for walks / fallback provider)
+  stopCount: number        // boards: number of intermediate stops (the stop list itself is only in /commute/trip)
+  stops?: Stop[]           // /commute/trip only: intermediate stops in order (boarding and exit stop are from/to)
+}
+
+Stop = {                   // one intermediate stop of a ride leg (connection detail)
+  name: string; stopId: string
+  arrival: StopTime | null; departure: StopTime | null
+  platform: string; platformChanged: boolean    // '' when no source has it (search.ch has none per stop)
+  realtime: boolean        // false: no real-time data for this stop → show planned times only, marked
+  cancelled: boolean       // the vehicle does not call here (search.ch 'X')
+  occupancy: Occupancy     // forecast at this stop (search.ch), often null
+}
+StopTime = { planned: string; time: string; delay: number | null }   // delay null = no real-time value
+
+Position = {               // where the trip is now (from real times; planned where a stop has none)
+  state: 'notStarted' | 'atStop' | 'between' | 'transfer' | 'arrived'
+  legIndex: number         // index into trip.legs (a ride leg)
+  point: number            // 0 = leg.from, 1..n = leg.stops[point-1], n+1 = leg.to
+                           // atStop: at that point; between: after `point`, before `point + 1`; transfer: left leg `legIndex` at its last point
+  progress: number         // between: 0–1 of the way to the next point
+  estimated: boolean       // a time it relies on has no real-time value
 }
 
 Transfer = { at: string; minutes: number; plannedMinutes: number; broken: boolean; tight: boolean }
@@ -136,6 +158,7 @@ Provider = { name: 'search.ch' | 'transport.opendata.ch'; occupancy: 'train-clas
 | GET | `/commute/stops` | `?q=Scherz` (≥ 2 chars) | `{ stops: Stop[] }` (max 10, small bus stops included) |
 | GET | `/commute/board` | `?route=<id>` optional | `{ boards: RouteBoard[], provider: Provider }` — live, for every route (or one) |
 | GET | `/commute/connections` | `?from=<stop id or name>&to=…&via=…&via=…&at=<ISO>&timeType=depart\|arrive` | `{ trips: Trip[], stale }` — the connection picker (editor, works before saving): up to 8 trips from `at`, in planned departure order. Page with the last trip's plannedDeparture + 1 min. |
+| GET | `/commute/trip` | `?route=<id>&trip=<Trip.id>&at=<Trip.plannedDeparture>` | `{ trip: Trip (with legs[].stops) \| null, position: Position, updatedAt, stale, gone, sources: { realtime: 'search.ch'\|'transport.opendata.ch', platforms: 'transport.opendata.ch'\|null, formation: null } }` — the connection detail. `gone: true` when the timetable no longer has that trip. Cached 30 s on the server; clients refresh every 30 s while the detail is visible (not in the background). Per-stop platforms and arrival forecasts come from transport.opendata.ch (own daily budget of 900 lookups; without it the stops show search.ch data only). Formation/sectors: no source without an opentransportdata.swiss key → always null. |
 | GET | `/commute/trips` | `?route=<id>&at=<ISO>&timeType=depart\|arrive` | `{ trips: Trip[] }` — browse later/earlier |
 
 `GET /commute/board` is what the app calls on open, on pull-to-refresh, and when a commute push

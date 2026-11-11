@@ -146,6 +146,17 @@ class CommuteStore(
         return withContext(Dispatchers.IO) { client.commuteTrips(session, routeId, at, arrive) }
     }
 
+    /**
+     * The connection detail of one trip: every stop, real times, platforms and the vehicle position. Runs on the IO
+     * dispatcher itself, so any caller (the screen's main-thread coroutine included) may call it. Throws on a failed request.
+     */
+    suspend fun tripDetail(routeId: String, tripId: String, plannedDeparture: String): ch.fasrv.fanotes.commute.TripDetail {
+        val session = auth()
+        return withContext(Dispatchers.IO) {
+            client.commuteTripDetail(session, routeId, tripId, plannedDeparture) ?: throw java.io.IOException("unreadable trip detail")
+        }
+    }
+
     /** The connection picker's trips from [atIso] for the draft's ends and via stops. Nothing is stored. */
     suspend fun connections(route: Route, atIso: String): List<ch.fasrv.fanotes.commute.Trip> {
         val session = auth()
