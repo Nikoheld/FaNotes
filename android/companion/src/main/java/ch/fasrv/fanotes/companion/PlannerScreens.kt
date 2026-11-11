@@ -445,7 +445,7 @@ fun PlannerScreen(model: CompanionModel) {
         if (aksa) others = runCatching { model.graph.classTimetables() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrDefault(ClassTimetableSummary())
     }
     if (showOthers && others.available) {
-        OtherTimetablesScreen(model.graph, others) { showOthers = false }
+        OtherTimetablesScreen(model.graph, others, TimetableLook(model.colors, model.desk.courseAliases, model.desk.planCompact)) { showOthers = false }
         return
     }
     Column(Modifier.fillMaxSize()) {
@@ -666,7 +666,7 @@ private fun WeekStrip(days: List<LocalDate>, chosenDay: LocalDate, today: LocalD
 }
 
 @Composable
-private fun GapRow(minutes: Int) {
+internal fun GapRow(minutes: Int) {
     val line = LocalCompanionSemantics.current.hairline
     Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
         Spacer(Modifier.width(52.dp + 12.dp))
@@ -703,64 +703,42 @@ fun AgendaRow(model: CompanionModel, entry: AgendaEntry, position: RailPosition 
         entry.kind == AgendaKind.Task || entry.kind == AgendaKind.Event -> scheme.primary
         else -> entry.school?.let { paletteColor(it.displayColor(model.colors)) } ?: scheme.primary
     }
-    val line = s.hairline
     val room = entryRoom(entry)
     val people = entryPeople(entry)
-    val highlight = if (highlighted || running) scheme.primaryContainer else Color.Transparent
-    // The highlight bleeds 10 dp into the page gutter so the time rail never shifts sideways.
-    val compactRows = model.desk.planCompact
-    Row(Modifier.fillMaxWidth()
-        .drawBehind {
-            if (highlight != Color.Transparent) drawRoundRect(highlight, Offset(-10.dp.toPx(), 0f), Size(size.width + 20.dp.toPx(), size.height), androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()))
-            val x = (52 + 12 + 7).dp.toPx()
-            val nodeY = (if (compactRows) 10.dp else 14.dp).toPx() + 11.dp.toPx()
-            val stroke = 2.dp.toPx()
-            if (position == RailPosition.Middle || position == RailPosition.Last) drawLine(line, Offset(x, 0f), Offset(x, nodeY), stroke)
-            if (position == RailPosition.Middle || position == RailPosition.First) drawLine(line, Offset(x, nodeY), Offset(x, size.height), stroke)
-            val r = 6.dp.toPx()
-            when {
-                cancelled -> drawCircle(accent, r - stroke / 2, Offset(x, nodeY), style = Stroke(stroke))
-                entry.kind == AgendaKind.Exam -> {
-                    val path = Path().apply { moveTo(x, nodeY - r - 1f); lineTo(x + r + 1f, nodeY); lineTo(x, nodeY + r + 1f); lineTo(x - r - 1f, nodeY); close() }
-                    drawPath(path, accent)
-                }
-                entry.kind == AgendaKind.Event -> drawCircle(accent, r - stroke / 2, Offset(x, nodeY), style = Stroke(stroke + 0.5f))
-                entry.kind == AgendaKind.Task -> drawRect(accent, Offset(x - r + 1f, nodeY - r + 1f), Size((r - 1f) * 2, (r - 1f) * 2))
-                else -> drawCircle(accent, r, Offset(x, nodeY))
-            }
-        }
-        .clickable(onClick = onClick).heightIn(min = Space.row),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Column(Modifier.width(52.dp).padding(top = if (model.desk.planCompact) 10.dp else 14.dp), horizontalAlignment = Alignment.End) {
-            if (showDay) {
-                val dated = entry.school == null || examHasDate(entry.school.start)
-                Text(if (!dated) "–" else formatSchoolDate(entry.day, if (entry.day.year == LocalDate.now().year) "d MMM" else "d.M.yy"), style = TimeSmallStyle, color = scheme.onSurfaceVariant, maxLines = 1)
-            }
-            Text(entry.start.ifBlank { if (entry.kind == AgendaKind.Task) t(R.string.due) else t(R.string.all_day_short) },
-                style = if (entry.start.isBlank()) MaterialTheme.typography.labelMedium else TimeStyle, softWrap = entry.start.isNotBlank(), color = if (running) scheme.primary else scheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (entry.end.isNotBlank() && entry.end != entry.start) Text(entry.end, style = TimeSmallStyle, color = scheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f).padding(vertical = if (model.desk.planCompact) 10.dp else 14.dp)) {
-            Text(courseAlias(entry.title, model.desk.courseAliases), style = MaterialTheme.typography.titleMedium,
-                textDecoration = if (cancelled) TextDecoration.LineThrough else TextDecoration.None, color = if (cancelled) scheme.onSurfaceVariant else scheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            val meta = when {
-                entry.school != null -> listOf(room.takeIf { it.isNotBlank() }?.let { t(R.string.room_named, it) }, people.takeIf { it.isNotBlank() }).filterNotNull()
-                entry.local != null -> listOf(entry.local.location).filter { it.isNotBlank() }
-                else -> listOf(entry.detail).filter { it.isNotBlank() }
-            }
-            if (meta.isNotEmpty() && !model.desk.planCompact) Text(meta.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-            val tags = buildList {
-                if (running) add(t(R.string.now_label) to scheme.primary)
-                if (entry.school?.let { plannedFor(it, model.plannedAbsences) } != null) add(t(R.string.planned_absence_tag) to s.warning)
-                if (cancelled) add(t(R.string.cancelled) to scheme.error)
-                else if (entry.school?.isSubstitution() == true) add(t(R.string.substitution) to s.warning)
-                else if (entry.school?.let { lessonMarkTag(it, s.warning) } != null) add(entry.school.let { lessonMarkTag(it, s.warning)!! })
-                else if (entry.kind != AgendaKind.Lesson && (entry.kind != AgendaKind.Task || entry.start.isNotBlank())) add(entry.kind.uiLabel() to accent)
-            }
-            if (tags.isNotEmpty()) Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) { tags.forEach { (label, color) -> Tag(label, color) } }
-        }
+    val node = when {
+        cancelled -> RailNode.Cancelled
+        entry.kind == AgendaKind.Exam -> RailNode.Exam
+        entry.kind == AgendaKind.Event -> RailNode.Event
+        entry.kind == AgendaKind.Task -> RailNode.Task
+        else -> RailNode.Lesson
     }
+    val meta = when {
+        entry.school != null -> listOf(room.takeIf { it.isNotBlank() }?.let { t(R.string.room_named, it) }, people.takeIf { it.isNotBlank() }).filterNotNull()
+        entry.local != null -> listOf(entry.local.location).filter { it.isNotBlank() }
+        else -> listOf(entry.detail).filter { it.isNotBlank() }
+    }
+    val tags = buildList {
+        if (running) add(t(R.string.now_label) to scheme.primary)
+        if (entry.school?.let { plannedFor(it, model.plannedAbsences) } != null) add(t(R.string.planned_absence_tag) to s.warning)
+        if (cancelled) add(t(R.string.cancelled) to scheme.error)
+        else if (entry.school?.isSubstitution() == true) add(t(R.string.substitution) to s.warning)
+        else if (entry.school?.let { lessonMarkTag(it, s.warning) } != null) add(entry.school.let { lessonMarkTag(it, s.warning)!! })
+        else if (entry.kind != AgendaKind.Lesson && (entry.kind != AgendaKind.Task || entry.start.isNotBlank())) add(entry.kind.uiLabel() to accent)
+    }
+    val dayLabel = if (!showDay) null else {
+        val dated = entry.school == null || examHasDate(entry.school.start)
+        if (!dated) "–" else formatSchoolDate(entry.day, if (entry.day.year == LocalDate.now().year) "d MMM" else "d.M.yy")
+    }
+    TimetableRailRow(
+        start = entry.start.ifBlank { if (entry.kind == AgendaKind.Task) t(R.string.due) else t(R.string.all_day_short) },
+        end = entry.end.takeIf { it.isNotBlank() && it != entry.start }.orEmpty(),
+        startIsClock = entry.start.isNotBlank(),
+        dayLabel = dayLabel,
+        title = courseAlias(entry.title, model.desk.courseAliases),
+        meta = meta.joinToString("  ·  "),
+        accent = accent, node = node, position = position, running = running, highlighted = highlighted,
+        compact = model.desk.planCompact, tags = tags, onClick = onClick,
+    )
 }
 
 @Composable
@@ -804,7 +782,7 @@ private fun TasksScreen(model: CompanionModel) {
         ChoiceRow(listOf("open" to t(R.string.open), "done" to t(R.string.completed), "school" to t(R.string.from_school)), model.taskSource, { model.taskSource = it }, Modifier.padding(horizontal = Space.page))
         ScreenList(Modifier.weight(1f)) {
             if (model.taskSource == "school") {
-                item(key = "school-hint") { StatusLine(t(R.string.school_assignments_are_read_only_add_one_to_your), StateTone.Neutral, Modifier.padding(vertical = 12.dp)) }
+                item(key = "school-hint") { StatusLine(t(R.string.add_school_assignment_to_your_tasks), StateTone.Neutral, Modifier.padding(vertical = 12.dp)) }
                 val tasks = model.snapshot.homework.filter { "${it.title} ${it.courseName} ${it.description}".contains(query, true) }.sortedBy { it.dueDate }
                 if (tasks.isEmpty()) item(key = "school-empty") { EmptyState(Icons.AutoMirrored.Outlined.Assignment, t(R.string.no_school_assignments), if (query.isNotBlank()) t(R.string.try_another_search) else t(R.string.assignments_appear_after_a_school_refresh_when_y)) }
                 itemsIndexed(tasks, key = { _, it -> "school-task:${it.id}" }) { index, item ->
@@ -831,7 +809,6 @@ private fun TasksScreen(model: CompanionModel) {
     schoolTask?.let { item ->
         KantiSheet(onDismiss = { schoolTask = null }) {
             SheetTitle(item.title) { schoolTask = null }
-            Tag(t(R.string.schulnetz_read_only))
             Text(listOf(item.courseName, dueLabel(item.dueDate)).filter { it.isNotBlank() }.joinToString("  ·  "), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 14.dp))
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                 if (item.description.isNotBlank()) Text(item.description, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 10.dp))

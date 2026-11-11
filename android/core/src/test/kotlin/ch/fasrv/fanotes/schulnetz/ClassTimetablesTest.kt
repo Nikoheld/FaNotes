@@ -19,8 +19,8 @@ class ClassTimetablesTest {
     }
 
     @Test fun namesAreValidatedStrictly() {
-        for (ok in listOf("G26A", "G22S", "G26BF")) assertTrue(isClassCode(ok), ok)
-        for (bad in listOf("g26a", "G26", "G26ABC", "../G26A", "G26A.pdf", "")) assertFalse(isClassCode(bad), bad)
+        for (ok in listOf("G26A", "G22S", "G26BF", "I24B", "W23C", "G26ABC")) assertTrue(isClassCode(ok), ok)
+        for (bad in listOf("g26a", "G26", "G26ABCD", "26A", "../G26A", "G26A.pdf", "")) assertFalse(isClassCode(bad), bad)
         for (ok in listOf("516", "Wed_A", "T49", "Telli", "Sporthalle 1")) assertTrue(isRoomName(ok), ok)
         for (bad in listOf("", "../x", "a/b", "x".repeat(25), "<b>")) assertFalse(isRoomName(bad), bad)
     }
@@ -70,5 +70,36 @@ class ClassTimetablesTest {
         val second = classPdfCacheName("G26D", "2026-11-12T08:00:00.000Z")
         assertTrue(first != second)
         assertTrue(first.endsWith("-G26D.pdf") && !first.contains('/') && !first.contains(':'))
+    }
+
+    private val classJson = """{"class":"G26A","teacher":"TstAa","semester":"SJ 2026-27","entries":[
+        {"day":2,"start":"09:35","end":"10:20","subject":"Mathematik","teacher":"TstBb","room":"T01","footnote":"1"},
+        {"day":1,"start":"07:45","end":"08:30","subject":"Deutsch","teacher":"TstAa","room":"T02"},
+        {"day":9,"start":"07:45","subject":"Bad day"},{"day":1,"start":"7:45","subject":"Bad time"},
+        {"day":3,"start":"08:35","subject":"Nur Fach"},"junk"],"footnotes":[{"nr":"1","text":"x"}]}"""
+
+    @Test fun aClassWeekIsParsedDefensively() {
+        val week = parseClassWeek(classJson)!!
+        assertEquals("G26A", week.code)
+        assertEquals("TstAa", week.teacher)
+        assertEquals(3, week.lessons.size)
+        val bare = week.lessons.first { it.day == 3 }
+        assertEquals(ClassLesson(3, "08:35", "", "Nur Fach", "", ""), bare)
+        assertNull(parseClassWeek("nope"))
+        assertEquals(emptyList(), parseClassWeek("{}")!!.lessons)
+    }
+
+    @Test fun aClassWeekMapsToOrderedGridCells() {
+        val cells = classWeekCells(parseClassWeek(classJson)!!)
+        assertEquals(listOf(1, 2, 3), cells.map { it.day })
+        assertEquals(TimetableCell(2, "09:35", "10:20", "Mathematik", "TstBb", "T01"), cells[1])
+    }
+
+    @Test fun aRoomWeekMapsClassesIntoThePlace() {
+        val week = parseRoomWeek("""{"room":"T01","entries":[
+            {"day":1,"start":"07:45","end":"08:30","class":"G26B","subject":"Physik","teacher":"TstAa"},
+            {"day":1,"start":"07:45","end":"08:30","class":"G26A","subject":"Physik","teacher":"TstAa"}]}""")!!
+        val cells = roomWeekCells(week)
+        assertEquals(listOf(TimetableCell(1, "07:45", "08:30", "Physik", "TstAa", "G26A, G26B")), cells)
     }
 }

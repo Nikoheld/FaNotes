@@ -1,4 +1,5 @@
 import { dateLabel } from '../lib/i18n'
+import { kontoFooter } from '../lib/konto'
 import { useKanti } from '../state'
 import { Card, Empty, SectionLabel } from '../components/ui'
 
@@ -6,6 +7,7 @@ import { Card, Empty, SectionLabel } from '../components/ui'
 export const Updates = () => {
   const { t, language, data, news } = useKanti()
   const snapshot = data.snapshot
+  const footer = kontoFooter(snapshot?.konto || [], snapshot?.kontoSaldo)
   const messages = [...(snapshot?.messages || [])].sort((left, right) => (right.at || '').localeCompare(left.at || ''))
   return (
     <div className="view view-updates">
@@ -40,6 +42,9 @@ export const Updates = () => {
                   <tbody>{snapshot.konto.map((line, index) => (
                     <tr key={`${line.date}-${index}`}><td className="tabular">{dateLabel(line.date, language)}</td><td>{line.label}</td><td className="number tabular">{line.amount}</td><td className="number tabular">{line.balance}</td></tr>
                   ))}</tbody>
+                  {footer ? (
+                    <tfoot><tr className="konto-total"><th colSpan={3} scope="row">{footer.kind === 'calculated' ? t.accountBalanceCalculated : t.accountBalance}</th><td className="number tabular">{footer.amount}</td></tr></tfoot>
+                  ) : null}
                 </table>
               </Card>
             </>

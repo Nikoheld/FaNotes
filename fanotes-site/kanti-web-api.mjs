@@ -38,7 +38,7 @@ export const PAIRING_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u
 const HASH_PATTERN = /^[a-f0-9]{64}$/u
 const CONNECTION_ID = /^[a-f0-9]{12}$/u
-const EMPTY_SNAPSHOT = Object.freeze({ revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], startMessages: [] })
+const EMPTY_SNAPSHOT = Object.freeze({ revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], kontoSaldo: '', startMessages: [] })
 
 const sha256 = (value) => createHash('sha256').update(String(value)).digest('hex')
 const webError = (status, message) => {
@@ -696,6 +696,12 @@ export const createKantiWebApi = (options = {}) => {
     }
     let name = ''
     try { name = decodeURIComponent(rawName) } catch { fail(404, 'Diesen Stundenplan gibt es nicht.') }
+    if (kind === 'class' && !name.endsWith('.png')) {
+      const week = CLASS_CODE.test(name) ? await store.classWeek(name) : null
+      if (!week) fail(404, 'Diesen Stundenplan gibt es nicht.')
+      send(response, 200, week)
+      return
+    }
     if (kind === 'class') {
       const code = name.endsWith('.png') ? name.slice(0, -4) : ''
       const png = CLASS_CODE.test(code) ? await store.classPng(code) : null

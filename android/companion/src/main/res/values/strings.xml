@@ -63,7 +63,9 @@
     <string name="average">Average</string>
     <string name="back">Back</string>
     <string name="balance">Balance %1$s</string>
-    <string name="bring_your_timetable_and_school_records_into_kan">Bring your timetable and school records into Kanti+. School access stays read-only.</string>
+    <string name="account_balance">Balance</string>
+    <string name="account_balance_calculated">Balance (calculated)</string>
+    <string name="bring_your_timetable_and_school_records_into_kan">Bring your timetable and school records into Kanti+.</string>
     <string name="bucket_count">%1$s · %2$d</string>
     <string name="cached_school_data">Cached school data</string>
     <string name="calendar">Calendar</string>
@@ -575,7 +577,7 @@
     <string name="school_address">School address</string>
     <string name="school_announcements_messages_and_dates_will_app">School announcements, messages and dates will appear here.</string>
     <string name="school_assignments">School assignments</string>
-    <string name="school_assignments_are_read_only_add_one_to_your">School assignments are read-only. Add one to your tasks to track your own progress.</string>
+    <string name="add_school_assignment_to_your_tasks">Add a school assignment to your tasks to track your own progress.</string>
     <string name="school_connection">School connection</string>
     <string name="school_connection_needs_attention">School connection needs attention</string>
     <string name="school_data_cached_on_this_device">School data cached on this device</string>
@@ -598,7 +600,6 @@
     <string name="schulnetz">Schulnetz</string>
     <string name="schulnetz_connection">Schulnetz connection</string>
     <string name="schulnetz_kind">Schulnetz · %1$s</string>
-    <string name="schulnetz_read_only">Schulnetz · read-only</string>
     <string name="search">Search</string>
     <string name="search_all_notes">Search all notes</string>
     <string name="search_by_title_note_text_or_an_existing_handwri">Search by title, note text, or an existing handwriting transcript.</string>
@@ -975,7 +976,7 @@
     </plurals>
     <string name="connected_last_updated">Connected · last updated %1$s</string>
     <string name="cached_last_updated">Saved on this device · last updated %1$s</string>
-    <string name="read_only_last_updated">Read-only from Schulnetz · last updated %1$s</string>
+    <string name="school_last_updated">Last updated %1$s</string>
     <string name="adjusted_short">adjusted</string>
     <string name="new_mark_hidden">New mark hidden</string>
     <string name="subject_options">Subject options</string>
@@ -1067,7 +1068,6 @@
     <string name="fanotes_account_deleted">Account and server data deleted.</string>
     <string name="could_not_delete_account">The account could not be deleted.</string>
     <string name="connect_tam">Connect TAM intranet</string>
-    <string name="tam_read_only">TAM intranet · read-only</string>
     <string name="tam_connected">TAM intranet connected.</string>
     <string name="school_connections">School connections</string>
     <string name="add_connection">Add a connection</string>

@@ -63,7 +63,9 @@
     <string name="average">Schnitt</string>
     <string name="back">Zurück</string>
     <string name="balance">Saldo %1$s</string>
-    <string name="bring_your_timetable_and_school_records_into_kan">Hol Stundenplan und Schuldaten in Kanti+. Der Schulzugriff bleibt nur lesend.</string>
+    <string name="account_balance">Kontostand</string>
+    <string name="account_balance_calculated">Kontostand (berechnet)</string>
+    <string name="bring_your_timetable_and_school_records_into_kan">Hol Stundenplan und Schuldaten in Kanti+.</string>
     <string name="bucket_count">%1$s · %2$d</string>
     <string name="cached_school_data">Gespeicherte Schuldaten</string>
     <string name="calendar">Kalender</string>
@@ -575,7 +577,7 @@
     <string name="school_address">Schuladresse</string>
     <string name="school_announcements_messages_and_dates_will_app">Schulankündigungen, Mitteilungen und Termine erscheinen hier.</string>
     <string name="school_assignments">Schulaufträge</string>
-    <string name="school_assignments_are_read_only_add_one_to_your">Schulaufträge sind nur lesbar. Nimm einen in deine Aufgaben auf, um deinen Fortschritt zu verfolgen.</string>
+    <string name="add_school_assignment_to_your_tasks">Nimm einen Schulauftrag in deine Aufgaben auf, um deinen Fortschritt zu verfolgen.</string>
     <string name="school_connection">Schulverbindung</string>
     <string name="school_connection_needs_attention">Die Schulverbindung braucht Aufmerksamkeit</string>
     <string name="school_data_cached_on_this_device">Schuldaten auf diesem Gerät gespeichert</string>
@@ -598,7 +600,6 @@
     <string name="schulnetz">Schulnetz</string>
     <string name="schulnetz_connection">Schulnetz-Verbindung</string>
     <string name="schulnetz_kind">Schulnetz · %1$s</string>
-    <string name="schulnetz_read_only">Schulnetz · nur lesen</string>
     <string name="search">Suche</string>
     <string name="search_all_notes">Alle Notizen durchsuchen</string>
     <string name="search_by_title_note_text_or_an_existing_handwri">Nach Titel, Notiztext oder einem vorhandenen Handschrift-Transkript suchen.</string>
@@ -975,7 +976,7 @@
     </plurals>
     <string name="connected_last_updated">Verbunden · Stand %1$s</string>
     <string name="cached_last_updated">Auf diesem Gerät · Stand %1$s</string>
-    <string name="read_only_last_updated">Aus Schulnetz, nur lesen · Stand %1$s</string>
+    <string name="school_last_updated">Stand %1$s</string>
     <string name="adjusted_short">angepasst</string>
     <string name="new_mark_hidden">Neue Note verdeckt</string>
     <string name="subject_options">Fachoptionen</string>
@@ -1067,7 +1068,6 @@
     <string name="fanotes_account_deleted">Konto und Serverdaten wurden gelöscht.</string>
     <string name="could_not_delete_account">Das Konto konnte nicht gelöscht werden.</string>
     <string name="connect_tam">TAM-Intranet verbinden</string>
-    <string name="tam_read_only">TAM-Intranet · nur lesen</string>
     <string name="tam_connected">TAM-Intranet verbunden.</string>
     <string name="school_connections">Schulverbindungen</string>
     <string name="add_connection">Verbindung hinzufügen</string>

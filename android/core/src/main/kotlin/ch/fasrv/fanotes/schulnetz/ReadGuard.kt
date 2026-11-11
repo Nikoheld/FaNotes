@@ -153,6 +153,7 @@ fun keepStoredRead(
     var absences = guarded.absences
     var startMessages = next.startMessages
     var konto = next.konto
+    var kontoSaldo = next.kontoSaldo
     var weekFetched = next.weekFetched
     var weekRead = next.weekRead
     var weekSpanStart = next.weekSpanStart
@@ -163,6 +164,7 @@ fun keepStoredRead(
         if (absences.isEmpty()) absences = prior.absences
         if (startMessages.isEmpty()) startMessages = prior.startMessages
         if (konto.isEmpty()) konto = prior.konto
+        if (kontoSaldo.isBlank()) kontoSaldo = prior.kontoSaldo
         if (events.isEmpty()) events = prior.events
         else if (events.none { it.isLesson() }) events = prior.events.filter { it.isLesson() } + events
         if (weekFetched.isEmpty()) weekFetched = prior.weekFetched
@@ -189,6 +191,7 @@ fun keepStoredRead(
         absences = absences,
         startMessages = startMessages,
         konto = konto,
+        kontoSaldo = kontoSaldo,
         weekFetched = weekFetched,
         weekRead = weekRead,
         weekSpanStart = weekSpanStart,

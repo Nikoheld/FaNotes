@@ -11,6 +11,8 @@ import { notifyAccountDeleted, setAccountDeletedHook } from './sync-api.mjs'
 import { connectionRouteKey, fcmDataMessage, fcmDropToken, fcmPriorityForChanges, isValidFcmToken, serviceAccountJwt } from './fcm.mjs'
 import {
   diffSnapshots as diffSnapshotsAt,
+  parseKontoauszug,
+  parseKontoSaldo,
   changeIsOver,
   weekMondayKey,
   addDays,
@@ -223,6 +225,30 @@ test('parser reads the mobile grade shape and the Kontoauszug table', () => {
   assert.equal(snapshot.grades[0].mark, 5.5)
   assert.equal(snapshot.konto[0].label, 'Mittagessen')
   assert.deepEqual(snapshot.startMessages, ['Elternabend am Freitag'])
+})
+
+const KONTO_UNCLOSED = `<h3>Test Klassenkasse</h3> <br/> <table border=0> <tr><td width=100>Name: <td>Muster <tr><td>Klasse: <td>1a </table> <br/><br/>
+<table border=0 cellpadding=4> <tr bgcolor="#eeeeee"> <td width=100><b>Datum</b> <td width=250><b>Text</b> <td width=100 align=right><b>Betrag</b> <td width=100 align=right><b>Saldo</b>
+<tr bgcolor="#d0d0d0"> <td>12.08.2026 <td>Some text <td align=right> <span class="redft"> -12.50 CHF </span> <td align=right> <span class="greenft"> 87.50 CHF </span>
+<tr bgcolor="#eeeeee"> <td>20.08.2026 <td>Other text <td align=right> <span class="greenft"> 100.00 CHF </span> <td align=right> <span class="greenft"> 187.50 CHF </span>
+<tr bgcolor="#eeeeee"> <td colspan=3><b>Saldo</b><td align=right><b>5.40 CHF</b> </table>
+<p> <br>Saldo der Klassenkasse <a href="javascript:decision('x')">bestätigen</a> </div>`
+
+test('Kontoauszug parser tolerates unclosed tags and reads the Saldo row', () => {
+  const rows = parseKontoauszug(KONTO_UNCLOSED)
+  assert.deepEqual(rows, [
+    { date: '12.08.2026', label: 'Some text', amount: '-12.50 CHF', balance: '87.50 CHF' },
+    { date: '20.08.2026', label: 'Other text', amount: '100.00 CHF', balance: '187.50 CHF' },
+  ])
+  assert.equal(parseKontoSaldo(KONTO_UNCLOSED), '5.40 CHF')
+  assert.equal(parseKontoSaldo('<table><tr><td>01.11.2026</td><td>x</td><td>1.00</td></tr></table>'), '')
+  assert.equal(parseKontoSaldo(''), '')
+  const closed = '<table><tr><td>01.11.2026</td><td>Essen</td><td>-1.00</td><td>9.00</td></tr><tr><td colspan="3">Saldo</td><td>9.00 CHF</td></tr></table>'
+  assert.equal(parseKontoauszug(closed).length, 1)
+  assert.equal(parseKontoSaldo(closed), '9.00 CHF')
+  const snapshot = parseRawSnapshot({ kontoHtml: KONTO_UNCLOSED })
+  assert.equal(snapshot.kontoSaldo, '5.40 CHF')
+  assert.equal(snapshot.konto.length, 2)
 })
 
 test('stored refresh tokens are encrypted and only the poller refreshes', async () => {

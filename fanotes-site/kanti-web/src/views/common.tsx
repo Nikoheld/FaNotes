@@ -1,6 +1,6 @@
 // Small pieces several views share.
 import { useEffect, useState } from 'react'
-import { zurichNow, type Clock, type Entry } from '../lib/agenda'
+import { zurichNow, type Clock, type Entry as AgendaEntry } from '../lib/agenda'
 import { dateLabel, markLabel, type Language, type Strings } from '../lib/i18n'
 import { markTone } from '../lib/grades'
 import { Icon, RoomPill, Tag } from '../components/ui'
@@ -30,6 +30,9 @@ export const ago = (iso: string, t: Strings) => {
   if (!Number.isFinite(at)) return t.never
   return t.minutesAgo(Math.max(0, Math.round((Date.now() - at) / 60_000)))
 }
+
+/** What the views draw of an entry; entries without an agenda event (the school's PDF) fit too. */
+type Entry = Omit<AgendaEntry, 'event'>
 
 export const kindLabel = (entry: Entry, t: Strings) => (entry.kind === 'exam' ? t.exam : entry.kind === 'appointment' ? t.appointment : t.lesson)
 

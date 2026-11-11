@@ -78,6 +78,8 @@ export interface Snapshot {
   messages: SchoolMessage[]
   vacations: SchoolVacation[]
   konto: KontoLine[]
+  /** Final Saldo row of the statement as Schulnetz prints it; absent or empty when missing. */
+  kontoSaldo?: string
   startMessages: string[]
   readErrors?: string[]
   weekFetched?: Record<string, string>

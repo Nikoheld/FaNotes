@@ -174,9 +174,10 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
     messages: [{ id: `${DEMO_ID_PREFIX}message-1`, title: 'Willkommen im Demo-Modus', body: 'Alle Angaben in diesem Modus sind erfunden. Kanti+ liest im Demo-Modus nichts aus Schulnetz und sendet nichts an einen Server.', at: stamp }],
     vacations: [],
     konto: [
-      { date: addDays(today, -40), label: 'Kopierkosten (Demo)', amount: '-12.50', balance: '37.50' },
       { date: addDays(today, -60), label: 'Einzahlung (Demo)', amount: '50.00', balance: '50.00' },
+      { date: addDays(today, -40), label: 'Kopierkosten (Demo)', amount: '-12.50', balance: '37.50' },
     ],
+    kontoSaldo: '37.50 CHF',
     startMessages: [],
     weekFetched: read,
     weekRead: read,

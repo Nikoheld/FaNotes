@@ -1,41 +1,52 @@
 import { useEffect, useMemo, useState } from 'react'
+import { weekDays, weekMonday } from '../lib/agenda'
 import { dateLabel } from '../lib/i18n'
-import { cellEntries, cellLabel, roomStarts, type RoomWeek, type TimetableSummary } from '../lib/timetables'
+import { classGridEntries, roomGridEntries, type ClassFootnote, type ClassWeek, type RoomWeek, type TimetableSummary } from '../lib/timetables'
 import { useKanti } from '../state'
 import { Banner, Button, Card, Empty } from '../components/ui'
+import { WeekGrid, type GridEntry } from '../components/WeekGrid'
+import { EntryDetails, useClock } from './common'
 
 type Segment = 'classes' | 'rooms'
 
-const RoomTable = ({ week }: { week: RoomWeek }) => {
-  const { t } = useKanti()
-  const starts = useMemo(() => roomStarts(week.entries), [week])
-  if (!starts.length) return <Empty icon="info">{t.roomEmpty}</Empty>
+/** The generic week of a class or room in the same grid as the own timetable, with a details panel. */
+const OtherWeek = ({ entries, footnotes = [], empty }: { entries: GridEntry[]; footnotes?: ClassFootnote[]; empty: string }) => {
+  const { t, language } = useKanti()
+  const clock = useClock()
+  const [selectedKey, setSelectedKey] = useState('')
+  const monday = weekMonday(clock.today)
+  const days = weekDays(monday)
+  const selected = entries.find((entry) => entry.key === selectedKey) || null
   return (
-    <div className="room-week-scroll">
-      <table className="room-week">
-        <thead>
-          <tr><th scope="col">{t.time}</th>{[0, 1, 2, 3, 4].map((day) => <th scope="col" key={day}>{t.weekdays[day]}</th>)}</tr>
-        </thead>
-        <tbody>
-          {starts.map((start) => (
-            <tr key={start}>
-              <th scope="row" className="tabular">{start}</th>
-              {[1, 2, 3, 4, 5].map((day) => (
-                <td key={day}>
-                  {cellLabel(cellEntries(week.entries, day, start)).map((item) => (
-                    <div key={item.text + item.classes} className="room-cell"><strong>{item.text}</strong><small className="muted">{item.classes}</small></div>
-                  ))}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <div className="columns columns-timetable">
+        <WeekGrid
+          days={days}
+          today={clock.today}
+          entries={entries}
+          selectedKey={selectedKey}
+          onSelect={setSelectedKey}
+          emptyLabel={<Empty icon="info">{empty}</Empty>}
+        />
+        <aside className="column column-side details-panel">
+          <Card>{selected ? <EntryDetails entry={selected} t={t} language={language} /> : <Empty icon="info">{t.pickLesson}</Empty>}</Card>
+        </aside>
+      </div>
+      {footnotes.length ? (
+        <Card>
+          <h3>{t.footnotesTitle}</h3>
+          <ul className="footnote-list">
+            {footnotes.map((note, index) => (
+              <li key={index}><strong>{note.nr}</strong> {[note.subject, note.teacher, note.room].filter(Boolean).join(' · ')}{note.classes.length ? <small className="muted"> {note.classes.join(', ')}{note.classesTruncated ? ' …' : ''}</small> : null}</li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
+    </>
   )
 }
 
-/** The school's timetable for other classes (as a picture of the PDF page) and for rooms (as a week table). */
+/** The school's timetable for other classes and for rooms, as week grids like the own timetable. */
 export const OtherTimetables = ({ summary }: { summary: TimetableSummary }) => {
   const kanti = useKanti()
   const { t, api, active, language } = kanti
@@ -45,6 +56,8 @@ export const OtherTimetables = ({ summary }: { summary: TimetableSummary }) => {
   const [code, setCode] = useState(classes[0]?.code || '')
   const [room, setRoom] = useState(rooms[0] || '')
   const [week, setWeek] = useState<RoomWeek | null>(null)
+  const [classWeek, setClassWeek] = useState<ClassWeek | null>(null)
+  const monday = weekMonday(useClock().today)
   const [failed, setFailed] = useState(false)
   const connectionId = active?.id || ''
 
@@ -56,6 +69,16 @@ export const OtherTimetables = ({ summary }: { summary: TimetableSummary }) => {
     return () => { live = false }
   }, [api, connectionId, room, segment])
 
+  useEffect(() => {
+    if (segment !== 'classes' || !code || !connectionId) return undefined
+    let live = true
+    setFailed(false)
+    api.timetableClass(connectionId, code).then((value) => { if (live) setClassWeek(value) }).catch(() => { if (live) { setClassWeek(null); setFailed(true) } })
+    return () => { live = false }
+  }, [api, connectionId, code, segment])
+
+  const classEntries = useMemo(() => (classWeek && classWeek.class === code ? classGridEntries(classWeek, monday) : []), [classWeek, code, monday])
+  const roomEntries = useMemo(() => (week && week.room === room ? roomGridEntries(week, monday) : []), [week, room, monday])
   const teacher = classes.find((item) => item.code === code)?.teacher || ''
   return (
     <div className="view view-other-timetables">
@@ -84,7 +107,7 @@ export const OtherTimetables = ({ summary }: { summary: TimetableSummary }) => {
               </label>
               {teacher ? <span className="muted">{t.classTeacher}: {teacher}</span> : null}
             </div>
-            {code && connectionId ? <img className="class-timetable-image" src={api.timetableClassImage(connectionId, code)} alt={t.timetableImageAlt(code)} /> : null}
+            {failed ? <Banner tone="warning" icon="warning">{t.timetableLoadFailed}</Banner> : null}
           </>
         ) : (
           <>
@@ -96,11 +119,14 @@ export const OtherTimetables = ({ summary }: { summary: TimetableSummary }) => {
                 </select>
               </label>
             </div>
-            {failed ? <Banner tone="warning" icon="warning">{t.timetableLoadFailed}</Banner> : week && week.room === room ? <RoomTable week={week} /> : <div className="loading"><span className="spinner" /></div>}
+            {failed ? <Banner tone="warning" icon="warning">{t.timetableLoadFailed}</Banner> : null}
           </>
         )}
         {summary.uploadedAt ? <p className="muted small">{t.timetableSource(summary.semester || '', dateLabel(summary.uploadedAt.slice(0, 10), language))}</p> : null}
       </Card>
+      {failed ? null : segment === 'classes'
+        ? (classWeek && classWeek.class === code ? <OtherWeek key={`c:${code}`} entries={classEntries} footnotes={classWeek.footnotes} empty={t.weekFree} /> : <div className="loading"><span className="spinner" /></div>)
+        : (week && week.room === room ? <OtherWeek key={`r:${room}`} entries={roomEntries} empty={t.roomEmpty} /> : <div className="loading"><span className="spinner" /></div>)}
     </div>
   )
 }

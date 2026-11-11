@@ -442,6 +442,7 @@ class CompanionGraph(private val context: Context) {
     suspend fun schoolAuth(): SchoolAuth = current().schoolAuth()
     /** Other classes and rooms of the Alte Kanti; empty (not available) for any other connection. */
     suspend fun classTimetables(): ch.fasrv.fanotes.schulnetz.ClassTimetableSummary = withContext(Dispatchers.IO) { client.classTimetables(schoolAuth()) }
+    suspend fun classTimetable(code: String): ch.fasrv.fanotes.schulnetz.ClassWeek = withContext(Dispatchers.IO) { client.classTimetable(schoolAuth(), code) }
     suspend fun roomTimetable(room: String): ch.fasrv.fanotes.schulnetz.RoomWeek = withContext(Dispatchers.IO) { client.roomTimetable(schoolAuth(), room) }
     /** The class page PDF in the cache dir; a file from the same upload is reused. */
     suspend fun classTimetableFile(code: String, uploadedAt: String): java.io.File = withContext(Dispatchers.IO) {
@@ -1828,6 +1829,7 @@ class CompanionGraph(private val context: Context) {
             messages = next.messages.ifEmpty { previous.messages },
             vacations = next.vacations.ifEmpty { previous.vacations },
             konto = next.konto.ifEmpty { previous.konto },
+            kontoSaldo = next.kontoSaldo.ifBlank { previous.kontoSaldo },
             startMessages = next.startMessages.ifEmpty { previous.startMessages },
             weekFetched = next.weekFetched.ifEmpty { previous.weekFetched },
             weekRead = next.weekRead.ifEmpty { previous.weekRead },

@@ -328,6 +328,8 @@ td { padding: 9px 10px; border-bottom: 1px solid var(--hairline); vertical-align
 tr:last-child td { border-bottom: none; }
 .number { text-align: right; }
 .marks, .table-card { padding: 6px 8px; overflow-x: auto; }
+.konto-total th { text-align: left; font-weight: 600; border-top: 1px solid var(--line, currentColor); padding-top: 10px; }
+.konto-total td { font-weight: 600; border-top: 1px solid var(--line, currentColor); padding-top: 10px; }
 .hidden-row td { background: color-mix(in srgb, var(--sunken) 50%, transparent); }
 .wish-inputs { display: flex; flex-wrap: wrap; gap: 16px; }
 .wish-inputs label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
@@ -467,12 +469,8 @@ tr:last-child td { border-bottom: none; }
 .segments { display: inline-flex; border: 1px solid var(--hairline); border-radius: var(--radius-m, 10px); overflow: hidden; }
 .segments button { background: transparent; border: 0; color: var(--text); padding: 8px 16px; cursor: pointer; font: inherit; }
 .segments button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.class-timetable-image { display: block; max-width: 100%; height: auto; margin-top: 12px; border: 1px solid var(--hairline); border-radius: 8px; background: #fff; }
-.room-week-scroll { overflow-x: auto; margin-top: 12px; }
-.room-week { border-collapse: collapse; width: 100%; min-width: 560px; }
-.room-week th, .room-week td { border: 1px solid var(--hairline); padding: 6px 8px; text-align: left; vertical-align: top; font-size: 0.9rem; }
-.room-week thead th { background: var(--sunken); }
-.room-cell { display: flex; flex-direction: column; margin-bottom: 4px; }
+.view-other-timetables > .loading { margin-top: 16px; }
+.footnote-list { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
 .admin-page { max-width: 640px; margin: 0 auto; padding: 24px 16px; display: grid; gap: 16px; }
 .admin-head { display: flex; align-items: center; gap: 12px; }
 .admin-head h1 { font-size: 1.3rem; margin: 0; }

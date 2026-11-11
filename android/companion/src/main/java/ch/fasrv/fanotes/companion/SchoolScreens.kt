@@ -332,7 +332,7 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
     RefreshableScreenList(model.syncing, { model.pullRefresh() }) {
         item(key = "head") {
             val stamp = updatedLabel(model.snapshot.fetchedAt)
-            StatusLine(if (online) t(R.string.read_only_last_updated, stamp) else t(R.string.offline_last_updated, stamp), if (online) StateTone.Neutral else StateTone.Offline, Modifier.padding(bottom = 12.dp))
+            StatusLine(if (online) t(R.string.school_last_updated, stamp) else t(R.string.offline_last_updated, stamp), if (online) StateTone.Neutral else StateTone.Offline, Modifier.padding(bottom = 12.dp))
             if (page != Page.Statement) SearchField(query, { query = it }, t(R.string.search_page, page.uiTitle()))
         }
         when (page) {
@@ -457,6 +457,14 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
                                 Text(line.amount, style = TimeStyle, maxLines = 1)
                                 if (line.balance.isNotBlank()) Text(t(R.string.balance, line.balance), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                        }
+                    }
+                }
+                kontoFooter(model.snapshot.konto, model.snapshot.kontoSaldo)?.let { footer ->
+                    item(key = "konto-footer") {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text(t(if (footer.kind == KontoFooterKind.Calculated) R.string.account_balance_calculated else R.string.account_balance), style = MaterialTheme.typography.titleSmall)
+                            Text(footer.amount, style = TimeStyle, maxLines = 1)
                         }
                     }
                 }

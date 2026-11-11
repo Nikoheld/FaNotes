@@ -124,6 +124,7 @@ export const parseRawSnapshot = (raw, fetchedAt = '') => ({
   messages: parseMessages(raw.messages),
   vacations: safeList(raw.vacations).map(parseVacation).filter(Boolean),
   konto: parseKontoauszug(raw.kontoHtml || ''),
+  kontoSaldo: parseKontoSaldo(raw.kontoHtml || ''),
   startMessages: parseStartMessages(raw.startHtml || ''),
 })
 
@@ -274,16 +275,39 @@ const htmlText = (raw) => String(raw)
   .replace(/\s+/g, ' ')
   .trim()
 
+/**
+ * Schulnetz page 21411 leaves <tr>/<td> unclosed, so rows are split on the opening tags.
+ * Text after the closing </table> (for example the "confirm balance" action link) is never read.
+ */
+const kontoRows = (html) => {
+  const cleaned = String(html || '').replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+  const rows = []
+  for (const chunk of cleaned.split(/<tr\b/i).slice(1)) {
+    const body = chunk.split(/<\/table\b/i)[0].replace(/^[^>]*>/, '')
+    const cells = body.split(/<t[dh]\b[^>]*>/i).slice(1).map(htmlText).filter(Boolean)
+    if (cells.length) rows.push(cells)
+  }
+  return rows
+}
+
 export const parseKontoauszug = (html) => {
   if (!html) return []
-  const cleaned = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
   const lines = []
-  for (const row of cleaned.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
-    const cells = [...row[1].matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cell) => htmlText(cell[1])).filter(Boolean)
+  for (const cells of kontoRows(html)) {
     if (cells.length < 3 || !/\d{1,2}\.\d{1,2}\.\d{2,4}/.test(cells[0])) continue
     lines.push({ date: cells[0], label: cells[1], amount: cells[2], balance: cells[3] || '' })
   }
   return lines
+}
+
+/** Final "Saldo" row of the statement (for example "5.40 CHF"), or ''. */
+export const parseKontoSaldo = (html) => {
+  if (!html) return ''
+  let saldo = ''
+  for (const cells of kontoRows(html)) {
+    if (cells.length >= 2 && /^saldo:?$/i.test(cells[0])) saldo = cells[cells.length - 1]
+  }
+  return saldo
 }
 
 export const parseStartMessages = (html) => {

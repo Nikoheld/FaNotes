@@ -22,7 +22,8 @@ data class RoomLesson(val day: Int, val start: String, val end: String, val scho
 
 data class RoomWeek(val room: String, val lessons: List<RoomLesson>)
 
-private val CLASS_CODE = Regex("^G\\d{2}[A-Z]{1,2}$")
+// Same as the server (class-timetables.mjs): G, I and W classes (e.g. G26A, I24B, W23C).
+private val CLASS_CODE = Regex("^[A-Z]\\d{2}[A-Z]{1,3}$")
 private val ROOM_NAME = Regex("^[A-Za-z0-9_.\\- ]{1,24}$")
 
 fun isClassCode(value: String): Boolean = CLASS_CODE.matches(value)
@@ -73,6 +74,40 @@ fun roomWeekByDay(week: RoomWeek): List<Pair<Int, List<RoomSlot>>> = (1..5).map 
         .sortedWith(compareBy({ it.start }, { it.subject }))
     day to slots
 }
+
+/** One lesson of a class week: [day] 1 = Monday ... 5 = Friday, [start]/[end] as HH:MM. */
+data class ClassLesson(val day: Int, val start: String, val end: String, val subject: String, val teacher: String, val room: String)
+
+data class ClassWeek(val code: String, val teacher: String, val semester: String, val lessons: List<ClassLesson>)
+
+private val CLOCK = Regex("^\\d{2}:\\d{2}$")
+
+/** The server's class week; null when the body is not an object. Missing fields become empty, bad entries are dropped. */
+fun parseClassWeek(json: String): ClassWeek? {
+    val obj = runCatching { parseJson(json) as? JsonValue.Obj }.getOrNull() ?: return null
+    val lessons = obj.array("entries")?.items.orEmpty().mapNotNull { item ->
+        val entry = item as? JsonValue.Obj ?: return@mapNotNull null
+        val day = entry.double("day")?.toInt()?.takeIf { it in 1..5 } ?: return@mapNotNull null
+        val start = entry.string("start")?.takeIf { CLOCK.matches(it) } ?: return@mapNotNull null
+        ClassLesson(day, start, entry.string("end").orEmpty().takeIf { CLOCK.matches(it) }.orEmpty(), entry.string("subject").orEmpty(), entry.string("teacher").orEmpty(), entry.string("room").orEmpty())
+    }
+    return ClassWeek(obj.string("class").orEmpty(), obj.string("teacher").orEmpty(), obj.string("semester").orEmpty().take(40), lessons)
+}
+
+/**
+ * One cell of the timetable grid shared by the own timetable and the other classes and rooms.
+ * [place] is the room for a lesson of a class and the class code(s) for a lesson of a room.
+ */
+data class TimetableCell(val day: Int, val start: String, val end: String, val title: String, val teacher: String, val place: String)
+
+/** A class week as grid cells, ordered by day and start time. */
+fun classWeekCells(week: ClassWeek): List<TimetableCell> =
+    week.lessons.map { TimetableCell(it.day, it.start, it.end, it.subject, it.teacher, it.room) }
+        .sortedWith(compareBy({ it.day }, { it.start }, { it.title }))
+
+/** A room week as grid cells; the classes sharing a lesson take the place of the room. */
+fun roomWeekCells(week: RoomWeek): List<TimetableCell> =
+    roomWeekByDay(week).flatMap { (day, slots) -> slots.map { TimetableCell(day, it.start, it.end, it.subject, it.teacher, it.classes.joinToString(", ")) } }
 
 /** A file name for a cached class PDF that changes with each upload, so an old page is never shown. */
 fun classPdfCacheName(code: String, uploadedAt: String): String {
