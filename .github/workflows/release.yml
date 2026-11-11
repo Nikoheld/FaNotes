@@ -39,7 +39,10 @@ jobs:
           cache: npm
           cache-dependency-path: fanotes/package-lock.json
       - name: Install AppImage tools
-        # The runner's Azure apt mirror sometimes fails DNS for a long time: use the main archive and retry.
+        # The runner's apt mirrors sometimes fail DNS for hours. Best effort: the AppImage hardening only uses
+        # --appimage-offset/--appimage-extract, which work without FUSE, and xz is preinstalled.
+        timeout-minutes: 4
+        continue-on-error: true
         run: |
           sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/\?#http://archive.ubuntu.com/ubuntu/#g' /etc/apt/apt-mirrors.txt 2>/dev/null || true
           for attempt in 1 2 3; do
