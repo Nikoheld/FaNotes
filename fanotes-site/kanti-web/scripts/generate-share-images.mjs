@@ -11,7 +11,8 @@ const pub = join(root, 'public')
 const work = mkdtempSync(join(tmpdir(), 'kanti-og-'))
 copyFileSync(join(root, 'scripts/og-card.html'), join(work, 'card.html'))
 copyFileSync(join(pub, 'kanti-icon.svg'), join(work, 'icon.svg'))
-for (const name of ['heute', 'noten']) copyFileSync(join(pub, `about/img/${name}.webp`), join(work, `${name}.webp`))
+copyFileSync(join(pub, 'about/img/heute-desktop.webp'), join(work, 'heute.webp'))
+copyFileSync(join(pub, 'fonts/instrument-sans.woff2'), join(work, 'font.woff2'))
 const iconSvg = readFileSync(join(pub, 'kanti-icon.svg'), 'utf8')
 
 const browser = await chromium.launch()
@@ -19,6 +20,7 @@ try {
   const card = await browser.newPage({ viewport: { width: 1200, height: 630 }, deviceScaleFactor: 1 })
   await card.goto(`file://${join(work, 'card.html')}`)
   await card.waitForLoadState('load')
+  await card.evaluate(() => document.fonts.ready)
   const raw = join(work, 'og.png')
   await card.screenshot({ path: raw })
   // 8-bit palette PNG keeps the card small.

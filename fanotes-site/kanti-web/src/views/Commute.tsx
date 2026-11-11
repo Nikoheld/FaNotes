@@ -104,7 +104,7 @@ export const Commute = () => {
         <div className="columns">
           <div className="column column-main">
             {routes.length > 1 ? (
-              <div className="route-tabs" role="tablist" aria-label={t.commuteRoutes}>
+              <div className="route-tabs segments" role="tablist" aria-label={t.commuteRoutes}>
                 {routes.map((route) => (
                   <button type="button" role="tab" key={route.id} aria-selected={route.id === selected?.id} className={route.id === selected?.id ? 'active' : ''} onClick={() => choose(route.id)}>{routeLabel(route)}</button>
                 ))}

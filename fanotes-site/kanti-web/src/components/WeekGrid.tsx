@@ -1,15 +1,26 @@
 import { useMemo, type ReactNode } from 'react'
 import { clockMinutes, type Entry } from '../lib/agenda'
-import { dateLabel } from '../lib/i18n'
+import { dateLabel, type Strings } from '../lib/i18n'
 import { useKanti } from '../state'
-import { Card } from './ui'
-import { kindLabel } from '../views/common'
+import { Card, Icon } from './ui'
+import { EntryDetails, kindLabel } from '../views/common'
 
 /** What the grid draws of an entry; an agenda `Entry` fits, so do entries made from the school's PDF. */
 export type GridEntry = Omit<Entry, 'event'>
 
+/** The small label under a block: cancelled wins, then a change, a substitution or the kind of entry. */
+const flag = (entry: GridEntry, t: Strings): ReactNode => {
+  if (entry.cancelled) return <span className="block-flag flag-danger">{t.cancelled}</span>
+  if (entry.marker === 'changed' || entry.marker === 'moved' || entry.marker === 'added') {
+    return <span className={`block-flag ${entry.marker === 'added' ? 'flag-accent' : 'flag-warning'}`}>{entry.marker === 'changed' ? t.markChanged : entry.marker === 'moved' ? t.markMoved : t.markAdded}</span>
+  }
+  if (entry.substitution) return <span className="block-flag flag-warning">{t.substitution}</span>
+  if (entry.kind !== 'lesson') return <span className={`block-flag ${entry.kind === 'exam' ? 'flag-warning' : 'flag-success'}`}>{kindLabel(entry, t)}</span>
+  return null
+}
+
 const DAY_START = 7 * 60
-const DAY_END = 16 * 60
+const DAY_END = 15 * 60
 
 interface Placed { entry: GridEntry; lane: number; lanes: number }
 
@@ -58,7 +69,7 @@ export const WeekGrid = ({ days, today, nowMinutes, entries, selectedKey, onSele
   const timed = entries.filter((entry) => entry.start)
   const allDay = entries.filter((entry) => !entry.start)
 
-  // Fit the axis to the week: never narrower than 07:00–18:00, wider when an entry is outside.
+  // Fit the axis to the week: never narrower than 07:00–15:00, wider when an entry is outside.
   const bounds = useMemo(() => {
     let low = DAY_START
     let high = DAY_END
@@ -81,8 +92,9 @@ export const WeekGrid = ({ days, today, nowMinutes, entries, selectedKey, onSele
         <div className="week-head">
           <span />
           {days.map((day, dayIndex) => (
-            <span key={day} className={`week-day${day === today ? ' today' : ''}`}>
-              <strong>{t.weekdays[dayIndex]}</strong> <span className="tabular">{dateLabel(day, language, { day: 'numeric', month: 'numeric' })}</span>
+            <span key={day} className={`week-day${day === today ? ' today' : ''}`} aria-current={day === today ? 'date' : undefined}>
+              <strong>{t.weekdays[dayIndex]}</strong>
+              <span className="week-date tabular">{dateLabel(day, language, { day: 'numeric', month: 'numeric' })}</span>
             </span>
           ))}
         </div>
@@ -98,7 +110,7 @@ export const WeekGrid = ({ days, today, nowMinutes, entries, selectedKey, onSele
             ))}
           </div>
         ) : null}
-        <div className={`week-body${compact ? ' compact' : ''}`}>
+        <div className={`week-body${compact ? ' compact' : ''}`} style={{ ['--hours' as string]: String(span / 60) }}>
           <div className="axis">
             {hours.map((minutes) => <span key={minutes} className="axis-hour tabular" style={{ top: top(minutes) }}>{`${String(minutes / 60).padStart(2, '0')}:00`}</span>)}
           </div>
@@ -123,7 +135,7 @@ export const WeekGrid = ({ days, today, nowMinutes, entries, selectedKey, onSele
                     >
                       <span className="block-title">{entry.title}</span>
                       <span className="block-meta tabular">{entry.start}{entry.room ? ` · ${entry.room}` : ''}</span>
-                      {entry.cancelled ? <span className="block-flag">{t.cancelled}</span> : entry.marker === 'changed' || entry.marker === 'moved' || entry.marker === 'added' ? <span className="block-flag">{entry.marker === 'changed' ? t.markChanged : entry.marker === 'moved' ? t.markMoved : t.markAdded}</span> : entry.substitution ? <span className="block-flag">{t.substitution}</span> : entry.kind !== 'lesson' ? <span className="block-flag">{kindLabel(entry, t)}</span> : null}
+                      {flag(entry, t)}
                     </button>
                   )
                 })}
@@ -134,5 +146,23 @@ export const WeekGrid = ({ days, today, nowMinutes, entries, selectedKey, onSele
         {!timed.length && emptyLabel ? <div className="week-empty">{emptyLabel}</div> : null}
       </div>
     </Card>
+  )
+}
+
+/** The sticky card beside the grid: the picked entry in full, or a friendly hint. */
+export const DetailsPanel = ({ entry }: { entry: GridEntry | null }) => {
+  const { t, language } = useKanti()
+  return (
+    <aside className="column column-side details-panel">
+      <Card className={`detail-card${entry ? ` kind-${entry.kind}${entry.cancelled ? ' cancelled' : ''}` : ''}`}>
+        {entry ? <EntryDetails entry={entry} t={t} language={language} /> : (
+          <div className="detail-empty">
+            <span className="detail-empty-icon"><Icon name="timetable" size={22} /></span>
+            <strong>{t.details}</strong>
+            <p>{t.pickLesson}</p>
+          </div>
+        )}
+      </Card>
+    </aside>
   )
 }

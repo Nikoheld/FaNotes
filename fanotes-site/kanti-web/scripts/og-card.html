@@ -1,27 +1,30 @@
 <!doctype html>
 <html lang="de"><head><meta charset="utf-8"><title>Kanti+ share card</title>
 <style>
+  @font-face { font-family: 'Instrument Sans'; src: url('font.woff2') format('woff2'); font-weight: 400 700; font-stretch: 75% 100%; }
   * { box-sizing: border-box; margin: 0; }
   body { width: 1200px; height: 630px; overflow: hidden; position: relative; font-family: 'Instrument Sans', system-ui, 'Segoe UI', sans-serif; color: #f6f8f6;
-         background: radial-gradient(900px 500px at 15% 0%, #1f4d75 0%, #143552 60%, #0f2a42 100%); }
-  .copy { position: absolute; left: 72px; top: 92px; width: 600px; }
-  .icon { width: 120px; height: 120px; border-radius: 28px; display: block; border: 2px solid #2d5f8a; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
-  h1 { font-size: 104px; letter-spacing: -0.03em; font-weight: 700; margin-top: 36px; line-height: 1; }
-  h1 b { color: #e7b552; font-weight: 700; }
-  p { font-size: 36px; line-height: 1.25; margin-top: 24px; color: #d3dde6; }
-  .url { position: absolute; left: 72px; bottom: 56px; font-size: 28px; color: #e7b552; font-weight: 600; }
-  .phone { position: absolute; width: 300px; height: 600px; border-radius: 34px; border: 8px solid #0b1d2e; overflow: hidden; background: #f4f5f2; box-shadow: 0 24px 60px rgba(0,0,0,.45); }
-  .phone img { width: 100%; display: block; }
-  .p1 { left: 700px; top: 90px; }
-  .p2 { left: 950px; top: 150px; }
+         background: radial-gradient(760px 520px at 100% 100%, #2a6f97 0%, rgba(42,111,151,0) 70%), linear-gradient(155deg, #143552 0%, #123049 55%, #1a4566 100%); }
+  .ring { position: absolute; right: -170px; top: -190px; width: 520px; height: 520px; border-radius: 50%; border: 1px solid rgba(255,255,255,.1); box-shadow: inset 0 0 0 60px rgba(255,255,255,.025); }
+  .copy { position: absolute; left: 72px; top: 76px; width: 520px; }
+  .brand { display: flex; align-items: center; gap: 16px; font-size: 34px; font-weight: 700; letter-spacing: -0.025em; }
+  .icon { width: 64px; height: 64px; border-radius: 24%; display: block; box-shadow: 0 0 0 1px rgba(255,255,255,.18), 0 12px 28px rgba(0,0,0,.35); }
+  h1 { font-size: 68px; letter-spacing: -0.038em; font-weight: 700; margin-top: 70px; line-height: 1.02; }
+  h1::after { content: ''; display: block; width: 64px; height: 6px; margin-top: 26px; border-radius: 6px; background: #e7b552; }
+  p { font-size: 29px; line-height: 1.3; margin-top: 26px; color: #d3dde6; }
+  .url { position: absolute; left: 72px; bottom: 52px; font-size: 26px; color: #e7b552; font-weight: 600; letter-spacing: -0.01em; }
+  .browser { position: absolute; left: 640px; top: 112px; width: 660px; border-radius: 16px; overflow: hidden; background: #fff; box-shadow: 0 40px 80px -20px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.14); }
+  .bar { display: flex; gap: 7px; align-items: center; height: 34px; padding: 0 14px; background: #e9ece8; }
+  .bar i { width: 10px; height: 10px; border-radius: 50%; background: #b9c0c6; }
+  .browser img { display: block; width: 100%; }
 </style></head>
 <body>
+  <div class="ring"></div>
   <div class="copy">
-    <img class="icon" src="icon.svg" alt="">
-    <h1>Kanti<b>+</b></h1>
+    <div class="brand"><img class="icon" src="icon.svg" alt="">Kanti+</div>
+    <h1>Dein Schulalltag auf einen Blick</h1>
     <p>Stundenplan, Noten, Absenzen und Pendeln für Kantischüler</p>
   </div>
   <div class="url">schulnetz.fasrv.ch</div>
-  <div class="phone p1"><img src="heute.webp" alt=""></div>
-  <div class="phone p2"><img src="noten.webp" alt=""></div>
+  <div class="browser"><div class="bar"><i></i><i></i><i></i></div><img src="heute.webp" alt=""></div>
 </body></html>

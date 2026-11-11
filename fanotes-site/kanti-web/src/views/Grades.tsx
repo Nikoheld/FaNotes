@@ -4,6 +4,8 @@ import { dateLabel, markLabel } from '../lib/i18n'
 import { useKanti } from '../state'
 import { Banner, Button, Card, Dialog, Empty, Icon, SectionLabel, Tag } from '../components/ui'
 import { MarkBadge } from './common'
+import { MarkTrend, ScaleBar } from '../components/charts'
+import { PASS_MARK } from '../lib/charts'
 
 export const Grades = () => {
   const kanti = useKanti()
@@ -15,6 +17,9 @@ export const Grades = () => {
   const selected = courses.find((course) => course.key === requested) || null
   const hidden = courses.reduce((sum, course) => sum + course.hidden, 0)
   const [revealing, setRevealing] = useState<CourseMark | null>(null)
+  const averaged = courses.filter((course) => course.average != null)
+  const below = averaged.filter((course) => (course.average as number) < PASS_MARK).length
+  const best = averaged.reduce<CourseSummary | null>((top, course) => (top == null || (course.average as number) > (top.average as number) ? course : top), null)
 
   const open = (course: CourseSummary | null) => kanti.navigate('grades', course ? { fach: course.key } : {}, true)
 
@@ -35,21 +40,29 @@ export const Grades = () => {
 
   return (
     <div className="view view-grades">
-      <div className="stat-row">
-        <Card className="stat"><span className="stat-label">{t.pluspunkte}</span><span className={`stat-value tabular ${totals.total >= 0 ? 'positive' : 'negative'}`}>{plusLabel(totals.total)}</span><small className="tabular">+{totals.plus} / −{Math.abs(totals.minus)}</small></Card>
-        <Card className="stat"><span className="stat-label">{t.overall}</span><span className="stat-value tabular">{markLabel(overall)}</span><small>{t.subjects(courses.length)}</small></Card>
-        {hidden ? <Card className="stat stat-hidden"><span className="stat-label">{t.hiddenGrade}</span><span className="stat-value tabular"><Icon name="eyeOff" size={26} /> {hidden}</span><small>{t.hiddenCount(hidden)}</small></Card> : null}
+      <div className="metric-row">
+        <Card className="metric"><span className="metric-label">{t.pluspunkte}</span><span className={`metric-value tabular ${totals.total >= 0 ? 'positive' : 'negative'}`}>{plusLabel(totals.total)}</span><small className="metric-sub tabular">+{totals.plus} / −{Math.abs(totals.minus)}</small></Card>
+        <Card className="metric"><span className="metric-label">{t.overall}</span><span className="metric-value tabular">{markLabel(overall)}</span><small className="metric-sub">{t.subjects(courses.length)}</small></Card>
+        <Card className="metric"><span className="metric-label">{t.statBelowFour}</span><span className={`metric-value tabular ${below ? 'negative' : 'positive'}`}>{below}</span><small className="metric-sub">{t.statBelowFourSub(averaged.length)}</small></Card>
+        <Card className="metric"><span className="metric-label">{t.statBestSubject}</span><span className="metric-value tabular">{best ? markLabel(best.average) : '–'}</span><small className="metric-sub" title={best?.label}>{best?.label || ''}</small></Card>
+        {hidden ? <Card className="metric stat-hidden"><span className="metric-label">{t.hiddenGrade}</span><span className="metric-value tabular"><Icon name="eyeOff" size={26} /> {hidden}</span><small className="metric-sub">{t.hiddenCount(hidden)}</small></Card> : null}
       </div>
       <div className="columns columns-grades">
-        <Card className="course-list" role="listbox" aria-label={t.grades}>
-          {courses.map((course) => (
-            <button type="button" role="option" aria-selected={course.key === selected?.key} key={course.key} className={`course-row${course.key === selected?.key ? ' selected' : ''}`} onClick={() => open(course)}>
-              <span className="course-name">{course.label}{course.hidden ? <Icon name="eyeOff" size={14} /> : null}</span>
-              <span className="course-average tabular">{markLabel(course.average)}</span>
-              <MarkBadge mark={course.zeugnis} t={t} />
-              <span className={`course-points tabular ${course.pluspunkte >= 0 ? 'positive' : 'negative'}`}>{course.promotion ? plusLabel(course.pluspunkte) : '–'}</span>
-            </button>
-          ))}
+        <Card className="course-card">
+          <div className="course-cols" aria-hidden="true"><span>{t.allSubjects}</span><span>{t.average}</span><span>{t.zeugnis}</span><span>{t.pluspunkte}</span></div>
+          <div className="course-list" role="listbox" aria-label={t.grades}>
+            {courses.map((course) => (
+              <button type="button" role="option" aria-selected={course.key === selected?.key} key={course.key} className={`course-row${course.key === selected?.key ? ' selected' : ''}`} onClick={() => open(course)}>
+                <span className="course-main">
+                  <span className="course-name">{course.label}{course.hidden ? <Icon name="eyeOff" size={14} /> : null}</span>
+                  <ScaleBar value={course.average} />
+                </span>
+                <span className="course-average tabular">{markLabel(course.average)}</span>
+                <MarkBadge mark={course.zeugnis} t={t} />
+                <span className={`course-points tabular ${course.pluspunkte >= 0 ? 'positive' : 'negative'}`}>{course.promotion ? plusLabel(course.pluspunkte) : '–'}</span>
+              </button>
+            ))}
+          </div>
         </Card>
         <div className="column column-detail">
           {selected ? <CourseDetail course={selected} onReveal={setRevealing} /> : <Card><Empty>{t.pickCourse}</Empty></Card>}
@@ -66,10 +79,11 @@ const CourseDetail = ({ course, onReveal }: { course: CourseSummary; onReveal: (
   const [target, setTarget] = useState(4.5)
   const [weight, setWeight] = useState(1)
   const wish = wishFor(course, target, weight)
+  const wishTone = wish.alreadyMet ? 'success' : wish.achievable && wish.needed != null ? 'accent' : 'danger'
   return (
     <>
       <Card className="course-head">
-        <div>
+        <div className="course-title">
           <h2>{course.label}</h2>
           <p className="muted">{course.sport ? t.sportNotCounted : `${t.weight} ${markLabel(course.weight)}`}</p>
         </div>
@@ -79,15 +93,21 @@ const CourseDetail = ({ course, onReveal }: { course: CourseSummary; onReveal: (
           <span><small>{t.pluspunkte}</small><strong className={`tabular ${course.pluspunkte >= 0 ? 'positive' : 'negative'}`}>{course.promotion ? plusLabel(course.pluspunkte) : '–'}</strong></span>
         </div>
       </Card>
+      {course.marks.some((mark) => mark.counted && !mark.hidden) ? (
+        <Card className="trend-card">
+          <SectionLabel>{t.gradeTrend}</SectionLabel>
+          <MarkTrend marks={course.marks} label={course.label} t={t} language={language} />
+        </Card>
+      ) : null}
       <Card className="marks">
         <table>
           <thead><tr><th>{t.date}</th><th>{t.title}</th><th className="number">{t.weight}</th><th className="number">{t.mark}</th></tr></thead>
           <tbody>
             {course.marks.map((mark) => (
               <tr key={mark.grade.id} className={mark.hidden ? 'hidden-row' : ''}>
-                <td className="tabular">{dateLabel(mark.grade.date, language, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                <td>{mark.grade.title}{mark.mark == null && !mark.hidden ? <> <Tag>{t.pending}</Tag></> : null}{mark.grade.comment ? <small className="block muted">{mark.grade.comment}</small> : null}</td>
-                <td className="number tabular">{markLabel(mark.weight)}</td>
+                <td className="tabular muted">{dateLabel(mark.grade.date, language, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                <td><span className="mark-title">{mark.grade.title}</span>{mark.mark == null && !mark.hidden ? <> <Tag>{t.pending}</Tag></> : null}{mark.grade.comment ? <small className="block muted">{mark.grade.comment}</small> : null}</td>
+                <td className="number tabular muted">{markLabel(mark.weight)}</td>
                 <td className="number">{mark.hidden ? <Button tone="outline" icon="eye" onClick={() => onReveal(mark)}>{t.reveal}</Button> : <MarkBadge mark={mark.mark} t={t} />}</td>
               </tr>
             ))}
@@ -101,7 +121,7 @@ const CourseDetail = ({ course, onReveal }: { course: CourseSummary; onReveal: (
             <label>{t.wishTarget}<input type="number" min={1} max={6} step={0.25} value={target} onChange={(event) => setTarget(Number(event.target.value))} /></label>
             <label>{t.wishWeight}<input type="number" min={0.25} max={4} step={0.25} value={weight} onChange={(event) => setWeight(Number(event.target.value))} /></label>
           </div>
-          <p className="wish-result">{wish.alreadyMet ? t.wishMet : wish.achievable && wish.needed != null ? t.wishNeeded(markLabel(wish.neededHalf ?? wish.needed)) : t.wishImpossible}</p>
+          <p className={`wish-result wish-${wishTone}`}><Icon name={wishTone === 'danger' ? 'warning' : 'check'} size={20} /><span>{wish.alreadyMet ? t.wishMet : wish.achievable && wish.needed != null ? t.wishNeeded(markLabel(wish.neededHalf ?? wish.needed)) : t.wishImpossible}</span></p>
         </Card>
       ) : null}
     </>

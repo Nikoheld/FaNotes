@@ -1,13 +1,30 @@
 /* Static intro inside #root of index.html: shown to crawlers and while the app bundle loads.
-   React's createRoot().render() replaces it. Everything is scoped to .kp-intro; the colours are the app's. */
-.kp-intro { --kp-bg: #f4f5f2; --kp-text: #151c22; --kp-muted: #505b64; --kp-accent: #2a6f97; --kp-on-accent: #fff;
-  min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-  padding: 32px 20px; text-align: center; background: var(--kp-bg); color: var(--kp-text);
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; line-height: 1.5; }
-@media (prefers-color-scheme: dark) { .kp-intro { --kp-bg: #111315; --kp-text: #ecedee; --kp-muted: #a8aeb4; --kp-accent: #86bfe0; --kp-on-accent: #0c2433; } }
-.kp-intro img { border-radius: 24%; display: block; }
-.kp-intro h1 { margin: 0; font-size: 34px; font-weight: 650; letter-spacing: -0.02em; }
-.kp-intro p { margin: 0; max-width: 46ch; color: var(--kp-muted); font-size: 16px; }
-.kp-intro nav { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 6px; }
-.kp-intro a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 999px; border: 1.5px solid var(--kp-accent); color: var(--kp-accent); font-weight: 600; text-decoration: none; }
-.kp-intro a:first-child { background: var(--kp-accent); color: var(--kp-on-accent); }
+   React's createRoot().render() replaces it. Everything is scoped to .kp-intro; the colours are the app's
+   (tokens.css light and dark), so nothing flashes when the app takes over. */
+@font-face {
+  font-family: 'Kanti Intro';
+  src: url('/fonts/instrument-sans.woff2') format('woff2');
+  font-weight: 400 700;
+  font-stretch: 75% 100%;
+  font-display: swap;
+}
+.kp-intro { --kp-bg: #f4f5f2; --kp-surface: #ffffff; --kp-text: #151c22; --kp-muted: #505b64; --kp-hairline: #dce0da; --kp-accent: #2a6f97; --kp-on-accent: #ffffff; --kp-navy: #143552; --kp-gold: #e7b552;
+  position: relative; isolation: isolate; overflow: hidden; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  padding: 40px 20px; text-align: center; color: var(--kp-text); line-height: 1.5;
+  font-family: 'Kanti Intro', 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background:
+    radial-gradient(60% 50% at 50% 0%, color-mix(in srgb, var(--kp-accent) 18%, transparent) 0%, transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--kp-navy) 8%, var(--kp-bg)) 0%, var(--kp-bg) 70%); }
+@media (prefers-color-scheme: dark) { .kp-intro { --kp-bg: #111315; --kp-surface: #1a1c1f; --kp-text: #ecedee; --kp-muted: #a8aeb4; --kp-hairline: #2d3135; --kp-accent: #86bfe0; --kp-on-accent: #0c2433; } }
+.kp-intro img { display: block; border-radius: 24%; box-shadow: 0 14px 32px -12px rgb(20 53 82 / 0.55); }
+.kp-intro h1 { margin: 10px 0 0; font-size: clamp(40px, 7vw, 56px); font-weight: 700; letter-spacing: -0.035em; line-height: 1.05; }
+.kp-intro p { margin: 0; max-width: 46ch; color: var(--kp-muted); font-size: 17px; text-wrap: pretty; }
+.kp-intro p + p { display: inline-flex; align-items: center; gap: 8px; margin-top: 2px; font-size: 14px; }
+.kp-intro p + p::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--kp-gold); box-shadow: 0 0 0 3px color-mix(in srgb, var(--kp-gold) 28%, transparent); animation: kp-pulse 1.6s ease-in-out infinite; }
+.kp-intro nav { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
+.kp-intro a { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 24px; border-radius: 999px; border: 1.5px solid var(--kp-hairline); background: var(--kp-surface); color: var(--kp-text); font-weight: 600; font-size: 16px; text-decoration: none; }
+.kp-intro a:first-child { background: var(--kp-accent); border-color: var(--kp-accent); color: var(--kp-on-accent); }
+.kp-intro a:focus-visible { outline: 2px solid var(--kp-accent); outline-offset: 2px; }
+@keyframes kp-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .kp-intro p + p::before { animation: none; } }
+@media (max-width: 480px) { .kp-intro nav { flex-direction: column; align-self: stretch; } }

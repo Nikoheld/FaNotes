@@ -4,14 +4,14 @@ import { dateLabel } from '../lib/i18n'
 import { classGridEntries, roomGridEntries, type ClassFootnote, type ClassWeek, type RoomWeek, type TimetableSummary } from '../lib/timetables'
 import { useKanti } from '../state'
 import { Banner, Button, Card, Empty } from '../components/ui'
-import { WeekGrid, type GridEntry } from '../components/WeekGrid'
-import { EntryDetails, useClock } from './common'
+import { DetailsPanel, WeekGrid, type GridEntry } from '../components/WeekGrid'
+import { useClock } from './common'
 
 type Segment = 'classes' | 'rooms'
 
 /** The generic week of a class or room in the same grid as the own timetable, with a details panel. */
 const OtherWeek = ({ entries, footnotes = [], empty }: { entries: GridEntry[]; footnotes?: ClassFootnote[]; empty: string }) => {
-  const { t, language } = useKanti()
+  const { t } = useKanti()
   const clock = useClock()
   const [selectedKey, setSelectedKey] = useState('')
   const monday = weekMonday(clock.today)
@@ -28,16 +28,14 @@ const OtherWeek = ({ entries, footnotes = [], empty }: { entries: GridEntry[]; f
           onSelect={setSelectedKey}
           emptyLabel={<Empty icon="info">{empty}</Empty>}
         />
-        <aside className="column column-side details-panel">
-          <Card>{selected ? <EntryDetails entry={selected} t={t} language={language} /> : <Empty icon="info">{t.pickLesson}</Empty>}</Card>
-        </aside>
+        <DetailsPanel entry={selected} />
       </div>
       {footnotes.length ? (
-        <Card>
+        <Card className="footnotes">
           <h3>{t.footnotesTitle}</h3>
           <ul className="footnote-list">
             {footnotes.map((note, index) => (
-              <li key={index}><strong>{note.nr}</strong> {[note.subject, note.teacher, note.room].filter(Boolean).join(' · ')}{note.classes.length ? <small className="muted"> {note.classes.join(', ')}{note.classesTruncated ? ' …' : ''}</small> : null}</li>
+              <li key={index}><strong className="fn-nr tabular">{note.nr}</strong><span>{[note.subject, note.teacher, note.room].filter(Boolean).join(' · ')}{note.classes.length ? <small className="muted"> {note.classes.join(', ')}{note.classesTruncated ? ' …' : ''}</small> : null}</span></li>
             ))}
           </ul>
         </Card>
@@ -82,7 +80,7 @@ export const OtherTimetables = ({ summary }: { summary: TimetableSummary }) => {
   const teacher = classes.find((item) => item.code === code)?.teacher || ''
   return (
     <div className="view view-other-timetables">
-      <div className="toolbar">
+      <div className="toolbar tt-toolbar">
         <div className="toolbar-group">
           <Button tone="outline" icon="left" onClick={() => kanti.navigate('timetable')}>{t.backToTimetable}</Button>
           <h2 className="week-title">{t.otherTimetables}</h2>
@@ -95,34 +93,29 @@ export const OtherTimetables = ({ summary }: { summary: TimetableSummary }) => {
           ))}
         </div>
       </div>
-      <Card>
-        {segment === 'classes' ? (
-          <>
-            <div className="toolbar-group">
-              <label className="select">
-                <span className="sr-only">{t.pickClass}</span>
+      <Card className="tt-picker">
+        <div className="tt-picker-row">
+          {segment === 'classes' ? (
+            <>
+              <label className="select tt-picker-select">
+                <span className="tt-picker-label">{t.pickClass}</span>
                 <select value={code} onChange={(event) => setCode(event.target.value)}>
                   {classes.map((item) => <option key={item.code} value={item.code}>{item.code}</option>)}
                 </select>
               </label>
-              {teacher ? <span className="muted">{t.classTeacher}: {teacher}</span> : null}
-            </div>
-            {failed ? <Banner tone="warning" icon="warning">{t.timetableLoadFailed}</Banner> : null}
-          </>
-        ) : (
-          <>
-            <div className="toolbar-group">
-              <label className="select">
-                <span className="sr-only">{t.pickRoom}</span>
-                <select value={room} onChange={(event) => setRoom(event.target.value)}>
-                  {rooms.map((item) => <option key={item} value={item}>{item}</option>)}
-                </select>
-              </label>
-            </div>
-            {failed ? <Banner tone="warning" icon="warning">{t.timetableLoadFailed}</Banner> : null}
-          </>
-        )}
-        {summary.uploadedAt ? <p className="muted small">{t.timetableSource(summary.semester || '', dateLabel(summary.uploadedAt.slice(0, 10), language))}</p> : null}
+              {teacher ? <span className="tt-picker-teacher">{t.classTeacher}: <strong>{teacher}</strong></span> : null}
+            </>
+          ) : (
+            <label className="select tt-picker-select">
+              <span className="tt-picker-label">{t.pickRoom}</span>
+              <select value={room} onChange={(event) => setRoom(event.target.value)}>
+                {rooms.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+          )}
+          {summary.uploadedAt ? <p className="muted small tt-picker-source">{t.timetableSource(summary.semester || '', dateLabel(summary.uploadedAt.slice(0, 10), language))}</p> : null}
+        </div>
+        {failed ? <Banner tone="warning" icon="warning">{t.timetableLoadFailed}</Banner> : null}
       </Card>
       {failed ? null : segment === 'classes'
         ? (classWeek && classWeek.class === code ? <OtherWeek key={`c:${code}`} entries={classEntries} footnotes={classWeek.footnotes} empty={t.weekFree} /> : <div className="loading"><span className="spinner" /></div>)

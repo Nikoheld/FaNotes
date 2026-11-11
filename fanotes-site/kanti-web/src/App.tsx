@@ -55,11 +55,16 @@ const Onboarding = ({ onDone }: { onDone: () => void }) => {
   return (
     <div className="onboarding" role="dialog" aria-modal="true" aria-label={t.onboardingTitles[step]}>
       <div className="onboarding-card">
-        <Logo size={64} />
-        <div className="onboarding-dots" aria-hidden="true">{t.onboardingTitles.map((title, index) => <span key={title} className={index === step ? 'on' : ''} />)}</div>
+        <div className="onboarding-head">
+          <Logo size={52} />
+          <div className="onboarding-progress" aria-hidden="true">
+            <span className="onboarding-dots">{t.onboardingTitles.map((title, index) => <span key={title} className={index === step ? 'on' : index < step ? 'past' : ''} />)}</span>
+            <span className="onboarding-step tabular">{step + 1} / {t.onboardingTitles.length}</span>
+          </div>
+        </div>
         <h1>{t.onboardingTitles[step]}</h1>
         <p>{t.onboardingBodies[step]}</p>
-        {step === 2 ? <p className="muted small"><Kbd>1</Kbd>–<Kbd>8</Kbd> {t.keyNav} · <Kbd>←</Kbd> <Kbd>→</Kbd> {t.keyWeek} · <Kbd>/</Kbd> {t.keySearch} · <Kbd>?</Kbd> {t.keyHelp}</p> : null}
+        {step === 2 ? <p className="onboarding-keys muted small"><Kbd>1</Kbd>–<Kbd>8</Kbd> {t.keyNav} · <Kbd>←</Kbd> <Kbd>→</Kbd> {t.keyWeek} · <Kbd>/</Kbd> {t.keySearch} · <Kbd>?</Kbd> {t.keyHelp}</p> : null}
         <div className="onboarding-actions">
           <Button tone="quiet" onClick={onDone}>{t.skip}</Button>
           <Button onClick={() => (last ? onDone() : setStep(step + 1))} autoFocus>{last ? t.start : t.next}</Button>

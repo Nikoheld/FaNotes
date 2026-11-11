@@ -15,17 +15,18 @@
   <meta property="og:site_name" content="Kanti+" />
   <meta property="og:locale" content="de_CH" />
   <meta property="og:title" content="Kanti+ – Schulnetz-Begleiter für Kantis" />
-  <meta property="og:description" content="Stundenplan mit ausfallenden Lektionen, Noten-Push, Prüfungen, Absenzen und Pendeln. Inoffiziell, nur lesend, ohne Werbung." />
+  <meta property="og:description" content="Stundenplan mit ausfallenden Lektionen, Noten-Push, Prüfungen, Absenzen und Pendeln. Inoffiziell, ändert nichts in Schulnetz, ohne Werbung." />
   <meta property="og:url" content="https://schulnetz.fasrv.ch/about/" />
   <meta property="og:image" content="https://schulnetz.fasrv.ch/og-kanti.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="Kanti+ mit Stundenplan und Noten in der Demo-Ansicht" />
+  <meta property="og:image:alt" content="Kanti+: Dein Schulalltag auf einen Blick, Dashboard im Browser (Demo)" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Kanti+ – Schulnetz-Begleiter für Kantis" />
-  <meta name="twitter:description" content="Stundenplan mit ausfallenden Lektionen, Noten-Push, Prüfungen, Absenzen und Pendeln. Inoffiziell, nur lesend, ohne Werbung." />
+  <meta name="twitter:description" content="Stundenplan mit ausfallenden Lektionen, Noten-Push, Prüfungen, Absenzen und Pendeln. Inoffiziell, ändert nichts in Schulnetz, ohne Werbung." />
   <meta name="twitter:image" content="https://schulnetz.fasrv.ch/og-kanti.png" />
-  <meta name="twitter:image:alt" content="Kanti+ mit Stundenplan und Noten in der Demo-Ansicht" />
+  <meta name="twitter:image:alt" content="Kanti+: Dein Schulalltag auf einen Blick, Dashboard im Browser (Demo)" />
+  <link rel="preload" href="/fonts/instrument-sans.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/about/about.css" />
   <script type="application/ld+json">
 {
@@ -136,112 +137,197 @@
   </script>
 </head>
 <body>
-  <div class="wrap">
-    <header class="site-head">
-      <a class="brand" href="/about/"><img src="/kanti-icon.svg" width="36" height="36" alt="" />Kanti+</a>
+  <a class="skip" href="#inhalt">Zum Inhalt</a>
+  <header class="site-head">
+    <div class="wrap head-row">
+      <a class="brand" href="/about/"><img src="/kanti-icon.svg" width="32" height="32" alt="" />Kanti+</a>
       <nav class="head-links" aria-label="Hauptnavigation">
         <a class="optional" href="#funktionen">Funktionen</a>
+        <a class="optional" href="#einblicke">Einblicke</a>
         <a class="optional" href="#faq">Fragen</a>
-        <a href="/">Im Browser öffnen</a>
+        <a class="btn btn-primary btn-small" href="/">Im Browser öffnen</a>
       </nav>
-    </header>
-  </div>
-  <main>
+    </div>
+  </header>
+  <main id="inhalt">
     <section class="hero">
       <div class="wrap">
-        <h1>Kanti+ – dein Schulnetz-Begleiter</h1>
-        <p class="lead">Kanti+ ist eine inoffizielle App für Kantischülerinnen und Kantischüler. Sie zeigt dir Stundenplan, Noten, Prüfungen und Absenzen aus Schulnetz, meldet dir Änderungen sofort und hilft dir beim Pendeln. Kanti+ liest Schulnetz nur und verändert dort nichts.</p>
-        <div class="cta">
-          <a class="btn btn-primary" href="/">Kanti+ im Browser öffnen</a>
-          <a class="btn btn-outline" href="/?demo">Demo ansehen</a>
+        <div class="hero-copy">
+          <p class="pill reveal d1"><span class="gold-dot" aria-hidden="true"></span>Inoffiziell · kostenlos · ohne Werbung</p>
+          <h1 class="reveal d2">Kanti+ – dein Schulalltag <span class="underline">auf einen Blick</span></h1>
+          <p class="lead reveal d3">Kanti+ ist eine inoffizielle App für Kantischülerinnen und Kantischüler. Sie zeigt dir Stundenplan, Noten, Prüfungen und Absenzen aus Schulnetz, meldet dir Änderungen sofort und hilft dir beim Pendeln. Kanti+ liest Schulnetz nur und verändert dort nichts.</p>
+          <div class="cta reveal d4">
+            <a class="btn btn-primary" href="/">Kanti+ im Browser öffnen</a>
+            <a class="btn btn-outline" href="/?demo"><svg class="ico" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>Demo ansehen</a>
+          </div>
+          <p class="note reveal d4"><span class="tag">Android</span>Kanti+ für Android ist in der Testphase und noch nicht im Play Store.</p>
         </div>
-        <p class="note">Kanti+ für Android ist in der Testphase und noch nicht im Play Store.</p>
+        <div class="hero-shot reveal d5">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">schulnetz.fasrv.ch</span></div>
+            <picture>
+              <source media="(prefers-color-scheme: dark)" srcset="/about/img/heute-desktop-dark.webp" />
+              <img src="/about/img/heute-desktop.webp" width="1440" height="900" alt="Kanti+ im Browser, Ansicht «Heute»: laufende Lektion, Kennzahlen, Stundenplan, Prüfungen und Pendeln auf einen Blick (Demo)" fetchpriority="high" decoding="async" />
+            </picture>
+          </div>
+        </div>
       </div>
     </section>
 
     <section id="funktionen">
       <div class="wrap">
-        <h2>Was Kanti+ kann</h2>
-        <p class="intro">Alles, was du im Schulalltag brauchst, an einem Ort.</p>
+        <div class="section-head">
+          <p class="eyebrow">Funktionen</p>
+          <h2>Was Kanti+ kann</h2>
+          <p class="intro">Alles, was du im Schulalltag brauchst, an einem Ort.</p>
+        </div>
         <ul class="features">
-        <li>
-          <h3>Stundenplan</h3>
-          <p>Dein Stundenplan aus Schulnetz, mit Wochenansicht. Ausfallende und geänderte Lektionen sind markiert, auch mit Vertretung.</p>
-        </li>
-        <li>
-          <h3>Noten-Push</h3>
-          <p>Eine neue Note meldet Kanti+ per Benachrichtigung, in der Regel innert etwa 10 Minuten. Mit Pluspunkten und Schnitt pro Fach.</p>
-        </li>
-        <li>
-          <h3>Prüfungen und Termine</h3>
-          <p>Kommende Prüfungen und Termine auf einen Blick, damit du keine verpasst.</p>
-        </li>
-        <li>
-          <h3>Absenzen</h3>
-          <p>Gebuchte Absenzpunkte und Kontingent. Für offene Meldungen schätzt Kanti+ die Punkte nach dem Absenzenreglement.</p>
-        </li>
-        <li>
-          <h3>Pendeln</h3>
-          <p>Live-Verbindungen zwischen Schule und Zuhause mit Verspätungen, einer festen Verbindung und Hinweisen, wenn ein Zug ausfällt.</p>
-        </li>
-        <li>
-          <h3>Widgets</h3>
-          <p>Widgets für den Android-Startbildschirm zeigen dir die nächste Lektion und deine Verbindung auf einen Blick.</p>
-        </li>
-        <li>
-          <h3>Mensa</h3>
-          <p>Das Mensa-Menü gleich auf der Startseite, wenn du es einschaltest.</p>
-        </li>
-        <li>
-          <h3>Kanti+ im Browser</h3>
-          <p>Dieselben Daten auf Laptop und Desktop. Du koppelst den Browser einmal mit der App und siehst alles auch dort.</p>
-        </li>
-      </ul>
+          <li class="feature">
+            <span class="chip"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 2h2v2h6V2h2v2h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2zm-2 8v10h14V10zm0-2h14V6H5zm2 4h4v3H7zm6 0h4v3h-4zm-6 4.5h4V19H7z" fill="currentColor"/></svg></span>
+            <h3>Stundenplan</h3>
+            <p>Dein Stundenplan aus Schulnetz, mit Wochenansicht. Ausfallende und geänderte Lektionen sind markiert, auch mit Vertretung.</p>
+          </li>
+          <li class="feature">
+            <span class="chip"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2Zm6-6v-5c0-3.1-1.6-5.6-4.5-6.3V4a1.5 1.5 0 0 0-3 0v.7C7.6 5.4 6 7.9 6 11v5l-2 2v1h16v-1zm-2 1H8v-6c0-2.5 1.5-4.5 4-4.5s4 2 4 4.5z" fill="currentColor"/></svg></span>
+            <h3>Noten-Push</h3>
+            <p>Eine neue Note meldet Kanti+ per Benachrichtigung, in der Regel innert etwa 10 Minuten. Mit Pluspunkten und Schnitt pro Fach.</p>
+          </li>
+          <li class="feature">
+            <span class="chip"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M17 12h-5v5h5zM16 1v2H8V1H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2h-1V1zm3 18H5V8h14z" fill="currentColor"/></svg></span>
+            <h3>Prüfungen und Termine</h3>
+            <p>Kommende Prüfungen und Termine auf einen Blick, damit du keine verpasst.</p>
+          </li>
+          <li class="feature">
+            <span class="chip"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 1.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4ZM4 20c0-3.3 3.6-6 8-6 1 0 2 .2 2.9.4l-1.6 1.6A9 9 0 0 0 12 15.8c-3.4 0-6.2 1.9-6.2 4.2H4Zm11.3-3.6 1.3-1.3 1.9 1.9 1.9-1.9 1.3 1.3-1.9 1.9 1.9 1.9-1.3 1.3-1.9-1.9-1.9 1.9-1.3-1.3 1.9-1.9z" fill="currentColor"/></svg></span>
+            <h3>Absenzen</h3>
+            <p>Gebuchte Absenzpunkte und Kontingent. Für offene Meldungen schätzt Kanti+ die Punkte nach dem Absenzenreglement.</p>
+          </li>
+          <li class="feature">
+            <span class="chip"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2c-4 0-8 .5-8 4v9.5C4 17.4 5.6 19 7.5 19L6 20.5v.5h2.2l2-2H14l2 2h2v-.5L16.5 19c1.9 0 3.5-1.6 3.5-3.5V6c0-3.5-3.6-4-8-4ZM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3ZM11 10H6V6h5Zm2 0V6h5v4Zm3.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z" fill="currentColor"/></svg></span>
+            <h3>Pendeln</h3>
+            <p>Live-Verbindungen zwischen Schule und Zuhause mit Verspätungen, einer festen Verbindung und Hinweisen, wenn ein Zug ausfällt.</p>
+          </li>
+          <li class="feature">
+            <span class="chip"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm8-2h8v8h-8zm2 2v4h4v-4z" fill="currentColor"/></svg></span>
+            <h3>Widgets</h3>
+            <p>Widgets für den Android-Startbildschirm zeigen dir die nächste Lektion und deine Verbindung auf einen Blick.</p>
+          </li>
+          <li class="feature">
+            <span class="chip"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 9H9V2H7v7H5V2H3v7c0 2.12 1.66 3.84 3.75 3.97V22h2.5v-9.03C11.34 12.84 13 11.12 13 9V2h-2zm5-3v8h2.5v8H21V2c-2.76 0-5 2.24-5 4z" fill="currentColor"/></svg></span>
+            <h3>Mensa</h3>
+            <p>Das Mensa-Menü gleich auf der Startseite, wenn du es einschaltest.</p>
+          </li>
+          <li class="feature">
+            <span class="chip"><svg class="ico" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M21 2H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7v2H8v2h8v-2h-2v-2h7a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm0 14H3V4h18z" fill="currentColor"/></svg></span>
+            <h3>Kanti+ im Browser</h3>
+            <p>Dieselben Daten auf Laptop und Desktop. Du koppelst den Browser einmal mit der App und siehst alles auch dort.</p>
+          </li>
+        </ul>
       </div>
     </section>
 
-    <section id="bilder">
+    <section id="einblicke" class="band">
       <div class="wrap">
-        <h2>So sieht Kanti+ aus</h2>
-        <p class="intro">Bilder der Browser-Version im Demo-Modus. Alle Angaben darin sind erfunden.</p>
-      <ul class="shots">
-        <li><figure>
-          <img src="/about/img/heute.webp" width="390" height="780" alt="Kanti+ im Browser, Ansicht «Heute»: nächste Lektion und Tagesstundenplan (Demo)" loading="lazy" decoding="async" />
-          <figcaption>Heute</figcaption>
-        </figure></li>
-        <li><figure>
-          <img src="/about/img/stundenplan.webp" width="390" height="780" alt="Kanti+ im Browser, Wochenstundenplan mit Lektionen von Montag bis Freitag (Demo)" loading="lazy" decoding="async" />
-          <figcaption>Stundenplan</figcaption>
-        </figure></li>
-        <li><figure>
-          <img src="/about/img/noten.webp" width="390" height="780" alt="Kanti+ im Browser, Notenübersicht mit Pluspunkten und Gesamtschnitt (Demo)" loading="lazy" decoding="async" />
-          <figcaption>Noten</figcaption>
-        </figure></li>
-        <li><figure>
-          <img src="/about/img/termine.webp" width="390" height="780" alt="Kanti+ im Browser, Liste der kommenden Prüfungen und Termine (Demo)" loading="lazy" decoding="async" />
-          <figcaption>Prüfungen</figcaption>
-        </figure></li>
-        <li><figure>
-          <img src="/about/img/absenzen.webp" width="390" height="780" alt="Kanti+ im Browser, Absenzpunkte mit geschätzten Punkten für offene Meldungen (Demo)" loading="lazy" decoding="async" />
-          <figcaption>Absenzen</figcaption>
-        </figure></li>
-        <li><figure>
-          <img src="/about/img/pendeln.webp" width="390" height="780" alt="Kanti+ im Browser, Heimweg mit Verbindungen und Hinweis auf eine ausfallende Verbindung (Demo)" loading="lazy" decoding="async" />
-          <figcaption>Pendeln</figcaption>
-        </figure></li>
-      </ul>
+        <div class="section-head">
+          <p class="eyebrow">Einblicke</p>
+          <h2>So sieht Kanti+ aus</h2>
+          <p class="intro">Bilder der Browser-Version im Demo-Modus. Alle Angaben darin sind erfunden.</p>
+        </div>
+        <article class="row">
+          <div class="row-copy">
+            <p class="eyebrow">Stundenplan</p>
+            <h3>Die ganze Woche im Raster</h3>
+            <p>Alle Lektionen mit Zeit und Raum, auf dem Laptop genauso übersichtlich wie auf dem Handy.</p>
+            <ul class="ticks">
+              <li><svg class="tick" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg><span>Ausfälle, Änderungen und Vertretungen sind sofort markiert</span></li>
+              <li><svg class="tick" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg><span>Prüfungen erkennst du direkt im Raster</span></li>
+              <li><svg class="tick" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg><span>Die laufende Lektion ist hervorgehoben</span></li>
+            </ul>
+          </div>
+          <div class="row-shot">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">schulnetz.fasrv.ch</span></div>
+            <picture>
+              <source media="(prefers-color-scheme: dark)" srcset="/about/img/stundenplan-desktop-dark.webp" />
+              <img src="/about/img/stundenplan-desktop.webp" width="1440" height="900" alt="Kanti+ im Browser, Wochenstundenplan von Montag bis Freitag mit ausfallender und geänderter Lektion (Demo)" loading="lazy" decoding="async" />
+            </picture>
+          </div>
+          </div>
+        </article>
+        <article class="row">
+          <div class="row-copy">
+            <p class="eyebrow">Noten</p>
+            <h3>Schnitt und Verlauf im Blick</h3>
+            <p>Pluspunkte, Schnitt pro Fach und der Verlauf als Diagramm, mit allen Einzelnoten darunter.</p>
+            <ul class="ticks">
+              <li><svg class="tick" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg><span>Neue Noten per Push, in der Regel innert etwa 10 Minuten</span></li>
+              <li><svg class="tick" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg><span>Auf Wunsch bleiben neue Noten verdeckt, bis du sie aufdeckst</span></li>
+              <li><svg class="tick" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg><span>Pluspunkte und Gesamtschnitt immer aktuell</span></li>
+            </ul>
+          </div>
+          <div class="row-shot">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">schulnetz.fasrv.ch</span></div>
+            <picture>
+              <source media="(prefers-color-scheme: dark)" srcset="/about/img/noten-desktop-dark.webp" />
+              <img src="/about/img/noten-desktop.webp" width="1440" height="900" alt="Kanti+ im Browser, Notenübersicht mit Gesamtschnitt, Pluspunkten und Notenverlauf als Diagramm (Demo)" loading="lazy" decoding="async" />
+            </picture>
+          </div>
+          </div>
+        </article>
+        <article class="row">
+          <div class="row-copy">
+            <p class="eyebrow">Pendeln</p>
+            <h3>Pünktlich zur ersten Lektion</h3>
+            <p>Deine Verbindung zwischen Schule und Zuhause, live aus dem öffentlichen Verkehr.</p>
+            <ul class="ticks">
+              <li><svg class="tick" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg><span>Live-Verspätungen für jede Verbindung</span></li>
+              <li><svg class="tick" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg><span>Eine feste Verbindung, die du immer oben siehst</span></li>
+              <li><svg class="tick" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" fill="currentColor"/></svg><span>Hinweis, wenn ein Zug ausfällt</span></li>
+            </ul>
+          </div>
+          <div class="row-shot">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">schulnetz.fasrv.ch</span></div>
+            <picture>
+              <source media="(prefers-color-scheme: dark)" srcset="/about/img/pendeln-desktop-dark.webp" />
+              <img src="/about/img/pendeln-desktop.webp" width="1440" height="900" alt="Kanti+ im Browser, Pendeln mit Verbindungen, Verspätungen und Hinweis auf eine ausfallende Verbindung (Demo)" loading="lazy" decoding="async" />
+            </picture>
+          </div>
+          </div>
+        </article>
+        <div class="phones" role="group" aria-label="Kanti+ auf dem Handy">
+          <h3>Und unterwegs auf dem Handy</h3>
+          <ul class="phone-strip" tabindex="0">
+          <li><figure>
+            <div class="phone"><img src="/about/img/heute.webp" width="540" height="1080" alt="Kanti+ auf dem Handy, Ansicht «Heute»: nächste Lektion und Kennzahlen (Demo)" loading="lazy" decoding="async" /></div>
+            <figcaption>Heute</figcaption>
+          </figure></li>
+          <li><figure>
+            <div class="phone"><img src="/about/img/stundenplan.webp" width="540" height="1080" alt="Kanti+ auf dem Handy, Stundenplan mit den Lektionen des Tages (Demo)" loading="lazy" decoding="async" /></div>
+            <figcaption>Stundenplan</figcaption>
+          </figure></li>
+          <li><figure>
+            <div class="phone"><img src="/about/img/noten.webp" width="540" height="1080" alt="Kanti+ auf dem Handy, Notenübersicht mit Gesamtschnitt und Pluspunkten (Demo)" loading="lazy" decoding="async" /></div>
+            <figcaption>Noten</figcaption>
+          </figure></li>
+          </ul>
+        </div>
       </div>
     </section>
 
     <section id="android">
       <div class="wrap">
         <div class="panel">
-          <h2>Kanti+ für Android</h2>
-          <p>Kanti+ für Android ist in der Testphase und noch nicht im Play Store. Die App läuft in einem geschlossenen Test, deshalb gibt es noch keinen öffentlichen Download.</p>
-          <p>Die Browser-Version kannst du sofort ausprobieren:</p>
+          <div class="panel-copy">
+            <p class="eyebrow">Android</p>
+            <h2>Kanti+ für Android</h2>
+            <p>Kanti+ für Android ist in der Testphase und noch nicht im Play Store. Die App läuft in einem geschlossenen Test, deshalb gibt es noch keinen öffentlichen Download.</p>
+            <p>Die Browser-Version kannst du sofort ausprobieren:</p>
+          </div>
           <ol class="steps">
-            <li>Öffne <a href="/?demo">die Demo</a> und sieh dir Kanti+ mit erfundenen Daten an.</li>
-            <li>Mit der App koppelst du den Browser über einen 8-stelligen Code, damit er deine eigenen Daten zeigt.</li>
+            <li><span class="n" aria-hidden="true">1</span><span>Öffne <a href="/?demo">die Demo</a> und sieh dir Kanti+ mit erfundenen Daten an.</span></li>
+            <li><span class="n" aria-hidden="true">2</span><span>Mit der App koppelst du den Browser über einen 8-stelligen Code, damit er deine eigenen Daten zeigt.</span></li>
           </ol>
         </div>
       </div>
@@ -249,6 +335,7 @@
 
     <section id="faq" class="faq">
       <div class="wrap">
+        <p class="eyebrow">FAQ</p>
         <h2>Häufige Fragen</h2>
         <details>
           <summary><h3>Ist Kanti+ offiziell?</h3></summary>
@@ -284,12 +371,15 @@
 
   <footer class="site-foot">
     <div class="wrap">
-      <nav class="foot-links" aria-label="Rechtliches">
-        <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/">Datenschutz</a>
-        <a href="https://fanotes.fasrv.ch/kantiplus/konto-loeschen/">Konto und Daten löschen</a>
-        <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/#verantwortlich">Kontakt</a>
-        <a href="/">Kanti+ im Browser</a>
-      </nav>
+      <div class="foot-top">
+        <a class="brand" href="/about/"><img src="/kanti-icon.svg" width="32" height="32" alt="" />Kanti+</a>
+        <nav class="foot-links" aria-label="Rechtliches">
+          <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/">Datenschutz</a>
+          <a href="https://fanotes.fasrv.ch/kantiplus/konto-loeschen/">Konto und Daten löschen</a>
+          <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/#verantwortlich">Kontakt</a>
+          <a href="/">Kanti+ im Browser</a>
+        </nav>
+      </div>
       <p>Kanti+ ist ein Projekt von FaStudios.</p>
       <p>Kanti+ ist eine inoffizielle App. Sie wird privat entwickelt und ist weder mit Schulnetz (dem Anbieter) noch mit einer Kantonsschule, dem Kanton oder Microsoft verbunden. Kanti+ liest deine Daten aus Schulnetz nur und verändert dort nichts.</p>
     </div>
