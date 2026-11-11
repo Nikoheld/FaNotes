@@ -1,5 +1,25 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.24
+
+- Timetables: asking whether any exist is an answer, not an error.
+- Kanti+ app: other classes and rooms from the school's timetable PDF
+- Web: other classes and rooms view and the operator's timetable upload page
+- Server: class and room timetables from the school's PDF (parser, storage, admin upload, serving)
+- Add planned (provisional) absences with provisional points
+- Half-class groups: detect Halbklassen, per-subject choice hides other groups
+- Server: read the Mensa week from the menu page's public API, HTML page as fallback
+- Kanti+ app: show a pairing code for the browser, report real pairing errors
+- Add Playwright end-to-end test of the Kanti+ web app against a local full stack
+- Web app: show the real reason per section, keep phone read errors apart, pair with a code from the app.
+- Sync task done state both ways: merge Hausaufgaben.md per task, drop planner hold for homework
+- Web: optional Mensa menu card in the Heute column
+- Companion: optional Mensa menu card on Today
+- Exams take their lesson's slot; scrollable widget and start-page lesson strip
+- Server: cached Mensa menu endpoint for the start page
+- Add Sonnet/Haiku project subagents and a model rule for routine work.
+- Space only real Schulnetz reads apart and skip the overdue warning right after a start.
+
 ## 2026.11.2-beta.23
 
 - Promise new grades on the phone within 10 minutes, around the clock.
