@@ -1113,6 +1113,7 @@
     <string name="web_pair_too_many_connections">So viele Verbindungen kann der Browser nicht übernehmen.</string>
     <string name="web_pair_offline">Keine Verbindung zum Kanti+-Server.</string>
     <string name="web_pair_failed">Das Koppeln hat nicht geklappt. Bitte nochmals versuchen.</string>
+    <string name="web_pair_working">Verbinde mit dem Kanti+-Server…</string>
     <string name="web_pair_busy">Bitte kurz warten, eine andere Aktion läuft noch.</string>
     <string name="web_pair_unavailable">Füge zuerst eine Verbindung hinzu. Ohne Verbindung gibt es nichts, was ein Browser zeigen könnte.</string>
     <string name="web_pair_no_server">keine Verbindung zum Server</string>
