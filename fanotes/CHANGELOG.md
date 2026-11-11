@@ -1,5 +1,13 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.26
+
+- Show cancelled lessons: Schulnetz marks them as deleted (struck through); the app, widget and web app now show them as "Fällt aus", and changed, moved and extra lessons get tags with the substitute teacher.
+- Push a new cancellation within the 10-minute grade window, also in the evening and at night.
+- Other classes' and rooms' timetables now use the same timetable design as your own plan, in the app and on the web.
+- Schulkontoauszug: the statement loads again and shows the balance at the bottom.
+- Remove the "nur lesen" labels.
+
 ## 2026.11.2-beta.25
 
 - Compile the app's own code ahead of time with the baseline profile.
