@@ -1,5 +1,12 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.27
+
+- Pendelstrecken: add your routes to and from school (with an optional via stop) and see the next connections live with delays, platforms, transfers and occupancy, on Heute, in a new widget and on the web.
+- Alerts from a delay you choose, for cancellations, missed transfers and platform changes, with alternatives right away.
+- When your last lessons are cancelled, Kanti+ shows and pushes the earlier way home ("Letzte Stunde fällt aus – du kannst den Bus um … nehmen"); a cancelled first lesson shows the later way to school.
+- Includes everything from beta.26 (not published separately): cancelled lessons, native class timetables, account balance, no read-only labels.
+
 ## 2026.11.2-beta.26
 
 - Show cancelled lessons: Schulnetz marks them as deleted (struck through); the app, widget and web app now show them as "Fällt aus", and changed, moved and extra lessons get tags with the substitute teacher.
