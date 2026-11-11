@@ -1137,6 +1137,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       revision: (link.revision || 0) + 1,
       // A grade check reads the grades page only; the full read time stays what it was.
       fetchedAt: gradesOnly ? (previous?.fetchedAt || now().toISOString()) : now().toISOString(),
+      // A grade check that also read this and next week's lessons (lessonCheckWeeks).
+      lessonsFetchedAt: gradesOnly ? (scraped.lessonsRead && !failed ? now().toISOString() : (previous?.lessonsFetchedAt || '')) : now().toISOString(),
       gradesFetchedAt: scraped.gradesRead && !failed ? now().toISOString() : (previous?.gradesFetchedAt || ''),
       grades: keepLoadedGrades(previous?.grades, scraped.grades || [], !failed),
       gradesReadComplete: !failed,

@@ -1490,10 +1490,11 @@ test('an unmarked timetable still loads next week into the schedule', async () =
     weekRead: read.weekRead,
   })
   const againSchedulers = urls.filter((url) => url.includes('scheduler_processor'))
-  // The current week again, plus only far weeks the walk forward has not read yet.
+  // The current week again, next week after LESSON_CHECK_MS, plus only far weeks the walk forward has not read yet.
   const againWeeks = [...new Set(againSchedulers.map((url) => url.match(/min_date=([\d-]+)/u)[1]))]
   assert.equal(againWeeks.includes('2026-11-02'), true)
-  assert.equal(againWeeks.filter((week) => week !== '2026-11-02').every((week) => !read.weekFetched[week] && week > '2026-11-30'), true)
+  assert.equal(againWeeks.includes('2026-11-09'), true)
+  assert.equal(againWeeks.filter((week) => week !== '2026-11-02' && week !== '2026-11-09').every((week) => !read.weekFetched[week] && week > '2026-11-30'), true)
   assert.equal(againSchedulers.length, againWeeks.length * 2)
   assert.equal(again.events.some((event) => event.id === 'next'), true)
 })

@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { GRADE_PARSER_VERSION, addDays, isLesson, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, addDays, lessonCheckWeeks, isLesson, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -126,15 +126,19 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     if (!url.includes('scheduler_processor')) openPage = url
     return body
   }
-  // A grade check (the 10-minute grade promise) reads the start page and the grades page only.
-  const order = options.gradesOnly ? ['1', '21311'] : ['1', '21311', '21111', '21411', '21200', '22202', '22108', '21312']
+  const nowIso = options.now || new Date().toISOString()
+  const today = options.today || zurichToday(new Date(nowIso))
+  // A grade check (the 10-minute grade promise) reads the start page and the grades page, and this
+  // and next week's lessons when their last read is old, so a cancelled lesson arrives as fast.
+  const lessonCheck = options.gradesOnly
+    ? lessonCheckWeeks({ weekFetched: options.weekFetched || {}, today, now: nowIso, spanStart: options.weekSpanStart || '', spanEnd: options.weekSpanEnd || '' })
+    : []
+  const order = options.gradesOnly ? ['1', '21311', ...(lessonCheck.length ? ['22202'] : [])] : ['1', '21311', '21111', '21411', '21200', '22202', '22108', '21312']
   for (const pageId of order) {
     const body = await get(`/index.php?pageid=${pageId}&id=${session.id}&transid=${transid}`)
     pages[pageId] = body
     if (pages.problem) break
   }
-  const nowIso = options.now || new Date().toISOString()
-  const today = options.today || zurichToday(new Date(nowIso))
   const previousEvents = Array.isArray(options.previousEvents) ? options.previousEvents : []
   const previousExams = Array.isArray(options.previousExams) ? options.previousExams : []
   const weekFetched = { ...(options.weekFetched || {}) }
@@ -159,7 +163,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     const span = weekSpanStart && weekSpanEnd ? { start: weekSpanStart, end: weekSpanEnd } : fallbackSchoolSpan(previousEvents, vacations, today, previousExams)
     const icalUrl = findIcalUrl(pages['22202'], root)
     const icalAvailable = Boolean(icalUrl && schulnetzCallAllowed('GET', icalUrl))
-    const plan = planWeekFetches({
+    const plan = options.gradesOnly ? { fetch: lessonCheck, fetchIcal: false } : planWeekFetches({
       mondays: span ? mondaysBetween(span.start, span.end) : [],
       // Retry timing follows every attempt, so an unread week is not requested on every sync.
       fetchedAt: { ...weekFetched, ...confirmedLessonStamps(previousEvents, weekFetched, weekRead) },
@@ -184,7 +188,9 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       const body = await get(`/index.php?pageid=${pageId}&id=${session.id}&transid=${transid}`)
       return schedulerTransid(body, pageId) || transid
     }
-    const lessonTransid = plan.fetch.length && !pages.problem ? await reopen('22202') : transid
+    // A grade check opens the timetable page last, so the transid it printed is still the fresh one.
+    const lessonTransid = !plan.fetch.length || pages.problem ? transid
+      : options.gradesOnly ? schedulerTransid(pages['22202'], '22202') || transid : await reopen('22202')
     for (const monday of plan.fetch) {
       if (pages.problem) break
       const max = addDays(monday, 7)
@@ -210,10 +216,10 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
         }
       }
     }
-    const examTransid = plan.fetch.length && !pages.problem ? await reopen('21312') : transid
+    const examTransid = plan.fetch.length && !pages.problem && !options.gradesOnly ? await reopen('21312') : transid
     const examEmpty = []
     let examAnswered = false
-    for (const monday of plan.fetch) {
+    for (const monday of options.gradesOnly ? [] : plan.fetch) {
       if (pages.problem) break
       const max = addDays(monday, 7)
       const curr = monday === current ? today : monday
@@ -276,6 +282,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
   }
   return {
     problem: pages.problem || '',
+    lessonsRead: Boolean(options.gradesOnly && lessonCheck.length && !pages.problem && pages['22202']),
     grades: parseGradesHtml(pages['21311'] || ''),
     gradeParser: GRADE_PARSER_VERSION,
     gradesRead: !pages.problem && Boolean(pages['21311']),
