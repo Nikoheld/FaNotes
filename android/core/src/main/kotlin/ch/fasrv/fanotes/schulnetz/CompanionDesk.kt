@@ -4,6 +4,9 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
+private val deskSwissDay = Regex("""(\d{1,2})\.(\d{1,2})\.(\d{4})""")
+private val courseCodeSuffix = Regex("""\(([^)]+)\)\s*$""")
+
 data class CompanionBadge(val id: String, val title: String, val detail: String, val earned: Boolean)
 
 /** Local profile. Nothing here is compared with another account. */
@@ -48,7 +51,7 @@ fun excuseReminders(absences: List<SchoolAbsence>, today: LocalDate, withinDays:
 }
 
 fun parseSchoolDate(raw: String): LocalDate? {
-    val match = Regex("""(\d{1,2})\.(\d{1,2})\.(\d{4})""").find(raw) ?: return null
+    val match = deskSwissDay.find(raw) ?: return null
     return runCatching {
         LocalDate.of(match.groupValues[3].toInt(), match.groupValues[2].toInt(), match.groupValues[1].toInt())
     }.getOrNull()
@@ -169,7 +172,7 @@ fun eventInHours(event: AgendaEvent, startHour: Int, endHour: Int, zone: java.ti
 
 fun courseAlias(name: String, aliases: Map<String, String>): String {
     val keys = colorKeys(name).toMutableList()
-    val code = Regex("""\(([^)]+)\)\s*$""").find(name.trim())?.groupValues?.get(1).orEmpty()
+    val code = courseCodeSuffix.find(name.trim())?.groupValues?.get(1).orEmpty()
     if (code.isNotEmpty()) keys += colorKeys(code)
     for (key in keys) aliases[key]?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
     return name

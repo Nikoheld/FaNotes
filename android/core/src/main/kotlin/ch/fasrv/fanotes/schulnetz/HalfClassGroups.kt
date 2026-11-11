@@ -3,6 +3,10 @@ package ch.fasrv.fanotes.schulnetz
 import java.time.LocalDate
 import java.time.temporal.IsoFields
 
+private val semesterFamily = Regex("""^(.+?)[-_]sem([12])$""")
+private val numberedFamily = Regex("""^(.+?)\s+(\d+)\.(\d+)$""")
+private val sportFamily = Regex("""^sp[fm](?:[_\s-].*)?$""")
+
 /** One selectable course inside a [GroupSet] (for example one half-class group). */
 data class GroupOption(val label: String, val title: String, val lessonsPerWeek: Int, val teacher: String)
 
@@ -14,9 +18,9 @@ private data class GroupFamily(val family: String)
 /** Name families: `-Sem1`/`-Sem2`, `<name> <n>.<m>` and `spf`/`spm` (also `SPF_...`/`SPM_...`). */
 private fun groupFamily(label: String): GroupFamily? {
     val text = label.trim().lowercase()
-    Regex("""^(.+?)[-_]sem([12])$""").find(text)?.let { return GroupFamily(it.groupValues[1].trim() + "|sem") }
-    Regex("""^(.+?)\s+(\d+)\.(\d+)$""").find(text)?.let { return GroupFamily(it.groupValues[1].trim() + " " + it.groupValues[2]) }
-    if (Regex("""^sp[fm](?:[_\s-].*)?$""").matches(text)) return GroupFamily("sp")
+    semesterFamily.find(text)?.let { return GroupFamily(it.groupValues[1].trim() + "|sem") }
+    numberedFamily.find(text)?.let { return GroupFamily(it.groupValues[1].trim() + " " + it.groupValues[2]) }
+    if (sportFamily.matches(text)) return GroupFamily("sp")
     return null
 }
 

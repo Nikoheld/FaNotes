@@ -8,6 +8,9 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+private val absenceWhitespace = Regex("""\s+""")
+private val absenceNonWord = Regex("[^a-z0-9]+")
+
 /*
  * Absence points (Absenzpunkte). The AKSA Absenzen page (pageid 21111, schulNetz 5.14) has two
  * tables: the booked statement ("Absenzenauszug", with points per row and the semester quota) and
@@ -65,10 +68,10 @@ private val LEADING_DATE = Regex("""^\d{1,2}\.\d{1,2}\.\d{4}""")
 
 private data class Column(val label: String, val start: Int, val span: Int)
 
-private fun cleanText(raw: String) = raw.replace(' ', ' ').replace(Regex("""\s+"""), " ").trim()
+private fun cleanText(raw: String) = raw.replace(' ', ' ').replace(absenceWhitespace, " ").trim()
 
 private fun foldAbsenceLabel(raw: String): String =
-    cleanText(raw).lowercase().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace(Regex("[^a-z0-9]+"), " ").trim()
+    cleanText(raw).lowercase().replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace(absenceNonWord, " ").trim()
 
 private fun Element.nearestTable(): Element? {
     var node: Element? = this

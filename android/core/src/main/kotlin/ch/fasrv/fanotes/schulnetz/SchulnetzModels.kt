@@ -102,7 +102,10 @@ data class AgendaEvent(
     val color: String,
     val timetableText: String,
 ) {
-    val label: String get() = listOf(courseName, text, timetableText).map(::cleanSchulnetzText).firstOrNull { it.isNotBlank() } ?: "Lektion"
+    /** Computed once per event: lists, filters and exam slots read it for every lesson on every pass. */
+    val label: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        listOf(courseName, text, timetableText).map(::cleanSchulnetzText).firstOrNull { it.isNotBlank() } ?: "Lektion"
+    }
 }
 
 /**
@@ -558,10 +561,31 @@ fun unwrapSchulnetz(raw: String): String {
 }
 
 /** Drop CDATA markup, including a wrapper that sits inside a longer field. */
-fun cleanSchulnetzText(raw: String): String =
-    cdataClose.replace(cdataOpen.replace(unwrapSchulnetz(raw), ""), "")
-        .replace(Regex("""\s+"""), " ")
+fun cleanSchulnetzText(raw: String): String {
+    // Nearly every field is plain text: no CDATA brackets and single spaces only. It skips four regex passes.
+    if (plainSchulnetzText(raw)) return raw.trim()
+    return cdataClose.replace(cdataOpen.replace(unwrapSchulnetz(raw), ""), "")
+        .replace(whitespaceRun, " ")
         .trim()
+}
+
+private val whitespaceRun = Regex("""\s+""")
+
+/** No `[`/`]` (so no CDATA markup) and no whitespace other than single spaces: cleaning only trims. */
+private fun plainSchulnetzText(raw: String): Boolean {
+    var previousSpace = false
+    for (char in raw) {
+        if (char == '[' || char == ']') return false
+        if (char == ' ') {
+            if (previousSpace) return false
+            previousSpace = true
+        } else {
+            if (char.isWhitespace() || char.code < 0x20) return false
+            previousSpace = false
+        }
+    }
+    return true
+}
 
 /** A real HH:mm from the field. The T inside `<![CDATA[` is not a time, and a date alone is not 00:00. */
 fun schulnetzClock(raw: String): String {

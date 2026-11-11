@@ -29,16 +29,24 @@ object AppLanguage {
     var currentTag by mutableStateOf("system")
         private set
 
+    /** The stored tag, read from preferences once; [choose] keeps it current. */
+    @Volatile private var knownTag: String? = null
+    private val resourcesLock = Any()
+    private var localizedTag = ""
+    private var localizedBase: Configuration? = null
+    private var localized: Resources? = null
+
     fun install(context: Context) {
         app = context.applicationContext
         val tag = storedTag(app)
+        knownTag = tag
         currentTag = tag
         AppCompatDelegate.setApplicationLocales(localesFor(tag))
         applyDefaultLocale()
     }
 
     fun locale(): Locale {
-        val tag = if (::app.isInitialized) storedTag(app) else currentTag
+        val tag = if (::app.isInitialized) tagOf(app) else currentTag
         if (tag == "de" || tag == "en") return Locale.forLanguageTag(tag)
         val system = Resources.getSystem().configuration.locales
         return if (system.isEmpty) Locale.getDefault() else system[0]
@@ -56,13 +64,15 @@ object AppLanguage {
     fun choose(tag: String) {
         val next = if (tag == "de" || tag == "en") tag else "system"
         if (::app.isInitialized) app.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().putString(KEY, next).commit()
+        knownTag = next
+        synchronized(resourcesLock) { localized = null; localizedBase = null }
         currentTag = next
         AppCompatDelegate.setApplicationLocales(localesFor(next))
         applyDefaultLocale()
     }
 
     fun applyDefaultLocale() {
-        val tag = if (::app.isInitialized) storedTag(app) else currentTag
+        val tag = if (::app.isInitialized) tagOf(app) else currentTag
         if (tag == "de" || tag == "en") Locale.setDefault(Locale.forLanguageTag(tag))
         else {
             val system = Resources.getSystem().configuration.locales
@@ -71,7 +81,7 @@ object AppLanguage {
     }
 
     fun wrap(base: Context): Context {
-        val tag = storedTag(base)
+        val tag = tagOf(base)
         if (tag != "de" && tag != "en") return base
         val config = Configuration(base.resources.configuration)
         config.setLocales(LocaleList.forLanguageTags(tag))
@@ -89,7 +99,29 @@ object AppLanguage {
         else -> LocaleListCompat.getEmptyLocaleList()
     }
 
-    private fun resources(): Resources = wrap(app).resources
+    private fun tagOf(context: Context): String = knownTag ?: storedTag(context).also { knownTag = it }
+
+    /**
+     * Every [t] call lands here, many times per frame. The localized resources are built once per
+     * tag and device configuration (rotation, dark mode, font size), not once per string.
+     */
+    private fun resources(): Resources {
+        val tag = tagOf(app)
+        val baseResources = app.resources
+        if (tag != "de" && tag != "en") return baseResources
+        val base = baseResources.configuration
+        synchronized(resourcesLock) {
+            val hit = localized
+            if (hit != null && localizedTag == tag && localizedBase == base) return hit
+            val config = Configuration(base)
+            config.setLocales(LocaleList.forLanguageTags(tag))
+            val built = app.createConfigurationContext(config).resources
+            localized = built
+            localizedTag = tag
+            localizedBase = Configuration(base)
+            return built
+        }
+    }
 
     fun get(@StringRes id: Int, vararg args: Any): String {
         val resources = resources()

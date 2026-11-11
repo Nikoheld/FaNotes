@@ -36,7 +36,7 @@ fun SchoolScreen(model: CompanionModel) {
     val courses = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)).size }
     val exams = remember(model.snapshot.exams, model.snapshot.events) { (model.snapshot.exams + model.snapshot.events.filter { it.isExamLike() }).distinctBy(::lessonTargetId).size }
     val openAbsences = model.snapshot.absences.count { it.isOpen() }
-    val absencePoints = remember(model.snapshot) { absenceTally(model.snapshot) }
+    val absencePoints = remember(model.snapshot) { model.absencePoints() }
     val updates = model.snapshot.messages.size + model.snapshot.startMessages.size
     val fetched = model.snapshot.fetchedAt.isNotBlank()
     RefreshableScreenList(model.syncing, { model.pullRefresh() }) {
@@ -322,8 +322,8 @@ fun CourseScreen(model: CompanionModel) {
 
 @Composable
 fun SchoolRecordScreen(model: CompanionModel, page: Page) {
-    val tally = remember(model.snapshot) { absenceTally(model.snapshot) }
-    val provisional = remember(model.snapshot, model.plannedAbsences) { provisionalTally(model.snapshot, model.plannedAbsences, LocalDate.now()) }
+    val tally = remember(model.snapshot) { model.absencePoints() }
+    val provisional = remember(model.snapshot, model.plannedAbsences) { model.provisionalPoints(LocalDate.now()) }
     var query by rememberSaveable(page) { mutableStateOf("") }
     var filter by rememberSaveable(page) { mutableStateOf("all") }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
