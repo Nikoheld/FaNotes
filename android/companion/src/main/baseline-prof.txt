@@ -18,3 +18,7 @@ Lch/fasrv/fanotes/companion/NoteReadingKt;
 Lch/fasrv/fanotes/companion/CompanionThemeKt;
 Lch/fasrv/fanotes/ink/InkViewTransformKt;
 Lch/fasrv/fanotes/schulnetz/GradeMathKt;
+HSPLch/fasrv/fanotes/companion/**->**(**)**
+HSPLch/fasrv/fanotes/schulnetz/**->**(**)**
+HSPLch/fasrv/fanotes/desk/**->**(**)**
+HSPLch/fasrv/fanotes/json/**->**(**)**
