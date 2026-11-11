@@ -61,7 +61,9 @@ jobs:
       - name: Kanti+ web app end-to-end (Playwright, local full stack)
         working-directory: fanotes-site/kanti-web
         run: |
-          npx playwright install --with-deps chromium
+          # --with-deps goes through apt, whose mirror sometimes fails DNS on the runner; the
+          # ubuntu image already has Chromium's libraries, so fall back to the browser alone.
+          timeout 300 npx playwright install --with-deps chromium || npx playwright install chromium
           npm run e2e
       - name: Firebase config when the secret exists
         working-directory: android
