@@ -310,7 +310,11 @@ test('timetables are served only to Alte Kanti identities, in the app and in the
     assert.equal((await aksa.call('/timetables/room/..%2Fx')).status, 404)
     assert.equal((await aksa.call('/timetables/room/Unknown')).status, 404)
 
-    for (const path of ['/timetables', '/timetables/class/G26D.pdf', '/timetables/room/Telli']) assert.equal((await other.call(path)).status, 404, path)
+    // Another school: the summary says "nothing here" (no error for the page), the files stay 404.
+    const otherSummary = await other.call('/timetables')
+    assert.equal(otherSummary.status, 200)
+    assert.deepEqual(await otherSummary.json(), { available: false })
+    for (const path of ['/timetables/class/G26D.pdf', '/timetables/room/Telli']) assert.equal((await other.call(path)).status, 404, path)
 
     const browser = await pairedBrowser(env.base, aksa)
     const web = await (await browser.call('GET', `/connections/${browser.id}/timetables`)).json()
@@ -323,7 +327,9 @@ test('timetables are served only to Alte Kanti identities, in the app and in the
     assert.equal((await browser.call('GET', `/connections/${browser.id}/timetables/room/..%2Fx`)).status, 404)
 
     const otherBrowser = await pairedBrowser(env.base, other)
-    assert.equal((await otherBrowser.call('GET', `/connections/${otherBrowser.id}/timetables`)).status, 404)
+    const otherWeb = await otherBrowser.call('GET', `/connections/${otherBrowser.id}/timetables`)
+    assert.equal(otherWeb.status, 200)
+    assert.deepEqual(await otherWeb.json(), { available: false })
     assert.equal((await otherBrowser.call('GET', `/connections/${otherBrowser.id}/timetables/class/G26D.png`)).status, 404)
     // No session: no timetables.
     const anonymous = await fetch(`${env.base}/api/v1/kanti-web/connections/${browser.id}/timetables`, { headers: { 'X-Forwarded-Host': WEB } })

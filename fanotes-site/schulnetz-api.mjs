@@ -1382,8 +1382,10 @@ export const createSchulnetzRuntime = (options = {}) => {
       const timetableMatch = /^\/timetables(?:\/(class|room)\/([^/]+))?$/u.exec(route)
       if (timetableMatch && method === 'GET') {
         const link = await readLink(accountId)
-        if (!timetables || !isAksaBase(link?.baseUrl)) fail(404, 'Diesen Endpunkt gibt es nicht.')
         const [, kind, rawName] = timetableMatch
+        // Asking whether there is anything is an answer, not an error; files stay 404 for everyone else.
+        if ((!timetables || !isAksaBase(link?.baseUrl)) && !kind) { send(response, 200, { available: false }); return true }
+        if (!timetables || !isAksaBase(link?.baseUrl)) fail(404, 'Diesen Endpunkt gibt es nicht.')
         if (!kind) { send(response, 200, await timetables.summary()); return true }
         let name = ''
         try { name = decodeURIComponent(rawName) } catch { fail(404, 'Diesen Stundenplan gibt es nicht.') }

@@ -663,6 +663,8 @@ export const createKantiWebApi = (options = {}) => {
     const connection = connectionOf(session, id)
     const status = await access.readStatus(connection.accountId)
     const store = status.linked ? await access.timetablesFor(connection.accountId) : null
+    // Asking whether there is anything is an answer, not an error (the page asks for every connection).
+    if (!store && !kind) { send(response, 200, { available: false }); return }
     if (!store) fail(404, 'Diesen Endpunkt gibt es nicht.')
     if (!kind) {
       send(response, 200, await store.summary())
