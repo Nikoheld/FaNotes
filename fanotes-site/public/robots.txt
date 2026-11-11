@@ -1,0 +1,4 @@
+User-agent: *
+Disallow: /api/
+
+Sitemap: https://fanotes.fasrv.ch/sitemap.xml

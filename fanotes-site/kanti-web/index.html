@@ -4,14 +4,77 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f4f5f2" />
-    <meta name="description" content="Kanti+ im Browser: Stundenplan, Noten, Prüfungen und Absenzen für Laptop und Desktop." />
+    <meta name="google-site-verification" content="wbNqoq9CsvRbTZbf9dblrVZQEjikSt1OX1n1ggKXr10" />
+    <title>Kanti+ – Schulnetz-Begleiter für Kantischüler</title>
+    <meta name="description" content="Kanti+ im Browser: Stundenplan, Noten, Prüfungen, Absenzen und Pendeln aus Schulnetz. Inoffiziell, nur lesend, ohne Werbung. Mit Demo." />
     <meta name="referrer" content="no-referrer" />
+    <link rel="canonical" href="https://schulnetz.fasrv.ch/" />
     <link rel="icon" type="image/svg+xml" href="/kanti-icon.svg" />
-    <title>Kanti+</title>
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Kanti+" />
+    <meta property="og:locale" content="de_CH" />
+    <meta property="og:title" content="Kanti+ – Schulnetz-Begleiter für Kantischüler" />
+    <meta property="og:description" content="Stundenplan, Noten, Prüfungen, Absenzen und Pendeln im Browser. Inoffiziell, nur lesend, ohne Werbung." />
+    <meta property="og:url" content="https://schulnetz.fasrv.ch/" />
+    <meta property="og:image" content="https://schulnetz.fasrv.ch/og-kanti.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Kanti+ mit Stundenplan und Noten in der Demo-Ansicht" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Kanti+ – Schulnetz-Begleiter für Kantischüler" />
+    <meta name="twitter:description" content="Stundenplan, Noten, Prüfungen, Absenzen und Pendeln im Browser. Inoffiziell, nur lesend, ohne Werbung." />
+    <meta name="twitter:image" content="https://schulnetz.fasrv.ch/og-kanti.png" />
+    <link rel="stylesheet" href="/intro.css" />
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebApplication",
+      "@id": "https://schulnetz.fasrv.ch/#app",
+      "name": "Kanti+",
+      "url": "https://schulnetz.fasrv.ch/",
+      "description": "Inoffizielle Schulnetz-Begleiter-App für Kantischülerinnen und Kantischüler: Stundenplan, Noten, Prüfungen, Absenzen und Pendeln.",
+      "applicationCategory": "EducationalApplication",
+      "operatingSystem": "Web, Android",
+      "inLanguage": "de-CH",
+      "image": "https://schulnetz.fasrv.ch/og-kanti.png",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "CHF"
+      },
+      "publisher": {
+        "@id": "https://fanotes.fasrv.ch/#organization"
+      }
+    },
+    {
+      "@type": "Organization",
+      "@id": "https://fanotes.fasrv.ch/#organization",
+      "name": "FaStudios",
+      "url": "https://fanotes.fasrv.ch/",
+      "logo": "https://fanotes.fasrv.ch/assets/fanotes-logo-512.png"
+    }
+  ]
+}
+    </script>
   </head>
   <body>
-    <div id="root"></div>
-    <noscript>Kanti+ braucht JavaScript.</noscript>
+    <div id="root">
+      <!-- Static intro for crawlers and the first paint; React replaces it on mount. -->
+      <div class="kp-intro">
+        <img src="/kanti-icon.svg" width="72" height="72" alt="" />
+        <h1>Kanti+</h1>
+        <p>Kanti+ ist die inoffizielle Schulnetz-Begleiter-App für Kantischülerinnen und Kantischüler: Stundenplan, Noten, Prüfungen, Absenzen und Pendeln, jetzt auch im Browser.</p>
+        <p>Die Seite wird geladen …</p>
+        <nav aria-label="Kanti+">
+          <a href="/about/">Was ist Kanti+?</a>
+          <a href="/?demo">Demo ansehen</a>
+        </nav>
+      </div>
+    </div>
+    <noscript>Kanti+ im Browser braucht JavaScript. Was Kanti+ kann, steht auf <a href="/about/">der Info-Seite</a>.</noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

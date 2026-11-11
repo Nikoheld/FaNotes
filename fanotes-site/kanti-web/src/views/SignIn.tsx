@@ -176,6 +176,7 @@ export const SignIn = () => {
         <p>{t.whyPairingBody}</p>
       </details>
       <footer className="signin-foot">
+        <a href="/about/">{t.aboutKanti}</a>
         <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/" target="_blank" rel="noopener noreferrer">{t.privacy}</a>
         <a href="https://fanotes.fasrv.ch/kantiplus/konto-loeschen/" target="_blank" rel="noopener noreferrer">{t.deleteAccount}</a>
       </footer>

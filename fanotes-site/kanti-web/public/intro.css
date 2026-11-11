@@ -1,0 +1,13 @@
+/* Static intro inside #root of index.html: shown to crawlers and while the app bundle loads.
+   React's createRoot().render() replaces it. Everything is scoped to .kp-intro; the colours are the app's. */
+.kp-intro { --kp-bg: #f4f5f2; --kp-text: #151c22; --kp-muted: #505b64; --kp-accent: #2a6f97; --kp-on-accent: #fff;
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  padding: 32px 20px; text-align: center; background: var(--kp-bg); color: var(--kp-text);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; line-height: 1.5; }
+@media (prefers-color-scheme: dark) { .kp-intro { --kp-bg: #111315; --kp-text: #ecedee; --kp-muted: #a8aeb4; --kp-accent: #86bfe0; --kp-on-accent: #0c2433; } }
+.kp-intro img { border-radius: 24%; display: block; }
+.kp-intro h1 { margin: 0; font-size: 34px; font-weight: 650; letter-spacing: -0.02em; }
+.kp-intro p { margin: 0; max-width: 46ch; color: var(--kp-muted); font-size: 16px; }
+.kp-intro nav { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 6px; }
+.kp-intro a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 999px; border: 1.5px solid var(--kp-accent); color: var(--kp-accent); font-weight: 600; text-decoration: none; }
+.kp-intro a:first-child { background: var(--kp-accent); color: var(--kp-on-accent); }

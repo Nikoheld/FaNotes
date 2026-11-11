@@ -97,3 +97,40 @@ test('FaNotes account sign-in', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Heute', exact: true }).first()).toBeVisible({ timeout: 20_000 })
   await visitEverything(page, problems)
 })
+
+test.describe('static pages and the SPA shell', () => {
+  test.describe('without JavaScript', () => {
+    test.use({ javaScriptEnabled: false })
+    test('/about/ shows the landing text and the FAQ in plain HTML', async ({ page }) => {
+      await page.goto('/about/')
+      await expect(page.getByRole('heading', { level: 1, name: /Kanti\+/ })).toBeVisible()
+      await expect(page.getByRole('heading', { name: 'Ist Kanti+ offiziell?' })).toBeVisible()
+      await expect(page.getByText('noch nicht im Play Store').first()).toBeVisible()
+      // No horizontal scroll at phone width is covered by the mobile project; here the page must at least render the screenshots.
+      await expect(page.locator('img[src$="heute.webp"]')).toHaveCount(1)
+    })
+    test('/ ships a crawlable intro before the app loads', async ({ page }) => {
+      await page.goto('/')
+      await expect(page.getByRole('heading', { level: 1, name: 'Kanti+' })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Was ist Kanti+?' })).toHaveAttribute('href', '/about/')
+    })
+  })
+
+  test('/about/ does not scroll sideways', async ({ page }) => {
+    await page.goto('/about/')
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+  })
+
+  test('the intro is replaced by the app after load', async ({ page }) => {
+    await page.goto('/?demo')
+    await expect(page.getByRole('heading', { name: 'Heute', exact: true }).first()).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.kp-intro')).toHaveCount(0)
+    await expect(page.getByText('Die Seite wird geladen')).toHaveCount(0)
+  })
+
+  test('the sign-in screen links to the landing page', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.locator('.signin a[href="/about/"]')).toBeVisible()
+  })
+})

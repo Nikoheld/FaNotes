@@ -96,6 +96,7 @@ const MIME_TYPES = new Map([
   ['.webmanifest', 'application/manifest+json; charset=utf-8'],
   ['.webp', 'image/webp'],
   ['.woff2', 'font/woff2'],
+  ['.xml', 'application/xml; charset=utf-8'],
 ])
 
 const json = (response, status, value, extraHeaders = {}, localize = true) => {
@@ -583,7 +584,17 @@ const serveStatic = async (request, response, pathname) => {
 
 // Browsers get a readable 404 page; API clients and scripts keep the JSON error.
 const serveNotFoundPage = async (request, response) => {
-  if (!/\btext\/html\b/u.test(String(request.headers.accept || ''))) return false
+  const accept = String(request.headers.accept || '').trim()
+  const wantsHtml = /\btext\/html\b/u.test(accept)
+  // Crawlers may send no Accept header or */*; give them the HTML 404 for page-like paths (not /api/).
+  let pathname = ''
+  try {
+    pathname = new URL(request.url || '/', 'http://localhost').pathname
+  } catch {
+    pathname = ''
+  }
+  const pageLike = (accept === '' || accept === '*/*') && !pathname.startsWith('/api/') && (pathname.endsWith('/') || !extname(pathname))
+  if (!wantsHtml && !pageLike) return false
   let body
   try {
     body = await fs.readFile(join(PUBLIC_DIR, '404.html'))

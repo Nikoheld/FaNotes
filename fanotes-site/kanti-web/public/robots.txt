@@ -1,0 +1,4 @@
+User-agent: *
+Disallow: /api/
+
+Sitemap: https://schulnetz.fasrv.ch/sitemap.xml
