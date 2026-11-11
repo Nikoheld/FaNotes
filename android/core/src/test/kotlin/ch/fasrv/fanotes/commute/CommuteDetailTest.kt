@@ -91,9 +91,9 @@ class CommuteDetailTest {
         assertEquals(DelayClass.ON_TIME, cls(0))
         assertEquals(DelayClass.ON_TIME, cls(-1))
         assertEquals(DelayClass.MINOR, cls(1))
-        assertEquals(DelayClass.MINOR, cls(2))
+        assertEquals(DelayClass.MODERATE, cls(2))
         assertEquals(DelayClass.MODERATE, cls(3))
-        assertEquals(DelayClass.MODERATE, cls(5))
+        assertEquals(DelayClass.MAJOR, cls(5))
         assertEquals(DelayClass.MAJOR, cls(6))
         assertEquals(DelayClass.CANCELLED, stopDelayClass(StopTime("p", "t", null), cancelled = true))
         for (d in listOf(0, 1, 2, 3, 5, 6, 30)) assertEquals(delayClass(d), cls(d))
@@ -131,7 +131,7 @@ class CommuteDetailTest {
         assertNull(rows[0].arrival); assertEquals("23:40", rows[0].departure?.shownClock)
         assertEquals("00:02", rows[4].arrival?.realClock)
         assertTrue(rows[4].platformChanged)
-        assertEquals(DelayClass.MINOR, rows[4].badgeClass)
+        assertEquals(DelayClass.MODERATE, rows[4].badgeClass)
     }
 
     @Test fun boardingAndExitWithoutDelayValueAreMarkedNoRealtime() {

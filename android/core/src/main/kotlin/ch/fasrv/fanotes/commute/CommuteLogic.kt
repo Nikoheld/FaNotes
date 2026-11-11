@@ -57,8 +57,9 @@ enum class DelayClass { ON_TIME, MINOR, MODERATE, MAJOR, CANCELLED }
 fun delayClass(delay: Int?, cancelled: Boolean = false): DelayClass = when {
     cancelled -> DelayClass.CANCELLED
     delay == null || delay <= 0 -> DelayClass.ON_TIME
-    delay <= 2 -> DelayClass.MINOR
-    delay <= 5 -> DelayClass.MODERATE
+    // +1 subtle, +2 to +4 orange, +5 and more red (as Fabio specified for the connection detail).
+    delay <= 1 -> DelayClass.MINOR
+    delay <= 4 -> DelayClass.MODERATE
     else -> DelayClass.MAJOR
 }
 
