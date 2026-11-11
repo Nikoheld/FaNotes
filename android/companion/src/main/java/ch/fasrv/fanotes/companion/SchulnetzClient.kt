@@ -801,6 +801,10 @@ class SchulnetzClient(
     fun commuteTrips(session: SchoolAuth, routeId: String, at: String, arrive: Boolean): List<ch.fasrv.fanotes.commute.Trip> =
         ch.fasrv.fanotes.commute.parseTrips(commuteGet(session, "/commute/trips?route=${queryValue(routeId)}&at=${queryValue(at)}&timeType=${if (arrive) "arrive" else "depart"}"))
 
+    /** The connection picker: trips from [at] for an unsaved or saved route. [path] comes from `connectionsPath`. */
+    fun commuteConnections(session: SchoolAuth, path: String): List<ch.fasrv.fanotes.commute.Trip> =
+        ch.fasrv.fanotes.commute.parseTrips(commuteGet(session, path))
+
     /** Links a connection the phone reads itself (TAM): no school secret, the server never polls it. */
     fun linkDevice(session: SchoolAuth, baseUrl: String, deviceId: String, displayName: String): SchulnetzLinkState {
         val (code, body) = fanotes("PUT", "/link", session, deviceLinkBody(baseUrl, deviceId, displayName))

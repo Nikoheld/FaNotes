@@ -1,6 +1,6 @@
 // Pendeln: the live board per route, the trip details and the route management.
 import { useEffect, useMemo, useState } from 'react'
-import { browseRequest, clockOf, emptyRoute, MAX_ROUTES, mergeTrips, moveRoute, relevantRoute, routeLabel, THRESHOLDS, upsertRoute } from '../lib/commute'
+import { browseRequest, clockOf, emptyRoute, isoWeekday, MAX_ROUTES, mergeTrips, moveRoute, relevantRoute, routeLabel, routeVias, THRESHOLDS, upsertRoute } from '../lib/commute'
 import { useCommuteLive } from '../lib/useCommuteLive'
 import { useKanti } from '../state'
 import type { CommuteRoute, Trip } from '../types'
@@ -11,6 +11,12 @@ import { useClock } from './common'
 
 const scheduleSummary = (route: CommuteRoute, t: ReturnType<typeof useKanti>['t']): string => {
   const { mode, times, days, bufferMinutes } = route.schedule
+  const pins = route.pins || []
+  if (pins.length) {
+    // "Feste Verbindung 07:12 IR 16" or per weekday "Mo 07:12 · Di 08:12".
+    const text = pins.length === 1 ? `${pins[0].departure} ${pins[0].line}` : pins.map((pin) => `${pin.days.map((day) => t.weekdays[day - 1]).join('/')} ${pin.departure}`).join(' · ')
+    return `${t.pinnedBadge} ${text}`
+  }
   if (mode === 'none') return t.scheduleModes.none
   const dayText = days.length === 7 ? '' : days.length === 5 && days.join() === '1,2,3,4,5' ? `${t.weekdays[0]}–${t.weekdays[4]}` : days.map((day) => t.weekdays[day - 1]).join(' ')
   const head = mode === 'times' ? times.join(' · ') : `${t.scheduleModes[mode]} (${bufferMinutes} ${t.minutesShort})`
@@ -22,7 +28,7 @@ export const Commute = () => {
   const { t, commute, route: location } = kanti
   const clock = useClock()
   useCommuteLive(commute)
-  const [editing, setEditing] = useState<{ route: CommuteRoute; isNew: boolean } | null>(null)
+  const [editing, setEditing] = useState<{ route: CommuteRoute; isNew: boolean; pickDay?: number } | null>(null)
   const [deleting, setDeleting] = useState<CommuteRoute | null>(null)
   const [error, setError] = useState('')
   const [extra, setExtra] = useState<Record<string, Trip[]>>({})
@@ -44,6 +50,16 @@ export const Commute = () => {
     if (routes.length < MAX_ROUTES) setEditing({ route: emptyRoute(), isNew: true })
     kanti.navigate('commute', {}, true)
   }, [wantsNew, commute.loaded]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // "?wahl=<route>" (from the Today card's "Neu wählen") opens that route's editor with the picker.
+  const repickId = location.params.get('wahl') || ''
+  useEffect(() => {
+    if (!repickId || !commute.loaded) return
+    const target = routes.find((route) => route.id === repickId)
+    const day = boards[repickId]?.pinned?.day
+    if (target) setEditing({ route: target, isNew: false, pickDay: day ? isoWeekday(day) : target.pins[0]?.days[0] || 1 })
+    kanti.navigate('commute', { strecke: repickId }, true)
+  }, [repickId, commute.loaded]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const persist = async (next: CommuteRoute[], settings?: { delayThreshold: number }) => {
     setError('')
@@ -99,7 +115,7 @@ export const Commute = () => {
                 <header className="board-head">
                   <div className="board-title">
                     <h2>{routeLabel(selected)}</h2>
-                    <p className="board-stops">{selected.from.name} <Icon name="forward" size={14} /> {selected.to.name}{selected.via ? <small className="muted"> · {selected.via.name}</small> : null}</p>
+                    <p className="board-stops">{selected.from.name} <Icon name="forward" size={14} /> {selected.to.name}{routeVias(selected).length ? <small className="muted"> · {t.commuteViaList(routeVias(selected).map((stop) => stop.name).join(', '))}</small> : null}</p>
                   </div>
                   <IconButton icon="refresh" label={t.commuteRefresh} onClick={() => void commute.refreshBoards(true)} disabled={commute.boardLoading} />
                 </header>
@@ -117,6 +133,7 @@ export const Commute = () => {
                     noMore={browse.none}
                     onEarlier={() => void more('earlier')}
                     onLater={() => void more('later')}
+                    onRepick={() => setEditing({ route: selected, isNew: false, pickDay: board.pinned ? isoWeekday(board.pinned.day) : selected.pins[0]?.days[0] || 1 })}
                   />
                 ) : !commute.boardError ? <div className="loading board-loading" role="status"><span className="spinner" /><span className="sr-only">{t.boardLoading}</span></div> : null}
                 {commute.provider ? <p className="muted small board-provider">{t.commuteProvider(commute.provider.name)}</p> : null}
@@ -131,8 +148,8 @@ export const Commute = () => {
                 <div key={route.id} className={`route-row${route.id === selected?.id ? ' active' : ''}`}>
                   <button type="button" className="route-main" onClick={() => choose(route.id)}>
                     <strong>{routeLabel(route)}</strong>
-                    <small>{route.from.name} → {route.to.name}{route.via ? ` · ${route.via.name}` : ''}</small>
-                    <small className="muted">{scheduleSummary(route, t)}</small>
+                    <small>{route.from.name} → {route.to.name}{routeVias(route).length ? ` · ${routeVias(route).map((stop) => stop.name).join(', ')}` : ''}</small>
+                    <small className="muted">{scheduleSummary(route, t)}{route.pins.length ? ` · ${t.pinnedBadge}` : ''}</small>
                   </button>
                   <div className="route-actions">
                     <IconButton icon="up" label={`${t.commuteMoveUp}: ${routeLabel(route)}`} disabled={index === 0} onClick={() => void persist(moveRoute(routes, index, -1)).catch(() => undefined)} />
@@ -162,6 +179,8 @@ export const Commute = () => {
           isNew={editing.isNew}
           globalThreshold={commute.settings.delayThreshold}
           search={commute.stops}
+          connections={commute.connections}
+          pickDay={editing.pickDay}
           t={t}
           onClose={() => setEditing(null)}
           onSave={async (route) => {

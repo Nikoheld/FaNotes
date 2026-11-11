@@ -10,8 +10,6 @@ import { parseRoute, routeHref, type Route } from './lib/route'
 import { pickLanguage, STRINGS, type Language, type Strings } from './lib/i18n'
 import type { View } from './lib/shortcuts'
 import { useCommuteStore, type Commute } from './state-commute'
-import { detectGroupSets } from './lib/groups'
-import { hiddenLabelsFor } from './lib/commute'
 import { zurichToday } from '@shared/schulnetz-logic'
 import type { AlertSettings, Change, Connection, LinkStatus, Reveals, Session, Snapshot } from './types'
 
@@ -245,9 +243,8 @@ export const KantiProvider = ({ children, api: injected, demo: startInDemo = fal
 
   const data = demo ? demoData : (active ? store[active.id] || EMPTY_DATA : EMPTY_DATA)
 
-  const hiddenLabels = useMemo(() => (data.snapshot ? hiddenLabelsFor(detectGroupSets(data.snapshot.events || []), prefs.groupChoices) : null), [data.snapshot, prefs.groupChoices])
   const onUnauthorized = useCallback(() => { setSession(null); setPhase('signedOut') }, [])
-  const commute = useCommuteStore({ api, connectionId: active?.id || '', demo, ready: phase === 'ready', hiddenLabels, onUnauthorized })
+  const commute = useCommuteStore({ api, connectionId: active?.id || '', demo, ready: phase === 'ready', onUnauthorized })
 
   const value: Kanti = {
     commute,

@@ -1,6 +1,7 @@
 // The one way the page talks to the server: same origin, the session cookie, JSON, and the
 // session's CSRF token on every request that changes something.
 import type { AdminIndex, AdminUploadResult, ClassWeek, RoomWeek, TimetableSummary } from './timetables'
+import type { ConnectionsQuery } from './commute'
 import type { AlertSettings, Change, CommuteBoards, CommuteConfig, CommuteRoute, CommuteSettings, Connection, LinkStatus, Reveals, Session, Snapshot, Stop, Trip } from '../types'
 
 export const API = '/api/v1/kanti-web'
@@ -85,6 +86,10 @@ export const createApi = (transport: Transport = (input, init) => fetch(input, i
     commuteStops: (id: string, query: string) => call<{ stops: Stop[] }>('GET', `${connection(id)}/commute/stops?q=${encodeURIComponent(query)}`),
     commuteBoard: (id: string, route = '') => call<CommuteBoards>('GET', `${connection(id)}/commute/board${route ? `?route=${encodeURIComponent(route)}` : ''}`),
     commuteTrips: (id: string, route: string, at: string, timeType: 'depart' | 'arrive') => call<{ trips: Trip[] }>('GET', `${connection(id)}/commute/trips?route=${encodeURIComponent(route)}&at=${encodeURIComponent(at)}&timeType=${timeType}`),
+    /** The connection picker of the route editor: up to 8 trips from `at`, before the route is saved. */
+    commuteConnections: (id: string, query: ConnectionsQuery) => call<{ trips: Trip[]; stale?: boolean }>('GET', `${connection(id)}/commute/connections?${[
+      `from=${encodeURIComponent(query.from)}`, `to=${encodeURIComponent(query.to)}`, ...query.vias.map((via) => `via=${encodeURIComponent(via)}`), `at=${encodeURIComponent(query.at)}`, `timeType=${query.timeType}`,
+    ].join('&')}`),
     rename: (id: string, label: string) => call<Connection>('PATCH', connection(id), { label }),
     remove: (id: string) => call<{ removed: boolean; signedOut: boolean }>('DELETE', connection(id)),
   }

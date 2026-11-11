@@ -238,12 +238,86 @@ class CommuteUiTest {
     }
 
     @Test fun alertTitlesFromTheServerAreShownInTheChosenLanguage() {
-        val titles = listOf("Verspätung", "Fällt aus", "Anschluss verpasst", "Gleisänderung", "Früher nach Hause", "Später zur Schule")
+        val titles = listOf("Verspätung", "Fällt aus", "Anschluss verpasst", "Gleisänderung", "Früher nach Hause", "Später zur Schule", "Verbindung fehlt")
         AppLanguage.choose("en")
-        assertEquals(listOf("Delay", "Cancelled", "Connection missed", "Platform change", "Home earlier", "Later to school"), titles.map { shownText(it) })
+        assertEquals(listOf("Delay", "Cancelled", "Connection missed", "Platform change", "Home earlier", "Later to school", "Connection missing"), titles.map { shownText(it) })
         AppLanguage.choose("de")
         assertEquals(titles, titles.map { shownText(it) })
         AppLanguage.choose("en")
+    }
+
+    // ── Fixed connection ─────────────────────────────────────────────────────
+
+    private val pin = Pin(listOf(1, 2, 3, 4, 5), "IR 16", "1234", "Testdorf", "9000001", "07:05", "07:47", 1)
+
+    private fun pinnedBoard(state: PinnedState?, vararg trips: Trip, alternatives: List<Trip> = emptyList(), change: Trip? = null, target: TripTarget = CommuteSamples.target()) =
+        CommuteSamples.board(*trips, alternatives = alternatives, target = target).copy(pinned = state, change = change)
+
+    @Test fun pinnedRouteShowsThePinnedTripAndHidesOthersBehindAnExpander() {
+        val p = CommuteSamples.trip("07:05", delay = 4, id = "pin")
+        val other = CommuteSamples.trip("07:35", id = "other")
+        val board = pinnedBoard(PinnedState(PinStatus.OK, CommuteSamples.DAY, pin, p), p, other)
+        show(false, card(CommuteSamples.ui(board)))
+        rule.onNodeWithText("07:09").assertIsDisplayed()
+        rule.onNodeWithText(t(R.string.commute_delay_minutes, 4)).assertIsDisplayed()
+        rule.onNodeWithText(t(R.string.commute_other_show)).assertIsDisplayed()
+        assertTrue(rule.onAllNodes(hasText("07:35")).fetchSemanticsNodes().isEmpty())
+        rule.onNodeWithText(t(R.string.commute_other_show)).performClick()
+        rule.onNodeWithText("07:35").assertIsDisplayed()
+        rule.onNodeWithText(t(R.string.commute_other_hide)).assertIsDisplayed()
+    }
+
+    @Test fun movedPinSaysTheNewTime() {
+        val p = CommuteSamples.trip("07:12", id = "pin")
+        show(false, card(CommuteSamples.ui(pinnedBoard(PinnedState(PinStatus.MOVED, CommuteSamples.DAY, pin, p), p))))
+        rule.onNodeWithText(t(R.string.commute_pin_moved, "07:12")).assertIsDisplayed()
+    }
+
+    @Test fun missingPinSaysSoOffersTheNearestTripAndARepickButton() {
+        val near = CommuteSamples.trip("07:20", id = "near")
+        val repicks = mutableListOf<String>()
+        val board = pinnedBoard(PinnedState(PinStatus.MISSING, CommuteSamples.DAY, pin, null, near), near)
+        show(false, { CommuteCard(CommuteSamples.ui(board), CommuteSamples.NOW, true, {}, {}, onRepick = { repicks += it }) })
+        rule.onNodeWithText(t(R.string.commute_pin_missing_title)).assertIsDisplayed()
+        rule.onNodeWithText(t(R.string.commute_pin_nearest)).assertIsDisplayed()
+        rule.onNodeWithText("07:20").assertIsDisplayed()
+        rule.onNodeWithText(t(R.string.commute_pin_repick)).performClick()
+        assertEquals(listOf("a1b2c3d4e5f6"), repicks)
+    }
+
+    @Test fun cancelledPinShowsTheAlternativesProminentlyAndALessonChangeLine() {
+        val p = CommuteSamples.trip("07:05", status = TripStatus.CANCELLED, id = "pin")
+        val alt = CommuteSamples.trip("07:35", id = "alt")
+        val early = CommuteSamples.trip("12:40", id = "early")
+        val target = CommuteSamples.target("lastLesson", LessonChange.LAST_CANCELLED)
+        val board = pinnedBoard(PinnedState(PinStatus.OK, CommuteSamples.DAY, pin, p), p, alternatives = listOf(alt), change = early, target = target)
+        show(false, card(CommuteSamples.ui(board)))
+        rule.onNodeWithText(t(R.string.commute_alternative)).assertIsDisplayed()
+        rule.onNodeWithText(t(R.string.commute_change_last, "12:40 371")).assertIsDisplayed()
+    }
+
+    @Test fun editorOffersASecondViaOnlyAfterTheFirstAndKeepsTheOrder() {
+        val h = Harness(Route("x", from = CommuteSamples.home, to = CommuteSamples.school))
+        showEditor(h)
+        assertTrue(rule.onAllNodes(hasText(t(R.string.commute_optional, t(R.string.commute_via_second)))).fetchSemanticsNodes().isEmpty())
+        h.route = withViaAt(h.route, 0, CommuteSamples.hub)
+        rule.waitForIdle()
+        rule.onNodeWithText(t(R.string.commute_optional, t(R.string.commute_via_second))).performScrollTo().assertIsDisplayed()
+        h.route = withViaAt(h.route, 1, Stop("5", "Zwischen", StopType.BUS))
+        rule.waitForIdle()
+        assertEquals(listOf("Knoten", "Zwischen"), h.route.vias.map { it.name })
+    }
+
+    @Test fun changingTheStopsClearsThePinsAndThePinSectionNeedsStops() {
+        val pinned = CommuteSamples.route().copy(pins = listOf(pin))
+        val h = Harness(pinned)
+        showEditor(h)
+        rule.onNodeWithText(t(R.string.commute_pin_title)).performScrollTo().assertIsDisplayed()
+        rule.onNodeWithText(commutePinSummary(pin)).performScrollTo().assertIsDisplayed()
+        rule.onNodeWithContentDescription(t(R.string.commute_clear_stop, t(R.string.commute_to))).performScrollTo().performClick()
+        assertTrue(h.route.pins.isEmpty())
+        rule.waitForIdle()
+        rule.onNodeWithText(t(R.string.commute_pin_cleared)).performScrollTo().assertIsDisplayed()
     }
 
     // ── Widget rows ──────────────────────────────────────────────────────────

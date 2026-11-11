@@ -17,7 +17,7 @@ object CommuteSamples {
     val hub = Stop("9000003", "Knoten", StopType.TRAIN)
 
     fun route(id: String = "a1b2c3d4e5f6", name: String = "Schule", mode: ScheduleMode = ScheduleMode.FIRST_LESSON, via: Stop? = null, notify: Boolean = true) =
-        Route(id, name, home, school, via, Schedule(mode, if (mode == ScheduleMode.TIMES) listOf("07:05") else emptyList(), bufferMinutes = 10), null, notify)
+        Route(id, name, home, school, listOfNotNull(via), Schedule(mode, if (mode == ScheduleMode.TIMES) listOf("07:05") else emptyList(), bufferMinutes = 10), null, notify)
 
     private fun point(name: String, clock: String, planned: String = clock, delay: Int? = null, platform: String = "", changed: Boolean = false) =
         Point(name, "", at(clock), at(planned), delay, platform, changed)

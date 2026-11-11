@@ -4,17 +4,17 @@ import { renderToString } from 'react-dom/server'
 import { shortcutFor, VIEWS } from '../src/lib/shortcuts'
 import { createApi } from '../src/lib/api'
 import {
-  browseRequest, chipColors, clockOf, createStopSearcher, delayClass, durationLabel, emptyRoute, focusDue, hiddenLabelsFor, isoZurich, lessonChange, mergeTrips, moveRoute,
-  newRouteId, nextTrip, normalizeRoute, pollDue, relevantRoute, sameLabels, upsertRoute, validateRoute, MAX_ROUTES,
+  assignPin, boardFocus, browseRequest, cleanPins, chipColors, connectionsQuery, defaultPickTime, isoWeekday, nextDateForWeekday, pickerPage, pinFromTrip, pinModeOf, readRoute, removePinDay, routeVias, zurichAt,
+  clockOf, createStopSearcher, delayClass, durationLabel, emptyRoute, focusDue, isoZurich, lessonChange, mergeTrips, moveRoute,
+  newRouteId, nextTrip, normalizeRoute, pollDue, relevantRoute, upsertRoute, validateRoute, MAX_ROUTES,
 } from '../src/lib/commute'
-import { demoCommute } from '../src/lib/demo-commute'
-import { detectGroupSets } from '../src/lib/groups'
+import { demoCommute, demoConnections } from '../src/lib/demo-commute'
 import { STRINGS } from '../src/lib/i18n'
-import { BoardBody, DelayBadge, LessonChangeBanner, LineChip, TripCard } from '../src/components/commute'
+import { BoardBody, PinnedFocus, DelayBadge, LessonChangeBanner, LineChip, TripCard } from '../src/components/commute'
 import { KantiProvider } from '../src/state'
 import { Today } from '../src/views/Today'
 import { Commute } from '../src/views/Commute'
-import type { CommuteRoute, Stop, Trip } from '../src/types'
+import type { CommuteRoute, Pin, RouteBoard, Stop, Trip } from '../src/types'
 
 const NOW = Date.parse('2026-11-12T06:00:00+01:00')
 const demo = demoCommute(NOW)
@@ -138,19 +138,6 @@ describe('route editor validation', () => {
     expect(upsertRoute(list, { ...list[0], name: 'Neu' })[0].name).toBe('Neu')
     expect(moveRoute([1, 2, 3], 0, 1)).toEqual([2, 1, 3])
     expect(moveRoute([1, 2, 3], 0, -1)).toEqual([1, 2, 3])
-  })
-  it('derives the hidden lesson labels from the half-class choices', () => {
-    const weekly = (label: string, hour: number) => [0, 1, 2].map((week) => ({
-      id: `${label}-${week}`, eventType: 'lesson', start: `2026-11-${String(2 + week * 7).padStart(2, '0')}T${hour}:00:00`, end: `2026-11-${String(2 + week * 7).padStart(2, '0')}T${hour}:45:00`,
-      text: label, courseName: label, courseId: label, room: '', teachers: [], status: '', comment: '', timetableText: '', color: '',
-    }))
-    const sets = detectGroupSets([...weekly('Sport-Sem1', 9), ...weekly('Sport-Sem2', 9)] as never)
-    expect(sets).toHaveLength(1)
-    expect(hiddenLabelsFor(sets, {})).toEqual([])
-    expect(hiddenLabelsFor(sets, { [sets[0].key]: ['Sport-Sem1'] })).toEqual(['sport-sem2'])
-    expect(hiddenLabelsFor(sets, { [sets[0].key]: ['Gone'] })).toEqual([])
-    expect(sameLabels(['A', 'b'], ['b', 'a'])).toBe(true)
-    expect(sameLabels(['a'], [])).toBe(false)
   })
 })
 
@@ -310,5 +297,155 @@ describe('rendering', () => {
     expect(de.commute).toBe('Pendeln')
     expect(de.alertNames.commuteLessonEnd).toBeTruthy()
     expect(en.alertNames.commuteLessonEnd).toBeTruthy()
+  })
+})
+
+describe('two vias and pins', () => {
+  const stop = (id: string): Stop => ({ id, name: `Halt ${id}`, type: 'train' })
+  const pin = (extra: Partial<Pin> = {}): Pin => ({ days: [1, 2, 3, 4, 5], line: 'IR 16', trainNo: '1234', stop: 'Aarau', stopId: 'aarau', departure: '07:12', arrival: '07:41', transfers: 1, ...extra })
+
+  it('reads a route without vias as [via] and with vias as they are', () => {
+    const old = { ...validRoute(), via: stop('v1') } as Partial<CommuteRoute>
+    delete old.vias
+    delete old.pins
+    expect(routeVias(old)).toEqual([stop('v1')])
+    const read = readRoute(old as CommuteRoute)
+    expect(read).toMatchObject({ vias: [stop('v1')], via: stop('v1'), pins: [] })
+    expect(readRoute({ ...validRoute(), vias: [stop('x'), stop('y'), stop('z')], via: null }).vias.map((v) => v.id)).toEqual(['x', 'y'])
+    expect(routeVias({ via: null })).toEqual([])
+  })
+  it('saves vias (max 2, ordered, no duplicates or ends), via = first and cleaned pins', () => {
+    const route = normalizeRoute({ ...validRoute(), vias: [stop('x'), stop('x'), { id: '', name: '', type: 'other' }, stop('y'), stop('z')], via: null, pins: [pin({ days: [5, 1, 1] }), pin({ days: [1, 2], departure: '08:00' }), pin({ days: [3], departure: '99:00' })] })
+    expect(route.vias.map((v) => v.id)).toEqual(['x', 'y'])
+    expect(route.via?.id).toBe('x')
+    expect(route.pins).toHaveLength(2)
+    expect(route.pins[0].days).toEqual([1, 5])
+    expect(route.pins[1].days).toEqual([2])
+    expect(normalizeRoute({ ...validRoute(), vias: [{ id: 'a', name: 'Testdorf', type: 'train' }, stop('y')], via: null }).vias.map((v) => v.id)).toEqual(['y'])
+    expect(normalizeRoute(validRoute())).toMatchObject({ vias: [], via: null, pins: [] })
+    expect(cleanPins(undefined)).toEqual([])
+  })
+  it('keeps a weekday in one pin only and merges the same connection', () => {
+    const base = [pin({ days: [1, 2, 3, 4, 5] })]
+    const wed = assignPin(base, pin({ days: [3], departure: '07:40', line: 'S 29' }))
+    expect(wed.map((p) => [p.departure, p.days])).toEqual([['07:12', [1, 2, 4, 5]], ['07:40', [3]]])
+    const back = assignPin(wed, pin({ days: [3] }))
+    expect(back).toHaveLength(1)
+    expect(back[0].days).toEqual([1, 2, 3, 4, 5])
+    expect(removePinDay(back, 3)[0].days).toEqual([1, 2, 4, 5])
+    expect(removePinDay([pin({ days: [2] })], 2)).toEqual([])
+  })
+  it('derives the editor mode from the pins', () => {
+    const schedule = validRoute().schedule
+    expect(pinModeOf({ pins: [], schedule })).toBe('none')
+    expect(pinModeOf({ pins: [pin()], schedule })).toBe('daily')
+    expect(pinModeOf({ pins: [pin({ days: [1] })], schedule })).toBe('weekday')
+    expect(pinModeOf({ pins: [pin({ days: [1, 2] }), pin({ days: [3, 4, 5], departure: '08:00' })], schedule })).toBe('weekday')
+  })
+  it('turns a trip into a pin and picks the default time from the schedule', () => {
+    const trip = demoConnections(demo.routes[0].from, demo.routes[0].to, [], '2026-11-13T06:30:00+01:00')[0]
+    expect(pinFromTrip(trip, [5, 1])).toMatchObject({ days: [1, 5], line: 'IR16', departure: clockOf(trip.plannedDeparture) })
+    expect(pinFromTrip({ ...trip, pin: null }, [1])).toBeNull()
+    const schedule = validRoute().schedule
+    expect(defaultPickTime({ ...schedule, mode: 'times', times: ['07:40', '07:05'] })).toBe('07:05')
+    expect(defaultPickTime({ ...schedule, mode: 'firstLesson' })).toBe('06:30')
+    expect(defaultPickTime({ ...schedule, mode: 'lastLesson' })).toBe('12:00')
+    expect(defaultPickTime(schedule)).toBe('06:30')
+  })
+  it('finds the next date with a weekday and builds Zurich times', () => {
+    const wednesday = Date.parse('2026-11-11T10:00:00+01:00')
+    expect(isoWeekday('2026-11-11')).toBe(3)
+    expect(nextDateForWeekday(3, wednesday)).toBe('2026-11-11')
+    expect(nextDateForWeekday(1, wednesday)).toBe('2026-11-16')
+    expect(nextDateForWeekday(2, Date.parse('2026-12-31T23:30:00+01:00'))).toBe('2027-01-05')
+    expect(zurichAt('2026-11-16', '07:05')).toBe('2026-11-16T07:05:00+01:00')
+    expect(zurichAt('2026-07-14', '07:05')).toBe('2026-07-14T07:05:00+02:00')
+  })
+  it('builds the connections query with stop ids (names as fallback) and pages by planned departure', () => {
+    const route = { from: stop('a'), to: { id: '', name: 'Ziel', type: 'bus' as const }, vias: [stop('v1'), stop('v2')] }
+    expect(connectionsQuery(route, 'AT')).toEqual({ from: 'a', to: 'Ziel', vias: ['v1', 'v2'], at: 'AT', timeType: 'depart' })
+    const trips = demoConnections(stop('a'), stop('b'), [], '2026-11-13T06:30:00+01:00')
+    expect(trips).toHaveLength(8)
+    const last = trips[trips.length - 1]
+    expect(pickerPage(trips, 'later')).toBe(isoZurich(Date.parse(last.plannedDeparture) + 60_000))
+    expect(pickerPage(trips, 'earlier')).toBe(isoZurich(Date.parse(trips[0].plannedDeparture) - 60 * 60_000))
+    expect(pickerPage([], 'later')).toBeNull()
+  })
+  it('api: the connections request repeats via and carries at and timeType', async () => {
+    const seen: string[] = []
+    const api = createApi(async (url) => { seen.push(String(url)); return new Response(JSON.stringify({ trips: [] }), { status: 200, headers: { 'content-type': 'application/json' } }) })
+    await api.commuteConnections('abcdefabcdef', { from: 'a', to: 'b', vias: ['v1', 'v 2'], at: '2026-11-13T07:05:00+01:00', timeType: 'depart' })
+    expect(seen[0]).toBe('/api/v1/kanti-web/connections/abcdefabcdef/commute/connections?from=a&to=b&via=v1&via=v%202&at=2026-11-13T07%3A05%3A00%2B01%3A00&timeType=depart')
+  })
+})
+
+describe('pinned board focus', () => {
+  const pinnedBoard = demo.boards[demo.routes.find((route) => route.pins.length)!.id]
+  const withState = (patch: Partial<NonNullable<RouteBoard['pinned']>>, extra: Partial<RouteBoard> = {}): RouteBoard => ({ ...pinnedBoard, pinned: { ...pinnedBoard.pinned!, ...patch }, ...extra })
+
+  it('has no focus on a plain route', () => {
+    const focus = boardFocus(schoolBoard)
+    expect(focus.mode).toBe('plain')
+    expect(focus.others).toEqual(schoolBoard.trips)
+    expect(boardFocus(undefined).mode).toBe('plain')
+  })
+  it('focuses the pinned trip and moves the others behind the expander', () => {
+    const focus = boardFocus(pinnedBoard)
+    expect(focus).toMatchObject({ mode: 'pinned', status: 'ok', broken: false, movedTo: '' })
+    expect(focus.trip?.id).toBe(pinnedBoard.pinned!.trip!.id)
+    expect(focus.others.map((trip) => trip.id)).not.toContain(focus.trip!.id)
+    expect(focus.others).toHaveLength(pinnedBoard.trips.length - 1)
+  })
+  it('reports moved, broken (cancelled and gone) and missing', () => {
+    const trip = pinnedBoard.pinned!.trip!
+    expect(boardFocus(withState({ status: 'moved' })).movedTo).toBe(clockOf(trip.plannedDeparture))
+    const cancelled = { ...trip, status: 'cancelled' as const }
+    expect(boardFocus(withState({ trip: cancelled })).broken).toBe(true)
+    expect(boardFocus(withState({ status: 'gone', trip })).broken).toBe(true)
+    const nearest = pinnedBoard.trips[0]
+    const missing = boardFocus(withState({ status: 'missing', trip: null, nearest }))
+    expect(missing).toMatchObject({ status: 'missing', trip: null, nearest })
+    expect(missing.others.map((other) => other.id)).not.toContain(nearest.id)
+  })
+  it('suggests the server change trip for a pinned route', () => {
+    const change = pinnedBoard.trips[0]
+    const board = withState({}, { target: { ...pinnedBoard.target, lessonChange: 'lastCancelled', plannedAt: null }, change })
+    expect(lessonChange(board)).toMatchObject({ kind: 'lastCancelled', pinned: true, time: clockOf(change.departure), arrival: clockOf(change.arrival) })
+    expect(lessonChange({ ...board, change: null })).toBeNull()
+  })
+
+  it('renders the pinned trip with its label, delay, and the notices', () => {
+    for (const t of [de, en]) {
+      const html = renderToString(<PinnedFocus board={pinnedBoard} t={t} />)
+      expect(html).toContain('trip-pinned')
+      expect(html).toContain(t.pinnedBadge)
+      expect(html).toContain(t.delayMinutes(2))
+      expect(html).not.toContain('class="alternatives"')
+    }
+    expect(renderToString(<PinnedFocus board={withState({ status: 'moved' })} t={de} />)).toContain(de.pinMoved(clockOf(pinnedBoard.pinned!.trip!.plannedDeparture)))
+    const missing = renderToString(<PinnedFocus board={withState({ status: 'missing', trip: null, nearest: pinnedBoard.trips[0] })} t={de} onRepick={() => undefined} />)
+    expect(missing).toContain(de.pinMissing(pinnedBoard.pinned!.pin.departure, 'IR16', pinnedBoard.pinned!.pin.stop, `${pinnedBoard.pinned!.day.slice(8, 10)}.${pinnedBoard.pinned!.day.slice(5, 7)}.`))
+    expect(missing).toContain(de.pinRepick)
+    expect(missing).toContain(de.pinNearest)
+  })
+  it('puts alternatives first when the pinned connection is cancelled and hides the others by default', () => {
+    const cancelled = { ...pinnedBoard.pinned!.trip!, status: 'cancelled' as const, issues: [{ kind: 'cancelled' as const, text: 'Zug fällt aus' }] }
+    const alt = pinnedBoard.trips[0]
+    const board = withState({ trip: cancelled }, { alternatives: [alt] })
+    const html = renderToString(<BoardBody board={board} trips={board.trips} t={de} onEarlier={() => undefined} onLater={() => undefined} />)
+    expect(html).toContain(de.bannerCancelled)
+    expect(html).toContain('class="alternatives"')
+    expect(html).toContain(de.othersShow)
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).not.toContain(de.boardEarlier)
+  })
+  it('a plain board still lists the trips directly', () => {
+    const html = renderToString(<BoardBody board={schoolBoard} trips={schoolBoard.trips} t={de} onEarlier={() => undefined} />)
+    expect(html).toContain(de.boardEarlier)
+    expect(html).not.toContain(de.othersShow)
+  })
+  it('the demo has a pinned route and a route with two vias', () => {
+    expect(demo.routes.some((route) => route.pins.length === 1)).toBe(true)
+    expect(demo.routes.some((route) => route.vias.length === 2 && route.via?.id === route.vias[0].id)).toBe(true)
   })
 })

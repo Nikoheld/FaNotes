@@ -1,7 +1,6 @@
 // Pendelstrecken: the pure logic behind the Pendeln view, the Today card and the route editor.
 // Nothing here touches the network or React, so all of it is unit-tested.
-import type { CommuteRoute, CommuteSettings, Leg, Occupancy, OccupancyLevel, RouteBoard, Schedule, ScheduleMode, Stop, Trip } from '../types'
-import type { GroupChoices, GroupSet } from './groups'
+import type { CommuteRoute, CommuteSettings, Leg, Occupancy, OccupancyLevel, Pin, RouteBoard, Schedule, ScheduleMode, Stop, Trip } from '../types'
 
 export const MAX_ROUTES = 8
 export const MAX_TIMES = 6
@@ -16,6 +15,7 @@ export const POLL_WINDOW_MS = 30 * 60_000
 export const SEARCH_DELAY_MS = 250
 export const SEARCH_MIN_CHARS = 2
 export const DEFAULT_DAYS = [1, 2, 3, 4, 5]
+export const MAX_VIAS = 2
 
 // ---------------------------------------------------------------- times
 
@@ -116,17 +116,65 @@ export const browseRequest = (trips: Trip[], direction: 'earlier' | 'later'): { 
   return Number.isFinite(ms) ? { at: isoZurich(ms - 60_000), timeType: 'arrive' } : null
 }
 
-export interface LessonChange { kind: 'lastCancelled' | 'firstCancelled'; line: string; time: string; plannedTime: string }
+export interface LessonChange { kind: 'lastCancelled' | 'firstCancelled'; line: string; time: string; plannedTime: string; arrival: string; pinned: boolean }
 
-/** The lesson-change banner: what to take instead, from the board's best trip. */
+/**
+ * The lesson-change banner: what to take instead. A pinned route suggests the server's `change`
+ * trip (the earlier way home / later way to school); others use the board's best trip.
+ */
 export const lessonChange = (board: RouteBoard | undefined): LessonChange | null => {
   if (!board || board.target.lessonChange === 'none') return null
   const kind = board.target.lessonChange
-  const trip = board.trips.find((candidate) => !tripCancelled(candidate)) || board.trips[0]
+  const pinned = Boolean(board.pinned)
+  const trip = pinned ? board.change : (board.trips.find((candidate) => !tripCancelled(candidate)) || board.trips[0])
   if (!trip) return null
   const line = rideLegs(trip)[0]?.line || ''
-  const time = clockOf(kind === 'lastCancelled' ? trip.departure : trip.departure)
-  return { kind, line, time, plannedTime: clockOf(board.target.plannedAt || '') }
+  return { kind, line, time: clockOf(trip.departure), plannedTime: clockOf(board.target.plannedAt || ''), arrival: clockOf(trip.arrival), pinned }
+}
+
+// ---------------------------------------------------------------- pinned focus
+
+export interface BoardFocus {
+  /** 'plain' for routes without a fixed connection: the board looks as it always did. */
+  mode: 'plain' | 'pinned'
+  status: 'ok' | 'moved' | 'missing' | 'gone' | null
+  pin: Pin | null
+  day: string
+  /** The pinned connection live; null when it is missing from the timetable. */
+  trip: Trip | null
+  /** Pinned connection cancelled, broken or gone: the alternatives become prominent. */
+  broken: boolean
+  /** Planned departure 'HH:MM' of a moved connection. */
+  movedTo: string
+  /** Missing: the trip closest to the pinned time. */
+  nearest: Trip | null
+  /** Everything else (secondary, behind "Andere Verbindungen anzeigen"). */
+  others: Trip[]
+}
+
+export const boardFocus = (board: RouteBoard | undefined, trips: Trip[] = board?.trips || []): BoardFocus => {
+  const pinned = board?.pinned
+  if (!board || !pinned) return { mode: 'plain', status: null, pin: null, day: '', trip: null, broken: false, movedTo: '', nearest: null, others: trips }
+  const trip = pinned.trip || null
+  const nearest = pinned.status === 'missing' ? pinned.nearest || null : null
+  const skip = new Set([trip?.id, nearest?.id].filter(Boolean) as string[])
+  return {
+    mode: 'pinned',
+    status: pinned.status,
+    pin: pinned.pin,
+    day: pinned.day,
+    trip,
+    broken: Boolean(trip && (tripCancelled(trip) || pinned.status === 'gone')),
+    movedTo: pinned.status === 'moved' && trip ? clockOf(trip.plannedDeparture) : '',
+    nearest,
+    others: trips.filter((candidate) => !skip.has(candidate.id)),
+  }
+}
+
+/** 'YYYY-MM-DD' as '13.11.'. */
+export const dayLabel = (day: string): string => {
+  const match = /^\d{4}-(\d{2})-(\d{2})$/u.exec(day || '')
+  return match ? `${match[2]}.${match[1]}.` : day || ''
 }
 
 // ---------------------------------------------------------------- relevant route
@@ -201,7 +249,7 @@ export const emptyStop = (): Stop => ({ id: '', name: '', type: 'other' })
 
 export const emptySchedule = (mode: ScheduleMode = 'none'): Schedule => ({ mode, times: [], days: [...DEFAULT_DAYS], bufferMinutes: 10 })
 
-export const emptyRoute = (id = newRouteId()): CommuteRoute => ({ id, name: '', from: emptyStop(), to: emptyStop(), via: null, schedule: emptySchedule(), delayThreshold: null, notify: true })
+export const emptyRoute = (id = newRouteId()): CommuteRoute => ({ id, name: '', from: emptyStop(), to: emptyStop(), vias: [], via: null, schedule: emptySchedule(), pins: [], delayThreshold: null, notify: true })
 
 export const routeLabel = (route: Pick<CommuteRoute, 'name' | 'from' | 'to'>): string => route.name.trim() || `${route.from.name} → ${route.to.name}`
 
@@ -225,18 +273,154 @@ export const validateRoute = (route: CommuteRoute): RouteError[] => {
   return errors
 }
 
-/** The route as it is saved: trimmed name, sorted unique times and days, empty via dropped. */
-export const normalizeRoute = (route: CommuteRoute): CommuteRoute => ({
-  ...route,
-  name: route.name.trim().slice(0, MAX_NAME),
-  via: route.via && route.via.id ? route.via : null,
-  schedule: {
-    mode: route.schedule.mode,
-    times: route.schedule.mode === 'times' ? [...new Set(route.schedule.times)].sort() : [],
-    days: [...new Set(route.schedule.days)].filter((day) => day >= 1 && day <= 7).sort((a, b) => a - b),
-    bufferMinutes: Math.min(60, Math.max(0, Math.round(route.schedule.bufferMinutes) || 0)),
-  },
-})
+/** The via stops of a route; a route read without `vias` (older server) has `[via]`. */
+const rawVias = (route: { vias?: Stop[] | null; via?: Stop | null }): Stop[] => (Array.isArray(route.vias) ? route.vias : route.via ? [route.via] : []).filter((stop) => stop && stop.id)
+
+export const routeVias = (route: { vias?: Stop[] | null; via?: Stop | null }): Stop[] => rawVias(route).slice(0, MAX_VIAS)
+
+const cleanVias = (route: Pick<CommuteRoute, 'from' | 'to' | 'vias' | 'via'>): Stop[] => {
+  const seen = new Set([route.from.id, route.to.id].filter(Boolean))
+  const out: Stop[] = []
+  for (const stop of rawVias(route)) {
+    if (seen.has(stop.id)) continue
+    seen.add(stop.id)
+    out.push(stop)
+  }
+  return out.slice(0, MAX_VIAS)
+}
+
+const cleanDays = (days: readonly number[]): number[] => [...new Set(days)].filter((day) => Number.isInteger(day) && day >= 1 && day <= 7).sort((a, b) => a - b)
+
+/** Pins as saved: valid times, sorted unique days, every weekday in one pin only (the first wins). */
+export const cleanPins = (pins: readonly Pin[] | null | undefined): Pin[] => {
+  const used = new Set<number>()
+  const out: Pin[] = []
+  for (const pin of pins || []) {
+    if (!pin || !isClock(pin.departure || '')) continue
+    const days = cleanDays(pin.days || []).filter((day) => !used.has(day))
+    if (!days.length) continue
+    for (const day of days) used.add(day)
+    out.push({ ...pin, days, line: pin.line || '', trainNo: pin.trainNo || '', stop: pin.stop || '', stopId: pin.stopId || '', arrival: isClock(pin.arrival || '') ? pin.arrival : '', transfers: Math.max(0, Math.round(pin.transfers) || 0) })
+  }
+  return out
+}
+
+/** A route as the server sent it: `vias` filled from `via` for older answers, pins always a list. */
+export const readRoute = (route: CommuteRoute): CommuteRoute => {
+  const vias = routeVias(route)
+  return { ...route, vias, via: vias[0] || null, pins: cleanPins(route.pins) }
+}
+
+/** The route as it is saved: trimmed name, sorted unique times and days, vias (max 2), pins; sends `vias`, `via` (= first) and `pins`. */
+export const normalizeRoute = (route: CommuteRoute): CommuteRoute => {
+  const vias = cleanVias(route)
+  return {
+    ...route,
+    name: route.name.trim().slice(0, MAX_NAME),
+    vias,
+    via: vias[0] || null,
+    pins: cleanPins(route.pins),
+    schedule: {
+      mode: route.schedule.mode,
+      times: route.schedule.mode === 'times' ? [...new Set(route.schedule.times)].sort() : [],
+      days: cleanDays(route.schedule.days),
+      bufferMinutes: Math.min(60, Math.max(0, Math.round(route.schedule.bufferMinutes) || 0)),
+    },
+  }
+}
+
+// ---------------------------------------------------------------- fixed connection (pins)
+
+export type PinMode = 'none' | 'daily' | 'weekday'
+
+/** The days a route travels: its schedule days, Monday to Friday without a schedule. */
+export const travelDays = (schedule: Schedule): number[] => (schedule.mode !== 'none' && schedule.days.length ? cleanDays(schedule.days) : [...DEFAULT_DAYS])
+
+/** One pin covering all travel days is "every day the same"; anything else is per weekday. */
+export const pinModeOf = (route: Pick<CommuteRoute, 'pins' | 'schedule'>): PinMode => {
+  if (!route.pins.length) return 'none'
+  const days = travelDays(route.schedule)
+  const [only] = route.pins
+  return route.pins.length === 1 && days.every((day) => only.days.includes(day)) ? 'daily' : 'weekday'
+}
+
+/** The first departure time offered by the connection picker, from the schedule. */
+export const defaultPickTime = (schedule: Schedule): string => {
+  if (schedule.mode === 'times') {
+    const first = [...schedule.times].filter(isClock).sort()[0]
+    if (first) return first
+  }
+  return schedule.mode === 'lastLesson' ? '12:00' : '06:30'
+}
+
+const sameConnection = (a: Pin, b: Pin) => a.line === b.line && a.trainNo === b.trainNo && a.stopId === b.stopId && a.stop === b.stop && a.departure === b.departure
+
+/** Pin from a picked trip; null for a walk-only trip. */
+export const pinFromTrip = (trip: Trip, days: number[]): Pin | null => (trip.pin ? { ...trip.pin, days: cleanDays(days) } : null)
+
+/** Adds a pin: its weekdays leave every other pin, the same connection merges, empty pins vanish. */
+export const assignPin = (pins: readonly Pin[], pin: Pin): Pin[] => {
+  const taken = new Set(pin.days)
+  const rest = pins.map((other) => ({ ...other, days: other.days.filter((day) => !taken.has(day)) })).filter((other) => other.days.length)
+  const merged = rest.find((other) => sameConnection(other, pin))
+  if (merged) return rest.map((other) => (other === merged ? { ...other, days: cleanDays([...other.days, ...pin.days]) } : other))
+  return [...rest, pin].sort((a, b) => a.days[0] - b.days[0])
+}
+
+/** Removes one weekday from the pins. */
+export const removePinDay = (pins: readonly Pin[], day: number): Pin[] => pins.map((pin) => ({ ...pin, days: pin.days.filter((value) => value !== day) })).filter((pin) => pin.days.length)
+
+export const pinForDay = (pins: readonly Pin[], day: number): Pin | null => pins.find((pin) => pin.days.includes(day)) || null
+
+/** Identity of the stops: a pin only fits the route it was picked for. */
+export const stopsKey = (route: Pick<CommuteRoute, 'from' | 'to' | 'vias'>): string => [route.from.id, ...routeVias(route).map((stop) => stop.id), route.to.id].join('>')
+
+const ymd = (ms: number): string => isoZurich(ms).slice(0, 10)
+
+/** 1 = Monday ... 7 = Sunday of a 'YYYY-MM-DD'. */
+export const isoWeekday = (day: string): number => {
+  const date = new Date(`${day}T00:00:00Z`)
+  return ((date.getUTCDay() + 6) % 7) + 1
+}
+
+/** The next date (today included) with this weekday, Zurich time. */
+export const nextDateForWeekday = (weekday: number, now: number): string => {
+  const today = ymd(now)
+  const ahead = (weekday - isoWeekday(today) + 7) % 7
+  const date = new Date(`${today}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + ahead)
+  return date.toISOString().slice(0, 10)
+}
+
+/** 'YYYY-MM-DD' + 'HH:MM' as ISO with the Zurich offset of that day. */
+export const zurichAt = (day: string, clock: string): string => {
+  const guess = Date.parse(`${day}T${clock}:00Z`)
+  for (const hours of [1, 2]) {
+    const candidate = isoZurich(guess - hours * 3_600_000)
+    if (candidate.startsWith(`${day}T${clock}`)) return candidate
+  }
+  return isoZurich(guess - 3_600_000)
+}
+
+export interface ConnectionsQuery { from: string; to: string; vias: string[]; at: string; timeType: 'depart' | 'arrive' }
+
+/** The picker's request: stop ids where present, names otherwise. */
+export const connectionsQuery = (route: Pick<CommuteRoute, 'from' | 'to' | 'vias'>, at: string): ConnectionsQuery => {
+  const ref = (stop: Stop) => stop.id || stop.name
+  return { from: ref(route.from), to: ref(route.to), vias: routeVias(route).map(ref), at, timeType: 'depart' }
+}
+
+/** Later: after the last trip's planned departure (+1 min); earlier: 60 min before the first one. */
+export const pickerPage = (trips: Trip[], direction: 'earlier' | 'later'): string | null => {
+  if (!trips.length) return null
+  const planned = (trip: Trip) => timeMs(trip.plannedDeparture || trip.departure)
+  if (direction === 'later') {
+    const last = Math.max(...trips.map(planned))
+    return Number.isFinite(last) ? isoZurich(last + 60_000) : null
+  }
+  const first = Math.min(...trips.map(planned))
+  return Number.isFinite(first) ? isoZurich(first - 60 * 60_000) : null
+}
 
 /** Adds or replaces a route; the list never grows past the server's limit. */
 export const upsertRoute = (routes: CommuteRoute[], route: CommuteRoute): CommuteRoute[] => {
@@ -253,31 +437,7 @@ export const moveRoute = <T,>(list: T[], index: number, delta: -1 | 1): T[] => {
   return copy
 }
 
-// ---------------------------------------------------------------- hidden lessons
-
-const lower = (text: string) => text.trim().toLowerCase()
-
-/**
- * Lower-case labels of the lessons the user does not attend: in every half-class group set with a
- * choice, the options that were not chosen. The server ignores these lessons when it works out
- * the first and the last lesson of a day.
- */
-export const hiddenLabelsFor = (sets: GroupSet[], choices: GroupChoices): string[] => {
-  const out = new Set<string>()
-  for (const set of sets) {
-    const valid = new Set(set.options.map((option) => lower(option.label)))
-    const chosen = new Set((choices[set.key] || []).map(lower).filter((label) => valid.has(label)))
-    if (!chosen.size) continue
-    for (const option of set.options) if (!chosen.has(lower(option.label))) out.add(lower(option.label))
-  }
-  return [...out].sort().slice(0, 200)
-}
-
-export const sameLabels = (a: readonly string[], b: readonly string[]): boolean => {
-  const left = [...new Set(a.map(lower))].sort()
-  const right = [...new Set(b.map(lower))].sort()
-  return left.length === right.length && left.every((label, index) => label === right[index])
-}
+// ---------------------------------------------------------------- settings
 
 export const defaultSettings = (): CommuteSettings => ({ delayThreshold: DEFAULT_THRESHOLD, hiddenLabels: [] })
 

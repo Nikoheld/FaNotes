@@ -33,14 +33,14 @@ import ch.fasrv.fanotes.commute.*
 
 /** Heute: the next trip of the route that matters now, or an invitation to add a route. */
 @Composable
-fun CommuteCard(ui: CommuteUi, nowMs: Long, showInvite: Boolean, onOpen: (String) -> Unit, onAdd: () -> Unit, modifier: Modifier = Modifier) {
+fun CommuteCard(ui: CommuteUi, nowMs: Long, showInvite: Boolean, onOpen: (String) -> Unit, onAdd: () -> Unit, modifier: Modifier = Modifier, onRepick: (String) -> Unit = {}) {
     if (ui.routes.isEmpty()) {
         if (showInvite) CommuteInvite(onAdd, modifier)
         return
     }
     val board = remember(ui, nowMs / 60_000) { ui.relevant(nowMs) } ?: return
     val route = ui.routes.firstOrNull { it.id == board.routeId } ?: return
-    CommuteBoardCard(route, board, nowMs, onOpen = { onOpen(route.id) }, modifier)
+    CommuteBoardCard(route, board, nowMs, onOpen = { onOpen(route.id) }, modifier, onRepick = { onRepick(route.id) })
 }
 
 @Composable
@@ -56,11 +56,14 @@ private fun CommuteInvite(onAdd: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun CommuteBoardCard(route: Route, board: RouteBoard, nowMs: Long, onOpen: () -> Unit, modifier: Modifier = Modifier) {
+fun CommuteBoardCard(route: Route, board: RouteBoard, nowMs: Long, onOpen: () -> Unit, modifier: Modifier = Modifier, onRepick: () -> Unit = {}) {
     val scheme = MaterialTheme.colorScheme
     val s = LocalCompanionSemantics.current
-    val trip = board.trips.firstOrNull()
+    val focus = remember(board) { boardFocus(board) }
+    val pinned = focus.kind != FocusKind.PLAIN
+    val trip = focus.main
     val minutes = trip?.let { minutesUntil(it.departure.ifBlank { it.plannedDeparture }, nowMs) }
+    var othersOpen by rememberSaveable(route.id) { mutableStateOf(false) }
     Surface(onClick = onOpen, color = scheme.surface, shape = MaterialTheme.shapes.extraLarge, modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -72,14 +75,21 @@ fun CommuteBoardCard(route: Route, board: RouteBoard, nowMs: Long, onOpen: () ->
                 if (trip != null && !trip.unusable && minutes != null) Text(commuteInText(minutes), style = MaterialTheme.typography.labelLarge, color = scheme.onSurface, maxLines = 1)
                 Icon(Icons.Outlined.ChevronRight, null, Modifier.size(20.dp), tint = scheme.onSurfaceVariant)
             }
-            commuteLessonBanner(board)?.let { (title, body) ->
+            if (pinned) {
+                PinnedBoardContent(route, board, focus, alternativeCount = 1, onRepick = onRepick)
+                if (focus.others.isNotEmpty()) {
+                    OtherConnectionsToggle(othersOpen, { othersOpen = !othersOpen })
+                    if (othersOpen) focus.others.take(3).forEach { CommuteTripSummary(it, showArrival = true) }
+                }
+            } else commuteLessonBanner(board)?.let { (title, body) ->
                 val last = board.target.lessonChange == LessonChange.LAST_CANCELLED
                 val planned = board.target.plannedAt?.let(::isoClock).orEmpty()
                 CommuteNotice(if (last) Icons.Outlined.EventBusy else Icons.Outlined.EventRepeat, title,
                     if (planned.isBlank()) body else body + "\n" + t(R.string.commute_was_planned, planned),
                     if (last) s.successSoft else s.warningSoft, if (last) s.success else s.warning)
             }
-            if (trip == null) {
+            if (pinned) Unit
+            else if (trip == null) {
                 Text(t(R.string.commute_no_connection), style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant)
             } else {
                 CommuteTripSummary(trip, showArrival = true)
@@ -172,6 +182,9 @@ fun LazyListScope.commuteDetailItems(
     onEarlier: () -> Unit,
     onLater: () -> Unit,
     onEdit: () -> Unit,
+    othersOpen: Boolean = false,
+    onToggleOthers: () -> Unit = {},
+    onRepick: (() -> Unit)? = null,
 ) {
     item(key = "head") {
         Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)) {
@@ -181,10 +194,12 @@ fun LazyListScope.commuteDetailItems(
     if (board == null) {
         item(key = "empty") { InfoBanner(t(R.string.commute_no_board), t(R.string.commute_no_board_body)) }
     } else {
+        val focus = boardFocus(board)
+        val pinned = focus.kind != FocusKind.PLAIN
         item(key = "target") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(commuteTargetText(board.target), style = MaterialTheme.typography.titleMedium)
-                commuteLessonBanner(board)?.let { (title, body) ->
+                if (!pinned) commuteLessonBanner(board)?.let { (title, body) ->
                     val last = board.target.lessonChange == LessonChange.LAST_CANCELLED
                     val sem = LocalCompanionSemantics.current
                     CommuteNotice(if (last) Icons.Outlined.EventBusy else Icons.Outlined.EventRepeat, title, body,
@@ -193,7 +208,26 @@ fun LazyListScope.commuteDetailItems(
                 if (board.stale) StatusLine(isoClock(board.updatedAt).let { if (it.isBlank()) t(R.string.commute_stale) else t(R.string.commute_stale_since, it) }, StateTone.Offline)
             }
         }
-        val shown = (board.trips + extraTrips).distinctBy { it.id.ifBlank { it.departure + it.arrival } }
+        if (pinned) {
+            item(key = "pinned") { PinnedBoardContent(route, board, focus, alternativeCount = 2, onRepick = onRepick) }
+            focus.change?.let { change ->
+                item(key = "pinned-change") { CommuteTripCard(change, startOpen = false, nowMs = nowMs) }
+            }
+            item(key = "others-toggle") { OtherConnectionsToggle(othersOpen, onToggleOthers) }
+        }
+        if (!pinned || othersOpen) commuteTripListItems(route, board, focus, pinned, extraTrips, nowMs, loadingMore, moreFailed, onEarlier, onLater)
+    }
+    commuteDetailFooter(provider, onEdit)
+}
+
+/** The trips list with earlier/later paging. For a pinned route it is the secondary list, without the pinned trip. */
+private fun LazyListScope.commuteTripListItems(
+    route: Route, board: RouteBoard, focus: BoardFocus, pinned: Boolean, extraTrips: List<Trip>, nowMs: Long,
+    loadingMore: Boolean, moreFailed: Boolean, onEarlier: () -> Unit, onLater: () -> Unit,
+) {
+    run {
+        val pinnedId = if (pinned) focus.main?.id.orEmpty() else ""
+        val shown = (board.trips + extraTrips).filter { pinnedId.isBlank() || it.id != pinnedId }.distinctBy { it.id.ifBlank { it.departure + it.arrival } }
             .sortedBy { isoMillis(it.plannedDeparture) ?: isoMillis(it.departure) ?: Long.MAX_VALUE }
         item(key = "earlier") {
             TextButton(onClick = onEarlier, enabled = !loadingMore) { Icon(Icons.Outlined.KeyboardArrowUp, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text(t(R.string.commute_earlier)) }
@@ -209,7 +243,7 @@ fun LazyListScope.commuteDetailItems(
             }
         }
         val first = board.trips.firstOrNull()
-        if (first != null && first.unusable) board.alternatives.takeIf { it.isNotEmpty() }?.let { alt ->
+        if (!pinned && first != null && first.unusable) board.alternatives.takeIf { it.isNotEmpty() }?.let { alt ->
             item(key = "alternatives") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     alt.take(2).forEach { CommuteAlternative(it, board.viaDropped, route.via?.name) }
@@ -217,6 +251,9 @@ fun LazyListScope.commuteDetailItems(
             }
         }
     }
+}
+
+private fun LazyListScope.commuteDetailFooter(provider: Provider, onEdit: () -> Unit) {
     item(key = "note") {
         Column(Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(t(R.string.commute_occupancy_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

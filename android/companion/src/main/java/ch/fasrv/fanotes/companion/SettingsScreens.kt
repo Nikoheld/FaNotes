@@ -242,9 +242,6 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
         Page.WebAccess -> WebAccessSettings(model)
         Page.Appearance -> AppearanceSettings(model)
         Page.Navigation -> NavigationBarSettings(model)
-        Page.HalfClass -> ScreenList {
-            item(key = "half-class") { HalfClassChoices(model) }
-        }
         Page.Planning -> ScreenList {
             item(key = "start-head") { SectionLabel(t(R.string.when_you_open_kanti)) }
             item(key = "start") { ChoiceRow((if (model.notesAccount) NAV_BAR_IDS else NAV_BAR_IDS.filter { it != "notes" }).map { it to navBarLabel(it) }, startTabId(model.desk.startTab).let { if (!model.notesAccount && it == "notes") "today" else it }, { model.updateDesk(model.desk.copy(startTab = it)) }) }
@@ -265,8 +262,6 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item(key = "timetable") {
                 Group {
                     ToggleRow(t(R.string.compact_rows), t(R.string.show_more_lessons_at_a_glance), model.desk.planCompact) { model.updateDesk(model.desk.copy(planCompact = it)) }
-                    FineDivider()
-                    SettingRow(null, t(R.string.half_class_groups), t(R.string.half_class_row)) { model.navigate(Page.HalfClass) }
                     FineDivider()
                     ToggleRow(t(R.string.include_weekends), t(R.string.show_empty_weekend_days_in_week_view), model.desk.showWeekend) { model.updateDesk(model.desk.copy(showWeekend = it)) }
                     FineDivider()

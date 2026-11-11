@@ -1,9 +1,9 @@
 // The commute data of the shown connection: routes, settings and the live boards. It lives in the
 // provider so the Pendeln view, the Today card and the settings share one copy and one request.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { ApiError, type Api } from './lib/api'
-import { BOARD_MIN_MS, defaultSettings, normalizeRoute, sameLabels } from './lib/commute'
-import { demoCommute } from './lib/demo-commute'
+import { BOARD_MIN_MS, defaultSettings, normalizeRoute, readRoute, type ConnectionsQuery } from './lib/commute'
+import { demoBoardFor, demoCommute, demoConnections } from './lib/demo-commute'
 import type { CommuteProvider, CommuteRoute, CommuteSettings, RouteBoard, Stop, Trip } from './types'
 
 export interface CommuteState {
@@ -30,6 +30,8 @@ export interface CommuteActions {
   save: (routes: CommuteRoute[], settings?: Partial<CommuteSettings>) => Promise<void>
   stops: (query: string) => Promise<Stop[]>
   trips: (routeId: string, at: string, timeType: 'depart' | 'arrive') => Promise<Trip[]>
+  /** The connection picker of the editor (works before the route is saved). */
+  connections: (query: ConnectionsQuery, stops: { from: Stop; to: Stop; vias: Stop[] }) => Promise<Trip[]>
 }
 
 export type Commute = CommuteState & CommuteActions
@@ -41,13 +43,11 @@ const EMPTY: CommuteState = {
 
 const failure = (error: unknown): string => (error instanceof ApiError ? (error.status === 0 ? 'offline' : error.message) : error instanceof Error ? error.message : String(error))
 
-export const useCommuteStore = ({ api, connectionId, demo, ready, hiddenLabels, onUnauthorized }: {
+export const useCommuteStore = ({ api, connectionId, demo, ready, onUnauthorized }: {
   api: Api
   connectionId: string
   demo: boolean
   ready: boolean
-  /** null until the timetable is known: the stored labels then stay as they are. */
-  hiddenLabels: string[] | null
   onUnauthorized: () => void
 }): Commute => {
   const key = demo ? 'demo' : connectionId
@@ -81,7 +81,7 @@ export const useCommuteStore = ({ api, connectionId, demo, ready, hiddenLabels, 
     patch(connectionId, { loading: true, error: '' })
     try {
       const answer = await api.commute(connectionId)
-      patch(connectionId, { loaded: true, loading: false, routes: answer.routes, settings: answer.settings, provider: answer.provider })
+      patch(connectionId, { loaded: true, loading: false, routes: answer.routes.map(readRoute), settings: answer.settings, provider: answer.provider })
     } catch (error) {
       handle(error, connectionId, 'error')
     }
@@ -108,12 +108,15 @@ export const useCommuteStore = ({ api, connectionId, demo, ready, hiddenLabels, 
     if (demo) {
       const boards = { ...stateRef.current.boards }
       const template = Object.values(boards)[0]
-      for (const route of cleaned) if (!boards[route.id] && template) boards[route.id] = { ...template, routeId: route.id }
+      const before = new Map(stateRef.current.routes.map((route) => [route.id, JSON.stringify(route.pins)]))
+      for (const route of cleaned) {
+        if (template && (!boards[route.id] || before.get(route.id) !== JSON.stringify(route.pins))) boards[route.id] = demoBoardFor(route, boards[route.id] || template, Date.now())
+      }
       patch('demo', { routes: cleaned, settings, boards, loaded: true })
       return
     }
     const answer = await api.saveCommute(connectionId, cleaned, settings)
-    patch(connectionId, { routes: answer.routes, settings: answer.settings, provider: answer.provider, loaded: true })
+    patch(connectionId, { routes: answer.routes.map(readRoute), settings: answer.settings, provider: answer.provider, loaded: true })
     // A changed list needs fresh boards at once; the boards of removed routes go away.
     const kept = Object.fromEntries(Object.entries(storeRef.current[connectionId]?.boards || {}).filter(([id]) => answer.routes.some((route) => route.id === id)))
     patch(connectionId, { boards: kept, boardsAt: 0 })
@@ -121,20 +124,11 @@ export const useCommuteStore = ({ api, connectionId, demo, ready, hiddenLabels, 
 
   const save = useCallback(async (routes: CommuteRoute[], settings: Partial<CommuteSettings> = {}) => {
     const base = stateRef.current.settings
-    await persist(routes, { delayThreshold: settings.delayThreshold ?? base.delayThreshold, hiddenLabels: settings.hiddenLabels ?? hiddenLabels ?? base.hiddenLabels })
+    await persist(routes, { delayThreshold: settings.delayThreshold ?? base.delayThreshold, hiddenLabels: settings.hiddenLabels ?? base.hiddenLabels })
     if (!demo) await refreshBoards(true)
-  }, [persist, hiddenLabels, refreshBoards, demo])
+  }, [persist, refreshBoards, demo])
 
-  // Keep settings.hiddenLabels current while routes exist (half-class choices or the timetable changed).
-  const syncing = useRef('')
-  useEffect(() => {
-    if (demo || !ready || !hiddenLabels || !state.loaded || !state.routes.length) return
-    if (sameLabels(state.settings.hiddenLabels, hiddenLabels)) { syncing.current = ''; return }
-    const signature = `${connectionId}:${hiddenLabels.join('|')}`
-    if (syncing.current === signature) return
-    syncing.current = signature
-    void persist(state.routes, { delayThreshold: state.settings.delayThreshold, hiddenLabels }).catch(() => { /* the next change tries again */ })
-  }, [demo, ready, state.loaded, state.routes, state.settings, hiddenLabels, connectionId, persist])
+  // The web app has no hide-lesson feature: the stored hiddenLabels (set by the app) are kept as they are.
 
   const stops = useCallback(async (query: string): Promise<Stop[]> => {
     if (demo) {
@@ -149,5 +143,10 @@ export const useCommuteStore = ({ api, connectionId, demo, ready, hiddenLabels, 
     return (await api.commuteTrips(connectionId, routeId, at, timeType)).trips
   }, [api, connectionId, demo])
 
-  return { ...state, ensure, refreshBoards, save, stops, trips }
+  const connections = useCallback(async (query: ConnectionsQuery, stopsOf: { from: Stop; to: Stop; vias: Stop[] }): Promise<Trip[]> => {
+    if (demo) return demoConnections(stopsOf.from, stopsOf.to, stopsOf.vias, query.at)
+    return (await api.commuteConnections(connectionId, query)).trips
+  }, [api, connectionId, demo])
+
+  return { ...state, ensure, refreshBoards, save, stops, trips, connections }
 }

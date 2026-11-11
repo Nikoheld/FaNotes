@@ -46,17 +46,40 @@ data class Schedule(
     val bufferMinutes: Int = 10,
 )
 
+const val MAX_VIAS = 2
+
+/**
+ * A fixed connection: a trip's [Trip.pin] plus the weekdays it is used on. [departure] and [arrival] are
+ * `HH:MM` planned times of the first ride leg's boarding and of the end of the trip.
+ */
+data class Pin(
+    val days: List<Int> = emptyList(),
+    val line: String = "",
+    val trainNo: String = "",
+    val stop: String = "",
+    val stopId: String = "",
+    val departure: String = "",
+    val arrival: String = "",
+    val transfers: Int = 0,
+)
+
 data class Route(
     val id: String,
     val name: String = "",
     val from: Stop = Stop(),
     val to: Stop = Stop(),
-    val via: Stop? = null,
+    /** 0 to [MAX_VIAS] ordered via stops. */
+    val vias: List<Stop> = emptyList(),
     val schedule: Schedule = Schedule(),
     /** Minutes; null follows [CommuteSettings.delayThreshold]. */
     val delayThreshold: Int? = null,
     val notify: Boolean = true,
-)
+    /** The fixed connections; empty shows the next connections. Weekdays are disjoint across pins. */
+    val pins: List<Pin> = emptyList(),
+) {
+    /** The first via stop (the field older servers know). */
+    val via: Stop? get() = vias.firstOrNull()
+}
 
 data class CommuteSettings(
     val delayThreshold: Int = DEFAULT_DELAY_THRESHOLD,
@@ -131,6 +154,8 @@ data class Trip(
     val occupancy: Occupancy = Occupancy(),
     val issues: List<TripIssue> = emptyList(),
     val quietest: Boolean = false,
+    /** What to store to pin this trip; null for a walk-only trip or an older server. Its [Pin.days] are empty. */
+    val pin: Pin? = null,
 ) {
     /** Cancelled or with a broken connection: the traveller needs another trip. */
     val unusable: Boolean get() = status == TripStatus.CANCELLED || status == TripStatus.BROKEN
@@ -155,6 +180,29 @@ data class TripTarget(
     val lesson: TargetLesson? = null,
     val lessonChange: LessonChange = LessonChange.NONE,
     val plannedAt: String? = null,
+    /** Kind "pinned" only: the pin that applies, its travel day (`YYYY-MM-DD`) and, on a lesson change, the other moment. */
+    val pin: Pin? = null,
+    val day: String? = null,
+    val changeAt: String? = null,
+    val changeTimeType: String? = null,
+)
+
+enum class PinStatus(val wire: String) {
+    OK("ok"), MOVED("moved"), MISSING("missing"), GONE("gone");
+
+    companion object {
+        fun of(wire: String?): PinStatus = entries.firstOrNull { it.wire == wire } ?: OK
+    }
+}
+
+/** The live state of the pinned connection on its day. [trip] is null when it is missing. */
+data class PinnedState(
+    val status: PinStatus = PinStatus.OK,
+    val day: String = "",
+    val pin: Pin = Pin(),
+    val trip: Trip? = null,
+    /** Missing only: the trip leaving closest to the pinned time. */
+    val nearest: Trip? = null,
 )
 
 data class RouteBoard(
@@ -165,6 +213,9 @@ data class RouteBoard(
     val viaDropped: Boolean = false,
     val updatedAt: String = "",
     val stale: Boolean = false,
+    val pinned: PinnedState? = null,
+    /** Pinned route with a lesson change: the earlier way home or the later way to school. */
+    val change: Trip? = null,
 )
 
 data class Provider(val name: String = "", val occupancy: String = "", val formation: Boolean = false)
@@ -190,6 +241,12 @@ private fun parseOrNull(body: String): JsonValue.Obj? = runCatching { parseJson(
 
 fun parseStop(obj: JsonValue.Obj?): Stop = if (obj == null) Stop() else Stop(obj.str("id"), obj.str("name"), StopType.of(obj.string("type")))
 
+/** `vias`, or the single `via` of a server that does not know two vias yet. */
+private fun parseVias(obj: JsonValue.Obj): List<Stop> {
+    val list = if (obj.array("vias") != null) obj.objects("vias").map(::parseStop) else listOfNotNull(obj.obj("via")?.let(::parseStop))
+    return list.filter { it.name.isNotBlank() }.take(MAX_VIAS)
+}
+
 fun parseSchedule(obj: JsonValue.Obj?): Schedule {
     if (obj == null) return Schedule()
     val days = obj.array("days")?.items.orEmpty().mapNotNull { (it as? JsonValue.Num)?.value?.toInt() }.filter { it in 1..7 }.distinct().sorted()
@@ -201,6 +258,19 @@ fun parseSchedule(obj: JsonValue.Obj?): Schedule {
     )
 }
 
+/** `days` of a pin: valid weekdays only, sorted and distinct. */
+private fun pinDays(obj: JsonValue.Obj): List<Int> =
+    obj.array("days")?.items.orEmpty().mapNotNull { (it as? JsonValue.Num)?.value?.toInt() }.filter { it in 1..7 }.distinct().sorted()
+
+fun parsePin(obj: JsonValue.Obj?): Pin? {
+    if (obj == null) return null
+    val pin = Pin(
+        days = pinDays(obj), line = obj.str("line"), trainNo = obj.str("trainNo"), stop = obj.str("stop"), stopId = obj.str("stopId"),
+        departure = obj.str("departure"), arrival = obj.str("arrival"), transfers = obj.int("transfers") ?: 0,
+    )
+    return pin.takeIf { isClockText(it.departure) }
+}
+
 fun parseRoute(obj: JsonValue.Obj): Route? {
     val id = obj.str("id")
     if (id.isBlank()) return null
@@ -209,8 +279,9 @@ fun parseRoute(obj: JsonValue.Obj): Route? {
         name = obj.str("name"),
         from = parseStop(obj.obj("from")),
         to = parseStop(obj.obj("to")),
-        via = obj.obj("via")?.let(::parseStop)?.takeIf { it.name.isNotBlank() },
+        vias = parseVias(obj),
         schedule = parseSchedule(obj.obj("schedule")),
+        pins = obj.objects("pins").mapNotNull { parsePin(it) }.filter { it.days.isNotEmpty() },
         delayThreshold = obj.int("delayThreshold"),
         notify = obj.bool("notify") != false,
     )
@@ -258,6 +329,7 @@ fun parseTrip(obj: JsonValue.Obj): Trip = Trip(
     occupancy = parseOccupancy(obj.obj("occupancy")),
     issues = obj.objects("issues").map { TripIssue(it.str("kind"), it.str("text")) },
     quietest = obj.bool("quietest") == true,
+    pin = parsePin(obj.obj("pin")),
 )
 
 private fun parseTarget(obj: JsonValue.Obj?): TripTarget {
@@ -269,6 +341,21 @@ private fun parseTarget(obj: JsonValue.Obj?): TripTarget {
         lesson = obj.obj("lesson")?.let { TargetLesson(it.str("start"), it.str("end"), it.str("label")) },
         lessonChange = LessonChange.of(obj.string("lessonChange")),
         plannedAt = obj.string("plannedAt"),
+        pin = parsePin(obj.obj("pin")),
+        day = obj.string("day"),
+        changeAt = obj.string("changeAt"),
+        changeTimeType = obj.string("changeTimeType"),
+    )
+}
+
+private fun parsePinned(obj: JsonValue.Obj?): PinnedState? {
+    if (obj == null) return null
+    return PinnedState(
+        status = PinStatus.of(obj.string("status")),
+        day = obj.str("day"),
+        pin = parsePin(obj.obj("pin")) ?: obj.obj("trip")?.let { parsePin(it.obj("pin")) } ?: Pin(),
+        trip = obj.obj("trip")?.let(::parseTrip),
+        nearest = obj.obj("nearest")?.let(::parseTrip),
     )
 }
 
@@ -278,6 +365,8 @@ fun parseRouteBoard(obj: JsonValue.Obj): RouteBoard = RouteBoard(
     trips = obj.objects("trips").map(::parseTrip),
     alternatives = obj.objects("alternatives").map(::parseTrip),
     viaDropped = obj.bool("viaDropped") == true,
+    pinned = parsePinned(obj.obj("pinned")),
+    change = obj.obj("change")?.let(::parseTrip),
     updatedAt = obj.str("updatedAt"),
     stale = obj.bool("stale") == true,
 )
@@ -315,13 +404,28 @@ private fun scheduleJson(schedule: Schedule): String = buildString {
     append('}')
 }
 
+private fun pinJson(pin: Pin): String = buildString {
+    append("{\"days\":[").append(pin.days.joinToString(",")).append(']')
+    append(",\"line\":").append(escapeJson(pin.line))
+    append(",\"trainNo\":").append(escapeJson(pin.trainNo))
+    append(",\"stop\":").append(escapeJson(pin.stop))
+    append(",\"stopId\":").append(escapeJson(pin.stopId))
+    append(",\"departure\":").append(escapeJson(pin.departure))
+    append(",\"arrival\":").append(escapeJson(pin.arrival))
+    append(",\"transfers\":").append(pin.transfers)
+    append('}')
+}
+
 fun routeJson(route: Route): String = buildString {
     append("{\"id\":").append(escapeJson(route.id))
     append(",\"name\":").append(escapeJson(route.name))
     append(",\"from\":").append(stopJson(route.from))
     append(",\"to\":").append(stopJson(route.to))
-    append(",\"via\":").append(route.via?.let(::stopJson) ?: "null")
+    // `vias` for servers that know two vias, `via` (the first) for older ones.
+    append(",\"vias\":[").append(route.vias.take(MAX_VIAS).joinToString(",") { stopJson(it) }).append(']')
+    append(",\"via\":").append(route.vias.firstOrNull()?.let(::stopJson) ?: "null")
     append(",\"schedule\":").append(scheduleJson(route.schedule))
+    append(",\"pins\":[").append(route.pins.joinToString(",") { pinJson(it) }).append(']')
     append(",\"delayThreshold\":").append(route.delayThreshold?.toString() ?: "null")
     append(",\"notify\":").append(route.notify)
     append('}')

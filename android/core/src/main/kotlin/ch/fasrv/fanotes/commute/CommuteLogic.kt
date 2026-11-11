@@ -3,10 +3,8 @@ package ch.fasrv.fanotes.commute
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.DerivedWorkProbe
 import ch.fasrv.fanotes.schulnetz.HiddenLesson
-import ch.fasrv.fanotes.schulnetz.activeGroupSets
 import ch.fasrv.fanotes.schulnetz.isLesson
 import ch.fasrv.fanotes.schulnetz.lessonHidden
-import ch.fasrv.fanotes.schulnetz.lessonHiddenByGroup
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -103,7 +101,10 @@ fun Occupancy.worst(): Int? = listOfNotNull(first, second).maxOrNull()
 
 // ── Which route to show ──────────────────────────────────────────────────────
 
-private fun RouteBoard.firstDepartureMs(): Long? = trips.firstOrNull()?.let { isoMillis(it.departure) ?: isoMillis(it.plannedDeparture) }
+/** The trip a board is about: the pinned connection of a pinned route, else the first trip. */
+fun RouteBoard.headTrip(): Trip? = if (pinned != null) pinned.trip else trips.firstOrNull()
+
+private fun RouteBoard.firstDepartureMs(): Long? = headTrip()?.let { isoMillis(it.departure) ?: isoMillis(it.plannedDeparture) }
 
 /**
  * The route Heute shows now. Morning (before 12:00): the route tied to the first lesson, the way to
@@ -116,7 +117,7 @@ fun relevantBoard(routes: List<Route>, boards: List<RouteBoard>, nowMs: Long, zo
     val byId = boards.filter { it.routeId in known }.associateBy { it.routeId }
     val ordered = routes.mapNotNull { byId[it.id] }
     if (ordered.isEmpty()) return null
-    val live = ordered.filter { it.trips.isNotEmpty() }
+    val live = ordered.filter { it.headTrip() != null }
     if (live.isEmpty()) return ordered.first()
     val hour = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).hour
     val wanted = if (hour < 12) ScheduleMode.FIRST_LESSON else ScheduleMode.LAST_LESSON
@@ -131,7 +132,7 @@ fun relevantBoard(routes: List<Route>, boards: List<RouteBoard>, nowMs: Long, zo
 
 /** The first departure of the board in the future-or-just-left window, for the refresh timer. */
 fun departsWithin(board: RouteBoard?, nowMs: Long, minutes: Int = 30): Boolean {
-    val trip = board?.trips?.firstOrNull() ?: return false
+    val trip = board?.headTrip() ?: return false
     val at = isoMillis(trip.departure) ?: isoMillis(trip.plannedDeparture) ?: return false
     return at - nowMs <= minutes * 60_000L && at - nowMs >= -5 * 60_000L
 }
@@ -146,25 +147,23 @@ fun boardOlderThan(updatedAt: String, nowMs: Long, seconds: Int = 30): Boolean {
 
 /**
  * Lower-case labels of lessons the user does not attend, as the server wants them in
- * `settings.hiddenLabels`: a label counts when every lesson of it in [events] is hidden, by a
- * half-class choice or by a hide rule. A subject that is hidden on one weekday only stays visible
+ * `settings.hiddenLabels`: a label counts when every lesson of it in [events] is hidden by a
+ * hide rule (the "hide lesson" feature). A subject that is hidden on one weekday only stays visible
  * on the others, so it is not listed. Sorted and capped at 200.
  */
 fun commuteHiddenLabels(
     events: List<AgendaEvent>,
     rules: List<HiddenLesson>,
-    groupChoices: Map<String, List<String>>,
     zone: ZoneId = COMMUTE_ZONE,
 ): List<String> {
     DerivedWorkProbe.hit("commuteHiddenLabels")
     val lessons = events.filter { it.isLesson() }
-    if (lessons.isEmpty() || (rules.isEmpty() && groupChoices.isEmpty())) return emptyList()
-    val sets = activeGroupSets(lessons, groupChoices)
+    if (lessons.isEmpty() || rules.isEmpty()) return emptyList()
     val hiddenAll = linkedMapOf<String, Boolean>()
     for (event in lessons) {
         val key = event.label.trim().lowercase()
         if (key.isEmpty()) continue
-        val hidden = lessonHidden(event, rules, zone) || lessonHiddenByGroup(event, sets, groupChoices)
+        val hidden = lessonHidden(event, rules, zone)
         hiddenAll[key] = (hiddenAll[key] ?: true) && hidden
     }
     return hiddenAll.filterValues { it }.keys.sorted().take(200)
@@ -230,6 +229,13 @@ fun commuteRow(trip: Trip, alternative: Boolean = false, zone: ZoneId = COMMUTE_
 /** The trips of a board for a list: its own, then (when the first is unusable) the offered alternatives. */
 fun commuteRows(board: RouteBoard?, limit: Int = 8, zone: ZoneId = COMMUTE_ZONE): List<CommuteRow> {
     if (board == null) return emptyList()
+    // A pinned route shows its fixed connection only (and the alternatives when that one fails).
+    if (board.pinned != null) {
+        val focus = boardFocus(board)
+        val main = focus.main?.let { commuteRow(it, false, zone) }
+        val extra = if (focus.kind == FocusKind.MISSING) listOfNotNull(focus.nearest) else focus.alternatives
+        return (listOfNotNull(main) + extra.map { commuteRow(it, true, zone) }).take(limit)
+    }
     val own = board.trips.map { commuteRow(it, false, zone) }
     val extra = if (board.trips.firstOrNull()?.unusable == true) board.alternatives.map { commuteRow(it, true, zone) } else emptyList()
     return (own + extra).take(limit)

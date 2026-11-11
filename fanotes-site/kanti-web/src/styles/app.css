@@ -588,8 +588,8 @@ tr:last-child td { border-bottom: none; }
 .stop-empty { padding: 10px; color: var(--muted); }
 .schedule-field { border: none; margin: 0; padding: 0; min-width: 0; }
 .schedule-field legend { padding: 0; margin-bottom: 6px; }
-.schedule-modes { display: flex; flex-wrap: wrap; max-width: 100%; }
-.schedule-modes button { flex: 1 1 auto; padding: 8px 12px; }
+.schedule-modes, .pin-modes { display: flex; flex-wrap: wrap; max-width: 100%; }
+.schedule-modes button, .pin-modes button { flex: 1 1 auto; padding: 8px 12px; }
 .time-row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
 .time-row input { width: 130px; }
 .inline-number { display: inline-flex; align-items: center; gap: 8px; }
@@ -626,6 +626,41 @@ tr:last-child td { border-bottom: none; }
   .route-editor .route-stops { grid-template-columns: minmax(0, 1fr); }
   .route-editor .swap-button { margin: 0; justify-self: end; transform: rotate(90deg); }
   .schedule-modes button { flex-basis: 45%; }
+  .pin-modes button { flex-basis: 100%; }
+  .pin-row { flex-direction: column; align-items: stretch; }
+  .pin-row-actions { justify-content: flex-start; }
+  .pick-trip { grid-template-columns: minmax(0, 1fr); }
   .route-row { flex-wrap: wrap; }
   .route-actions { margin-left: auto; }
 }
+
+/* Fixed (pinned) connection: focus card, secondary list, editor section and picker. */
+.pinned-focus, .pinned-focus .status-block { display: flex; flex-direction: column; gap: 10px; }
+.pinned-nearest { font-size: 14px; color: var(--muted); margin: 4px 0 0; }
+.trip-pinned { border-width: 2px; border-left-width: 4px; box-shadow: 0 1px 0 var(--hairline); }
+.trip-pinned-label { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0; padding: 8px 14px 0; font-size: 13px; font-weight: 700; color: var(--accent); }
+.trip-pinned-note { color: var(--muted); font-weight: 500; }
+.others { display: flex; flex-direction: column; gap: 10px; }
+.others-toggle { align-self: flex-start; min-height: 40px; gap: 6px; }
+.others-body { display: flex; flex-direction: column; gap: 10px; }
+.commute-card-pin { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 700; color: var(--accent); }
+.commute-card-warn { color: var(--warning); }
+
+.pin-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pin-rows { display: flex; flex-direction: column; gap: 8px; }
+.pin-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-m); background: var(--surface); }
+.pin-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 200px; overflow-wrap: anywhere; }
+.pin-weekday { color: var(--muted); font-weight: 600; }
+.pin-row-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.pin-picker { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--outline); border-radius: var(--radius-m); background: var(--sunken); min-width: 0; }
+.pin-picker-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pin-picker-head h4 { margin: 0; font-size: 15px; }
+.pin-picker-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.pin-picker-controls .field { padding: 0; min-width: 0; }
+.pick-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pick-trip { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'times chips' 'meta meta'; gap: 4px 12px; align-items: center; width: 100%; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: var(--radius-m); background: var(--surface); text-align: left; cursor: pointer; }
+.pick-trip:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.pick-trip:disabled { opacity: 0.6; cursor: not-allowed; }
+.pick-times { grid-area: times; display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; font-size: 17px; }
+.pick-chips { grid-area: chips; display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.pick-meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; color: var(--muted); font-size: 13px; }

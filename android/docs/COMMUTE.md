@@ -31,5 +31,20 @@ server has no routes for the new one, the saved local list is uploaded once.
 ## Hidden lessons
 
 `settings.hiddenLabels` holds the lower-case labels of lessons the user does not attend, so lesson-tied targets skip them.
-`commuteHiddenLabels` lists a label only when every lesson with that label is hidden (half-class choice or hide rule); a subject
+`commuteHiddenLabels` lists a label only when every lesson with that label is hidden (hide-lesson rule); a subject
 hidden on one weekday only stays visible. It runs on `Dispatchers.Default`, debounced by 1.5 s, and is sent only when it changed and routes exist.
+
+## Two vias and a fixed connection
+
+`Route.vias` holds up to two ordered via stops (the editor shows the second field once the first is set). The request body
+carries both `vias` and `via` (= the first one) for older servers; a reply with only `via` is read as one via.
+
+`Route.pins` are fixed connections (`Pin` = `Trip.pin` plus weekdays; a weekday belongs to one pin). The editor's section
+"Feste Verbindung" offers none / the same every day / per weekday. Its picker calls `GET /commute/connections` for the next date
+with that weekday (`CommutePins.kt`: start time, paging, `pinFromTrip`, `withPin`) and stores the chosen trip's pin on the draft.
+Changing the start, end or via stops clears the pins (`withPinsKeptOnlyIfJourneySame`).
+
+`boardFocus(board)` (core) decides what Heute, the detail page and the widget put first: plain board, pinned trip, moved
+(`neu HH:MM`), missing (notice, nearest trip, "Neu wählen" opens the picker), or cancelled/gone (alternatives first). Other
+trips of a pinned route sit behind "Andere Verbindungen anzeigen". The widget lists the pinned trip only. The alert title
+`Verbindung fehlt` is localized and follows the "cancelled" switch.

@@ -183,13 +183,32 @@ export interface Schedule {
   bufferMinutes: number
 }
 
+/** A fixed connection the user always takes: Trip.pin plus the weekdays it applies to. */
+export interface Pin {
+  /** 1 = Monday ... 7 = Sunday; disjoint across one route's pins. */
+  days: number[]
+  line: string
+  trainNo: string
+  stop: string
+  stopId: string
+  /** Planned departure of the first ride leg, 'HH:MM'. */
+  departure: string
+  arrival: string
+  transfers: number
+}
+
 export interface CommuteRoute {
   id: string
   name: string
   from: Stop
   to: Stop
+  /** 0-2 ordered via stops. */
+  vias: Stop[]
+  /** = vias[0], kept for clients older than two vias. */
   via: Stop | null
   schedule: Schedule
+  /** The fixed connection(s); [] = show the next connections. */
+  pins: Pin[]
   /** Minutes; null follows the global threshold. */
   delayThreshold: number | null
   notify: boolean
@@ -241,16 +260,34 @@ export interface Trip {
   changes: Transfer[]
   occupancy: Occupancy
   issues: TripIssue[]
+  /** What to store to pin this trip; null for a walk-only trip. */
+  pin: Omit<Pin, 'days'> | null
   quietest: boolean
 }
 
 export interface CommuteTarget {
-  kind: 'now' | 'time' | 'firstLesson' | 'lastLesson'
+  kind: 'now' | 'time' | 'firstLesson' | 'lastLesson' | 'pinned'
   at: string
   timeType: 'depart' | 'arrive'
   lesson: { start: string; end: string; label: string } | null
   lessonChange: 'none' | 'lastCancelled' | 'firstCancelled'
   plannedAt: string | null
+  /** kind 'pinned' only: the pin that applies and its travel day. */
+  pin?: Pin
+  day?: string
+  changeAt?: string | null
+  changeTimeType?: 'depart' | 'arrive' | null
+}
+
+export type PinnedStatus = 'ok' | 'moved' | 'missing' | 'gone'
+export interface PinnedState {
+  status: PinnedStatus
+  day: string
+  pin: Pin
+  /** The pinned connection live (also trips[0]); null when missing. */
+  trip: Trip | null
+  /** missing only: the trip leaving closest to the pinned time. */
+  nearest: Trip | null
 }
 
 export interface RouteBoard {
@@ -259,6 +296,9 @@ export interface RouteBoard {
   trips: Trip[]
   alternatives: Trip[]
   viaDropped: boolean
+  pinned?: PinnedState | null
+  /** Pinned + lesson change: the earlier way home / later way to school. */
+  change?: Trip | null
   updatedAt: string
   stale: boolean
 }

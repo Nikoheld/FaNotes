@@ -178,7 +178,7 @@ fun TodayScreen(model: CompanionModel) {
                     if (gapUnread) StatusLine(t(R.string.unread_before_next), StateTone.Warning, Modifier.padding(top = 10.dp, start = 4.dp))
                     // Built off the main thread and kept in the model: scrolling this item back in or returning to Heute reuses it.
                     val minute = now.epochSecond / 60
-                    val strip by androidx.compose.runtime.produceState(model.cachedLessonStrip(minute) ?: emptyList(), model.snapshot, model.hidden, model.desk.groupChoices, minute) {
+                    val strip by androidx.compose.runtime.produceState(model.cachedLessonStrip(minute) ?: emptyList(), model.snapshot, model.hidden, minute) {
                         value = model.lessonStrip(now, zone)
                     }
                     if (strip.count { !it.heading } >= 2) LessonStrip(strip, today, Modifier.padding(top = 12.dp))
@@ -198,7 +198,7 @@ fun TodayScreen(model: CompanionModel) {
         }
         if ("commute" in cards && !model.demo) item(key = "commute") {
             CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail,
-                onAdd = { model.editCommuteRoute(null) }, modifier = Modifier.padding(top = 12.dp))
+                onAdd = { model.editCommuteRoute(null) }, modifier = Modifier.padding(top = 12.dp), onRepick = { model.editCommuteRoute(it, openPicker = true) })
         }
         if ("tasks" in cards) {
             item(key = "tasks-head") { SectionLabel(t(R.string.on_your_list), if (urgent.isEmpty()) t(R.string.tasks) else t(R.string.all_2, urgent.size)) { model.openPlanner(true) } }

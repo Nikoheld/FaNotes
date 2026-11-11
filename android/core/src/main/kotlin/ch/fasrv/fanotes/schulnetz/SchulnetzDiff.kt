@@ -35,7 +35,7 @@ fun notifyAlertKind(change: SchulnetzChange): String {
             else -> "exam-other"
         }
         "commute" -> when (title) {
-            "Fällt aus", "Anschluss verpasst" -> "commute-cancelled"
+            "Fällt aus", "Anschluss verpasst", "Verbindung fehlt" -> "commute-cancelled"
             "Früher nach Hause", "Später zur Schule" -> "commute-lesson"
             else -> "commute-delay"
         }

@@ -16,11 +16,11 @@ const groupByWeek = (entries: Entry[]) => {
 
 /** Exams and school events next to each other, grouped by week. */
 export const Agenda = () => {
-  const { t, language, data, prefs } = useKanti()
+  const { t, language, data } = useKanti()
   const clock = useClock()
   const [past, setPast] = useState(false)
   const [selected, setSelected] = useState<Entry | null>(null)
-  const entries = useMemo(() => allEntries(data.snapshot, prefs.groupChoices), [data.snapshot, prefs.groupChoices])
+  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
   const shown = (kind: Entry['kind']) => {
     const list = entries.filter((entry) => entry.kind === kind && (past ? entry.day < clock.today : entry.day >= clock.today))
     return past ? list.reverse() : list
