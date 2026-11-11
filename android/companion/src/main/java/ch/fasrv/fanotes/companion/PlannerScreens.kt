@@ -110,7 +110,7 @@ private fun clockMinutes(raw: String): Int? = runCatching { LocalTime.parse(raw.
 @Composable
 fun TodayScreen(model: CompanionModel) {
     val now = rememberNow()
-    val absenceTally = remember(model.snapshot) { absenceTally(model.snapshot) }
+    val absenceTally = remember(model.snapshot) { model.absencePoints() }
     val zone = ZoneId.systemDefault()
     val today = now.atZone(zone).toLocalDate()
     val sync by model.graph.engine.state.collectAsStateWithLifecycle()
@@ -173,7 +173,11 @@ fun TodayScreen(model: CompanionModel) {
                         if (LocalCompanionSemantics.current.snow && model.snowfall && !LocalKantiMotion.current.reduced) Snowfall(Modifier.matchParentSize().clip(MaterialTheme.shapes.extraLarge))
                     }
                     if (gapUnread) StatusLine(t(R.string.unread_before_next), StateTone.Warning, Modifier.padding(top = 10.dp, start = 4.dp))
-                    val strip = remember(model.snapshot, model.hidden, model.desk.groupChoices, now.epochSecond / 60) { widgetRows(model.snapshot.events, model.snapshot.exams, model.hidden, now, zone, model.desk.groupChoices) }
+                    // Built off the main thread and kept in the model: scrolling this item back in or returning to Heute reuses it.
+                    val minute = now.epochSecond / 60
+                    val strip by androidx.compose.runtime.produceState(model.cachedLessonStrip(minute) ?: emptyList(), model.snapshot, model.hidden, model.desk.groupChoices, minute) {
+                        value = model.lessonStrip(now, zone)
+                    }
                     if (strip.count { !it.heading } >= 2) LessonStrip(strip, today, Modifier.padding(top = 12.dp))
                 }
                 TodayLead.Unread -> LeadCard(Icons.Outlined.EventBusy, StateTone.Warning, t(R.string.timetable_not_loaded), if (online) t(R.string.timetable_not_loaded_body) else t(R.string.offline_waiting),

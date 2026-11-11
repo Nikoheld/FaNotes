@@ -317,8 +317,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 val taskList = tasks
                 val hiddenList = hidden
                 val choices = desk.groupChoices
+                val planned = plannedAbsences
                 val built = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     val days = ((0L..14L).map { today.plusDays(it) } + ch.fasrv.fanotes.schulnetz.schoolWeek(selected, true)).distinct()
+                    runCatching { warmDerived(incoming, planned, today) }
                     agendaForDays(days, incoming, cal, taskList, hiddenList, zone, choices)
                 }
                 snapshot = incoming
@@ -1245,6 +1247,56 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun bumpDiagnostics() { diagnosticTick += 1 }
 
     private var lastHeapMb = -1L
+
+    // Derived school data the screens show. Built off the main thread when a snapshot arrives;
+    // a screen that asks first builds it once and every later frame, scroll and tab return reuses it.
+    private class TallyMemo(val snapshot: SchulnetzSnapshot, val tally: ch.fasrv.fanotes.schulnetz.AbsenceTally)
+    private class ProvisionalMemo(val snapshot: SchulnetzSnapshot, val planned: List<ch.fasrv.fanotes.schulnetz.PlannedAbsence>, val day: java.time.LocalDate, val tally: ch.fasrv.fanotes.schulnetz.ProvisionalTally)
+    private class StripMemo(val snapshot: SchulnetzSnapshot, val hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, val choices: Map<String, List<String>>, val minute: Long, val rows: List<ch.fasrv.fanotes.schulnetz.WidgetRow>) {
+        fun matches(snap: SchulnetzSnapshot, hiddenList: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, groupChoices: Map<String, List<String>>, at: Long) =
+            snapshot === snap && minute == at && hidden == hiddenList && choices == groupChoices
+    }
+    @Volatile private var tallyMemo: TallyMemo? = null
+    @Volatile private var provisionalMemo: ProvisionalMemo? = null
+    @Volatile private var stripMemo: StripMemo? = null
+
+    /** Absence points of the shown snapshot. */
+    fun absencePoints(): ch.fasrv.fanotes.schulnetz.AbsenceTally {
+        val snap = snapshot
+        tallyMemo?.takeIf { it.snapshot === snap }?.let { return it.tally }
+        return ch.fasrv.fanotes.schulnetz.absenceTally(snap).also { tallyMemo = TallyMemo(snap, it) }
+    }
+
+    /** Booked, open and planned absences together. */
+    fun provisionalPoints(day: java.time.LocalDate = java.time.LocalDate.now()): ch.fasrv.fanotes.schulnetz.ProvisionalTally {
+        val snap = snapshot
+        val planned = plannedAbsences
+        provisionalMemo?.takeIf { it.snapshot === snap && it.planned == planned && it.day == day }?.let { return it.tally }
+        return ch.fasrv.fanotes.schulnetz.provisionalTally(snap, planned, day).also { provisionalMemo = ProvisionalMemo(snap, planned, day, it) }
+    }
+
+    /** The Heute lesson strip for this minute, if it is already built. */
+    fun cachedLessonStrip(minute: Long): List<ch.fasrv.fanotes.schulnetz.WidgetRow>? =
+        stripMemo?.takeIf { it.matches(snapshot, hidden, desk.groupChoices, minute) }?.rows
+
+    /** Builds the Heute lesson strip off the main thread; once per snapshot, setting change and minute. */
+    suspend fun lessonStrip(now: java.time.Instant, zone: java.time.ZoneId): List<ch.fasrv.fanotes.schulnetz.WidgetRow> {
+        val minute = now.epochSecond / 60
+        val snap = snapshot
+        val hiddenList = hidden
+        val choices = desk.groupChoices
+        stripMemo?.takeIf { it.matches(snap, hiddenList, choices, minute) }?.let { return it.rows }
+        val rows = withContext(Dispatchers.Default) { ch.fasrv.fanotes.schulnetz.widgetRows(snap.events, snap.exams, hiddenList, now, zone, choices) }
+        stripMemo = StripMemo(snap, hiddenList, choices, minute, rows)
+        return rows
+    }
+
+    private fun warmDerived(snap: SchulnetzSnapshot, planned: List<ch.fasrv.fanotes.schulnetz.PlannedAbsence>, day: java.time.LocalDate) {
+        val tally = ch.fasrv.fanotes.schulnetz.absenceTally(snap)
+        tallyMemo = TallyMemo(snap, tally)
+        provisionalMemo = ProvisionalMemo(snap, planned, day, ch.fasrv.fanotes.schulnetz.provisionalTally(snap, planned, day))
+    }
+
     private var agendaCacheId = ""
     private var agendaCacheDays: Map<java.time.LocalDate, List<AgendaEntry>> = emptyMap()
 

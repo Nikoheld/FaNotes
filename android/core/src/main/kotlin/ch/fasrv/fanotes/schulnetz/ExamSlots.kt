@@ -12,7 +12,14 @@ data class ExamInSlot(val original: AgendaEvent, val shown: AgendaEvent)
 data class ExamSlotMerge(val droppedLessons: Set<String>, val exams: List<ExamInSlot>) {
     fun lessonDropped(lesson: AgendaEvent): Boolean = lessonKey(lesson) in droppedLessons
 
-    fun replacement(exam: AgendaEvent): AgendaEvent? = exams.firstOrNull { examKey(it.original) == examKey(exam) }?.shown
+    /** First merged exam per key, as the former scan returned it; a lookup instead of a scan per event. */
+    private val shownByKey: Map<String, AgendaEvent> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        val map = LinkedHashMap<String, AgendaEvent>()
+        exams.forEach { map.putIfAbsent(examKey(it.original), it.shown) }
+        map
+    }
+
+    fun replacement(exam: AgendaEvent): AgendaEvent? = if (exams.isEmpty()) null else shownByKey[examKey(exam)]
 
     /** [events] without the replaced lessons, with the merged exams in their slots, once per slot and title. */
     fun apply(events: List<AgendaEvent>): List<AgendaEvent> =
@@ -24,13 +31,16 @@ private fun examKey(event: AgendaEvent) = "${event.id}|${event.start}|${event.la
 
 private fun lessonKey(event: AgendaEvent) = "${event.id}|${event.start}|"
 
-private fun zonedStamp(raw: String): Boolean = raw.contains('Z') || Regex("""[+-]\d{2}:\d{2}$""").containsMatchIn(raw)
+private val offsetSuffix = Regex("""[+-]\d{2}:\d{2}$""")
+private val clockOnly = Regex("""^(\d{2}):(\d{2})$""")
+
+private fun zonedStamp(raw: String): Boolean = raw.contains('Z') || offsetSuffix.containsMatchIn(raw)
 
 private fun minutesOf(raw: String, zone: ZoneId): Int? {
     val clock = if (zonedStamp(raw)) {
         parseSchulnetzInstant(raw, zone)?.atZone(zone)?.toLocalTime()?.toString()?.take(5).orEmpty()
     } else schulnetzClock(raw)
-    val match = Regex("""^(\d{2}):(\d{2})$""").find(clock) ?: return null
+    val match = clockOnly.find(clock) ?: return null
     return match.groupValues[1].toInt() * 60 + match.groupValues[2].toInt()
 }
 

@@ -5,6 +5,8 @@ import ch.fasrv.fanotes.json.escapeJson
 import ch.fasrv.fanotes.json.parseJson
 import java.time.LocalDate
 
+private val plannedClock = Regex("""^\s*([01]?\d|2[0-3]):([0-5]\d)""")
+
 /*
  * Planned (provisional) absences. The student marks lessons in the timetable in advance. They live
  * only on the device and in the user's own vault sync, like hidden lessons, and are never sent to
@@ -59,7 +61,7 @@ fun plannedAbsenceRowId(absence: PlannedAbsence): String = "planned:${absence.id
 private fun plannedDate(raw: String): LocalDate? = runCatching { LocalDate.parse(raw.trim()) }.getOrNull()
 
 private fun plannedMinutes(clock: String): Int? =
-    Regex("""^\s*([01]?\d|2[0-3]):([0-5]\d)""").find(clock)?.let { it.groupValues[1].toInt() * 60 + it.groupValues[2].toInt() }
+    plannedClock.find(clock)?.let { it.groupValues[1].toInt() * 60 + it.groupValues[2].toInt() }
 
 /**
  * Classifies each planned absence against the real ones. A pending or booked absence matches when it
@@ -90,6 +92,7 @@ fun matchPlanned(planned: List<PlannedAbsence>, snapshot: SchulnetzSnapshot, tod
 
 /** The points the student would have with the planned absences entered as open reports. */
 fun provisionalTally(snapshot: SchulnetzSnapshot, planned: List<PlannedAbsence>, today: LocalDate = LocalDate.now()): ProvisionalTally {
+    DerivedWorkProbe.hit("provisionalTally")
     val items = matchPlanned(planned, snapshot, today)
     val rows = items.filter { it.state == PlannedState.Upcoming }.map { (item, _) ->
         SchoolAbsence(

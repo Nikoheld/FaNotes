@@ -4,6 +4,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
+private val widgetOffsetSuffix = Regex("""[+-]\d{2}:\d{2}$""")
+
 /** One row of the home-screen widget or of the start page strip: a lesson, or the heading of the next school day. */
 data class WidgetRow(
     val heading: Boolean,
@@ -21,7 +23,7 @@ data class WidgetRow(
 
 /** `HH:mm–HH:mm` of an event, empty without a real time. */
 fun lessonClockText(event: AgendaEvent, zone: ZoneId = SCHOOL_ZONE): String {
-    val zoned = event.start.contains('Z') || Regex("""[+-]\d{2}:\d{2}$""").containsMatchIn(event.start)
+    val zoned = event.start.contains('Z') || widgetOffsetSuffix.containsMatchIn(event.start)
     if (!zoned) return displayClock(event.start, event.end)
     val fmt = java.time.format.DateTimeFormatter.ofPattern("HH:mm")
     val start = event.startsAt(zone)?.atZone(zone)?.toLocalTime()?.format(fmt).orEmpty()
@@ -50,6 +52,7 @@ fun widgetRows(
     zone: ZoneId = SCHOOL_ZONE,
     groupChoices: Map<String, List<String>> = emptyMap(),
 ): List<WidgetRow> {
+    DerivedWorkProbe.hit("widgetRows")
     val merged = mergedScheduleEvents(events, exams, hidden, zone, groupChoices)
     val today = now.atZone(zone).toLocalDate()
     val dated = merged.mapNotNull { event ->
