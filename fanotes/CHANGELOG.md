@@ -1,5 +1,14 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.25
+
+- Compile the app's own code ahead of time with the baseline profile.
+- Add UI regression guard and fair before/after perf harness
+- Stop recomputing school data on the main thread on every scroll and tap.
+- Add JVM UI performance harness (Robolectric + Compose test)
+- Use synthetic teacher abbreviations in all timetable tests.
+- Read the class timetable PDF by word coordinates
+
 ## 2026.11.2-beta.24
 
 - Timetables: asking whether any exist is an answer, not an error.
