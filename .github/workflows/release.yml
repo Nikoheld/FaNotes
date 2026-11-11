@@ -269,7 +269,10 @@ jobs:
           distribution: temurin
           java-version: 17
       - name: Install poppler and qpdf (timetable PDF pipeline test)
-        # The runner's apt mirror sometimes fails DNS for minutes: retry instead of failing the build.
+        # The runner's apt mirror sometimes fails DNS for minutes. The pipeline test skips without
+        # these tools, so a failed install must neither block nor fail the build.
+        timeout-minutes: 4
+        continue-on-error: true
         run: |
           for attempt in 1 2 3 4; do
             if sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 poppler-utils qpdf; then exit 0; fi
