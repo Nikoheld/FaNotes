@@ -1,0 +1,9 @@
+/* Absenzen and absence points. */
+.warning-text { color: var(--warning); }
+.stat-of { font-size: 16px; font-weight: 500; color: var(--muted); margin-left: 4px; }
+.absence-explain { color: var(--muted); font-size: 13px; line-height: 1.5; margin: -4px 0 16px; max-width: 90ch; }
+.absence-explain strong { color: var(--warning); font-weight: 600; }
+.absence-note { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; white-space: normal; }
+.absence-estimate { font-weight: 600; color: var(--warning); cursor: help; white-space: nowrap; }
+.view-absences th.numeric, .view-absences td.numeric { text-align: right; }
+.view-absences tr.absence-open td:first-child { box-shadow: inset 3px 0 0 var(--warning); }

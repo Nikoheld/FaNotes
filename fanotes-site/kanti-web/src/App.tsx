@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import { allEntries, weekMonday } from './lib/agenda'
 import { courseSummaries } from './lib/grades'
 import { dateLabel } from './lib/i18n'
@@ -8,17 +8,24 @@ import { isTypingTarget, shortcutFor, VIEWS, type View } from './lib/shortcuts'
 import { useKanti } from './state'
 import { Banner, Button, Dialog, Icon, IconButton, Kbd, Logo, type IconName } from './components/ui'
 import { ago } from './views/common'
-import { AdminTimetable } from './views/AdminTimetable'
-import { Commute } from './views/Commute'
-import { Absences } from './views/Absences'
-import { Agenda } from './views/Agenda'
-import { Grades } from './views/Grades'
-import { Settings } from './views/Settings'
 import { SignIn } from './views/SignIn'
-import { Timetable } from './views/Timetable'
 import { Today } from './views/Today'
-import { Updates } from './views/Updates'
 import { zurichToday } from '@shared/schulnetz-logic'
+
+// Only the first screens ship in the main bundle; every other view loads when it is opened.
+const AdminTimetable = lazy(() => import('./views/AdminTimetable').then((module) => ({ default: module.AdminTimetable })))
+const Commute = lazy(() => import('./views/Commute').then((module) => ({ default: module.Commute })))
+const Absences = lazy(() => import('./views/Absences').then((module) => ({ default: module.Absences })))
+const Agenda = lazy(() => import('./views/Agenda').then((module) => ({ default: module.Agenda })))
+const Grades = lazy(() => import('./views/Grades').then((module) => ({ default: module.Grades })))
+const Settings = lazy(() => import('./views/Settings').then((module) => ({ default: module.Settings })))
+const Timetable = lazy(() => import('./views/Timetable').then((module) => ({ default: module.Timetable })))
+const Updates = lazy(() => import('./views/Updates').then((module) => ({ default: module.Updates })))
+
+const ViewLoading = () => <div className="loading"><span className="spinner" /></div>
+
+/** Where a new group starts in the sidebar: school, on the way, then the settings at the bottom. */
+const NAV_CLASS: Partial<Record<View, string>> = { timetable: 'nav-group', commute: 'nav-group', settings: 'nav-end' }
 
 const ICONS: Record<View, IconName> = { today: 'today', timetable: 'timetable', grades: 'grades', agenda: 'agenda', absences: 'absences', updates: 'updates', commute: 'train', settings: 'settings' }
 
@@ -143,7 +150,7 @@ const Sidebar = () => {
   const { t, route, connections, active, data, demo } = kanti
   return (
     <nav className="sidebar" aria-label="Kanti+">
-      <div className="brand"><Logo size={34} /><span className="brand-name">Kanti+</span></div>
+      <a className="brand" href="/" onClick={(event) => { event.preventDefault(); kanti.navigate('today') }}><Logo size={36} /><span className="brand-name">Kanti+</span></a>
       {connections.length > 1 ? (
         <label className="connection-switch">
           <span className="sr-only">{t.connections}</span>
@@ -151,10 +158,10 @@ const Sidebar = () => {
             {connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.label}</option>)}
           </select>
         </label>
-      ) : active ? <p className="connection-name">{active.label}</p> : null}
+      ) : active ? <p className="connection-name" title={active.label}><i className={`connection-dot${data.status?.needsReauth || kanti.offline ? ' off' : ''}`} aria-hidden="true" /><span>{active.label}</span></p> : null}
       <ul className="nav">
         {VIEWS.map((view, index) => (
-          <li key={view}>
+          <li key={view} className={NAV_CLASS[view]}>
             <a
               href={view === 'today' ? '/' : undefined}
               className={route.view === view ? 'active' : ''}
@@ -165,14 +172,17 @@ const Sidebar = () => {
               onKeyDown={(event) => { if (event.key === 'Enter') kanti.navigate(view) }}
             >
               <Icon name={ICONS[view]} />
-              <span className="nav-label">{t[view]}</span>
+              <span className="nav-label" title={t[view]}>{t[view]}</span>
               <Kbd>{index + 1}</Kbd>
             </a>
           </li>
         ))}
       </ul>
       <div className="sidebar-foot">
-        {demo ? <span className="demo-badge">Demo</span> : data.snapshot?.fetchedAt ? <small className="muted">{t.lastUpdated(ago(data.snapshot.fetchedAt, t))}</small> : null}
+        <span className="sidebar-status">
+          {demo ? <span className="demo-badge">Demo</span> : data.loading && data.snapshot ? <><span className="spinner spinner-small" aria-hidden="true" /><span className="sidebar-text">{t.updating}</span></> : data.snapshot?.fetchedAt ? <span className="sidebar-text">{t.lastUpdated(ago(data.snapshot.fetchedAt, t))}</span> : null}
+        </span>
+        <a href="/about/">{t.aboutKanti}</a>
       </div>
     </nav>
   )
@@ -223,7 +233,7 @@ export const App = () => {
   }, [phase, kanti, route.view])
 
   // The operator's upload page needs no Kanti+ session and is in no menu.
-  if (route.admin === 'timetable') return <AdminTimetable />
+  if (route.admin === 'timetable') return <Suspense fallback={<div className="boot"><Logo size={56} /></div>}><AdminTimetable /></Suspense>
   if (phase === 'loading') return <div className="boot"><Logo size={56} /></div>
   if (phase === 'signedOut') {
     return (
@@ -244,8 +254,9 @@ export const App = () => {
         <header className="topbar">
           <div className="topbar-title">
             <h1>{t[route.view]}</h1>
-            {active && kanti.connections.length > 1 ? <span className="muted">{active.label}</span> : null}
+            <span className="topbar-sub">{[dateLabel(zurichToday(), kanti.language, { weekday: 'long', day: 'numeric', month: 'long' }), active && kanti.connections.length > 1 ? active.label : ''].filter(Boolean).join(' · ')}</span>
           </div>
+          {demo ? <div className="demo-chip" title={t.demoActive}><Icon name="play" size={16} /><span>{t.demoActive}</span><Button tone="outline" onClick={kanti.endDemo}>{t.demoEnd}</Button></div> : null}
           <button type="button" className="search-box" onClick={() => setPalette(true)}>
             <Icon name="search" size={18} /><span>{t.search}</span><Kbd>/</Kbd>
           </button>
@@ -254,19 +265,20 @@ export const App = () => {
             <IconButton icon="keyboard" label={`${t.shortcuts} (?)`} onClick={() => setHelp(true)} />
           </div>
         </header>
+        <div className="content">
         <div className="banners">
-          {demo ? <Banner tone="warning" icon="play" action={<Button tone="outline" onClick={kanti.endDemo}>{t.demoEnd}</Button>}>{t.demoActive}</Banner> : null}
           {kanti.offline ? <Banner tone="warning" icon="warning">{t.offline}</Banner> : null}
           {status?.needsReauth ? <Banner tone="warning" icon="phone">{t.reauth}</Banner> : null}
           {status && !status.linked && !demo ? <Banner icon="info">{t.notLinked}</Banner> : null}
           {data.error && !kanti.offline ? <Banner tone="danger" icon="warning" action={<Button tone="outline" onClick={() => void kanti.refresh()}>{t.tryAgain}</Button>}>{data.error}</Banner> : null}
           {data.snapshot?.readErrors?.length ? <Banner tone="warning" icon="info">{t.readErrors}: {data.snapshot.readErrors.join(' · ')}</Banner> : null}
         </div>
-        {data.loading && !data.snapshot ? <div className="loading"><span className="spinner" /></div> : <Current />}
+        {data.loading && !data.snapshot ? <ViewLoading /> : <Suspense fallback={<ViewLoading />}><Current /></Suspense>}
         <footer className="foot">
           <span>{data.loading && data.snapshot ? <span className="updating" role="status"><span className="spinner spinner-small" aria-hidden="true" />{t.updating}</span> : data.snapshot?.fetchedAt ? t.lastUpdated(dateLabel(data.snapshot.fetchedAt.slice(0, 10), kanti.language) + ' ' + new Date(data.snapshot.fetchedAt).toLocaleTimeString(kanti.language === 'de' ? 'de-CH' : 'en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Zurich' })) : ''}</span>
           <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/" target="_blank" rel="noopener noreferrer">{t.privacy}</a>
         </footer>
+        </div>
       </main>
       <nav className="bottombar" aria-label="Kanti+">
         {VIEWS.filter((view) => view !== 'absences' && view !== 'updates').map((view) => (

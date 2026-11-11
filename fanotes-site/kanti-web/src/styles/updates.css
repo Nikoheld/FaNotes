@@ -1,0 +1,9 @@
+/* Mitteilungen, Neuigkeiten, Kontoauszug, Prüfungen & Termine. */
+.list-head { margin: 6px 12px 2px; color: var(--muted); font-size: 13px; font-weight: 600; }
+.message header { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.message h3 { font-size: 17px; }
+.message p { margin: 8px 0 0; white-space: pre-line; }
+.news-row { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-bottom: 1px solid var(--hairline); }
+.news-row:last-child { border-bottom: none; }
+.konto-total th { text-align: left; font-weight: 600; border-top: 1px solid var(--line, currentColor); padding-top: 10px; }
+.konto-total td { font-weight: 600; border-top: 1px solid var(--line, currentColor); padding-top: 10px; }

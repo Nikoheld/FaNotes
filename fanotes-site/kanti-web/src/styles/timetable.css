@@ -1,0 +1,58 @@
+/* Stundenplan: week grid, details panel, other classes and rooms. */
+.week-title { font-size: 19px; margin: 0 6px; }
+.week-grid-card { padding: 0; overflow: hidden; }
+.week-grid { --axis: 56px; position: relative; }
+.week-head, .week-allday { display: grid; grid-template-columns: var(--axis) repeat(var(--days), minmax(0, 1fr)); border-bottom: 1px solid var(--hairline); }
+.week-day { padding: 10px 8px; font-size: 14px; color: var(--muted); }
+.week-day strong { color: var(--text); margin-right: 4px; }
+.week-day.today { color: var(--accent); }
+.week-day.today strong { color: var(--accent); }
+.week-allday { padding: 6px 0; }
+.axis-label { color: var(--muted); font-size: 12px; padding: 4px 6px; }
+.allday-cell { display: flex; flex-direction: column; gap: 4px; padding: 0 3px; }
+.chip { border: none; border-radius: var(--radius-s); padding: 4px 8px; text-align: left; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--success-soft); color: var(--success); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.kind-exam { background: var(--warning-soft); color: var(--warning); }
+.chip.cancelled { text-decoration: line-through; }
+.chip.selected { outline: 2px solid var(--accent); }
+.week-body { position: relative; display: grid; grid-template-columns: var(--axis) repeat(var(--days), minmax(0, 1fr)); height: max(620px, calc(100vh - 300px)); }
+.week-body.compact { height: 520px; }
+.axis { position: relative; }
+.axis-hour { position: absolute; right: 8px; transform: translateY(-50%); color: var(--muted); font-size: 12px; }
+.axis-hour:first-child { transform: none; }
+.day-column { position: relative; border-left: 1px solid var(--hairline); }
+.day-column.today { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.day-column.vacation { background: repeating-linear-gradient(135deg, transparent 0 8px, var(--sunken) 8px 9px); }
+.hour-line { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--hairline); }
+.now-line { position: absolute; left: -1px; right: 0; border-top: 2px solid var(--accent); z-index: 3; }
+.now-line::before { content: ''; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.block {
+  position: absolute; z-index: 2; display: flex; flex-direction: column; gap: 1px; overflow: hidden; padding: 4px 7px; border: none;
+  border-left: 3px solid var(--accent); border-radius: 6px; background: var(--accent-soft); color: var(--text); text-align: left; cursor: pointer; font-size: 13px; line-height: 1.25;
+}
+.block:hover { filter: brightness(0.97); }
+.block.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.block-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.block-meta { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.block-flag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+.block.kind-exam { border-left-color: var(--warning); background: var(--warning-soft); }
+.block.kind-exam .block-flag { color: var(--warning); }
+.block.kind-appointment { border-left-color: var(--success); background: var(--success-soft); }
+.block.substitution { border-left-color: var(--warning); }
+.block.substitution .block-flag { color: var(--warning); }
+.block.cancelled { border-left-color: var(--danger); background: var(--danger-soft); }
+.block.cancelled .block-title { text-decoration: line-through; }
+.block.cancelled .block-flag { color: var(--danger); }
+.week-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.details-panel { position: sticky; top: 18px; }
+.view-other-timetables > .loading { margin-top: 16px; }
+.footnote-list { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
+
+@media (max-width: 1180px) {
+  .columns-timetable { grid-template-columns: minmax(0, 1fr); }
+  .details-panel { position: static; }
+}
+@media (max-width: 640px) {
+  .week-grid { --axis: 40px; }
+  .week-body { height: 560px; }
+  .block-meta, .block-flag { display: none; }
+}

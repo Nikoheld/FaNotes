@@ -1,0 +1,30 @@
+/* Noten: course list, course detail, marks table, wish grade, reveal. */
+.course-list { padding: 4px; }
+.course-row { display: grid; grid-template-columns: minmax(0, 1fr) 54px 56px 54px; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; border: none; border-radius: var(--radius-m); background: transparent; text-align: left; cursor: pointer; }
+.course-row:hover { background: var(--sunken); }
+.course-row.selected { background: var(--accent-soft); }
+.course-name { display: flex; align-items: center; gap: 6px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.course-name .icon { color: var(--muted); }
+.course-average { color: var(--muted); text-align: right; }
+.course-points { text-align: right; font-weight: 600; }
+.course-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; }
+.course-head h2 { font-size: 22px; }
+.course-head p { margin: 2px 0 0; }
+.course-figures { display: flex; gap: 22px; }
+.course-figures span { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.course-figures small { color: var(--muted); }
+.course-figures strong { font-size: 22px; }
+.hidden-row td { background: color-mix(in srgb, var(--sunken) 50%, transparent); }
+.wish-inputs { display: flex; flex-wrap: wrap; gap: 16px; }
+.wish-inputs label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 13px; }
+.wish-inputs input { width: 120px; color: var(--text); }
+.wish-result { margin: 12px 0 0; font-weight: 600; }
+.reveal { display: flex; flex-direction: column; gap: 14px; }
+.reveal-done { align-items: center; text-align: center; }
+.guess-row { display: flex; align-items: center; gap: 14px; }
+.guess-value { font-size: 28px; min-width: 56px; text-align: center; }
+
+@media (max-width: 640px) {
+  .course-row { grid-template-columns: minmax(0, 1fr) 44px 50px 46px; padding: 9px 8px; }
+  .course-figures { gap: 14px; }
+}
