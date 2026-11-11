@@ -1899,10 +1899,11 @@ export const extractWebIds = (url, html) => {
 
 export const WEEK_ADJACENT_MS = 30 * 60 * 1000
 /**
- * This week and the next are read again after at most this long, by a full read or by a grade check,
- * so a cancelled or changed lesson reaches the phone within the same 10 minutes as a grade.
+ * This week and the next are read again once their last read is this old, by a full read or by a
+ * grade check. Grade checks come every 3.06–3.94 min, so every second one reads the lessons: at most
+ * 2 × 3.94 ≈ 7.9 min from a change to its read, inside the same 10 minutes as a grade.
  */
-export const LESSON_CHECK_MS = 8 * 60 * 1000
+export const LESSON_CHECK_MS = 4 * 60 * 1000
 export const WEEK_FAR_MS = 24 * 60 * 60 * 1000
 export const WEEK_CAP = 48
 /** Mondays tried on each side when the page has no start or end. Not a school year. */

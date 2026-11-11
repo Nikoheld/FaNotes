@@ -10,7 +10,7 @@ import { createDecipheriv, randomBytes } from 'node:crypto'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
 import { scrapeWithSession } from './schulnetz-web.mjs'
 import {
-  GRADE_SLA_MS, LESSON_CHECK_MS, alertAllowed, diffSnapshots, isCancelled, isSubstitution, lessonCheckWeeks, lessonMarker,
+  GRADE_CHECK_JITTER, GRADE_CHECK_MS, GRADE_SLA_MS, LESSON_CHECK_MS, alertAllowed, diffSnapshots, isCancelled, isSubstitution, lessonCheckWeeks, lessonMarker,
   parseSchedulerXml, resolvedAlertSettings, seedLessonMarks,
 } from './schulnetz-logic.mjs'
 
@@ -119,14 +119,19 @@ test('a lesson cancelled after the first read with marks is announced, and respe
   assert.ok(back.every((change) => change.title === 'Stundenplan geändert'))
 })
 
-test('a grade check reads this and next week once their last read is 8 minutes old', () => {
+test('a grade check reads this and next week once their last read is 4 minutes old', () => {
   const now = '2026-11-12T21:30:00Z'
   assert.deepEqual(lessonCheckWeeks({ weekFetched: {}, today: '2026-11-12', now }), ['2026-11-09', '2026-11-16'])
-  assert.deepEqual(lessonCheckWeeks({ weekFetched: { '2026-11-09': '2026-11-12T21:25:00Z', '2026-11-16': '2026-11-12T21:21:00Z' }, today: '2026-11-12', now }), ['2026-11-16'])
-  assert.deepEqual(lessonCheckWeeks({ weekFetched: { '2026-11-09': '2026-11-12T21:25:00Z', '2026-11-16': '2026-11-12T21:23:00Z' }, today: '2026-11-12', now }), [])
+  assert.deepEqual(lessonCheckWeeks({ weekFetched: { '2026-11-09': '2026-11-12T21:27:00Z', '2026-11-16': '2026-11-12T21:25:00Z' }, today: '2026-11-12', now }), ['2026-11-16'])
+  assert.deepEqual(lessonCheckWeeks({ weekFetched: { '2026-11-09': '2026-11-12T21:27:00Z', '2026-11-16': '2026-11-12T21:26:30Z' }, today: '2026-11-12', now }), [])
   // Not past the semester Schulnetz offers.
   assert.deepEqual(lessonCheckWeeks({ weekFetched: {}, today: '2027-07-01', now: '2027-07-01T10:00:00Z', spanStart: '2026-08-17', spanEnd: '2027-07-04' }), ['2027-06-28'])
-  assert.equal(LESSON_CHECK_MS, 8 * 60_000)
+  // Worst case with the grade-check jitter: the second check after a lesson read always reads again,
+  // and two of the longest gaps plus a minute for the push stay inside the 10-minute promise.
+  const shortest = GRADE_CHECK_MS * (1 - GRADE_CHECK_JITTER)
+  const longest = GRADE_CHECK_MS * (1 + GRADE_CHECK_JITTER)
+  assert.ok(LESSON_CHECK_MS <= 2 * shortest)
+  assert.ok(LESSON_CHECK_MS > 0 && 2 * longest + 60_000 < GRADE_SLA_MS)
 })
 
 const timetablePage = (transid) => `<html><body><a href="index.php?pageid=21311&amp;id=abc123&amp;transid=${transid}">Noten</a>
