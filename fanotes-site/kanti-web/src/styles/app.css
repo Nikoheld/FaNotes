@@ -453,3 +453,19 @@ tr:last-child td { border-bottom: none; }
 /* Code from the app */
 .claim-or { text-align: center; margin: 14px 0 4px; }
 .claim-form input { font-variant-numeric: tabular-nums; letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* Other classes and rooms (the school's PDF) and the operator's upload page. */
+.segments { display: inline-flex; border: 1px solid var(--hairline); border-radius: var(--radius-m, 10px); overflow: hidden; }
+.segments button { background: transparent; border: 0; color: var(--text); padding: 8px 16px; cursor: pointer; font: inherit; }
+.segments button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.class-timetable-image { display: block; max-width: 100%; height: auto; margin-top: 12px; border: 1px solid var(--hairline); border-radius: 8px; background: #fff; }
+.room-week-scroll { overflow-x: auto; margin-top: 12px; }
+.room-week { border-collapse: collapse; width: 100%; min-width: 560px; }
+.room-week th, .room-week td { border: 1px solid var(--hairline); padding: 6px 8px; text-align: left; vertical-align: top; font-size: 0.9rem; }
+.room-week thead th { background: var(--sunken); }
+.room-cell { display: flex; flex-direction: column; margin-bottom: 4px; }
+.admin-page { max-width: 640px; margin: 0 auto; padding: 24px 16px; display: grid; gap: 16px; }
+.admin-head { display: flex; align-items: center; gap: 12px; }
+.admin-head h1 { font-size: 1.3rem; margin: 0; }
+.admin-form { display: grid; gap: 12px; margin: 12px 0; }
+.admin-form .field { display: grid; gap: 4px; }

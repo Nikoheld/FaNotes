@@ -106,6 +106,16 @@ const de = {
   readErrors: 'Nicht alles konnte gelesen werden',
   subjects: (count: number) => (count === 1 ? 'ein Fach' : `${count} Fächer`),
   ownMarksNote: 'Eigene Noten und Anpassungen aus der App bleiben auf dem Handy; hier zählen die Noten der Schule.',
+  otherTimetables: 'Andere Klassen & Räume', backToTimetable: 'Zurück zum Stundenplan',
+  classesTab: 'Klassen', roomsTab: 'Räume', pickClass: 'Klasse', pickRoom: 'Raum', classTeacher: 'Klassenlehrperson',
+  roomEmpty: 'In diesem Raum ist nichts eingetragen.', timetableLoadFailed: 'Der Stundenplan konnte nicht geladen werden.',
+  timetableSource: (semester: string, date: string) => `Stundenplan der Schule${semester ? ` · ${semester}` : ''} · Stand ${date}`,
+  timetableImageAlt: (code: string) => `Stundenplan der Klasse ${code}`,
+  adminTitle: 'Stundenplan-PDF hochladen', adminLead: 'Nur für den Betrieb. Die PDF-Datei der Schule wird auf dem Server gespeichert und nur Kanti+ Nutzern der Alten Kanti gezeigt.',
+  adminToken: 'Admin-Token', adminFile: 'PDF-Datei', adminUpload: 'Hochladen', adminUploading: 'Lade hoch …', adminShow: 'Stand anzeigen',
+  adminDone: (classes: number, rooms: number) => `${classes} Klassen und ${rooms} Räume übernommen.`,
+  adminWarnings: (count: number) => (count === 1 ? 'Ein Hinweis' : `${count} Hinweise`), adminCurrent: 'Aktuelle Version', adminNone: 'Noch keine PDF-Datei hochgeladen.',
+  adminUploadedAt: 'Hochgeladen', adminNeedToken: 'Bitte das Admin-Token eingeben.', adminNeedFile: 'Bitte eine PDF-Datei wählen.',
 }
 
 export type Strings = typeof de
@@ -216,6 +226,16 @@ const en: Strings = {
   readErrors: 'Not everything could be read',
   subjects: (count: number) => (count === 1 ? 'one subject' : `${count} subjects`),
   ownMarksNote: 'Own marks and adjustments from the app stay on the phone; here the school’s marks count.',
+  otherTimetables: 'Other classes & rooms', backToTimetable: 'Back to the timetable',
+  classesTab: 'Classes', roomsTab: 'Rooms', pickClass: 'Class', pickRoom: 'Room', classTeacher: 'Class teacher',
+  roomEmpty: 'Nothing is scheduled in this room.', timetableLoadFailed: 'The timetable could not be loaded.',
+  timetableSource: (semester: string, date: string) => `School timetable${semester ? ` · ${semester}` : ''} · as of ${date}`,
+  timetableImageAlt: (code: string) => `Timetable of class ${code}`,
+  adminTitle: 'Upload the timetable PDF', adminLead: 'Operations only. The school’s PDF is stored on the server and shown only to Kanti+ users of the Alte Kanti.',
+  adminToken: 'Admin token', adminFile: 'PDF file', adminUpload: 'Upload', adminUploading: 'Uploading …', adminShow: 'Show current',
+  adminDone: (classes: number, rooms: number) => `${classes} classes and ${rooms} rooms imported.`,
+  adminWarnings: (count: number) => (count === 1 ? 'One warning' : `${count} warnings`), adminCurrent: 'Current version', adminNone: 'No PDF uploaded yet.',
+  adminUploadedAt: 'Uploaded', adminNeedToken: 'Please enter the admin token.', adminNeedFile: 'Please choose a PDF file.',
 }
 
 export const STRINGS = { de, en }
