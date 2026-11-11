@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useMemo } from 'react'
+import { detectGroupSets, chosenLabels } from '../lib/groups'
 import { THEME_IDS } from '../lib/palette'
 import { permission, requestPermission } from '../lib/notify'
 import { useKanti } from '../state'
@@ -23,6 +25,13 @@ export const Settings = () => {
   const [removing, setRemoving] = useState<Connection | null>(null)
   const [error, setError] = useState('')
   const settings = data.status?.settings || {}
+  const groupSets = useMemo(() => detectGroupSets(data.snapshot?.events || []), [data.snapshot])
+  const pickGroup = (key: string, label: string) => {
+    const next = { ...prefs.groupChoices }
+    if (label) next[key] = [label]
+    else delete next[key]
+    setPrefs({ groupChoices: next })
+  }
   const linked = data.status?.linked === true && !demo
   const save = async (patch: Partial<AlertSettings>) => {
     setError('')
@@ -66,6 +75,26 @@ export const Settings = () => {
                 <option value="en">English</option>
               </select>
             </label>
+          </Card>
+
+          <SectionLabel>{t.halfClass}</SectionLabel>
+          <Card className="form">
+            <p className="muted small">{groupSets.length ? t.halfClassBody : t.halfClassNone}</p>
+            {groupSets.map((set) => {
+              const chosen = chosenLabels(set, prefs.groupChoices)
+              const selected = set.options.find((option) => chosen.has(option.label.trim().toLowerCase()))?.label || ''
+              return (
+                <div className="field" key={set.key} role="radiogroup" aria-label={set.options.map((option) => option.label).join(' / ')}>
+                  <span className="field-label">{set.options.map((option) => option.label).join(' / ')}</span>
+                  {[...set.options.map((option) => ({ id: option.label, text: option.label })), { id: '', text: t.halfClassAll }].map((choice) => (
+                    <label key={choice.id || 'all'} className="radio-row">
+                      <input type="radio" name={`group:${set.key}`} checked={selected === choice.id} onChange={() => pickGroup(set.key, choice.id)} /> {choice.text}
+                      {choice.id ? <small className="muted"> · {[set.options.find((option) => option.label === choice.id)?.teacher, t.halfClassPerWeek(set.options.find((option) => option.label === choice.id)?.lessonsPerWeek || 1)].filter(Boolean).join(' · ')}</small> : null}
+                    </label>
+                  ))}
+                </div>
+              )
+            })}
           </Card>
 
           <SectionLabel>{t.alerts}</SectionLabel>

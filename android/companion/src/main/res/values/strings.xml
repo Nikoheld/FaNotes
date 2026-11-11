@@ -1177,4 +1177,14 @@
     <string name="mensa_title">Mensa</string>
     <string name="mensa_closed">Mensa closed</string>
     <string name="mensa_student_price">Students CHF %1$s</string>
+    <string name="half_class_groups">Half-class groups</string>
+    <string name="half_class_row">Pick your own group per subject; lessons of the other groups are hidden.</string>
+    <string name="half_class_all">Show all</string>
+    <string name="half_class_onboarding_title">Pick your half-class group</string>
+    <string name="half_class_onboarding_body">Lessons of the other group are hidden. You can change this later in Settings.</string>
+    <string name="half_class_none">No half-class groups found in your timetable.</string>
+    <plurals name="half_class_per_week">
+        <item quantity="one">%d lesson per week</item>
+        <item quantity="other">%d lessons per week</item>
+    </plurals>
 </resources>

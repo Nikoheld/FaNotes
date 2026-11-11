@@ -17,7 +17,7 @@ enum class Page(val title: String) {
     Search("Search"), Editor("Note"), Grades("Grades"), Course("Subject"), Exams("Exams"),
     Absences("Absences"), Updates("School updates"), Statement("School account"),
     Settings("Settings"), Connections("Account & sync"), Appearance("Appearance"), ArchivedSubjects("Archived subjects"),
-    Navigation("Navigation bar"), Planning("Planning & grades"), Notifications("Notifications"),
+    Navigation("Navigation bar"), Planning("Planning & grades"), HalfClass("Half-class groups"), Notifications("Notifications"),
     Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted"), DocSearch("Document search"), WebAccess("Kanti+ in the browser")
 }
 data class CompanionRoute(val destination: Destination = Destination.Today, val page: Page? = null)
@@ -70,6 +70,7 @@ fun Page.uiTitle(): String = when (this) {
     Page.ArchivedSubjects -> t(R.string.archived_subjects)
     Page.Navigation -> t(R.string.navigation_bar)
     Page.Planning -> t(R.string.planning_grades)
+    Page.HalfClass -> t(R.string.half_class_groups)
     Page.Notifications -> t(R.string.notifications)
     Page.Profile -> t(R.string.your_activity)
     Page.Diagnostics -> t(R.string.diagnostics)
@@ -312,9 +313,11 @@ fun agendaForDays(
     tasks: List<HomeworkTask>,
     hidden: List<HiddenLesson>,
     zone: ZoneId = ZoneId.systemDefault(),
+    groupChoices: Map<String, List<String>> = emptyMap(),
 ): Map<LocalDate, List<AgendaEntry>> {
-    val schoolByDay = eventsByLocalDay(visibleEvents(snapshot.events + snapshot.exams, hidden, zone), zone)
-    return days.associateWith { day -> agendaForDay(day, snapshot, calendar, tasks, hidden, zone, schoolByDay) }
+    val sets = activeGroupSets(snapshot.events, groupChoices)
+    val schoolByDay = eventsByLocalDay(visibleEvents(snapshot.events + snapshot.exams, hidden, zone, sets, groupChoices), zone)
+    return days.associateWith { day -> agendaForDay(day, snapshot, calendar, tasks, hidden, zone, schoolByDay, groupChoices) }
 }
 
 fun agendaForDay(
@@ -325,10 +328,11 @@ fun agendaForDay(
     hidden: List<HiddenLesson>,
     zone: ZoneId = ZoneId.systemDefault(),
     schoolByDay: Map<LocalDate, List<AgendaEvent>>? = null,
+    groupChoices: Map<String, List<String>> = emptyMap(),
 ): List<AgendaEntry> {
     val clock = DateTimeFormatter.ofPattern("HH:mm")
     val imported = calendar.events.map { it.id }.toSet()
-    val daySchool = if (schoolByDay != null) schoolByDay[day].orEmpty() else eventsOn(visibleEvents(snapshot.events + snapshot.exams, hidden, zone), day, zone)
+    val daySchool = if (schoolByDay != null) schoolByDay[day].orEmpty() else eventsOn(visibleEvents(snapshot.events + snapshot.exams, hidden, zone, activeGroupSets(snapshot.events, groupChoices), groupChoices), day, zone)
     // An exam over one lesson, or two consecutive lessons of its course, takes that slot.
     val examKeys = snapshot.exams.map { "${it.id}|${it.start}" }.toSet()
     val slots = examsInLessonSlots(daySchool.filter { it.isLesson() }, daySchool.filter { it.isExamLike() || "${it.id}|${it.start}" in examKeys }, zone)

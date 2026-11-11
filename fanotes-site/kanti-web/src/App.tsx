@@ -87,10 +87,10 @@ const ShortcutHelp = ({ onClose }: { onClose: () => void }) => {
 
 const CommandPalette = ({ onClose }: { onClose: () => void }) => {
   const kanti = useKanti()
-  const { t, data, language } = kanti
+  const { t, data, language, prefs } = kanti
   const [query, setQuery] = useState('')
   const [index, setIndex] = useState(0)
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
+  const entries = useMemo(() => allEntries(data.snapshot, prefs.groupChoices), [data.snapshot, prefs.groupChoices])
   const courses = useMemo(() => courseSummaries(data.snapshot?.grades || []), [data.snapshot])
   const today = zurichToday()
   const hits = useMemo(() => search(query, { entries, courses, snapshot: data.snapshot, today, views: VIEWS.map((view) => ({ id: view, title: t[view] })) }), [query, entries, courses, data.snapshot, today, t])

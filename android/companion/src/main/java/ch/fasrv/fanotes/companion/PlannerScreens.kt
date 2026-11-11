@@ -173,7 +173,7 @@ fun TodayScreen(model: CompanionModel) {
                         if (LocalCompanionSemantics.current.snow && model.snowfall && !LocalKantiMotion.current.reduced) Snowfall(Modifier.matchParentSize().clip(MaterialTheme.shapes.extraLarge))
                     }
                     if (gapUnread) StatusLine(t(R.string.unread_before_next), StateTone.Warning, Modifier.padding(top = 10.dp, start = 4.dp))
-                    val strip = remember(model.snapshot, model.hidden, now.epochSecond / 60) { widgetRows(model.snapshot.events, model.snapshot.exams, model.hidden, now, zone) }
+                    val strip = remember(model.snapshot, model.hidden, model.desk.groupChoices, now.epochSecond / 60) { widgetRows(model.snapshot.events, model.snapshot.exams, model.hidden, now, zone, model.desk.groupChoices) }
                     if (strip.count { !it.heading } >= 2) LessonStrip(strip, today, Modifier.padding(top = 12.dp))
                 }
                 TodayLead.Unread -> LeadCard(Icons.Outlined.EventBusy, StateTone.Warning, t(R.string.timetable_not_loaded), if (online) t(R.string.timetable_not_loaded_body) else t(R.string.offline_waiting),

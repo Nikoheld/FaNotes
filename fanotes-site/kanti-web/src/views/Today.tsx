@@ -14,7 +14,7 @@ export const Today = () => {
   const { t, language, data, prefs } = kanti
   const clock = useClock()
   const snapshot = data.snapshot
-  const entries = useMemo(() => allEntries(snapshot), [snapshot])
+  const entries = useMemo(() => allEntries(snapshot, prefs.groupChoices), [snapshot, prefs.groupChoices])
   const days = useMemo(() => byDay(entries), [entries])
   const next = nextCommitment(entries, clock)
   const [selected, setSelected] = useState<Entry | null>(null)

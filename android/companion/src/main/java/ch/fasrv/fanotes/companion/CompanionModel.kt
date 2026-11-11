@@ -315,9 +315,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 val cal = calendar
                 val taskList = tasks
                 val hiddenList = hidden
+                val choices = desk.groupChoices
                 val built = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     val days = ((0L..14L).map { today.plusDays(it) } + ch.fasrv.fanotes.schulnetz.schoolWeek(selected, true)).distinct()
-                    agendaForDays(days, incoming, cal, taskList, hiddenList, zone)
+                    agendaForDays(days, incoming, cal, taskList, hiddenList, zone, choices)
                 }
                 snapshot = incoming
                 rememberAgenda(incoming, cal, taskList, hiddenList, built)
@@ -1236,7 +1237,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val tasks = taskList.fold(1) { acc, task -> 31 * acc + task.updatedAt.hashCode() + task.title.hashCode() + task.done.hashCode() + task.dueDate.hashCode() }
         val local = cal.events.fold(1) { acc, event -> 31 * acc + event.id.hashCode() + event.start.hashCode() + event.title.hashCode() }
         val hiddenHash = hiddenList.fold(1) { acc, item -> 31 * acc + item.hashCode() }
-        return "${snap.fetchedAt}|${snap.revision}|${snap.events.size}|${snap.exams.size}|$hiddenHash|$local|$tasks"
+        return "${snap.fetchedAt}|${snap.revision}|${snap.events.size}|${snap.exams.size}|$hiddenHash|${desk.groupChoices.hashCode()}|$local|$tasks"
     }
 
     private fun rememberAgenda(snap: SchulnetzSnapshot, cal: ch.fasrv.fanotes.desk.CalendarDocument, taskList: List<ch.fasrv.fanotes.desk.HomeworkTask>, hiddenList: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, built: Map<java.time.LocalDate, List<AgendaEntry>>) {
@@ -1250,7 +1251,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun cachedAgenda(days: List<java.time.LocalDate>, zone: java.time.ZoneId): Map<java.time.LocalDate, List<AgendaEntry>> {
         val id = agendaIdentity(snapshot, calendar, tasks, hidden)
         if (agendaCacheId == id && days.all { it in agendaCacheDays }) return days.associateWith { agendaCacheDays[it].orEmpty() }
-        val built = agendaForDays(days, snapshot, calendar, tasks, hidden, zone)
+        val built = agendaForDays(days, snapshot, calendar, tasks, hidden, zone, desk.groupChoices)
         rememberAgenda(snapshot, calendar, tasks, hidden, built)
         return days.associateWith { agendaCacheDays[it].orEmpty() }
     }
@@ -1260,12 +1261,13 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val cal = calendar
         val taskList = tasks
         val hiddenList = hidden
+        val choices = desk.groupChoices
         val selected = day
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val zone = java.time.ZoneId.systemDefault()
             val today = java.time.LocalDate.now(zone)
             val days = ((0L..14L).map { today.plusDays(it) } + ch.fasrv.fanotes.schulnetz.schoolWeek(selected, true)).distinct()
-            val built = agendaForDays(days, snap, cal, taskList, hiddenList, zone)
+            val built = agendaForDays(days, snap, cal, taskList, hiddenList, zone, choices)
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
                 if (agendaIdentity(snapshot, calendar, tasks, hidden) == agendaIdentity(snap, cal, taskList, hiddenList)) {
                     rememberAgenda(snap, cal, taskList, hiddenList, built)
