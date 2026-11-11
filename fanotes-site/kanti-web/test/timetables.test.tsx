@@ -7,7 +7,7 @@ import { cellEntries, cellLabel, isAksaConnection, readSummary, roomDays, roomSt
 import { KantiProvider } from '../src/state'
 import { AdminTimetable } from '../src/views/AdminTimetable'
 
-const entry = (fields: Partial<RoomEntry>): RoomEntry => ({ day: 1, start: '07:45', end: '08:35', class: 'G26A', subject: 'deu', teacher: 'ZimLu', ...fields })
+const entry = (fields: Partial<RoomEntry>): RoomEntry => ({ day: 1, start: '07:45', end: '08:35', class: 'G26A', subject: 'deu', teacher: 'TstOo', ...fields })
 
 describe('other classes and rooms (synthetic data)', () => {
   it('knows the Alte Kanti by its Schulnetz path', () => {
@@ -22,18 +22,18 @@ describe('other classes and rooms (synthetic data)', () => {
     expect(readSummary(null)).toEqual({ available: false })
     expect(readSummary({ available: false })).toEqual({ available: false })
     expect(readSummary({ available: true, classes: [], rooms: [] }).available).toBe(false)
-    const summary = readSummary({ available: true, uploadedAt: '2026-11-11T08:00:00Z', semester: 'SJ 2026-27', classes: [{ code: 'G26A', teacher: 'ZimLu' }, { code: '../x' }, 7], rooms: ['516', 'Wed_A', '<script>', 'a'.repeat(30)] })
+    const summary = readSummary({ available: true, uploadedAt: '2026-11-11T08:00:00Z', semester: 'SJ 2026-27', classes: [{ code: 'G26A', teacher: 'TstOo' }, { code: '../x' }, 7], rooms: ['516', 'Wed_A', '<script>', 'a'.repeat(30)] })
     expect(summary.available).toBe(true)
-    expect(summary.classes).toEqual([{ code: 'G26A', teacher: 'ZimLu' }])
+    expect(summary.classes).toEqual([{ code: 'G26A', teacher: 'TstOo' }])
     expect(summary.rooms).toEqual(['516', 'Wed_A'])
   })
 
   it('maps a room week to day columns, start rows and cells', () => {
     const entries = [
-      entry({ day: 2, start: '08:35', class: 'G26B', subject: 'spf', teacher: 'BauAn' }),
-      entry({ day: 2, start: '08:35', class: 'G26A', subject: 'spf', teacher: 'BauAn' }),
+      entry({ day: 2, start: '08:35', class: 'G26B', subject: 'spf', teacher: 'TstAa' }),
+      entry({ day: 2, start: '08:35', class: 'G26A', subject: 'spf', teacher: 'TstAa' }),
       entry({ day: 1 }),
-      entry({ day: 2, start: '08:35', class: 'G26D', subject: 'phy', teacher: 'LanFr' }),
+      entry({ day: 2, start: '08:35', class: 'G26D', subject: 'phy', teacher: 'TstFf' }),
     ]
     const days = roomDays(entries)
     expect(days.map((day) => day.entries.length)).toEqual([1, 3, 0, 0, 0])
@@ -41,8 +41,8 @@ describe('other classes and rooms (synthetic data)', () => {
     expect(roomStarts(entries)).toEqual(['07:45', '08:35'])
     const cell = cellEntries(entries, 2, '08:35')
     expect(cellLabel(cell)).toEqual([
-      { text: 'spf · BauAn', classes: 'G26B, G26A' },
-      { text: 'phy · LanFr', classes: 'G26D' },
+      { text: 'spf · TstAa', classes: 'G26B, G26A' },
+      { text: 'phy · TstFf', classes: 'G26D' },
     ])
     expect(cellEntries(entries, 5, '07:45')).toEqual([])
   })
