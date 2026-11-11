@@ -310,6 +310,15 @@ export const parseKontoSaldo = (html) => {
   return saldo
 }
 
+/**
+ * True when this body is the Kontoauszug. An empty body, a sign-in wall or another
+ * page is not a statement, and callers keep the stored rows instead of clearing them.
+ */
+export const kontoStatementRead = (html) => {
+  if (!html || sessionProblem('', html)) return false
+  return kontoRows(html).some((cells) => cells.some((cell) => /^datum$/i.test(cell) || /^saldo:?$/i.test(cell) || /\d{1,2}\.\d{1,2}\.\d{2,4}/.test(cell)))
+}
+
 export const parseStartMessages = (html) => {
   if (!html) return []
   const cleaned = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
