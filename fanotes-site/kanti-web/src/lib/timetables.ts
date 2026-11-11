@@ -1,3 +1,6 @@
+import { addDays } from './agenda'
+import type { GridEntry } from '../components/WeekGrid'
+
 // Other classes' and rooms' timetables (the school's PDF, served per connection by the server).
 // Pure helpers only; the views and the API client use them.
 
@@ -11,6 +14,10 @@ export interface TimetableSummary {
 
 export interface RoomEntry { day: number; start: string; end: string; class: string; subject: string; teacher: string }
 export interface RoomWeek { room: string; entries: RoomEntry[] }
+
+export interface ClassEntry { day: number; start: string; end: string; subject: string; teacher: string; room: string; footnote: string }
+export interface ClassFootnote { nr: string; teacher: string; subject: string; room: string; classes: string[]; classesTruncated?: boolean }
+export interface ClassWeek { class: string; teacher: string; semester: string; entries: ClassEntry[]; footnotes: ClassFootnote[] }
 
 export interface AdminIndex {
   available: boolean
@@ -72,4 +79,28 @@ export const cellLabel = (cell: RoomEntry[]): { text: string; classes: string }[
     groups.set(key, group)
   }
   return [...groups.values()].map((group) => ({ text: [group.subject, group.teacher].filter(Boolean).join(' · '), classes: group.classes.join(', ') }))
+}
+
+const lessonEntry = (key: string, monday: string, day: number, start: string, end: string, title: string, room: string, teachers: string[]): GridEntry => ({
+  key, kind: 'lesson', day: addDays(monday, day - 1), start, end, title, room, teachers: teachers.filter(Boolean),
+  comment: '', cancelled: false, substitution: false, marker: '', substitute: '',
+})
+
+/** A class's generic week as grid entries on the dates of the week starting at `monday` (Monday = day 1). */
+export const classGridEntries = (week: ClassWeek, monday: string): GridEntry[] =>
+  week.entries
+    .filter((entry) => entry.day >= 1 && entry.day <= 5)
+    .map((entry, index) => lessonEntry(`class:${week.class}:${index}`, monday, entry.day, entry.start, entry.end, entry.subject, entry.room, [entry.teacher]))
+
+/** A room's generic week; where the own grid shows the room, this shows the classes that use it. */
+export const roomGridEntries = (week: RoomWeek, monday: string): GridEntry[] => {
+  const groups = new Map<string, { day: number; start: string; end: string; subject: string; teacher: string; classes: string[] }>()
+  for (const entry of week.entries) {
+    if (entry.day < 1 || entry.day > 5) continue
+    const key = [entry.day, entry.start, entry.end, entry.subject, entry.teacher].join('\u0000')
+    const group = groups.get(key) || { day: entry.day, start: entry.start, end: entry.end, subject: entry.subject, teacher: entry.teacher, classes: [] }
+    group.classes.push(entry.class)
+    groups.set(key, group)
+  }
+  return [...groups.values()].map((group, index) => lessonEntry(`room:${week.room}:${index}`, monday, group.day, group.start, group.end, group.subject, group.classes.join(', '), [group.teacher]))
 }

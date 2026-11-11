@@ -225,6 +225,41 @@ test('real pipeline on a synthetic PDF: pdftotext, qpdf split, pdftoppm PNG', { 
   }
 })
 
+test('classes.json is written at ingest and built lazily from source.pdf for an older version', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetables-classes-'))
+  try {
+    const calls = []
+    const store = createClassTimetables({ root, log: () => {}, run: fakeRun(BBOX, calls) })
+    await store.ingest(PDF)
+    const { version } = await store.readIndex()
+    const file = join(store.root, version, 'classes.json')
+    const stored = JSON.parse(await readFile(file, 'utf8'))
+    assert.deepEqual(Object.keys(stored), ['G26A', 'G26D', 'I26B'])
+    assert.equal((await stat(file)).mode & 0o777, 0o600)
+    const week = await store.classWeek('G26A')
+    assert.equal(week.class, 'G26A')
+    assert.equal(week.entries.length, 13)
+    assert.deepEqual(week.footnotes.map((note) => note.nr), ['1', '1', '2', '2', '3'])
+    assert.equal(await store.classWeek('G26Z'), null)
+    assert.equal(await store.classWeek('../x'), null)
+    assert.equal(await store.classWeek('__proto__'), null)
+
+    // A version uploaded before classes.json existed: built on first request, then stored.
+    await rm(file)
+    calls.length = 0
+    const [first, second] = await Promise.all([store.classWeek('G26D'), store.classWeek('I26B')])
+    assert.equal(first.teacher, 'Peter Probe')
+    assert.equal(second.class, 'I26B')
+    assert.equal(calls.filter((c) => c[0] === 'pdftotext').length, 1)
+    assert.equal((await stat(file)).mode & 0o777, 0o600)
+    calls.length = 0
+    assert.equal((await store.classWeek('G26A')).entries.length, 13)
+    assert.equal(calls.length, 0)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 // ── HTTP: admin upload and serving ─────────────────────────────────────────
 
 const WEB = 'schulnetz.fasrv.ch'
@@ -358,7 +393,14 @@ test('timetables are served only to Alte Kanti identities, in the app and in the
     assert.equal(pdf.headers.get('cache-control'), 'private, max-age=3600')
     assert.equal((await aksa.call('/timetables/class/G26Z.pdf')).status, 404)
     assert.equal((await aksa.call('/timetables/class/..%2F..%2Fcurrent.json')).status, 404)
-    assert.equal((await aksa.call('/timetables/class/G26D')).status, 404)
+    // The week as JSON, for native rendering; unknown codes and traversal stay 404.
+    const week = await (await aksa.call('/timetables/class/G26A')).json()
+    assert.deepEqual(Object.keys(week), ['class', 'teacher', 'semester', 'entries', 'footnotes'])
+    assert.deepEqual([week.class, week.teacher, week.semester], ['G26A', 'Anna Muster', 'SJ 2026-27'])
+    assert.deepEqual(week.entries[0], { day: 1, start: '07:45', end: '09:20', subject: 'spf', teacher: 'TstAa', room: 'Telli', footnote: '1' })
+    assert.ok(week.footnotes.length > 0 && week.footnotes.every((note) => !('page' in note)))
+    assert.equal((await aksa.call('/timetables/class/G26Z')).status, 404)
+    assert.equal((await aksa.call('/timetables/class/..%2F..%2Fcurrent')).status, 404)
     const room = await (await aksa.call('/timetables/room/Telli')).json()
     assert.equal(room.room, 'Telli')
     assert.ok(room.entries.length > 1)
@@ -369,7 +411,7 @@ test('timetables are served only to Alte Kanti identities, in the app and in the
     const otherSummary = await other.call('/timetables')
     assert.equal(otherSummary.status, 200)
     assert.deepEqual(await otherSummary.json(), { available: false })
-    for (const path of ['/timetables/class/G26D.pdf', '/timetables/room/Telli']) assert.equal((await other.call(path)).status, 404, path)
+    for (const path of ['/timetables/class/G26D.pdf', '/timetables/class/G26D', '/timetables/room/Telli']) assert.equal((await other.call(path)).status, 404, path)
 
     const browser = await pairedBrowser(env.base, aksa)
     const web = await (await browser.call('GET', `/connections/${browser.id}/timetables`)).json()
@@ -378,6 +420,9 @@ test('timetables are served only to Alte Kanti identities, in the app and in the
     assert.equal(png.status, 200)
     assert.equal(png.headers.get('content-type'), 'image/png')
     assert.equal((await browser.call('GET', `/connections/${browser.id}/timetables/class/G26D.pdf`)).status, 404)
+    const webWeek = await (await browser.call('GET', `/connections/${browser.id}/timetables/class/G26D`)).json()
+    assert.deepEqual([webWeek.class, webWeek.teacher, webWeek.entries.length > 0], ['G26D', 'Peter Probe', true])
+    assert.equal((await browser.call('GET', `/connections/${browser.id}/timetables/class/G26Z`)).status, 404)
     assert.equal((await (await browser.call('GET', `/connections/${browser.id}/timetables/room/Wed_A`)).json()).room, 'Wed_A')
     assert.equal((await browser.call('GET', `/connections/${browser.id}/timetables/room/..%2Fx`)).status, 404)
 
@@ -386,6 +431,7 @@ test('timetables are served only to Alte Kanti identities, in the app and in the
     assert.equal(otherWeb.status, 200)
     assert.deepEqual(await otherWeb.json(), { available: false })
     assert.equal((await otherBrowser.call('GET', `/connections/${otherBrowser.id}/timetables/class/G26D.png`)).status, 404)
+    assert.equal((await otherBrowser.call('GET', `/connections/${otherBrowser.id}/timetables/class/G26D`)).status, 404)
     // No session: no timetables.
     const anonymous = await fetch(`${env.base}/api/v1/kanti-web/connections/${browser.id}/timetables`, { headers: { 'X-Forwarded-Host': WEB } })
     assert.equal(anonymous.status, 401)

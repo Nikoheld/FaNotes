@@ -80,7 +80,6 @@ class SchulnetzLoginActivity : ComponentActivity() {
                             ActionIcon(Icons.Outlined.Close, t(R.string.close_school_sign_in)) { finish() }
                             Column(Modifier.weight(1f).padding(start = 4.dp)) {
                                 Text(if (viewOnly) t(R.string.school_session) else if (tam) t(R.string.connect_tam) else t(R.string.connect_schulnetz), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                StatusLine(if (tam) t(R.string.tam_read_only) else t(R.string.schulnetz_read_only), StateTone.Accent)
                             }
                         }
                         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), trackColor = LocalCompanionSemantics.current.sunken)

@@ -22,6 +22,7 @@ fun parseRawSnapshot(raw: SchulnetzRaw, fetchedAt: String = ""): SchulnetzSnapsh
         messages = parseMessages(raw.messages),
         vacations = parseVacations(raw.vacations),
         konto = parseKontoauszug(raw.kontoHtml.orEmpty()),
+        kontoSaldo = parseKontoSaldo(raw.kontoHtml.orEmpty()),
         startMessages = parseStartMessages(raw.startHtml.orEmpty()),
     )
 }
@@ -218,6 +219,7 @@ fun SchulnetzSnapshot.toNormalizedJson(): String = buildString {
     append(",\"messages\":").appendMessages(messages)
     append(",\"vacations\":").appendVacations(vacations)
     append(",\"konto\":").appendKonto(konto)
+    append(",\"kontoSaldo\":").append(escapeJson(kontoSaldo))
     append(",\"startMessages\":[")
     startMessages.forEachIndexed { index, line ->
         if (index > 0) append(',')
@@ -276,6 +278,7 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
         messages = obj.array("messages")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toMessage() },
         vacations = obj.array("vacations")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toVacation() },
         konto = obj.array("konto")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toKonto() },
+        kontoSaldo = obj.flexString("kontoSaldo"),
         startMessages = obj.array("startMessages")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
         readErrors = obj.array("readErrors")?.items.orEmpty().mapNotNull { (it as? JsonValue.Str)?.value },
         weekFetched = obj.obj("weekFetched")?.fields.orEmpty().mapNotNull { (key, value) ->

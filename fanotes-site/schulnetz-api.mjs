@@ -36,6 +36,7 @@ import {
   unseenChanges,
   normalizeSchoolBase,
   parseKontoauszug,
+  parseKontoSaldo,
   parseRawSnapshot,
   parseStartMessages,
   redactSecrets,
@@ -1150,6 +1151,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       messages: keepMessages ? (previous?.messages || []) : parsedNotes,
       vacations: previous?.vacations || [],
       konto: gradesOnly ? (previous?.konto || []) : parseKontoauszug(scraped.kontoHtml || ''),
+      kontoSaldo: gradesOnly ? (previous?.kontoSaldo || '') : parseKontoSaldo(scraped.kontoHtml || ''),
       startMessages: keepMessages ? (previous?.startMessages || []) : parseStartMessages(scraped.startHtml || ''),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
       weekFetched: failed ? (previous?.weekFetched || {}) : (scraped.weekFetched || {}),
@@ -1392,7 +1394,14 @@ export const createSchulnetzRuntime = (options = {}) => {
         let name = ''
         try { name = decodeURIComponent(rawName) } catch { fail(404, 'Diesen Stundenplan gibt es nicht.') }
         if (kind === 'class') {
-          const code = name.endsWith('.pdf') ? name.slice(0, -4) : ''
+          if (!name.endsWith('.pdf')) {
+            // No extension: the week as JSON, rendered natively by the app.
+            const week = CLASS_CODE.test(name) ? await timetables.classWeek(name) : null
+            if (!week) fail(404, 'Diesen Stundenplan gibt es nicht.')
+            send(response, 200, week)
+            return true
+          }
+          const code = name.slice(0, -4)
           const pdf = CLASS_CODE.test(code) ? await timetables.classPdf(code) : null
           if (!pdf) fail(404, 'Diesen Stundenplan gibt es nicht.')
           response.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': pdf.length, 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' })
@@ -1424,7 +1433,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         const weeks = String(request.headers?.[TIMETABLE_WEEKS_HEADER] || '') === 'weeks' ? stored : legacySnapshotView(stored, zurichToday(now()))
         // Apps before the points parser get the absences their own reader produces, so their diff stays quiet.
         const snapshot = String(request.headers?.[ABSENCES_HEADER] || '') === String(ABSENCE_PARSER_VERSION) ? weeks : legacyAbsenceView(weeks)
-        send(response, 200, snapshot || { revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], startMessages: [] })
+        send(response, 200, snapshot || { revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], kontoSaldo: '', startMessages: [] })
         return true
       }
       if (route === '/changes' && method === 'GET') {

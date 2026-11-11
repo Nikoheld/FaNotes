@@ -3,8 +3,9 @@ import { renderToString } from 'react-dom/server'
 import { createAdminApi, createApi } from '../src/lib/api'
 import { STRINGS } from '../src/lib/i18n'
 import { ADMIN_TIMETABLE_PATH, parseRoute } from '../src/lib/route'
-import { cellEntries, cellLabel, isAksaConnection, readSummary, roomDays, roomStarts, type RoomEntry } from '../src/lib/timetables'
+import { cellEntries, cellLabel, classGridEntries, roomGridEntries, isAksaConnection, readSummary, roomDays, roomStarts, type ClassWeek, type RoomEntry } from '../src/lib/timetables'
 import { KantiProvider } from '../src/state'
+import { WeekGrid } from '../src/components/WeekGrid'
 import { AdminTimetable } from '../src/views/AdminTimetable'
 
 const entry = (fields: Partial<RoomEntry>): RoomEntry => ({ day: 1, start: '07:45', end: '08:35', class: 'G26A', subject: 'deu', teacher: 'TstOo', ...fields })
@@ -65,8 +66,10 @@ describe('other classes and rooms (synthetic data)', () => {
   })
 
   it('builds the per-connection URLs and sends the admin token only as a bearer header', async () => {
-    const api = createApi(async () => new Response('{}', { status: 200 }))
-    expect(api.timetableClassImage('abc123abc123', 'G26D')).toBe('/api/v1/kanti-web/connections/abc123abc123/timetables/class/G26D.png')
+    const urls: string[] = []
+    const logging = createApi(async (url) => { urls.push(String(url)); return new Response('{"class":"G26D"}', { status: 200 }) })
+    await logging.timetableClass('abc123abc123', 'G26D')
+    expect(urls[0]).toBe('/api/v1/kanti-web/connections/abc123abc123/timetables/class/G26D')
     const seen: { url: string; init: RequestInit }[] = []
     const admin = createAdminApi(async (url, init) => { seen.push({ url, init }); return new Response('{"available":false}', { status: 200 }) })
     await admin.index(' secret ')
@@ -83,5 +86,52 @@ describe('other classes and rooms (synthetic data)', () => {
     const html = renderToString(<KantiProvider api={noServer}><AdminTimetable /></KantiProvider>)
     expect(html).toMatch(/type="password"/u)
     expect(html).toMatch(/accept="application\/pdf"/u)
+  })
+
+  describe('shared week grid', () => {
+    const gridApi = createApi(async () => new Response('{"signedIn":false}', { status: 200 }))
+    const days = ['2026-11-09', '2026-11-10', '2026-11-11', '2026-11-12', '2026-11-13']
+    const grid = (entries: ReturnType<typeof classGridEntries>) => renderToString(
+      <KantiProvider api={gridApi}><WeekGrid days={days} today="2026-11-11" entries={entries} selectedKey="" onSelect={() => undefined} /></KantiProvider>,
+    )
+
+    it('renders a class week with subject, start, room and the teacher in the tooltip', () => {
+      const week: ClassWeek = {
+        class: 'G26A', teacher: 'TstOo', semester: 'SJ 2026-27',
+        entries: [
+          { day: 1, start: '07:45', end: '09:20', subject: 'spf', teacher: 'TstAa', room: 'Telli', footnote: '1' },
+          { day: 1, start: '07:45', end: '09:20', subject: 'spm', teacher: 'TstMm', room: 'Telli', footnote: '' },
+          { day: 3, start: '10:30', end: '11:15', subject: 'deu', teacher: 'TstBb', room: '516', footnote: '' },
+        ],
+        footnotes: [],
+      }
+      const entries = classGridEntries(week, '2026-11-09')
+      expect(entries.map((item) => [item.day, item.title, item.room, item.teachers, item.kind])).toEqual([
+        ['2026-11-09', 'spf', 'Telli', ['TstAa'], 'lesson'], ['2026-11-09', 'spm', 'Telli', ['TstMm'], 'lesson'], ['2026-11-11', 'deu', '516', ['TstBb'], 'lesson'],
+      ])
+      const html = grid(entries)
+      expect(html).toContain('week-grid')
+      expect(html.match(/class="block kind-lesson/gu)).toHaveLength(3)
+      expect(html).toContain('<span class="block-title">spf</span>')
+      expect(html).toContain('class="block-meta tabular">07:45<!-- --> · Telli')
+      expect(html).toContain('07:45–09:20 spf · Telli')
+      expect(html).toContain('day-column today')
+      expect(html).not.toContain('<img')
+    })
+
+    it('renders a room week with the class where the own grid shows the room', () => {
+      const entries = roomGridEntries({
+        room: 'Telli',
+        entries: [
+          entry({ day: 2, start: '08:35', end: '09:20', class: 'G26A', subject: 'spf', teacher: 'TstAa' }),
+          entry({ day: 2, start: '08:35', end: '09:20', class: 'G26B', subject: 'spf', teacher: 'TstAa' }),
+          entry({ day: 2, start: '08:35', end: '09:20', class: 'G26D', subject: 'phy', teacher: 'TstFf' }),
+        ],
+      }, '2026-11-09')
+      expect(entries.map((item) => [item.title, item.room])).toEqual([['spf', 'G26A, G26B'], ['phy', 'G26D']])
+      const html = grid(entries)
+      expect(html).toContain('08:35<!-- --> · G26A, G26B')
+      expect(html).toContain('08:35<!-- --> · G26D')
+    })
   })
 })

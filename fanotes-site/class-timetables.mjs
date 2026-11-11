@@ -474,12 +474,34 @@ export const isAksaBase = (baseUrl) => {
   try { return /^\/aksa\/?$/iu.test(new URL(String(baseUrl || '')).pathname) } catch { return false }
 }
 
+/**
+ * The per-class week the apps render natively:
+ * { code, teacher, semester, entries: [{ day, start, end, subject, teacher, room, footnote }], footnotes }.
+ * Footnotes are those of the class's own PDF page.
+ */
+export const classWeeksOf = (parsed) => {
+  const weeks = {}
+  for (const entryClass of parsed.classes) {
+    weeks[entryClass.code] = {
+      code: entryClass.code,
+      teacher: entryClass.teacher,
+      semester: parsed.semester,
+      entries: entryClass.slots.flatMap((slot) => slot.entries.map((entry) => ({
+        day: slot.day, start: slot.start, end: slot.end, subject: entry.subject, teacher: entry.teacher, room: entry.room, footnote: entry.footnote,
+      }))),
+      footnotes: parsed.footnotes.filter((note) => note.page === entryClass.page).map(({ page, ...note }) => note),
+    }
+  }
+  return weeks
+}
+
 export const createClassTimetables = (options = {}) => {
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz', 'timetables')
   const now = options.now || (() => new Date())
   const log = options.log || ((level, message) => console.log(`${now().toISOString()} timetables ${level} ${message}`))
   const run = options.run || defaultRun
   let tail = Promise.resolve()
+  const building = new Map()
 
   const versionDir = (version) => {
     if (!/^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{6}$/u.test(String(version))) return null
@@ -535,6 +557,30 @@ export const createClassTimetables = (options = {}) => {
     return { room: name, entries: rooms[name] }
   }
 
+  /** classes.json of a version; versions uploaded before it existed are built once from their source.pdf. */
+  const readClasses = async (version) => {
+    const dir = versionDir(version)
+    const stored = await readJson(join(dir, 'classes.json'))
+    if (stored) return stored
+    const pending = building.get(version) || (async () => {
+      let text
+      try { text = (await run('pdftotext', ['-bbox-layout', join(dir, 'source.pdf'), '-'])).stdout } catch { return null }
+      const weeks = classWeeksOf(parseTimetableBbox(text))
+      try { await fs.writeFile(join(dir, 'classes.json'), JSON.stringify(weeks), { mode: 0o600 }) } catch { /* served anyway */ }
+      return weeks
+    })()
+    building.set(version, pending)
+    try { return await pending } finally { building.delete(version) }
+  }
+  const classWeek = async (code) => {
+    if (!CLASS_CODE.test(String(code))) return null
+    const index = await readIndex()
+    if (!index || !index.classes.some((item) => item.code === code)) return null
+    const weeks = await readClasses(index.version)
+    const week = weeks && Object.hasOwn(weeks, code) ? weeks[code] : null
+    return week ? { class: code, teacher: week.teacher, semester: week.semester, entries: week.entries, footnotes: week.footnotes } : null
+  }
+
   const prune = async (keepVersion) => {
     const names = (await fs.readdir(root).catch(() => [])).filter((name) => versionDir(name)).sort()
     const surplus = names.slice(0, Math.max(0, names.length - KEEP_VERSIONS)).filter((name) => name !== keepVersion)
@@ -581,6 +627,7 @@ export const createClassTimetables = (options = {}) => {
         rooms: roomNames,
         warnings: parsed.warnings,
       }
+      await fs.writeFile(join(dir, 'classes.json'), JSON.stringify(classWeeksOf(parsed)), { mode: 0o600 })
       await fs.writeFile(join(dir, 'rooms.json'), JSON.stringify(parsed.rooms), { mode: 0o600 })
       await fs.writeFile(join(dir, 'index.json'), JSON.stringify(index), { mode: 0o600 })
       // The new version is complete: switch the pointer in one rename.
@@ -605,5 +652,5 @@ export const createClassTimetables = (options = {}) => {
     return result
   }
 
-  return { root, ingest, summary, readIndex, classPdf, classPng, room }
+  return { root, ingest, summary, readIndex, classPdf, classPng, classWeek, room }
 }
