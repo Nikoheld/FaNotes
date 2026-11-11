@@ -1238,8 +1238,9 @@ export const resolvedAlertSettings = (stored = {}) => {
  */
 export const alertAllowed = (settings = {}, change) => {
   if (isNotificationProbe(change?.id)) return true
-  if (settings?.enabled === false) return false
   const kind = notifyAlertKind(change)
+  // The master switch is "Schul-Updates"; commute alerts have their own parent switch.
+  if (settings?.enabled === false && !String(kind).startsWith('commute-')) return false
   if (!kind) return true
   const parent = ALERT_PARENT[kind]
   if (parent && settings?.[parent] === false) return false

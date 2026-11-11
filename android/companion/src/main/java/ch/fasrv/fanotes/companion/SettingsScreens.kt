@@ -98,6 +98,8 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     FineDivider()
                     SettingRow(Icons.Outlined.NotificationsNone, t(R.string.notifications), t(R.string.what_reaches_you_and_when)) { model.navigate(Page.Notifications) }
                     FineDivider()
+                    SettingRow(Icons.Outlined.DirectionsBus, t(R.string.commute_title), commuteSettingsSummary(model.commute)) { model.navigate(Page.Commute) }
+                    FineDivider()
                     SettingRow(Icons.Outlined.Laptop, t(R.string.web_access), t(R.string.web_access_row)) { model.navigate(Page.WebAccess) }
                     if (!model.notesAccount) { FineDivider(); SettingRow(Icons.Outlined.EditNote, t(R.string.sync_notes_with_fanotes), t(R.string.optional_school_stays_available_either_way)) { model.navigate(Page.Auth) } }
                 }
@@ -249,7 +251,7 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
             item(key = "today-head") { SectionLabel(t(R.string.on_today)) }
             itemsIndexed(TODAY_CARD_IDS, key = { _, it -> "card:$it" }) { index, id ->
                 GroupItem(index, TODAY_CARD_IDS.size) {
-                    ToggleRow(when (id) { "lessons" -> t(R.string.next_commitment); "exam" -> t(R.string.upcoming_exam); "grades" -> t(R.string.grade_overview); "pluspunkte" -> t(R.string.promotion_points_2); "absences" -> t(R.string.absence_points); "events" -> t(R.string.school_updates); else -> t(R.string.tasks) }, checked = id !in model.desk.hiddenCards) { show ->
+                    ToggleRow(when (id) { "lessons" -> t(R.string.next_commitment); "exam" -> t(R.string.upcoming_exam); "grades" -> t(R.string.grade_overview); "pluspunkte" -> t(R.string.promotion_points_2); "absences" -> t(R.string.absence_points); "events" -> t(R.string.school_updates); "commute" -> t(R.string.commute_title); else -> t(R.string.tasks) }, checked = id !in model.desk.hiddenCards) { show ->
                         model.updateDesk(model.desk.copy(hiddenCards = if (show) model.desk.hiddenCards - id else (model.desk.hiddenCards + id).distinct()))
                     }
                 }
@@ -776,6 +778,19 @@ private fun NotificationSettings(model: CompanionModel) {
                 ToggleRow(t(R.string.absences), checked = model.settings.absences, enabled = on) { model.toggleSetting("absences") }
                 FineDivider()
                 ToggleRow(t(R.string.excuse_deadlines), checked = model.settings.deadlines, enabled = on) { model.toggleSetting("deadlines") }
+            }
+        }
+        item(key = "commute-head") { SectionLabel(t(R.string.commute_notify_section)) }
+        item(key = "commute") {
+            val commuteOn = model.settings.commute
+            Group {
+                ToggleRow(t(R.string.commute_notify_master), t(R.string.commute_notify_master_body), commuteOn) { model.toggleSetting("commute") }
+                FineDivider()
+                ToggleRow(t(R.string.commute_notify_delay), t(R.string.commute_notify_delay_body), model.settings.commuteDelay, commuteOn) { model.toggleSetting("commuteDelay") }
+                FineDivider()
+                ToggleRow(t(R.string.commute_notify_cancelled), t(R.string.commute_notify_cancelled_body), model.settings.commuteCancelled, commuteOn) { model.toggleSetting("commuteCancelled") }
+                FineDivider()
+                ToggleRow(t(R.string.commute_notify_lesson), t(R.string.commute_notify_lesson_body), model.settings.commuteLessonEnd, commuteOn) { model.toggleSetting("commuteLessonEnd") }
             }
         }
         item(key = "background-head") { SectionLabel(t(R.string.background_refresh)) }

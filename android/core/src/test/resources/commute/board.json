@@ -1,0 +1,327 @@
+{
+ "boards": [
+  {
+   "routeId": "a1b2c3d4e5f6",
+   "target": {
+    "kind": "firstLesson",
+    "at": "2026-11-13T07:50:00+01:00",
+    "timeType": "arrive",
+    "lesson": {
+     "start": "2026-11-13T08:00:00+01:00",
+     "end": "2026-11-13T08:45:00+01:00",
+     "label": "tst"
+    },
+    "lessonChange": "none",
+    "plannedAt": null
+   },
+   "trips": [
+    {
+     "id": "371|001|2026-11-13T07:05:00+01:00|2026-11-13T07:47:00+01:00",
+     "departure": "2026-11-13T07:05:00+01:00",
+     "arrival": "2026-11-13T07:49:00+01:00",
+     "plannedDeparture": "2026-11-13T07:05:00+01:00",
+     "plannedArrival": "2026-11-13T07:47:00+01:00",
+     "depDelay": 0,
+     "arrDelay": 2,
+     "minutes": 44,
+     "transfers": 1,
+     "status": "delayed",
+     "legs": [
+      {
+       "kind": "ride",
+       "line": "371",
+       "category": "B",
+       "trainNo": "001",
+       "type": "bus",
+       "operator": "PAG",
+       "direction": "Endstation",
+       "fgColor": "fff",
+       "bgColor": "039",
+       "from": {
+        "name": "Testdorf, Dorfplatz",
+        "stopId": "9000001",
+        "time": "2026-11-13T07:05:00+01:00",
+        "planned": "2026-11-13T07:05:00+01:00",
+        "delay": 0,
+        "platform": "",
+        "platformChanged": false
+       },
+       "to": {
+        "name": "Knoten, Bahnhof",
+        "stopId": "9000002",
+        "time": "2026-11-13T07:21:00+01:00",
+        "planned": "2026-11-13T07:21:00+01:00",
+        "delay": 0,
+        "platform": "",
+        "platformChanged": false
+       },
+       "occupancy": {
+        "first": null,
+        "second": null
+       },
+       "cancelled": false,
+       "notes": [],
+       "minutes": 15
+      },
+      {
+       "kind": "walk",
+       "line": "",
+       "category": "",
+       "trainNo": "",
+       "type": "other",
+       "operator": "",
+       "direction": "",
+       "fgColor": "",
+       "bgColor": "",
+       "from": {
+        "name": "Knoten, Bahnhof",
+        "stopId": "9000002",
+        "time": "2026-11-13T07:21:00+01:00",
+        "planned": "2026-11-13T07:21:00+01:00",
+        "delay": null,
+        "platform": "",
+        "platformChanged": false
+       },
+       "to": {
+        "name": "Knoten",
+        "stopId": "9000003",
+        "time": "2026-11-13T07:25:00+01:00",
+        "planned": "2026-11-13T07:25:00+01:00",
+        "delay": null,
+        "platform": "",
+        "platformChanged": false
+       },
+       "occupancy": {
+        "first": null,
+        "second": null
+       },
+       "cancelled": false,
+       "notes": [],
+       "minutes": 4
+      },
+      {
+       "kind": "ride",
+       "line": "S29",
+       "category": "S",
+       "trainNo": "001",
+       "type": "train",
+       "operator": "SBB",
+       "direction": "Endstation",
+       "fgColor": "fff",
+       "bgColor": "039",
+       "from": {
+        "name": "Knoten",
+        "stopId": "9000003",
+        "time": "2026-11-13T07:32:00+01:00",
+        "planned": "2026-11-13T07:30:00+01:00",
+        "delay": 2,
+        "platform": "5",
+        "platformChanged": true
+       },
+       "to": {
+        "name": "Schulstadt",
+        "stopId": "9000004",
+        "time": "2026-11-13T07:49:00+01:00",
+        "planned": "2026-11-13T07:47:00+01:00",
+        "delay": 2,
+        "platform": "7",
+        "platformChanged": false
+       },
+       "occupancy": {
+        "first": 1,
+        "second": 2
+       },
+       "cancelled": false,
+       "notes": [],
+       "minutes": 15
+      }
+     ],
+     "changes": [
+      {
+       "at": "Knoten",
+       "minutes": 7,
+       "plannedMinutes": 5,
+       "broken": false,
+       "tight": false
+      }
+     ],
+     "occupancy": {
+      "first": 1,
+      "second": 2
+     },
+     "issues": [
+      {
+       "kind": "platformChange",
+       "text": "S29 ab Knoten: neu Gleis 5"
+      },
+      {
+       "kind": "delay",
+       "text": "+2 min"
+      }
+     ],
+     "quietest": true
+    }
+   ],
+   "alternatives": [
+    {
+     "id": "371|001|2026-11-13T07:35:00+01:00|2026-11-13T08:12:00+01:00",
+     "departure": "2026-11-13T07:42:00+01:00",
+     "arrival": "2026-11-13T08:12:00+01:00",
+     "plannedDeparture": "2026-11-13T07:35:00+01:00",
+     "plannedArrival": "2026-11-13T08:12:00+01:00",
+     "depDelay": 7,
+     "arrDelay": 0,
+     "minutes": 30,
+     "transfers": 1,
+     "status": "broken",
+     "legs": [
+      {
+       "kind": "ride",
+       "line": "371",
+       "category": "B",
+       "trainNo": "001",
+       "type": "bus",
+       "operator": "PAG",
+       "direction": "Endstation",
+       "fgColor": "fff",
+       "bgColor": "039",
+       "from": {
+        "name": "Testdorf, Dorfplatz",
+        "stopId": "9000001",
+        "time": "2026-11-13T07:42:00+01:00",
+        "planned": "2026-11-13T07:35:00+01:00",
+        "delay": 7,
+        "platform": "",
+        "platformChanged": false
+       },
+       "to": {
+        "name": "Knoten, Bahnhof",
+        "stopId": "9000002",
+        "time": "2026-11-13T07:58:00+01:00",
+        "planned": "2026-11-13T07:51:00+01:00",
+        "delay": 7,
+        "platform": "",
+        "platformChanged": false
+       },
+       "occupancy": {
+        "first": null,
+        "second": null
+       },
+       "cancelled": false,
+       "notes": [],
+       "minutes": 15
+      },
+      {
+       "kind": "walk",
+       "line": "",
+       "category": "",
+       "trainNo": "",
+       "type": "other",
+       "operator": "",
+       "direction": "",
+       "fgColor": "",
+       "bgColor": "",
+       "from": {
+        "name": "Knoten, Bahnhof",
+        "stopId": "9000002",
+        "time": "2026-11-13T07:51:00+01:00",
+        "planned": "2026-11-13T07:51:00+01:00",
+        "delay": null,
+        "platform": "",
+        "platformChanged": false
+       },
+       "to": {
+        "name": "Knoten",
+        "stopId": "9000003",
+        "time": "2026-11-13T07:25:00+01:00",
+        "planned": "2026-11-13T07:25:00+01:00",
+        "delay": null,
+        "platform": "",
+        "platformChanged": false
+       },
+       "occupancy": {
+        "first": null,
+        "second": null
+       },
+       "cancelled": false,
+       "notes": [],
+       "minutes": 4
+      },
+      {
+       "kind": "ride",
+       "line": "S29",
+       "category": "S",
+       "trainNo": "001",
+       "type": "train",
+       "operator": "SBB",
+       "direction": "Endstation",
+       "fgColor": "fff",
+       "bgColor": "039",
+       "from": {
+        "name": "Knoten",
+        "stopId": "9000003",
+        "time": "2026-11-13T07:55:00+01:00",
+        "planned": "2026-11-13T07:55:00+01:00",
+        "delay": 0,
+        "platform": "5",
+        "platformChanged": true
+       },
+       "to": {
+        "name": "Schulstadt",
+        "stopId": "9000004",
+        "time": "2026-11-13T08:12:00+01:00",
+        "planned": "2026-11-13T08:12:00+01:00",
+        "delay": 0,
+        "platform": "7",
+        "platformChanged": false
+       },
+       "occupancy": {
+        "first": 1,
+        "second": 2
+       },
+       "cancelled": false,
+       "notes": [],
+       "minutes": 15
+      }
+     ],
+     "changes": [
+      {
+       "at": "Knoten",
+       "minutes": -7,
+       "plannedMinutes": 0,
+       "broken": true,
+       "tight": false
+      }
+     ],
+     "occupancy": {
+      "first": 1,
+      "second": 2
+     },
+     "issues": [
+      {
+       "kind": "platformChange",
+       "text": "S29 ab Knoten: neu Gleis 5"
+      },
+      {
+       "kind": "missedTransfer",
+       "text": "Anschluss in Knoten nicht mehr erreichbar"
+      },
+      {
+       "kind": "delay",
+       "text": "+7 min"
+      }
+     ],
+     "quietest": false
+    }
+   ],
+   "viaDropped": false,
+   "updatedAt": "2026-11-13T06:40:00+01:00",
+   "stale": false
+  }
+ ],
+ "provider": {
+  "name": "search.ch",
+  "occupancy": "train-class",
+  "formation": false
+ }
+}

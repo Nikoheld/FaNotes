@@ -63,6 +63,8 @@ import {
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
 const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json', 'monitor.json']
+// Pendelstrecken move with the identity (guest → account) like the school files.
+const COMMUTE_FILES = ['commute.json', 'commute-state.json']
 const GUEST_LIMIT = 30
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 const REFERER = 'https://schulnetz.web.app/'
@@ -501,6 +503,22 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
   }
 
+  /** Pendelstrecken follow the identity; routes already on the target win. */
+  const copyCommuteFiles = async (fromId, toId) => {
+    const to = accountDir(toId)
+    if (await fs.stat(resolve(to, 'commute.json')).then(() => true, () => false)) return
+    await fs.mkdir(to, { recursive: true, mode: 0o700 })
+    for (const name of COMMUTE_FILES) {
+      try {
+        const dest = resolve(to, name)
+        await fs.copyFile(resolve(accountDir(fromId), name), dest)
+        await fs.chmod(dest, 0o600)
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
+      }
+    }
+  }
+
   const unionLedger = async (targetId, sourceId) => {
     const target = await readGradeLedger(targetId)
     const source = await readGradeLedger(sourceId)
@@ -530,6 +548,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       targetLink.fcmTokens = unionFcmTokens(targetLink, guestLink)
       await saveLink(faAccountId, targetLink)
     }
+    await copyCommuteFiles(guestId, faAccountId)
     await fs.rm(accountDir(guestId), { recursive: true, force: true })
     const revision = (await readLink(faAccountId))?.revision || 0
     return { adopted: true, revision }
@@ -547,6 +566,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     await assertGuest(guestId, guestToken)
     if (guestId === faAccountId) fail(400, 'Ungültiges Konto.')
     const faLink = await readLink(faAccountId)
+    await copyCommuteFiles(faAccountId, guestId)
     if (faLink) {
       await copySchoolFiles(faAccountId, guestId)
       const guestLink = await readLink(guestId)
@@ -1189,7 +1209,8 @@ export const createSchulnetzRuntime = (options = {}) => {
     const link = await readLink(accountId)
     if (!link) return []
     const settings = resolvedAlertSettings(link.settings || DEFAULT_SETTINGS)
-    const allowed = settings.enabled === false ? [] : changes.filter((change) => alertAllowed(settings, change))
+    // Commute alerts have their own switches; the school-updates master switch does not silence them.
+    const allowed = changes.filter((change) => alertAllowed(settings, change))
     if (!allowed.length) return []
     link.revision = (link.revision || 0) + 1
     await saveLink(accountId, link)

@@ -5,4 +5,7 @@
     <color name="widget_muted">#A8AEB4</color>
     <color name="widget_accent">#8EC4E0</color>
     <color name="widget_outline">#2D3135</color>
+    <color name="widget_alert">#F2877F</color>
+    <color name="widget_success">#7CCB9E</color>
+    <color name="widget_warning">#F0B964</color>
 </resources>

@@ -110,6 +110,9 @@ private fun clockMinutes(raw: String): Int? = runCatching { LocalTime.parse(raw.
 @Composable
 fun TodayScreen(model: CompanionModel) {
     val now = rememberNow()
+    val nowMs = now.toEpochMilli()
+    val commuteBoard = remember(model.commute, nowMs / 60_000) { model.commute.relevant(nowMs) }
+    CommuteRefreshTimer(model, commuteBoard, nowMs)
     val absenceTally = remember(model.snapshot) { model.absencePoints() }
     val zone = ZoneId.systemDefault()
     val today = now.atZone(zone).toLocalDate()
@@ -192,6 +195,10 @@ fun TodayScreen(model: CompanionModel) {
                     Icon(Icons.Outlined.ChevronRight, null, Modifier.padding(start = 2.dp).size(18.dp))
                 }
             }
+        }
+        if ("commute" in cards && !model.demo) item(key = "commute") {
+            CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail,
+                onAdd = { model.editCommuteRoute(null) }, modifier = Modifier.padding(top = 12.dp))
         }
         if ("tasks" in cards) {
             item(key = "tasks-head") { SectionLabel(t(R.string.on_your_list), if (urgent.isEmpty()) t(R.string.tasks) else t(R.string.all_2, urgent.size)) { model.openPlanner(true) } }

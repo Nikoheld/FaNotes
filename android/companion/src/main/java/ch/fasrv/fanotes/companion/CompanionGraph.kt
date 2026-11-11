@@ -148,6 +148,19 @@ class CompanionGraph(private val context: Context) {
     val link = MutableStateFlow(SchulnetzLinkState())
     val client = SchulnetzClient()
     val mensaStore by lazy { MensaStore(File(context.filesDir, "mensa.json"), client) }
+    /** Tests switch this off so a UI test never reaches the commute server. */
+    @Volatile internal var commuteRequestsAllowed = true
+    /** Pendelstrecken: routes and boards of the shown connection's Kanti+ identity (see CommuteStore). */
+    val commute by lazy {
+        CommuteStore(
+            dir = File(context.filesDir, "commute"),
+            client = client,
+            auth = { check(commuteRequestsAllowed) { "commute requests are switched off" }; schoolAuth() },
+            readAccount = { prefs.getString(COMMUTE_ACCOUNT_PREF, "").orEmpty() },
+            writeAccount = { id -> prefs.edit().apply { if (id == null) remove(COMMUTE_ACCOUNT_PREF) else putString(COMMUTE_ACCOUNT_PREF, id) }.apply() },
+            onBoard = { CommuteWidget.update(context) },
+        )
+    }
     val schulnetzLog = SchulnetzLog(File(context.filesDir, "schulnetz"))
     val trail = DiagnosticTrail()
     val browser = SchulnetzBrowser(context, schulnetzLog)
@@ -295,6 +308,10 @@ class CompanionGraph(private val context: Context) {
             link.value = shown.link.value
         }
         NextLessonWidget.update(context)
+        // Routes belong to a Kanti+ identity: the other connection has its own list.
+        commute.clearLocal()
+        CommuteWidget.update(context)
+        if (!demoActive()) scope.launch { commute.refresh(force = true, withRoutes = true) }
     }
 
     fun renameConnection(id: String, label: String) = saveRegistry(connections.value.rename(id, label))
@@ -564,6 +581,8 @@ class CompanionGraph(private val context: Context) {
         val listed = connections.value.connections
         for (connection in listed.filter { it.slot != PRIMARY_SLOT }) removeConnection(connection.id)
         sessionFor(PRIMARY_SLOT).deleteKantiData()
+        commute.clearLocal()
+        CommuteWidget.update(context)
         val remaining = connections.value.connections.filter { it.slot != PRIMARY_SLOT }
         saveRegistry(ConnectionRegistry(remaining, remaining.firstOrNull()?.id.orEmpty()))
         rearmSchoolDelivery()
@@ -932,6 +951,7 @@ class CompanionGraph(private val context: Context) {
         const val PLANNED_PATH = ".fanotes/schulnetz/planned-absences.json"
         const val SNAPSHOT_VAULT_PATH = ".fanotes/schulnetz/snapshot.json"
         const val GUESS_GRADES_PREF = NotifyPrefs.GUESS
+        const val COMMUTE_ACCOUNT_PREF = "commute-account"
         const val UNREVEALED_PREF = "unrevealed-grades"
         const val PLANNER_HOLD_PREF = "hold-planner-upload"
         const val DIAGNOSTIC_MODE_PREF = "diagnostic-mode"

@@ -759,12 +759,47 @@ class SchulnetzClient(
             append(",\"messageNew\":").append(settings.messageNew)
             append(",\"deadlines\":").append(settings.deadlines)
             append(",\"guessGrades\":").append(settings.guessGrades)
+            append(",\"commute\":").append(settings.commute)
+            append(",\"commuteDelay\":").append(settings.commuteDelay)
+            append(",\"commuteCancelled\":").append(settings.commuteCancelled)
+            append(",\"commuteLessonEnd\":").append(settings.commuteLessonEnd)
             append('}')
         }
         val (code, body) = fanotes("PUT", "/settings", session, payload)
         if (code !in 200..299) throw SchulnetzHttpException(code, errorMessage(body, code))
         return parseStatus(body).settingsUpdatedAt
     }
+
+    // Pendelstrecken (fanotes-site/commute-api.md). Routes live on our server only; Schulnetz is never involved.
+
+    private fun commuteGet(session: SchoolAuth, path: String): String {
+        val (status, body) = fanotes("GET", path, session, null)
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+        return body
+    }
+
+    private fun queryValue(value: String): String = java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+
+    /** The saved routes and settings, as the server sent them. */
+    fun commuteRaw(session: SchoolAuth): String = commuteGet(session, "/commute")
+
+    /** Saves the whole list; the server cleans invalid fields and answers with what it kept. */
+    fun saveCommuteRaw(session: SchoolAuth, body: String): String {
+        val (status, answer) = fanotes("PUT", "/commute", session, body)
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(answer, status))
+        return answer
+    }
+
+    fun commuteStops(session: SchoolAuth, query: String): List<ch.fasrv.fanotes.commute.Stop> =
+        ch.fasrv.fanotes.commute.parseStops(commuteGet(session, "/commute/stops?q=${queryValue(query.trim())}"))
+
+    /** Live boards for every route, or for [routeId] only. */
+    fun commuteBoardRaw(session: SchoolAuth, routeId: String? = null): String =
+        commuteGet(session, if (routeId.isNullOrBlank()) "/commute/board" else "/commute/board?route=${queryValue(routeId)}")
+
+    /** Trips around [at] (ISO 8601) for browsing earlier and later. [arrive] plans backwards from [at]. */
+    fun commuteTrips(session: SchoolAuth, routeId: String, at: String, arrive: Boolean): List<ch.fasrv.fanotes.commute.Trip> =
+        ch.fasrv.fanotes.commute.parseTrips(commuteGet(session, "/commute/trips?route=${queryValue(routeId)}&at=${queryValue(at)}&timeType=${if (arrive) "arrive" else "depart"}"))
 
     /** Links a connection the phone reads itself (TAM): no school secret, the server never polls it. */
     fun linkDevice(session: SchoolAuth, baseUrl: String, deviceId: String, displayName: String): SchulnetzLinkState {
@@ -1098,6 +1133,7 @@ class SchulnetzClient(
             "enabled", "grades", "gradeNew", "gradeChanged", "timetable", "lessonCancelled", "lessonChanged",
             "exams", "examNew", "examMoved", "examCancelled", "examRoom", "absences", "events",
             "appointmentNew", "messageNew", "deadlines", "guessGrades",
+            "commute", "commuteDelay", "commuteCancelled", "commuteLessonEnd",
         )
     }
 }

@@ -32,6 +32,18 @@ const PATHS: Record<string, string> = {
   info: 'M11 7h2v2h-2zm0 4h2v6h-2zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Z',
   snow: 'M22 11h-4.2l3.2-3.2-1.4-1.4L15 11h-2V9l4.6-4.6-1.4-1.4L13 6.2V2h-2v4.2L7.8 3 6.4 4.4 11 9v2H9L4.4 6.4 3 7.8 6.2 11H2v2h4.2L3 16.2l1.4 1.4L9 13h2v2l-4.6 4.6L7.8 21l3.2-3.2V22h2v-4.2l3.2 3.2 1.4-1.4L13 15v-2h2l4.6 4.6 1.4-1.4-3.2-3.2H22z',
   open: 'M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2zM14 3v2h3.6l-9.8 9.8 1.4 1.4L19 6.4V10h2V3z',
+  train: 'M12 2c-4 0-8 .5-8 4v9.5C4 17.4 5.6 19 7.5 19L6 20.5v.5h2.2l2-2H14l2 2h2v-.5L16.5 19c1.9 0 3.5-1.6 3.5-3.5V6c0-3.5-3.6-4-8-4ZM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3ZM11 10H6V6h5Zm2 0V6h5v4Zm3.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z',
+  bus: 'M4 16c0 .9.4 1.7 1 2.2V20a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1.8c.6-.5 1-1.3 1-2.2V6c0-3.5-3.6-4-8-4S4 2.5 4 6Zm3.5 1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm9 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3ZM18 11H6V6h12Z',
+  tram: 'M19 16.9V8.5c0-2.8-2.6-3.4-6-3.5l.8-1.5H17V2H7v1.5h4.8L11 5c-3.1.1-6 .7-6 3.5v8.4c0 1.5 1.2 2.7 2.6 3L6 21.5v.5h2.2l2-2H14l2 2h2v-.5L16.400 19.900c1.4-.3 2.6-1.5 2.6-3ZM12 18a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm5-6H7V8h10Z',
+  ship: 'M20 21c-1.4 0-2.8-.5-4-1.300-2.400 1.700-5.600 1.700-8 0-1.2.8-2.6 1.300-4 1.300H2v2h2c1.4 0 2.700-.3 4-1 2.500 1.300 5.500 1.300 8 0 1.300.7 2.6 1 4 1h2v-2ZM3.950 19H4c1.600 0 3-.9 4-2 1 1.100 2.400 2 4 2s3-.9 4-2c1 1.100 2.400 2 4 2h.050l1.900-6.700a1 1 0 0 0-.7-1.300L20 10.600V6a2 2 0 0 0-2-2h-3V1H9v3H6a2 2 0 0 0-2 2v4.600l-1.300.4a1 1 0 0 0-.7 1.300ZM6 6h12v4L12 8 6 10Z',
+  cableway: 'M11 2h2v4.100l8 2.400V10l-8-2.400V9h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h4V7.600L3 10V8.500l8-2.400Zm-4 9v7h10v-7Z',
+  stop: 'M12 2a7 7 0 0 0-7 7c0 5.250 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Zm0 9.500a2.500 2.500 0 1 1 0-5 2.500 2.500 0 0 1 0 5Z',
+  walk: 'M13.500 5.500a2 2 0 1 0 0-4 2 2 0 0 0 0 4ZM9.800 8.900 7 23h2.100l1.800-8 2.100 2v6h2v-7.500l-2.100-2 .6-3C14.800 12 16.800 13 19 13v-2c-1.900 0-3.500-1-4.300-2.400l-1-1.600c-.4-.6-1-1-1.700-1-.3 0-.5.100-.8.100L6 8.300V13h2V9.600Z',
+  edit: 'M3 17.250V21h3.75L17.810 9.940l-3.75-3.75ZM20.710 7.040a1 1 0 0 0 0-1.410l-2.340-2.340a1 1 0 0 0-1.410 0l-1.830 1.830 3.75 3.75Z',
+  delete: 'M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6ZM19 4h-3.500l-1-1h-5l-1 1H5v2h14Z',
+  up: 'M7.400 15.400 12 10.800l4.600 4.600L18 14l-6-6-6 6Z',
+  down: 'M7.400 8.600 12 13.2l4.600-4.600L18 10l-6 6-6-6Z',
+  forward: 'm12 4-1.410 1.410L16.170 11H4v2h12.170l-5.580 5.590L12 20l8-8Z',
 }
 
 export type IconName = keyof typeof PATHS
@@ -93,7 +105,11 @@ export const Kbd = ({ children }: { children: ReactNode }) => <kbd>{children}</k
 /** A modal dialog: focus moves in, Escape and the backdrop close it, focus returns afterwards. */
 export const Dialog = ({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) => {
   const box = useRef<HTMLDivElement>(null)
+  // The latest handler without re-running the focus logic when a parent re-renders (live data refreshes).
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
   useEffect(() => {
+    const onClose = () => closeRef.current()
     const previous = document.activeElement as HTMLElement | null
     const first = box.current?.querySelector<HTMLElement>('input, button, select, textarea, [tabindex]:not([tabindex="-1"])')
     first?.focus()
@@ -109,7 +125,7 @@ export const Dialog = ({ title, onClose, children, wide = false }: { title: stri
     }
     window.addEventListener('keydown', onKey, true)
     return () => { window.removeEventListener('keydown', onKey, true); previous?.focus?.() }
-  }, [onClose])
+  }, [])
   return (
     <div className="backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
       <div className={`dialog${wide ? ' dialog-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={box}>

@@ -229,7 +229,16 @@ abstract class UiPerfBase {
         slotFile(app, ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT, "schulnetz-snapshot.json").writeText(snapshot.toNormalizedJson())
         app.getSharedPreferences("fanotes-companion", android.content.Context.MODE_PRIVATE).edit().putBoolean("school-linked", true).commit()
         File(app.filesDir, "mensa.json").writeText(PerfFixture.mensaJson(today))
+        // A saved commute route with its last board, so Heute carries the commute card. The first trip leaves in 45 minutes:
+        // outside the 30-minute window, so the screen runs no refresh timer, and nothing here may reach the commute server.
+        val (commuteState, commuteBoard) = CommuteSamples.fixtureFiles(java.time.ZonedDateTime.now(), 45)
+        File(app.filesDir, "commute").also { dir ->
+            dir.mkdirs()
+            File(dir, CommuteStore.STATE_FILE).writeText(commuteState)
+            File(dir, CommuteStore.BOARD_FILE).writeText(commuteBoard)
+        }
         val graph = CompanionGraph(app)
+        graph.commuteRequestsAllowed = false
         val waitStart = System.currentTimeMillis()
         while (!graph.snapshotReady.value && System.currentTimeMillis() - waitStart < 20_000) { idleMain(); Thread.sleep(10) }
         val sets = detectGroupSets(graph.snapshot.value.events)
@@ -253,6 +262,9 @@ abstract class UiPerfBase {
         val readyStart = System.currentTimeMillis()
         while ((!model.schoolReady || model.loading || model.tasks.isEmpty() || model.desk.groupChoices != choices) && System.currentTimeMillis() - readyStart < 20_000) { idleMain(); Thread.sleep(10) }
         model.mensa = graph.mensaStore.cached()
+        val commuteBy = System.currentTimeMillis() + 10_000
+        while (!model.commute.loaded && System.currentTimeMillis() < commuteBy) { idleMain(); Thread.sleep(10) }
+        check(model.commute.relevant(System.currentTimeMillis()) != null) { "commute fixture not loaded" }
 
         rule.mainClock.autoAdvance = false
         round = 0
@@ -295,7 +307,14 @@ abstract class UiPerfBase {
         action(n("b scroll Heute (2 up, 2 down)")) { swipe(true); swipe(true); swipe(false); swipe(false) }
 
     protected fun tapExamOnHeute(n: (String) -> String) = action(n("d tap exam row on Heute + close sheet")) {
-        tapUntilShown(hasClickAction() and hasText(env.examTitle, substring = true), hasContentDescription(t(R.string.close)))
+        // The commute card sits above the rows this action taps, so they start below the fold: swipe like a finger until the
+        // exam row (its title and the Exam tag) is on screen well clear of the bottom bar, then tap it.
+        val exam = hasClickAction() and hasText(env.examTitle, substring = true) and hasText(AgendaKind.Exam.uiLabel())
+        var scrolls = 0
+        while (scrolls++ < 8 && rule.onAllNodes(exam).fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.let { it.top > 0f && it.bottom < 1950f } != true) swipe(true, steps = 4)
+        // Let the fling die out: a tap during a fling only stops the list.
+        if (scrolls > 1) frames(40)
+        tapUntilShown(exam, hasContentDescription(t(R.string.close)))
         click(hasContentDescription(t(R.string.close))); frames(20)
     }
 

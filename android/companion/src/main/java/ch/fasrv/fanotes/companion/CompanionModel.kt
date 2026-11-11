@@ -14,6 +14,7 @@ import androidx.core.content.FileProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -52,6 +53,11 @@ import ch.fasrv.fanotes.schulnetz.stripPhpSession
 import ch.fasrv.fanotes.schulnetz.timetableAnchor
 import ch.fasrv.fanotes.schulnetz.usesWebsiteSession
 import ch.fasrv.fanotes.schulnetz.webLoginUrl
+import ch.fasrv.fanotes.commute.Route
+import ch.fasrv.fanotes.commute.Schedule
+import ch.fasrv.fanotes.commute.commuteHiddenLabels
+import ch.fasrv.fanotes.commute.movedItem
+import ch.fasrv.fanotes.commute.newRouteId
 import ch.fasrv.fanotes.vault.VaultNode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -63,6 +69,12 @@ import java.io.File
 import java.net.URI
 import java.time.LocalDate
 import java.util.UUID
+
+/** Identity-compared inputs of the hidden-labels sync, so the flow never compares whole snapshots. */
+private class HiddenLabelsKey(val snapshot: SchulnetzSnapshot, val hidden: List<HiddenLesson>, val choices: Map<String, List<String>>, val hasRoutes: Boolean) {
+    override fun equals(other: Any?) = other is HiddenLabelsKey && snapshot === other.snapshot && hidden == other.hidden && choices == other.choices && hasRoutes == other.hasRoutes
+    override fun hashCode() = 0
+}
 
 class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var desk by mutableStateOf(ch.fasrv.fanotes.schulnetz.DeskPrefs(theme = graph.themeId()))
@@ -291,6 +303,15 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var diagnosticTick by mutableStateOf(0)
     var diagnosticExport by mutableStateOf<String?>(null)
 
+    // Pendelstrecken (see CommuteStore): routes and boards, the open route, the editor draft.
+    var commute by mutableStateOf(CommuteUi())
+    var commuteDetailId by mutableStateOf("")
+    var commuteDraft by mutableStateOf<Route?>(null)
+    var commuteDraftNew by mutableStateOf(true)
+    var commuteSaving by mutableStateOf(false)
+    /** The editor shown over the first-run onboarding (its step "Pendelstrecke hinzufügen"). */
+    var onboardingCommute by mutableStateOf(false)
+
     fun hiddenGradeIds(): Set<String> = if (settings.guessGrades) unrevealedIds else emptySet()
     fun isUnrevealed(targetId: String): Boolean = targetId.isNotBlank() && targetId in hiddenGradeIds()
     fun refreshUnrevealed() { unrevealedIds = graph.unrevealedGradeIds() }
@@ -327,6 +348,16 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 rememberAgenda(incoming, cal, taskList, hiddenList, built)
                 refreshUnrevealed()
                 if (graph.snapshotReady.value && incoming === graph.snapshot.value) schoolReady = true
+            }
+        }
+        viewModelScope.launch { graph.commute.loadCache(); graph.commute.state.collect { commute = it } }
+        // Lessons the user does not attend go to the server so it does not plan trips around them.
+        viewModelScope.launch {
+            snapshotFlow { HiddenLabelsKey(snapshot, hidden, desk.groupChoices, commute.routes.isNotEmpty()) }.collectLatest { key ->
+                if (!key.hasRoutes || demo) return@collectLatest
+                kotlinx.coroutines.delay(1_500)
+                val labels = withContext(Dispatchers.Default) { commuteHiddenLabels(key.snapshot.events, key.hidden, key.choices) }
+                graph.commute.syncHiddenLabels(labels)
             }
         }
         viewModelScope.launch { graph.link.collect { link = it } }
@@ -524,6 +555,72 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         // The app's process scope: leaving the app right away does not cancel a sync half way.
         graph.scope.launch { runCatching { graph.syncOnForeground("resume") } }
         refreshMensa()
+        refreshCommute()
+    }
+
+    /**
+     * Brings the commute boards up to date: on opening and returning to the app (when older than 30 s), on
+     * pull-to-refresh, on a commute push and from the Heute timer. Nothing runs without a school link or saved routes,
+     * so an install that never uses Pendelstrecken never talks to the commute endpoints.
+     */
+    fun refreshCommute(force: Boolean = false, withRoutes: Boolean = false) {
+        if (demo) return
+        if (!commute.loaded && !link.linked && !force) return
+        graph.scope.launch { graph.commute.refresh(force = force, withRoutes = withRoutes) }
+    }
+
+    fun openCommuteDetail(routeId: String) {
+        commuteDetailId = routeId
+        navigate(Page.CommuteDetail)
+    }
+
+    /** Opens the editor for [routeId], or for a new route. */
+    fun editCommuteRoute(routeId: String?) {
+        val existing = routeId?.let { id -> commute.routes.firstOrNull { it.id == id } }
+        commuteDraftNew = existing == null
+        commuteDraft = existing ?: Route(id = newRouteId(), schedule = Schedule())
+        if (!onboardingCommute) navigate(Page.CommuteEdit)
+    }
+
+    fun saveCommuteDraft() {
+        val draft = commuteDraft ?: return
+        if (commuteSaving) return
+        val next = if (commute.routes.any { it.id == draft.id }) commute.routes.map { if (it.id == draft.id) draft else it } else commute.routes + draft
+        saveCommuteRoutes(next, onDone = {
+            val onboarding = onboardingCommute
+            onboardingCommute = false
+            commuteDraft = null
+            commuteDetailId = draft.id
+            if (!onboarding) back()
+        })
+    }
+
+    fun deleteCommuteRoute(id: String) {
+        saveCommuteRoutes(commute.routes.filterNot { it.id == id }, onDone = {
+            commuteDraft = null
+            onboardingCommute = false
+            back()
+            if (route.page == Page.CommuteDetail && commuteDetailId == id) { commuteDetailId = ""; back() }
+        })
+    }
+
+    fun moveCommuteRoute(id: String, delta: Int) {
+        val index = commute.routes.indexOfFirst { it.id == id }
+        if (index < 0) return
+        saveCommuteRoutes(movedItem(commute.routes, index, index + delta))
+    }
+
+    fun setCommuteThreshold(minutes: Int) = saveCommuteRoutes(commute.routes, threshold = minutes)
+
+    private fun saveCommuteRoutes(routes: List<Route>, threshold: Int? = null, onDone: () -> Unit = {}) {
+        if (demo) { message = t(R.string.commute_demo); return }
+        commuteSaving = true
+        viewModelScope.launch {
+            val result = graph.commute.save(routes, threshold)
+            commuteSaving = false
+            if (result.isSuccess) onDone()
+            else message = result.exceptionOrNull()?.message?.takeIf { it.isNotBlank() }?.let(::shownText) ?: t(R.string.commute_save_failed)
+        }
     }
 
     /** Shows the cached Mensa menu and refreshes it when it is a few hours old. Does nothing while the card is off. */
@@ -539,6 +636,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     fun pullRefresh() {
         if (demo) { graph.showDemo(); return }
         viewModelScope.launch {
+            refreshCommute(force = true, withRoutes = true)
             val ok = runCatching { graph.syncOnForeground("pull", force = true) }.getOrDefault(false)
             if (!ok) message = t(R.string.could_not_refresh_school)
         }
@@ -997,6 +1095,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 examRoom = !settings.exams,
             )
             "events" -> settings.copy(appointmentNew = !settings.events, messageNew = !settings.events)
+            "commuteDelay" -> settings.copy(commuteDelay = !settings.commuteDelay)
+            "commuteCancelled" -> settings.copy(commuteCancelled = !settings.commuteCancelled)
+            "commuteLessonEnd" -> settings.copy(commuteLessonEnd = !settings.commuteLessonEnd)
+            "commute" -> settings.copy(commute = !settings.commute, commuteDelay = !settings.commute, commuteCancelled = !settings.commute, commuteLessonEnd = !settings.commute)
             else -> return
         }
         val next = flipped.aligned()
@@ -1203,6 +1305,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val route = ch.fasrv.fanotes.schulnetz.routeNotify(link, snapshot)
         history = emptyList()
         this.route = companionRoute(route)
+        if (route.section == "Pendeln") {
+            commuteDetailId = route.highlightIds.firstOrNull().orEmpty()
+            refreshCommute(force = true)
+        }
         focusCourseId = route.courseId
         highlightIds = route.highlightIds.toSet()
         if (route.day.isNotBlank()) {

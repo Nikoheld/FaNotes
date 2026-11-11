@@ -16,6 +16,8 @@ const ALERT_GROUPS: (keyof AlertSettings)[][] = [
   ['absences', 'deadlines', 'appointmentNew', 'messageNew'],
 ]
 
+const COMMUTE_ALERTS: (keyof AlertSettings)[] = ['commuteDelay', 'commuteCancelled', 'commuteLessonEnd']
+
 export const Settings = () => {
   const kanti = useKanti()
   const { t, prefs, setPrefs, data, demo, connections, active } = kanti
@@ -115,6 +117,11 @@ export const Settings = () => {
                     {group.map((name) => <Toggle key={name} checked={settings[name] !== false} disabled={settings.enabled === false} onChange={(value) => save({ [name]: value })} label={t.alertNames[name] || name} />)}
                   </div>
                 ))}
+                <div className="toggle-group">
+                  <p className="toggle-heading">{t.commuteSettingsGroup}</p>
+                  <Toggle checked={settings.commute !== false} onChange={(value) => save({ commute: value })} label={t.alertNames.commute} detail={t.commuteSettingsBody} />
+                  {COMMUTE_ALERTS.map((name) => <Toggle key={name} checked={settings[name] !== false} disabled={settings.commute === false} onChange={(value) => save({ [name]: value })} label={t.alertNames[name] || name} />)}
+                </div>
                 <Toggle checked={settings.guessGrades === true} onChange={(value) => save({ guessGrades: value })} label={t.guessGrades} detail={t.guessGradesBody} />
               </>
             ) : null}

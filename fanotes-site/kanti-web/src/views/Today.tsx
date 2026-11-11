@@ -4,6 +4,7 @@ import { courseSummaries, latestGrades, plusLabel, promotionTotals } from '../li
 import { dateLabel, pointsLabel } from '../lib/i18n'
 import { toMensaFeed, pickMensaDay, type MensaFeed } from '../lib/mensa'
 import { MensaCard } from '../components/MensaCard'
+import { CommuteCard } from '../components/CommuteCard'
 import { useKanti } from '../state'
 import { Banner, Card, DayBand, Dialog, Empty, Icon, RoomPill, SectionLabel, Snowfall } from '../components/ui'
 import { EntryDetails, EntryRow, EntryTags, MarkBadge, relativeDay, useClock } from './common'
@@ -100,6 +101,8 @@ export const Today = () => {
               <small className="muted">{t.pointsSummary(pointsLabel(absencePoints.booked, language), absencePoints.estimated > 0 ? `≈ ${absencePoints.estimated}` : '0')}{absencePoints.openReports ? ` · ${t.openReports(absencePoints.openReports)}` : ''}</small>
             </button>
           ) : null}
+
+          <CommuteCard />
 
           {mensaDay ? <MensaCard day={mensaDay} t={t} language={language} /> : null}
 

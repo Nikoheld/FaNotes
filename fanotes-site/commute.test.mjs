@@ -400,3 +400,15 @@ test('the app API stores routes, answers boards and stops, and the switches gate
 
 /** The runtime's publish hook, reached through a route alert the way the checker sends it. */
 const runtimePublish = async (runtime, accountId, changes) => runtime.commutePublish(accountId, changes)
+
+test('commute alerts have their own switch: the school-updates master switch does not silence them', async () => {
+  const { alertAllowed, resolvedAlertSettings } = await import('./schulnetz-logic.mjs')
+  const delay = { id: 'commute:x:2026-11-13:t:delay:6', category: 'commute', title: 'Verspätung', body: 'b' }
+  const grade = { id: 'grade:x', category: 'grade', title: 'Neue Note', body: 'b' }
+  const off = resolvedAlertSettings({ enabled: false })
+  assert.equal(alertAllowed(off, delay), true)
+  assert.equal(alertAllowed(off, grade), false)
+  assert.equal(alertAllowed(resolvedAlertSettings({ commute: false }), delay), false)
+  assert.equal(alertAllowed(resolvedAlertSettings({ commuteDelay: false }), { ...delay, title: 'Gleisänderung' }), false)
+  assert.equal(alertAllowed(resolvedAlertSettings({ commuteDelay: false }), { ...delay, title: 'Fällt aus' }), true)
+})

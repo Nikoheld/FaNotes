@@ -16,6 +16,9 @@ private val alertParent = mapOf(
     "appointment-new" to "events",
     "message-new" to "events",
     "absence-new" to "absences",
+    "commute-delay" to "commute",
+    "commute-cancelled" to "commute",
+    "commute-lesson" to "commute",
     "deadline" to "deadlines",
 )
 
@@ -31,6 +34,11 @@ fun notifyAlertKind(change: SchulnetzChange): String {
             "Raum geändert" -> "exam-room"
             else -> "exam-other"
         }
+        "commute" -> when (title) {
+            "Fällt aus", "Anschluss verpasst" -> "commute-cancelled"
+            "Früher nach Hause", "Später zur Schule" -> "commute-lesson"
+            else -> "commute-delay"
+        }
         "timetable" -> if (title == "Lektion fällt aus" || title == "Lektion entfernt") "lesson-cancelled" else "lesson-changed"
         "event" -> if (title == "Neuer Termin") "appointment-new" else "message-new"
         "absence" -> "absence-new"
@@ -45,8 +53,9 @@ fun notifyAlertKind(change: SchulnetzChange): String {
  */
 fun alertAllowed(settings: NotifySettings, change: SchulnetzChange): Boolean {
     if (isNotificationProbe(change.id)) return true
-    if (!settings.enabled) return false
     val kind = notifyAlertKind(change)
+    // Pendelstrecken alerts have their own switches; the school-updates master does not cover them.
+    if (!settings.enabled && !kind.startsWith("commute")) return false
     if (kind.isEmpty()) return true
     val parentOn = when (alertParent[kind]) {
         "grades" -> settings.grades
@@ -55,6 +64,7 @@ fun alertAllowed(settings: NotifySettings, change: SchulnetzChange): Boolean {
         "events" -> settings.events
         "absences" -> settings.absences
         "deadlines" -> settings.deadlines
+        "commute" -> settings.commute
         else -> true
     }
     if (!parentOn) return false
@@ -69,6 +79,9 @@ fun alertAllowed(settings: NotifySettings, change: SchulnetzChange): Boolean {
         "exam-room" -> settings.examRoom
         "appointment-new" -> settings.appointmentNew
         "message-new" -> settings.messageNew
+        "commute-delay" -> settings.commuteDelay
+        "commute-cancelled" -> settings.commuteCancelled
+        "commute-lesson" -> settings.commuteLessonEnd
         else -> true
     }
 }
