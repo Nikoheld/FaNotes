@@ -8,6 +8,7 @@ import { isTypingTarget, shortcutFor, VIEWS, type View } from './lib/shortcuts'
 import { useKanti } from './state'
 import { Banner, Button, Dialog, Icon, IconButton, Kbd, Logo, type IconName } from './components/ui'
 import { ago } from './views/common'
+import { AdminTimetable } from './views/AdminTimetable'
 import { Absences } from './views/Absences'
 import { Agenda } from './views/Agenda'
 import { Grades } from './views/Grades'
@@ -220,6 +221,8 @@ export const App = () => {
     return () => window.removeEventListener('keydown', onKey)
   }, [phase, kanti, route.view])
 
+  // The operator's upload page needs no Kanti+ session and is in no menu.
+  if (route.admin === 'timetable') return <AdminTimetable />
   if (phase === 'loading') return <div className="boot"><Logo size={56} /></div>
   if (phase === 'signedOut') {
     return (

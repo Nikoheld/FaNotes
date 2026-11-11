@@ -1,5 +1,6 @@
 // The one way the page talks to the server: same origin, the session cookie, JSON, and the
 // session's CSRF token on every request that changes something.
+import type { AdminIndex, AdminUploadResult, RoomWeek, TimetableSummary } from './timetables'
 import type { AlertSettings, Change, Connection, LinkStatus, Reveals, Session, Snapshot } from '../types'
 
 export const API = '/api/v1/kanti-web'
@@ -73,9 +74,36 @@ export const createApi = (transport: Transport = (input, init) => fetch(input, i
     changes: (id: string, since: number) => call<{ changes: Change[] }>('GET', `${connection(id)}/changes?since=${Math.max(0, Math.floor(since))}`),
     reveals: (id: string) => call<Reveals>('GET', `${connection(id)}/reveals`),
     reveal: (id: string, ids: string[]) => call<Reveals>('POST', `${connection(id)}/reveal`, { ids }),
+    /** Other classes' and rooms' timetables; 404 when the connection is not the Alte Kanti. */
+    timetables: (id: string) => call<TimetableSummary>('GET', `${connection(id)}/timetables`),
+    timetableRoom: (id: string, room: string) => call<RoomWeek>('GET', `${connection(id)}/timetables/room/${encodeURIComponent(room)}`),
+    timetableClassImage: (id: string, code: string) => `${API}${connection(id)}/timetables/class/${encodeURIComponent(code)}.png`,
     rename: (id: string, label: string) => call<Connection>('PATCH', connection(id), { label }),
     remove: (id: string) => call<{ removed: boolean; signedOut: boolean }>('DELETE', connection(id)),
   }
 }
 
 export type Api = ReturnType<typeof createApi>
+
+/** The operator's upload: its own bearer token (kept in memory only), no session and no CSRF token. */
+export const createAdminApi = (transport: Transport = (input, init) => fetch(input, init)) => {
+  const call = async <T>(method: 'GET' | 'POST', token: string, body?: Blob): Promise<T> => {
+    const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${token.trim()}` }
+    if (body) headers['Content-Type'] = 'application/pdf'
+    let response: Response
+    try {
+      response = await transport(`${API}/admin/timetable-pdf`, { method, headers, credentials: 'omit', cache: 'no-store', redirect: 'error', body })
+    } catch {
+      throw new ApiError(0, 'offline')
+    }
+    const text = await response.text()
+    let value: unknown = null
+    try { value = text ? JSON.parse(text) : null } catch { value = null }
+    if (!response.ok) throw new ApiError(response.status, value && typeof value === 'object' && 'error' in value ? String((value as { error: unknown }).error) : `HTTP ${response.status}`)
+    return value as T
+  }
+  return {
+    index: (token: string) => call<AdminIndex>('GET', token),
+    upload: (token: string, file: Blob) => call<AdminUploadResult>('POST', token, file),
+  }
+}

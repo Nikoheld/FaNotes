@@ -1196,4 +1196,13 @@
     <string name="planned_absence_not_entered">not entered</string>
     <string name="absence_points_provisional">Provisional</string>
     <string name="absence_points_provisional_remaining">Provisional remaining</string>
+    <string name="other_classes_rooms">Other classes &amp; rooms</string>
+    <string name="classes_segment">Classes</string>
+    <string name="rooms_segment">Rooms</string>
+    <string name="class_teacher_label">Class teacher: %1$s</string>
+    <string name="other_timetables_failed">The timetable could not be loaded.</string>
+    <string name="room_nothing_scheduled">Nothing is scheduled in this room.</string>
+    <string name="other_timetables_source">School timetable %1$s</string>
+    <string name="back_to_schedule">Back to the schedule</string>
+    <string name="back_to_list">Back to the list</string>
 </resources>

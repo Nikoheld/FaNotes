@@ -428,11 +428,23 @@ fun DayBand(lessons: List<AgendaEntry>, clock: Int, focusKey: String, modifier: 
 
 @Composable
 fun PlannerScreen(model: CompanionModel) {
+    // The school's PDF of other classes and rooms: asked only on the Alte Kanti, offered only when uploaded.
+    var others by remember { mutableStateOf(ClassTimetableSummary()) }
+    var showOthers by rememberSaveable { mutableStateOf(false) }
+    val aksa = model.link.linked && isAksaBase(model.link.baseUrl)
+    LaunchedEffect(aksa, model.link.baseUrl, model.connections.active?.id) {
+        others = ClassTimetableSummary()
+        if (aksa) others = runCatching { model.graph.classTimetables() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrDefault(ClassTimetableSummary())
+    }
+    if (showOthers && others.available) {
+        OtherTimetablesScreen(model.graph, others) { showOthers = false }
+        return
+    }
     Column(Modifier.fillMaxSize()) {
         SegmentedTabs(listOf("schedule" to t(R.string.schedule_tab), "tasks" to t(R.string.tasks)), if (model.plannerTasks) "tasks" else "schedule",
             { model.plannerTasks = it == "tasks" }, Modifier.padding(horizontal = Space.page, vertical = 6.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (model.plannerTasks) TasksScreen(model) else ScheduleScreen(model)
+            if (model.plannerTasks) TasksScreen(model) else ScheduleScreen(model, others.available) { showOthers = true }
         }
     }
 }
@@ -471,7 +483,7 @@ private fun dayItems(entries: List<AgendaEntry>, today: Boolean, clock: Int): Li
 }
 
 @Composable
-private fun ScheduleScreen(model: CompanionModel) {
+private fun ScheduleScreen(model: CompanionModel, othersAvailable: Boolean = false, onOthers: () -> Unit = {}) {
     var source by rememberSaveable { mutableStateOf("all") }
     var picker by remember { mutableStateOf(false) }
     var sourceMenu by remember { mutableStateOf(false) }
@@ -556,6 +568,12 @@ private fun ScheduleScreen(model: CompanionModel) {
                     model.connections.connections.forEach { connection ->
                         Pill(connection.label, connection.id == model.connections.active?.id) { model.showConnection(connection.id) }
                     }
+                }
+            }
+            if (othersAvailable) item(key = "other-classes") {
+                TextButton(onClick = onOthers, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)) {
+                    Icon(Icons.Outlined.Groups, null, Modifier.size(18.dp))
+                    Text(t(R.string.other_classes_rooms), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(start = 6.dp))
                 }
             }
             item(key = "heading") { Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {

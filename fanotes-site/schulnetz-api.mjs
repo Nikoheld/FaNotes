@@ -9,6 +9,7 @@ import { promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
+import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
 import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
@@ -152,6 +153,8 @@ export const createSchulnetzRuntime = (options = {}) => {
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz')
   // Kanti+ im Browser (kanti-web-api.mjs): pairing codes and browser sessions. Optional.
   const web = options.web || null
+  // Class and room timetables from the school's PDF (class-timetables.mjs). Optional.
+  const timetables = options.timetables || null
   const fetchImpl = options.fetch || globalThis.fetch
   const now = options.now || (() => new Date())
   const log = options.log || ((level, message) => {
@@ -1375,6 +1378,28 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (web && route === '/web-sessions' && method === 'GET') { send(response, 200, { sessions: await web.sessionsFor(accountId) }); return true }
       const webSession = /^\/web-sessions\/([a-f0-9]{16})$/u.exec(route)
       if (web && webSession && method === 'DELETE') { send(response, 200, { removed: await web.revoke(accountId, webSession[1]) }); return true }
+      // Other classes' and rooms' timetables: only for identities linked to the Alte Kanti (/aksa).
+      const timetableMatch = /^\/timetables(?:\/(class|room)\/([^/]+))?$/u.exec(route)
+      if (timetableMatch && method === 'GET') {
+        const link = await readLink(accountId)
+        if (!timetables || !isAksaBase(link?.baseUrl)) fail(404, 'Diesen Endpunkt gibt es nicht.')
+        const [, kind, rawName] = timetableMatch
+        if (!kind) { send(response, 200, await timetables.summary()); return true }
+        let name = ''
+        try { name = decodeURIComponent(rawName) } catch { fail(404, 'Diesen Stundenplan gibt es nicht.') }
+        if (kind === 'class') {
+          const code = name.endsWith('.pdf') ? name.slice(0, -4) : ''
+          const pdf = CLASS_CODE.test(code) ? await timetables.classPdf(code) : null
+          if (!pdf) fail(404, 'Diesen Stundenplan gibt es nicht.')
+          response.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': pdf.length, 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff' })
+          response.end(pdf)
+          return true
+        }
+        const found = await timetables.room(name)
+        if (!found) fail(404, 'Diesen Raum gibt es nicht.')
+        send(response, 200, found)
+        return true
+      }
       if (route === '/reveals' && method === 'GET') { send(response, 200, await readReveals(accountId)); return true }
       if (route === '/reveals' && method === 'PUT') { send(response, 200, await mergeReveals(accountId, await readBody(request))); return true }
       if (route === '/link' && method === 'PUT') {
@@ -1495,6 +1520,10 @@ export const createSchulnetzRuntime = (options = {}) => {
     changesSince: (accountId, since) => changesSince(accountId, since, ''),
     readReveals,
     mergeReveals,
+    timetablesFor: async (accountId) => {
+      const link = await readLink(accountId)
+      return timetables && isAksaBase(link?.baseUrl) ? timetables : null
+    },
   }
 
   return {

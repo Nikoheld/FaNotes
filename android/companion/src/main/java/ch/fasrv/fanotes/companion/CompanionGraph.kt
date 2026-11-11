@@ -440,6 +440,20 @@ class CompanionGraph(private val context: Context) {
     fun disconnectSchool() = current().disconnectSchool()
     fun clearLoginPrompt() = current().clearLoginPrompt()
     suspend fun schoolAuth(): SchoolAuth = current().schoolAuth()
+    /** Other classes and rooms of the Alte Kanti; empty (not available) for any other connection. */
+    suspend fun classTimetables(): ch.fasrv.fanotes.schulnetz.ClassTimetableSummary = withContext(Dispatchers.IO) { client.classTimetables(schoolAuth()) }
+    suspend fun roomTimetable(room: String): ch.fasrv.fanotes.schulnetz.RoomWeek = withContext(Dispatchers.IO) { client.roomTimetable(schoolAuth(), room) }
+    /** The class page PDF in the cache dir; a file from the same upload is reused. */
+    suspend fun classTimetableFile(code: String, uploadedAt: String): java.io.File = withContext(Dispatchers.IO) {
+        val directory = java.io.File(context.cacheDir, "class-timetables")
+        val file = java.io.File(directory, ch.fasrv.fanotes.schulnetz.classPdfCacheName(code, uploadedAt))
+        if (!file.isFile || file.length() < 8) {
+            // Older uploads are of no use any more.
+            directory.listFiles()?.filter { it.name.endsWith("-$code.pdf") || it.name.endsWith(".part") }?.forEach { it.delete() }
+            client.classTimetablePdf(schoolAuth(), code, file)
+        }
+        file
+    }
     val viewingSession: Boolean get() = loginSession?.viewingSession == true
     fun consumeOauthPermit(): Boolean = loginSession?.consumeOauthPermit() == true
     fun finishVisibleLogin(session: WebSession?) { (loginSession ?: current()).finishVisibleLogin(session) }

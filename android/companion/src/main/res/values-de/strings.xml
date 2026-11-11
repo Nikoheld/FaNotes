@@ -1196,4 +1196,13 @@
     <string name="planned_absence_not_entered">nicht eingetragen</string>
     <string name="absence_points_provisional">Provisorisch</string>
     <string name="absence_points_provisional_remaining">Provisorisch verbleibend</string>
+    <string name="other_classes_rooms">Andere Klassen &amp; Räume</string>
+    <string name="classes_segment">Klassen</string>
+    <string name="rooms_segment">Räume</string>
+    <string name="class_teacher_label">Klassenlehrperson: %1$s</string>
+    <string name="other_timetables_failed">Der Stundenplan konnte nicht geladen werden.</string>
+    <string name="room_nothing_scheduled">In diesem Raum ist nichts eingetragen.</string>
+    <string name="other_timetables_source">Stundenplan der Schule %1$s</string>
+    <string name="back_to_schedule">Zurück zum Stundenplan</string>
+    <string name="back_to_list">Zurück zur Liste</string>
 </resources>

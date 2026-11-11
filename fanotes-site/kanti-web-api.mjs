@@ -12,7 +12,10 @@
 
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { credentialOr } from './credentials.mjs'
+import { CLASS_CODE, MAX_PDF_BYTES, ROOM_NAME } from './class-timetables.mjs'
 import { accountAcceptsAuthKey, loadSyncAccountByEmail, syncAuthStamp, syncPreloginKdf } from './sync-api.mjs'
 import { prepareGradeNotifications, unrevealedGradeIds, webGradeView } from './schulnetz-logic.mjs'
 
@@ -26,6 +29,8 @@ const SESSION_TOUCH_MS = 6 * 60 * 60 * 1000
 export const PAIR_TTL_MS = 10 * 60 * 1000
 export const MAX_WEB_CONNECTIONS = 6
 const MAX_BODY = 16 * 1024
+const ADMIN_FAIL_LIMIT = 10
+const ADMIN_FAIL_WINDOW_MS = 60 * 60 * 1000
 const MAX_SESSIONS = 5000
 const SWEEP_MS = 15 * 60 * 1000
 const LIMIT_WINDOW_MS = 15 * 60 * 1000
@@ -515,6 +520,18 @@ export const createKantiWebApi = (options = {}) => {
   const acceptsKey = options.accountAcceptsAuthKey || accountAcceptsAuthKey
   const preloginKdf = options.syncPreloginKdf || syncPreloginKdf
   const readVersion = options.readVersion || (async () => null)
+  // The operator's timetable upload: the server holds only the SHA-256 (hex) of the admin token.
+  const timetables = options.timetables || null
+  const adminTokenFile = options.adminTokenFile || credentialOr('kanti-admin-token', '/etc/fanotes/kanti-admin-token.sha256')
+  const readAdminHash = options.readAdminHash || (async () => {
+    try {
+      const text = (await readFile(adminTokenFile, 'utf8')).trim().toLowerCase()
+      return HASH_PATTERN.test(text) ? text : null
+    } catch {
+      return null
+    }
+  })
+  const adminFailures = new Map()
 
   const windows = new Map()
   // Failed code claims per address: a code is 40 random bits, valid 10 minutes; 20 misses per window.
@@ -585,6 +602,85 @@ export const createKantiWebApi = (options = {}) => {
     } catch {
       fail(400, 'Ungültiges JSON.')
     }
+  }
+
+
+  const readRaw = async (request, limit) => {
+    if (Number(request.headers['content-length']) > limit) fail(413, 'Die Datei ist zu gross (höchstens 25 MB).')
+    const chunks = []
+    let size = 0
+    for await (const chunk of request) {
+      size += chunk.length
+      if (size > limit) fail(413, 'Die Datei ist zu gross (höchstens 25 MB).')
+      chunks.push(chunk)
+    }
+    return Buffer.concat(chunks)
+  }
+
+  /** Admin-only: Bearer token whose SHA-256 matches the configured hash; 10 misses per address and hour. */
+  const assertAdmin = async (request, address) => {
+    const configured = String((await readAdminHash()) || '').trim().toLowerCase()
+    const expected = HASH_PATTERN.test(configured) ? configured : ''
+    if (!timetables || !expected) fail(503, 'Der Admin-Zugang ist auf diesem Server nicht eingerichtet.')
+    const at = now().getTime()
+    const key = String(address || 'unknown').slice(0, 80)
+    const recent = (adminFailures.get(key) || []).filter((stamp) => at - stamp < ADMIN_FAIL_WINDOW_MS)
+    adminFailures.set(key, recent)
+    if (adminFailures.size > 10_000) adminFailures.clear()
+    if (recent.length >= ADMIN_FAIL_LIMIT) fail(429, 'Zu viele falsche Versuche. Bitte später erneut versuchen.')
+    const header = String(request.headers.authorization || '')
+    const token = /^Bearer\s+(\S{1,512})$/iu.exec(header)?.[1] || ''
+    const given = Buffer.from(sha256(token), 'hex')
+    const wanted = Buffer.from(expected, 'hex')
+    if (!token || given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
+      recent.push(at)
+      fail(401, 'Das Admin-Token stimmt nicht.')
+    }
+  }
+
+  const adminTimetable = async (request, response, method, address) => {
+    if (method === 'POST') {
+      const origin = String(request.headers.origin || '')
+      if (!origins.includes(origin)) fail(403, 'Diese Anfrage ist nicht erlaubt.')
+      const site = request.headers['sec-fetch-site']
+      if (site && site !== 'same-origin') fail(403, 'Diese Anfrage ist nicht erlaubt.')
+      if (String(request.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== 'application/pdf') fail(415, 'Bitte eine PDF-Datei senden.')
+    } else if (method !== 'GET') fail(405, 'Diese Methode ist hier nicht erlaubt.')
+    await assertAdmin(request, address)
+    if (method === 'GET') {
+      const index = await timetables.readIndex()
+      send(response, 200, index
+        ? { available: true, uploadedAt: index.uploadedAt, semester: index.semester || '', classes: index.classes, rooms: index.rooms.length, warnings: (index.warnings || []).slice(0, 20), warningCount: (index.warnings || []).length }
+        : { available: false })
+      return
+    }
+    const result = await timetables.ingest(await readRaw(request, MAX_PDF_BYTES + 1024))
+    send(response, 200, { ...result, warningCount: result.warnings.length, warnings: result.warnings.slice(0, 20) })
+  }
+
+  /** Other classes' and rooms' timetables, per connection; only for Alte Kanti (/aksa) links. */
+  const timetableRoute = async (response, session, id, kind, rawName) => {
+    const connection = connectionOf(session, id)
+    const status = await access.readStatus(connection.accountId)
+    const store = status.linked ? await access.timetablesFor(connection.accountId) : null
+    if (!store) fail(404, 'Diesen Endpunkt gibt es nicht.')
+    if (!kind) {
+      send(response, 200, await store.summary())
+      return
+    }
+    let name = ''
+    try { name = decodeURIComponent(rawName) } catch { fail(404, 'Diesen Stundenplan gibt es nicht.') }
+    if (kind === 'class') {
+      const code = name.endsWith('.png') ? name.slice(0, -4) : ''
+      const png = CLASS_CODE.test(code) ? await store.classPng(code) : null
+      if (!png) fail(404, 'Diesen Stundenplan gibt es nicht.')
+      response.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': png.length, 'Cache-Control': 'private, max-age=3600', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' })
+      response.end(png)
+      return
+    }
+    const found = ROOM_NAME.test(name) ? await store.room(name) : null
+    if (!found) fail(404, 'Diesen Raum gibt es nicht.')
+    send(response, 200, found)
   }
 
   /** Every request that changes something: our own origin, a JSON body, no cross-site fetch. */
@@ -876,6 +972,12 @@ export const createKantiWebApi = (options = {}) => {
         return true
       }
 
+      // The operator's upload of the school's timetable PDF: its own token, no browser session.
+      if (route === '/admin/timetable-pdf') {
+        await adminTimetable(request, response, method, address)
+        return true
+      }
+
       // The page asks this first; a browser without a session is an answer, not an error.
       if (route === '/session' && method === 'GET') {
         const current = await optionalSession(request)
@@ -895,6 +997,11 @@ export const createKantiWebApi = (options = {}) => {
         assertCsrf(request, session)
         await store.updateSession(hash, () => 'delete')
         send(response, 200, { signedOut: true }, [clearCookie(SESSION_COOKIE)])
+        return true
+      }
+      const timetableMatch = /^\/connections\/([^/]+)\/timetables(?:\/(class|room)\/([^/]+))?$/u.exec(route)
+      if (timetableMatch && method === 'GET') {
+        await timetableRoute(response, session, timetableMatch[1], timetableMatch[2] || '', timetableMatch[3] || '')
         return true
       }
       const match = /^\/connections\/([^/]+)(\/[a-z]+)?$/u.exec(route)
