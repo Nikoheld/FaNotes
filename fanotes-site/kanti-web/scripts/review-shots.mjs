@@ -10,7 +10,7 @@ const root = new URL('..', import.meta.url).pathname
 const out = process.argv[2] || join(root, '.shots')
 const filter = process.argv[3] || ''
 mkdirSync(out, { recursive: true })
-const port = 47932
+const port = Number(process.env.PORT || 47932)
 const base = process.env.BASE_URL || `http://127.0.0.1:${port}`
 
 const views = [
