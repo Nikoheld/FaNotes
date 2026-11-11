@@ -133,7 +133,7 @@ export const Timetable = () => {
                 {days.map((day) => (
                   <span key={day} className="allday-cell">
                     {allDay.filter((entry) => entry.day === day).map((entry) => (
-                      <button type="button" key={entry.key} className={`chip kind-${entry.kind}${entry.key === selectedKey ? ' selected' : ''}`} onClick={() => setSelectedKey(entry.key)}>{entry.title}</button>
+                      <button type="button" key={entry.key} className={`chip kind-${entry.kind}${entry.cancelled ? ' cancelled' : ''}${entry.key === selectedKey ? ' selected' : ''}`} onClick={() => setSelectedKey(entry.key)}>{entry.title}</button>
                     ))}
                   </span>
                 ))}
@@ -164,7 +164,7 @@ export const Timetable = () => {
                         >
                           <span className="block-title">{entry.title}</span>
                           <span className="block-meta tabular">{entry.start}{entry.room ? ` · ${entry.room}` : ''}</span>
-                          {entry.cancelled ? <span className="block-flag">{t.cancelled}</span> : entry.substitution ? <span className="block-flag">{t.substitution}</span> : entry.kind !== 'lesson' ? <span className="block-flag">{kindLabel(entry, t)}</span> : null}
+                          {entry.cancelled ? <span className="block-flag">{t.cancelled}</span> : entry.marker === 'changed' || entry.marker === 'moved' || entry.marker === 'added' ? <span className="block-flag">{entry.marker === 'changed' ? t.markChanged : entry.marker === 'moved' ? t.markMoved : t.markAdded}</span> : entry.substitution ? <span className="block-flag">{t.substitution}</span> : entry.kind !== 'lesson' ? <span className="block-flag">{kindLabel(entry, t)}</span> : null}
                         </button>
                       )
                     })}

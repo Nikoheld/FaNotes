@@ -41,7 +41,7 @@ const weekday = (day: string) => {
   return day
 }
 
-const lesson = (day: string, slot: number, subject: DemoSubject, status = '', comment = '', teacher = subject.teacher): AgendaEvent => ({
+const lesson = (day: string, slot: number, subject: DemoSubject, status = '', comment = '', teacher = subject.teacher, marker = '', substitute = ''): AgendaEvent => ({
   id: `${DEMO_ID_PREFIX}lesson-${day}-${slot}`,
   start: `${day}T${SLOTS[slot][0]}:00`,
   end: `${day}T${SLOTS[slot][1]}:00`,
@@ -55,6 +55,8 @@ const lesson = (day: string, slot: number, subject: DemoSubject, status = '', co
   eventType: '0_stp',
   color: '',
   timetableText: subject.name,
+  marker,
+  substitute,
 })
 
 const exam = (day: string, slot: number, subject: DemoSubject, topic: string): AgendaEvent => ({
@@ -120,8 +122,8 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
     return slots.flatMap((name, slot) => {
       if (!name) return []
       const subject = SUBJECTS[name]
-      if (week === nextMonday && dayIndex === 3 && slot === 4) return [lesson(day, slot, subject, 'entfällt', 'Lektion fällt aus')]
-      if (week === nextMonday && dayIndex === 4 && slot === 3) return [lesson(day, slot, subject, '', 'Vertretung', 'Lehrperson Z')]
+      if (week === nextMonday && dayIndex === 3 && slot === 4) return [lesson(day, slot, subject, 'cancelled', 'Lektion fällt aus', subject.teacher, 'cancelled')]
+      if (week === nextMonday && dayIndex === 4 && slot === 3) return [lesson(day, slot, subject, '', 'Vertretung', subject.teacher, 'changed', 'Lehrperson Z')]
       return [lesson(day, slot, subject)]
     })
   }))

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { ABSENCE_REASON, EXAM_TOPIC, GRADE_TITLE, MESSAGE_TITLE, PASSWORD, SUBJECT, appIdentity, fanotesAccount } from './seed'
+import { ABSENCE_REASON, CANCELLED_SUBJECT, CHANGED_SUBJECT, SUBSTITUTE, EXAM_TOPIC, GRADE_TITLE, MESSAGE_TITLE, PASSWORD, SUBJECT, appIdentity, fanotesAccount } from './seed'
 
 const base = () => `http://127.0.0.1:${Number(process.env.E2E_PORT || 4783)}`
 
@@ -45,6 +45,18 @@ const visitEverything = async (page: Page, problems: string[]) => {
       await expect(page.getByText('Laden fehlgeschlagen')).toHaveCount(0)
     })
   }
+  await test.step('marked lessons', async () => {
+    await page.goto('/')
+    await skipTour(page)
+    // A cancelled lesson stays in today's list, struck through and tagged; a changed one names its substitute.
+    const cancelled = page.locator('.entry-row.cancelled', { hasText: CANCELLED_SUBJECT })
+    await expect(cancelled).toBeVisible()
+    await expect(cancelled.getByText('Fällt aus')).toBeVisible()
+    const changed = page.locator('.entry-row', { hasText: CHANGED_SUBJECT })
+    await expect(changed.getByText('Geändert')).toBeVisible()
+    await changed.click()
+    await expect(page.getByText(`Vertretung: ${SUBSTITUTE}`)).toBeVisible()
+  })
   expect(problems).toEqual([])
 }
 

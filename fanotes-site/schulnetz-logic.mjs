@@ -187,6 +187,9 @@ const parseEvent = (obj) => {
     eventType: text(obj, 'eventType', 'type'),
     color: text(obj, 'color'),
     timetableText: text(obj, 'timetableText'),
+    // Lesson marks (lessonMarker) when a client sends them; absent stays absent (seedLessonMarks).
+    ...(Object.hasOwn(obj || {}, 'marker') ? { marker: text(obj, 'marker') } : {}),
+    ...(text(obj, 'substitute') ? { substitute: text(obj, 'substitute') } : {}),
   }
 }
 

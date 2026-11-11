@@ -641,6 +641,10 @@
     <string name="subject_order">Subject order</string>
     <string name="subject_unavailable">Subject unavailable</string>
     <string name="subjects">Subjects</string>
+    <string name="lesson_changed">Changed</string>
+    <string name="lesson_moved">Moved</string>
+    <string name="lesson_added">Extra lesson</string>
+    <string name="substitute_named">Substitute: %1$s</string>
     <string name="substitution">Substitution</string>
     <string name="support_exports">Support exports</string>
     <string name="swiss_marks_are_1_to_6_higher_is_better">Swiss marks are 1 to 6. Higher is better.</string>

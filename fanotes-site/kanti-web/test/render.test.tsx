@@ -6,6 +6,10 @@ import { KantiProvider } from '../src/state'
 import { createApi } from '../src/lib/api'
 import { Absences } from '../src/views/Absences'
 import { Today } from '../src/views/Today'
+import { EntryDetails, EntryRow, EntryTags } from '../src/views/common'
+import { allEntries } from '../src/lib/agenda'
+import { demoSnapshot } from '../src/lib/demo'
+import { STRINGS } from '../src/lib/i18n'
 
 const noServer = createApi(async () => new Response('{"signedIn":false}', { status: 200 }))
 
@@ -13,6 +17,26 @@ describe('views', () => {
   it('render the sign-in page server-side without throwing', () => {
     const html = renderToString(<KantiProvider api={noServer}><App /></KantiProvider>)
     expect(html).toContain('logo')
+  })
+
+  it('renders the cancelled and the changed demo lesson in the timetable, row tags and details', () => {
+    const entries = allEntries(demoSnapshot('2026-11-10'))
+    const [cancelled] = entries.filter((entry) => entry.cancelled)
+    const [changed] = entries.filter((entry) => entry.marker === 'changed')
+    for (const language of ['de', 'en'] as const) {
+      const t = STRINGS[language]
+      const row = renderToString(<EntryRow entry={cancelled} t={t} language={language} today="2026-11-10" />)
+      expect(row).toContain('entry-row kind-lesson cancelled')
+      expect(row).toContain(t.cancelled)
+      const rowChanged = renderToString(<EntryRow entry={changed} t={t} language={language} today="2026-11-10" />)
+      expect(rowChanged).toContain(t.markChanged)
+      const details = renderToString(<EntryDetails entry={changed} t={t} language={language} />)
+      expect(details).toContain(t.substituteBy('Lehrperson Z'))
+      expect(renderToString(<EntryDetails entry={cancelled} t={t} language={language} />)).toContain('class="struck"')
+    }
+    expect(STRINGS.de.substituteBy('X')).toBe('Vertretung: X')
+    expect(STRINGS.en.markAdded).toBe('Extra lesson')
+    expect(renderToString(<EntryTags entry={{ ...changed, marker: 'moved', substitution: false }} t={STRINGS.de} />)).toContain('Verschoben')
   })
 
   it('shows open reports with their estimate and the combined quota', () => {

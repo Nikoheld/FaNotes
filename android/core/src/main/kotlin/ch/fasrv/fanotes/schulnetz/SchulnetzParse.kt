@@ -86,6 +86,8 @@ fun parseEvents(json: String?): List<AgendaEvent> = jsonObjects(json).mapNotNull
         eventType = obj.flexString("eventType", "type"),
         color = obj.flexString("color"),
         timetableText = obj.flexString("timetableText"),
+        marker = if (obj.fields.containsKey("marker")) obj.flexString("marker") else null,
+        substitute = cleanSchulnetzText(obj.flexString("substitute")),
     )
 }
 
@@ -330,6 +332,8 @@ private fun JsonValue.Obj.toEvent(): AgendaEvent? {
         eventType = cleanSchulnetzText(flexString("eventType")),
         color = flexString("color"),
         timetableText = cleanSchulnetzText(flexString("timetableText")),
+        marker = if (fields.containsKey("marker")) cleanSchulnetzText(flexString("marker")) else null,
+        substitute = cleanSchulnetzText(flexString("substitute")),
     )
 }
 
@@ -410,6 +414,8 @@ private fun StringBuilder.appendEvents(events: List<AgendaEvent>) {
         append(",\"eventType\":").append(escapeJson(event.eventType))
         append(",\"color\":").append(escapeJson(event.color))
         append(",\"timetableText\":").append(escapeJson(event.timetableText))
+        event.marker?.let { append(",\"marker\":").append(escapeJson(it)) }
+        if (event.substitute.isNotBlank()) append(",\"substitute\":").append(escapeJson(event.substitute))
         append('}')
     }
     append(']')

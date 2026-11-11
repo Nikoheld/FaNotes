@@ -5,8 +5,8 @@ import { dateLabel, pointsLabel } from '../lib/i18n'
 import { toMensaFeed, pickMensaDay, type MensaFeed } from '../lib/mensa'
 import { MensaCard } from '../components/MensaCard'
 import { useKanti } from '../state'
-import { Banner, Card, DayBand, Dialog, Empty, Icon, RoomPill, SectionLabel, Snowfall, Tag } from '../components/ui'
-import { EntryDetails, EntryRow, MarkBadge, relativeDay, useClock } from './common'
+import { Banner, Card, DayBand, Dialog, Empty, Icon, RoomPill, SectionLabel, Snowfall } from '../components/ui'
+import { EntryDetails, EntryRow, EntryTags, MarkBadge, relativeDay, useClock } from './common'
 import { absenceTally, addDays, eventDate } from '@shared/schulnetz-logic'
 
 export const Today = () => {
@@ -64,7 +64,7 @@ export const Today = () => {
               </div>
               <h2 className={`hero-title${next.cancelled ? ' struck' : ''}`}>{next.title}</h2>
               <p className="hero-meta">{[next.end && next.end !== next.start ? t.until(next.end) : '', next.teachers.join(', '), next.kind === 'exam' ? t.exam : next.kind === 'appointment' ? t.appointment : ''].filter(Boolean).join('  ·  ')}</p>
-              {next.substitution ? <Tag tone="warning">{t.substitution}</Tag> : null}
+              <div className="details-tags"><EntryTags entry={next} t={t} detail /></div>
               <DayBand lessons={dayLessons} clock={next.day === clock.today ? clock.minutes : -1} focusKey={next.key} />
             </Card>
           ) : (

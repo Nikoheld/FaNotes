@@ -33,6 +33,18 @@ export const ago = (iso: string, t: Strings) => {
 
 export const kindLabel = (entry: Entry, t: Strings) => (entry.kind === 'exam' ? t.exam : entry.kind === 'appointment' ? t.appointment : t.lesson)
 
+/** The tags a lesson carries beyond its title: cancelled wins, otherwise the mark and the substitution. */
+export const EntryTags = ({ entry, t, detail = false }: { entry: Entry; t: Strings; detail?: boolean }) => {
+  if (entry.cancelled) return <Tag tone="danger">{t.cancelled}</Tag>
+  const mark = entry.marker === 'changed' ? t.markChanged : entry.marker === 'moved' ? t.markMoved : entry.marker === 'added' ? t.markAdded : ''
+  return (
+    <>
+      {mark ? <Tag tone={entry.marker === 'added' ? 'accent' : 'warning'}>{mark}</Tag> : null}
+      {entry.substitution ? <Tag tone="warning">{detail && entry.substitute ? t.substituteBy(entry.substitute) : t.substitution}</Tag> : null}
+    </>
+  )
+}
+
 export const EntryRow = ({ entry, t, language, today, showDay = false, onOpen, now = false }: { entry: Entry; t: Strings; language: Language; today: string; showDay?: boolean; onOpen?: () => void; now?: boolean }) => (
   <button type="button" className={`entry-row kind-${entry.kind}${entry.cancelled ? ' cancelled' : ''}${now ? ' running' : ''}`} onClick={onOpen}>
     <span className="entry-time tabular">
@@ -48,7 +60,7 @@ export const EntryRow = ({ entry, t, language, today, showDay = false, onOpen, n
       </span>
     </span>
     <span className="entry-side">
-      {entry.cancelled ? <Tag tone="danger">{t.cancelled}</Tag> : entry.substitution ? <Tag tone="warning">{t.substitution}</Tag> : null}
+      <EntryTags entry={entry} t={t} />
       {entry.room ? <RoomPill room={entry.room} label={t.room} /> : null}
     </span>
   </button>
@@ -71,8 +83,7 @@ export const EntryDetails = ({ entry, t, language }: { entry: Entry; t: Strings;
       {entry.comment ? <><dt>{t.note}</dt><dd>{entry.comment}</dd></> : null}
     </dl>
     <div className="details-tags">
-      {entry.cancelled ? <Tag tone="danger">{t.cancelled}</Tag> : null}
-      {entry.substitution ? <Tag tone="warning">{t.substitution}</Tag> : null}
+      <EntryTags entry={entry} t={t} detail />
     </div>
   </div>
 )

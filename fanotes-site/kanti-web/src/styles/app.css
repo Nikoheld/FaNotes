@@ -273,6 +273,7 @@ input[type='range'] { accent-color: var(--accent); flex: 1; }
 .allday-cell { display: flex; flex-direction: column; gap: 4px; padding: 0 3px; }
 .chip { border: none; border-radius: var(--radius-s); padding: 4px 8px; text-align: left; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--success-soft); color: var(--success); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip.kind-exam { background: var(--warning-soft); color: var(--warning); }
+.chip.cancelled { text-decoration: line-through; }
 .chip.selected { outline: 2px solid var(--accent); }
 .week-body { position: relative; display: grid; grid-template-columns: var(--axis) repeat(var(--days), minmax(0, 1fr)); height: max(620px, calc(100vh - 300px)); }
 .week-body.compact { height: 520px; }

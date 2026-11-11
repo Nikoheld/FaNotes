@@ -338,7 +338,7 @@ fun agendaForDay(
     val examKeys = snapshot.exams.map { "${it.id}|${it.start}" }.toSet()
     val slots = examsInLessonSlots(daySchool.filter { it.isLesson() }, daySchool.filter { it.isExamLike() || "${it.id}|${it.start}" in examKeys }, zone)
     val school = (slots.apply(daySchool) + slots.exams.map { it.shown })
-        .distinctBy { Triple(it.start, it.end, it.label.lowercase()) }
+        .distinctBy(::slotDedupKey)
         .sortedBy { it.startsAt(zone) ?: java.time.Instant.EPOCH }
         .distinctBy(::lessonTargetId)
         .filterNot { "schulnetz-${it.id}" in imported }

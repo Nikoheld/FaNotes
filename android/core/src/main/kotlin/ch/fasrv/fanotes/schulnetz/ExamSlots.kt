@@ -24,8 +24,14 @@ data class ExamSlotMerge(val droppedLessons: Set<String>, val exams: List<ExamIn
     /** [events] without the replaced lessons, with the merged exams in their slots, once per slot and title. */
     fun apply(events: List<AgendaEvent>): List<AgendaEvent> =
         events.mapNotNull { replacement(it) ?: it.takeUnless { event -> lessonDropped(event) } }
-            .distinctBy { Triple(it.start, it.end, it.label.lowercase()) }
+            .distinctBy(::slotDedupKey)
 }
+
+/**
+ * One entry per slot and title. A cancelled lesson stays its own entry, so it neither hides an exam of the
+ * same title and time nor is hidden by one.
+ */
+fun slotDedupKey(event: AgendaEvent): List<Any> = listOf(event.start, event.end, event.label.lowercase(), event.isCancelled())
 
 private fun examKey(event: AgendaEvent) = "${event.id}|${event.start}|${event.label}"
 

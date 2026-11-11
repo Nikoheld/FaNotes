@@ -7,6 +7,9 @@ import android.text.Spanned
 import android.text.style.StrikethroughSpan
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
+import ch.fasrv.fanotes.schulnetz.isAddedLesson
+import ch.fasrv.fanotes.schulnetz.isChangedLesson
+import ch.fasrv.fanotes.schulnetz.isMovedLesson
 import ch.fasrv.fanotes.schulnetz.WidgetRow
 import ch.fasrv.fanotes.schulnetz.lessonTargetId
 import ch.fasrv.fanotes.schulnetz.linkedChange
@@ -54,12 +57,16 @@ class NextLessonWidgetService : RemoteViewsService() {
                 row.cancelled -> t(R.string.cancelled)
                 row.exam -> t(R.string.exam)
                 row.substitution -> t(R.string.substitution)
+                row.event?.isMovedLesson() == true -> t(R.string.lesson_moved)
+                row.event?.isAddedLesson() == true -> t(R.string.lesson_added)
+                row.event?.isChangedLesson() == true -> t(R.string.lesson_changed)
                 else -> ""
             }
             val markerColor = when {
                 row.cancelled -> alert
                 row.exam -> accent
                 row.substitution -> accent
+                state.isNotBlank() -> accent
                 else -> muted
             }
             views.setTextViewText(R.id.row_time, row.clock.ifBlank { "–" })

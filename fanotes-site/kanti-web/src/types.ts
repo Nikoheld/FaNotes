@@ -14,6 +14,10 @@ export interface AgendaEvent {
   eventType: string
   color: string
   timetableText: string
+  /** Lesson mark read from Schulnetz: '' | 'cancelled' | 'added' | 'moved' | 'changed'; absent on older stored lessons. */
+  marker?: string
+  /** Substitute teacher, or ''. */
+  substitute?: string
 }
 
 export interface SchoolGrade {
