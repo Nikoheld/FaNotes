@@ -22,8 +22,12 @@ jobs:
           distribution: temurin
           java-version: 17
       - name: Install poppler and qpdf (timetable PDF pipeline test)
-        # The runner's apt mirror sometimes fails DNS for minutes: retry instead of failing the build.
+        # The runner's apt mirror sometimes fails DNS for minutes. The pipeline test skips without
+        # these tools, so a failed install must neither block nor fail the build.
+        timeout-minutes: 4
+        continue-on-error: true
         run: |
+          sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/\?#http://archive.ubuntu.com/ubuntu/#g' /etc/apt/apt-mirrors.txt 2>/dev/null || true
           for attempt in 1 2 3 4; do
             if sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 poppler-utils qpdf; then exit 0; fi
             echo "apt attempt $attempt failed; retrying in 30 s"; sleep 30
@@ -58,7 +62,9 @@ jobs:
       - name: Kanti+ web app end-to-end (Playwright, local full stack)
         working-directory: fanotes-site/kanti-web
         run: |
-          npx playwright install --with-deps chromium
+          # --with-deps goes through apt, whose mirror sometimes fails DNS on the runner; the
+          # ubuntu image already has Chromium's libraries, so fall back to the browser alone.
+          timeout 300 npx playwright install --with-deps chromium || npx playwright install chromium
           npm run e2e
       - name: Firebase config when the secret exists
         working-directory: android
