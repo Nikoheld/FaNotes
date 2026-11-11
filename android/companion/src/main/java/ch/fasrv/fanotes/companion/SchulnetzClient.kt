@@ -8,6 +8,12 @@ import ch.fasrv.fanotes.schulnetz.NotifySettings
 import ch.fasrv.fanotes.schulnetz.RevealLedger
 import ch.fasrv.fanotes.schulnetz.SchoolProvider
 import ch.fasrv.fanotes.schulnetz.WebBrowserSession
+import ch.fasrv.fanotes.schulnetz.ClassTimetableSummary
+import ch.fasrv.fanotes.schulnetz.RoomWeek
+import ch.fasrv.fanotes.schulnetz.isClassCode
+import ch.fasrv.fanotes.schulnetz.isRoomName
+import ch.fasrv.fanotes.schulnetz.parseClassTimetableSummary
+import ch.fasrv.fanotes.schulnetz.parseRoomWeek
 import ch.fasrv.fanotes.schulnetz.WebPairInfo
 import ch.fasrv.fanotes.schulnetz.WebPairOffer
 import ch.fasrv.fanotes.schulnetz.parseWebPairOffer
@@ -804,6 +810,40 @@ class SchulnetzClient(
         if (status == 404) return null
         if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
         return parseRevealLedger(body)
+    }
+
+    /** Other classes and rooms (the school's PDF). Not available (404) for anything but the Alte Kanti. */
+    fun classTimetables(session: SchoolAuth): ClassTimetableSummary {
+        val (status, body) = fanotes("GET", "/timetables", session, null)
+        if (status == 404) return ClassTimetableSummary()
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+        return parseClassTimetableSummary(body)
+    }
+
+    fun roomTimetable(session: SchoolAuth, room: String): RoomWeek {
+        require(isRoomName(room))
+        val (status, body) = fanotes("GET", "/timetables/room/${java.net.URLEncoder.encode(room, "UTF-8").replace("+", "%20")}", session, null)
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+        return parseRoomWeek(body) ?: throw SchulnetzHttpException(status, "Ungültige Antwort des Servers.")
+    }
+
+    /** Downloads one class page as PDF into [target] (written through a temporary file). */
+    fun classTimetablePdf(session: SchoolAuth, code: String, target: java.io.File) {
+        require(isClassCode(code))
+        val request = Request.Builder().url("$SYNC_ORIGIN$SCHULNETZ_API_PATH/timetables/class/$code.pdf")
+            .header("Authorization", "Bearer ${session.token}")
+            .header(if (session.guest) "X-Kanti-Guest" else "X-FaNotes-Account", session.accountId)
+            .header("Accept", "application/pdf")
+            .build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw SchulnetzHttpException(response.code, "Der Stundenplan konnte nicht geladen werden (${response.code}).")
+            val bytes = response.body?.bytes() ?: ByteArray(0)
+            if (bytes.size < 8 || bytes.size > 5 * 1024 * 1024 || String(bytes, 0, 5, Charsets.ISO_8859_1) != "%PDF-") throw SchulnetzHttpException(response.code, "Ungültige Antwort des Servers.")
+            target.parentFile?.mkdirs()
+            val temporary = java.io.File(target.parentFile, target.name + ".part")
+            temporary.writeBytes(bytes)
+            if (!temporary.renameTo(target)) { temporary.delete(); throw java.io.IOException("rename failed") }
+        }
     }
 
     fun snapshot(session: SchoolAuth): String {
