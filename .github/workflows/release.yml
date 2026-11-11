@@ -268,6 +268,8 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - name: Install poppler and qpdf (timetable PDF pipeline test)
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils qpdf
       - name: Install Android SDK
         run: |
           set -euo pipefail
@@ -338,7 +340,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x gradlew
-          node --test ../fanotes-site/schulnetz-logic.test.mjs ../fanotes-site/sync-guard.test.mjs ../fanotes-site/kanti-web-api.test.mjs ../fanotes-site/absence-points.test.mjs ../fanotes-site/poll-schedule.test.mjs ../fanotes-site/grade-sla.test.mjs
+          node --test ../fanotes-site/schulnetz-logic.test.mjs ../fanotes-site/sync-guard.test.mjs ../fanotes-site/kanti-web-api.test.mjs ../fanotes-site/absence-points.test.mjs ../fanotes-site/poll-schedule.test.mjs ../fanotes-site/grade-sla.test.mjs ../fanotes-site/class-timetables.test.mjs
           if [ -z "${FANOTES_ANDROID_KEYSTORE_B64}" ] || [ -z "${FANOTES_ANDROID_KEYSTORE_PASSWORD}" ]; then
             echo "The Android release keystore is not configured." >&2
             exit 1
