@@ -4,8 +4,9 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createMensa, parseMensaHtml, pickMensaDay } from './mensa.mjs'
+import { createMensa, mensaQuery, parseMensaApi, parseMensaHtml, pickMensaDay } from './mensa.mjs'
 
+const apiFixture = JSON.parse(await fs.readFile(new URL('./test-fixtures/mensa-api-week.json', import.meta.url), 'utf8'))
 const fixture = await fs.readFile(new URL('./test-fixtures/mensa-alte-kanti.html', import.meta.url), 'utf8')
 
 test('parses the real page fixture', () => {
@@ -55,14 +56,75 @@ test('pickMensaDay chooses today, the next school day after 14:00 and after the 
   assert.equal(pickMensaDay([], new Date()), null)
 })
 
-const makeFetch = (calls, pages) => async (url, init) => {
+// A fake of the two sources. `pages` feeds the HTML page in order; the API answers from the fixture
+// unless `api` is false (then it fails). Every request is recorded in `calls`.
+const makeFetch = (calls, pages, { api = false } = {}) => async (url, init) => {
   calls.push({ url: String(url), init })
+  const text = String(url)
+  if (text.includes('/api/_Combine/')) {
+    if (!api) throw new Error('API down')
+    const kind = text.split('/api/_Combine/')[1].split('/')[0].toLowerCase()
+    return { ok: true, status: 200, text: async () => JSON.stringify(apiFixture[kind]) }
+  }
   const next = pages.shift()
   if (next instanceof Error) throw next
   return { ok: true, status: 200, text: async () => next }
 }
+const pageCalls = (calls) => calls.filter((call) => !call.url.includes('/api/')).length
+const menuCalls = (calls) => calls.filter((call) => call.url.includes('/api/_Combine/Menu/')).length
 
-test('cache: no refetch within the window, refetch after it, stale fallback on failure', async () => {
+test('parses the API week fixture', () => {
+  const { days } = parseMensaApi(apiFixture.menu)
+  assert.equal(days.length, 10)
+  assert.deepEqual(days.map((day) => day.weekday).slice(0, 5), ['Mo', 'Di', 'Mi', 'Do', 'Fr'])
+  assert.equal(days[0].date, '2026-11-09')
+  assert.deepEqual(days[1].menus[0], {
+    name: 'Pouletgeschnetzeltes ( CH )', description: 'Zürcher Art, Teigwaren und Tagesgemüse', label: 'Daily', price: 13.5, studentPrice: 10.5,
+  })
+  assert.equal(days[1].menus[1].label, 'Vegi')
+  assert.deepEqual(parseMensaApi({ status: 'ERROR' }), { days: [] })
+  assert.deepEqual(parseMensaApi(null), { days: [] })
+})
+
+test('week data finds the next school day (Friday to Monday)', () => {
+  const { days } = parseMensaApi(apiFixture.menu)
+  assert.equal(pickMensaDay(days, new Date('2026-11-13T14:00:00Z'))?.date, '2026-11-16') // Friday 15:00
+  assert.equal(pickMensaDay(days, new Date('2026-11-10T14:00:00Z'))?.date, '2026-11-11') // Tuesday 15:00
+})
+
+test('the query encoding matches the page', () => {
+  assert.equal(mensaQuery('Unit', ['ID', 'UnitName1', 'UnitWebsite1'], [['UnitWebsite1', 'eq', 'altekanti']], 1),
+    'Unit/MS0wJTJGJTJGSUQlMjZVbml0TmFtZTElMjZVbml0V2Vic2l0ZTElMkZVbml0V2Vic2l0ZTElM0RlcSUzQSU3QiU3QmFsdGVrYW50aSU3RCU3RA==')
+})
+
+test('the API is the primary source; only GETs to the allowed host', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-'))
+  const calls = []
+  const mensa = createMensa({ fetch: makeFetch(calls, [fixture], { api: true }), now: () => new Date('2026-11-13T14:00:00Z'), root, log: () => {} })
+  const body = await mensa.get()
+  assert.equal(pageCalls(calls), 0)
+  assert.equal(calls.length, 3) // unit, outlet, menus
+  for (const call of calls) {
+    assert.equal(new URL(call.url).hostname, 'clients.compass-group.ch')
+    assert.equal(call.init.method, 'GET')
+    assert.equal(call.init.headers['User-Agent'], 'Kanti+ menu reader (fasrv.ch)')
+  }
+  assert.equal(body.days.length, 10)
+  assert.equal(body.day.date, '2026-11-16')
+})
+
+test('falls back to the HTML page when the API fails', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-'))
+  const calls = []
+  const mensa = createMensa({ fetch: makeFetch(calls, [fixture]), now: () => new Date('2026-11-10T07:00:00Z'), root, log: () => {} })
+  const body = await mensa.get()
+  assert.equal(pageCalls(calls), 1)
+  assert.equal(body.days.length, 1)
+  assert.equal(body.day.date, '2026-11-10')
+  assert.equal(body.stale, false)
+})
+
+test('cache (page source): no refetch within the window, refetch after it, stale fallback on failure', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mensa-'))
   let clock = new Date('2026-11-10T05:00:00Z') // 06:00 Zurich, Tuesday
   const calls = []
@@ -70,29 +132,30 @@ test('cache: no refetch within the window, refetch after it, stale fallback on f
   const mensa = createMensa({ fetch: makeFetch(calls, pages), now: () => clock, root, log: () => {} })
 
   const first = await mensa.get()
-  assert.equal(calls.length, 1)
-  assert.equal(calls[0].url, 'https://clients.compass-group.ch/altekanti/de/Mensa%20Alte%20Kanti')
-  assert.equal(calls[0].init.method, 'GET')
-  assert.equal(calls[0].init.headers['User-Agent'], 'Kanti+ menu reader (fasrv.ch)')
+  const pageCall = calls.find((call) => !call.url.includes('/api/'))
+  assert.equal(pageCalls(calls), 1)
+  assert.equal(pageCall.url, 'https://clients.compass-group.ch/altekanti/de/Mensa%20Alte%20Kanti')
+  assert.equal(pageCall.init.method, 'GET')
+  assert.equal(pageCall.init.headers['User-Agent'], 'Kanti+ menu reader (fasrv.ch)')
   assert.equal(first.stale, false)
   assert.equal(first.day.date, '2026-11-10')
   assert.equal(JSON.parse(await fs.readFile(join(root, 'mensa.json'), 'utf8')).days.length, 1)
 
   clock = new Date(clock.getTime() + 2 * 3_600_000)
   await Promise.all([mensa.get(), mensa.get()])
-  assert.equal(calls.length, 1)
+  assert.equal(pageCalls(calls), 1)
 
   clock = new Date(clock.getTime() + 2 * 3_600_000) // 4 h old, school hours
   await Promise.all([mensa.get(), mensa.get()])
   await mensa.idle()
-  assert.equal(calls.length, 2)
+  assert.equal(pageCalls(calls), 2)
 
   clock = new Date(clock.getTime() + 3.5 * 3_600_000) // 13:30 Zurich, failing fetch
   const stale = await mensa.get()
   await mensa.idle()
-  assert.equal(calls.length, 3)
+  assert.equal(pageCalls(calls), 3)
   const after = await mensa.get()
-  assert.equal(calls.length, 3, 'no retry storm after a failure')
+  assert.equal(pageCalls(calls), 3, 'no retry storm after a failure')
   assert.equal(after.stale, true)
   assert.equal(after.days.length, 1)
   assert.equal(typeof stale.fetchedAt, 'string')
@@ -110,10 +173,38 @@ test('outside school hours the window is 12 hours', async () => {
   await mensa.get()
   clock = new Date(clock.getTime() + 5 * 3_600_000)
   await mensa.get(); await mensa.idle()
-  assert.equal(calls.length, 1)
+  assert.equal(pageCalls(calls), 1)
   clock = new Date(clock.getTime() + 8 * 3_600_000)
   await mensa.get(); await mensa.idle()
-  assert.equal(calls.length, 2)
+  assert.equal(pageCalls(calls), 2)
+})
+
+test('cache (API source): the outlet is looked up once, menus refresh by window, failure keeps the week', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-'))
+  let clock = new Date('2026-11-10T05:00:00Z')
+  const calls = []
+  let apiUp = true
+  const inner = makeFetch(calls, [fixture], { api: true })
+  const fetchImpl = async (url, init) => {
+    if (!apiUp) { calls.push({ url: String(url), init }); throw new Error('down') }
+    return inner(url, init)
+  }
+  const mensa = createMensa({ fetch: fetchImpl, now: () => clock, root, log: () => {} })
+  await mensa.get()
+  assert.equal(calls.length, 3)
+  clock = new Date(clock.getTime() + 2 * 3_600_000)
+  await mensa.get()
+  assert.equal(calls.length, 3)
+  clock = new Date(clock.getTime() + 2 * 3_600_000)
+  await mensa.get(); await mensa.idle()
+  assert.equal(menuCalls(calls), 2)
+  assert.equal(calls.length, 4, 'outlet id is reused')
+  apiUp = false
+  clock = new Date(clock.getTime() + 3.5 * 3_600_000)
+  await mensa.get(); await mensa.idle()
+  const after = await mensa.get()
+  assert.equal(after.stale, true)
+  assert.equal(after.days.length, 10)
 })
 
 test('first fetch failing gives an empty stale body', async () => {

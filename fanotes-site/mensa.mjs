@@ -1,12 +1,16 @@
-// Today's Mensa menu (Mensa Alte Kanti, run by Compass Group) for the Kanti+ start page.
-// The public page is an Angular app that is server-rendered for the current day only: the day tabs
-// Mo..So exist, but only the active tab ("Heute") carries a date and its menus. We parse whatever
-// dated day panels are present, merge them into the last good result and serve that from a cache.
+// The Mensa menu (Mensa Alte Kanti, run by Compass Group) for the Kanti+ start page.
+// Primary source: the public query API the menu page itself uses (anonymous GET on the same host):
+// the unit "altekanti" -> its outlet -> the outlet's menus for this and next week.
+// Fallback: the page is an Angular app that is server-rendered for the current day only (the active
+// tab "Heute" carries a date and its menus); we parse that. Either result is merged into the last
+// good result and served from a cache.
 import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 export const MENSA_HOST = 'clients.compass-group.ch'
 export const MENSA_URL = `https://${MENSA_HOST}/altekanti/de/Mensa%20Alte%20Kanti`
+export const MENSA_API = `https://${MENSA_HOST}/api/_Combine/`
+export const MENSA_UNIT = 'altekanti'
 export const MENSA_USER_AGENT = 'Kanti+ menu reader (fasrv.ch)'
 export const MENSA_PATHS = ['/api/v1/schulnetz/mensa', '/api/v1/kanti-web/mensa']
 
@@ -86,6 +90,57 @@ export const parseMensaHtml = (html) => {
   }
 }
 
+const languageText = (value) => {
+  if (typeof value !== 'string') return ''
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('{')) return trimmed.replace(/\s+/gu, ' ')
+  try {
+    const parsed = JSON.parse(trimmed)
+    const picked = typeof parsed?.DE === 'string' ? parsed.DE : Object.values(parsed || {}).find((entry) => typeof entry === 'string')
+    return String(picked || '').replace(/\s+/gu, ' ').trim()
+  } catch {
+    return trimmed
+  }
+}
+const apiPrice = (value) => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null)
+
+/** One query of the menu API: the table plus the base64 of the url-encoded "limit-offset/order/columns/where" text. */
+export const mensaQuery = (table, columns, where = [], limit = 100, order = '') => {
+  const text = [`${limit}-0`, order, columns.join('&'), ...(where.length ? [where.map(([column, operator, value]) => `${column}=${operator}:{{${value}}}`).join('&')] : [])].join('/')
+  return `${table}/${Buffer.from(encodeURIComponent(text), 'binary').toString('base64')}`
+}
+const apiRows = (body) => {
+  const data = body && typeof body === 'object' ? body.data : null
+  const rows = data && typeof data === 'object' ? Object.values(data)[0] : null
+  if (body?.status !== 'OK' || !Array.isArray(rows)) throw new Error('unexpected API answer')
+  return rows
+}
+
+/** Parses the menu API answer for the menus query. Never throws; unusable input gives { days: [] }. */
+export const parseMensaApi = (body) => {
+  try {
+    const byDate = new Map()
+    for (const row of apiRows(body)) {
+      const instant = new Date(row?.MenuDate1)
+      if (Number.isNaN(instant.getTime())) continue
+      const { date, weekday } = zurichParts(instant)
+      if (weekday === 'Sa' || weekday === 'So') continue
+      const name = languageText(row.MenuIngredients1)
+      if (!name) continue
+      const description = [row.MenuIngredients2, row.MenuIngredients3, row.MenuIngredients4].map(languageText).filter(Boolean).join(' ')
+      const menu = { name, description, label: languageText(row.Menuline?.MenulineLabel1), price: apiPrice(row.MenuPrice1), studentPrice: apiPrice(row.MenuPrice2) }
+      if (!byDate.has(date)) byDate.set(date, { date, weekday, closed: false, note: '', menus: [] })
+      byDate.get(date).menus.push({ order: Number(row.MenuOrder1) || 0, menu })
+    }
+    const days = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).map((day) => ({
+      ...day, menus: day.menus.sort((a, b) => a.order - b.order).map((entry) => entry.menu),
+    }))
+    return { days }
+  } catch {
+    return { days: [] }
+  }
+}
+
 const addDays = (date, count) => {
   const value = new Date(`${date}T12:00:00Z`)
   value.setUTCDate(value.getUTCDate() + count)
@@ -142,12 +197,11 @@ export const createMensa = (options = {}) => {
     }
   }
 
-  const download = async () => {
-    const url = new URL(MENSA_URL)
-    if (url.hostname !== MENSA_HOST) throw new Error('unexpected host')
+  const getText = async (url) => {
+    if (url.protocol !== 'https:' || url.hostname !== MENSA_HOST) throw new Error('unexpected host')
     const response = await fetchImpl(url, {
       method: 'GET',
-      headers: { 'User-Agent': MENSA_USER_AGENT, Accept: 'text/html' },
+      headers: { 'User-Agent': MENSA_USER_AGENT, Accept: 'text/html,application/json' },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -155,12 +209,51 @@ export const createMensa = (options = {}) => {
     if (body.length > MAX_HTML_BYTES) throw new Error('page too large')
     return body
   }
+  const download = () => getText(new URL(MENSA_URL))
+
+  // Ids of the unit and its outlet are looked up once and kept until a request fails.
+  let outletId = null
+  const queryApi = async (query) => apiRows(JSON.parse(await getText(new URL(`${MENSA_API}${query}`))))
+  const downloadApi = async () => {
+    try {
+      if (!outletId) {
+        const units = await queryApi(mensaQuery('Unit', ['ID', 'UnitName1'], [['UnitWebsite1', 'eq', MENSA_UNIT]], 1))
+        const unit = Number(units[0]?.ID)
+        if (!Number.isInteger(unit) || unit <= 0) throw new Error('unit not found')
+        const outlets = await queryApi(mensaQuery('Outlet', ['ID', 'OutletName1', 'OutletWeekdays1'], [['Unit', 'eq', unit]], 20, '+OutletOrder1'))
+        const outlet = Number(outlets[0]?.ID)
+        if (!Number.isInteger(outlet) || outlet <= 0) throw new Error('outlet not found')
+        outletId = outlet
+      }
+      // From Monday of this week to the end of next week.
+      const today = zurichParts(now()).date
+      const monday = addDays(today, -((new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7))
+      const columns = ['ID', 'MenuDate1', 'MenuIngredients1', 'MenuIngredients2', 'MenuIngredients3', 'MenuIngredients4', 'MenuPrice1', 'MenuPrice2', 'Menuline.MenulineLabel1', 'MenuOrder1']
+      const query = mensaQuery('Menu', columns, [['MenuDate1', 'bt', `${monday}|${addDays(monday, 13)}`], ['Outlet', 'eq', outletId]], 100, '+MenuDate1&+MenuOrder1')
+      const parsed = parseMensaApi(JSON.parse(await getText(new URL(`${MENSA_API}${query}`))))
+      if (!parsed.days.length) throw new Error('no menus in API answer')
+      return parsed
+    } catch (error) {
+      outletId = null
+      throw error
+    }
+  }
+
+  /** The API first; when it fails the server-rendered page (today only). */
+  const readMenus = async () => {
+    try {
+      return await downloadApi()
+    } catch (error) {
+      log('warn', `menu API failed, using the page: ${String(error?.message || error).slice(0, 80)}`)
+      return parseMensaHtml(await download())
+    }
+  }
 
   const refresh = () => {
     if (inflight) return inflight
     inflight = (async () => {
       try {
-        const parsed = parseMensaHtml(await download())
+        const parsed = await readMenus()
         if (!parsed.days.length) throw new Error('no menu days found')
         const instant = now()
         const keepFrom = zurichParts(new Date(instant.getTime() - KEEP_DAYS_MS)).date
