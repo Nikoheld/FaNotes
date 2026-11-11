@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -874,6 +875,7 @@ private fun WebAccessSettings(model: CompanionModel) {
                             )
                             PrimaryButton(t(R.string.web_pair_continue), { model.lookupWebPair(code) }, Modifier.fillMaxWidth().padding(top = 12.dp), enabled = !model.busy && normalizePairCode(code) != null)
                             TextButton(onClick = { model.startWebOffer() }, enabled = !model.busy, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text(t(R.string.web_offer_show)) }
+                            if (model.webPairWorking) WebPairProgress()
                         }
                     }
                 }
@@ -931,6 +933,15 @@ private fun WebAccessSettings(model: CompanionModel) {
     model.webPairOffer?.let { offer -> WebOfferDialog(model, offer) }
 }
 
+/** "Verbinde mit dem Kanti+-Server…" while a pairing request runs (it runs off the main thread). */
+@Composable
+private fun WebPairProgress() {
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp).semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        Text(t(R.string.web_pair_working), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
 /** The connection chooser shared by both pairing directions. */
 @Composable
 private fun WebPairChooser(model: CompanionModel, title: String, intro: String, warning: Boolean, confirm: String, key: Any, onConfirm: (List<String>) -> Unit, onDismiss: () -> Unit) {
@@ -959,6 +970,7 @@ private fun WebPairChooser(model: CompanionModel, title: String, intro: String, 
                     }
                 }
                 if (tamChosen) Text(t(R.string.web_pair_tam_note), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 10.dp))
+                if (model.webPairWorking) WebPairProgress()
             }
         },
         confirmButton = {

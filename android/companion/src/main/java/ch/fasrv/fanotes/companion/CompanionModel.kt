@@ -800,36 +800,43 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     /** True when some connection can be shared with a browser. */
     val webAccessAvailable: Boolean get() = !demo && connections.connections.isNotEmpty()
 
+    /** True while a pairing request is out; the screens show a progress row. */
+    var webPairWorking by mutableStateOf(false)
+        private set
+
+    /** Runs one pairing step off the main thread with progress and a readable error. */
+    private fun webPairStep(step: suspend () -> Unit) {
+        busy = true
+        webPairWorking = true
+        viewModelScope.launch {
+            try {
+                step()
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                message = webPairMessage(error)
+            } finally {
+                busy = false
+                webPairWorking = false
+            }
+        }
+    }
+
     fun lookupWebPair(raw: String) {
         val code = ch.fasrv.fanotes.schulnetz.normalizePairCode(raw)
         if (code == null) { message = t(R.string.web_pair_code_invalid); return }
         if (busy) { message = t(R.string.web_pair_busy); return }
         if (!webAccessAvailable) { message = t(R.string.web_pair_unavailable); return }
-        busy = true
-        viewModelScope.launch {
-            try {
-                webPairPrompt = WebPairPrompt(code, graph.webPairInfo(code))
-            } catch (error: Exception) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
-                message = webPairMessage(error)
-            } finally { busy = false }
-        }
+        webPairStep { webPairPrompt = WebPairPrompt(code, graph.webPairInfo(code)) }
     }
 
     fun approveWebPair(connectionIds: List<String>) {
         val prompt = webPairPrompt ?: return
         if (busy || connectionIds.isEmpty()) return
-        busy = true
-        viewModelScope.launch {
-            try {
-                graph.approveWebPair(prompt.code, connectionIds)
-                webPairPrompt = null
-                message = t(R.string.web_pair_done)
-                webBrowsers = graph.webBrowsers()
-            } catch (error: Exception) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
-                message = webPairMessage(error)
-            } finally { busy = false }
+        webPairStep {
+            graph.approveWebPair(prompt.code, connectionIds)
+            webPairPrompt = null
+            message = t(R.string.web_pair_done)
+            webBrowsers = graph.webBrowsers()
         }
     }
 
@@ -850,16 +857,10 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
 
     fun offerWebPair(connectionIds: List<String>) {
         if (busy || connectionIds.isEmpty()) return
-        busy = true
-        viewModelScope.launch {
-            try {
-                webPairOffer = graph.offerWebPair(connectionIds)
-                webOfferChoosing = false
-                webBrowsers = graph.webBrowsers()
-            } catch (error: Exception) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
-                message = webPairMessage(error)
-            } finally { busy = false }
+        webPairStep {
+            webPairOffer = graph.offerWebPair(connectionIds)
+            webOfferChoosing = false
+            webBrowsers = graph.webBrowsers()
         }
     }
 
@@ -889,6 +890,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         val status = when (error) {
             is SchulnetzHttpException -> error.status
             is java.io.IOException -> 0
+            is java.util.concurrent.TimeoutException -> 0
             else -> -1
         }
         val generic = when (ch.fasrv.fanotes.schulnetz.webPairFailure(status)) {
@@ -1007,7 +1009,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             try {
                 graph.gate.exclusive("disconnect") {
                     val auth = runCatching { graph.schoolAuth() }.getOrNull()
-                    if (auth != null) runCatching { graph.client.unlink(auth) }
+                    if (auth != null) runCatching { withContext(Dispatchers.IO) { graph.client.unlink(auth) } }
                     withContext(Dispatchers.IO) { graph.disconnectSchool() }
                 }
                 message = t(R.string.schulnetz_disconnected)
@@ -1331,7 +1333,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 message = if (CompanionAlerts.notificationsAllowed(context)) t(R.string.local_test_sent) else t(R.string.notifications_off_settings)
                 return@launch
             }
-            runCatching { graph.client.testPush(auth) }
+            runCatching { withContext(Dispatchers.IO) { graph.client.testPush(auth) } }
                 .onSuccess { message = t(R.string.test_notification_sent) }
                 .onFailure { error ->
                     message = t(R.string.local_notification_server, shownText(error.message))
@@ -1504,7 +1506,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 message = t(R.string.diagnostic_reset_local)
                 return@launch
             }
-            runCatching { graph.client.clearProbe(auth, token) }
+            runCatching { withContext(Dispatchers.IO) { graph.client.clearProbe(auth, token) } }
                 .onSuccess { cleared -> message = if (cleared.failed) t(R.string.diagnostic_reset_server_failed) else t(R.string.diagnostic_reset_done) }
                 .onFailure { message = t(R.string.diagnostic_reset_server_failed) }
         }
@@ -1545,7 +1547,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
                 message = t(R.string.delivery_probe_needs_token)
                 return@launch
             }
-            runCatching { graph.client.probePush(auth, token, scenario) }
+            runCatching { withContext(Dispatchers.IO) { graph.client.probePush(auth, token, scenario) } }
                 .onSuccess { ack ->
                     val detail = ack.correlation.takeIf { it.matches(Regex("^probe:[0-9]{1,20}$")) }.orEmpty()
                     DiagnosticTrace.record("push", "sent", 0, "ok", detail)

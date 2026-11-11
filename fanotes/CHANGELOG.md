@@ -1,5 +1,11 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.28
+
+- Fix: pairing Kanti+ im Browser failed with "NetworkOnMainThreadException". Pairing, the browser list and removing a browser now run in the background, with a progress row and a clear error after 15 seconds instead of a hang.
+- Fix: removing a connection or signing out now really unlinks it on the server; the request used to fail silently on the main thread.
+- Every request of the app refuses to run on the main thread, and debug builds crash on such a request (StrictMode), so this cannot slip back in unnoticed.
+
 ## 2026.11.2-beta.27
 
 - Pendelstrecken: pick the one connection you always take (for every day or per weekday); the route card, Heute, the widget, the web app and the alerts then follow exactly that train or bus, and the other connections are one tap away.

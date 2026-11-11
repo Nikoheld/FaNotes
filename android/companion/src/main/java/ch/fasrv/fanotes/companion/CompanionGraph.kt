@@ -134,7 +134,11 @@ import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
-class CompanionGraph(private val context: Context) {
+/**
+ * [client] is replaceable for tests. Every suspend function the screens call here is main-safe: it does
+ * its network and disk work on [Dispatchers.IO] itself (the client refuses to run on the main thread).
+ */
+class CompanionGraph(private val context: Context, val client: SchulnetzClient = SchulnetzClient()) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
     private val secrets = VaultSecrets(context)
@@ -145,7 +149,6 @@ class CompanionGraph(private val context: Context) {
     @Volatile var busyPaths: Set<String> = emptySet()
     val snapshot = MutableStateFlow(SchulnetzSnapshot())
     val link = MutableStateFlow(SchulnetzLinkState())
-    val client = SchulnetzClient()
     val mensaStore by lazy { MensaStore(File(context.filesDir, "mensa.json"), client) }
     /** Tests switch this off so a UI test never reaches the commute server. */
     @Volatile internal var commuteRequestsAllowed = true
@@ -323,15 +326,15 @@ class CompanionGraph(private val context: Context) {
      * Kanti+ im Browser: the browser shows a code, the user approves it here for some connections.
      * Each connection joins the pairing with its own server identity; the last one finishes it.
      */
-    suspend fun webPairInfo(code: String): WebPairInfo {
+    suspend fun webPairInfo(code: String): WebPairInfo = withContext(Dispatchers.IO) {
         if (demoActive()) throw DemoModeException()
         // Any connection that already has a server identity can look the code up.
         val asker = sessions().firstOrNull { it.serverShared() } ?: current()
-        return client.webPairInfo(asker.schoolAuth(), code)
+        client.webPairInfo(asker.schoolAuth(), code)
     }
 
     /** Shares the connections with [ids] (in list order) with the browser behind [code]. */
-    suspend fun approveWebPair(code: String, ids: List<String>) {
+    suspend fun approveWebPair(code: String, ids: List<String>) = withContext(Dispatchers.IO) {
         if (demoActive()) throw DemoModeException()
         val chosen = sessions().filter { it.id in ids }
         require(chosen.isNotEmpty())
@@ -342,7 +345,7 @@ class CompanionGraph(private val context: Context) {
     }
 
     /** Gets a code from the server and joins the connections with [ids] to it; the browser enters the code later. */
-    suspend fun offerWebPair(ids: List<String>): WebPairOffer {
+    suspend fun offerWebPair(ids: List<String>): WebPairOffer = withContext(Dispatchers.IO) {
         if (demoActive()) throw DemoModeException()
         val chosen = sessions().filter { it.id in ids }
         require(chosen.isNotEmpty())
@@ -352,19 +355,19 @@ class CompanionGraph(private val context: Context) {
             chosen.forEachIndexed { index, session -> session.joinWebPairing(offer.code, finish = index == chosen.lastIndex) }
         }
         rearmSchoolDelivery()
-        return offer
+        offer
     }
 
     /** Browsers per connection id; a connection that could not be asked is left out. */
-    suspend fun webBrowsers(): Map<String, List<WebBrowserSession>> {
-        if (demoActive()) return emptyMap()
-        return sessions().mapNotNull { session ->
+    suspend fun webBrowsers(): Map<String, List<WebBrowserSession>> = withContext(Dispatchers.IO) {
+        if (demoActive()) return@withContext emptyMap()
+        sessions().mapNotNull { session ->
             runCatching { session.id to session.webBrowsers() }.onFailure { schulnetzLog.error(it) }.getOrNull()
         }.toMap()
     }
 
-    suspend fun revokeWebBrowser(connectionId: String, sessionId: String) {
-        val session = sessionById(connectionId) ?: return
+    suspend fun revokeWebBrowser(connectionId: String, sessionId: String) = withContext(Dispatchers.IO) {
+        val session = sessionById(connectionId) ?: return@withContext
         session.revokeWebBrowser(sessionId)
     }
 
@@ -455,7 +458,7 @@ class CompanionGraph(private val context: Context) {
     fun schoolDisconnected(): Boolean = current().schoolDisconnected()
     fun disconnectSchool() = current().disconnectSchool()
     fun clearLoginPrompt() = current().clearLoginPrompt()
-    suspend fun schoolAuth(): SchoolAuth = current().schoolAuth()
+    suspend fun schoolAuth(): SchoolAuth = withContext(Dispatchers.IO) { current().schoolAuth() }
     /** Other classes and rooms of the Alte Kanti; empty (not available) for any other connection. */
     suspend fun classTimetables(): ch.fasrv.fanotes.schulnetz.ClassTimetableSummary = withContext(Dispatchers.IO) { client.classTimetables(schoolAuth()) }
     suspend fun classTimetable(code: String): ch.fasrv.fanotes.schulnetz.ClassWeek = withContext(Dispatchers.IO) { client.classTimetable(schoolAuth(), code) }
@@ -1128,7 +1131,7 @@ class CompanionGraph(private val context: Context) {
             // A TAM connection has server data only when it was shared with a browser.
             if (connection.provider == SchoolProvider.SCHULNETZ || prefs.getBoolean(TAM_DEVICE_LINK_PREF, false) || readGuestFile() != null) {
                 val auth = runCatching { if (slot == PRIMARY_SLOT && engine.currentSession() != null) schoolAuth() else readGuestFile() }.getOrNull()
-                if (auth != null) {
+                if (auth != null) withContext(Dispatchers.IO) {
                     runCatching { client.unlink(auth) }.onFailure { schulnetzLog.error(it) }
                     if (auth.guest) runCatching { client.deleteGuest(auth) }.onFailure { schulnetzLog.error(it) }
                 }
@@ -1234,13 +1237,13 @@ class CompanionGraph(private val context: Context) {
         }
 
         /** Every browser that can read this connection (Kanti+ im Browser). */
-        suspend fun webBrowsers(): List<WebBrowserSession> {
-            if (demoActive() || !serverShared()) return emptyList()
+        suspend fun webBrowsers(): List<WebBrowserSession> = withContext(Dispatchers.IO) {
+            if (demoActive() || !serverShared()) return@withContext emptyList()
             val auth = schoolAuth()
-            return client.webSessions(auth)
+            client.webSessions(auth)
         }
 
-        suspend fun revokeWebBrowser(id: String) {
+        suspend fun revokeWebBrowser(id: String) = withContext(Dispatchers.IO) {
             val auth = schoolAuth()
             client.revokeWebSession(auth, id)
             // A TAM connection no browser reads any more leaves the server at once.
@@ -1258,7 +1261,7 @@ class CompanionGraph(private val context: Context) {
          * Adds this connection to a browser pairing. A TAM connection first gets a device link and its
          * current read, so the browser has something to show; nothing TAM-related was on the server before.
          */
-        internal suspend fun joinWebPairing(code: String, finish: Boolean) {
+        internal suspend fun joinWebPairing(code: String, finish: Boolean) = withContext(Dispatchers.IO) {
             val auth = schoolAuth()
             if (connection.provider == SchoolProvider.TAM) {
                 client.linkDevice(auth, baseUrl(), deviceId(), connection.label)
@@ -1539,7 +1542,7 @@ class CompanionGraph(private val context: Context) {
             // An install that registered before push keys existed sends its key once.
             val keyMissing = prefs.getString("fcm-sent-key", "").orEmpty() != key
             if (!keyMissing && !fcmTokenNeedsUpload(token, session.accountId, sentToken, sentAccount, sentAt, now, false)) return
-            val uploaded = runCatching { client.registerFcmToken(session, token, key) }.onFailure { schulnetzLog.error(it) }.isSuccess
+            val uploaded = runCatching { withContext(Dispatchers.IO) { client.registerFcmToken(session, token, key) } }.onFailure { schulnetzLog.error(it) }.isSuccess
             if (!uploaded) return
             prefs.edit()
                 .putString("fcm-sent-token", token)
@@ -2151,7 +2154,7 @@ class CompanionGraph(private val context: Context) {
         suspend fun ensureGuest(): SchoolAuth = guestLock.withLock {
             if (demoActive()) throw DemoModeException()
             readGuestFile()?.let { return@withLock it }
-            val created = client.createGuest()
+            val created = withContext(Dispatchers.IO) { client.createGuest() }
             writeGuestFile(created)
             created
         }
@@ -2160,7 +2163,7 @@ class CompanionGraph(private val context: Context) {
             if (readGuestFile() == null) return
             guestLock.withLock {
                 val guest = readGuestFile() ?: return@withLock
-                runCatching { client.adopt(SchoolAuth(session.accountId, session.token, false), guest.accountId, guest.token) }
+                runCatching { withContext(Dispatchers.IO) { client.adopt(SchoolAuth(session.accountId, session.token, false), guest.accountId, guest.token) } }
                     .onSuccess { revision ->
                         deleteGuestFile()
                         rememberRevision(revision)
@@ -2188,19 +2191,21 @@ class CompanionGraph(private val context: Context) {
             val session = engine.currentSession() ?: return
             val guest = ensureGuest()
             runCatching {
-                client.detach(
-                    SchoolAuth(session.accountId, session.token, false),
-                    guest.accountId,
-                    guest.token,
-                    globalPrefs.getString("fcm-token", null),
-                )
+                withContext(Dispatchers.IO) {
+                    client.detach(
+                        SchoolAuth(session.accountId, session.token, false),
+                        guest.accountId,
+                        guest.token,
+                        globalPrefs.getString("fcm-token", null),
+                    )
+                }
             }.onSuccess { rememberRevision(it) }.onFailure { schulnetzLog.error(it) }
         }
 
         /** Remove the anonymous identity's server data and this device's school cache. Tasks and calendar stay. */
         suspend fun deleteKantiData() {
             val auth = readGuestFile() ?: ensureGuest()
-            if (auth.guest) client.deleteGuest(auth)
+            if (auth.guest) withContext(Dispatchers.IO) { client.deleteGuest(auth) }
             deleteGuestFile()
             clearSchoolCache()
             ensureGuest()
