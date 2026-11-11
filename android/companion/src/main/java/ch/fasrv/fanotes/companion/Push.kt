@@ -53,6 +53,7 @@ import ch.fasrv.fanotes.schulnetz.hiddenGradePortraitUrl
 import ch.fasrv.fanotes.schulnetz.changeFromPayload
 import ch.fasrv.fanotes.schulnetz.gradeTargetId
 import ch.fasrv.fanotes.schulnetz.settleGradeNotifications
+import ch.fasrv.fanotes.schulnetz.activeGroupSets
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.hiddenGradeBody
 import ch.fasrv.fanotes.schulnetz.hiddenGradeTitle
@@ -269,10 +270,13 @@ object CompanionAlerts {
             val file = java.io.File(context.filesDir, "vault/${slotVaultPath(scope.slot, CompanionGraph.HIDDEN_PATH)}")
             if (!file.isFile) emptyList() else parseHiddenLessons(file.readText())
         }.getOrDefault(emptyList())
-        if (changeIsHidden(change, hidden)) return
         val prefs = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE)
         val guess = slotPrefs(context, scope).getBoolean(CompanionGraph.GUESS_GRADES_PREF, false)
         val snapshot = CompanionGraph.snapshotFile(context, scope.slot).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
+        val groupChoices = runCatching {
+            java.io.File(context.filesDir, "vault/${CompanionGraph.DESK_PATH}").takeIf { it.isFile }?.readText()?.let { parseDeskPrefs(it).groupChoices }
+        }.getOrNull().orEmpty()
+        if (changeIsHidden(change, hidden, activeGroupSets(snapshot?.events.orEmpty(), groupChoices), groupChoices)) return
         var shown = change
         if (guess && change.category == "grade" && !isNotificationProbe(change.id)) {
             rememberUnrevealed(context, change.linkIds(), scope)
@@ -767,7 +771,7 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
         }
 
         /** What the widget and its list factory both read: the shown connection's snapshot, hidden lessons and the compact setting. */
-        internal class WidgetData(val snapshot: SchulnetzSnapshot?, val hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, val compact: Boolean)
+        internal class WidgetData(val snapshot: SchulnetzSnapshot?, val hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, val compact: Boolean, val groupChoices: Map<String, List<String>> = emptyMap())
 
         internal fun loadData(context: Context): WidgetData {
             val demo = context.getSharedPreferences("fanotes-companion", Context.MODE_PRIVATE).getBoolean(CompanionGraph.DEMO_PREF, false)
@@ -777,12 +781,12 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             val snapshot = if (demo) ch.fasrv.fanotes.schulnetz.demoSnapshot(java.time.LocalDate.now(ch.fasrv.fanotes.schulnetz.SCHOOL_ZONE))
                 else CompanionGraph.snapshotFile(context, slot).takeIf { it.isFile }?.readText()?.let { parseNormalizedSnapshot(it) }
             val hidden = java.io.File(context.filesDir, "vault/${slotVaultPath(slot, CompanionGraph.HIDDEN_PATH)}").takeIf { it.isFile }?.readText()?.let { parseHiddenLessons(it) }.orEmpty()
-            val compact = java.io.File(context.filesDir, "vault/${CompanionGraph.DESK_PATH}").takeIf { it.isFile }?.readText()?.let { parseDeskPrefs(it).widgetCompact } == true
-            return WidgetData(snapshot, hidden, compact)
+            val desk = java.io.File(context.filesDir, "vault/${CompanionGraph.DESK_PATH}").takeIf { it.isFile }?.readText()?.let { parseDeskPrefs(it) }
+            return WidgetData(snapshot, hidden, desk?.widgetCompact == true, desk?.groupChoices.orEmpty())
         }
 
         internal fun rowsFor(data: WidgetData, zone: ZoneId): List<ch.fasrv.fanotes.schulnetz.WidgetRow> =
-            data.snapshot?.let { ch.fasrv.fanotes.schulnetz.widgetRows(it.events, it.exams, data.hidden, java.time.Instant.now(), zone) }.orEmpty()
+            data.snapshot?.let { ch.fasrv.fanotes.schulnetz.widgetRows(it.events, it.exams, data.hidden, java.time.Instant.now(), zone, data.groupChoices) }.orEmpty()
 
         /** Template for the list rows; each row's fill-in intent carries its own target. */
         internal fun rowTemplate(context: Context): PendingIntent =
@@ -813,7 +817,7 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
             }
             // The list factory reloads its rows from the same cache.
             if (ids.isNotEmpty()) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
-            scheduleWidgetTick(context, snapshot, hidden, zone)
+            scheduleWidgetTick(context, snapshot, hidden, zone, data.groupChoices)
         }
 
         private fun widgetViews(context: Context, widgetId: Int, span: WidgetSpan, lessons: List<ch.fasrv.fanotes.schulnetz.AgendaEvent>, zone: ZoneId, unread: Boolean = false): RemoteViews {
@@ -855,7 +859,7 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
         private fun lessonClock(event: ch.fasrv.fanotes.schulnetz.AgendaEvent, zone: ZoneId): String =
             ch.fasrv.fanotes.schulnetz.lessonClockText(event, zone)
 
-        private fun scheduleWidgetTick(context: Context, snapshot: SchulnetzSnapshot?, hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, zone: ZoneId) {
+        private fun scheduleWidgetTick(context: Context, snapshot: SchulnetzSnapshot?, hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, zone: ZoneId, groupChoices: Map<String, List<String>> = emptyMap()) {
             val alarm = context.getSystemService(AlarmManager::class.java) ?: return
             val pending = widgetTickIntent(context)
             val ids = AppWidgetManager.getInstance(context).getAppWidgetIds(ComponentName(context, NextLessonWidget::class.java))
@@ -863,7 +867,7 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
                 alarm.cancel(pending)
                 return
             }
-            val boundary = snapshot?.let { nextLessonBoundary(ch.fasrv.fanotes.schulnetz.mergedScheduleEvents(it.events, it.exams, hidden, zone), java.time.Instant.now(), zone) }
+            val boundary = snapshot?.let { nextLessonBoundary(ch.fasrv.fanotes.schulnetz.mergedScheduleEvents(it.events, it.exams, hidden, zone, groupChoices), java.time.Instant.now(), zone) }
             if (boundary == null) {
                 alarm.cancel(pending)
                 return

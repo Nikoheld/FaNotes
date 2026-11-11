@@ -85,6 +85,8 @@ data class DeskPrefs(
     val navBar: List<String> = DEFAULT_NAV_BAR,
     /** With guess-the-grade, a hidden mark opens only after a long press. */
     val revealLongPress: Boolean = false,
+    /** Half-class choice: group set key to the chosen course labels. Missing or empty shows all. */
+    val groupChoices: Map<String, List<String>> = emptyMap(),
 )
 
 fun lessonClock(event: AgendaEvent, zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich")): String {
@@ -143,8 +145,18 @@ fun lessonHidden(event: AgendaEvent, rules: List<HiddenLesson>, zone: java.time.
     }
 }
 
-fun visibleEvents(events: List<AgendaEvent>, rules: List<HiddenLesson>, zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich")): List<AgendaEvent> =
-    events.filterNot { lessonHidden(it, rules, zone) }
+fun visibleEvents(
+    events: List<AgendaEvent>,
+    rules: List<HiddenLesson>,
+    zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich"),
+    groupSets: List<GroupSet> = emptyList(),
+    groupChoices: Map<String, List<String>> = emptyMap(),
+): List<AgendaEvent> =
+    events.filterNot { lessonHidden(it, rules, zone) || lessonHiddenByGroup(it, groupSets, groupChoices) }
+
+/** Group sets worth detecting only when a choice exists; empty otherwise. */
+fun activeGroupSets(events: List<AgendaEvent>, groupChoices: Map<String, List<String>>): List<GroupSet> =
+    if (groupChoices.isEmpty()) emptyList() else detectGroupSets(events)
 
 fun eventInHours(event: AgendaEvent, startHour: Int, endHour: Int, zone: java.time.ZoneId = java.time.ZoneId.of("Europe/Zurich")): Boolean {
     val hour = event.startsAt(zone)?.atZone(zone)?.hour ?: return true
@@ -174,7 +186,13 @@ fun shownTodayCards(prefs: DeskPrefs): List<String> {
     return (order + rest).filter { it in TODAY_CARD_IDS && it !in hidden }
 }
 
-fun changeIsHidden(change: SchulnetzChange, rules: List<HiddenLesson>): Boolean {
+fun changeIsHidden(
+    change: SchulnetzChange,
+    rules: List<HiddenLesson>,
+    groupSets: List<GroupSet> = emptyList(),
+    groupChoices: Map<String, List<String>> = emptyMap(),
+): Boolean {
+    if (changeHiddenByGroup(change, groupSets, groupChoices)) return true
     if (change.category != "timetable" || rules.isEmpty()) return false
     val eventId = change.id.split(':').getOrNull(1).orEmpty()
     if (rules.any { it.eventId == eventId && it.eventId.isNotBlank() }) return true
@@ -230,6 +248,11 @@ fun parseDeskPrefs(json: String): DeskPrefs {
         val name = (value as? ch.fasrv.fanotes.json.JsonValue.Str)?.value ?: return@forEach
         if (key.isNotBlank() && name.isNotBlank()) aliases[key.lowercase()] = name
     }
+    val choices = linkedMapOf<String, List<String>>()
+    obj.obj("groupChoices")?.fields?.forEach { (key, value) ->
+        val labels = (value as? ch.fasrv.fanotes.json.JsonValue.Arr)?.items?.mapNotNull { (it as? ch.fasrv.fanotes.json.JsonValue.Str)?.value?.takeIf(String::isNotBlank) }.orEmpty()
+        if (key.isNotBlank() && labels.isNotEmpty()) choices[key] = labels
+    }
     return DeskPrefs(
         accent = if (Regex("^#[0-9A-Fa-f]{6}$").matches(accent)) accent.lowercase() else "#2a6f97",
         theme = obj.string("theme").orEmpty().ifBlank { "system" },
@@ -248,6 +271,7 @@ fun parseDeskPrefs(json: String): DeskPrefs {
         startTab = obj.string("startTab").orEmpty().ifBlank { "Heute" },
         navBar = validateNavBar(obj.array("navBar")?.items?.mapNotNull { (it as? ch.fasrv.fanotes.json.JsonValue.Str)?.value }),
         revealLongPress = obj.bool("revealLongPress") == true,
+        groupChoices = choices,
     )
 }
 
@@ -286,5 +310,13 @@ fun serializeDeskPrefs(prefs: DeskPrefs): String = buildString {
     }
     append("]")
     append(",\"revealLongPress\":").append(prefs.revealLongPress)
+    append(",\"groupChoices\":{")
+    prefs.groupChoices.entries.filter { it.value.isNotEmpty() }.forEachIndexed { index, (key, labels) ->
+        if (index > 0) append(',')
+        append(ch.fasrv.fanotes.json.escapeJson(key)).append(":[")
+        labels.forEachIndexed { i, label -> if (i > 0) append(','); append(ch.fasrv.fanotes.json.escapeJson(label)) }
+        append(']')
+    }
+    append('}')
     append('}')
 }

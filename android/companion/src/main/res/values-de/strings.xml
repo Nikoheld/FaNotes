@@ -1160,4 +1160,14 @@
     <string name="delivery_no_push">Push ist auf diesem Gerät nicht verfügbar. Kanti+ prüft etwa alle %1$s.</string>
     <string name="interval_minutes">%1$d Minuten</string>
     <string name="interval_hours">%1$d Stunden</string>
+    <string name="half_class_groups">Halbklassen</string>
+    <string name="half_class_row">Wähle pro Fach deine Gruppe; Lektionen der anderen Gruppen werden ausgeblendet.</string>
+    <string name="half_class_all">Alle anzeigen</string>
+    <string name="half_class_onboarding_title">Halbklasse wählen</string>
+    <string name="half_class_onboarding_body">Lektionen der anderen Gruppe werden ausgeblendet. Du kannst das später in den Einstellungen ändern.</string>
+    <string name="half_class_none">In deinem Stundenplan wurden keine Halbklassen gefunden.</string>
+    <plurals name="half_class_per_week">
+        <item quantity="one">%d Lektion pro Woche</item>
+        <item quantity="other">%d Lektionen pro Woche</item>
+    </plurals>
 </resources>

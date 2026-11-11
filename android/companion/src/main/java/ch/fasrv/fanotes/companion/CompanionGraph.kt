@@ -88,6 +88,7 @@ import ch.fasrv.fanotes.schulnetz.HiddenLesson
 import ch.fasrv.fanotes.schulnetz.changeFromObj
 import ch.fasrv.fanotes.schulnetz.isNotificationProbe
 import ch.fasrv.fanotes.schulnetz.probeDeviceKey
+import ch.fasrv.fanotes.schulnetz.activeGroupSets
 import ch.fasrv.fanotes.schulnetz.changeIsHidden
 import ch.fasrv.fanotes.schulnetz.parseDeskPrefs
 import ch.fasrv.fanotes.schulnetz.parseGradeBook
@@ -1929,6 +1930,8 @@ class CompanionGraph(private val context: Context) {
             if (demoActive() || incoming.isDemo()) return
             val next = incoming.copy(grades = ch.fasrv.fanotes.schulnetz.keepGradeRead(previous?.grades.orEmpty(), incoming.grades, incoming.trustedGradeRead()))
             val hidden = hiddenLessons()
+            val groupChoices = deskPrefs().groupChoices
+            val groupSets = activeGroupSets((next.events + previous?.events.orEmpty()).distinctBy { it.id + it.start }, groupChoices)
             val local = notifySettings()
             val effective = settings.copy(guessGrades = local.guessGrades)
             val prior = previous?.takeIf { it.fetchedAt.isNotBlank() || it.grades.isNotEmpty() || it.events.isNotEmpty() }
@@ -1949,7 +1952,7 @@ class CompanionGraph(private val context: Context) {
             // Fallback check: drop a disabled school alert before it can be posted. An empty list still stores the snapshot below.
             val raw = diffSnapshots(before, next, effective)
                 .filter { schoolAlertGate(effective, it, notificationsPermitted = true) == AlertGate.DELIVER }
-                .filterNot { changeIsHidden(it, hidden) }
+                .filterNot { changeIsHidden(it, hidden, groupSets, groupChoices) }
             val allowed = CompanionAlerts.notificationsAllowed(context)
             val changes = if (allowed || readGradeLedger(context, slot) == null) {
                 CompanionAlerts.settledChanges(alerts, context, raw, prior?.grades.orEmpty() + next.grades)
@@ -1991,7 +1994,7 @@ class CompanionGraph(private val context: Context) {
             val visible = CompanionAlerts.settledChanges(
                 context,
                 items.filter { schoolAlertGate(settings, it, notificationsPermitted = true) == AlertGate.DELIVER }
-                    .filterNot { changeIsHidden(it, hiddenLessons()) },
+                    .filterNot { changeIsHidden(it, hiddenLessons(), activeGroupSets(snapshot.value.events, deskPrefs().groupChoices), deskPrefs().groupChoices) },
                 snapshot.value.grades,
             )
             if (guess) addUnrevealedGrades(newGradeTargetIds(visible))

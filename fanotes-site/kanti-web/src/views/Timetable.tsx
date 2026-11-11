@@ -13,7 +13,7 @@ export const Timetable = () => {
   const kanti = useKanti()
   const { t, language, data, prefs, route } = kanti
   const clock = useClock()
-  const entries = useMemo(() => allEntries(data.snapshot), [data.snapshot])
+  const entries = useMemo(() => allEntries(data.snapshot, prefs.groupChoices), [data.snapshot, prefs.groupChoices])
   const weeks = useMemo(() => weekRange(data.snapshot, entries, clock.today), [data.snapshot, entries, clock.today])
   const requested = route.params.get('woche') || ''
   const monday = /^\d{4}-\d{2}-\d{2}$/u.test(requested) ? weekMonday(requested) : weekMonday(clock.today)
