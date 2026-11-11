@@ -227,6 +227,8 @@ data class SchulnetzSnapshot(
     val messages: List<SchoolMessage> = emptyList(),
     val vacations: List<SchoolVacation> = emptyList(),
     val konto: List<KontoLine> = emptyList(),
+    /** Final Saldo row of the Kontoauszug as Schulnetz prints it; empty when absent. */
+    val kontoSaldo: String = "",
     val startMessages: List<String> = emptyList(),
     val readErrors: List<String> = emptyList(),
     /** Monday (ISO date) to the instant that week was last read. */

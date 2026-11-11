@@ -1,6 +1,6 @@
 // The one way the page talks to the server: same origin, the session cookie, JSON, and the
 // session's CSRF token on every request that changes something.
-import type { AdminIndex, AdminUploadResult, RoomWeek, TimetableSummary } from './timetables'
+import type { AdminIndex, AdminUploadResult, ClassWeek, RoomWeek, TimetableSummary } from './timetables'
 import type { AlertSettings, Change, Connection, LinkStatus, Reveals, Session, Snapshot } from '../types'
 
 export const API = '/api/v1/kanti-web'
@@ -77,7 +77,7 @@ export const createApi = (transport: Transport = (input, init) => fetch(input, i
     /** Other classes' and rooms' timetables; 404 when the connection is not the Alte Kanti. */
     timetables: (id: string) => call<TimetableSummary>('GET', `${connection(id)}/timetables`),
     timetableRoom: (id: string, room: string) => call<RoomWeek>('GET', `${connection(id)}/timetables/room/${encodeURIComponent(room)}`),
-    timetableClassImage: (id: string, code: string) => `${API}${connection(id)}/timetables/class/${encodeURIComponent(code)}.png`,
+    timetableClass: (id: string, code: string) => call<ClassWeek>('GET', `${connection(id)}/timetables/class/${encodeURIComponent(code)}`),
     rename: (id: string, label: string) => call<Connection>('PATCH', connection(id), { label }),
     remove: (id: string) => call<{ removed: boolean; signedOut: boolean }>('DELETE', connection(id)),
   }

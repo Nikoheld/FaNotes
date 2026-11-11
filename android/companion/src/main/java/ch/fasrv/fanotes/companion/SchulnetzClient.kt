@@ -9,10 +9,12 @@ import ch.fasrv.fanotes.schulnetz.RevealLedger
 import ch.fasrv.fanotes.schulnetz.SchoolProvider
 import ch.fasrv.fanotes.schulnetz.WebBrowserSession
 import ch.fasrv.fanotes.schulnetz.ClassTimetableSummary
+import ch.fasrv.fanotes.schulnetz.ClassWeek
 import ch.fasrv.fanotes.schulnetz.RoomWeek
 import ch.fasrv.fanotes.schulnetz.isClassCode
 import ch.fasrv.fanotes.schulnetz.isRoomName
 import ch.fasrv.fanotes.schulnetz.parseClassTimetableSummary
+import ch.fasrv.fanotes.schulnetz.parseClassWeek
 import ch.fasrv.fanotes.schulnetz.parseRoomWeek
 import ch.fasrv.fanotes.schulnetz.WebPairInfo
 import ch.fasrv.fanotes.schulnetz.WebPairOffer
@@ -76,6 +78,7 @@ import ch.fasrv.fanotes.schulnetz.parseStartRecentGrades
 import ch.fasrv.fanotes.schulnetz.parseTerminliste
 import ch.fasrv.fanotes.schulnetz.parseTimetableHtml
 import ch.fasrv.fanotes.schulnetz.parseKontoauszug
+import ch.fasrv.fanotes.schulnetz.parseKontoSaldo
 import ch.fasrv.fanotes.schulnetz.parseSchedulerXml
 import ch.fasrv.fanotes.schulnetz.parseStartMessages
 import ch.fasrv.fanotes.schulnetz.parseTokenJson
@@ -652,6 +655,7 @@ class SchulnetzClient(
                 absenceParser = if (absences.value.read) ch.fasrv.fanotes.schulnetz.ABSENCE_PARSER_VERSION else 0,
                 messages = messages,
                 konto = parseKontoauszug(pages["21411"].orEmpty()),
+                kontoSaldo = parseKontoSaldo(pages["21411"].orEmpty()),
                 startMessages = parseStartMessages(pages["1"].orEmpty()),
                 readErrors = errors,
                 weekFetched = stamps,
@@ -709,7 +713,7 @@ class SchulnetzClient(
         "21312" -> snapshot.copy(exams = readExamsPage(html).value.ifEmpty { snapshot.exams })
         // Appointments merge by id; lessons reuse ids across weeks and are never deduplicated by id.
         "22108" -> snapshot.copy(events = mergeById(snapshot.events, readTerminliste(html).value))
-        "21411" -> snapshot.copy(konto = parseKontoauszug(html).ifEmpty { snapshot.konto })
+        "21411" -> snapshot.copy(konto = parseKontoauszug(html).ifEmpty { snapshot.konto }, kontoSaldo = parseKontoSaldo(html).ifBlank { snapshot.kontoSaldo })
         "1" -> snapshot.copy(startMessages = parseStartMessages(html).ifEmpty { snapshot.startMessages })
         else -> snapshot
     }
@@ -831,6 +835,14 @@ class SchulnetzClient(
         val (status, body) = fanotes("GET", "/timetables/room/${java.net.URLEncoder.encode(room, "UTF-8").replace("+", "%20")}", session, null)
         if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
         return parseRoomWeek(body) ?: throw SchulnetzHttpException(status, "Ungültige Antwort des Servers.")
+    }
+
+    /** One class's week as data (rendered in the app's own timetable design). */
+    fun classTimetable(session: SchoolAuth, code: String): ClassWeek {
+        require(isClassCode(code))
+        val (status, body) = fanotes("GET", "/timetables/class/$code", session, null)
+        if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
+        return parseClassWeek(body) ?: throw SchulnetzHttpException(status, "Ungültige Antwort des Servers.")
     }
 
     /** Downloads one class page as PDF into [target] (written through a temporary file). */
