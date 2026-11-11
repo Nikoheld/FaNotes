@@ -1485,6 +1485,13 @@ export const createSchulnetzRuntime = (options = {}) => {
         if (route === '/commute' && method === 'PUT') { send(response, 200, await commute.save(accountId, await readBody(request))); return true }
         if (route === '/commute/stops' && method === 'GET') { send(response, 200, await commute.stops(url.searchParams.get('q') || '')); return true }
         if (route === '/commute/board' && method === 'GET') { send(response, 200, await commute.board(accountId, String(url.searchParams.get('route') || ''))); return true }
+        if (route === '/commute/connections' && method === 'GET') {
+          const params = url.searchParams
+          const found = await commute.connections({ from: params.get('from'), to: params.get('to'), vias: params.getAll('via').slice(0, 2), at: String(params.get('at') || ''), timeType: String(params.get('timeType') || 'depart') })
+          if (!found) fail(400, 'Start und Ziel fehlen.')
+          send(response, 200, found)
+          return true
+        }
         if (route === '/commute/trips' && method === 'GET') {
           const found = await commute.tripsFor(accountId, String(url.searchParams.get('route') || ''), String(url.searchParams.get('at') || ''), String(url.searchParams.get('timeType') || 'depart'))
           if (!found) fail(404, 'Diese Pendelstrecke gibt es nicht.')

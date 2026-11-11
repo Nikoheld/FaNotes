@@ -1186,7 +1186,7 @@ export const notifyAlertKind = (change) => {
   if (category === 'absence') return 'absence-new'
   if (category === 'deadline') return 'deadline'
   if (category === 'commute') {
-    if (title === 'Fällt aus' || title === 'Anschluss verpasst') return 'commute-cancelled'
+    if (title === 'Fällt aus' || title === 'Anschluss verpasst' || title === 'Verbindung fehlt') return 'commute-cancelled'
     if (title === 'Früher nach Hause' || title === 'Später zur Schule') return 'commute-lesson'
     return 'commute-delay'
   }
