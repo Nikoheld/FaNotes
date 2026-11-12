@@ -16,6 +16,8 @@ import { HOMEWORK_NOTE_PATH, mergeHomeworkMarkdownBytes } from '../homeworkStore
 import { canonicalSyncBytes, identitySyncBytes, isFamdSyncPath, noteSyncKind, withLocalPageStats, type NoteSyncKind } from '../famd'
 
 const syncText = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
+/** Sign-in, network, rate-limit and server errors concern every entry, so they end the cycle instead of skipping one file. */
+const cycleWide = (error: unknown) => error instanceof SyncApiError && (error.unauthorized || error.offline || error.status === 429 || error.status >= 500)
 import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
 import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncRemoteEntry, type SyncSession } from './api'
 import { mcpReaderRequest, newReaderKey, type McpGrantInfo } from '../mcp/client'
@@ -673,7 +675,7 @@ export class SyncEngine {
         // Sign-in and network errors end the cycle. One damaged or undecryptable
         // entry must not keep every local edit on this device from uploading:
         // it waits on the skip list and is tried again on the next pull.
-        if (error instanceof SyncApiError && (error.unauthorized || error.offline)) throw error
+        if (cycleWide(error)) throw error
         this.log('warn', `Ein Eintrag konnte nicht übernommen werden und wird später erneut versucht (${error instanceof Error ? error.message : 'unbekannt'}).`)
         return { result: 'skipped' as const, path: null }
       })
@@ -1001,7 +1003,7 @@ export class SyncEngine {
             const applied = await this.applyRemote(current, idIndex)
             if ((applied.result === 'written' || applied.result === 'conflict') && applied.path) this.options?.onApplied?.({ written: [applied.path], removed: [] })
           } catch (applyError) {
-            if (applyError instanceof SyncApiError && (applyError.unauthorized || applyError.offline)) throw applyError
+            if (cycleWide(applyError)) throw applyError
             this.log('warn', `„${entry.path}“ konnte nicht abgeglichen werden und wird später erneut versucht (${applyError instanceof Error ? applyError.message : 'unbekannt'}).`)
           }
           return 'conflict'
