@@ -173,6 +173,11 @@ private data class Secrets(
  * and writes the local bytes beside it as a conflict copy, which the next push
  * uploads so every device ends up with both. See `fanotes/src/lib/sync/engine.ts`.
  *
+ * A 409 is resolved in the same cycle from the entry the server sends with it,
+ * never by waiting for the pull: the cursor can already be past that entry. A
+ * refused (guard) body is never sent again, a tombstone is recreated once, and a
+ * newer live entry is applied like a pulled change.
+ *
  * File-table updates run on one engine thread. Downloads and uploads inside a
  * cycle are sequential so a revision cursor cannot move past a deferred note.
  */
@@ -564,8 +569,23 @@ class SyncEngine(
         currentHost: SyncHost,
         active: SyncSession,
         table: EngineState,
+        rejected: Boolean = false,
     ): ApplyResult = try {
-        applyRemoteDocument(entry, idIndex, syncKeys, currentHost, active, table)
+        applyRemoteDocument(entry, idIndex, syncKeys, currentHost, active, table, rejected)
+    } catch (_: LocalReadFailed) {
+        // The file is there but could not be read. Writing over it could lose a newer
+        // local edit, so the entry waits and holds the cursor.
+        diagnostic("sync applyRemote deferred reason=read deepCopyDepth=0")
+        ApplyResult("deferred", null)
+    } catch (error: RemoteEntryUnusable) {
+        // One bad entry must not stop the pull or the push. The caller puts it on the skip
+        // list, which is the only reason the cursor may pass it; every later pull retries it.
+        diagnostic("sync applyRemote skipped reason=${error.why} deepCopyDepth=0")
+        if (table.skipped.none { it.id == entry.id && it.revision == entry.revision }) {
+            val subject = error.path?.let { "“$it”" } ?: "A note"
+            log("warn", "$subject could not be taken from the server (${error.label}). It is retried on every sync.")
+        }
+        ApplyResult("skipped", error.path)
     } catch (_: OutOfMemoryError) {
         // Unwind document/crypto allocations before the cycle publishes its fixed failure state.
         emergencyReserve = null
@@ -586,6 +606,10 @@ class SyncEngine(
         ApplyResult("skipped", null)
     }
 
+    /**
+     * [rejected] is the server's current entry from a 409. It is applied even when its
+     * revision is not above the tracked base, because the server just said the base is wrong.
+     */
     private suspend fun applyRemoteDocument(
         entry: SyncRemoteEntry,
         idIndex: MutableMap<String, String>,
@@ -593,12 +617,13 @@ class SyncEngine(
         currentHost: SyncHost,
         active: SyncSession,
         table: EngineState,
+        rejected: Boolean = false,
     ): ApplyResult {
         val knownPath = idIndex[entry.id]
         if (entry.deleted) {
             if (knownPath == null) return ApplyResult("noop", null)
             val base = table.files[knownPath] ?: return ApplyResult("noop", knownPath)
-            if (entry.revision <= base.revision) return ApplyResult("noop", knownPath)
+            if (!rejected && entry.revision <= base.revision) return ApplyResult("noop", knownPath)
             if (options.isPathBusy(knownPath)) return ApplyResult("deferred", knownPath)
             val local = localSnapshot(knownPath, currentHost)
             if (local == null) {
@@ -620,16 +645,15 @@ class SyncEngine(
         if (entry.meta.isNullOrEmpty() || entry.sha256.isNullOrEmpty()) return ApplyResult("skipped", null)
         val meta = try {
             decryptMeta(syncKeys, entry.id, entry.meta)
-        } catch (error: Exception) {
-            log("warn", "Could not decrypt an entry's metadata (${error.message ?: "unknown"}).")
-            return ApplyResult("skipped", null)
+        } catch (_: Exception) {
+            throw RemoteEntryUnusable("decrypt", null)
         }
         val path = meta.path
         if (!acceptsPath(path)) return ApplyResult("skipped", null)
         diagnostic("sync applyRemote declaredBytes=${meta.size} deepCopyDepth=0")
         requireSyncDocumentBudget(path, meta.size)
         val base = table.files[path]
-        if (base != null && base.id == entry.id && entry.revision <= base.revision) return ApplyResult("noop", path)
+        if (!rejected && base != null && base.id == entry.id && entry.revision <= base.revision) return ApplyResult("noop", path)
         if (options.isPathBusy(path)) return ApplyResult("deferred", path)
         val local = localSnapshot(path, currentHost)
         // Match the server hash only. A stored identity means the local file still
@@ -655,12 +679,24 @@ class SyncEngine(
             )
         }
         var result = "written"
-        when (val download = api.download(active, entry.id)) {
+        val response = try {
+            api.download(active, entry.id)
+        } catch (error: SyncApiError) {
+            // Sign-in, network, rate-limit, and server errors concern the whole cycle. Anything
+            // else (a blob the server no longer has) concerns this file only.
+            if (error.unauthorized || error.offline || error.status == 429 || error.status >= 500) throw error
+            throw RemoteEntryUnusable("download", path)
+        }
+        when (val download = response) {
             is DownloadResult.Deleted -> return ApplyResult("noop", path)
             is DownloadResult.Blob -> {
-                if (sha256Hex(download.bytes) != download.sha256) throw IllegalStateException("“$path” arrived damaged.")
-                val plain = decryptBytes(syncKeys, entry.id, download.bytes)
-                if (sha256Hex(plain) != meta.sha256) throw IllegalStateException("The checksum of “$path” does not match.")
+                if (sha256Hex(download.bytes) != download.sha256) throw RemoteEntryUnusable("damaged", path)
+                val plain = try {
+                    decryptBytes(syncKeys, entry.id, download.bytes)
+                } catch (_: Exception) {
+                    throw RemoteEntryUnusable("decrypt", path)
+                }
+                if (sha256Hex(plain) != meta.sha256) throw RemoteEntryUnusable("checksum", path)
                 val plainIdentity = remoteIdentity(path, plain, "download")
                 val localIdentity = local?.identity.orEmpty()
                 if (local != null && local.kind != NoteSyncKind.UNREADABLE && plainIdentity.isNotEmpty() && plainIdentity == localIdentity) {
@@ -670,7 +706,7 @@ class SyncEngine(
                     return ApplyResult("noop", path)
                 }
                 val remoteKind = noteSyncKind(path, plain)
-                if (remoteKind == NoteSyncKind.UNREADABLE) throw IllegalStateException("Remote note could not be validated; the local copy was kept.")
+                if (remoteKind == NoteSyncKind.UNREADABLE) throw RemoteEntryUnusable("unreadable", path)
                 val body = if (local != null && isFamdSyncPath(path)) withLocalPageStats(plain, local.bytes, path) else plain
                 // Finish all fallible document transforms before replacing the last good file.
                 val storedIdentity = if (body === plain) plainIdentity else remoteIdentity(path, body, "stored")
@@ -689,7 +725,7 @@ class SyncEngine(
                 }
                 if (local != null && (changedLocal != null || (remoteKind == NoteSyncKind.BLANK && local.kind != NoteSyncKind.BLANK))) {
                     val at = java.time.Instant.ofEpochMilli(options.now())
-                    val copyPath = conflictCopyPath(path, deviceInfo().first, at)
+                    val copyPath = freeConflictCopyPath(path, at, currentHost)
                     currentHost.write(copyPath, local.bytes, at.toEpochMilli())
                     val conflict = SyncConflict(path, copyPath, isoNow(at.toEpochMilli()))
                     table.conflicts.add(conflict)
@@ -821,22 +857,98 @@ class SyncEngine(
         val id = base?.id ?: fileIdFor(syncKeys, entry.path)
         val meta = encryptMeta(syncKeys, id, SyncFileMeta(entry.path, entry.mtimeMs, bytes.size.toLong(), hash))
         val blob = encryptBytes(syncKeys, id, bytes)
-        return try {
-            val revision = api.upload(active, id, base?.revision ?: 0L, meta, sha256Hex(blob), blob, kind == NoteSyncKind.BLANK, clearing && kind == NoteSyncKind.BLANK)
-            cleared.remove(entry.path)
-            table.files[entry.path] = LocalBase(id, revision, hash, entry.size, entry.mtimeMs, identity, kind == NoteSyncKind.BLANK)
-            "uploaded"
-        } catch (error: SyncApiError) {
-            when {
-                error.conflict && kind == NoteSyncKind.BLANK && base != null -> restoreInstead(entry, base, raw, table, syncKeys, active, currentHost)
-                error.conflict -> "conflict"
-                error.status == 507 -> {
+        val blank = kind == NoteSyncKind.BLANK
+        var sentBase = base?.revision ?: 0L
+        var recreating = false
+        while (true) {
+            try {
+                val revision = api.upload(active, id, sentBase, meta, sha256Hex(blob), blob, blank, clearing && blank)
+                cleared.remove(entry.path)
+                table.files[entry.path] = LocalBase(id, revision, hash, entry.size, entry.mtimeMs, identity, blank)
+                if (recreating) log("info", "“${entry.path}” had been deleted on the server. The copy on this device was uploaded again.")
+                return "uploaded"
+            } catch (error: SyncApiError) {
+                if (error.status == 507) {
                     log("error", "“${entry.path}” does not fit in the account: ${error.message}")
-                    "skipped"
+                    return "skipped"
                 }
-                else -> throw error
+                if (!error.conflict) throw error
+                // The pull cursor may already be past the entry that caused this 409
+                // (an old tombstone, a skipped entry, or the same revision for a
+                // guard refusal). Resolve it here, or the same 409 repeats every cycle.
+                val remote = error.entry?.let { if (it.id.isEmpty()) it.copy(id = id) else it }
+                    ?.takeIf { it.id == id }
+                    ?: return "conflict"
+                val guard = !remote.deleted && (error.reason == "guard" || (error.reason == null && remote.revision == sentBase))
+                when {
+                    guard -> return keepBothOnFailure(entry.path) {
+                        // Never send this body again. The local bytes become a conflict copy and the server copy returns.
+                        restoreInstead(entry, base ?: LocalBase(id, remote.revision, "", 0L, 0L), raw, table, syncKeys, active, currentHost, refused = true)
+                    }
+                    remote.deleted && !blank && !recreating -> {
+                        // A tombstone holds no content, so recreating on top of it overwrites nothing. Once per cycle.
+                        recreating = true
+                        sentBase = remote.revision
+                    }
+                    remote.deleted -> {
+                        // A blank file does not bring a deleted note back. Track it at the tombstone so it is
+                        // uploaded only once it has content. A second tombstone in one cycle waits for the next.
+                        table.files[entry.path] = if (blank) {
+                            LocalBase(id, remote.revision, hash, entry.size, entry.mtimeMs, identity, true)
+                        } else {
+                            LocalBase(id, remote.revision, "", 0L, 0L)
+                        }
+                        return "conflict"
+                    }
+                    else -> return applyRejected(remote, table, syncKeys, active, currentHost)
+                }
             }
         }
+    }
+
+    /**
+     * Applies the server's current entry from a 409 right away, like a pulled change:
+     * an unchanged local file adopts it, a changed one becomes a conflict copy first.
+     * The pull cursor is not consulted, so an entry below it is not lost.
+     */
+    private suspend fun applyRejected(
+        remote: SyncRemoteEntry,
+        table: EngineState,
+        syncKeys: SyncKeys,
+        active: SyncSession,
+        currentHost: SyncHost,
+    ): String = keepBothOnFailure(null) {
+        val idIndex = table.files.map { (filePath, item) -> item.id to filePath }.toMap(linkedMapOf())
+        val result = applyRemote(remote, idIndex, syncKeys, currentHost, active, table, rejected = true)
+        when (result.result) {
+            "skipped" -> rememberSkip(table, remote)
+            "deferred" -> Unit
+            else -> forgetSkip(table, remote.id)
+        }
+        val path = result.path
+        if (path != null && (result.result == "written" || result.result == "conflict")) options.onApplied(listOf(path), emptyList())
+        if (path != null && result.result == "removed") options.onApplied(emptyList(), listOf(path))
+        "conflict"
+    }
+
+    /**
+     * A 409 that cannot be resolved now (damaged download, unreadable remote note)
+     * leaves both copies as they are and lets the rest of the push continue.
+     */
+    private suspend fun keepBothOnFailure(path: String?, block: suspend () -> String): String = try {
+        block()
+    } catch (error: kotlinx.coroutines.CancellationException) {
+        throw error
+    } catch (error: SyncApiError) {
+        throw error
+    } catch (error: SyncDocumentLimitException) {
+        throw error
+    } catch (error: JsonLimitException) {
+        throw error
+    } catch (error: Exception) {
+        val subject = path?.let { "“$it”" } ?: "A note"
+        log("warn", "$subject changed on the server, but that copy could not be applied (${error.message ?: "unknown"}). The local copy stays.")
+        "conflict"
     }
 
     private suspend fun restoreInstead(
@@ -847,6 +959,7 @@ class SyncEngine(
         syncKeys: SyncKeys,
         active: SyncSession,
         currentHost: SyncHost,
+        refused: Boolean = false,
     ): String {
         val download = when (val response = api.download(active, base.id)) {
             is DownloadResult.Deleted -> return "conflict"
@@ -860,17 +973,23 @@ class SyncEngine(
             return "skipped"
         }
         val at = java.time.Instant.ofEpochMilli(options.now())
-        val copyPath = conflictCopyPath(entry.path, deviceInfo().first, at)
+        val copyPath = freeConflictCopyPath(entry.path, at, currentHost)
         currentHost.write(copyPath, localBytes, at.toEpochMilli())
         val conflict = SyncConflict(entry.path, copyPath, isoNow(at.toEpochMilli()))
         table.conflicts.add(conflict)
         if (table.conflicts.size > 50) table.conflicts.removeAt(0)
-        log("warn", "“${entry.path}” was empty locally. That copy is now “$copyPath”, and the server copy was kept.")
+        if (refused) {
+            log("warn", "The server refused “${entry.path}” because it is empty or much shorter than the copy there. The local copy is now “$copyPath”, and the server copy was restored.")
+        } else {
+            log("warn", "“${entry.path}” was empty locally. That copy is now “$copyPath”, and the server copy was kept.")
+        }
         options.onConflict(conflict)
         publish(state.value.copy(conflicts = table.conflicts.toList()))
         val stat = currentHost.write(entry.path, plain, at.toEpochMilli())
         val identity = identitySyncBytes(entry.path, plain)?.let { sha256Hex(it) }.orEmpty()
-        table.files[entry.path] = base.copy(sha256 = base.sha256.ifEmpty { sha256Hex(plain) }, size = stat.size, mtimeMs = stat.mtimeMs, contentSha256 = identity, blank = false)
+        // The file now holds the downloaded revision, so that is the base the next upload names.
+        table.files[entry.path] = base.copy(revision = download.revision, sha256 = sha256Hex(plain), size = stat.size, mtimeMs = stat.mtimeMs, contentSha256 = identity, blank = false)
+        options.onApplied(listOf(entry.path), emptyList())
         return "conflict"
     }
 
@@ -882,12 +1001,12 @@ class SyncEngine(
             "deleted"
         } catch (error: SyncApiError) {
             if (error.conflict) {
-                val remote = error.entry
+                val remote = error.entry?.let { if (it.id.isEmpty()) it.copy(id = base.id) else it }?.takeIf { it.id == base.id }
                 val syncKeys = keys
                 val currentHost = host
                 if (remote != null && syncKeys != null && currentHost != null) {
-                    val idIndex = table.files.map { (filePath, item) -> item.id to filePath }.toMap(linkedMapOf())
-                    applyRemote(remote, idIndex, syncKeys, currentHost, active, table)
+                    // A newer remote edit wins over the local delete, even when it is below the pull cursor.
+                    applyRejected(remote, table, syncKeys, active, currentHost)
                 }
                 "conflict"
             } else {
@@ -912,6 +1031,9 @@ class SyncEngine(
 
     private suspend fun restoreVanished(path: String, table: EngineState, syncKeys: SyncKeys, active: SyncSession, currentHost: SyncHost) {
         val base = table.files[path] ?: return
+        // A listing can miss a file (a storage-provider hiccup). If it still reads, it is
+        // not gone, and writing the server copy over it could lose a newer local edit.
+        if (stillReadable(path, currentHost)) return
         try {
             when (val download = api.download(active, base.id)) {
                 is DownloadResult.Deleted -> table.files.remove(path)
@@ -958,8 +1080,55 @@ class SyncEngine(
         throw error
     } catch (error: SyncDocumentLimitException) {
         throw error
-    } catch (_: Exception) {
+    } catch (_: NoSuchElementException) {
         null
+    } catch (error: kotlinx.coroutines.CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        // Every host reports a missing file as NoSuchElementException. Anything else is a
+        // failed read of a file that may hold unsynced edits; treating it as missing would
+        // write the remote copy over it without a conflict copy.
+        throw LocalReadFailed()
+    }
+
+    private class LocalReadFailed : Exception("The local file could not be read.")
+
+    /** A remote entry that cannot be applied now. [why] is a fixed word for diagnostics; no content. */
+    private class RemoteEntryUnusable(val why: String, val path: String?) : Exception("Remote entry unusable: $why") {
+        val label get() = when (why) {
+            "damaged" -> "the download was damaged"
+            "decrypt" -> "it could not be decrypted"
+            "checksum" -> "its checksum did not match"
+            "unreadable" -> "it could not be read as a note"
+            else -> "the server could not provide it"
+        }
+    }
+
+    private suspend fun stillReadable(path: String, currentHost: SyncHost): Boolean = try {
+        currentHost.read(path)
+        true
+    } catch (error: kotlinx.coroutines.CancellationException) {
+        throw error
+    } catch (_: NoSuchElementException) {
+        false
+    } catch (_: Exception) {
+        // Present but unreadable: still not gone.
+        true
+    }
+
+    /** [conflictCopyPath], numbered when a copy from the same minute already exists, so no copy is overwritten. */
+    private suspend fun freeConflictCopyPath(path: String, at: java.time.Instant, currentHost: SyncHost): String {
+        val first = conflictCopyPath(path, deviceInfo().first, at)
+        if (!stillReadable(first, currentHost)) return first
+        val name = path.substringAfterLast('/')
+        val dot = name.lastIndexOf('.')
+        val extension = if (dot > 0) name.substring(dot) else ""
+        val stem = first.removeSuffix(extension).removeSuffix(")")
+        for (number in 2..99) {
+            val candidate = "$stem $number)$extension"
+            if (!stillReadable(candidate, currentHost)) return candidate
+        }
+        return "$stem ${options.now()})$extension"
     }
 
     private data class Snapshot(val bytes: ByteArray, val sha256: String, val rawSha256: String, val identity: String, val kind: NoteSyncKind)

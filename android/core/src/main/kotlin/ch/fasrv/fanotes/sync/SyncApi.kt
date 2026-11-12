@@ -69,7 +69,17 @@ data class SyncAccountInfo(
     val devices: List<SyncDevice>,
 )
 
-class SyncApiError(val status: Int, message: String, val entry: SyncRemoteEntry? = null) : Exception(message) {
+/**
+ * [entry] is the server's current entry on a 409. [reason] is `stale` (the base
+ * revision is not current) or `guard` (the base was current, but the body was
+ * refused as blank or collapsed). Older servers send no reason.
+ */
+class SyncApiError(
+    val status: Int,
+    message: String,
+    val entry: SyncRemoteEntry? = null,
+    val reason: String? = null,
+) : Exception(message) {
     val unauthorized get() = status == 401
     val conflict get() = status == 409
     val offline get() = status == 0
@@ -277,16 +287,18 @@ class SyncApi(
 private fun parseError(response: SyncHttpResponse): SyncApiError {
     var message = "The sync server responded with ${response.status}."
     var entry: SyncRemoteEntry? = null
+    var reason = header(response.headers, "x-fanotes-rejected")?.trim()?.lowercase()?.ifEmpty { null }
     try {
         val body = parseJson(response.body.toString(StandardCharsets.UTF_8)) as? JsonValue.Obj
         if (body != null) {
             body.string("error")?.let { message = it }
             entry = body.obj("entry")?.toEntry()
+            body.string("reason")?.trim()?.lowercase()?.ifEmpty { null }?.let { reason = it }
         }
     } catch (_: Exception) {
         // Not JSON.
     }
-    return SyncApiError(response.status, message, entry)
+    return SyncApiError(response.status, message, entry, reason)
 }
 
 private fun JsonValue.Obj.toEntry(): SyncRemoteEntry = SyncRemoteEntry(
