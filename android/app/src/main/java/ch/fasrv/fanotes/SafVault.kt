@@ -74,7 +74,8 @@ class SafVault(private val context: Context, private val tree: Uri) : VaultIo {
         val dir = if (directory.isBlank()) root else locate(normalize(directory), create = false) ?: return emptyList()
         if (!dir.isDirectory) return emptyList()
         val prefix = directory.trim('/')
-        return dir.listFiles().map { child ->
+        val children = dir.listFiles() ?: throw java.io.IOException("Der Ordner konnte nicht gelesen werden.")
+        return children.map { child ->
             val name = child.name ?: return@map child.let { VaultEntry("", false, 0, 0) }
             val path = if (prefix.isEmpty()) name else "$prefix/$name"
             VaultEntry(path, child.isDirectory, if (child.isFile) child.length() else 0L, child.lastModified())
@@ -82,6 +83,7 @@ class SafVault(private val context: Context, private val tree: Uri) : VaultIo {
     }
 
     override fun walkFiles(): List<VaultEntry> {
+        if (!root.exists() || !root.isDirectory) throw java.io.IOException("Der Ordner konnte nicht gelesen werden.")
         val found = mutableListOf<VaultEntry>()
         fun visit(directory: String) {
             for (entry in list(directory)) {

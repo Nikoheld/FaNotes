@@ -48,7 +48,7 @@ await new Promise((resolve) => httpServer.listen(PORT, '127.0.0.1', resolve))
 
 const vite = await createServer({ root: appRoot, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true } })
 const crypto = await vite.ssrLoadModule('/src/lib/sync/crypto.ts')
-const { SyncApi } = await vite.ssrLoadModule('/src/lib/sync/api.ts')
+const { SyncApi, SyncApiError } = await vite.ssrLoadModule('/src/lib/sync/api.ts')
 const { SyncEngine, isSyncablePath, conflictCopyPath } = await vite.ssrLoadModule('/src/lib/sync/engine.ts')
 const homework = await vite.ssrLoadModule('/src/lib/homeworkStore.ts')
 
@@ -96,6 +96,7 @@ const createEngine = (host, name, hooks = {}) => {
     deviceName: () => name,
     automatic: () => false,
     isPathBusy: (path) => hooks.busy?.(path) ?? false,
+    excludedPrefixes: () => hooks.excludedPrefixes?.() ?? [],
     onApplied: (change) => events.applied.push(change),
     onConflict: (conflict) => events.conflicts.push(conflict),
     onSignedOut: (reason) => events.signedOut.push(reason),
@@ -308,11 +309,13 @@ try {
 
   // Delete on A → gone on B; delete + concurrent edit keeps the edit.
   hostA.files.delete('Physik/Bild.png')
+  A.engine.markDeleted('Physik/Bild.png')
   await A.engine.syncNow()
   await B.engine.syncNow()
   assert.ok(!hostB.files.has('Physik/Bild.png'))
   assert.deepEqual(B.events.applied.at(-1), { written: [], removed: ['Physik/Bild.png'] })
   hostA.files.delete(copies[0])
+  A.engine.markDeleted(copies[0])
   hostB.put(copies[0], 'doch behalten')
   await A.engine.syncNow()
   await B.engine.syncNow()
@@ -320,6 +323,33 @@ try {
   await B.engine.syncNow()
   await A.engine.syncNow()
   assert.equal(hostA.text(copies[0]), 'doch behalten', 'and is re-uploaded on top of the tombstone')
+
+  // A missing file is not a delete. The server copy is written back.
+  hostA.put('Physik/Bleibt.png', encoder.encode('bleibt'))
+  await A.engine.syncNow()
+  await B.engine.syncNow()
+  assert.equal(hostB.text('Physik/Bleibt.png'), 'bleibt')
+  hostA.files.delete('Physik/Bleibt.png')
+  await A.engine.syncNow()
+  assert.equal(hostA.text('Physik/Bleibt.png'), 'bleibt', 'a vanished file is restored')
+  await B.engine.syncNow()
+  assert.equal(hostB.text('Physik/Bleibt.png'), 'bleibt', 'the other device still has it')
+
+  // A note skipped while its folder was excluded is fetched once the folder is included.
+  {
+    let hide = true
+    const hostD = createFakeHost('skip')
+    const D = createEngine(hostD, 'Web', { excludedPrefixes: () => (hide ? ['Notizen'] : []) })
+    hostA.put('Notizen/Uebersprungen.md', '# spaeter')
+    await A.engine.syncNow()
+    await D.engine.login('fabio@example.com', 'korrektes pferd batterie')
+    await D.engine.syncNow()
+    assert.equal(hostD.text('Notizen/Uebersprungen.md'), null, 'excluded notes are not applied')
+    hide = false
+    await D.engine.syncNow()
+    assert.equal(hostD.text('Notizen/Uebersprungen.md'), '# spaeter', 'a previously skipped note is fetched again')
+    D.engine.dispose()
+  }
 
   // A note that is being edited is not overwritten; it arrives once the editor is quiet.
   let busy = true
@@ -376,6 +406,13 @@ try {
   assert.equal((await A.engine.refreshAccount()).revision, beforeStamp, 'a timestamp-only famd is not uploaded')
   await C.engine.syncNow()
   assert.equal(hostB.text('Notizen/Seite.famd'), keptNote)
+
+  // A failed load is not uploaded. The server copy comes back.
+  hostA.put('Notizen/Seite.famd', '<!-- fanotes-famd:v1 chars=20 -->\n{"truncated":')
+  await A.engine.syncNow()
+  assert.ok(hostA.text('Notizen/Seite.famd').includes('"points"'), 'a truncated famd is not uploaded')
+  await C.engine.syncNow()
+  assert.ok(hostB.text('Notizen/Seite.famd').includes('"points"'))
 
   // A blank local file is not uploaded over the note. It is kept as a conflict copy.
   const blank = blankFamd()
@@ -451,6 +488,192 @@ try {
   await assert.rejects(A.engine.login('fabio@example.com', 'neues sicheres passwort 42'), /E-Mail-Adresse oder Passwort/u)
   A.engine.dispose(); B.engine.dispose(); C.engine.dispose()
 
+  // ── 409s are resolved from the entry the server sends back ─────────────
+  // The production laptop re-sent six notes on every cycle for weeks: their
+  // server entries were tombstones older than its pull cursor, so the pull that
+  // was meant to resolve the 409 never brought them. A ProbeApi records every
+  // upload and can play a stricter (older) server.
+  {
+    class ProbeApi extends SyncApi {
+      constructor() { super(ORIGIN); this.uploads = []; this.refuse = null; this.corrupt = null }
+      async download(session, id) {
+        const result = await super.download(session, id)
+        if (!this.corrupt?.has(id) || !result.blob) return result
+        const blob = new Uint8Array(result.blob)
+        blob[blob.length - 1] ^= 0xff
+        return { ...result, blob }
+      }
+      async upload(session, id, base, ...rest) {
+        const refusal = this.refuse ? await this.refuse(id, base, session) : null
+        if (refusal) {
+          this.uploads.push({ id, base, status: 409 })
+          throw refusal
+        }
+        try {
+          const revision = await super.upload(session, id, base, ...rest)
+          this.uploads.push({ id, base, status: 200 })
+          return revision
+        } catch (error) {
+          this.uploads.push({ id, base, status: error.status })
+          throw error
+        }
+      }
+    }
+    const createProbe = (host, name) => {
+      const api = new ProbeApi()
+      const engine = new SyncEngine(api)
+      const events = { conflicts: [], applied: [], busy: new Set() }
+      engine.attach(host, { platform: 'linux', deviceName: () => name, automatic: () => false, isPathBusy: (path) => events.busy.has(path), excludedPrefixes: () => [], onConflict: (conflict) => events.conflicts.push(conflict), onApplied: (change) => events.applied.push(change) })
+      return { engine, api, events }
+    }
+    const entryFor = async (api, session, id) => (await api.changes(session, 0)).entries.find((item) => item.id === id) ?? null
+    const password = 'probe passwort fuer den sync 7'
+    const hostP = createFakeHost('probe-laptop')
+    const P = createProbe(hostP, 'Laptop')
+    await P.engine.register('probe@example.com', password)
+    const hostQ = createFakeHost('probe-tablet')
+    const Q = createProbe(hostQ, 'Tablet')
+    await Q.engine.login('probe@example.com', password)
+    const idOf = async (path) => {
+      const state = JSON.parse(hostP.store.state.get('vault-probe-laptop'))
+      return state.files[path]?.id ?? null
+    }
+
+    // A short note that got shorter still syncs (deleting a line is not an empty overwrite).
+    const longList = `# Einkauf\n\n${Array.from({ length: 12 }, (_, index) => `- Artikel ${index} mit etwas Text`).join('\n')}\n`
+    const shortList = '# Einkauf\n\n- Artikel 0 mit etwas Text\n'
+    hostP.put('Notizen/Kurz.md', longList)
+    await P.engine.syncNow()
+    await Q.engine.syncNow()
+    assert.equal(hostQ.text('Notizen/Kurz.md'), longList)
+    hostP.put('Notizen/Kurz.md', shortList)
+    await P.engine.syncNow()
+    assert.equal(P.api.uploads.at(-1).status, 200, 'the shorter short note is accepted')
+    await Q.engine.syncNow()
+    assert.equal(hostQ.text('Notizen/Kurz.md'), shortList, 'a short note that got shorter arrives on the other device')
+
+    // A note that is a tombstone older than the cursor, while this device still has the file.
+    const kept = '# Wieder da\n\nInhalt, den der Laptop noch hat.\n'
+    for (const [path, strict] of [['Alt/Wieder da.md', true], ['Alt/Auch wieder da.md', false]]) {
+      hostP.put(path, kept)
+      await P.engine.syncNow()
+      await Q.engine.syncNow()
+      assert.equal(hostQ.text(path), kept)
+      const id = await idOf(path)
+      hostP.files.delete(path)
+      P.engine.markDeleted(path)
+      await P.engine.syncNow()
+      await Q.engine.syncNow()
+      assert.equal(hostQ.text(path), null, 'the explicit delete reached the tablet')
+      // Later changes move the cursor well past the tombstone.
+      hostQ.put(`Alt/Spaeter ${strict}.md`, 'spaeter')
+      await Q.engine.syncNow()
+      await P.engine.syncNow()
+      // An older build put the file back untracked (or its delete was inferred from a missing file).
+      hostP.put(path, kept)
+      P.api.refuse = strict
+        ? async (uploadId, base, session) => {
+          if (uploadId !== id) return null
+          const current = await entryFor(P.api, session, id)
+          return current?.deleted && base < current.revision ? new SyncApiError(409, 'stale', current, 'stale') : null
+        }
+        : null
+      await P.engine.syncNow()
+      assert.equal(P.engine.getState().status, 'idle', P.engine.getState().error)
+      const tries = P.api.uploads.filter((item) => item.id === id)
+      assert.equal(tries.at(-1).status, 200, `${strict ? 'a strict' : 'this'} server takes the copy back over the tombstone`)
+      const count = P.api.uploads.length
+      await P.engine.syncNow()
+      assert.equal(P.api.uploads.length, count, 'nothing is sent again on the next cycle')
+      await Q.engine.syncNow()
+      assert.equal(hostQ.text(path), kept, 'the tablet has the note again')
+      P.api.refuse = null
+    }
+
+    // One damaged entry does not keep the rest of the pull, or any upload, from happening.
+    {
+      hostP.put('Alt/Kaputt.md', '# Kaputt\n\nkommt beschaedigt an\n')
+      hostP.put('Alt/Gut.md', '# Gut\n\nkommt an\n')
+      await P.engine.syncNow()
+      Q.api.corrupt = new Set([await idOf('Alt/Kaputt.md')])
+      hostQ.put('Alt/Vom Tablet.md', '# Vom Tablet\n')
+      await Q.engine.syncNow()
+      assert.equal(Q.engine.getState().status, 'idle', Q.engine.getState().error)
+      assert.equal(hostQ.text('Alt/Gut.md'), '# Gut\n\nkommt an\n', 'the other entries are applied')
+      assert.equal(hostQ.text('Alt/Kaputt.md'), null, 'the damaged entry is not written')
+      await P.engine.syncNow()
+      assert.equal(hostP.text('Alt/Vom Tablet.md'), '# Vom Tablet\n', 'the local edit was uploaded in the same cycle')
+      Q.api.corrupt = null
+      await Q.engine.syncNow()
+      assert.equal(hostQ.text('Alt/Kaputt.md'), '# Kaputt\n\nkommt beschaedigt an\n', 'the damaged entry arrives once it is served intact')
+    }
+
+    // A stale 409 whose newer entry is older than the cursor is applied at once.
+    {
+      hostP.put('Alt/Liste.md', '# Liste\n\n- eins\n')
+      await P.engine.syncNow()
+      await Q.engine.syncNow()
+      const id = await idOf('Alt/Liste.md')
+      const persisted = JSON.parse(hostP.store.state.get('vault-probe-laptop'))
+      const olderBase = persisted.files['Alt/Liste.md'].revision
+      hostQ.put('Alt/Liste.md', '# Liste\n\n- eins\n- zwei vom Tablet\n')
+      await Q.engine.syncNow()
+      await P.engine.syncNow()
+      assert.equal(hostP.text('Alt/Liste.md'), '# Liste\n\n- eins\n- zwei vom Tablet\n')
+      // Play an older build that moved its cursor past that change without applying it.
+      P.engine.dispose()
+      const rewound = JSON.parse(hostP.store.state.get('vault-probe-laptop'))
+      rewound.files['Alt/Liste.md'].revision = olderBase
+      rewound.files['Alt/Liste.md'].contentSha256 = 'stale'
+      hostP.store.state.set('vault-probe-laptop', JSON.stringify(rewound))
+      const P2 = createProbe(hostP, 'Laptop')
+      await P2.engine.start()
+      hostP.put('Alt/Liste.md', '# Liste\n\n- eins\n- drei vom Laptop\n')
+      await P2.engine.syncNow()
+      assert.equal(P2.engine.getState().status, 'idle', P2.engine.getState().error)
+      assert.equal(hostP.text('Alt/Liste.md'), '# Liste\n\n- eins\n- zwei vom Tablet\n', 'the newer server revision is applied in the same cycle')
+      const copies = [...hostP.files.keys()].filter((path) => path.startsWith('Alt/Liste (Konflikt Laptop '))
+      assert.equal(copies.length, 1, 'the local edit is kept as a conflict copy')
+      assert.equal(hostP.text(copies[0]), '# Liste\n\n- eins\n- drei vom Laptop\n')
+      const count = P2.api.uploads.filter((item) => item.id === id).length
+      await P2.engine.syncNow()
+      assert.equal(P2.api.uploads.filter((item) => item.id === id).length, count, 'the note is not sent again')
+      await Q.engine.syncNow()
+      assert.equal(hostQ.text(copies[0]), '# Liste\n\n- eins\n- drei vom Laptop\n', 'both versions reach the tablet')
+
+      // A guard 409 (base current, body refused) keeps both instead of looping.
+      hostP.put('Alt/Gross.md', `# Gross\n\n${'Viel Inhalt. '.repeat(600)}\n`)
+      await P2.engine.syncNow()
+      const big = hostP.text('Alt/Gross.md')
+      const bigId = JSON.parse(hostP.store.state.get('vault-probe-laptop')).files['Alt/Gross.md'].id
+      hostP.put('Alt/Gross.md', `# Gross\n\n${'Viel Inhalt. '.repeat(590)}\n`)
+      P2.api.refuse = async (uploadId, base, session) => {
+        if (uploadId !== bigId) return null
+        return new SyncApiError(409, 'guard', await entryFor(P2.api, session, bigId), 'guard')
+      }
+      // While the editor still holds the note, nothing is written under it.
+      const edited = hostP.text('Alt/Gross.md')
+      P2.events.busy.add('Alt/Gross.md')
+      await P2.engine.syncNow()
+      assert.equal(hostP.text('Alt/Gross.md'), edited, 'an open note is not replaced under the editor')
+      assert.equal([...hostP.files.keys()].filter((path) => path.startsWith('Alt/Gross (Konflikt')).length, 0)
+      P2.events.busy.delete('Alt/Gross.md')
+      await P2.engine.syncNow()
+      P2.api.refuse = null
+      assert.ok(P2.events.applied.some((change) => change.written.includes('Alt/Gross.md')), 'the app is told to reload the restored note')
+      assert.equal(hostP.text('Alt/Gross.md'), big, 'the server copy is put back after a guard rejection')
+      const guardCopies = [...hostP.files.keys()].filter((path) => path.startsWith('Alt/Gross (Konflikt Laptop '))
+      assert.equal(guardCopies.length, 1, 'the refused local version stays beside the note')
+      const tries = P2.api.uploads.filter((item) => item.id === bigId).length
+      await P2.engine.syncNow()
+      assert.equal(P2.api.uploads.filter((item) => item.id === bigId).length, tries, 'a guard rejection is not retried')
+      await P2.engine.logout()
+      P2.engine.dispose()
+    }
+    await Q.engine.logout()
+    Q.engine.dispose()
+  }
+
   // ── Wiring ──────────────────────────────────────────────────────────────
   const serverSource = read('../fanotes-site/server.mjs')
   assert.match(serverSource, /import \{[^}]*\bhandleSyncRequest\b[^}]*\} from '\.\/sync-api\.mjs'/u)
@@ -506,6 +729,8 @@ try {
     const host = createSyncHost({ vaultRoot: async () => root, userDataDirectory: userData, safeStorage: fakeSafeStorage })
     const scanned = (await host.scan()).map((entry) => entry.path).sort()
     assert.deepEqual(scanned, ['.fanotes/folder-colors.json', 'Mathe/Algebra.md'], 'scan skips history, tmp files, .git and symlinks')
+    const missingRoot = createSyncHost({ vaultRoot: async () => join(root, 'fehlt'), userDataDirectory: userData, safeStorage: fakeSafeStorage })
+    await assert.rejects(missingRoot.scan(), /unvollständig/u, 'a missing vault is not an empty scan')
     await assert.rejects(host.read('Mathe/Link.md'), /Symbolische Links/u)
     await assert.rejects(host.read('Link/secret.md'), /Symbolische Links/u)
     await assert.rejects(host.read('../outside.md'), /Ungültiger Sync-Pfad/u)

@@ -2805,7 +2805,10 @@ export default function App({ startupBootstrap }: AppProps) {
       for (const worksheetId of clonedWorksheetIds) {
         await window.fanotes.deleteWorksheet(worksheetId).catch(() => undefined)
       }
-      if (createdPath) await window.fanotes.trashEntry(createdPath).catch(() => undefined)
+      if (createdPath) {
+        await window.fanotes.trashEntry(createdPath).catch(() => undefined)
+        syncEngine.markDeleted(createdPath)
+      }
       if (session === vaultSessionGenerationRef.current) {
         toast(error instanceof Error ? error.message : 'Notiz konnte nicht dupliziert werden.', 'error')
       }
@@ -3360,6 +3363,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     vaultStructureRevisionRef.current += 1
     const nextPath = await window.fanotes.renameEntry(path, nextName)
+    if (nextPath && nextPath !== path) syncEngine.markDeleted(path)
     if (session !== vaultSessionGenerationRef.current) return
     remapNotePaperPaths(path, nextPath)
     remapWorkspacePaths(path, nextPath)
@@ -3407,6 +3411,7 @@ export default function App({ startupBootstrap }: AppProps) {
     vaultStructureRevisionRef.current += 1
     try {
       const nextPath = await window.fanotes.moveEntry(path, destFolder)
+      if (nextPath !== path) syncEngine.markDeleted(path)
       if (session !== vaultSessionGenerationRef.current) return
       if (nextPath === path) return
       remapNotePaperPaths(path, nextPath)
@@ -3473,6 +3478,7 @@ export default function App({ startupBootstrap }: AppProps) {
       setMutatingEntryPaths((current) => current.includes(path) ? current : [...current, path])
       mutationMarked = true
       await window.fanotes.trashEntry(path)
+      syncEngine.markDeleted(path)
       if (session !== vaultSessionGenerationRef.current) return
       remapNotePaperPaths(path, null)
       vaultStructureRevisionRef.current += 1

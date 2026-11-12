@@ -821,7 +821,7 @@ class DirectoryVault(val root: Path) : VaultIo {
     }
 
     override fun walkFiles(): List<VaultEntry> {
-        if (!Files.exists(root)) return emptyList()
+        if (!Files.isDirectory(root)) throw java.nio.file.NoSuchFileException(root.toString())
         return Files.walk(root).use { stream ->
             stream.filter { Files.isRegularFile(it) }.map { file ->
                 val relative = file.relativeTo(root).toString().replace('\\', '/')

@@ -13,8 +13,9 @@
 //   accounts/<id>/index.json          -> snapshot of the file table { revision, entries }
 //   accounts/<id>/changes.jsonl       -> appended mutations since the snapshot
 //   accounts/<id>/blobs/<fileId>      -> ciphertext
-//   accounts/<id>/revisions/<fileId>/ -> one previous blob, plus up to three
-//     collapse archives (c-<revision>) so a shrink can be undone
+//   accounts/<id>/revisions/<fileId>/ -> the last 8 blobs, and the largest
+//     older blob, so a shrink or a bad overwrite can be restored
+//   accounts/<id>/quarantine/<fileId>/ -> rejected empty or truncated uploads
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { createReadStream, promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
@@ -42,11 +43,15 @@ const API_PREFIX = '/api/v1/sync'
 const MAX_JSON_BYTES = 64 * 1024
 const MAX_BLOB_BYTES = Number(process.env.FANOTES_SYNC_MAX_FILE_BYTES || 100 * 1024 * 1024)
 const QUOTA_BYTES = Number(process.env.FANOTES_SYNC_QUOTA_BYTES || 4 * 1024 * 1024 * 1024)
-// A large note replaced by a few hundred bytes is the empty-overwrite failure.
-// Only clients that do not say whether the body has content hit this net.
+// A large note replaced by a few hundred bytes, or by under a quarter of its
+// size, is what a failed load looks like. That net holds whatever the client
+// claims about the body. Short notes are not judged by size: deleting a line
+// from a 600-byte note is a normal edit, and the archive keeps the previous blob.
 const COLLAPSE_OLD_BYTES = 4096
 const COLLAPSE_NEW_BYTES = 1024
-const MAX_COLLAPSE_KEPT = 3
+// AES-GCM adds a 12-byte IV and a 16-byte tag; a body of this size is an empty file.
+const EMPTY_CIPHERTEXT_BYTES = 28
+const MAX_REVISIONS_KEPT = 8
 const MAX_FILES = Number(process.env.FANOTES_SYNC_MAX_FILES || 50_000)
 const MAX_DEVICES = 20
 const MAX_SESSIONS = 40
@@ -177,14 +182,21 @@ const readJsonBody = async (request) => {
 
 const readBinaryBody = async (request, limit) => {
   const declared = Number(request.headers['content-length'])
-  if (Number.isFinite(declared) && declared > limit) fail(413, 'Die Datei ist zu groß für den Sync.')
+  if (!Number.isInteger(declared) || declared < 0) fail(400, 'Die Datei kam unvollständig an.')
+  if (declared > limit) fail(413, 'Die Datei ist zu groß für den Sync.')
   const chunks = []
   let size = 0
-  for await (const chunk of request) {
-    size += chunk.length
-    if (size > limit) fail(413, 'Die Datei ist zu groß für den Sync.')
-    chunks.push(chunk)
+  try {
+    for await (const chunk of request) {
+      size += chunk.length
+      if (size > declared) fail(400, 'Die Datei kam unvollständig an.')
+      chunks.push(chunk)
+    }
+  } catch (error) {
+    if (error instanceof SyncApiError) throw error
+    fail(400, 'Die Datei kam unvollständig an.')
   }
+  if (size !== declared) fail(400, 'Die Datei kam unvollständig an.')
   return Buffer.concat(chunks)
 }
 
@@ -414,8 +426,8 @@ const corsHeaders = (request) => {
   return {
     ...(allowed ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256, X-FaNotes-Blank, X-FaNotes-Clear',
-    'Access-Control-Expose-Headers': 'ETag, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256, X-FaNotes-Blank, X-FaNotes-Clear, X-FaNotes-Delete',
+    'Access-Control-Expose-Headers': 'ETag, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted, X-FaNotes-Rejected',
     'Access-Control-Max-Age': '600',
   }
 }
@@ -676,25 +688,38 @@ const handleGetFile = async (request, response, auth, fileId) => {
   stream.pipe(response)
 }
 
+// `reason` tells a client which 409 this is. "stale": the base is not the current
+// revision, so apply `entry` (it may be older than the client's pull cursor).
+// "guard": the base was current but the body was refused as empty or collapsed,
+// so keep the local file beside the note instead of sending it again.
 const conflict = (request, response, entry) => {
-  sendJson(request, response, 409, { error: 'Die Datei wurde inzwischen von einem anderen Gerät geändert.', entry: publicEntry(entry) })
+  sendJson(request, response, 409, { error: 'Die Datei wurde inzwischen von einem anderen Gerät geändert.', entry: publicEntry(entry), reason: 'stale' })
+}
+
+const guardRejected = (request, response, entry) => {
+  sendJson(request, response, 409, { error: 'Die leere oder stark gekürzte Fassung wurde nicht über die vorhandene Notiz gelegt.', entry: publicEntry(entry), reason: 'guard' }, { 'X-FaNotes-Rejected': 'guard' })
 }
 
 // '1' / '0' are the new client. No header means an older client.
 const headerFlag = (value) => (value === '1' ? true : value === '0' ? false : null)
 
 /**
- * A blank body must not replace a note that still has content unless the
- * editor set X-FaNotes-Clear. The previous blob stays; the response is the
- * same 409 the client already treats as "keep the server copy".
+ * Empty, blank, or severely truncated ciphertext must not replace a note that
+ * still has content. X-FaNotes-Clear is the only bypass. A client that claims
+ * the short body still has content (`X-FaNotes-Blank: 0`) is not trusted:
+ * a failed load can look like a tiny note. The previous blob stays, and the
+ * response is the same 409 the client already treats as "keep the server copy".
  */
-const rejectsBlankOverwrite = (current, nextSize, blank, clear) => {
+export const rejectsBlankOverwrite = (current, nextSize, blank, clear) => {
   if (clear || !current || current.deleted) return false
   const previous = Number(current.size) || 0
-  if (previous <= 0) return false
-  if (blank === true && nextSize + 64 < previous) return true
-  if (blank == null && previous >= COLLAPSE_OLD_BYTES && nextSize <= COLLAPSE_NEW_BYTES) return true
-  return false
+  if (previous <= EMPTY_CIPHERTEXT_BYTES) return false
+  // The client parsed the note and found no strokes and no text.
+  if (blank === true) return true
+  // A zero-byte file never replaces content without an explicit clear.
+  if (nextSize <= EMPTY_CIPHERTEXT_BYTES) return true
+  const collapse = previous >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < previous)
+  return collapse
 }
 
 const listRevisionFiles = async (directory) => {
@@ -730,12 +755,15 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   if (move) await fs.rename(blobPath, dest)
   else await fs.copyFile(blobPath, dest)
   const files = await listRevisionFiles(directory)
-  const collapses = files.filter((file) => file.name.startsWith('c-')).sort((left, right) => left.revision - right.revision)
-  const previous = files.filter((file) => !file.name.startsWith('c-')).sort((left, right) => left.revision - right.revision)
-  const drop = []
-  if (previous.length > 1) drop.push(...previous.slice(0, -1))
-  if (collapses.length > MAX_COLLAPSE_KEPT) drop.push(...collapses.slice(0, collapses.length - MAX_COLLAPSE_KEPT))
-  for (const file of drop) await fs.rm(safeJoin(directory, file.name), { force: true })
+  const ranked = [...files].sort((left, right) => left.revision - right.revision)
+  if (ranked.length) {
+    const largest = ranked.reduce((best, file) => (file.size > best.size ? file : best), ranked[0])
+    const keep = new Set(ranked.slice(-MAX_REVISIONS_KEPT).map((file) => file.name))
+    if (largest && largest.size > nextSize) keep.add(largest.name)
+    for (const file of ranked) {
+      if (!keep.has(file.name)) await fs.rm(safeJoin(directory, file.name), { force: true })
+    }
+  }
   const after = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
   return after - before
 }
@@ -754,8 +782,14 @@ const handlePutFile = async (request, response, auth, fileId) => {
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
     const currentRevision = current ? current.revision : 0
-    if (currentRevision !== base) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
-    if (rejectsBlankOverwrite(current, body.length, blank, clear)) return conflict(request, response, current)
+    // A tombstone holds no content, so a device that still has the note may put
+    // it back from any older base. The deleted blob stays in the archive.
+    const recreatesTombstone = Boolean(current?.deleted) && base < currentRevision && body.length > EMPTY_CIPHERTEXT_BYTES && blank !== true
+    if (currentRevision !== base && !recreatesTombstone) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
+    if (rejectsBlankOverwrite(current, body.length, blank, clear)) {
+      await quarantineRejected(auth.account.id, fileId, base, body)
+      return guardRejected(request, response, current)
+    }
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
     const historyDelta = current && !current.deleted && (current.sha256 !== declaredSha) ? (Number(current.size) || 0) : 0
     if (table.bytes - previousBytes + body.length + (table.historyBytes || 0) + historyDelta > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
@@ -775,7 +809,86 @@ const handlePutFile = async (request, response, auth, fileId) => {
   })
 }
 
+/** Keep a rejected body without ever replacing the live blob. Failures here still reject the write. */
+const quarantineRejected = async (accountId, fileId, base, body) => {
+  try {
+    const directory = safeJoin(accountDirectory(accountId), 'quarantine', fileId)
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+    await atomicWrite(safeJoin(directory, String(base)), body)
+    const names = (await fs.readdir(directory)).filter((name) => /^\d+$/u.test(name)).sort((left, right) => Number(left) - Number(right))
+    for (const name of names.slice(0, Math.max(0, names.length - MAX_REVISIONS_KEPT))) {
+      await fs.rm(safeJoin(directory, name), { force: true })
+    }
+  } catch (error) {
+    if (error instanceof SyncApiError) throw error
+  }
+}
+
+const metaForRestore = async (accountId, fileId, current) => {
+  if (current && !current.deleted && typeof current.meta === 'string' && current.meta) return current.meta
+  let text = ''
+  try {
+    text = await fs.readFile(safeJoin(accountDirectory(accountId), 'changes.jsonl'), 'utf8')
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  }
+  const lines = text.split('\n')
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (!lines[index]) continue
+    try {
+      const entry = JSON.parse(lines[index])
+      if (entry.id === fileId && !entry.deleted && typeof entry.meta === 'string' && entry.meta) return entry.meta
+    } catch {
+      // A damaged history line cannot name the file. Keep looking.
+    }
+  }
+  return null
+}
+
+const handleListRevisions = async (request, response, auth, fileId) => {
+  const directory = revisionsDirectory(auth.account.id, fileId)
+  const files = await listRevisionFiles(directory)
+  sendJson(request, response, 200, {
+    revisions: files
+      .sort((left, right) => left.revision - right.revision)
+      .map((file) => ({ revision: file.revision, size: file.size, collapse: file.name.startsWith('c-') })),
+  })
+}
+
+const handleRestoreFile = async (request, response, auth, fileId) => {
+  const base = parseIfMatch(request)
+  const payload = await readJsonBody(request)
+  const archivedRevision = Number(payload.revision)
+  if (!Number.isInteger(archivedRevision) || archivedRevision < 0) fail(400, 'Diese Fassung liegt nicht im Archiv.')
+  await withAccountLock(auth.account.id, async () => {
+    const table = await loadTable(auth.account.id)
+    const current = table.entries.get(fileId)
+    const currentRevision = current ? current.revision : 0
+    if (currentRevision !== base) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
+    const directory = revisionsDirectory(auth.account.id, fileId)
+    const archived = (await listRevisionFiles(directory)).find((file) => file.revision === archivedRevision)
+    if (!archived) fail(404, 'Diese Fassung liegt nicht im Archiv.')
+    const bytes = await fs.readFile(safeJoin(directory, archived.name))
+    const meta = await metaForRestore(auth.account.id, fileId, current)
+    if (!meta) fail(404, 'Diese Fassung liegt nicht im Archiv.')
+    if (current && !current.deleted && current.sha256 !== sha256(bytes)) {
+      table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, bytes.length, false)
+    }
+    const digest = sha256(bytes)
+    const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
+    await atomicWrite(safeJoin(accountDirectory(auth.account.id), 'blobs', fileId), bytes)
+    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: bytes.length, sha256: digest, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
+    table.revision = entry.revision
+    table.entries.set(fileId, entry)
+    table.bytes += bytes.length - previousBytes
+    await appendChange(auth.account.id, table, entry)
+    sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, size: bytes.length }, { ETag: `"${entry.revision}"` })
+  })
+}
+
 const handleDeleteFile = async (request, response, auth, fileId) => {
+  if (request.headers['x-fanotes-delete'] !== '1') fail(428, 'Eine Löschung braucht eine ausdrückliche Bestätigung.')
   const base = parseIfMatch(request)
   await withAccountLock(auth.account.id, async () => {
     const table = await loadTable(auth.account.id)
@@ -872,6 +985,16 @@ export const handleSyncRequest = async (request, response, url) => {
     if (route === '/changes' && method === 'GET') { await handleChanges(request, response, auth, url); return true }
     const deviceMatch = /^\/devices\/([a-f0-9]{24})$/u.exec(route)
     if (deviceMatch && method === 'DELETE') { await handleRemoveDevice(request, response, auth, deviceMatch[1]); return true }
+    const revisionsMatch = /^\/files\/([a-f0-9]{64})\/revisions$/u.exec(route)
+    if (revisionsMatch && method === 'GET') {
+      await handleListRevisions(request, response, auth, parseFileId(revisionsMatch[1]))
+      return true
+    }
+    const restoreMatch = /^\/files\/([a-f0-9]{64})\/restore$/u.exec(route)
+    if (restoreMatch && method === 'POST') {
+      await handleRestoreFile(request, response, auth, parseFileId(restoreMatch[1]))
+      return true
+    }
     const fileMatch = /^\/files\/([a-f0-9]{64})$/u.exec(route)
     if (fileMatch) {
       const fileId = parseFileId(fileMatch[1])

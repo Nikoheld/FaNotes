@@ -2857,5 +2857,10 @@
   "Kennzahlen": "Metrics",
   "Zeitverlauf": "Timeline",
   "FaNotes Statistik": "FaNotes Statistics",
-  "Private Produktstatistik von FaNotes: anonyme Summen für Website, Downloads und App-Starts.": "Private FaNotes product statistics: anonymous totals for the website, downloads, and app launches."
+  "Private Produktstatistik von FaNotes: anonyme Summen für Website, Downloads und App-Starts.": "Private FaNotes product statistics: anonymous totals for the website, downloads, and app launches.",
+  "Die Datei kam unvollständig an.": "The file arrived incomplete.",
+  "Der Vault wurde unvollständig gelesen.": "The vault was read incompletely.",
+  "Eine Löschung braucht eine ausdrückliche Bestätigung.": "A deletion needs an explicit confirmation.",
+  "Diese Fassung liegt nicht im Archiv.": "This revision is not in the archive.",
+  "Die leere oder stark gekürzte Fassung wurde nicht über die vorhandene Notiz gelegt.": "The empty or heavily shortened version was not saved over the existing note."
 }

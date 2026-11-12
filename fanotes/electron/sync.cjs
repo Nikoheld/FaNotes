@@ -81,15 +81,26 @@ const coerceSyncBytes = (bytes) => {
 }
 
 async function scanDirectory(root, directory, depth, out) {
-  if (depth > MAX_DEPTH || out.length >= MAX_ENTRIES) return
+  if (depth > MAX_DEPTH || out.length >= MAX_ENTRIES) {
+    const error = new Error('Der Vault wurde unvollständig gelesen.')
+    error.code = 'EINCOMPLETE'
+    throw error
+  }
   let entries
   try {
     entries = await fsp.readdir(directory, { withFileTypes: true })
-  } catch {
-    return
+  } catch (error) {
+    if (error?.code === 'ENOENT' && depth > 0) return
+    const wrapped = new Error('Der Vault wurde unvollständig gelesen.')
+    wrapped.code = 'EINCOMPLETE'
+    throw wrapped
   }
   for (const entry of entries) {
-    if (out.length >= MAX_ENTRIES) return
+    if (out.length >= MAX_ENTRIES) {
+      const error = new Error('Der Vault wurde unvollständig gelesen.')
+      error.code = 'EINCOMPLETE'
+      throw error
+    }
     if (entry.isSymbolicLink()) continue
     const absolute = path.join(directory, entry.name)
     const relative = toPosix(root, absolute)
@@ -110,7 +121,7 @@ async function scanDirectory(root, directory, depth, out) {
     } catch {
       continue
     }
-    if (!info.isFile() || info.size > MAX_FILE_BYTES) continue
+    if (!info.isFile()) continue
     out.push({ path: relative, size: info.size, mtimeMs: Math.round(info.mtimeMs) })
   }
 }

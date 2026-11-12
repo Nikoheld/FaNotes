@@ -238,6 +238,61 @@ class SyncEngineTest {
     }
 
     @Test
+    fun aMissingFileIsRestoredUnlessTheDeleteWasExplicit() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Tablet A")
+        val engineB = engine(SyncApi(server), hostB, "Tablet B")
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            val note = noteFamd("2026-01-01T00:00:00.000Z").encodeToByteArray()
+            hostA.put("Notizen/Seite.famd", note, 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            synchronized(hostA.files) { hostA.files.remove("Notizen/Seite.famd") }
+            engineA.syncNow()
+            assertTrue(hostA.read("Notizen/Seite.famd").contentEquals(note))
+            engineB.syncNow()
+            assertTrue(hostB.read("Notizen/Seite.famd").contentEquals(note))
+            synchronized(hostA.files) { hostA.files.remove("Notizen/Seite.famd") }
+            engineA.markDeleted("Notizen/Seite.famd")
+            engineA.syncNow()
+            engineB.syncNow()
+            assertTrue(synchronized(hostB.files) { hostB.files["Notizen/Seite.famd"] == null })
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aTruncatedLocalNoteIsNotUploaded() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Tablet A")
+        val engineB = engine(SyncApi(server), hostB, "Tablet B")
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            val note = ByteArray(8000) { 9 }
+            hostA.put("Bilder/Scan.png", note, 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            hostA.put("Bilder/Scan.png", ByteArray(40) { 1 }, 2_000)
+            engineA.syncNow()
+            assertTrue(hostA.read("Bilder/Scan.png").contentEquals(note))
+            engineB.syncNow()
+            assertTrue(hostB.read("Bilder/Scan.png").contentEquals(note))
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
     fun applyRemoteOomPausesWithoutLosingLocalNotesOrAdvancingTheCursor() = runBlocking {
         val server = MemorySyncServer()
         val hostA = MemoryHost("memory-a")
@@ -406,6 +461,199 @@ class SyncEngineTest {
         }
     }
 
+    @Test
+    fun aLocalNoteOverAnOldTombstoneIsRecreatedOnceAndThenStaysQuiet() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("tomb-a")
+        val hostB = MemoryHost("tomb-b")
+        val engineA = engine(SyncApi(server), hostA, "Tablet A")
+        val engineB = engine(SyncApi(server), hostB, "Tablet B")
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            hostA.put("Notes/Old.md", "Old note from A\n".encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            synchronized(hostA.files) { hostA.files.remove("Notes/Old.md") }
+            engineA.markDeleted("Notes/Old.md")
+            engineA.syncNow()
+            hostA.put("Notes/Later.md", "Written after the delete\n".encodeToByteArray(), 2_000)
+            engineA.syncNow()
+            // B kept the note from before it signed in. Its first pull passes the tombstone
+            // (no path, so nothing to match) and moves the cursor beyond it.
+            val kept = "Kept on B and never deleted here\n".encodeToByteArray()
+            hostB.put("Notes/Old.md", kept, 3_000)
+            val before = server.callCount()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            val puts = server.callsSince(before).filter { it.method == "PUT" }
+            val rejected = puts.single { it.status == 409 }
+            assertEquals("0", rejected.ifMatch)
+            val retries = puts.filter { it.fileId == rejected.fileId }
+            assertEquals(listOf(409, 200), retries.map { it.status })
+            assertTrue(retries.last().ifMatch != "0")
+
+            val mark = server.callCount()
+            engineB.syncNow()
+            val next = server.callsSince(mark)
+            assertTrue(next.none { it.status == 409 })
+            assertTrue(next.none { it.method == "PUT" })
+            assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+
+            engineA.syncNow()
+            kotlin.test.assertContentEquals(kept, hostA.read("Notes/Old.md"))
+            assertEquals("Written after the delete\n", hostB.read("Notes/Later.md").decodeToString())
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aRefusedUploadBecomesAConflictCopyAndIsNotSentAgain() = runBlocking {
+        // Once with `reason`, once as an older server that only sends the entry.
+        for (legacy in listOf(false, true)) {
+            val server = MemorySyncServer().apply { legacyConflicts = legacy }
+            val host = MemoryHost("guard-$legacy")
+            val engine = engine(SyncApi(server), host, "Tablet")
+            try {
+                engine.register("ada@example.com", "correct horse")
+                val full = "Eine Zeile mit Inhalt.\n".repeat(60).encodeToByteArray()
+                host.put("Notes/Lang.md", full, 1_000)
+                engine.syncNow()
+                val shorter = "Eine Zeile mit Inhalt.\n".encodeToByteArray()
+                host.put("Notes/Lang.md", shorter, 2_000)
+                server.refuseOverwrites = true
+                val before = server.callCount()
+                engine.syncNow()
+                val first = server.callsSince(before)
+                val refused = first.single { it.method == "PUT" && it.status == 409 }
+                assertEquals(1, first.count { it.method == "PUT" && it.fileId == refused.fileId }, "legacy=$legacy")
+                kotlin.test.assertContentEquals(full, host.read("Notes/Lang.md"))
+                val copy = synchronized(host.files) { host.files.keys.single { it.startsWith("Notes/Lang (Konflikt") } }
+                kotlin.test.assertContentEquals(shorter, host.read(copy))
+                assertTrue(engine.state.value.conflicts.any { it.path == "Notes/Lang.md" && it.copyPath == copy })
+
+                val mark = server.callCount()
+                engine.syncNow()
+                val second = server.callsSince(mark)
+                assertTrue(second.none { it.method == "PUT" && it.fileId == refused.fileId }, "legacy=$legacy")
+                assertTrue(second.none { it.status == 409 }, "legacy=$legacy")
+                // The conflict copy is a new file, so the guard has nothing to protect and it uploads.
+                assertEquals(1, second.count { it.method == "PUT" && it.status == 200 && it.ifMatch == "0" })
+                kotlin.test.assertContentEquals(full, host.read("Notes/Lang.md"))
+                assertEquals(SyncStatus.IDLE, engine.state.value.status)
+            } finally {
+                engine.close()
+            }
+        }
+    }
+
+    @Test
+    fun aNewerEntryBelowTheCursorIsAppliedWhenTheUploadIsRejected() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("stale-a")
+        val hostB = MemoryHost("stale-b")
+        val engineA = engine(SyncApi(server), hostA, "Tablet A")
+        val engineB = engine(SyncApi(server), hostB, "Tablet B")
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            hostA.put("Notes/Shared.md", "First version\n".encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            assertEquals("First version\n", hostB.read("Notes/Shared.md").decodeToString())
+            val edit = server.callCount()
+            hostA.put("Notes/Shared.md", "Second version from A\n".encodeToByteArray(), 2_000)
+            engineA.syncNow()
+            val sharedId = server.callsSince(edit).single { it.method == "PUT" && it.status == 200 }.fileId!!
+            hostA.put("Notes/Other.md", "A later note\n".encodeToByteArray(), 2_500)
+            engineA.syncNow()
+            // B's pull lists only the later note, so its cursor moves past A's edit without applying it.
+            server.hiddenIds = setOf(sharedId)
+            engineB.syncNow()
+            server.hiddenIds = emptySet()
+            assertEquals("A later note\n", hostB.read("Notes/Other.md").decodeToString())
+            assertEquals("First version\n", hostB.read("Notes/Shared.md").decodeToString())
+            engineB.syncNow()
+            assertEquals("First version\n", hostB.read("Notes/Shared.md").decodeToString())
+
+            hostB.put("Notes/Shared.md", "Edited on B\n".encodeToByteArray(), 3_000)
+            val before = server.callCount()
+            engineB.syncNow()
+            val first = server.callsSince(before)
+            assertEquals(1, first.count { it.method == "PUT" && it.status == 409 })
+            assertEquals("Second version from A\n", hostB.read("Notes/Shared.md").decodeToString())
+            val copy = synchronized(hostB.files) { hostB.files.keys.single { it.startsWith("Notes/Shared (Konflikt") } }
+            assertEquals("Edited on B\n", hostB.read(copy).decodeToString())
+            assertTrue(engineB.state.value.conflicts.any { it.path == "Notes/Shared.md" && it.copyPath == copy })
+
+            val mark = server.callCount()
+            engineB.syncNow()
+            assertTrue(server.callsSince(mark).none { it.status == 409 })
+            engineA.syncNow()
+            assertEquals("Second version from A\n", hostA.read("Notes/Shared.md").decodeToString())
+            assertEquals("Edited on B\n", hostA.read(copy).decodeToString())
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aDamagedRemoteBlobIsSkippedWhileTheRestOfThePullAndThePushRun() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("damaged-a")
+        val hostB = MemoryHost("damaged-b")
+        val engineA = engine(SyncApi(server), hostA, "Tablet A")
+        val engineB = engine(SyncApi(server), hostB, "Tablet B")
+        suspend fun skippedIds(): List<String> {
+            val state = parseJson(hostB.readState("damaged-b")!!) as JsonValue.Obj
+            return state.array("skipped")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.string("id") }
+        }
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            hostA.put("Notes/Base.md", "Base note\n".encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            val badUpload = server.callCount()
+            hostA.put("Notes/Bad.md", "This blob arrives damaged\n".encodeToByteArray(), 2_000)
+            engineA.syncNow()
+            val badId = server.callsSince(badUpload).single { it.method == "PUT" && it.status == 200 }.fileId!!
+            hostA.put("Notes/Good.md", "This one arrives intact\n".encodeToByteArray(), 2_500)
+            engineA.syncNow()
+
+            server.damagedIds = setOf(badId)
+            hostB.put("Notes/Base.md", "Edited on B\n".encodeToByteArray(), 3_000)
+            val before = server.callCount()
+            engineB.syncNow()
+            val cycle = server.callsSince(before)
+            // The damaged entry did not stop the cycle: the next entry and the local edit both went through.
+            assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+            assertEquals(null, engineB.state.value.error)
+            assertEquals("This one arrives intact\n", hostB.read("Notes/Good.md").decodeToString())
+            assertTrue(synchronized(hostB.files) { "Notes/Bad.md" !in hostB.files })
+            assertEquals(1, cycle.count { it.method == "PUT" && it.status == 200 })
+            assertTrue(badId in skippedIds())
+            assertTrue(engineB.state.value.log.any { it.level == "warn" && it.text.contains("retried") })
+            // A later pull retries it from the skip list; still damaged, it stays there and is not logged again.
+            val warnings = engineB.state.value.log.count { it.level == "warn" }
+            engineB.syncNow()
+            assertTrue(badId in skippedIds())
+            assertEquals(warnings, engineB.state.value.log.count { it.level == "warn" })
+            engineA.syncNow()
+            assertEquals("Edited on B\n", hostA.read("Notes/Base.md").decodeToString())
+
+            server.damagedIds = emptySet()
+            engineB.syncNow()
+            assertEquals("This blob arrives damaged\n", hostB.read("Notes/Bad.md").decodeToString())
+            assertTrue(badId !in skippedIds())
+            assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
     private fun noteFamd(updatedAt: String): String {
         val ink = JsonValue.Obj()
         ink.put("updatedAt", jsonString(updatedAt))
@@ -471,11 +719,41 @@ private class MemoryHost(private val id: String) : SyncHost {
 private class MemorySyncServer : SyncTransport {
     private val accounts = linkedMapOf<String, Account>()
     private val sessions = linkedMapOf<String, String>()
+    private val calls = mutableListOf<Call>()
+
+    /** A server from before `reason` and `X-FaNotes-Rejected`: the 409 carries only the entry. */
+    @Volatile var legacyConflicts = false
+
+    /** The size guard refuses every PUT over a live entry, as for a blank or collapsed body. */
+    @Volatile var refuseOverwrites = false
+
+    /** `/changes` leaves these files out but still moves `nextSince` past them, as for a lost entry. */
+    @Volatile var hiddenIds: Set<String> = emptySet()
+
+    /** Downloads of these files arrive with one flipped byte, so the blob fails its checksum. */
+    @Volatile var damagedIds: Set<String> = emptySet()
+
+    data class Call(val method: String, val fileId: String?, val ifMatch: String?, val status: Int)
+
+    fun callCount() = synchronized(this) { calls.size }
+
+    fun callsSince(mark: Int) = synchronized(this) { calls.drop(mark) }
 
     override suspend fun execute(request: SyncHttpRequest): SyncHttpResponse = synchronized(this) {
         val path = request.url.substringAfter("/api/v1/sync")
+        val response = route(path, request)
+        calls += Call(
+            request.method,
+            path.takeIf { it.startsWith("/files/") }?.removePrefix("/files/"),
+            header(request, "If-Match"),
+            response.status,
+        )
+        response
+    }
+
+    private fun route(path: String, request: SyncHttpRequest): SyncHttpResponse {
         val account = accountFor(request)
-        try {
+        return try {
             when {
                 path == "/prelogin" && request.method == "POST" -> prelogin(request)
                 path == "/register" && request.method == "POST" -> register(request)
@@ -553,7 +831,7 @@ private class MemorySyncServer : SyncTransport {
         val entries = account.files.values.filter { it.revision > since }.sortedBy { it.revision }
         val page = entries.take(500)
         val next = page.lastOrNull()?.revision ?: account.revision
-        val body = page.joinToString(",", prefix = "[", postfix = "]") { entryJson(it).removePrefix("\"entry\":") }
+        val body = page.filter { it.id !in hiddenIds }.joinToString(",", prefix = "[", postfix = "]") { entryJson(it).removePrefix("\"entry\":") }
         return json(200, """{"revision":${account.revision},"entries":$body,"more":${entries.size > page.size},"nextSince":$next}""")
     }
 
@@ -569,7 +847,7 @@ private class MemorySyncServer : SyncTransport {
                 "x-fanotes-meta" to entry.meta.orEmpty(),
                 "x-fanotes-sha256" to entry.sha256.orEmpty(),
             ),
-            entry.blob,
+            if (id in damagedIds) entry.blob.copyOf().also { it[it.size / 2] = (it[it.size / 2].toInt() xor 0x5a).toByte() } else entry.blob,
         )
     }
 
@@ -577,7 +855,7 @@ private class MemorySyncServer : SyncTransport {
         val base = header(request, "If-Match")?.trim('"')?.toLongOrNull() ?: return json(428, """{"error":"if-match"}""")
         val current = account.files[id]
         val currentRevision = current?.revision ?: 0L
-        if (currentRevision != base) return conflict(current, id)
+        if (currentRevision != base) return conflict(current, id, "stale")
         val declared = header(request, "X-FaNotes-Sha256") ?: return json(400, """{"error":"sha"}""")
         val body = request.body ?: ByteArray(0)
         if (sha256Hex(body) != declared) return json(400, """{"error":"checksum"}""")
@@ -587,7 +865,8 @@ private class MemorySyncServer : SyncTransport {
             else -> null
         }
         val clear = header(request, "X-FaNotes-Clear") == "1"
-        if (rejectsBlank(current, body.size, blank, clear)) return conflict(current, id)
+        val refused = refuseOverwrites && !clear && current != null && !current.deleted
+        if (refused || rejectsBlank(current, body.size, blank, clear)) return conflict(current, id, "guard")
         account.revision += 1
         val entry = FileEntry(id, account.revision, false, body.size.toLong(), declared, header(request, "X-FaNotes-Meta"), body)
         account.files[id] = entry
@@ -595,17 +874,23 @@ private class MemorySyncServer : SyncTransport {
     }
 
     private fun remove(account: Account, id: String, request: SyncHttpRequest): SyncHttpResponse {
+        if (header(request, "X-FaNotes-Delete") != "1") return json(428, """{"error":"explicit"}""")
         val base = header(request, "If-Match")?.trim('"')?.toLongOrNull() ?: return json(428, """{"error":"if-match"}""")
         val current = account.files[id]
-        if ((current?.revision ?: 0L) != base) return conflict(current, id)
+        if ((current?.revision ?: 0L) != base) return conflict(current, id, "stale")
         account.revision += 1
         account.files[id] = FileEntry(id, account.revision, true, 0, null, null, ByteArray(0))
         return json(200, """{"revision":${account.revision}}""")
     }
 
-    private fun conflict(current: FileEntry?, id: String): SyncHttpResponse {
+    /** Same body as fanotes-site: the current entry, and `reason` plus a header on a guard refusal. */
+    private fun conflict(current: FileEntry?, id: String, reason: String): SyncHttpResponse {
         val entry = current ?: FileEntry(id, 0, true, 0, null, null, ByteArray(0))
-        return json(409, """{"error":"conflict","entry":${entryJson(entry).removePrefix("\"entry\":")}}""")
+        val entryBody = entryJson(entry).removePrefix("\"entry\":")
+        if (legacyConflicts) return json(409, """{"error":"conflict","entry":$entryBody}""")
+        val headers = mutableMapOf("content-type" to "application/json")
+        if (reason == "guard") headers["X-FaNotes-Rejected"] = "guard"
+        return SyncHttpResponse(409, headers, """{"error":"conflict","reason":"$reason","entry":$entryBody}""".toByteArray(StandardCharsets.UTF_8))
     }
 
     private fun openDevice(account: Account, name: String): Device {
@@ -632,12 +917,15 @@ private class MemorySyncServer : SyncTransport {
     private fun header(request: SyncHttpRequest, name: String) =
         request.headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value
 
-    /** Same rule as fanotes-site: a blank body does not replace a real note unless the editor cleared it. */
+    /**
+     * Same rule as `rejectsBlankOverwrite` in fanotes-site: a blank, empty, or collapsed body does
+     * not replace a real note unless the editor cleared it. Short notes are not judged by size.
+     */
     private fun rejectsBlank(current: FileEntry?, nextSize: Int, blank: Boolean?, clear: Boolean): Boolean {
-        if (clear || current == null || current.deleted || current.size <= 0L) return false
-        if (blank == true && nextSize + 64 < current.size) return true
-        if (blank == null && current.size >= 4096L && nextSize <= 1024) return true
-        return false
+        if (clear || current == null || current.deleted || current.size <= 28L) return false
+        if (blank == true) return true
+        if (nextSize <= 28) return true
+        return current.size >= 4096L && (nextSize <= 1024 || nextSize * 4 < current.size)
     }
 
     private class Account(

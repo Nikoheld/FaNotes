@@ -1550,6 +1550,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** False while a packed page is still becoming strokes, and until its first paint finishes. */
   const inkReadyRef = useRef(true)
   const inkHydratingRef = useRef(false)
+  /**
+   * A stored page was handed to this board and the load effect has not taken
+   * it yet. The first layout pass grows the still-empty page to the sheet and
+   * marks it dirty before that effect runs.
+   */
+  const inkLoadPendingRef = useRef(Boolean(initialDrawingJson))
+  /** The stored page could not be read. The board stays read-only and never writes over it. */
+  const inkLoadFailedRef = useRef(false)
+  /**
+   * The strokes in memory are not the stored page yet: it is still loading,
+   * or it could not be read. Writing them would replace the note's ink with an
+   * empty or partial page, so every save path asks this first.
+   */
+  const inkLoadBlocksSave = useCallback(() => (
+    inkLoadPendingRef.current || inkHydratingRef.current || inkLoadFailedRef.current
+  ), [])
   const inkOpenTokenRef = useRef(0)
   /** Rust viewport raster: set once the flag is on and the module loaded; null keeps the slice bitmap. */
   const viewportRasterRef = useRef<ViewportRaster | null>(null)
@@ -2033,8 +2049,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // The host guards note switches and the window close with this flag. A
     // page that has nothing to write (no strokes, no record: only its extent
     // followed the layout) must not keep those waiting on a save that never runs.
-    onDirtyChange?.(dirty && inkPagePersists(strokesRef.current.length, Boolean(drawingIdRef.current) || loadedDrawingIdRef.current !== undefined))
-  }, [onDirtyChange])
+    // Neither may a page whose stored ink is still loading or failed to load.
+    onDirtyChange?.(dirty && inkPagePersists(strokesRef.current.length, Boolean(drawingIdRef.current) || loadedDrawingIdRef.current !== undefined) && !inkLoadBlocksSave())
+  }, [inkLoadBlocksSave, onDirtyChange])
 
   const bumpRevision = useCallback(() => {
     revisionRef.current += 1
@@ -2836,6 +2853,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
 
   useEffect(() => {
     if (!initialDrawingJson) return
+    // From here this run either takes the page synchronously, starts the
+    // packed restore (inkHydratingRef), or fails it (inkLoadFailedRef).
+    inkLoadPendingRef.current = false
     const openId = drawingId ?? null
     const step = drawingLoadStep({
       loadedId: loadedDrawingIdRef.current,
@@ -2887,6 +2907,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       committedCanvasDirtyRef.current = true
       inkHydratingRef.current = false
       inkReadyRef.current = true
+      // The note still holds that page. This board shows nothing of it, so it
+      // must not write: no pen input, no save, and the extent the first
+      // layout pass grew is not a change.
+      inkLoadFailedRef.current = true
+      setDirty(false)
       setNotice({ kind: 'error', text: 'Die gespeicherte Zeichnung konnte nicht gelesen werden.' })
     }
     const applyLoaded = (
@@ -2943,6 +2968,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       undoRef.current = history.undo
       redoRef.current = history.redo
       inkHydratingRef.current = false
+      inkLoadFailedRef.current = false
       if (!inkPageIsHeavy(strokes)) inkReadyRef.current = true
       clearRecognitionScope()
       bumpInkRevision({ updateTranscript: false })
@@ -5157,7 +5183,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     // A packed page is still restoring strokes or painting its first slice.
     // An eraser on that partial model would delete ink the pointer never touched.
-    if (!inkReadyRef.current) return
+    // A page that could not be read stays read-only: strokes drawn on the
+    // empty board would replace the ink the note still holds.
+    if (!inkReadyRef.current || inkLoadFailedRef.current) return
     if (overlayInert(inline, inputActive) || !overlayHitEnabled(inputActive)) return
     if (hitTestChrome(event.clientX, event.clientY)) return
     setArtPanelOpen(false)
@@ -6904,6 +6932,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [applyInkExtentStyles, finishCanvasExport, paperStyle, resolvePaperElement, settings.paperSquareMm, settings.smoothing, title, toggleSection])
 
   const saveDrawing = useCallback((insertAfterSave: boolean, silent = false) => {
+    // Every board save comes through here: autosave, unmount, retry, the
+    // buttons, and the transcript pass. None may write a page that is still
+    // loading or failed to load over the stored one.
+    if (inkLoadBlocksSave()) {
+      if (!silent && inkLoadFailedRef.current) {
+        setNotice({ kind: 'error', text: 'Die gespeicherte Zeichnung konnte nicht gelesen werden.' })
+      }
+      return Promise.resolve()
+    }
     if (!inkPagePersists(strokesRef.current.length, inkRecordExists())) return Promise.resolve()
     if (!silent) {
       queuedSaveCountRef.current += 1
@@ -6915,6 +6952,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       await waitForCanvasExport()
       const savedRevision = revisionRef.current
       try {
+        // Queued behind an earlier write: a new page may have started loading since.
+        if (inkLoadBlocksSave()) return
         const result = await writeInkPage(drawingPayload(insertAfterSave))
         if (!mountedRef.current) {
           // The unmount save of a closing board: no state left to set, but the
@@ -6969,7 +7008,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const queued = saveQueueRef.current.catch(() => {}).then(run)
     saveQueueRef.current = queued
     return queued
-  }, [clear, drawingPayload, inkRecordExists, onDirtyChange, onInsertMarkdown, setDirty, settings.keepDrawingAfterInsert, title, waitForCanvasExport, writeInkPage])
+  }, [clear, drawingPayload, inkLoadBlocksSave, inkRecordExists, onDirtyChange, onInsertMarkdown, setDirty, settings.keepDrawingAfterInsert, title, waitForCanvasExport, writeInkPage])
 
   useEffect(() => {
     saveLatestRef.current = () => saveDrawing(false, true)
@@ -6985,6 +7024,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       // Strokes drawn while a write is in flight bump the revision; only a
       // write that saw the latest revision may clear the dirty flag.
       for (let attempt = 0; attempt < INK_FLUSH_MAX_ROUNDS; attempt += 1) {
+        // A note switch or the app closing while the stored page is still
+        // loading (or failed to load) finds nothing to keep: the pen is off
+        // until it is in, and the only change is the extent the layout grew.
+        if (inkLoadBlocksSave()) return
         if (!dirtyRef.current || !inkPagePersists(strokesRef.current.length, inkRecordExists())) return
         await waitForCanvasExport()
         const savedRevision = revisionRef.current
@@ -7050,7 +7093,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     },
     exportOpenCanvas,
     finishCanvasExport,
-  }), [drawingPayload, exportOpenCanvas, finishCanvasExport, inkMode, inkRecordExists, restoreUnmovedSelection, setDirty, tool, waitForCanvasExport, writeInkPage])
+  }), [drawingPayload, exportOpenCanvas, finishCanvasExport, inkLoadBlocksSave, inkMode, inkRecordExists, restoreUnmovedSelection, setDirty, tool, waitForCanvasExport, writeInkPage])
 
   useEffect(() => () => {
     if (saveRetryTimerRef.current !== null) window.clearTimeout(saveRetryTimerRef.current)
