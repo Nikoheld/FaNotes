@@ -291,3 +291,76 @@ test('an explicit clear keeps the previous blob in the revision archive', async 
   const archived = names.map((name) => readFileSync(join(dataDirectory, 'accounts', accountId, 'revisions', id, name)))
   assert.ok(archived.some((bytes) => bytes.equals(original)))
 })
+
+const revisionOf = (response) => JSON.parse(response.body.toString('utf8')).revision
+const jsonOf = (response) => JSON.parse(response.body.toString('utf8'))
+
+test('deleting a line from a short note is stored, from new and older clients', async () => {
+  for (const headers of [{ 'X-FaNotes-Blank': '0' }, {}]) {
+    const id = randomBytes(32).toString('hex')
+    const created = await putFile(id, randomBytes(600), 0, headers)
+    assert.equal(created.status, 200, created.body.toString('utf8'))
+    const shorter = randomBytes(500)
+    const edited = await putFile(id, shorter, revisionOf(created), headers)
+    assert.equal(edited.status, 200, edited.body.toString('utf8'))
+    assert.deepEqual((await readFile(id)).body, shorter)
+  }
+})
+
+test('an empty file never replaces a short note without an explicit clear', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(300)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  const empty = randomBytes(28)
+  for (const headers of [{ 'X-FaNotes-Blank': '0' }, {}]) {
+    const blocked = await putFile(id, empty, revisionOf(created), headers)
+    assert.equal(blocked.status, 409, blocked.body.toString('utf8'))
+  }
+  assert.deepEqual((await readFile(id)).body, original)
+  const cleared = await putFile(id, empty, revisionOf(created), { 'X-FaNotes-Blank': '1', 'X-FaNotes-Clear': '1' })
+  assert.equal(cleared.status, 200, cleared.body.toString('utf8'))
+})
+
+test('a guard rejection says so, and a stale rejection names the current entry', async () => {
+  const id = randomBytes(32).toString('hex')
+  const created = await putFile(id, randomBytes(5000), 0, { 'X-FaNotes-Blank': '0' })
+  const revision = revisionOf(created)
+  const guarded = await putFile(id, randomBytes(400), revision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(guarded.status, 409)
+  assert.equal(guarded.headers['x-fanotes-rejected'], 'guard')
+  assert.equal(jsonOf(guarded).reason, 'guard')
+  assert.equal(jsonOf(guarded).entry.revision, revision)
+  const stale = await putFile(id, randomBytes(5000), revision - 1, { 'X-FaNotes-Blank': '0' })
+  assert.equal(stale.status, 409)
+  assert.equal(stale.headers['x-fanotes-rejected'], undefined)
+  assert.equal(jsonOf(stale).reason, 'stale')
+  assert.equal(jsonOf(stale).entry.revision, revision)
+})
+
+test('a device that still has a deleted note can put it back over the tombstone', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(revisionOf(created)), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 200, removed.body.toString('utf8'))
+  // The deleted blob is archived, not dropped.
+  const archived = readdirSync(join(dataDirectory, 'accounts', accountId, 'revisions', id))
+    .map((name) => readFileSync(join(dataDirectory, 'accounts', accountId, 'revisions', id, name)))
+  assert.ok(archived.some((bytes) => bytes.equals(original)))
+  // A blank body cannot resurrect the note, from any base.
+  const blankBack = await putFile(id, randomBytes(200), 0, { 'X-FaNotes-Blank': '1' })
+  assert.equal(blankBack.status, 409)
+  assert.equal((await readFile(id)).status, 204)
+  // A device with an older base (here: none) puts its copy back.
+  const kept = randomBytes(4000)
+  const back = await putFile(id, kept, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(back.status, 200, back.body.toString('utf8'))
+  assert.deepEqual((await readFile(id)).body, kept)
+  // Once live again, a stale base is rejected as before.
+  const stale = await putFile(id, randomBytes(4000), 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(stale.status, 409)
+  assert.deepEqual((await readFile(id)).body, kept)
+})

@@ -34,14 +34,19 @@ export type SyncAccountInfo = {
   devices: SyncDevice[]
 }
 
+/** Why a 409 happened: the base is not the current revision, or the server refused an empty or collapsed body. */
+export type SyncRejectReason = 'stale' | 'guard'
+
 export class SyncApiError extends Error {
-  constructor(public status: number, message: string, public entry: SyncRemoteEntry | null = null) {
+  constructor(public status: number, message: string, public entry: SyncRemoteEntry | null = null, public reason: SyncRejectReason | null = null) {
     super(message)
     this.name = 'SyncApiError'
   }
   get unauthorized() { return this.status === 401 }
   get conflict() { return this.status === 409 }
   get offline() { return this.status === 0 }
+  /** The server kept its copy because this body looked empty or collapsed. Sending it again cannot succeed. */
+  get guarded() { return this.status === 409 && this.reason === 'guard' }
 }
 
 /** The web build talks to its own origin (nginx proxies /api/v1/sync); the desktop renderer talks to the public host. */
@@ -54,12 +59,14 @@ export const resolveSyncOrigin = () => {
 const parseError = async (response: Response): Promise<SyncApiError> => {
   let message = `Der Sync-Server antwortete mit ${response.status}.`
   let entry: SyncRemoteEntry | null = null
+  let reason: SyncRejectReason | null = response.headers.get('X-FaNotes-Rejected') === 'guard' ? 'guard' : null
   try {
-    const body = await response.json() as { error?: unknown; entry?: SyncRemoteEntry }
+    const body = await response.json() as { error?: unknown; entry?: SyncRemoteEntry; reason?: unknown }
     if (typeof body.error === 'string') message = body.error
     if (body.entry && typeof body.entry === 'object') entry = body.entry
+    if (body.reason === 'guard' || body.reason === 'stale') reason = body.reason
   } catch { /* not JSON */ }
-  return new SyncApiError(response.status, message, entry)
+  return new SyncApiError(response.status, message, entry, reason)
 }
 
 export class SyncApi {

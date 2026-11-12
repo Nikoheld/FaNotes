@@ -43,10 +43,14 @@ const API_PREFIX = '/api/v1/sync'
 const MAX_JSON_BYTES = 64 * 1024
 const MAX_BLOB_BYTES = Number(process.env.FANOTES_SYNC_MAX_FILE_BYTES || 100 * 1024 * 1024)
 const QUOTA_BYTES = Number(process.env.FANOTES_SYNC_QUOTA_BYTES || 4 * 1024 * 1024 * 1024)
-// A large note replaced by a few hundred bytes is the empty-overwrite failure.
-// Only clients that do not say whether the body has content hit this net.
+// A large note replaced by a few hundred bytes, or by under a quarter of its
+// size, is what a failed load looks like. That net holds whatever the client
+// claims about the body. Short notes are not judged by size: deleting a line
+// from a 600-byte note is a normal edit, and the archive keeps the previous blob.
 const COLLAPSE_OLD_BYTES = 4096
 const COLLAPSE_NEW_BYTES = 1024
+// AES-GCM adds a 12-byte IV and a 16-byte tag; a body of this size is an empty file.
+const EMPTY_CIPHERTEXT_BYTES = 28
 const MAX_REVISIONS_KEPT = 8
 const MAX_FILES = Number(process.env.FANOTES_SYNC_MAX_FILES || 50_000)
 const MAX_DEVICES = 20
@@ -423,7 +427,7 @@ const corsHeaders = (request) => {
     ...(allowed ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256, X-FaNotes-Blank, X-FaNotes-Clear, X-FaNotes-Delete',
-    'Access-Control-Expose-Headers': 'ETag, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted',
+    'Access-Control-Expose-Headers': 'ETag, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted, X-FaNotes-Rejected',
     'Access-Control-Max-Age': '600',
   }
 }
@@ -684,8 +688,16 @@ const handleGetFile = async (request, response, auth, fileId) => {
   stream.pipe(response)
 }
 
+// `reason` tells a client which 409 this is. "stale": the base is not the current
+// revision, so apply `entry` (it may be older than the client's pull cursor).
+// "guard": the base was current but the body was refused as empty or collapsed,
+// so keep the local file beside the note instead of sending it again.
 const conflict = (request, response, entry) => {
-  sendJson(request, response, 409, { error: 'Die Datei wurde inzwischen von einem anderen Gerät geändert.', entry: publicEntry(entry) })
+  sendJson(request, response, 409, { error: 'Die Datei wurde inzwischen von einem anderen Gerät geändert.', entry: publicEntry(entry), reason: 'stale' })
+}
+
+const guardRejected = (request, response, entry) => {
+  sendJson(request, response, 409, { error: 'Die leere oder stark gekürzte Fassung wurde nicht über die vorhandene Notiz gelegt.', entry: publicEntry(entry), reason: 'guard' }, { 'X-FaNotes-Rejected': 'guard' })
 }
 
 // '1' / '0' are the new client. No header means an older client.
@@ -698,16 +710,16 @@ const headerFlag = (value) => (value === '1' ? true : value === '0' ? false : nu
  * a failed load can look like a tiny note. The previous blob stays, and the
  * response is the same 409 the client already treats as "keep the server copy".
  */
-const rejectsBlankOverwrite = (current, nextSize, blank, clear) => {
+export const rejectsBlankOverwrite = (current, nextSize, blank, clear) => {
   if (clear || !current || current.deleted) return false
   const previous = Number(current.size) || 0
-  if (previous <= 0) return false
+  if (previous <= EMPTY_CIPHERTEXT_BYTES) return false
+  // The client parsed the note and found no strokes and no text.
   if (blank === true) return true
-  const emptyBand = nextSize <= COLLAPSE_NEW_BYTES && previous > nextSize + 64
-  const truncated = previous >= COLLAPSE_OLD_BYTES && nextSize * 4 < previous
-  if (blank == null && (emptyBand || truncated)) return true
-  if (blank === false && (emptyBand || truncated)) return true
-  return false
+  // A zero-byte file never replaces content without an explicit clear.
+  if (nextSize <= EMPTY_CIPHERTEXT_BYTES) return true
+  const collapse = previous >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < previous)
+  return collapse
 }
 
 const listRevisionFiles = async (directory) => {
@@ -770,10 +782,13 @@ const handlePutFile = async (request, response, auth, fileId) => {
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
     const currentRevision = current ? current.revision : 0
-    if (currentRevision !== base) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
+    // A tombstone holds no content, so a device that still has the note may put
+    // it back from any older base. The deleted blob stays in the archive.
+    const recreatesTombstone = Boolean(current?.deleted) && base < currentRevision && body.length > EMPTY_CIPHERTEXT_BYTES && blank !== true
+    if (currentRevision !== base && !recreatesTombstone) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
     if (rejectsBlankOverwrite(current, body.length, blank, clear)) {
       await quarantineRejected(auth.account.id, fileId, base, body)
-      return conflict(request, response, current)
+      return guardRejected(request, response, current)
     }
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
     const historyDelta = current && !current.deleted && (current.sha256 !== declaredSha) ? (Number(current.size) || 0) : 0

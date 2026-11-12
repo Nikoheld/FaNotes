@@ -936,35 +936,72 @@ export class SyncEngine {
     const id = base?.id ?? await fileIdFor(this.keys, entry.path)
     const meta = await encryptMeta(this.keys, id, { path: entry.path, mtimeMs: entry.mtimeMs, size: bytes.byteLength, sha256 })
     const blob = await encryptBytes(this.keys, id, bytes)
-    try {
-      const revision = await this.api.upload(this.session, id, base?.revision ?? 0, meta, await sha256Hex(blob), blob, { blank: kind === 'blank', clear: clearing && kind === 'blank' })
-      this.cleared.delete(entry.path)
-      this.state.files[entry.path] = {
-        id,
-        revision,
-        sha256,
-        size: entry.size,
-        mtimeMs: entry.mtimeMs,
-        contentSha256: identity,
-        ...(kind === 'blank' ? { blank: true } : {}),
-      }
-      return 'uploaded'
-    } catch (error) {
-      if (error instanceof SyncApiError && error.conflict) {
+    const blobSha256 = await sha256Hex(blob)
+    let baseRevision = base?.revision ?? 0
+    // A 409 is resolved here from the entry the server sends back. Waiting for
+    // the next pull is not enough: that entry can be older than the pull cursor
+    // (a tombstone from weeks ago, a change that was skipped), and then the same
+    // upload would be refused on every cycle and the note would never sync.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const revision = await this.api.upload(this.session, id, baseRevision, meta, blobSha256, blob, { blank: kind === 'blank', clear: clearing && kind === 'blank' })
+        this.cleared.delete(entry.path)
+        this.state.files[entry.path] = {
+          id,
+          revision,
+          sha256,
+          size: entry.size,
+          mtimeMs: entry.mtimeMs,
+          contentSha256: identity,
+          ...(kind === 'blank' ? { blank: true } : {}),
+        }
+        return 'uploaded'
+      } catch (error) {
+        if (!(error instanceof SyncApiError && error.conflict)) {
+          if (error instanceof SyncApiError && error.status === 507) {
+            this.log('error', `„${entry.path}“ passt nicht mehr in den Speicher des Kontos: ${error.message}`)
+            return 'skipped'
+          }
+          throw error
+        }
+        const current = error.entry && error.entry.id === id ? error.entry : null
+        // The base was current, so the server refused the body itself as empty or
+        // collapsed (older servers send no reason). Sending it again cannot help:
+        // keep this file beside the note and put the server copy back.
+        if (error.guarded || (current && !current.deleted && current.revision === baseRevision)) {
+          if (base) return this.restoreInstead(entry, { ...base, revision: current?.revision ?? base.revision }, raw, 'guard')
+          return 'skipped'
+        }
+        if (current?.deleted) {
+          if (kind === 'blank') {
+            // Nothing to put back over the tombstone. Track the blank file so it is not sent again.
+            this.state.files[entry.path] = { id, revision: current.revision, sha256, size: entry.size, mtimeMs: entry.mtimeMs, contentSha256: identity, blank: true }
+            return 'skipped'
+          }
+          if (attempt === 0) {
+            // Deleted elsewhere, or by an older build of this app, while the file is
+            // still here. A tombstone holds no content, so this copy goes back on top.
+            this.log('info', `„${entry.path}“ war im Sync gelöscht, liegt hier aber noch vor – die lokale Fassung wird wieder hochgeladen.`)
+            baseRevision = current.revision
+            continue
+          }
+          return 'conflict'
+        }
+        if (current) {
+          // A newer revision exists. Apply it now: a changed local file becomes a conflict copy.
+          const idIndex = new Map(Object.entries(this.state.files).map(([filePath, known]) => [known.id, filePath]))
+          await this.applyRemote(current, idIndex)
+          return 'conflict'
+        }
         if (kind === 'blank' && base) return this.restoreInstead(entry, base, raw)
-        // Someone else moved this file on; the follow-up pull decides (same content → adopt, different → conflict copy).
         return 'conflict'
       }
-      if (error instanceof SyncApiError && error.status === 507) {
-        this.log('error', `„${entry.path}“ passt nicht mehr in den Speicher des Kontos: ${error.message}`)
-        return 'skipped'
-      }
-      throw error
     }
+    return 'conflict'
   }
 
-  /** The blank local file is kept beside the note. The server copy is written back. */
-  private async restoreInstead(entry: SyncScanEntry, base: LocalBase, localBytes: Uint8Array): Promise<'conflict' | 'skipped'> {
+  /** The blank (or, after a guard rejection, collapsed) local file is kept beside the note. The server copy is written back. */
+  private async restoreInstead(entry: SyncScanEntry, base: LocalBase, localBytes: Uint8Array, why: 'blank' | 'guard' = 'blank'): Promise<'conflict' | 'skipped'> {
     if (!this.session || !this.host || !this.state || !this.keys) return 'skipped'
     const download = await this.api.download(this.session, base.id)
     if ('deleted' in download) return 'conflict'
@@ -986,7 +1023,9 @@ export class SyncEngine {
     await this.host.write(copyPath, localBytes, at.getTime())
     const conflict = { path: entry.path, copyPath, at: at.toISOString() }
     this.state.conflicts = [...this.state.conflicts, conflict].slice(-50)
-    this.log('warn', `Leere Fassung von „${entry.path}“ wurde nicht hochgeladen. Die lokale Kopie liegt unter „${copyPath}“.`)
+    this.log('warn', why === 'guard'
+      ? `Der Sync-Server hat die stark gekürzte Fassung von „${entry.path}“ nicht übernommen. Die lokale Kopie liegt unter „${copyPath}“.`
+      : `Leere Fassung von „${entry.path}“ wurde nicht hochgeladen. Die lokale Kopie liegt unter „${copyPath}“.`)
     this.options?.onConflict?.(conflict)
     const stat = await this.host.write(entry.path, plain, at.getTime())
     const identityBytes = identitySyncBytes(entry.path, plain)
