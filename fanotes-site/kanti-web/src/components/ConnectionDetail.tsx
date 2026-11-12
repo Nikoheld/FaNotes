@@ -145,6 +145,10 @@ export const DetailContent = ({ trip, detail, routeName, t }: { trip: Trip; deta
   const lateArrival = !cancelled && (trip.arrDelay || 0) > 0 && clockOf(trip.plannedArrival) !== clockOf(trip.arrival)
   const position = cancelled ? undefined : detail.position
   const sources = detail.sources
+  // Delays, cancellations, platform changes and missed transfers show where they happen (badge, leg, stop,
+  // transfer); only a disruption note that no leg carries is left for the top.
+  const legNotes = new Set(trip.legs.flatMap((leg) => leg.notes))
+  const notes = trip.issues.filter((issue) => issue.kind === 'disruption' && !legNotes.has(issue.text))
   return (
     <>
       <header className="dt-summary">
@@ -167,7 +171,7 @@ export const DetailContent = ({ trip, detail, routeName, t }: { trip: Trip; deta
         </div>
         <PositionLine trip={trip} position={position} t={t} />
       </header>
-      {trip.issues.filter((issue) => issue.kind !== 'platformChange').map((issue) => <p key={issue.text} className="leg-note"><Icon name="info" size={14} />{issue.text}</p>)}
+      {notes.map((issue) => <p key={issue.text} className="leg-note"><Icon name="info" size={14} />{issue.text}</p>)}
       {detail.stale ? <Banner tone="warning" icon="warning">{t.boardStale(clockOf(detail.updatedAt || ''))}</Banner> : null}
       <ol className="dt-legs">
         {trip.legs.map((leg, index) => {
