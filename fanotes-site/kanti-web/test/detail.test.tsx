@@ -233,6 +233,14 @@ describe('DetailContent', () => {
     expect(html).toContain('Baustelle bei Mid1')
     expect(html).toContain('rail-vehicle')
   })
+  it('does not repeat the delay or a leg note above the legs', () => {
+    const t = STRINGS.de
+    const legs = detail.trip.legs.map((leg, index) => (index === 0 ? { ...leg, notes: ['Ersatzbus ab Mid1'] } : leg))
+    const trip = { ...detail.trip, legs, issues: [{ kind: 'delay' as const, text: '+4 min' }, { kind: 'disruption' as const, text: 'Ersatzbus ab Mid1' }] }
+    const html = renderToString(<DetailContent trip={trip} detail={{ ...detail, trip }} routeName="" t={t} />)
+    expect(html).not.toContain('+4 min')
+    expect(html.split('Ersatzbus ab Mid1').length - 1).toBe(1)
+  })
   it('hides the platform source when there is none, and the position of a cancelled trip', () => {
     const t = STRINGS.de
     const html = renderToString(<DetailContent trip={{ ...detail.trip, status: 'cancelled' }} detail={{ ...detail, sources: { realtime: 'search.ch', platforms: null, formation: null } }} routeName="" t={t} />)
