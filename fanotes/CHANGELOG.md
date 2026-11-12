@@ -5,6 +5,8 @@
 - Pendeln: tap a connection (on the route, on Heute or in the widget) to see every train, bus and tram of it with all stops in between, like the SBB app: planned and real times per stop, delays in colour, platforms and platform changes, cancelled stops, transfers with "Anschluss gefährdet/verpasst" and walking time, occupancy per leg.
 - The connection detail shows where the vehicle is now (at a stop or between two stops) and refreshes every 30 seconds while it is open.
 - Stops without real-time data show their planned time only, marked; nothing is guessed.
+- Kanti+ im Browser (schulnetz.fasrv.ch): new design with a sidebar and a dashboard on Heute, charts for grades, a new sign-in and landing page, light and dark. The same connection detail opens from Pendeln and from the Heute card.
+- Fix (browser): "Stand" on Pendeln showed UTC, an hour behind.
 
 ## 2026.11.2-beta.28
 

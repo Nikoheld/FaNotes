@@ -22,9 +22,18 @@ export const MAX_VIAS = 2
 // ---------------------------------------------------------------- times
 
 /** 'HH:MM' of an ISO time that already carries the Zurich offset; '' when it is not one. */
+const ZURICH_CLOCK = new Intl.DateTimeFormat('de-CH', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+
+/**
+ * HH:MM in Swiss time. Timetable times carry +01:00/+02:00 and read as they are; server stamps such as
+ * `updatedAt` are UTC ("…Z") and are converted, so "Stand" shows the clock on the wall, not UTC.
+ */
 export const clockOf = (iso: string): string => {
-  const match = /T(\d{2}:\d{2})/u.exec(iso || '')
-  return match ? match[1] : ''
+  const match = /T(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?/u.exec(iso || '')
+  if (!match) return ''
+  if (!match[2]) return match[1]
+  const ms = Date.parse(iso)
+  return Number.isFinite(ms) ? ZURICH_CLOCK.format(ms) : match[1]
 }
 
 export const timeMs = (iso: string): number => {

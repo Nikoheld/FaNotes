@@ -47,6 +47,10 @@ describe('delay classes and formatting', () => {
   it('formats clocks, durations and zurich ISO times', () => {
     expect(clockOf('2026-11-13T07:05:00+01:00')).toBe('07:05')
     expect(clockOf('')).toBe('')
+    // Server stamps are UTC: "Stand" shows Swiss time (winter +1 h, summer +2 h).
+    expect(clockOf('2026-11-12T05:44:10.123Z')).toBe('06:44')
+    expect(clockOf('2026-07-01T05:44:00Z')).toBe('07:44')
+    expect(clockOf('2026-07-01T07:44:00+02:00')).toBe('07:44')
     expect(durationLabel(65)).toBe('1 h 05 min')
     expect(durationLabel(42)).toBe('42 min')
     expect(isoZurich(Date.parse('2026-11-12T05:00:00Z'))).toBe('2026-11-12T06:00:00+01:00')
