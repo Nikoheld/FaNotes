@@ -122,6 +122,9 @@ export const demoSnapshot = (today: string, now = new Date(`${today}T06:00:00Z`)
     return slots.flatMap((name, slot) => {
       if (!name) return []
       const subject = SUBJECTS[name]
+      // The current week carries one cancelled and one substituted lesson too (they show in the week grid).
+      if (week === monday && dayIndex === 3 && slot === 3) return [lesson(day, slot, subject, 'cancelled', 'Lektion fällt aus', subject.teacher, 'cancelled')]
+      if (week === monday && dayIndex === 4 && slot === 2) return [lesson(day, slot, subject, '', 'Vertretung', subject.teacher, 'changed', 'Lehrperson Z')]
       if (week === nextMonday && dayIndex === 3 && slot === 4) return [lesson(day, slot, subject, 'cancelled', 'Lektion fällt aus', subject.teacher, 'cancelled')]
       if (week === nextMonday && dayIndex === 4 && slot === 3) return [lesson(day, slot, subject, '', 'Vertretung', subject.teacher, 'changed', 'Lehrperson Z')]
       return [lesson(day, slot, subject)]

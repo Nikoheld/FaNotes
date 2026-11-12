@@ -8,7 +8,7 @@ const PROVIDER = { name: 'search.ch', occupancy: 'train-class', formation: false
 
 /** Mocks /commute, /commute/stops and /commute/board; PUT stores the list like the server does. */
 const mockCommute = async (page: Page) => {
-  const state = { routes: [] as Record<string, unknown>[], settings: { delayThreshold: 3, hiddenLabels: [] as string[] }, saved: [] as unknown[] }
+  const state = { routes: [] as Record<string, unknown>[], settings: { delayThreshold: 3, hiddenLabels: [] as string[] }, saved: [] as unknown[], tripRequests: [] as string[] }
   await page.route('**/api/v1/kanti-web/connections/*/commute**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -18,6 +18,16 @@ const mockCommute = async (page: Page) => {
       return json({ stops: COMMUTE_STOPS.filter((stop) => stop.name.toLowerCase().includes(q)) })
     }
     if (url.pathname.endsWith('/commute/board')) return json({ boards: state.routes.map((entry) => commuteBoard(String(entry.id))), provider: PROVIDER })
+    if (url.pathname.endsWith('/commute/trip')) {
+      state.tripRequests.push(url.search)
+      const board = commuteBoard(String(url.searchParams.get('route')))
+      const found = board.trips.find((entry) => entry.id === url.searchParams.get('trip'))
+      if (!found) return json({ trip: null, gone: true, updatedAt: board.updatedAt, stale: false })
+      const leg = found.legs[0] as Record<string, unknown>
+      const stops = [{ name: 'Mittelstadt', stopId: 'e2e-mid', arrival: { planned: found.plannedDeparture, time: found.plannedDeparture, delay: 0 }, departure: null, platform: '2', platformChanged: false, realtime: true, cancelled: false, occupancy: { first: null, second: null } }]
+      const trip = { ...found, legs: [{ ...leg, journeyId: 'e2e', stopCount: 1, stops }] }
+      return json({ trip, position: { state: 'notStarted', legIndex: 0, point: 0, progress: 0, estimated: false }, updatedAt: board.updatedAt, stale: false, gone: false, sources: { realtime: 'search.ch', platforms: null, formation: null } })
+    }
     if (url.pathname.endsWith('/commute/trips')) return json({ trips: [] })
     if (request.method() === 'PUT') {
       const body = request.postDataJSON() as { routes: Record<string, unknown>[]; settings: typeof state.settings }
@@ -79,8 +89,20 @@ test('commute: add a route in the editor, see the board and a cancellation with 
   await expect(page.getByRole('heading', { name: 'Alternativen' })).toBeVisible()
   await expect(page.getByText('Weniger voll').first()).toBeVisible()
   await expect(page.getByText(/Auslastungsprognose pro Zug und Klasse/)).toBeVisible()
+  // A trip card opens the connection detail, loaded from the server's trip endpoint with route, trip and planned departure.
   await page.locator('.alternatives .trip-head').first().click()
-  await expect(page.locator('.alternatives .leg').first()).toBeVisible()
+  const detail = page.getByRole('dialog', { name: 'Verbindungsdetail' })
+  await expect(detail).toBeVisible()
+  await expect(page).toHaveURL(/verbindung=e2e-alt/)
+  await expect(detail.locator('.dt-leg').first()).toBeVisible()
+  await expect(detail.getByText('Mittelstadt')).toHaveCount(0)
+  await detail.getByRole('button', { name: '1 Zwischenhalt' }).click()
+  await expect(detail.getByText('Mittelstadt')).toBeVisible()
+  await expect(detail.getByText('Noch nicht abgefahren')).toBeVisible()
+  expect(state.tripRequests).toHaveLength(1)
+  expect(state.tripRequests[0]).toMatch(/route=[0-9a-f]{12}&trip=e2e-alt&at=/u)
+  await page.keyboard.press('Escape')
+  await expect(detail).toHaveCount(0)
 
   // The saved list carries 12 hex characters of id and the full route.
   expect(state.saved).toHaveLength(1)
@@ -217,4 +239,60 @@ test('commute demo: change the fixed connection of the pinned route', async ({ p
   await editor.getByRole('button', { name: 'Speichern' }).click()
   await expect(editor).toHaveCount(0)
   await expect(page.locator('.trip-pinned')).toHaveCount(0)
+})
+
+// ---- Connection detail in demo mode: legs, the stops behind "Zwischenhalte", delays, the vehicle, Escape and the back button ----
+
+test('commute demo: the connection detail opens from a trip, shows legs, stops, a delay and where the train is', async ({ page }) => {
+  await openDemo(page, '/pendeln?strecke=d3m0a9b8c7d6')
+  await page.locator('.trip-head').first().click()
+  const detail = page.getByRole('dialog', { name: 'Verbindungsdetail' })
+  await expect(detail).toBeVisible()
+  await expect(page).toHaveURL(/strecke=d3m0a9b8c7d6&verbindung=.+&ab=/)
+  // The lake trip is under way: the ferry is between two stops, the status line says so.
+  await expect(detail.getByRole('status').filter({ hasText: 'Zwischen Rebberg und Fischerhaus' })).toBeVisible()
+  await expect(detail.locator('.rail-vehicle')).toHaveCount(1)
+  // Three legs; the change to the IR is tight.
+  await expect(detail.locator('.dt-leg')).toHaveCount(3)
+  await expect(detail.getByText('Anschluss gefährdet')).toBeVisible()
+  // Collapsed by default; the button reveals the stops (one without real time, one cancelled).
+  await expect(detail.getByText('Neumatt')).toHaveCount(0)
+  await detail.getByRole('button', { name: '4 Zwischenhalte' }).click()
+  await expect(detail.getByText('Neumatt')).toBeVisible()
+  await expect(detail.getByText('ohne Echtzeit')).toBeVisible()
+  await expect(detail.getByText('Halt fällt aus')).toBeVisible()
+  await expect(detail.getByText('Wagenreihung: keine Daten')).toBeVisible()
+  await expect(detail.getByText('Echtzeit: search.ch · Gleise: transport.opendata.ch')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(detail).toHaveCount(0)
+  await expect(page).not.toHaveURL(/verbindung=/)
+})
+
+test('commute demo: a delayed trip shows the delay badge and that it has not left yet; the back button closes the detail', async ({ page }) => {
+  await openDemo(page, '/pendeln?strecke=d3m0a1b2c3d4')
+  await page.locator('.trip-head').first().click()
+  const detail = page.getByRole('dialog', { name: 'Verbindungsdetail' })
+  await expect(detail.getByRole('status').filter({ hasText: 'Noch nicht abgefahren' })).toBeVisible()
+  await expect(detail.locator('.delay-badge').first()).toHaveText('+4 Min.')
+  await expect(detail.locator('.platform-changed').first()).toBeVisible()
+  await page.goBack()
+  await expect(detail).toHaveCount(0)
+  await expect(page.locator('.view-commute')).toBeVisible()
+})
+
+test('commute demo: the detail is linkable and the Today card opens the connection it shows', async ({ page }) => {
+  await openDemo(page, '/pendeln?strecke=d3m0c9d0e1f2')
+  await page.locator('.trip-pinned .trip-head').click()
+  await expect(page).toHaveURL(/verbindung=/)
+  const link = page.url()
+  await page.keyboard.press('Escape')
+  await page.goto(`${link}&demo`)
+  await expect(page.getByRole('dialog', { name: 'Verbindungsdetail' })).toBeVisible()
+  await expect(page.getByRole('dialog').getByText('IR16')).toBeVisible()
+
+  await page.goto('/?demo')
+  await skipTour(page)
+  await page.locator('.commute-card').click()
+  await expect(page.getByRole('dialog', { name: 'Verbindungsdetail' })).toBeVisible()
+  await expect(page).toHaveURL(/\/pendeln\?strecke=.+&verbindung=/)
 })

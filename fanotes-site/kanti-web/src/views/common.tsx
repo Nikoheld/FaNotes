@@ -49,7 +49,7 @@ export const EntryTags = ({ entry, t, detail = false }: { entry: Entry; t: Strin
 }
 
 export const EntryRow = ({ entry, t, language, today, showDay = false, onOpen, now = false }: { entry: Entry; t: Strings; language: Language; today: string; showDay?: boolean; onOpen?: () => void; now?: boolean }) => (
-  <button type="button" className={`entry-row kind-${entry.kind}${entry.cancelled ? ' cancelled' : ''}${now ? ' running' : ''}`} onClick={onOpen}>
+  <button type="button" className={`entry-row kind-${entry.kind}${entry.cancelled ? ' cancelled' : ''}${now ? ' running' : ''}${showDay ? ' with-day' : ''}`} onClick={onOpen}>
     <span className="entry-time tabular">
       {showDay ? <small>{relativeDay(entry.day, today, t, language)}</small> : null}
       <span>{entry.start || t.allDay}</span>

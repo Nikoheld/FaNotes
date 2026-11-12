@@ -1,0 +1,115 @@
+/* Sign-in (two panels), pairing code and the first-run tour. Pairing styles also serve the "add connection" dialog in Settings. */
+
+.signin { display: grid; grid-template-columns: minmax(380px, 5fr) minmax(0, 7fr); min-height: 100vh; background: var(--bg); }
+
+/* Left: brand panel. Navy in every theme, like the logo. */
+.signin-brand {
+  position: sticky; top: 0; height: 100vh; overflow: hidden; isolation: isolate; color: #f6f8f6;
+  background:
+    radial-gradient(90% 60% at 100% 100%, color-mix(in srgb, var(--accent) 70%, var(--brand-navy)) 0%, transparent 70%),
+    linear-gradient(160deg, var(--brand-navy) 0%, color-mix(in srgb, var(--brand-navy) 62%, var(--accent)) 100%);
+}
+.signin-brand::before { content: ''; position: absolute; z-index: -1; right: -140px; top: -120px; width: 420px; height: 420px; border-radius: 50%; border: 1px solid rgb(255 255 255 / 0.1); box-shadow: inset 0 0 0 48px rgb(255 255 255 / 0.025); }
+.signin-brand-inner { display: flex; flex-direction: column; height: 100%; max-width: 520px; margin: 0 auto; padding: 48px clamp(32px, 4vw, 64px) 44px; }
+.signin-wordmark { display: flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 700; letter-spacing: -0.025em; }
+.signin-wordmark .logo { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.16); }
+.signin-pitch { margin-block: auto; padding-block: 32px; }
+.signin-pitch h1 { font-size: clamp(34px, 3.4vw, 46px); line-height: 1.05; letter-spacing: -0.035em; }
+.signin-pitch h1::after { content: ''; display: block; width: 44px; height: 4px; margin-top: 18px; border-radius: 4px; background: var(--brand-gold); }
+.signin .lead { margin: 18px 0 0; max-width: 42ch; color: #d3dde6; font-size: var(--text-l); line-height: 1.5; }
+.signin-benefits { display: flex; flex-direction: column; gap: 14px; margin: 30px 0 0; padding: 0; list-style: none; }
+.signin-benefits li { display: flex; align-items: center; gap: 14px; color: #eef3f6; font-weight: 550; line-height: 1.35; }
+.signin-benefit-icon { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: rgb(255 255 255 / 0.1); color: var(--brand-gold); box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1); }
+.signin-brand-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s3) var(--s5); }
+.signin .signin-demo.button { min-height: 46px; padding: 0 22px; background: #fff; border-color: transparent; color: var(--brand-navy); box-shadow: 0 8px 24px -10px rgb(0 0 0 / 0.5); }
+.signin .signin-demo.button:hover { background: #eaf1f6; }
+.signin-about { display: inline-flex; align-items: center; gap: 6px; color: #fff; font-weight: 600; text-decoration: underline; text-decoration-color: rgb(255 255 255 / 0.4); text-underline-offset: 4px; }
+.signin-about:hover { text-decoration-color: var(--brand-gold); }
+.signin-about:focus-visible, .signin .signin-demo:focus-visible { outline-color: #fff; }
+.signin-brand-note { margin-top: var(--s3); color: #b9c8d4; font-size: var(--text-s); }
+
+/* Right: the actual sign-in. */
+.signin-main { display: flex; align-items: center; justify-content: center; min-width: 0; padding: 56px clamp(24px, 5vw, 72px); }
+.signin-stack { width: 100%; max-width: 680px; display: flex; flex-direction: column; }
+.signin-stack .banner { margin-bottom: var(--s4); }
+.signin-card { display: flex; flex-direction: column; gap: var(--s3); padding: var(--s6); border-radius: var(--radius-xl); }
+.signin-card p { margin: 0; }
+.signin-card .button { align-self: flex-start; }
+.signin-card-head { display: flex; align-items: center; gap: var(--s3); }
+.signin-card-head h2 { font-size: var(--text-l); letter-spacing: -0.015em; }
+.signin-chip { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; background: var(--accent-soft); color: var(--accent); }
+.signin-primary { padding: var(--s8); gap: var(--s4); border-color: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: var(--shadow-2);
+  background: radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--accent) 15%, var(--accent-soft)) 0%, var(--accent-soft) 58%); }
+.signin-primary .signin-card-head h2 { font-size: var(--text-xl); letter-spacing: -0.02em; }
+.signin-primary .signin-chip { background: var(--accent); color: var(--on-accent); }
+.signin-primary .button { min-height: 46px; padding-inline: 24px; }
+.signin-or { display: flex; align-items: center; gap: var(--s4); margin: var(--s4) 0; }
+.signin-or::before, .signin-or::after { content: ''; flex: 1; height: 1px; background: var(--hairline); }
+.signin-secondary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); align-items: start; }
+.signin-secondary .signin-card-head h2 { font-size: var(--text-m); }
+.signin-secondary .form { gap: var(--s3); }
+.signin-secondary .field { padding: 0; }
+.signin-secondary .button { width: 100%; }
+.signin-claim .field-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.signin .why { margin-top: var(--s6); padding: 0 var(--s2); color: var(--muted); }
+.signin .why summary { cursor: pointer; font-weight: 600; color: var(--text); }
+.signin .why p { margin-top: var(--s2); max-width: 62ch; }
+.signin-foot { display: flex; gap: var(--s5); margin-top: var(--s8); padding: var(--s4) var(--s2) 0; border-top: 1px solid var(--hairline); font-size: var(--text-s); }
+.signin-foot a { color: var(--muted); }
+.signin-foot a:hover { color: var(--accent); }
+.claim-form input { font-variant-numeric: tabular-nums; letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* Pairing code (sign-in and the Settings dialog) */
+.pairing { display: flex; flex-direction: column; gap: var(--s3); }
+.pairing-code { margin: 0; padding: 14px var(--s5); border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--hairline)); border-radius: var(--radius-l); background: var(--surface); box-shadow: var(--shadow-1);
+  color: var(--text); font-size: clamp(38px, 6vw, 56px); font-weight: 650; line-height: 1.1; letter-spacing: 0.08em; text-align: center; user-select: all; }
+.pairing-steps { font-size: var(--text-m); }
+.pairing-steps, .pairing .muted { margin: 0; }
+
+/* First-run tour */
+.onboarding { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: var(--s4); background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(8px); animation: fade var(--fast) var(--ease); }
+.onboarding-card { width: min(520px, 100%); overflow: hidden; background: var(--raised); border: 1px solid var(--hairline); border-radius: var(--radius-xxl); box-shadow: var(--shadow-3); animation: rise 200ms var(--ease); padding: 0 32px 28px; }
+.onboarding-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); margin: 0 -32px; padding: 26px 32px 22px; border-bottom: 1px solid var(--hairline);
+  background: radial-gradient(120% 200% at 0% 0%, color-mix(in srgb, var(--accent) 16%, var(--accent-soft)) 0%, var(--accent-soft) 60%); }
+.onboarding-head .logo { box-shadow: 0 8px 20px -8px rgb(20 53 82 / 0.55); }
+.onboarding-progress { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.onboarding-dots { display: flex; gap: 6px; }
+.onboarding-dots span { width: 24px; height: 5px; border-radius: 5px; background: color-mix(in srgb, var(--accent) 22%, transparent); transition: background var(--fast) var(--ease), width var(--fast) var(--ease); }
+.onboarding-dots span.past { background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.onboarding-dots span.on { width: 36px; background: var(--accent); }
+.onboarding-step { color: var(--muted); font-size: var(--text-s); font-weight: 600; }
+.onboarding-card h1 { margin: 26px 0 10px; font-size: var(--text-2xl); letter-spacing: -0.025em; line-height: 1.15; }
+.onboarding-card p { margin: 0; color: var(--muted); font-size: var(--text-l); line-height: 1.5; }
+.onboarding-card .onboarding-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: var(--s4); padding: 10px 14px; border-radius: var(--radius-m); background: var(--sunken); font-size: var(--text-s); line-height: 1.9; }
+.onboarding-actions { display: flex; align-items: center; justify-content: space-between; margin-top: var(--s6); }
+.onboarding-actions .button-primary { min-height: 44px; padding-inline: 26px; }
+
+/* Tablet and phone: the brand panel becomes a header above the sign-in. */
+@media (max-width: 1000px) {
+  .signin { grid-template-columns: minmax(0, 1fr); }
+  .signin-brand { position: relative; height: auto; }
+  .signin-brand-inner { height: auto; max-width: 680px; padding: 32px var(--s6) 36px; gap: var(--s5); }
+  .signin-brand::after { left: var(--s6); }
+  .signin-pitch { margin: 0; padding: 0; }
+  .signin-pitch h1 { font-size: 36px; }
+  .signin-benefits { flex-direction: row; flex-wrap: wrap; gap: var(--s3) var(--s5); }
+  .signin-benefits li { flex: 1 1 200px; }
+  .signin-main { padding: var(--s8) var(--s6) 48px; align-items: flex-start; }
+}
+@media (max-width: 640px) {
+  .signin-brand-inner { padding: 24px var(--s4) 28px; gap: var(--s4); }
+  .signin-pitch h1 { font-size: 30px; }
+  .signin .lead { font-size: var(--text-m); }
+  .signin-benefits { flex-direction: column; margin-top: var(--s5); }
+  .signin-benefits li { flex: none; }
+  .signin-benefit-icon { width: 34px; height: 34px; border-radius: 10px; }
+  .signin-brand-actions .signin-demo { flex: 1 1 100%; }
+  .signin-main { padding: var(--s6) var(--s4) 40px; }
+  .signin-primary { padding: var(--s5); }
+  .signin-card { padding: var(--s5); }
+  .signin-secondary { grid-template-columns: minmax(0, 1fr); }
+  .onboarding-card { padding: 0 var(--s5) var(--s5); }
+  .onboarding-head { margin-inline: calc(-1 * var(--s5)); padding: var(--s5); }
+  .onboarding-card h1 { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) { .onboarding-dots span { transition: none; } }

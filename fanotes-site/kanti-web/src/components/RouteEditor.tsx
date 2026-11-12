@@ -78,11 +78,8 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, connectio
   return (
     <Dialog title={isNew ? t.commuteNewRoute : t.commuteEditRoute} onClose={onClose} wide>
       <form className="form route-editor" noValidate onSubmit={(event) => { event.preventDefault(); void submit() }}>
-        <label className="field">
-          <span className="field-label">{t.commuteName}</span>
-          <input value={draft.name} maxLength={40} placeholder={t.commuteNamePlaceholder} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
-          {shown('name') ? <small className="field-error" role="alert">{shown('name')}</small> : null}
-        </label>
+        <div className="route-cols">
+        <div className="route-col">
 
         <div className="route-stops">
           <StopPicker key={`from${swapped}`} label={t.commuteFrom} value={draft.from.id ? draft.from : null} onChange={(stop) => setDraft({ ...draft, from: stop || { id: '', name: '', type: 'other' } })} search={search} t={t} invalid={Boolean(shown('from') || shown('same'))} error={shown('from') || shown('same')} />
@@ -96,6 +93,13 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, connectio
           <div><Button tone="outline" icon="plus" onClick={() => setSecondVia(true)}>{t.commuteAddVia}</Button></div>
         ) : null}
 
+        </div>
+        <div className="route-col">
+        <label className="field route-name">
+          <span className="field-label">{t.commuteName}</span>
+          <input value={draft.name} maxLength={40} placeholder={t.commuteNamePlaceholder} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+          {shown('name') ? <small className="field-error" role="alert">{shown('name')}</small> : null}
+        </label>
         <fieldset className="field schedule-field">
           <legend className="field-label">{t.commuteSchedule}</legend>
           <div className="segments schedule-modes" role="radiogroup" aria-label={t.commuteSchedule}>
@@ -142,10 +146,13 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, connectio
             </div>
           ) : null}
         </fieldset>
+        </div>
+        </div>
 
         <PinSection route={draft} mode={pinMode} onMode={changeMode} onPins={setPins} connections={connections} t={t} startDay={pickDay} />
         {pinsCleared ? <Banner tone="warning" icon="info">{t.pinCleared}</Banner> : null}
 
+        <div className="route-foot">
         <label className="field">
           <span className="field-label">{t.commuteThreshold}</span>
           <select value={draft.delayThreshold == null ? '' : String(draft.delayThreshold)} onChange={(event) => setDraft({ ...draft, delayThreshold: event.target.value === '' ? null : Number(event.target.value) })}>
@@ -154,6 +161,7 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, connectio
           </select>
         </label>
         <Toggle checked={draft.notify} onChange={(value) => setDraft({ ...draft, notify: value })} label={t.commuteNotify} />
+        </div>
 
         {failure ? <Banner tone="danger" icon="warning">{failure}</Banner> : null}
         <div className="dialog-actions">

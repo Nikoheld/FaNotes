@@ -81,7 +81,7 @@ describe('intro in the SPA shell', () => {
 describe('/about/ landing page', () => {
   it('has the landing text in the raw HTML', () => {
     expect(about).toContain('<html lang="de">')
-    expect(about.match(/<h1>/gu)).toHaveLength(1)
+    expect(about.match(/<h1[\s>]/gu)).toHaveLength(1)
     for (const feature of ['Stundenplan', 'Noten-Push', 'Prüfungen', 'Absenzen', 'Pendeln', 'Widgets', 'Mensa', 'Kanti+ im Browser']) expect(about).toContain(`<h3>${feature}`)
     expect(about).toContain('Kanti+ für Android ist in der Testphase und noch nicht im Play Store.')
     expect(about).not.toMatch(/play\.google\.com/u)
@@ -109,10 +109,12 @@ describe('/about/ landing page', () => {
       expect(image).toMatch(/\sheight="\d+"/u)
       expect(image).toMatch(/\salt="/u)
     }
+    // The hero shot is above the fold and loads eagerly with a high fetch priority; every other screenshot is lazy.
     for (const image of images.filter((i) => i.includes('/about/img/'))) {
       expect(image).toMatch(/alt="[^"]{20,}"/u)
-      expect(image).toContain('loading="lazy"')
+      if (!image.includes('fetchpriority="high"')) expect(image).toContain('loading="lazy"')
     }
+    expect(images.filter((i) => i.includes('fetchpriority="high"'))).toHaveLength(1)
   })
   it('FAQ is visible HTML and the FAQPage JSON-LD matches it', () => {
     const details = [...about.matchAll(/<details>\s*<summary><h3>([\s\S]*?)<\/h3><\/summary>\s*<p>([\s\S]*?)<\/p>\s*<\/details>/gu)]

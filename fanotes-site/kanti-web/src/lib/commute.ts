@@ -1,6 +1,6 @@
 // Pendelstrecken: the pure logic behind the Pendeln view, the Today card and the route editor.
 // Nothing here touches the network or React, so all of it is unit-tested.
-import type { CommuteRoute, CommuteSettings, Leg, Occupancy, OccupancyLevel, Pin, RouteBoard, Schedule, ScheduleMode, Stop, Trip } from '../types'
+import type { CommuteRoute, CommuteSettings, Leg, LegStop, Occupancy, OccupancyLevel, Pin, Position, RouteBoard, Schedule, ScheduleMode, Stop, StopTime, Trip } from '../types'
 
 export const MAX_ROUTES = 8
 export const MAX_TIMES = 6
@@ -10,6 +10,8 @@ export const DEFAULT_THRESHOLD = 3
 /** The server caches a board for 30 s: the page never asks more often. */
 export const BOARD_MIN_MS = 30_000
 export const POLL_EVERY_MS = 60_000
+/** The open connection detail refreshes this often (the server caches it for 30 s). */
+export const DETAIL_REFRESH_MS = 30_000
 /** Poll only while a trip leaves within this window. */
 export const POLL_WINDOW_MS = 30 * 60_000
 export const SEARCH_DELAY_MS = 250
@@ -61,8 +63,9 @@ export const delayClass = (delay: number | null | undefined, cancelled = false):
   if (cancelled) return 'cancelled'
   const minutes = typeof delay === 'number' && Number.isFinite(delay) ? delay : 0
   if (minutes <= 0) return 'ok'
-  if (minutes <= 2) return 'minor'
-  if (minutes <= 5) return 'moderate'
+  // The same steps as the app: +1 subtle, +2 to +4 orange, +5 and more red.
+  if (minutes <= 1) return 'minor'
+  if (minutes <= 4) return 'moderate'
   return 'major'
 }
 
@@ -490,4 +493,177 @@ export const createStopSearcher = (
       }, delay)
     },
   }
+}
+
+// ---------------------------------------------------------------- connection detail
+
+/**
+ * Where the vehicle of a trip is at `now` (ms). A port of the server's `tripPosition`
+ * (commute-logic.mjs), used for the demo only: a live detail comes with the server's position.
+ * `point`: 0 = leg.from, 1..n = leg.stops[point-1], n+1 = leg.to. Stops the vehicle skips are ignored.
+ */
+export const tripPosition = (trip: Trip, now: number): Position => {
+  const rides = trip.legs.map((leg, index) => ({ leg, index })).filter(({ leg }) => leg.kind === 'ride')
+  if (!rides.length) return { state: 'notStarted', legIndex: 0, point: 0, progress: 0, estimated: true }
+  interface Moment { at: number; real: boolean }
+  interface Point { arrive: Moment | null; leave: Moment | null; original: number }
+  const moment = (time: StopTime | null): Moment | null => (time ? { at: timeMs(time.time), real: time.delay != null } : null)
+  for (let r = 0; r < rides.length; r += 1) {
+    const { leg, index } = rides[r]
+    const stops = leg.stops || []
+    const points: Point[] = [
+      { arrive: null, leave: { at: timeMs(leg.from.time), real: leg.from.delay != null }, original: 0 },
+      ...stops.map((stop, at) => ({ stop, at })).filter(({ stop }) => !stop.cancelled).map(({ stop, at }) => ({ arrive: moment(stop.arrival), leave: moment(stop.departure), original: at + 1 })),
+      { arrive: { at: timeMs(leg.to.time), real: leg.to.delay != null }, leave: null, original: stops.length + 1 },
+    ]
+    const startAt = (points[0].leave as Moment).at
+    if (now < startAt) {
+      return r === 0
+        ? { state: 'notStarted', legIndex: index, point: 0, progress: 0, estimated: !(points[0].leave as Moment).real }
+        : { state: 'transfer', legIndex: rides[r - 1].index, point: (rides[r - 1].leg.stops || []).length + 1, progress: 0, estimated: !(points[0].leave as Moment).real }
+    }
+    for (let p = 0; p < points.length - 1; p += 1) {
+      const here = points[p]
+      const next = points[p + 1]
+      const leaveAt = (here.leave ?? here.arrive)?.at as number
+      const arriveAt = (next.arrive ?? next.leave)?.at as number
+      if (here.arrive && now >= here.arrive.at && now < leaveAt) return { state: 'atStop', legIndex: index, point: here.original, progress: 0, estimated: !(here.arrive.real && here.leave?.real) }
+      if (now >= leaveAt && now < arriveAt) {
+        const span = Math.max(1, arriveAt - leaveAt)
+        return { state: 'between', legIndex: index, point: here.original, progress: Math.min(1, Math.max(0, (now - leaveAt) / span)), estimated: !((here.leave?.real ?? false) && (next.arrive?.real ?? false)) }
+      }
+    }
+    const last = points[points.length - 1]
+    if (last.arrive && now >= last.arrive.at && r === rides.length - 1) return { state: 'arrived', legIndex: index, point: last.original, progress: 1, estimated: !last.arrive.real }
+  }
+  const final = rides[rides.length - 1]
+  return { state: 'arrived', legIndex: final.index, point: (final.leg.stops || []).length + 1, progress: 1, estimated: true }
+}
+
+/** One stop of a ride leg as a row of the timeline: boarding stop, intermediate stop or exit stop. */
+export interface RailRow {
+  /** Position point of the leg: 0 = boarding, 1..n = intermediate, n+1 = exit. */
+  index: number
+  kind: 'board' | 'stop' | 'exit'
+  name: string
+  stopId: string
+  arrival: StopTime | null
+  departure: StopTime | null
+  platform: string
+  platformChanged: boolean
+  /** false only for an intermediate stop the provider has no real-time data for. */
+  realtime: boolean
+  cancelled: boolean
+}
+
+const endTime = (point: Leg['from']): StopTime => ({ planned: point.planned, time: point.time, delay: point.delay })
+
+/** All rows of a ride leg in driving order, cancelled stops included. */
+export const legRows = (leg: Leg): RailRow[] => {
+  const stops: LegStop[] = leg.stops || []
+  return [
+    { index: 0, kind: 'board', name: leg.from.name, stopId: leg.from.stopId, arrival: null, departure: endTime(leg.from), platform: leg.from.platform, platformChanged: leg.from.platformChanged, realtime: true, cancelled: false },
+    ...stops.map((stop, at): RailRow => ({ index: at + 1, kind: 'stop', name: stop.name, stopId: stop.stopId, arrival: stop.arrival, departure: stop.departure, platform: stop.platform, platformChanged: stop.platformChanged, realtime: stop.realtime, cancelled: stop.cancelled })),
+    { index: stops.length + 1, kind: 'exit', name: leg.to.name, stopId: leg.to.stopId, arrival: endTime(leg.to), departure: null, platform: leg.to.platform, platformChanged: leg.to.platformChanged, realtime: true, cancelled: false },
+  ]
+}
+
+/** The time a row is shown with: the arrival, or the departure at the boarding stop. */
+export const rowTime = (row: RailRow): StopTime | null => (row.kind === 'board' ? row.departure : row.arrival || row.departure)
+
+/** The planned time shows struck only when the real one differs on the clock and the stop has real time. */
+export const rowShowsPlanned = (row: RailRow): boolean => {
+  const time = rowTime(row)
+  return Boolean(time && row.realtime && !row.cancelled && clockOf(time.planned) !== clockOf(time.time))
+}
+
+/**
+ * Rows that get a delay badge: the boarding and exit stop when late, and an intermediate stop only where the delay
+ * differs from the stop before (a train that is 4 minutes late all the way says so once, the times show the rest).
+ */
+export const delayBadgeRows = (rows: RailRow[]): Set<number> => {
+  const shown = new Set<number>()
+  let before = 0
+  for (const row of rows) {
+    if (row.cancelled || !row.realtime) continue
+    const delay = rowTime(row)?.delay ?? null
+    if (delay == null) continue
+    if (delay > 0 && (row.kind !== 'stop' || delay !== before)) shown.add(row.index)
+    before = delay
+  }
+  return shown
+}
+
+/** Minutes the vehicle waits at an intermediate stop (0 when it leaves at once or the times are unknown). */
+export const dwellMinutes = (row: RailRow): number => {
+  if (row.kind !== 'stop' || !row.arrival || !row.departure) return 0
+  return Math.max(0, Math.round((timeMs(row.departure.time) - timeMs(row.arrival.time)) / 60_000))
+}
+
+/** The rows that stay visible while the stops are collapsed: boarding, exit and where the vehicle is. */
+export const pinnedPoints = (leg: Leg, legIndex: number, position: Position | undefined): Set<number> => {
+  const end = (leg.stops || []).length + 1
+  const keep = new Set<number>([0, end])
+  if (position && position.legIndex === legIndex && position.state !== 'notStarted') {
+    keep.add(position.point)
+    if (position.state === 'between') keep.add(position.point + 1)
+  }
+  return keep
+}
+
+export type RailItem = { type: 'row'; row: RailRow } | { type: 'gap'; count: number; from: number }
+
+/** Rows with every collapsed run of intermediate stops replaced by one gap item (its stop count). */
+export const railItems = (rows: RailRow[], expanded: boolean, keep: Set<number>): RailItem[] => {
+  const items: RailItem[] = []
+  for (const row of rows) {
+    if (expanded || keep.has(row.index)) { items.push({ type: 'row', row }); continue }
+    const last = items[items.length - 1]
+    if (last && last.type === 'gap') last.count += 1
+    else items.push({ type: 'gap', count: 1, from: row.index })
+  }
+  return items
+}
+
+export type RowProgress = 'past' | 'current' | 'future'
+
+/** Whether the vehicle has passed a row of a leg, is there, or still has to come. */
+export const rowProgress = (position: Position | undefined, legIndex: number, point: number): RowProgress => {
+  if (!position || position.state === 'notStarted') return 'future'
+  if (legIndex < position.legIndex) return 'past'
+  if (legIndex > position.legIndex) return 'future'
+  if (point < position.point) return 'past'
+  if (point > position.point) return 'future'
+  return position.state === 'between' ? 'past' : 'current'
+}
+
+export interface PositionInfo {
+  state: Position['state']
+  /** Where it is: the stop, or the one it left. */
+  at: string
+  /** Between: the stop it is heading to. */
+  next: string
+  estimated: boolean
+}
+
+/** Names for the status line ("Hält in X", "Zwischen X und Y", ...); null when the position does not fit the trip. */
+export const positionInfo = (trip: Trip, position: Position | undefined): PositionInfo | null => {
+  if (!position) return null
+  const leg = trip.legs[position.legIndex]
+  if (!leg || leg.kind !== 'ride') return null
+  const rows = legRows(leg)
+  const here = rows[position.point]
+  if (!here) return null
+  const next = position.state === 'between' ? rows[position.point + 1]?.name || '' : ''
+  return { state: position.state, at: here.name, next, estimated: position.estimated }
+}
+
+/** 'tight' or 'broken' for a change (minutes in real time), '' otherwise. */
+export const transferWarning = (change: Trip['changes'][number] | undefined): '' | 'tight' | 'broken' => (change ? (change.broken ? 'broken' : change.tight ? 'tight' : '') : '')
+
+/** The change that follows the ride leg at `legIndex`, matched by order of the ride legs. */
+export const changeAfter = (trip: Trip, legIndex: number): Trip['changes'][number] | undefined => {
+  const rides = trip.legs.map((leg, index) => (leg.kind === 'ride' ? index : -1)).filter((index) => index >= 0)
+  const order = rides.indexOf(legIndex)
+  return order >= 0 && order < rides.length - 1 ? trip.changes[order] : undefined
 }

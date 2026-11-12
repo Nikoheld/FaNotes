@@ -1,0 +1,81 @@
+/* Absenzen and absence points. Figure cards use .metric from grades.css. */
+
+.absence-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.absence-metrics.with-ring { grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 1fr)); }
+.absence-metrics .metric:not(.metric-ring) { justify-content: center; padding-top: var(--s4); }
+.absence-metrics .metric:not(.metric-ring) .metric-value { font-size: 44px; }
+.metric-ring { flex-direction: row; align-items: center; justify-content: flex-start; gap: var(--s6); padding: var(--s4) var(--s6); }
+.metric-label .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 3px; vertical-align: -1px; }
+.swatch-booked { background: var(--accent); }
+.swatch-estimated { background: repeating-linear-gradient(135deg, var(--warning) 0 2px, color-mix(in srgb, var(--warning) 22%, var(--surface)) 2px 4px); box-shadow: inset 0 0 0 1px var(--warning); }
+.metric-open { box-shadow: inset 3px 0 0 var(--warning), var(--shadow-1); }
+
+.quota-ring { position: relative; flex: none; width: 124px; height: 124px; }
+.quota-ring svg { display: block; transform: rotate(-90deg); }
+.quota-ring circle { fill: none; stroke-width: 11; }
+.ring-track { stroke: color-mix(in srgb, var(--text) 9%, transparent); }
+.ring-booked { stroke: var(--accent); stroke-linecap: butt; }
+.ring-estimated { stroke-linecap: butt; }
+.ring-hatch-bg { fill: color-mix(in srgb, var(--warning) 26%, var(--surface)); }
+.ring-hatch-bar { fill: var(--warning); }
+.quota-ring.over .ring-booked { stroke: var(--danger); }
+.ring-center { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+.ring-value { font-size: 34px; font-weight: 650; letter-spacing: -0.02em; line-height: 1; }
+.ring-value .stat-of { display: block; margin: 4px 0 0; font-size: var(--text-s); font-weight: 600; }
+.ring-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ring-label { font-size: var(--text-xl); font-weight: 650; letter-spacing: -0.015em; line-height: 1.2; }
+.ring-text .metric-sub { margin-top: var(--s2); white-space: normal; font-weight: 650; }
+
+/* The explanation, quiet */
+.callout { display: flex; align-items: flex-start; gap: var(--s3); margin: 0 0 var(--s5); padding: var(--s3) var(--s4); border-radius: var(--radius-m); border: 1px solid var(--hairline); background: color-mix(in srgb, var(--sunken) 55%, var(--bg)); color: var(--muted); font-size: var(--text-s); line-height: 1.55; }
+.callout > .icon { margin-top: 1px; color: var(--accent); }
+.callout > div { max-width: 84ch; }
+.callout strong { display: block; margin-bottom: 2px; color: var(--warning); font-size: var(--text-m); font-weight: 650; }
+.callout p { color: var(--muted); }
+
+/* The table */
+.view-absences .table-card { padding: var(--s1) var(--s2); }
+.view-absences th { padding: 12px var(--s4) 10px; white-space: nowrap; }
+.view-absences td { padding: 13px var(--s4); vertical-align: top; }
+.view-absences td:first-child { white-space: nowrap; font-weight: 600; }
+.view-absences td:nth-child(2) { white-space: nowrap; color: var(--muted); }
+.view-absences th.numeric, .view-absences td.numeric { text-align: right; }
+.view-absences tbody tr { transition: background var(--fast) var(--ease); }
+.view-absences tbody tr:hover { background: var(--tint); }
+.view-absences tr.absence-open { background: color-mix(in srgb, var(--warning) 6%, transparent); }
+.view-absences tr.absence-open:hover { background: color-mix(in srgb, var(--warning) 10%, transparent); }
+.view-absences tr.absence-open td:first-child { box-shadow: inset 3px 0 0 var(--warning); }
+.absence-note { display: block; color: var(--muted); font-size: var(--text-xs); margin-top: 3px; white-space: normal; line-height: 1.35; }
+.absence-estimate { font-weight: 700; font-size: var(--text-l); color: var(--warning); cursor: help; white-space: nowrap; }
+.view-absences td.numeric .tabular { font-weight: 650; font-size: var(--text-l); }
+.view-absences td.numeric .absence-note { margin-left: auto; max-width: 28ch; }
+
+@media (max-width: 1180px) {
+  .absence-metrics.with-ring { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .absence-metrics .metric-ring { grid-column: 1 / -1; }
+}
+@media (max-width: 900px) {
+  .view-absences thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .view-absences table, .view-absences tbody { display: block; }
+  .view-absences tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--s4); padding: var(--s3) var(--s3) var(--s3) var(--s4); border-bottom: 1px solid var(--hairline); position: relative; }
+  .view-absences tr:last-child { border-bottom: none; }
+  .view-absences td { display: block; grid-column: 1 / -1; padding: 2px 0; border: none; }
+  .view-absences td:nth-child(1) { grid-column: 1; grid-row: 1; }
+  .view-absences td:nth-child(2) { grid-column: 1; grid-row: 2; }
+  .view-absences td:nth-child(2):empty { display: none; }
+  .view-absences td:nth-child(3) { font-weight: 550; }
+  .view-absences td:nth-child(3):empty, .view-absences td:nth-child(4):empty { display: none; }
+  .view-absences td:nth-child(5) { margin-top: var(--s2); }
+  .view-absences td.numeric { display: contents; }
+  .view-absences td.numeric > .absence-estimate, .view-absences td.numeric > .tabular { grid-column: 2; grid-row: 1 / span 2; justify-self: end; }
+  .view-absences td.numeric .absence-note { grid-column: 1 / -1; margin: 2px 0 0; max-width: none; text-align: left; }
+  .view-absences tr.absence-open td:first-child { box-shadow: none; }
+  .view-absences tr.absence-open::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--warning); }
+}
+@media (max-width: 640px) {
+  .absence-metrics { gap: var(--s3); }
+  .metric-ring { padding: var(--s4); gap: var(--s4); }
+  .quota-ring, .quota-ring svg { width: 104px; height: 104px; }
+  .ring-value { font-size: 29px; }
+  .ring-label { font-size: var(--text-l); }
+}

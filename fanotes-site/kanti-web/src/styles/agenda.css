@@ -1,0 +1,46 @@
+/* Prüfungen & Termine: one timeline grouped by week. */
+.seg-count { margin-left: 4px; font-weight: 500; opacity: 0.75; }
+.agenda-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--s6); align-items: start; }
+.agenda-timeline { min-width: 0; display: flex; flex-direction: column; gap: var(--s5); }
+.tl-week-head { margin: 0 var(--s1) var(--s2); color: var(--muted); font-size: var(--text-xs); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.tl-list { padding: 6px; display: flex; flex-direction: column; gap: 2px; }
+.tl-item { --rail: var(--hairline); --tile-bg: var(--sunken); --tile-fg: var(--text); position: relative; display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: var(--s4); width: 100%; padding: 10px 14px 10px 10px; border: 0; border-radius: var(--radius-m); background: transparent; text-align: left; cursor: pointer; transition: background var(--fast) var(--ease); }
+.tl-item:hover { background: var(--tint); }
+.tl-item.kind-exam { --rail: var(--warning); --tile-bg: var(--warning-soft); --tile-fg: var(--warning); }
+.tl-item.kind-appointment { --rail: var(--success); --tile-bg: var(--success-soft); --tile-fg: var(--success); }
+.tl-item.cancelled .tl-title { text-decoration: line-through; color: var(--muted); }
+.tl-item::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 3px; background: var(--rail); }
+.tl-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; margin-left: 6px; height: 64px; border-radius: var(--radius-m); background: var(--tile-bg); color: var(--tile-fg); line-height: 1.05; }
+.tl-wd, .tl-month { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+.tl-day { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; padding: 1px 0; }
+.tl-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tl-title { font-weight: 600; font-size: var(--text-m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-meta { display: flex; flex-wrap: wrap; gap: 0 var(--s2); color: var(--muted); font-size: var(--text-s); }
+.tl-meta > span + span::before { content: '·'; margin-right: var(--s2); }
+.tl-side { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--s2); }
+.tl-side .tag:last-child { min-width: 64px; justify-content: center; }
+.agenda-side { position: sticky; top: calc(var(--topbar, 68px) + 8px); }
+.agenda-glance { padding: var(--s5); }
+.glance-label { color: var(--muted); font-size: var(--text-xs); font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase; }
+.glance-figure { margin-top: var(--s2); font-size: 30px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; font-stretch: 85%; color: var(--warning); }
+.glance-title { margin-top: var(--s2); font-weight: 600; }
+.glance-meta { color: var(--muted); font-size: var(--text-s); margin-top: 2px; }
+.glance-counts { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--hairline); font-size: var(--text-s); color: var(--muted); }
+.glance-counts strong { color: var(--text); margin-right: 4px; }
+.dot { display: inline-block; width: 8px; height: 8px; margin-right: var(--s2); border-radius: 50%; }
+.dot-exam { background: var(--warning); }
+.dot-appointment { background: var(--success); }
+
+@media (max-width: 1180px) {
+  .agenda-layout { grid-template-columns: minmax(0, 1fr); }
+  .agenda-side { position: static; order: -1; }
+  .glance-counts { flex-direction: row; gap: var(--s5); }
+}
+@media (max-width: 640px) {
+  .tl-item { grid-template-columns: 52px minmax(0, 1fr); gap: var(--s3); }
+  .tl-tile { height: 58px; }
+  .tl-day { font-size: 22px; }
+  .tl-side { grid-column: 2; justify-content: flex-start; }
+  .tl-title { white-space: normal; }
+  .toolbar .segments { max-width: 100%; overflow-x: auto; }
+}

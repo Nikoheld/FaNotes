@@ -1,6 +1,6 @@
 // Pieces of the Pendeln view and the Today card: line chips, delay badges, occupancy, trips with
 // their leg timeline, and the board body with its status banners.
-import { useState } from 'react'
+import { createContext, useContext, useState } from 'react'
 import { boardFocus, chipColors, clockOf, dayLabel, delayClass, departureDelay, departurePlatform, durationLabel, hasOccupancy, lessonChange, occupancyLevel, rideLegs, tripCancelled } from '../lib/commute'
 import type { Strings } from '../lib/i18n'
 import type { CommuteRoute, CommuteTarget, Leg, Occupancy, RouteBoard, Stop, Trip, TripPoint } from '../types'
@@ -114,9 +114,15 @@ export const TransferNote = ({ change, t }: { change: Trip['changes'][number]; t
   </p>
 )
 
+/** Set by the Pendeln view: a trip card then opens the connection detail instead of unfolding its legs. */
+export const TripOpenContext = createContext<((trip: Trip) => void) | null>(null)
+
 /** One connection: departure (planned struck when late), arrival, lines, platform, changes and forecast; opens into the legs. */
 export const TripCard = ({ trip, t, open: startOpen = false, compact = false, pinned = false, note }: { trip: Trip; t: Strings; open?: boolean; compact?: boolean; pinned?: boolean; note?: string }) => {
-  const [open, setOpen] = useState(startOpen)
+  const opener = useContext(TripOpenContext)
+  const [folded, setOpen] = useState(startOpen)
+  // With the detail view available the card opens that; the inline legs are the fallback (and the tests').
+  const open = opener ? false : folded
   const cancelled = tripCancelled(trip)
   const delay = departureDelay(trip)
   const kind = delayClass(delay, cancelled)
@@ -133,7 +139,7 @@ export const TripCard = ({ trip, t, open: startOpen = false, compact = false, pi
   return (
     <article className={`trip trip-${kind}${cancelled ? ' trip-cancelled' : ''}${trip.quietest ? ' trip-quietest' : ''}${pinned ? ' trip-pinned' : ''}`} data-trip={trip.id}>
       {pinned ? <p className="trip-pinned-label"><Icon name="pin" size={14} />{t.pinnedBadge}{note ? <span className="trip-pinned-note"> · {note}</span> : null}</p> : null}
-      <button type="button" className="trip-head" aria-expanded={open} onClick={() => setOpen(!open)} aria-label={`${clockOf(trip.departure)} ${label}. ${open ? t.tripHideDetails : t.tripShowDetails}`}>
+      <button type="button" className="trip-head" aria-expanded={opener ? undefined : open} aria-haspopup={opener ? 'dialog' : undefined} onClick={() => (opener ? opener(trip) : setOpen(!open))} aria-label={`${clockOf(trip.departure)} ${label}. ${opener ? t.tripOpenDetail : open ? t.tripHideDetails : t.tripShowDetails}`}>
         <span className="trip-times tabular">
           <span className="trip-dep">
             {late ? <s className="trip-planned">{clockOf(trip.plannedDeparture)}</s> : null}
@@ -164,7 +170,7 @@ export const TripCard = ({ trip, t, open: startOpen = false, compact = false, pi
           ))}
         </span>
         {compact ? null : <span className="trip-occupancy"><OccupancyMeter occupancy={trip.occupancy} t={t} /></span>}
-        <span className="trip-toggle" aria-hidden="true"><Icon name={open ? 'up' : 'down'} size={18} /></span>
+        <span className="trip-toggle" aria-hidden="true"><Icon name={opener ? 'right' : open ? 'up' : 'down'} size={18} /></span>
       </button>
       {open ? <div className="trip-detail">{detail}</div> : null}
     </article>

@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { allEntries, vacationOn, weekDays, weekMonday, weekRange, weekState, addDays } from '../lib/agenda'
 import { dateLabel } from '../lib/i18n'
 import { useKanti } from '../state'
-import { Banner, Button, Card, Empty, IconButton, Tag } from '../components/ui'
-import { WeekGrid } from '../components/WeekGrid'
+import { Banner, Empty, IconButton, Tag } from '../components/ui'
+import { DetailsPanel, WeekGrid } from '../components/WeekGrid'
 import { isAksaConnection, readSummary, type TimetableSummary } from '../lib/timetables'
-import { EntryDetails, useClock } from './common'
+import { useClock } from './common'
 import { OtherTimetables } from './OtherTimetables'
 
 /** Mon–Fri as columns, the day as a measured axis, every week of the semester one keypress away. */
@@ -49,20 +49,23 @@ export const Timetable = () => {
   }, [api, aksa, activeId])
 
   const index = weeks.indexOf(monday)
+  const isCurrent = monday === weekMonday(clock.today)
 
   if (others.available && route.params.get('ansicht') === 'andere') return <OtherTimetables summary={others} />
 
   return (
     <div className="view view-timetable">
-      <div className="toolbar">
-        <div className="toolbar-group">
-          <IconButton icon="left" label={`${t.previousWeek} (←)`} onClick={() => go(addDays(monday, -7))} />
-          <IconButton icon="right" label={`${t.nextWeek} (→)`} onClick={() => go(addDays(monday, 7))} />
+      <div className="toolbar tt-toolbar">
+        <div className="toolbar-group tt-heading">
+          <div className="week-nav" role="group" aria-label={t.week}>
+            <IconButton icon="left" label={`${t.previousWeek} (←)`} onClick={() => go(addDays(monday, -7))} />
+            <button type="button" className={`nav-today${isCurrent ? ' current' : ''}`} onClick={() => go(weekMonday(clock.today))}>{t.today}</button>
+            <IconButton icon="right" label={`${t.nextWeek} (→)`} onClick={() => go(addDays(monday, 7))} />
+          </div>
           <h2 className="week-title">{t.weekOf(dateLabel(monday, language, { day: 'numeric', month: 'long', year: 'numeric' }))}</h2>
-          {monday !== weekMonday(clock.today) ? <Button tone="outline" onClick={() => go(weekMonday(clock.today))}>{t.thisWeek}</Button> : <Tag tone="accent">{t.thisWeek}</Tag>}
+          {isCurrent ? <Tag tone="accent">{t.thisWeek}</Tag> : null}
         </div>
         <div className="toolbar-group">
-          {others.available ? <Button tone="quiet" icon="timetable" onClick={() => kanti.navigate('timetable', { ansicht: 'andere' })}>{t.otherTimetables}</Button> : null}
           <label className="select">
             <span className="sr-only">{t.week}</span>
             <select value={index >= 0 ? monday : ''} onChange={(event) => go(event.target.value)}>
@@ -70,6 +73,12 @@ export const Timetable = () => {
               {weeks.map((week) => <option key={week} value={week}>{t.weekOf(dateLabel(week, language, { day: 'numeric', month: 'short', year: 'numeric' }))}</option>)}
             </select>
           </label>
+          {others.available ? (
+            <div className="segments" role="group" aria-label={t.timetable}>
+              <button type="button" className="active" aria-pressed="true">{t.timetable}</button>
+              <button type="button" aria-pressed="false" onClick={() => kanti.navigate('timetable', { ansicht: 'andere' })}>{t.otherTimetables}</button>
+            </div>
+          ) : null}
         </div>
       </div>
       {state === 'unread' ? <Banner tone="warning" icon="warning">{t.weekUnread}</Banner> : null}
@@ -86,9 +95,7 @@ export const Timetable = () => {
           isVacation={(day) => Boolean(vacationOn(data.snapshot, day))}
           emptyLabel={state !== 'unread' ? <Empty icon="timetable">{state === 'holiday' ? t.holiday : t.weekFree}</Empty> : null}
         />
-        <aside className="column column-side details-panel">
-          <Card>{selected ? <EntryDetails entry={selected} t={t} language={language} /> : <Empty icon="info">{t.pickLesson}</Empty>}</Card>
-        </aside>
+        <DetailsPanel entry={selected} />
       </div>
     </div>
   )

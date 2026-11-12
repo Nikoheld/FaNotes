@@ -2,7 +2,8 @@ import { useMemo } from 'react'
 import { absenceTally, eventDate, type AbsenceEstimate } from '@shared/schulnetz-logic'
 import { dateLabel, pointsLabel, type Strings } from '../lib/i18n'
 import { useKanti } from '../state'
-import { Card, Empty, Tag } from '../components/ui'
+import { Card, Empty, Icon, Tag } from '../components/ui'
+import { QuotaRing } from '../components/charts'
 import { useClock } from './common'
 import type { SchoolAbsence } from '../types'
 
@@ -34,33 +35,42 @@ export const Absences = () => {
   const points = (value: number) => pointsLabel(value, language)
   return (
     <div className="view view-absences">
-      <div className="stat-row">
+      <div className={`metric-row absence-metrics${tally.quota != null && tally.remaining != null ? ' with-ring' : ''}`}>
         {tally.quota != null && tally.remaining != null ? (
-          <Card className="stat" title={t.absenceExplain}>
-            <span className="stat-label">{t.absencePoints} · {t.pointsRemaining}</span>
-            <span className={`stat-value tabular${tally.remaining < 0 ? ' negative' : tally.estimated > 0 ? ' warning-text' : ''}`}>{points(tally.remaining)}<small className="stat-of">/ {points(tally.quota)}</small></span>
+          <Card className="metric metric-ring" title={t.absenceExplain}>
+            <QuotaRing booked={tally.booked} estimated={tally.estimated} quota={tally.quota} over={tally.remaining < 0}>
+              <span className={`ring-value tabular${tally.remaining < 0 ? ' negative' : tally.estimated > 0 ? ' warning-text' : ''}`}>{points(tally.remaining)}<small className="stat-of">/ {points(tally.quota)}</small></span>
+            </QuotaRing>
+            <span className="ring-text">
+              <span className="metric-label">{t.absencePoints}</span>
+              <span className="ring-label">{t.pointsRemaining}</span>
+              {tally.openReports ? <small className="metric-sub warning-text">{t.openReports(tally.openReports)}</small> : null}
+            </span>
           </Card>
         ) : null}
         {withPoints ? (
           <>
-            <Card className="stat"><span className="stat-label">{t.pointsBooked}</span><span className="stat-value tabular">{points(tally.booked)}</span></Card>
-            <Card className="stat" title={t.absenceExplain}>
-              <span className="stat-label">{t.pointsEstimated}</span>
-              <span className={`stat-value tabular${tally.estimated > 0 ? ' warning-text' : ''}`}>{tally.estimated > 0 ? `≈ ${tally.estimated}` : '0'}</span>
+            <Card className="metric"><span className="metric-label"><i className="swatch swatch-booked" aria-hidden="true" />{t.pointsBooked}</span><span className="metric-value tabular">{points(tally.booked)}</span></Card>
+            <Card className={`metric${tally.estimated > 0 ? ' metric-open' : ''}`} title={t.absenceExplain}>
+              <span className="metric-label"><i className="swatch swatch-estimated" aria-hidden="true" />{t.pointsEstimated}</span>
+              <span className={`metric-value tabular${tally.estimated > 0 ? ' warning-text' : ''}`}>{tally.estimated > 0 ? `≈ ${tally.estimated}` : '0'}</span>
             </Card>
           </>
         ) : (
           <>
-            <Card className="stat"><span className="stat-label">{t.absences}</span><span className="stat-value tabular">{absences.length}</span></Card>
-            <Card className="stat"><span className="stat-label">{t.open}</span><span className={`stat-value tabular${open ? ' negative' : ''}`}>{open}</span></Card>
+            <Card className="metric"><span className="metric-label">{t.absences}</span><span className="metric-value tabular">{absences.length}</span></Card>
+            <Card className={`metric${open ? ' metric-open' : ''}`}><span className="metric-label">{t.open}</span><span className={`metric-value tabular${open ? ' negative' : ''}`}>{open}</span></Card>
           </>
         )}
       </div>
       {withPoints ? (
-        <p className="absence-explain">
-          {tally.openReports ? <strong>{t.openReports(tally.openReports)} · {t.estimateValue(tally.estimated)}. </strong> : null}
-          {t.absenceExplain}
-        </p>
+        <aside className="callout absence-explain">
+          <Icon name="info" size={20} />
+          <div>
+            {tally.openReports ? <strong>{t.openReports(tally.openReports)} · {t.estimateValue(tally.estimated)}. </strong> : null}
+            <p>{t.absenceExplain}</p>
+          </div>
+        </aside>
       ) : null}
       <Card className="table-card">
         {absences.length ? (

@@ -1,0 +1,110 @@
+/* Connection detail ("Verbindungsdetail"): side panel, summary, legs on a vertical rail, vehicle marker. */
+
+/* Panel: a sheet from the right on desktop, the whole screen on a phone. */
+.backdrop-side { place-items: stretch end; padding: 0; }
+.dialog-side { display: flex; flex-direction: column; width: min(560px, 100%); max-height: none; height: 100dvh; overflow: hidden; border-radius: var(--radius-xl) 0 0 var(--radius-xl); border-width: 0 0 0 1px; animation: slide-in 200ms var(--ease); }
+.dialog-side .dialog-head { flex: none; padding-bottom: var(--s2); border-bottom: 1px solid var(--hairline); padding-inline: var(--s5) var(--s4); }
+.dialog-side .dialog-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 var(--s5) var(--s8); }
+@keyframes slide-in { from { opacity: 0; transform: translateX(24px); } }
+@media (max-width: 640px) {
+  .dialog-side { width: 100%; border-radius: 0; border-width: 0; }
+  .dialog-side .dialog-head { padding-inline: var(--s4) var(--s3); }
+  .dialog-side .dialog-body { padding: 0 var(--s4) var(--s8); }
+}
+
+.dt { --dot-y: 16px; --track: 22px; --rail-future: color-mix(in srgb, var(--outline) 55%, var(--hairline)); display: flex; flex-direction: column; gap: var(--s4); min-height: 70vh; }
+.dt-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-height: 40px; margin-top: var(--s2); }
+.dt-stand { font-size: var(--text-s); }
+
+/* Summary */
+.dt-summary { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s4) var(--s5) var(--s4); border-radius: var(--radius-l); background: radial-gradient(120% 160% at 100% 0%, color-mix(in srgb, var(--accent) 13%, var(--accent-soft)) 0%, var(--accent-soft) 62%); border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); }
+.dt-route { margin: 0; font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); overflow-wrap: anywhere; }
+.dt-times { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2) var(--s3); }
+.dt-times > .icon { color: var(--muted); }
+.dt-dep, .dt-arr { display: inline-flex; align-items: baseline; gap: 8px; font-size: 38px; line-height: 1.05; letter-spacing: -0.02em; }
+.dt-dep strong { font-weight: 700; }
+.dt-arr { color: var(--muted); }
+.dt-arr strong { font-weight: 600; }
+.dt-dep s, .dt-arr s { font-size: var(--text-m); font-weight: 500; color: var(--muted); }
+.dt-times.is-cancelled strong { text-decoration: line-through; }
+.dt-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px var(--s3); color: var(--muted); font-size: var(--text-s); font-weight: 550; }
+.dt-position { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); margin: var(--s1) 0 0; padding-top: var(--s3); border-top: 1px solid color-mix(in srgb, var(--accent) 16%, transparent); font-weight: 650; }
+.dt-pos-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); flex: none; }
+.dt-pos-notStarted .dt-pos-dot { background: transparent; border: 2px solid var(--outline); box-shadow: none; }
+.dt-pos-arrived .dt-pos-dot { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
+.dt-pos-transfer .dt-pos-dot { background: var(--warning); box-shadow: 0 0 0 4px var(--warning-soft); }
+
+/* Legs and transfers */
+.dt-legs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.dt-item { display: flex; flex-direction: column; }
+.dt-leg { padding: var(--s4) var(--s4) var(--s3); border: 1px solid var(--hairline); border-radius: var(--radius-l); background: color-mix(in srgb, var(--sunken) 24%, var(--raised)); }
+.dt-leg.is-cancelled { border-color: color-mix(in srgb, var(--danger) 35%, var(--hairline)); background: color-mix(in srgb, var(--danger-soft) 40%, var(--raised)); }
+.dt-leg-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px var(--s3); padding-bottom: var(--s3); }
+.dt-direction { display: inline-flex; align-items: center; gap: 4px; font-weight: 650; min-width: 0; overflow-wrap: anywhere; }
+.dt-direction .icon { color: var(--muted); flex: none; }
+.dt-operator { font-size: var(--text-xs); }
+.dt-leg-head .occupancy { margin-left: auto; }
+.dt-transfers, .dt-walks { list-style: none; margin: 0; padding: 0; }
+.dt-transfer { display: flex; align-items: center; flex-wrap: wrap; gap: 6px var(--s2); margin: var(--s2) var(--s2); padding: var(--s2) var(--s3); border-radius: var(--radius-m); background: var(--sunken); color: var(--muted); font-size: var(--text-s); font-weight: 600; }
+.dt-transfer-tight { background: var(--warning-soft); color: var(--warning); }
+.dt-transfer-broken { background: var(--danger-soft); color: var(--danger); }
+.dt-walks { margin: 0; }
+.dt-walk { display: grid; grid-template-columns: 56px var(--track) minmax(0, 1fr); gap: 0 8px; min-height: 40px; align-items: center; padding: 0 var(--s4); }
+.dt-walk .rail-track { align-self: stretch; }
+.dt-walk .rail-track::before { top: 0; height: 100%; background: repeating-linear-gradient(to bottom, var(--rail-future) 0 4px, transparent 4px 8px); }
+.dt-walk-text { grid-column: 3; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--text-s); font-weight: 600; }
+
+/* The rail: one row per stop; the line runs from a row's dot to the next row's dot, so a vehicle between two
+   stops sits at `top: dot + progress * row height`. */
+.rail { list-style: none; margin: 0; padding: 0; }
+.rail-row { --line: var(--rail-future); display: grid; grid-template-columns: 56px var(--track) minmax(0, 1fr); gap: 0 8px; min-height: 40px; }
+.rail-row.rail-board { min-height: 52px; }
+.rail-row.rail-exit { min-height: 36px; }
+.rail-row.rail-gap { min-height: 44px; }
+.rail-row.is-past { --line: var(--accent); }
+.rail-row.is-between { --line: linear-gradient(to bottom, var(--accent) calc(var(--p) * 100%), var(--rail-future) 0); }
+.rail-time { display: flex; flex-direction: column; align-items: flex-end; padding-top: calc(var(--dot-y) - 11px); font-size: var(--text-m); line-height: 1.2; }
+.rail-time strong { font-weight: 650; }
+.rail-time s { color: var(--muted); font-size: var(--text-xs); font-weight: 500; }
+.rail-board .rail-time strong, .rail-exit .rail-time strong { font-size: var(--text-l); font-weight: 700; }
+.rail-track { position: relative; }
+.rail-track::before { content: ''; position: absolute; left: calc(50% - 1px); top: var(--dot-y); width: 2px; height: 100%; border-radius: 2px; background: var(--line); }
+.rail-exit .rail-track::before { display: none; }
+.rail-gap .rail-track::before { background: repeating-linear-gradient(to bottom, var(--line) 0 4px, transparent 4px 8px); }
+.rail-gap.is-past { --line: var(--accent); }
+.rail-dot { position: absolute; left: calc(50% - 5px); top: calc(var(--dot-y) - 5px); width: 10px; height: 10px; border-radius: 50%; background: var(--raised); border: 2px solid var(--rail-future); z-index: 1; box-sizing: border-box; }
+.rail-board .rail-dot, .rail-exit .rail-dot { left: calc(50% - 6px); top: calc(var(--dot-y) - 6px); width: 12px; height: 12px; border-color: var(--text); }
+.rail-gap .rail-dot { display: none; }
+.rail-row.is-past .rail-dot { border-color: var(--accent); background: var(--accent); }
+.rail-row.is-past.rail-board .rail-dot, .rail-row.is-past.rail-exit .rail-dot { background: var(--accent); }
+.rail-row.is-cancelled .rail-dot { border-color: var(--danger); background: var(--raised); }
+.rail-body { display: flex; flex-direction: column; gap: 4px; padding: calc(var(--dot-y) - 12px) 0 var(--s3); min-width: 0; }
+.rail-exit .rail-body { padding-bottom: var(--s1); }
+.rail-name { font-size: var(--text-m); font-weight: 600; line-height: 24px; overflow-wrap: anywhere; }
+.rail-board .rail-name, .rail-exit .rail-name { font-weight: 700; font-size: var(--text-l); }
+.rail-row.is-past .rail-name, .rail-row.is-past .rail-time { color: var(--muted); }
+.rail-row.is-past.has-vehicle .rail-name { color: var(--text); }
+.rail-row.is-cancelled .rail-name, .rail-row.is-cancelled .rail-time { color: var(--muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--danger) 70%, transparent); }
+.rail-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.rail-chips:empty { display: none; }
+.rail-chips .platform { padding: 0 7px; font-size: var(--text-xs); }
+.rail-note { color: var(--muted); font-size: var(--text-xs); font-weight: 600; font-style: italic; }
+.rail-toggle { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 32px; margin-top: calc(var(--dot-y) - 16px); padding: 0 10px 0 6px; border: none; border-radius: 999px; background: transparent; color: var(--accent); font-weight: 650; font-size: var(--text-s); cursor: pointer; }
+.rail-toggle:hover { background: var(--accent-soft); }
+.rail-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rail-toggle-hide { margin: 0 0 0 calc(56px + 8px + var(--track) + 8px - 6px); }
+
+/* The vehicle: filled where it is certain, hollow when the time it relies on is an estimate. */
+.rail-vehicle { position: absolute; left: calc(50% - 11px); top: calc(var(--dot-y) - 11px + var(--p, 0) * 100%); width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--on-accent); border: 2px solid var(--raised); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); z-index: 2; box-sizing: border-box; transition: top 200ms var(--ease); }
+.rail-vehicle.is-estimated { background: var(--raised); color: var(--accent); border: 2px solid var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+.rail-row.has-vehicle:not(.is-between) .rail-dot { opacity: 0; }
+
+/* Footer, states */
+.dt-foot { display: flex; flex-direction: column; gap: 2px; padding-top: var(--s3); border-top: 1px solid var(--hairline); color: var(--muted); font-size: var(--text-xs); }
+.dt-foot p { margin: 0; }
+.dt-skeleton { display: flex; flex-direction: column; gap: var(--s3); }
+.skel { border-radius: var(--radius-m); background: var(--sunken); animation: skel 1.4s ease-in-out infinite alternate; }
+.skel-title { height: 118px; border-radius: var(--radius-l); }
+.skel-line { height: 20px; width: 55%; }
+.skel-card { height: 168px; border-radius: var(--radius-l); }
+@keyframes skel { to { opacity: 0.55; } }

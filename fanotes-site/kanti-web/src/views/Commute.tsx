@@ -1,10 +1,11 @@
 // Pendeln: the live board per route, the trip details and the route management.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { browseRequest, clockOf, emptyRoute, isoWeekday, MAX_ROUTES, mergeTrips, moveRoute, relevantRoute, routeLabel, routeVias, THRESHOLDS, upsertRoute } from '../lib/commute'
 import { useCommuteLive } from '../lib/useCommuteLive'
 import { useKanti } from '../state'
 import type { CommuteRoute, Trip } from '../types'
-import { BoardBody, targetLine } from '../components/commute'
+import { BoardBody, targetLine, TripOpenContext } from '../components/commute'
+import { ConnectionDetail } from '../components/ConnectionDetail'
 import { RouteEditor } from '../components/RouteEditor'
 import { Banner, Button, Card, Dialog, Empty, Icon, IconButton, SectionLabel } from '../components/ui'
 import { useClock } from './common'
@@ -40,6 +41,11 @@ export const Commute = () => {
   const fallback = relevantRoute({ routes, boards, now: Date.now(), clockMinutes: clock.minutes })
   const selected = routes.find((route) => route.id === wanted) || fallback
   const board = selected ? boards[selected.id] : undefined
+  // "?verbindung=<trip id>&ab=<planned departure>": the connection detail, linkable; the back button closes it.
+  const detailTrip = location.params.get('verbindung') || ''
+  const detailAt = location.params.get('ab') || ''
+  const openedHere = useRef(false)
+  useEffect(() => { if (!detailTrip) openedHere.current = false }, [detailTrip])
   const trips = useMemo(() => (board ? mergeTrips(board.trips, extra[board.routeId] || []) : []), [board, extra])
 
   const openNew = () => setEditing({ route: emptyRoute(), isNew: true })
@@ -64,6 +70,15 @@ export const Commute = () => {
   const persist = async (next: CommuteRoute[], settings?: { delayThreshold: number }) => {
     setError('')
     try { await commute.save(next, settings) } catch (failure) { setError(failure instanceof Error && failure.message ? `${t.commuteSaveFailed} (${failure.message})` : t.commuteSaveFailed); throw failure }
+  }
+  const openTrip = (trip: Trip) => {
+    if (!selected) return
+    openedHere.current = true
+    kanti.navigate('commute', { strecke: selected.id, verbindung: trip.id, ab: trip.plannedDeparture })
+  }
+  const closeTrip = () => {
+    if (openedHere.current) { openedHere.current = false; window.history.back() }
+    else kanti.navigate('commute', selected ? { strecke: selected.id } : {}, true)
   }
   const choose = (id: string) => kanti.navigate('commute', { strecke: id }, true)
 
@@ -91,6 +106,7 @@ export const Commute = () => {
   }
 
   return (
+    <TripOpenContext.Provider value={openTrip}>
     <div className="view view-commute">
       {error ? <Banner tone="danger" icon="warning">{error}</Banner> : null}
       {!routes.length ? (
@@ -104,7 +120,7 @@ export const Commute = () => {
         <div className="columns">
           <div className="column column-main">
             {routes.length > 1 ? (
-              <div className="route-tabs" role="tablist" aria-label={t.commuteRoutes}>
+              <div className="route-tabs segments" role="tablist" aria-label={t.commuteRoutes}>
                 {routes.map((route) => (
                   <button type="button" role="tab" key={route.id} aria-selected={route.id === selected?.id} className={route.id === selected?.id ? 'active' : ''} onClick={() => choose(route.id)}>{routeLabel(route)}</button>
                 ))}
@@ -190,6 +206,9 @@ export const Commute = () => {
           }}
         />
       ) : null}
+      {detailTrip && selected ? (
+        <ConnectionDetail commute={commute} routeId={selected.id} routeName={routeLabel(selected)} tripId={detailTrip} at={detailAt} t={t} onClose={closeTrip} />
+      ) : null}
       {deleting ? (
         <Dialog title={t.commuteDelete} onClose={() => setDeleting(null)}>
           <p>{t.commuteDeleteConfirm(routeLabel(deleting))}</p>
@@ -200,5 +219,6 @@ export const Commute = () => {
         </Dialog>
       ) : null}
     </div>
+    </TripOpenContext.Provider>
   )
 }

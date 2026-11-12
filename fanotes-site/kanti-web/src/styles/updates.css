@@ -1,0 +1,53 @@
+/* Mitteilungen, Neuigkeiten, Kontoauszug. Two balanced columns on desktop: the school's words left, what changed and the money right. */
+
+.updates-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s6); align-items: start; }
+.updates-grid > .column { min-width: 0; display: flex; flex-direction: column; }
+.updates-grid .column > .section-label:not(:first-child) { margin-top: var(--s8); }
+.updates-grid .column > .card + .card { margin-top: 0; }
+
+.message-list { display: flex; flex-direction: column; gap: var(--s3); }
+.message { padding: var(--s5) var(--s6); }
+.message header { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s4); }
+.message h3 { font-size: var(--text-l); line-height: 1.3; letter-spacing: -0.012em; }
+.message-date { flex: none; color: var(--muted); font-size: var(--text-s); font-weight: 600; white-space: nowrap; }
+.message p { max-width: 68ch; margin: var(--s2) 0 0; line-height: 1.6; white-space: pre-line; color: color-mix(in srgb, var(--text) 88%, var(--muted)); }
+.message > p:only-child { margin-top: 0; }
+
+.news-card { padding: var(--s1) var(--s2); }
+.news-row { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: var(--s3); padding: 12px var(--s3); border-bottom: 1px solid var(--hairline); }
+.news-row:last-child { border-bottom: none; }
+.news-dot { width: 8px; height: 8px; margin-top: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.news-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.news-main small { color: var(--text); opacity: 0.82; font-size: var(--text-s); }
+.news-main small.muted { color: var(--muted); opacity: 1; font-size: var(--text-xs); margin-top: 2px; }
+
+.statement { padding: var(--s1) var(--s2) var(--s2); }
+.statement th { padding: 12px var(--s3) 10px; }
+.statement td { padding: 12px var(--s3); }
+.statement td:first-child { white-space: nowrap; font-size: var(--text-s); }
+.statement .amount { font-weight: 650; white-space: nowrap; }
+.statement td.number { white-space: nowrap; }
+.statement tfoot th, .statement tfoot td { border-bottom: none; }
+.konto-total th, .konto-total td { padding: 14px var(--s3); background: var(--accent-soft); border-top: 2px solid var(--accent); color: var(--text); font-size: var(--text-l); font-weight: 650; text-transform: none; letter-spacing: 0; }
+.konto-total th { border-radius: 0 0 0 var(--radius-m); text-align: left; }
+.konto-total th .icon { vertical-align: -3px; margin-right: var(--s2); color: var(--accent); }
+.konto-total td { border-radius: 0 0 var(--radius-m) 0; font-size: 22px; letter-spacing: -0.015em; white-space: nowrap; word-spacing: 0.2em; }
+
+@media (max-width: 1180px) {
+  .updates-grid { grid-template-columns: minmax(0, 1fr); gap: var(--s5); }
+}
+@media (max-width: 640px) {
+  .message { padding: var(--s4); }
+  .message header { flex-direction: column; gap: 2px; }
+  .statement thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .statement table, .statement tbody, .statement tfoot { display: block; }
+  .statement tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: var(--s3); padding: var(--s3); border-bottom: 1px solid var(--hairline); }
+  .statement tbody td { display: block; padding: 0; border: none; }
+  .statement tbody td:nth-child(1) { grid-column: 1; grid-row: 1; color: var(--muted); }
+  .statement tbody td:nth-child(2) { grid-column: 1; grid-row: 2; font-weight: 550; }
+  .statement tbody td:nth-child(3) { grid-column: 2; grid-row: 1; text-align: right; font-size: var(--text-l); }
+  .statement tbody td:nth-child(4) { grid-column: 2; grid-row: 2; text-align: right; font-size: var(--text-s); }
+  .statement tfoot tr { display: flex; align-items: center; justify-content: space-between; background: var(--accent-soft); border-top: 2px solid var(--accent); border-radius: 0 0 var(--radius-m) var(--radius-m); }
+  .statement tfoot th, .statement tfoot td { border: none; background: none; border-radius: 0; }
+  .statement tfoot th { flex: 1; }
+}

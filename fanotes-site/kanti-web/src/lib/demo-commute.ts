@@ -1,7 +1,7 @@
 // Demo mode: invented routes and boards (Testdorf -> Schulstadt), built relative to "now" so the
 // next trips are always ahead. Nothing here is read from or sent anywhere.
-import { clockOf, isoZurich, timeMs } from './commute'
-import type { CommuteProvider, CommuteRoute, CommuteSettings, Leg, Occupancy, Pin, RouteBoard, Stop, Trip, TripPoint } from '../types'
+import { clockOf, isoZurich, timeMs, tripPosition } from './commute'
+import type { CommuteProvider, CommuteRoute, CommuteSettings, Leg, LegStop, Occupancy, Pin, RouteBoard, Stop, Trip, TripDetail, TripPoint } from '../types'
 
 const MIN = 60_000
 const stop = (id: string, name: string, type: Stop['type']): Stop => ({ id, name, type })
@@ -21,11 +21,21 @@ const point = (s: Stop, at: number, planned: number, platform = '', changed = fa
   name: s.name, stopId: s.id, time: isoZurich(at), planned: isoZurich(planned), delay: Math.round((at - planned) / MIN), platform, platformChanged: changed,
 })
 
+/** Invented intermediate stops per kind of vehicle; the board only carries how many (`stopCount`). */
+const STOP_NAMES: Record<string, string[]> = {
+  S: ['Unterdorf', 'Neumatt', 'Birchwil', 'Seehalde'],
+  IR: ['Hardmatt'],
+  T: ['Marktplatz', 'Rathaus', 'Altstadt'],
+  B: ['Dorfplatz Süd', 'Schulhaus Birken', 'Bergstrasse', 'Gewerbepark', 'Sportanlage'],
+  BAT: ['Rebberg', 'Fischerhaus'],
+}
+const stopNames = (category: string): string[] => STOP_NAMES[category] || []
+
 const ride = (line: string, category: string, type: Stop['type'], direction: string, from: [Stop, number, number, string?, boolean?], to: [Stop, number, number, string?], occupancy: Occupancy, colors: [string, string] = ['', ''], extra: Partial<Leg> = {}): Leg => ({
   kind: 'ride', line, category, type, operator: 'Demo-Verkehr', direction, bgColor: colors[0], fgColor: colors[1],
   from: point(from[0], from[1], from[2], from[3] || '', from[4] || false),
   to: point(to[0], to[1], to[2], to[3] || ''),
-  occupancy, cancelled: false, notes: [], minutes: Math.round((to[1] - from[1]) / MIN), ...extra,
+  occupancy, cancelled: false, notes: [], minutes: Math.round((to[1] - from[1]) / MIN), journeyId: `demo-${line}-${from[2]}`, stopCount: stopNames(category).length, ...extra,
 })
 
 const trip = (legs: Leg[], extra: Partial<Trip> = {}): Trip => {
@@ -55,6 +65,40 @@ const trip = (legs: Leg[], extra: Partial<Trip> = {}): Trip => {
 const tripPin = (legs: Leg[], transfers: number): Omit<Pin, 'days'> => {
   const first = legs.find((leg) => leg.kind === 'ride') as Leg
   return { line: first.line, trainNo: '', stop: first.from.name, stopId: first.from.stopId, departure: clockOf(first.from.planned), arrival: clockOf(legs[legs.length - 1].to.planned), transfers }
+}
+
+/**
+ * The intermediate stops of a demo ride leg, spread evenly between its ends. Real times follow the
+ * delay of the ends. The S-Bahn legs show every case the detail view handles: the second stop has no
+ * real-time data (planned time only), the third is skipped, the first changes its platform.
+ */
+export const demoStopsFor = (leg: Leg): LegStop[] => {
+  const names = stopNames(leg.category)
+  const train = leg.type === 'train'
+  const plannedFrom = timeMs(leg.from.planned)
+  const plannedSpan = timeMs(leg.to.planned) - plannedFrom
+  const delayFrom = leg.from.delay || 0
+  const delayTo = leg.to.delay || 0
+  return names.map((name, index): LegStop => {
+    const share = (index + 1) / (names.length + 1)
+    const planned = Math.round((plannedFrom + plannedSpan * share) / MIN) * MIN
+    const delay = Math.round(delayFrom + (delayTo - delayFrom) * share)
+    const dwell = leg.category === 'IR' ? MIN : 0
+    const realtime = !(leg.category === 'S' && index === 1)
+    const times = (at: number) => realtime ? { planned: isoZurich(at), time: isoZurich(at + delay * MIN), delay } : { planned: isoZurich(at), time: isoZurich(at), delay: null }
+    return {
+      name, stopId: `demo-${name.toLowerCase().replace(/[^a-z]+/gu, '-')}`,
+      arrival: times(planned), departure: times(planned + dwell),
+      platform: train ? String((index % 3) + 1) : '', platformChanged: train && leg.category === 'S' && index === 0,
+      realtime, cancelled: leg.cancelled || (leg.category === 'S' && index === 2), occupancy: none,
+    }
+  })
+}
+
+/** Demo version of the connection detail: the board trip with its stops and a position from the clock. */
+export const demoTripDetail = (trip: Trip, now: number): TripDetail => {
+  const full: Trip = { ...trip, legs: trip.legs.map((leg) => (leg.kind === 'ride' ? { ...leg, stops: demoStopsFor(leg) } : leg)) }
+  return { trip: full, position: tripPosition(full, now), updatedAt: isoZurich(now), stale: false, gone: false, sources: { realtime: 'search.ch', platforms: 'transport.opendata.ch', formation: null } }
 }
 
 /**
@@ -143,13 +187,13 @@ export const demoCommute = (now: number): { routes: CommuteRoute[]; settings: Co
   const lake: CommuteRoute = { id: 'd3m0a9b8c7d6', name: 'Seeweg', from: SEEBLICK, to: KANTI, vias: [MITTELWIL, TESTDORF], via: MITTELWIL, schedule: { mode: 'none', times: [], days: [1, 2, 3, 4, 5], bufferMinutes: 10 }, pins: [], delayThreshold: null, notify: false }
   const lakeTrip = (dep: number) => trip([
     ride('3302', 'BAT', 'ship', 'Mittelwil', [SEEBLICK, at(dep), at(dep), '1'], [MITTELWIL, at(dep + 22), at(dep + 22), '2'], none, ['0b6e9f', 'ffffff']),
-    ride('S29', 'S', 'train', 'Schulstadt', [MITTELWIL, at(dep + 28), at(dep + 28), '1'], [TESTDORF, at(dep + 40), at(dep + 40), '2'], { first: 1, second: 2 }, ['1f6fb5', 'ffffff']),
+    ride('S29', 'S', 'train', 'Schulstadt', [MITTELWIL, at(dep + 28), at(dep + 28), '1'], [TESTDORF, at(dep + 43), at(dep + 43), '2'], { first: 1, second: 2 }, ['1f6fb5', 'ffffff']),
     ride('IR16', 'IR', 'train', 'Schulstadt', [TESTDORF, at(dep + 45), at(dep + 45), '3'], [SCHULSTADT, at(dep + 63), at(dep + 63), '5'], { first: 1, second: 1 }, ['d81e1e', 'ffffff']),
   ])
   const lakeBoard: RouteBoard = {
     routeId: lake.id,
     target: { kind: 'now', at: isoZurich(at(0)), timeType: 'depart', lesson: null, lessonChange: 'none', plannedAt: null },
-    trips: [lakeTrip(18), lakeTrip(78)], alternatives: [], viaDropped: false, pinned: null, change: null, updatedAt: isoZurich(now), stale: false,
+    trips: [lakeTrip(-10), lakeTrip(18), lakeTrip(78)], alternatives: [], viaDropped: false, pinned: null, change: null, updatedAt: isoZurich(now), stale: false,
   }
 
   return {

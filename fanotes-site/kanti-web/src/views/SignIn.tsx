@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../lib/api'
 import { deriveAuthKey, kdfSupported } from '../lib/auth'
 import { useKanti } from '../state'
-import { Banner, Button, Card, Icon, Logo } from '../components/ui'
+import { Banner, Button, Card, Icon, Logo, type IconName } from '../components/ui'
 
 /** Shows a pairing code, waits for the app to approve it, then reports how many connections came. */
 export const PairingPanel = ({ onDone }: { onDone: (added: number) => void | Promise<void> }) => {
@@ -136,50 +136,64 @@ const FaNotesLogin = () => {
   )
 }
 
+const BENEFIT_ICONS: IconName[] = ['timetable', 'refresh', 'key']
+
 export const SignIn = () => {
   const kanti = useKanti()
   const { t } = kanti
   const [pairing, setPairing] = useState(false)
   const [approved, setApproved] = useState(0)
+  const paired = async (added: number) => { setApproved(added); setPairing(false); await kanti.start() }
   return (
     <div className="signin">
-      <header className="signin-head">
-        <Logo size={56} />
-        <div>
-          <h1>{t.signInTitle}</h1>
-          <p className="lead">{t.signInLead}</p>
+      <aside className="signin-brand">
+        <div className="signin-brand-inner">
+          <div className="signin-wordmark"><Logo size={44} /><span>Kanti+</span></div>
+          <div className="signin-pitch">
+            <h1>{t.signInTitle}</h1>
+            <p className="lead">{t.signInLead}</p>
+            <ul className="signin-benefits">
+              {t.signInBenefits.map((benefit, index) => <li key={benefit}><span className="signin-benefit-icon"><Icon name={BENEFIT_ICONS[index] ?? 'check'} size={20} /></span><span>{benefit}</span></li>)}
+            </ul>
+          </div>
+          <div className="signin-brand-actions">
+            <Button tone="outline" icon="play" className="signin-demo" onClick={kanti.startDemo}>{t.demoTitle}</Button>
+            <a className="signin-about" href="/about/">{t.aboutKanti}<Icon name="forward" size={16} /></a>
+          </div>
+          <p className="signin-brand-note">{t.demoBody}</p>
         </div>
-      </header>
-      {kanti.offline ? <Banner tone="warning" icon="warning">{t.offline}</Banner> : null}
-      {approved ? <Banner icon="check">{t.pairApproved(approved)}</Banner> : null}
-      <div className="signin-grid">
-        <Card className="signin-card signin-primary">
-          <div className="signin-card-head"><Icon name="phone" size={24} /><h2>{t.pairTitle}</h2></div>
-          <p className="muted">{t.pairBody}</p>
-          {pairing ? <PairingPanel onDone={async (added) => { setApproved(added); setPairing(false); await kanti.start() }} /> : <Button icon="phone" onClick={() => setPairing(true)}>{t.pairStart}</Button>}
-          <p className="claim-or muted small">{t.claimOr}</p>
-          <ClaimCode onDone={async (added) => { setApproved(added); setPairing(false); await kanti.start() }} />
-        </Card>
-        <Card className="signin-card">
-          <div className="signin-card-head"><Icon name="key" size={24} /><h2>{t.fanotesTitle}</h2></div>
-          <p className="muted">{t.fanotesBody}</p>
-          <FaNotesLogin />
-        </Card>
-        <Card className="signin-card">
-          <div className="signin-card-head"><Icon name="play" size={24} /><h2>{t.demoTitle}</h2></div>
-          <p className="muted">{t.demoBody}</p>
-          <Button tone="outline" icon="play" onClick={kanti.startDemo}>{t.demoStart}</Button>
-        </Card>
-      </div>
-      <details className="why">
-        <summary>{t.whyPairing}</summary>
-        <p>{t.whyPairingBody}</p>
-      </details>
-      <footer className="signin-foot">
-        <a href="/about/">{t.aboutKanti}</a>
-        <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/" target="_blank" rel="noopener noreferrer">{t.privacy}</a>
-        <a href="https://fanotes.fasrv.ch/kantiplus/konto-loeschen/" target="_blank" rel="noopener noreferrer">{t.deleteAccount}</a>
-      </footer>
+      </aside>
+      <main className="signin-main">
+        <div className="signin-stack">
+          {kanti.offline ? <Banner tone="warning" icon="warning">{t.offline}</Banner> : null}
+          {approved ? <Banner icon="check">{t.pairApproved(approved)}</Banner> : null}
+          <Card className="signin-card signin-primary">
+            <div className="signin-card-head"><span className="signin-chip"><Icon name="phone" size={22} /></span><h2>{t.pairTitle}</h2></div>
+            <p className="muted">{t.pairBody}</p>
+            {pairing ? <PairingPanel onDone={paired} /> : <Button icon="phone" onClick={() => setPairing(true)}>{t.pairStart}</Button>}
+          </Card>
+          <p className="signin-or muted small"><span>{t.claimOr}</span></p>
+          <div className="signin-secondary">
+            <Card className="signin-card signin-claim">
+              <div className="signin-card-head"><span className="signin-chip"><Icon name="keyboard" size={20} /></span><h2>{t.claimTitle}</h2></div>
+              <ClaimCode onDone={paired} />
+            </Card>
+            <Card className="signin-card">
+              <div className="signin-card-head"><span className="signin-chip"><Icon name="key" size={20} /></span><h2>{t.fanotesTitle}</h2></div>
+              <p className="muted small">{t.fanotesBody}</p>
+              <FaNotesLogin />
+            </Card>
+          </div>
+          <details className="why">
+            <summary>{t.whyPairing}</summary>
+            <p>{t.whyPairingBody}</p>
+          </details>
+          <footer className="signin-foot">
+            <a href="https://fanotes.fasrv.ch/kantiplus/datenschutz/" target="_blank" rel="noopener noreferrer">{t.privacy}</a>
+            <a href="https://fanotes.fasrv.ch/kantiplus/konto-loeschen/" target="_blank" rel="noopener noreferrer">{t.deleteAccount}</a>
+          </footer>
+        </div>
+      </main>
     </div>
   )
 }
