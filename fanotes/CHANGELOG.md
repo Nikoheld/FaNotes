@@ -1,5 +1,16 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.30
+
+- Never write an empty handwriting page over a note whose ink has not loaded.
+- Android: resolve sync 409s from the server's entry, and keep syncing past one damaged entry.
+- End a sync cycle on rate-limit and server errors instead of skipping every entry.
+- Do not restore a refused note under an open editor, and tell the app when a note is put back.
+- Keep syncing when one remote entry is damaged.
+- Resolve sync 409s from the server's entry so no note stays stuck, and stop rejecting normal edits to short notes.
+- Refuse sync writes that would replace a note with older, empty, or partial content.
+- Kanti+ web: the connection detail no longer repeats the delay as a note.
+
 ## 2026.11.2-beta.29
 
 - Pendeln: tap a connection (on the route, on Heute or in the widget) to see every train, bus and tram of it with all stops in between, like the SBB app: planned and real times per stop, delays in colour, platforms and platform changes, cancelled stops, transfers with "Anschluss gefährdet/verpasst" and walking time, occupancy per leg.
