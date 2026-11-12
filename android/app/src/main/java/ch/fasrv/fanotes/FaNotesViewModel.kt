@@ -1173,7 +1173,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Umbenennen ist fehlgeschlagen.")
                 return@launch
             }
-            if (next != path) moveReferences(path, next)
+            if (next != path) {
+                graph.engine.markDeleted(path)
+                moveReferences(path, next)
+            }
             loadTree()
         }
     }
@@ -1262,7 +1265,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Verschieben ist fehlgeschlagen.")
                 return@launch
             }
-            if (next != path) moveReferences(path, next)
+            if (next != path) {
+                graph.engine.markDeleted(path)
+                moveReferences(path, next)
+            }
             loadTree()
         }
     }
@@ -1296,6 +1302,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Der Eintrag konnte nicht in den Papierkorb verschoben werden.")
                 return@launch
             }
+            graph.engine.markDeleted(path)
             detachTrashed(path)
             val colors = ch.fasrv.fanotes.desk.dropFolderColors(folderColors.value, path)
             if (colors != folderColors.value) {

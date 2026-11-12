@@ -198,6 +198,7 @@ class SyncApi(
     suspend fun upload(session: SyncSession, fileId: String, baseRevision: Long, meta: String, sha256: String, blob: ByteArray, blank: Boolean = false, clear: Boolean = false): Long {
         val headers = mutableMapOf(
             "Content-Type" to "application/octet-stream",
+            "Content-Length" to blob.size.toString(),
             "If-Match" to baseRevision.toString(),
             "X-FaNotes-Meta" to meta,
             "X-FaNotes-Sha256" to sha256,
@@ -216,7 +217,12 @@ class SyncApi(
     }
 
     suspend fun remove(session: SyncSession, fileId: String, baseRevision: Long): Long {
-        val response = raw("DELETE", "/files/$fileId", session, headers = mapOf("If-Match" to baseRevision.toString()))
+        val response = raw(
+            "DELETE",
+            "/files/$fileId",
+            session,
+            headers = mapOf("If-Match" to baseRevision.toString(), "X-FaNotes-Delete" to "1"),
+        )
         if (response.body.isEmpty()) return baseRevision
         val json = parseJson(response.body.toString(StandardCharsets.UTF_8)) as? JsonValue.Obj
         return json?.double("revision")?.toLong() ?: baseRevision

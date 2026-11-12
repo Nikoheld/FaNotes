@@ -155,6 +155,8 @@ private data class EngineState(
     var lastSyncAt: String?,
     val files: LinkedHashMap<String, LocalBase>,
     var conflicts: MutableList<SyncConflict>,
+    val pendingDeletes: MutableList<String> = mutableListOf(),
+    val skipped: MutableList<SyncRemoteEntry> = mutableListOf(),
 )
 
 private data class Secrets(
@@ -262,6 +264,18 @@ class SyncEngine(
     /** The editor cleared this note on purpose. A blank file is not uploaded without it. */
     fun markCleared(path: String) {
         cleared += path
+    }
+
+    /** The user deleted or renamed this path. A missing file is not a delete. */
+    suspend fun markDeleted(path: String) {
+        val normal = path.trim().trim('/')
+        if (normal.isEmpty() || normal.split('/').any { it.isEmpty() || it == "." || it == ".." }) return
+        onEngine {
+            val table = engineState ?: return@onEngine
+            if (normal !in table.pendingDeletes) table.pendingDeletes += normal
+            persistState()
+        }
+        notifyLocalChange()
     }
 
     /** Runs one cycle. Overlapping calls collapse into a single follow-up cycle. */
@@ -514,6 +528,10 @@ class SyncEngine(
             if (!more) break
         }
         if (more) log("warn", "Sync pull stopped after $pages pages; more changes remain.")
+        val seen = pending.map { it.id }.toMutableSet()
+        for (entry in table.skipped) {
+            if (seen.add(entry.id)) pending += entry
+        }
         if (pending.isEmpty()) return 0
         publish(state.value.copy(progress = SyncProgress("pull", 0, pending.size)))
         val idIndex = table.files.map { (path, base) -> base.id to path }.toMap(linkedMapOf())
@@ -527,6 +545,8 @@ class SyncEngine(
             if ((result.result == "written" || result.result == "conflict") && result.path != null) written += result.path
             if (result.result == "removed" && result.path != null) removed += result.path
             if (result.result == "deferred") holdCursor = minOf(holdCursor, entry.revision - 1)
+            else if (result.result == "skipped") rememberSkip(table, entry)
+            else forgetSkip(table, entry.id)
             publish(state.value.copy(progress = SyncProgress("pull", index + 1, pending.size)))
         }
         table.cursor = maxOf(table.cursor, minOf(since, holdCursor))
@@ -717,7 +737,10 @@ class SyncEngine(
             val base = table.files[entry.path]
             base == null || base.size != entry.size || base.mtimeMs != entry.mtimeMs || entry.mtimeMs == 0L || base.sha256.isEmpty()
         }
-        val deleted = table.files.keys.filter { acceptsPath(it) && it !in present && !options.isPathBusy(it) }
+        val missing = table.files.keys.filter { acceptsPath(it) && it !in present && !options.isPathBusy(it) }
+        val deleted = missing.filter { isPendingDelete(table, it) }
+        val vanished = missing.filter { !isPendingDelete(table, it) }
+        for (path in vanished) restoreVanished(path, table, syncKeys, active, currentHost)
         publish(state.value.copy(pendingLocal = changed.size + deleted.size, progress = SyncProgress("push", 0, changed.size + deleted.size)))
         var uploads = 0
         var deletes = 0
@@ -751,6 +774,9 @@ class SyncEngine(
                 publish(state.value.copy(progress = SyncProgress("push", done, total)))
             }
         }
+        table.pendingDeletes.removeAll { prefix ->
+            table.files.keys.none { it == prefix || it.startsWith("$prefix/") }
+        }
         persistState()
         return PushResult(uploads, deletes, conflicts)
     }
@@ -765,11 +791,17 @@ class SyncEngine(
             return "skipped"
         }
         val kind = noteSyncKind(entry.path, raw)
+        val baseEarly = table.files[entry.path]
         if (kind == NoteSyncKind.UNREADABLE) {
             log("warn", "“${entry.path}” could not be read, so it was not uploaded.")
+            if (baseEarly != null && !baseEarly.blank) return restoreInstead(entry, baseEarly, raw, table, syncKeys, active, currentHost)
             return "skipped"
         }
-        val identityBytes = identitySyncBytes(entry.path, raw) ?: return "skipped"
+        val identityBytes = identitySyncBytes(entry.path, raw)
+        if (identityBytes == null) {
+            if (baseEarly != null && !baseEarly.blank) return restoreInstead(entry, baseEarly, raw, table, syncKeys, active, currentHost)
+            return "skipped"
+        }
         val bytes = canonicalSyncBytes(entry.path, raw)
         val hash = sha256Hex(bytes)
         val identity = sha256Hex(identityBytes)
@@ -780,8 +812,9 @@ class SyncEngine(
             return "unchanged"
         }
         val clearing = entry.path in cleared
-        val baseHoldsContent = base != null && !base.blank && base.size > raw.size + 64
-        if (kind == NoteSyncKind.BLANK && baseHoldsContent && !clearing) {
+        val severeShrink = base != null && !base.blank && base.size >= 4096 && (raw.size <= 1024 || raw.size * 4 < base.size)
+        val baseHoldsContent = base != null && !base.blank && (base.size > raw.size + 64 || kind == NoteSyncKind.BLANK || severeShrink)
+        if ((kind == NoteSyncKind.BLANK || severeShrink) && baseHoldsContent && !clearing) {
             log("warn", "“${entry.path}” is empty and was not uploaded over the copy already on the server.")
             return restoreInstead(entry, base!!, raw, table, syncKeys, active, currentHost)
         }
@@ -849,11 +882,56 @@ class SyncEngine(
             "deleted"
         } catch (error: SyncApiError) {
             if (error.conflict) {
-                table.files.remove(path)
+                val remote = error.entry
+                val syncKeys = keys
+                val currentHost = host
+                if (remote != null && syncKeys != null && currentHost != null) {
+                    val idIndex = table.files.map { (filePath, item) -> item.id to filePath }.toMap(linkedMapOf())
+                    applyRemote(remote, idIndex, syncKeys, currentHost, active, table)
+                }
                 "conflict"
             } else {
                 throw error
             }
+        }
+    }
+
+    private fun isPendingDelete(table: EngineState, path: String) =
+        table.pendingDeletes.any { prefix -> path == prefix || path.startsWith("$prefix/") }
+
+    private fun rememberSkip(table: EngineState, entry: SyncRemoteEntry) {
+        if (entry.id.isEmpty()) return
+        table.skipped.removeAll { it.id == entry.id }
+        table.skipped += entry
+        while (table.skipped.size > 200) table.skipped.removeAt(0)
+    }
+
+    private fun forgetSkip(table: EngineState, id: String) {
+        table.skipped.removeAll { it.id == id }
+    }
+
+    private suspend fun restoreVanished(path: String, table: EngineState, syncKeys: SyncKeys, active: SyncSession, currentHost: SyncHost) {
+        val base = table.files[path] ?: return
+        try {
+            when (val download = api.download(active, base.id)) {
+                is DownloadResult.Deleted -> table.files.remove(path)
+                is DownloadResult.Blob -> {
+                    if (sha256Hex(download.bytes) != download.sha256) return
+                    val plain = decryptBytes(syncKeys, base.id, download.bytes)
+                    val stat = currentHost.write(path, plain, options.now())
+                    val identity = identitySyncBytes(path, plain)?.let { sha256Hex(it) }.orEmpty()
+                    table.files[path] = base.copy(
+                        revision = download.revision,
+                        sha256 = sha256Hex(plain),
+                        size = stat.size,
+                        mtimeMs = stat.mtimeMs,
+                        contentSha256 = identity,
+                        blank = false,
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            // Leave the tracking entry. Do not upload and do not tombstone.
         }
     }
 
@@ -1059,6 +1137,19 @@ private fun encodeState(state: EngineState): String {
         "lastSyncAt" to (state.lastSyncAt?.let { jsonString(it) } ?: ch.fasrv.fanotes.json.jsonNull()),
         "files" to files,
         "conflicts" to conflicts,
+        "pendingDeletes" to JsonValue.Arr(state.pendingDeletes.map { jsonString(it) }.toMutableList()),
+        "skipped" to JsonValue.Arr(state.skipped.map { entry ->
+            jsonObject(
+                "id" to jsonString(entry.id),
+                "revision" to jsonNumber(entry.revision.toDouble()),
+                "deleted" to ch.fasrv.fanotes.json.jsonBool(entry.deleted),
+                "size" to jsonNumber(entry.size.toDouble()),
+                "sha256" to (entry.sha256?.let { jsonString(it) } ?: ch.fasrv.fanotes.json.jsonNull()),
+                "meta" to (entry.meta?.let { jsonString(it) } ?: ch.fasrv.fanotes.json.jsonNull()),
+                "updatedAt" to (entry.updatedAt?.let { jsonString(it) } ?: ch.fasrv.fanotes.json.jsonNull()),
+                "deviceId" to (entry.deviceId?.let { jsonString(it) } ?: ch.fasrv.fanotes.json.jsonNull()),
+            )
+        }.toMutableList()),
     ).stringify()
 }
 
@@ -1094,12 +1185,31 @@ private fun parseState(raw: String?, accountId: String): EngineState {
             val copy = obj.string("copyPath") ?: return@mapNotNull null
             SyncConflict(path, copy, obj.string("at") ?: "")
         }.takeLast(50).toMutableList()
+        val pendingDeletes = parsed.array("pendingDeletes")?.items.orEmpty().mapNotNull { item ->
+            (item as? JsonValue.Str)?.value?.takeIf { it.isNotEmpty() && it.length <= 1024 }
+        }.takeLast(500).toMutableList()
+        val skipped = parsed.array("skipped")?.items.orEmpty().mapNotNull { item ->
+            val obj = item as? JsonValue.Obj ?: return@mapNotNull null
+            val id = obj.string("id") ?: return@mapNotNull null
+            SyncRemoteEntry(
+                id,
+                obj.double("revision")?.toLong() ?: 0L,
+                obj.bool("deleted") == true,
+                obj.double("size")?.toLong() ?: 0L,
+                obj.string("sha256"),
+                obj.string("meta"),
+                obj.string("updatedAt"),
+                obj.string("deviceId"),
+            )
+        }.takeLast(200).toMutableList()
         EngineState(
             accountId,
             parsed.double("cursor")?.toLong()?.coerceAtLeast(0) ?: 0L,
             parsed.string("lastSyncAt"),
             files,
             conflicts,
+            pendingDeletes,
+            skipped,
         )
     } catch (_: Exception) {
         EngineState(accountId, 0, null, linkedMapOf(), mutableListOf())

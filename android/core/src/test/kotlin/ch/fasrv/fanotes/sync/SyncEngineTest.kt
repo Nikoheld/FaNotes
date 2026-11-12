@@ -238,6 +238,61 @@ class SyncEngineTest {
     }
 
     @Test
+    fun aMissingFileIsRestoredUnlessTheDeleteWasExplicit() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Tablet A")
+        val engineB = engine(SyncApi(server), hostB, "Tablet B")
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            val note = noteFamd("2026-01-01T00:00:00.000Z").encodeToByteArray()
+            hostA.put("Notizen/Seite.famd", note, 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            synchronized(hostA.files) { hostA.files.remove("Notizen/Seite.famd") }
+            engineA.syncNow()
+            assertTrue(hostA.read("Notizen/Seite.famd").contentEquals(note))
+            engineB.syncNow()
+            assertTrue(hostB.read("Notizen/Seite.famd").contentEquals(note))
+            synchronized(hostA.files) { hostA.files.remove("Notizen/Seite.famd") }
+            engineA.markDeleted("Notizen/Seite.famd")
+            engineA.syncNow()
+            engineB.syncNow()
+            assertTrue(synchronized(hostB.files) { hostB.files["Notizen/Seite.famd"] == null })
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aTruncatedLocalNoteIsNotUploaded() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Tablet A")
+        val engineB = engine(SyncApi(server), hostB, "Tablet B")
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            val note = ByteArray(8000) { 9 }
+            hostA.put("Bilder/Scan.png", note, 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            hostA.put("Bilder/Scan.png", ByteArray(40) { 1 }, 2_000)
+            engineA.syncNow()
+            assertTrue(hostA.read("Bilder/Scan.png").contentEquals(note))
+            engineB.syncNow()
+            assertTrue(hostB.read("Bilder/Scan.png").contentEquals(note))
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
     fun applyRemoteOomPausesWithoutLosingLocalNotesOrAdvancingTheCursor() = runBlocking {
         val server = MemorySyncServer()
         val hostA = MemoryHost("memory-a")
@@ -595,6 +650,7 @@ private class MemorySyncServer : SyncTransport {
     }
 
     private fun remove(account: Account, id: String, request: SyncHttpRequest): SyncHttpResponse {
+        if (header(request, "X-FaNotes-Delete") != "1") return json(428, """{"error":"explicit"}""")
         val base = header(request, "If-Match")?.trim('"')?.toLongOrNull() ?: return json(428, """{"error":"if-match"}""")
         val current = account.files[id]
         if ((current?.revision ?: 0L) != base) return conflict(current, id)
@@ -635,9 +691,10 @@ private class MemorySyncServer : SyncTransport {
     /** Same rule as fanotes-site: a blank body does not replace a real note unless the editor cleared it. */
     private fun rejectsBlank(current: FileEntry?, nextSize: Int, blank: Boolean?, clear: Boolean): Boolean {
         if (clear || current == null || current.deleted || current.size <= 0L) return false
-        if (blank == true && nextSize + 64 < current.size) return true
-        if (blank == null && current.size >= 4096L && nextSize <= 1024) return true
-        return false
+        if (blank == true) return true
+        val emptyBand = nextSize <= 1024 && current.size > nextSize + 64
+        val truncated = current.size >= 4096L && nextSize * 4 < current.size
+        return emptyBand || truncated
     }
 
     private class Account(

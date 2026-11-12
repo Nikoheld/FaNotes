@@ -498,7 +498,7 @@ impl Host {
     fn sync_scan(&self) -> Result<Value, String> {
         let root = self.require_vault()?;
         let mut entries = Vec::new();
-        scan_sync_directory(root, root, 0, &mut entries);
+        scan_sync_directory(root, root, 0, &mut entries)?;
         Ok(Value::Array(entries))
     }
 
@@ -2425,16 +2425,15 @@ fn recognition_model_path(root: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Vec<Value>) {
+fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Vec<Value>) -> Result<(), String> {
     if depth > MAX_SYNC_DEPTH || out.len() >= MAX_SYNC_ENTRIES {
-        return;
+        return Err("Der Vault wurde unvollständig gelesen.".to_owned());
     }
-    let Ok(entries) = fs::read_dir(directory) else {
-        return;
-    };
-    for entry in entries.flatten() {
+    let entries = fs::read_dir(directory).map_err(|_| "Der Vault wurde unvollständig gelesen.".to_owned())?;
+    for entry in entries {
+        let entry = entry.map_err(|_| "Der Vault wurde unvollständig gelesen.".to_owned())?;
         if out.len() >= MAX_SYNC_ENTRIES {
-            return;
+            return Err("Der Vault wurde unvollständig gelesen.".to_owned());
         }
         let name = entry.file_name().to_string_lossy().to_string();
         let path = entry.path();
@@ -2455,13 +2454,10 @@ fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Ve
             continue;
         }
         if meta.is_dir() {
-            scan_sync_directory(root, &path, depth + 1, out);
+            scan_sync_directory(root, &path, depth + 1, out)?;
             continue;
         }
-        if !meta.is_file()
-            || name.to_ascii_lowercase().ends_with(".tmp")
-            || meta.len() > SYNC_MAX_BYTES
-        {
+        if !meta.is_file() || name.to_ascii_lowercase().ends_with(".tmp") {
             continue;
         }
         out.push(json!({
@@ -2470,6 +2466,7 @@ fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Ve
             "mtimeMs": mtime_millis(&meta),
         }));
     }
+    Ok(())
 }
 
 enum CreateAttempt {

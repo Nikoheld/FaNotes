@@ -249,7 +249,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
             if (current.close()) { editor = null; editorPath = null; back(); reload() }
         }
     }
-    fun perform(success: String? = null, onSuccess: () -> Unit = {}, action: () -> Unit) {
+    fun perform(success: String? = null, onSuccess: () -> Unit = {}, action: suspend () -> Unit) {
         viewModelScope.launch {
             try {
                 writes.lock()
@@ -1285,10 +1285,19 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     }
 
     fun createFolder(title: String) = perform(t(R.string.folder_created)) { graph.store.createFolder(noteFolder, title); graph.engine.notifyLocalChange() }
-    fun renameNote(node: VaultNode, title: String) = perform(t(R.string.renamed)) { graph.store.rename(node.path, title); graph.engine.notifyLocalChange() }
-    fun moveNote(node: VaultNode, folder: String) = perform(t(R.string.moved)) { graph.store.moveEntry(node.path, folder); graph.engine.notifyLocalChange() }
+    fun renameNote(node: VaultNode, title: String) = perform(t(R.string.renamed)) {
+        val next = graph.store.rename(node.path, title)
+        if (next != node.path) graph.engine.markDeleted(node.path) else graph.engine.notifyLocalChange()
+    }
+    fun moveNote(node: VaultNode, folder: String) = perform(t(R.string.moved)) {
+        val next = graph.store.moveEntry(node.path, folder)
+        if (next != node.path) graph.engine.markDeleted(node.path) else graph.engine.notifyLocalChange()
+    }
     fun duplicateNote(node: VaultNode) = perform(t(R.string.note_duplicated)) { graph.store.duplicateNote(node.path); graph.engine.notifyLocalChange() }
-    fun trashNote(node: VaultNode) = perform(t(R.string.moved_to_recently_deleted)) { graph.store.trashEntry(node.path, UUID.randomUUID().toString(), ch.fasrv.fanotes.famd.isoNow()); graph.engine.notifyLocalChange() }
+    fun trashNote(node: VaultNode) = perform(t(R.string.moved_to_recently_deleted)) {
+        graph.store.trashEntry(node.path, UUID.randomUUID().toString(), ch.fasrv.fanotes.famd.isoNow())
+        graph.engine.markDeleted(node.path)
+    }
     fun restoreNote(id: String, onRestored: () -> Unit = {}) = perform(t(R.string.note_restored), onRestored) { graph.store.restoreTrash(id); graph.engine.notifyLocalChange() }
 
     fun openNotify(intent: Intent?) {

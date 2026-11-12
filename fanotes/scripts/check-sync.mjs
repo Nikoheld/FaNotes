@@ -96,6 +96,7 @@ const createEngine = (host, name, hooks = {}) => {
     deviceName: () => name,
     automatic: () => false,
     isPathBusy: (path) => hooks.busy?.(path) ?? false,
+    excludedPrefixes: () => hooks.excludedPrefixes?.() ?? [],
     onApplied: (change) => events.applied.push(change),
     onConflict: (conflict) => events.conflicts.push(conflict),
     onSignedOut: (reason) => events.signedOut.push(reason),
@@ -308,11 +309,13 @@ try {
 
   // Delete on A → gone on B; delete + concurrent edit keeps the edit.
   hostA.files.delete('Physik/Bild.png')
+  A.engine.markDeleted('Physik/Bild.png')
   await A.engine.syncNow()
   await B.engine.syncNow()
   assert.ok(!hostB.files.has('Physik/Bild.png'))
   assert.deepEqual(B.events.applied.at(-1), { written: [], removed: ['Physik/Bild.png'] })
   hostA.files.delete(copies[0])
+  A.engine.markDeleted(copies[0])
   hostB.put(copies[0], 'doch behalten')
   await A.engine.syncNow()
   await B.engine.syncNow()
@@ -320,6 +323,33 @@ try {
   await B.engine.syncNow()
   await A.engine.syncNow()
   assert.equal(hostA.text(copies[0]), 'doch behalten', 'and is re-uploaded on top of the tombstone')
+
+  // A missing file is not a delete. The server copy is written back.
+  hostA.put('Physik/Bleibt.png', encoder.encode('bleibt'))
+  await A.engine.syncNow()
+  await B.engine.syncNow()
+  assert.equal(hostB.text('Physik/Bleibt.png'), 'bleibt')
+  hostA.files.delete('Physik/Bleibt.png')
+  await A.engine.syncNow()
+  assert.equal(hostA.text('Physik/Bleibt.png'), 'bleibt', 'a vanished file is restored')
+  await B.engine.syncNow()
+  assert.equal(hostB.text('Physik/Bleibt.png'), 'bleibt', 'the other device still has it')
+
+  // A note skipped while its folder was excluded is fetched once the folder is included.
+  {
+    let hide = true
+    const hostD = createFakeHost('skip')
+    const D = createEngine(hostD, 'Web', { excludedPrefixes: () => (hide ? ['Notizen'] : []) })
+    hostA.put('Notizen/Uebersprungen.md', '# spaeter')
+    await A.engine.syncNow()
+    await D.engine.login('fabio@example.com', 'korrektes pferd batterie')
+    await D.engine.syncNow()
+    assert.equal(hostD.text('Notizen/Uebersprungen.md'), null, 'excluded notes are not applied')
+    hide = false
+    await D.engine.syncNow()
+    assert.equal(hostD.text('Notizen/Uebersprungen.md'), '# spaeter', 'a previously skipped note is fetched again')
+    D.engine.dispose()
+  }
 
   // A note that is being edited is not overwritten; it arrives once the editor is quiet.
   let busy = true
@@ -376,6 +406,13 @@ try {
   assert.equal((await A.engine.refreshAccount()).revision, beforeStamp, 'a timestamp-only famd is not uploaded')
   await C.engine.syncNow()
   assert.equal(hostB.text('Notizen/Seite.famd'), keptNote)
+
+  // A failed load is not uploaded. The server copy comes back.
+  hostA.put('Notizen/Seite.famd', '<!-- fanotes-famd:v1 chars=20 -->\n{"truncated":')
+  await A.engine.syncNow()
+  assert.ok(hostA.text('Notizen/Seite.famd').includes('"points"'), 'a truncated famd is not uploaded')
+  await C.engine.syncNow()
+  assert.ok(hostB.text('Notizen/Seite.famd').includes('"points"'))
 
   // A blank local file is not uploaded over the note. It is kept as a conflict copy.
   const blank = blankFamd()
@@ -506,6 +543,8 @@ try {
     const host = createSyncHost({ vaultRoot: async () => root, userDataDirectory: userData, safeStorage: fakeSafeStorage })
     const scanned = (await host.scan()).map((entry) => entry.path).sort()
     assert.deepEqual(scanned, ['.fanotes/folder-colors.json', 'Mathe/Algebra.md'], 'scan skips history, tmp files, .git and symlinks')
+    const missingRoot = createSyncHost({ vaultRoot: async () => join(root, 'fehlt'), userDataDirectory: userData, safeStorage: fakeSafeStorage })
+    await assert.rejects(missingRoot.scan(), /unvollständig/u, 'a missing vault is not an empty scan')
     await assert.rejects(host.read('Mathe/Link.md'), /Symbolische Links/u)
     await assert.rejects(host.read('Link/secret.md'), /Symbolische Links/u)
     await assert.rejects(host.read('../outside.md'), /Ungültiger Sync-Pfad/u)

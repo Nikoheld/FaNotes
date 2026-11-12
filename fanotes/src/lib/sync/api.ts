@@ -159,6 +159,7 @@ export class SyncApi {
   async upload(session: SyncSession, fileId: string, baseRevision: number, meta: string, sha256: string, blob: Uint8Array, flags?: { blank?: boolean; clear?: boolean }): Promise<number> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/octet-stream',
+      'Content-Length': String(blob.byteLength),
       'If-Match': String(baseRevision),
       'X-FaNotes-Meta': meta,
       'X-FaNotes-Sha256': sha256,
@@ -175,7 +176,11 @@ export class SyncApi {
   }
 
   async remove(session: SyncSession, fileId: string, baseRevision: number): Promise<number> {
-    const result = await this.json<{ revision: number }>(`/files/${fileId}`, { method: 'DELETE', session, headers: { 'If-Match': String(baseRevision) } })
+    const result = await this.json<{ revision: number }>(`/files/${fileId}`, {
+      method: 'DELETE',
+      session,
+      headers: { 'If-Match': String(baseRevision), 'X-FaNotes-Delete': '1' },
+    })
     return result.revision
   }
 }

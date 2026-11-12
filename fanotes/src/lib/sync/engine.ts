@@ -46,7 +46,7 @@ export type SyncPublicState = {
 }
 
 type LocalBase = { id: string; revision: number; sha256: string; size: number; mtimeMs: number; contentSha256?: string; blank?: boolean }
-type PersistedState = { version: 1; accountId: string; cursor: number; lastSyncAt: string | null; files: Record<string, LocalBase>; conflicts: SyncConflict[] }
+type PersistedState = { version: 1; accountId: string; cursor: number; lastSyncAt: string | null; files: Record<string, LocalBase>; conflicts: SyncConflict[]; pendingDeletes: string[]; skipped: SyncRemoteEntry[] }
 type Secrets = { v: 1; accountId: string; deviceId: string; token: string; expiresAt: string; email: string; vaultSecret: string; mcpReader?: string }
 
 export type SyncEngineOptions = {
@@ -122,7 +122,7 @@ const defaultDeviceName = (platform: string) => {
   return 'Gerät'
 }
 
-const emptyState = (accountId: string): PersistedState => ({ version: 1, accountId, cursor: 0, lastSyncAt: null, files: {}, conflicts: [] })
+const emptyState = (accountId: string): PersistedState => ({ version: 1, accountId, cursor: 0, lastSyncAt: null, files: {}, conflicts: [], pendingDeletes: [], skipped: [] })
 
 const parseState = (raw: string | null, accountId: string): PersistedState => {
   if (!raw) return emptyState(accountId)
@@ -151,6 +151,8 @@ const parseState = (raw: string | null, accountId: string): PersistedState => {
       lastSyncAt: typeof parsed.lastSyncAt === 'string' ? parsed.lastSyncAt : null,
       files,
       conflicts: Array.isArray(parsed.conflicts) ? parsed.conflicts.filter((item): item is SyncConflict => Boolean(item) && typeof item.path === 'string' && typeof item.copyPath === 'string').slice(-50) : [],
+      pendingDeletes: Array.isArray(parsed.pendingDeletes) ? parsed.pendingDeletes.filter((item): item is string => typeof item === 'string' && item.length > 0 && item.length <= 1024).slice(-500) : [],
+      skipped: Array.isArray(parsed.skipped) ? parsed.skipped.filter((item): item is SyncRemoteEntry => Boolean(item) && typeof item.id === 'string' && typeof item.revision === 'number').slice(-200) : [],
     }
   } catch {
     return emptyState(accountId)
@@ -552,6 +554,19 @@ export class SyncEngine {
     this.cleared.add(path)
   }
 
+  /**
+   * The user deleted or renamed this path. A missing file is not a delete:
+   * only paths recorded here become tombstones.
+   */
+  markDeleted(path: string) {
+    if (!this.state) return
+    const normal = path.replace(/^\/+|\/+$/gu, '')
+    if (!normal || normal.split('/').some((segment) => !segment || segment === '.' || segment === '..')) return
+    if (!this.state.pendingDeletes.includes(normal)) this.state.pendingDeletes.push(normal)
+    void this.persistState()
+    this.notifyLocalChange()
+  }
+
   private schedule(delay: number) {
     if (this.disposed || !this.session) return
     if (this.timer !== null) window.clearTimeout(this.timer)
@@ -642,6 +657,10 @@ export class SyncEngine {
       since = changes.nextSince
       if (!changes.more) break
     }
+    const seen = new Set(pending.map((entry) => entry.id))
+    for (const entry of this.state.skipped) {
+      if (!seen.has(entry.id)) pending.push(entry)
+    }
     if (!pending.length) return 0
     this.setState({ progress: { phase: 'pull', done: 0, total: pending.length } })
     const idIndex = new Map(Object.entries(this.state.files).map(([path, base]) => [base.id, path]))
@@ -655,6 +674,8 @@ export class SyncEngine {
       if ((result === 'written' || result === 'conflict') && path) written.push(path)
       if (result === 'removed' && path) removed.push(path)
       if (result === 'deferred') holdCursor = Math.min(holdCursor, entry.revision - 1)
+      else if (result === 'skipped') this.rememberSkip(entry)
+      else this.forgetSkip(entry.id)
       done += 1
       this.setState({ progress: { phase: 'pull', done, total: pending.length } })
     })
@@ -832,7 +853,10 @@ export class SyncEngine {
       const base = this.state.files[entry.path]
       if (!base || base.size !== entry.size || base.mtimeMs !== entry.mtimeMs || !entry.mtimeMs || !base.sha256) changed.push(entry)
     }
-    const deleted = Object.keys(this.state.files).filter((path) => this.acceptsPath(path) && !present.has(path))
+    const missing = Object.keys(this.state.files).filter((path) => this.acceptsPath(path) && !present.has(path) && !this.options?.isPathBusy?.(path))
+    const deleted = missing.filter((path) => this.isPendingDelete(path))
+    const vanished = missing.filter((path) => !this.isPendingDelete(path))
+    for (const path of vanished) await this.restoreVanished(path)
     this.setState({ pendingLocal: changed.length + deleted.length, progress: { phase: 'push', done: 0, total: changed.length + deleted.length } })
 
     let uploads = 0
@@ -859,6 +883,9 @@ export class SyncEngine {
         tick()
       }
     }
+    this.state.pendingDeletes = this.state.pendingDeletes.filter((prefix) => (
+      Object.keys(this.state!.files).some((candidate) => candidate === prefix || candidate.startsWith(`${prefix}/`))
+    ))
     this.scanCache = null
     await this.persistState()
     return { uploads, deletes, conflicts }
@@ -869,12 +896,17 @@ export class SyncEngine {
     const raw = await this.host.read(entry.path).catch(() => null)
     if (!raw) return 'skipped'
     const kind = noteSyncKind(entry.path, raw)
+    const baseEarly = this.state.files[entry.path]
     if (kind === 'unreadable') {
       this.log('warn', `„${entry.path}“ konnte nicht gelesen werden und wird nicht hochgeladen.`)
+      if (baseEarly && !baseEarly.blank) return this.restoreInstead(entry, baseEarly, raw)
       return 'skipped'
     }
     const identityBytes = identitySyncBytes(entry.path, raw)
-    if (!identityBytes) return 'skipped'
+    if (!identityBytes) {
+      if (baseEarly && !baseEarly.blank) return this.restoreInstead(entry, baseEarly, raw)
+      return 'skipped'
+    }
     const bytes = canonicalSyncBytes(entry.path, raw)
     const rawSha256 = await sha256Hex(raw)
     const sha256 = bytes === raw ? rawSha256 : await sha256Hex(bytes)
@@ -895,8 +927,9 @@ export class SyncEngine {
       return 'unchanged'
     }
     const clearing = this.cleared.has(entry.path)
-    const baseHoldsContent = Boolean(base) && !base?.blank && base!.size > raw.byteLength + 64
-    if (kind === 'blank' && baseHoldsContent && !clearing) {
+    const severeShrink = Boolean(base) && !base?.blank && base!.size >= 4096 && (raw.byteLength <= 1024 || raw.byteLength * 4 < base!.size)
+    const baseHoldsContent = Boolean(base) && !base?.blank && (base!.size > raw.byteLength + 64 || kind === 'blank' || severeShrink)
+    if ((kind === 'blank' || severeShrink) && baseHoldsContent && !clearing) {
       this.log('warn', `„${entry.path}“ ist leer und wird nicht über die vorhandene Fassung hochgeladen.`)
       return this.restoreInstead(entry, base!, raw)
     }
@@ -978,11 +1011,68 @@ export class SyncEngine {
       return 'deleted'
     } catch (error) {
       if (error instanceof SyncApiError && error.conflict) {
-        // Changed elsewhere after we deleted it here: the remote version comes back with the next pull.
-        delete this.state.files[path]
+        // A newer remote edit wins the race. It is applied; the local delete is not a tombstone.
+        if (error.entry && this.state) {
+          const idIndex = new Map(Object.entries(this.state.files).map(([filePath, base]) => [base.id, filePath]))
+          await this.applyRemote(error.entry, idIndex)
+        }
         return 'conflict'
       }
       throw error
+    }
+  }
+
+  private isPendingDelete(path: string) {
+    if (!this.state) return false
+    return this.state.pendingDeletes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+  }
+
+  private rememberSkip(entry: SyncRemoteEntry) {
+    if (!this.state || !entry.id) return
+    const rest = this.state.skipped.filter((item) => item.id !== entry.id)
+    this.state.skipped = [...rest, {
+      id: entry.id,
+      revision: entry.revision,
+      deleted: Boolean(entry.deleted),
+      size: Number(entry.size) || 0,
+      sha256: entry.sha256,
+      meta: entry.meta,
+      updatedAt: entry.updatedAt,
+      deviceId: entry.deviceId,
+    }].slice(-200)
+  }
+
+  private forgetSkip(id: string) {
+    if (!this.state) return
+    if (!this.state.skipped.some((item) => item.id === id)) return
+    this.state.skipped = this.state.skipped.filter((item) => item.id !== id)
+  }
+
+  /** A tracked file disappeared without an explicit delete. Put the server copy back. */
+  private async restoreVanished(path: string): Promise<void> {
+    if (!this.session || !this.host || !this.state || !this.keys) return
+    const base = this.state.files[path]
+    if (!base) return
+    try {
+      const download = await this.api.download(this.session, base.id)
+      if ('deleted' in download) {
+        delete this.state.files[path]
+        return
+      }
+      if (await sha256Hex(download.blob) !== download.sha256) return
+      const plain = await decryptBytes(this.keys, base.id, download.blob)
+      const stat = await this.host.write(path, plain, Date.now())
+      const identityBytes = identitySyncBytes(path, plain)
+      this.state.files[path] = {
+        ...base,
+        revision: download.revision,
+        sha256: await sha256Hex(plain),
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ...(identityBytes ? { contentSha256: await sha256Hex(identityBytes) } : {}),
+      }
+    } catch {
+      // Leave the tracking entry. Do not upload and do not tombstone.
     }
   }
 
