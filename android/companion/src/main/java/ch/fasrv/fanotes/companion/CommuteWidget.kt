@@ -123,10 +123,19 @@ class CommuteWidget : AppWidgetProvider() {
             service.data = android.net.Uri.parse(service.toUri(Intent.URI_INTENT_SCHEME))
             views.setRemoteAdapter(R.id.widget_list, service)
             views.setPendingIntentTemplate(R.id.widget_list, rowTemplate(context))
+            // The header opens the trip the first row shows (the detail falls back to the route's list when it is gone).
+            val shown = focus?.main ?: first
             val target = if (route == null) Intent(context, MainActivity::class.java)
-                else CompanionAlerts.notifyIntent(context, linkedChange("widget-commute", "commute", "", "", route.id))
+                else commuteOpenIntent(context, route.id, shown?.id.orEmpty(), shown?.plannedDeparture.orEmpty())
             views.setOnClickPendingIntent(R.id.widget_header, PendingIntent.getActivity(context, 11, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
             return views
+        }
+
+        /** Opens [tripId] of [routeId] in the app; with a blank trip it opens the route's connection list. */
+        internal fun commuteOpenIntent(context: Context, routeId: String, tripId: String, plannedDeparture: String): Intent {
+            val ids = if (tripId.isBlank() || plannedDeparture.isBlank()) listOf(routeId) else commuteTripLinkIds(CommuteTripRef(routeId, tripId, plannedDeparture))
+            val change = linkedChange("widget-commute", "commute", "", "", routeId).copy(targetIds = ids)
+            return CompanionAlerts.notifyIntent(context, change)
         }
 
         internal fun rowTemplate(context: Context): PendingIntent =
@@ -226,7 +235,7 @@ internal fun commuteRowViews(context: Context, row: CommuteRow, wide: Boolean, r
             views.setContentDescription(R.id.row_occ, commuteOccupancyText(row.occupancy))
         }
     }
-    val target = CompanionAlerts.notifyIntent(context, linkedChange("widget-commute", "commute", "", "", routeId))
+    val target = CommuteWidget.commuteOpenIntent(context, routeId, row.tripId, row.plannedDeparture)
     views.setOnClickFillInIntent(R.id.row_dep, target)
     views.setOnClickFillInIntent(R.id.row_delay, target)
     views.setOnClickFillInIntent(R.id.row_line, target)

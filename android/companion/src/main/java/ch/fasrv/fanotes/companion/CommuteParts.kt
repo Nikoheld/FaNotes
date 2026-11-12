@@ -171,11 +171,11 @@ fun lineChipColors(bgHex: String, fgHex: String, fallbackBg: Color, fallbackFg: 
 // ── Pieces ───────────────────────────────────────────────────────────────────
 
 @Composable
-fun LineChip(leg: Leg) {
+fun LineChip(leg: Leg, label: String? = null) {
     val scheme = MaterialTheme.colorScheme
     val (bg, fg) = lineChipColors(leg.bgColor, leg.fgColor, scheme.primaryContainer, scheme.primary)
     Text(
-        leg.line.ifBlank { stopTypeLabel(leg.type) },
+        label ?: leg.line.ifBlank { stopTypeLabel(leg.type) },
         style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = fg, maxLines = 1,
         modifier = Modifier.background(bg, RoundedCornerShape(7.dp)).padding(horizontal = 9.dp, vertical = 3.dp),
     )

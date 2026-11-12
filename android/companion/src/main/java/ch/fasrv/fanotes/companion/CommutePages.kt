@@ -8,7 +8,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import ch.fasrv.fanotes.commute.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 
 /** The three Pendelstrecken pages: route list, editor and route detail. */
@@ -17,6 +19,7 @@ fun CommuteScreen(model: CompanionModel, page: Page) {
     when (page) {
         Page.CommuteEdit -> CommuteEditPage(model)
         Page.CommuteDetail -> CommuteDetailPage(model)
+        Page.CommuteTrip -> CommuteTripPage(model)
         else -> CommuteListPage(model)
     }
 }
@@ -108,8 +111,48 @@ private fun CommuteDetailPage(model: CompanionModel) {
         }
     }
     CommuteRefreshTimer(model, board, now)
+    CompositionLocalProvider(LocalOpenCommuteTrip provides { trip -> model.openCommuteTrip(route.id, trip) }) {
     RefreshableScreenList(model.commute.refreshing, { model.refreshCommute(force = true, withRoutes = true) }) {
         commuteDetailItems(route, board, extra, ui.provider, now, loading, failed, { more(true) }, { more(false) }, { model.editCommuteRoute(route.id) },
             othersOpen, { othersOpen = !othersOpen }, { model.editCommuteRoute(route.id, openPicker = true) })
     }
+    }
 }
+
+/**
+ * The connection detail of one trip. It asks our server for every stop and the vehicle position right away and then every
+ * 30 s, but only while the screen is on top ([Lifecycle.State.STARTED]); pull-to-refresh asks at once. The first paint
+ * uses the trip as the board knows it, so the screen does not jump when the stops arrive.
+ */
+@Composable
+fun CommuteTripPage(model: CompanionModel) {
+    val ref = model.commuteTrip
+    val ui = model.commute
+    if (ref.tripId.isBlank()) {
+        LaunchedEffect(Unit) { model.back() }
+        return
+    }
+    val route = ui.routes.firstOrNull { it.id == ref.routeId }
+    val seed = remember(ui.boards, ref) { ui.board(ref.routeId)?.findTrip(ref.tripId) }
+    var state by remember(ref) { mutableStateOf(TripDetailUi()) }
+    val signal = remember(ref) { Channel<Unit>(Channel.CONFLATED) }
+    val owner = LocalLifecycleOwner.current
+    LaunchedEffect(ref, owner) {
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                state = state.copy(refreshing = true)
+                state = try {
+                    val detail = model.graph.commute.tripDetail(ref.routeId, ref.tripId, ref.plannedDeparture)
+                    state.copy(detail = detail, failed = false, refreshing = false)
+                } catch (error: CancellationException) { throw error } catch (_: Exception) { state.copy(failed = true, refreshing = false) }
+                withTimeoutOrNull(TRIP_DETAIL_TICK_MS) { signal.receive() }
+            }
+        }
+    }
+    CommuteTripDetailContent(
+        ui = state.copy(seed = seed), routeName = route?.let(::routeTitle).orEmpty(),
+        onRefresh = { signal.trySend(Unit) }, onRetry = { signal.trySend(Unit) }, onOpenRoute = { model.showCommuteRoute(ref.routeId) },
+    )
+}
+
+const val TRIP_DETAIL_TICK_MS = 30_000L

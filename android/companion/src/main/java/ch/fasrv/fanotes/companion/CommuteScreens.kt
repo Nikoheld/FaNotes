@@ -33,14 +33,19 @@ import ch.fasrv.fanotes.commute.*
 
 /** Heute: the next trip of the route that matters now, or an invitation to add a route. */
 @Composable
-fun CommuteCard(ui: CommuteUi, nowMs: Long, showInvite: Boolean, onOpen: (String) -> Unit, onAdd: () -> Unit, modifier: Modifier = Modifier, onRepick: (String) -> Unit = {}) {
+fun CommuteCard(
+    ui: CommuteUi, nowMs: Long, showInvite: Boolean, onOpen: (String) -> Unit, onAdd: () -> Unit, modifier: Modifier = Modifier, onRepick: (String) -> Unit = {},
+    /** When set, a tap on the card opens the connection detail of the trip it shows instead of the route. */
+    onOpenTrip: ((String, Trip) -> Unit)? = null,
+) {
     if (ui.routes.isEmpty()) {
         if (showInvite) CommuteInvite(onAdd, modifier)
         return
     }
     val board = remember(ui, nowMs / 60_000) { ui.relevant(nowMs) } ?: return
     val route = ui.routes.firstOrNull { it.id == board.routeId } ?: return
-    CommuteBoardCard(route, board, nowMs, onOpen = { onOpen(route.id) }, modifier, onRepick = { onRepick(route.id) })
+    val shown = remember(board) { boardFocus(board).main }
+    CommuteBoardCard(route, board, nowMs, onOpen = { if (onOpenTrip != null && shown != null) onOpenTrip(route.id, shown) else onOpen(route.id) }, modifier, onRepick = { onRepick(route.id) })
 }
 
 @Composable
@@ -65,6 +70,7 @@ fun CommuteBoardCard(route: Route, board: RouteBoard, nowMs: Long, onOpen: () ->
     val minutes = trip?.let { minutesUntil(it.departure.ifBlank { it.plannedDeparture }, nowMs) }
     var othersOpen by rememberSaveable(route.id) { mutableStateOf(false) }
     Surface(onClick = onOpen, color = scheme.surface, shape = MaterialTheme.shapes.extraLarge, modifier = modifier.fillMaxWidth()) {
+        CompositionLocalProvider(LocalOpenCommuteTrip provides null) {
         Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(stopTypeIcon(trip?.firstRide()?.type ?: route.from.type), null, Modifier.size(20.dp), tint = scheme.primary)
@@ -110,6 +116,7 @@ fun CommuteBoardCard(route: Route, board: RouteBoard, nowMs: Long, onOpen: () ->
                 StatusLine(if (at.isBlank()) t(R.string.commute_stale) else t(R.string.commute_stale_since, at), StateTone.Offline)
             }
         }
+        }
     }
 }
 
@@ -119,7 +126,9 @@ fun CommuteTripSummary(trip: Trip, showArrival: Boolean, modifier: Modifier = Mo
     val scheme = MaterialTheme.colorScheme
     val cls = tripDelayClass(trip)
     val ride = trip.firstRide()
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val open = LocalOpenCommuteTrip.current
+    // Inside a card that opens the trip itself the local is cleared; a summary on its own (pinned, alternatives) is tappable.
+    Column(if (open != null) modifier.clickable(role = androidx.compose.ui.semantics.Role.Button) { open(trip) } else modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp), itemVerticalAlignment = Alignment.Bottom) {
             DepartureClock(trip)
             if (cls != DelayClass.ON_TIME) DelayBadge(cls, trip.depDelay ?: trip.arrDelay, Modifier.padding(bottom = 6.dp))
@@ -211,7 +220,7 @@ fun LazyListScope.commuteDetailItems(
         if (pinned) {
             item(key = "pinned") { PinnedBoardContent(route, board, focus, alternativeCount = 2, onRepick = onRepick) }
             focus.change?.let { change ->
-                item(key = "pinned-change") { CommuteTripCard(change, startOpen = false, nowMs = nowMs) }
+                item(key = "pinned-change") { CommuteTripCard(change, nowMs = nowMs) }
             }
             item(key = "others-toggle") { OtherConnectionsToggle(othersOpen, onToggleOthers) }
         }
@@ -234,7 +243,7 @@ private fun LazyListScope.commuteTripListItems(
         }
         if (shown.isEmpty()) item(key = "none") { Text(t(R.string.commute_no_connection), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         itemsIndexed(shown, key = { _, trip -> "trip:" + trip.id.ifBlank { trip.departure + trip.arrival } }) { index, trip ->
-            CommuteTripCard(trip, startOpen = trip.id == board.trips.firstOrNull()?.id, nowMs = nowMs, modifier = Modifier.padding(bottom = 10.dp))
+            CommuteTripCard(trip, nowMs = nowMs, modifier = Modifier.padding(bottom = 10.dp))
         }
         item(key = "later") {
             Column {
@@ -265,82 +274,31 @@ private fun LazyListScope.commuteDetailFooter(provider: Provider, onEdit: () -> 
     }
 }
 
-/** One trip of the detail list: the summary, and the legs timeline when opened. */
+/** One trip of the detail list: the summary; a tap opens the connection detail. */
 @Composable
-fun CommuteTripCard(trip: Trip, startOpen: Boolean, nowMs: Long, modifier: Modifier = Modifier) {
-    var open by rememberSaveable(trip.id) { mutableStateOf(startOpen) }
+fun CommuteTripCard(trip: Trip, nowMs: Long, modifier: Modifier = Modifier) {
+    val open = LocalOpenCommuteTrip.current
     val minutes = minutesUntil(trip.departure.ifBlank { trip.plannedDeparture }, nowMs)
-    Surface(onClick = { open = !open }, color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.large, modifier = modifier.fillMaxWidth()) {
+    Surface(onClick = { open?.invoke(trip) }, enabled = open != null, color = MaterialTheme.colorScheme.surface, shape = MaterialTheme.shapes.large, modifier = modifier.fillMaxWidth()) {
+        CompositionLocalProvider(LocalOpenCommuteTrip provides null) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 CommuteTripSummary(trip, showArrival = true, modifier = Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.End) {
                     if (!trip.unusable && minutes != null && minutes >= -1) Text(commuteInText(minutes), style = MaterialTheme.typography.labelLarge)
-                    Icon(if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null, Modifier.padding(top = 6.dp).size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(Icons.Outlined.ChevronRight, null, Modifier.padding(top = 6.dp).size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (trip.status != TripStatus.OK) trip.issues.filter { it.kind != "platformChange" }.take(3).forEach { issue ->
                 if (issue.text.isNotBlank()) Text(issue.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (open) LegTimeline(trip)
+        }
         }
     }
 }
 
-/** Departure stop to destination, leg by leg, with a rail on the left. */
-@Composable
-fun LegTimeline(trip: Trip, modifier: Modifier = Modifier) {
-    val scheme = MaterialTheme.colorScheme
-    val rail = scheme.outlineVariant
-    val dot = scheme.primary
-    Column(modifier.fillMaxWidth().padding(top = 4.dp)) {
-        HorizontalDivider(color = LocalCompanionSemantics.current.hairline, modifier = Modifier.padding(bottom = 10.dp))
-        trip.legs.forEachIndexed { index, leg ->
-            val last = index == trip.legs.lastIndex
-            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(Modifier.width(48.dp), horizontalAlignment = Alignment.End) {
-                    val planned = isoClock(leg.from.planned)
-                    val real = isoClock(leg.from.time.ifBlank { leg.from.planned })
-                    Text(real, style = TimeStyle, color = if (leg.cancelled) scheme.error else scheme.onSurface)
-                    if (planned.isNotBlank() && planned != real) Text(planned, style = TimeSmallStyle, color = scheme.onSurfaceVariant, textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)
-                }
-                Box(Modifier.width(14.dp).fillMaxHeight().drawBehind {
-                    val x = size.width / 2
-                    drawLine(rail, Offset(x, 10.dp.toPx()), Offset(x, size.height), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-                    drawCircle(dot, 4.5.dp.toPx(), Offset(x, 10.dp.toPx()))
-                })
-                Column(Modifier.weight(1f).padding(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(leg.from.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                    if (leg.walk) Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.DirectionsWalk, null, Modifier.size(16.dp), tint = scheme.onSurfaceVariant)
-                        Text(t(R.string.commute_walk, leg.minutes), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant, modifier = Modifier.padding(start = 6.dp))
-                    } else {
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-                            LineChip(leg)
-                            if (leg.direction.isNotBlank()) Text(t(R.string.commute_towards, leg.direction), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                            PlatformText(leg)
-                            val dc = delayClass(leg.from.delay, leg.cancelled)
-                            if (dc != DelayClass.ON_TIME) DelayBadge(dc, leg.from.delay)
-                        }
-                        val arrive = isoClock(leg.to.time.ifBlank { leg.to.planned })
-                        Text(listOf(t(R.string.commute_arrive_stop, leg.to.name, arrive), commuteDurationText(leg.minutes).takeIf { leg.minutes > 0 }).filterNotNull().joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
-                        OccupancyRow(leg.occupancy, false)
-                        leg.notes.take(2).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = LocalCompanionSemantics.current.warning) }
-                    }
-                }
-            }
-            if (last) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                Text(isoClock(leg.to.time.ifBlank { leg.to.planned }), style = TimeStyle, modifier = Modifier.width(48.dp), textAlign = androidx.compose.ui.text.style.TextAlign.End)
-                Box(Modifier.width(14.dp).height(20.dp).drawBehind { drawCircle(dot, 4.5.dp.toPx(), Offset(size.width / 2, 10.dp.toPx())) })
-                Column(Modifier.weight(1f)) {
-                    Text(leg.to.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                    PlatformText(leg, leg.to)
-                }
-            }
-        }
-    }
-}
+/** Opens the connection detail of a trip of the route in view; null where the detail is not available. */
+val LocalOpenCommuteTrip = staticCompositionLocalOf<((Trip) -> Unit)?> { null }
 
 // ── Route list ───────────────────────────────────────────────────────────────
 

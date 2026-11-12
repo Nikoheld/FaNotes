@@ -2702,6 +2702,157 @@ test('the first upload after uploads were refused announces no absence, message 
   assert.equal(diffSnapshots(uploadDiffBase(known, many), many, {}).filter((change) => change.category === 'absence').length, 0)
 })
 
+const webSchoolFetch = (mutate) => {
+  const response = (status, body, { location = '', cookies = [] } = {}) => ({
+    status,
+    headers: { get: (name) => (name.toLowerCase() === 'location' ? location : null) },
+    setCookies: cookies,
+    text: async () => body,
+  })
+  return async (url, options = {}) => {
+    const target = String(url)
+    const cookie = options.headers?.Cookie || ''
+    if ((options.method || 'GET') !== 'GET') throw new Error(`not read-only: ${options.method}`)
+    if (target.endsWith('/index.php?pageid=1') && !cookie.includes('PHPSESSID=server-session')) {
+      return response(302, '', { location: 'https://login.microsoftonline.com/tenant/oauth2/v2.0/authorize?redirect_uri=https%3A%2F%2Fwww.schulnetz-ag.ch%2Faksa%2F' })
+    }
+    if (target.includes('login.microsoftonline.com')) return response(302, '', { location: 'https://www.schulnetz-ag.ch/aksa/?code=abc' })
+    if (target.includes('/aksa/?code=') || target.includes('/aksa?code=')) {
+      return response(200, '<a href="index.php?pageid=21311&id=abc123&transid=a1b2c3">Noten</a>', { cookies: ['PHPSESSID=server-session; Path=/; HttpOnly'] })
+    }
+    const custom = await mutate(target, cookie)
+    if (custom) return response(custom.status || 200, custom.body)
+    return response(200, '<html><body><a href="index.php?pageid=21311&amp;id=abc123&amp;transid=a1b2c3">Noten</a></body></html>')
+  }
+}
+
+test('a failed or unreadable Kontoauszug read keeps the stored statement', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-konto-'))
+  const key = randomBytes(32)
+  const first = '<table><tr><td>01.11.2026</td><td>Mittagessen</td><td>-12.50</td><td>40.00</td></tr><tr><td colspan="3">Saldo</td><td>40.00 CHF</td></tr></table>'
+  const next = '<table><tr><td>02.11.2026</td><td>Pause</td><td>-3.00</td><td>37.00</td></tr><tr><td colspan="3">Saldo</td><td>37.00 CHF</td></tr></table>'
+  let phase = 'statement'
+  const fetch = webSchoolFetch(async (target) => {
+    if (!target.includes('pageid=21411')) return null
+    if (phase === 'wall') return { body: '<html><body>Inaktivitätslimit überschritten</body></html>' }
+    if (phase === 'shell') return { body: '<html><body><a href="index.php?pageid=21311&amp;id=abc123&amp;transid=a1b2c3">Noten</a>Menü</body></html>' }
+    if (phase === 'updated') return { body: next }
+    return { body: first }
+  })
+  const runtime = createSchulnetzRuntime({ root, key, fetch, autostart: false, now: () => new Date('2026-11-11T12:00:00Z') })
+  const accountId = 'e'.repeat(32)
+  const readSnapshot = async () => JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
+  try {
+    await runtime.linkAccount(accountId, {
+      mode: 'web',
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      userAgent: 'FaNotesTest',
+      ssoCookies: { 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=microsoft-cookie-value' },
+    })
+    await runtime.pollAccount(accountId)
+    const stored = await readSnapshot()
+    assert.ok(stored.konto?.length, JSON.stringify({ konto: stored.konto, saldo: stored.kontoSaldo, errors: stored.readErrors }))
+    assert.equal(stored.konto[0].label, 'Mittagessen')
+    assert.equal(stored.kontoSaldo, '40.00 CHF')
+    phase = 'wall'
+    await runtime.pollAccount(accountId)
+    const afterWall = await readSnapshot()
+    assert.equal(afterWall.konto[0].label, 'Mittagessen')
+    assert.equal(afterWall.kontoSaldo, '40.00 CHF')
+    phase = 'shell'
+    await runtime.pollAccount(accountId)
+    const afterShell = await readSnapshot()
+    assert.equal(afterShell.konto[0].label, 'Mittagessen', 'a page that is not the statement must not clear it')
+    assert.equal(afterShell.kontoSaldo, '40.00 CHF')
+    phase = 'updated'
+    await runtime.pollAccount(accountId)
+    const updated = await readSnapshot()
+    assert.equal(updated.konto[0].label, 'Pause')
+    assert.equal(updated.kontoSaldo, '37.00 CHF')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a push token, a setting and a probe saved during a poll stay on that account', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-poll-race-'))
+  const key = randomBytes(32)
+  let gradeHits = 0
+  let release = () => {}
+  const gate = new Promise((resolve) => { release = resolve })
+  let opened = () => {}
+  const started = new Promise((resolve) => { opened = resolve })
+  const grade = (id, course, mark) => ({ id, course, courseId: course, title: 'Probe', date: '2026-11-11', mark, weight: '1' })
+  const fetch = async (url) => {
+    const target = String(url)
+    const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+    if (target.endsWith('/token.php')) return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+    if (target.includes('/me/grades')) {
+      gradeHits += 1
+      if (gradeHits === 2) {
+        opened()
+        await gate
+        return json([grade('g1', 'Mathematik', '5.5'), grade('g2', 'Englisch', '4.5')])
+      }
+      return json([grade('g1', 'Mathematik', '5.5')])
+    }
+    if (target.includes('pageid=21411')) return { status: 200, text: async () => '<table><tr><td>01.11.2026</td><td>Essen</td><td>-1.00</td><td>9.00</td></tr></table>' }
+    return json([])
+  }
+  const runtime = createSchulnetzRuntime({
+    root,
+    key,
+    fetch,
+    autostart: false,
+    now: () => new Date('2026-11-11T12:00:00Z'),
+    fcmSend: async () => ({ status: 200 }),
+  })
+  const token = 'phone:APA91b-race-device-token'
+  const otherToken = 'phone:APA91b-other-account-token'
+  try {
+    const owner = await runtime.createGuest('203.0.113.80')
+    const other = await runtime.createGuest('203.0.113.81')
+    const linkBody = {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    }
+    await runtime.linkAccount(owner.accountId, linkBody)
+    await runtime.linkAccount(other.accountId, { ...linkBody, deviceId: '0123456789abcdef01234568' })
+    await runtime.pollAccount(owner.accountId)
+    const polling = runtime.pollAccount(owner.accountId)
+    await started
+    const tokenWrite = runtime.addFcmToken(owner.accountId, token)
+    const settingsWrite = guestCall(runtime, owner, 'PUT', '/api/v1/schulnetz/settings', '{"guessGrades":true}')
+    const otherWrite = runtime.addFcmToken(other.accountId, otherToken)
+    const probeWrite = probeCall(runtime, owner, JSON.stringify({ token }))
+    await otherWrite
+    const otherDuring = JSON.parse(await readFile(join(root, 'accounts', other.accountId, 'link.json'), 'utf8'))
+    assert.deepEqual(otherDuring.fcmTokens, [otherToken])
+    release()
+    const [, settings, probe] = await Promise.all([polling, settingsWrite, probeWrite, tokenWrite])
+    assert.equal(settings.status, 200)
+    assert.equal(probe.status, 200)
+    const link = JSON.parse(await readFile(join(root, 'accounts', owner.accountId, 'link.json'), 'utf8'))
+    assert.deepEqual(link.fcmTokens, [token])
+    assert.equal(link.settings.guessGrades, true)
+    const lines = (await readFile(join(root, 'accounts', owner.accountId, 'changes.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    const probeRows = lines.filter((row) => String(row.id).startsWith('probe:'))
+    const gradeRows = lines.filter((row) => String(row.id).startsWith('grade:'))
+    assert.equal(probeRows.length, 6)
+    assert.equal(gradeRows.length, 1)
+    assert.notEqual(probeRows[0].revision, gradeRows[0].revision)
+    const otherLink = JSON.parse(await readFile(join(root, 'accounts', other.accountId, 'link.json'), 'utf8'))
+    assert.deepEqual(otherLink.fcmTokens, [otherToken])
+    assert.equal(JSON.stringify(otherLink).includes(token), false)
+    assert.equal(await readFile(join(root, 'accounts', other.accountId, 'changes.jsonl'), 'utf8').catch(() => ''), '')
+  } finally {
+    release()
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a push names its school connection by a route key and keeps one collapse slot per connection', () => {
   // Shared test vector with the app (android core ConnectionsTest).
   assert.equal(connectionRouteKey('0123456789abcdef0123456789abcdef'), 'b6df6a1c77130be8')

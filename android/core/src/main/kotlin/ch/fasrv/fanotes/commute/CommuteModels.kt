@@ -99,6 +99,24 @@ data class Point(
     val platformChanged: Boolean = false,
 )
 
+/** A time at one stop. [delay] null means the source has no real-time value: [time] is then only the planned time. */
+data class StopTime(val planned: String = "", val time: String = "", val delay: Int? = null)
+
+/** One intermediate stop of a ride leg (connection detail only). The boarding and exit stops are [Leg.from] and [Leg.to]. */
+data class LegStop(
+    val name: String = "",
+    val stopId: String = "",
+    val arrival: StopTime? = null,
+    val departure: StopTime? = null,
+    val platform: String = "",
+    val platformChanged: Boolean = false,
+    /** False: no real-time data for this stop, so only planned times may be shown. */
+    val realtime: Boolean = true,
+    /** The vehicle does not call here. */
+    val cancelled: Boolean = false,
+    val occupancy: Occupancy = Occupancy(),
+)
+
 data class Leg(
     /** "ride" or "walk". */
     val kind: String = "ride",
@@ -116,6 +134,12 @@ data class Leg(
     val cancelled: Boolean = false,
     val notes: List<String> = emptyList(),
     val minutes: Int = 0,
+    /** search.ch id of this vehicle; empty for walks and fallback providers. */
+    val journeyId: String = "",
+    /** Number of intermediate stops (the list itself is only in the connection detail). */
+    val stopCount: Int = 0,
+    /** Intermediate stops in order; empty outside the connection detail or on an older server. */
+    val stops: List<LegStop> = emptyList(),
 ) {
     val walk: Boolean get() = kind == "walk"
 }
@@ -315,6 +339,20 @@ private fun parseLeg(obj: JsonValue.Obj): Leg = Leg(
     cancelled = obj.bool("cancelled") == true,
     notes = obj.strings("notes"),
     minutes = obj.int("minutes") ?: 0,
+    journeyId = obj.str("journeyId"),
+    stopCount = obj.int("stopCount") ?: 0,
+    stops = obj.objects("stops").map(::parseLegStop),
+)
+
+private fun parseStopTime(obj: JsonValue.Obj?): StopTime? =
+    if (obj == null) null else StopTime(obj.str("planned"), obj.str("time"), obj.int("delay"))
+
+private fun parseLegStop(obj: JsonValue.Obj): LegStop = LegStop(
+    name = obj.str("name"), stopId = obj.str("stopId"),
+    arrival = parseStopTime(obj.obj("arrival")), departure = parseStopTime(obj.obj("departure")),
+    platform = obj.str("platform"), platformChanged = obj.bool("platformChanged") == true,
+    realtime = obj.bool("realtime") != false, cancelled = obj.bool("cancelled") == true,
+    occupancy = parseOccupancy(obj.obj("occupancy")),
 )
 
 fun parseTrip(obj: JsonValue.Obj): Trip = Trip(
@@ -390,6 +428,69 @@ fun parseStops(body: String): List<Stop> =
     parseOrNull(body)?.objects("stops").orEmpty().map(::parseStop).filter { it.name.isNotBlank() }
 
 fun parseTrips(body: String): List<Trip> = parseOrNull(body)?.objects("trips").orEmpty().map(::parseTrip)
+
+/** Where the trip is now. [point]: 0 = leg.from, 1..n = leg.stops[point-1], n+1 = leg.to. */
+enum class PositionState(val wire: String) {
+    NOT_STARTED("notStarted"), AT_STOP("atStop"), BETWEEN("between"), TRANSFER("transfer"), ARRIVED("arrived");
+
+    companion object {
+        fun of(wire: String?): PositionState? = entries.firstOrNull { it.wire == wire }
+    }
+}
+
+data class Position(
+    val state: PositionState = PositionState.NOT_STARTED,
+    val legIndex: Int = 0,
+    val point: Int = 0,
+    /** Between: 0-1 of the way to the next point. */
+    val progress: Double = 0.0,
+    /** A time the position relies on has no real-time value. */
+    val estimated: Boolean = false,
+)
+
+data class DetailSources(val realtime: String = "", val platforms: String? = null, val formation: String? = null)
+
+/** `GET /commute/trip`: one connection with every stop. [trip] is null when [gone]. */
+data class TripDetail(
+    val trip: Trip? = null,
+    val position: Position? = null,
+    val updatedAt: String = "",
+    val stale: Boolean = false,
+    val gone: Boolean = false,
+    val sources: DetailSources = DetailSources(),
+)
+
+private fun parsePosition(obj: JsonValue.Obj?): Position? {
+    val state = PositionState.of(obj?.string("state")) ?: return null
+    return Position(
+        state = state,
+        legIndex = (obj?.int("legIndex") ?: 0).coerceAtLeast(0),
+        point = (obj?.int("point") ?: 0).coerceAtLeast(0),
+        progress = (obj?.double("progress") ?: 0.0).takeIf { !it.isNaN() && !it.isInfinite() }?.coerceIn(0.0, 1.0) ?: 0.0,
+        estimated = obj?.bool("estimated") == true,
+    )
+}
+
+/** Null when [body] is not a JSON object. A missing `trip` counts as gone. */
+fun parseTripDetail(body: String): TripDetail? {
+    val root = parseOrNull(body) ?: return null
+    val trip = root.obj("trip")?.let(::parseTrip)
+    val sources = root.obj("sources")
+    return TripDetail(
+        trip = trip,
+        position = parsePosition(root.obj("position")),
+        updatedAt = root.str("updatedAt"),
+        stale = root.bool("stale") == true,
+        gone = root.bool("gone") == true || trip == null,
+        sources = DetailSources(sources?.str("realtime").orEmpty(), sources?.string("platforms")?.takeIf { it.isNotBlank() }, sources?.string("formation")?.takeIf { it.isNotBlank() }),
+    )
+}
+
+/** Path of `GET /commute/trip` for [routeId], [tripId] and the trip's planned departure. */
+fun tripDetailPath(routeId: String, tripId: String, plannedDeparture: String): String {
+    fun q(value: String) = java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+    return "/commute/trip?route=${q(routeId)}&trip=${q(tripId)}&at=${q(plannedDeparture)}"
+}
 
 // ── Writing ──────────────────────────────────────────────────────────────────
 

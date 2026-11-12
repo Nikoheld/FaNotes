@@ -4,6 +4,7 @@
 // calls token.php. Devices receive the normalised snapshot and change list,
 // never the token.
 
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
@@ -39,6 +40,7 @@ import {
   normalizeSchoolBase,
   parseKontoauszug,
   parseKontoSaldo,
+  kontoStatementRead,
   parseRawSnapshot,
   parseStartMessages,
   redactSecrets,
@@ -246,7 +248,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     return material
   }
 
-  const linkAccount = async (accountId, body) => {
+  const linkAccount = (accountId, body) => withAccount(accountId, async () => {
     if (body?.mode === 'device') return linkDeviceAccount(accountId, body)
     const material = await requireKey()
     const baseUrl = normalizeSchoolBase(body?.baseUrl)
@@ -276,7 +278,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     await saveLink(accountId, record)
     return publicStatus(record)
-  }
+  })
 
   const linkWebAccount = async (accountId, body, material, baseUrl, deviceId) => {
     const cookies = body?.ssoCookies
@@ -379,7 +381,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     return { revision: snapshot.revision, changes: changes.length }
   }
 
-  const updateSettings = async (accountId, body) => {
+  const updateSettings = (accountId, body) => withAccount(accountId, async () => {
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
     const settings = { ...DEFAULT_SETTINGS, ...(link.settings || {}) }
@@ -391,7 +393,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     link.settingsUpdatedAt = now().toISOString()
     await saveLink(accountId, link)
     return publicStatus(link)
-  }
+  })
 
   const revealsPath = (accountId) => resolve(accountDir(accountId), 'reveals.json')
   const readReveals = async (accountId) => mergeRevealLedger(await readJson(revealsPath(accountId)))
@@ -412,7 +414,7 @@ export const createSchulnetzRuntime = (options = {}) => {
    * [pushKey]: 32 random bytes the app made for this device. Pushes to this token then carry their
    * notices sealed with it, so the app shows them at once and Google never reads them. Sealed at rest.
    */
-  const addFcmToken = async (accountId, token, pushKey = '') => {
+  const addFcmToken = (accountId, token, pushKey = '') => withAccount(accountId, async () => {
     if (!isValidFcmToken(token)) fail(400, 'Das Push-Token ist ungültig.')
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
@@ -424,16 +426,16 @@ export const createSchulnetzRuntime = (options = {}) => {
     link.pushKeys = keys
     await saveLink(accountId, link)
     return publicStatus(link)
-  }
+  })
 
-  const unlink = async (accountId) => {
+  const unlink = (accountId) => withAccount(accountId, async () => {
     const guest = await readGuestRecord(accountId)
     if (guest) {
       for (const name of SCHOOL_FILES) await fs.rm(resolve(accountDir(accountId), name), { force: true })
       return
     }
     await fs.rm(accountDir(accountId), { recursive: true, force: true })
-  }
+  })
 
   const guestHits = new Map()
   const guestAllowed = (address) => {
@@ -535,7 +537,7 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   /** Move a guest's school files onto a FaNotes account. Never publishes. */
-  const adoptGuest = async (faAccountId, body) => {
+  const adoptGuest = (faAccountId, body) => withAccounts([faAccountId, body?.guestAccountId], async () => {
     const guestId = String(body?.guestAccountId || '')
     const guestToken = String(body?.guestToken || '')
     await assertGuest(guestId, guestToken)
@@ -552,14 +554,14 @@ export const createSchulnetzRuntime = (options = {}) => {
     await fs.rm(accountDir(guestId), { recursive: true, force: true })
     const revision = (await readLink(faAccountId))?.revision || 0
     return { adopted: true, revision }
-  }
+  })
 
   /**
    * Copy the FaNotes school link onto this device's guest so sign-out keeps
    * school updates. This device's push token moves. Other devices stay.
    * Never publishes.
    */
-  const detachGuest = async (faAccountId, body) => {
+  const detachGuest = (faAccountId, body) => withAccounts([faAccountId, body?.guestAccountId], async () => {
     const guestId = String(body?.guestAccountId || '')
     const guestToken = String(body?.guestToken || '')
     const fcmToken = body?.fcmToken
@@ -594,16 +596,16 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     const revision = (await readLink(guestId))?.revision || 0
     return { detached: true, revision }
-  }
+  })
 
-  const deleteGuestAccount = async (accountId) => {
+  const deleteGuestAccount = (accountId) => withAccount(accountId, async () => {
     const guest = await readGuestRecord(accountId)
     if (!guest) fail(404, 'Dieses Kanti+-Konto gibt es nicht.')
     await fs.rm(accountDir(accountId), { recursive: true, force: true })
     // Browsers that read this identity lose it now, not on their next request.
     if (web?.forgetAccount) await web.forgetAccount(accountId).catch(() => undefined)
     return { deleted: true }
-  }
+  })
 
   const bearerToken = (request) => {
     const header = request.headers?.authorization
@@ -617,11 +619,30 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const tails = new Map()
+  const accountScope = new AsyncLocalStorage()
+  // One mutation at a time per account. A poll holds the turn for the whole read, so a push
+  // token, a setting or a probe that arrives during that read is applied to the saved link
+  // afterwards instead of being overwritten. The same account may re-enter (the poller drops
+  // an orphan with unlink); a second account queues independently.
   const withAccount = (accountId, task) => {
+    if (accountScope.getStore()?.has(accountId)) return Promise.resolve().then(task)
     const previous = tails.get(accountId) || Promise.resolve()
-    const run = previous.then(task, task)
+    const run = previous.then(() => {
+      const held = new Set(accountScope.getStore())
+      held.add(accountId)
+      return accountScope.run(held, task)
+    }, () => {
+      const held = new Set(accountScope.getStore())
+      held.add(accountId)
+      return accountScope.run(held, task)
+    })
     tails.set(accountId, run.then(() => undefined, () => undefined))
     return run
+  }
+  const withAccounts = (ids, task) => {
+    const ordered = [...new Set(ids.map((id) => String(id || '')).filter(Boolean))].sort()
+    const run = ordered.reduceRight((next, id) => () => withAccount(id, next), () => task())
+    return run()
   }
 
   const schoolFetch = async (url, method, headers, body) => {
@@ -1058,6 +1079,11 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
     const snapshot = parseRawSnapshot(raw, now().toISOString())
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
+    // A missing or rejected Kontoauszug page is not an empty statement.
+    if (!kontoStatementRead(raw.kontoHtml || '')) {
+      snapshot.konto = previous?.konto || []
+      snapshot.kontoSaldo = previous?.kontoSaldo || ''
+    }
     const eventsOk = typeof raw.events === 'string' && raw.events.trim() !== ''
     const seededRead = Object.keys(previous?.weekRead || {}).length
       ? { ...(previous.weekRead) }
@@ -1162,6 +1188,9 @@ export const createSchulnetzRuntime = (options = {}) => {
       : absenceFields(keepAbsenceRead(previous || {}, { absences: [] }))
     const parsedNotes = parseStartMessages(scraped.startHtml || '').map((body, index) => ({ id: `start-${index}`, title: 'Mitteilung', body, at: '' }))
     const keepMessages = failed || parsedNotes.length === 0
+    // A grade check does not open the statement. An empty body, a sign-in wall or another page is not an empty statement.
+    const kontoHtml = gradesOnly ? '' : (scraped.kontoHtml || '')
+    const kontoFresh = kontoStatementRead(kontoHtml)
     const snapshot = {
       revision: (link.revision || 0) + 1,
       // A grade check reads the grades page only; the full read time stays what it was.
@@ -1178,8 +1207,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       homework: previous?.homework || [],
       messages: keepMessages ? (previous?.messages || []) : parsedNotes,
       vacations: previous?.vacations || [],
-      konto: gradesOnly ? (previous?.konto || []) : parseKontoauszug(scraped.kontoHtml || ''),
-      kontoSaldo: gradesOnly ? (previous?.kontoSaldo || '') : parseKontoSaldo(scraped.kontoHtml || ''),
+      konto: kontoFresh ? parseKontoauszug(kontoHtml) : (previous?.konto || []),
+      kontoSaldo: kontoFresh ? parseKontoSaldo(kontoHtml) : (previous?.kontoSaldo || ''),
       startMessages: keepMessages ? (previous?.startMessages || []) : parseStartMessages(scraped.startHtml || ''),
       readErrors: scraped.problem ? [`Schulnetz: ${scraped.problem}`] : [],
       weekFetched: failed ? (previous?.weekFetched || {}) : (scraped.weekFetched || {}),
@@ -1485,6 +1514,13 @@ export const createSchulnetzRuntime = (options = {}) => {
         if (route === '/commute' && method === 'PUT') { send(response, 200, await commute.save(accountId, await readBody(request))); return true }
         if (route === '/commute/stops' && method === 'GET') { send(response, 200, await commute.stops(url.searchParams.get('q') || '')); return true }
         if (route === '/commute/board' && method === 'GET') { send(response, 200, await commute.board(accountId, String(url.searchParams.get('route') || ''))); return true }
+        if (route === '/commute/trip' && method === 'GET') {
+          const params = url.searchParams
+          const found = await commute.tripDetail(accountId, String(params.get('route') || ''), String(params.get('trip') || '').slice(0, 200), String(params.get('at') || ''))
+          if (!found) fail(404, 'Diese Pendelstrecke gibt es nicht.')
+          send(response, 200, found)
+          return true
+        }
         if (route === '/commute/connections' && method === 'GET') {
           const params = url.searchParams
           const found = await commute.connections({ from: params.get('from'), to: params.get('to'), vias: params.getAll('via').slice(0, 2), at: String(params.get('at') || ''), timeType: String(params.get('timeType') || 'depart') })
@@ -1537,66 +1573,72 @@ export const createSchulnetzRuntime = (options = {}) => {
       }
       if (route === '/push/test' && method === 'POST') {
         accountRate(accountId, 'push-test', PUSH_TEST_LIMIT)
-        const link = await readLink(accountId)
-        if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
-        await ping(accountId, link, 'test')
+        await withAccount(accountId, async () => {
+          const link = await readLink(accountId)
+          if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
+          await ping(accountId, link, 'test')
+        })
         send(response, 200, { ok: true })
         return true
       }
       if (route === '/push/probe' && method === 'POST') {
         accountRate(accountId, 'push-probe', PUSH_TEST_LIMIT)
-        const link = await readLink(accountId)
-        if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
         const body = await readBody(request)
-        const token = typeof body?.token === 'string' ? body.token.trim() : ''
-        if (!isValidFcmToken(token) || !(link.fcmTokens || []).includes(token)) {
-          fail(400, 'Dieses Gerät ist für Push nicht registriert.')
-        }
-        const serverAt = now().toISOString()
-        const scenario = typeof body?.scenario === 'string' ? body.scenario : 'standard'
-        const batch = notificationProbeBatch({ serverAt, day: zurichToday(now()), scenario })
-        if (!batch) fail(400, 'Dieses Testszenario gibt es nicht.')
-        const device = probeDeviceKey(token)
-        const changes = batch.map((change) => ({ ...change, device }))
-        const correlation = changes[0]?.correlation || ''
-        const revision = (Number(link.revision) || 0) + 1
-        await appendChanges(accountId, changes, revision)
-        link.revision = revision
-        await saveLink(accountId, link)
-        const result = await pingDevice(accountId, link, token, 'sync', 'HIGH', { probe: true, serverAt, correlation })
-        const accepted = result?.status === 200 && !result.drop && !result.skipped && !result.failed && !result.rejected
-        if (!accepted) {
-          await rollbackProbe(accountId, link, revision)
-          if (result?.skipped) fail(503, 'Firebase ist auf dem Server nicht eingerichtet.')
-          if (result?.drop) fail(409, 'Dieses Gerät ist bei Firebase nicht mehr registriert.')
-          fail(502, 'Firebase hat die Testmeldung nicht angenommen.')
-        }
-        send(response, 200, {
-          ok: true,
-          serverAt,
-          count: changes.length,
-          correlation,
-          scenario: String(scenario || 'standard').trim().toLowerCase() || 'standard',
-          probeRemaining: rateRemaining(accountId, 'push-probe', PUSH_TEST_LIMIT),
-          clearRemaining: rateRemaining(accountId, 'push-probe-clear', PUSH_TEST_LIMIT),
+        await withAccount(accountId, async () => {
+          const link = await readLink(accountId)
+          if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
+          const token = typeof body?.token === 'string' ? body.token.trim() : ''
+          if (!isValidFcmToken(token) || !(link.fcmTokens || []).includes(token)) {
+            fail(400, 'Dieses Gerät ist für Push nicht registriert.')
+          }
+          const serverAt = now().toISOString()
+          const scenario = typeof body?.scenario === 'string' ? body.scenario : 'standard'
+          const batch = notificationProbeBatch({ serverAt, day: zurichToday(now()), scenario })
+          if (!batch) fail(400, 'Dieses Testszenario gibt es nicht.')
+          const device = probeDeviceKey(token)
+          const changes = batch.map((change) => ({ ...change, device }))
+          const correlation = changes[0]?.correlation || ''
+          const revision = (Number(link.revision) || 0) + 1
+          await appendChanges(accountId, changes, revision)
+          link.revision = revision
+          await saveLink(accountId, link)
+          const result = await pingDevice(accountId, link, token, 'sync', 'HIGH', { probe: true, serverAt, correlation })
+          const accepted = result?.status === 200 && !result.drop && !result.skipped && !result.failed && !result.rejected
+          if (!accepted) {
+            await rollbackProbe(accountId, link, revision)
+            if (result?.skipped) fail(503, 'Firebase ist auf dem Server nicht eingerichtet.')
+            if (result?.drop) fail(409, 'Dieses Gerät ist bei Firebase nicht mehr registriert.')
+            fail(502, 'Firebase hat die Testmeldung nicht angenommen.')
+          }
+          send(response, 200, {
+            ok: true,
+            serverAt,
+            count: changes.length,
+            correlation,
+            scenario: String(scenario || 'standard').trim().toLowerCase() || 'standard',
+            probeRemaining: rateRemaining(accountId, 'push-probe', PUSH_TEST_LIMIT),
+            clearRemaining: rateRemaining(accountId, 'push-probe-clear', PUSH_TEST_LIMIT),
+          })
         })
         return true
       }
       if (route === '/push/probe/clear' && method === 'POST') {
         accountRate(accountId, 'push-probe-clear', PUSH_TEST_LIMIT)
-        const link = await readLink(accountId)
-        if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
         const body = await readBody(request)
-        const token = typeof body?.token === 'string' ? body.token.trim() : ''
-        if (!isValidFcmToken(token) || !(link.fcmTokens || []).includes(token)) {
-          fail(400, 'Dieses Gerät ist für Push nicht registriert.')
-        }
-        const cleared = await clearProbeChanges(accountId, probeDeviceKey(token))
-        send(response, 200, {
-          ok: !cleared.failed,
-          ...cleared,
-          probeRemaining: rateRemaining(accountId, 'push-probe', PUSH_TEST_LIMIT),
-          clearRemaining: rateRemaining(accountId, 'push-probe-clear', PUSH_TEST_LIMIT),
+        await withAccount(accountId, async () => {
+          const link = await readLink(accountId)
+          if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
+          const token = typeof body?.token === 'string' ? body.token.trim() : ''
+          if (!isValidFcmToken(token) || !(link.fcmTokens || []).includes(token)) {
+            fail(400, 'Dieses Gerät ist für Push nicht registriert.')
+          }
+          const cleared = await clearProbeChanges(accountId, probeDeviceKey(token))
+          send(response, 200, {
+            ok: !cleared.failed,
+            ...cleared,
+            probeRemaining: rateRemaining(accountId, 'push-probe', PUSH_TEST_LIMIT),
+            clearRemaining: rateRemaining(accountId, 'push-probe-clear', PUSH_TEST_LIMIT),
+          })
         })
         return true
       }

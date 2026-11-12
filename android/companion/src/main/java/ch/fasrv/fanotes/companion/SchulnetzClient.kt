@@ -164,6 +164,9 @@ data class SchulnetzLinkState(
     val webSessions: Int = 0,
 )
 
+/** A request was started on the main thread (a bug: the caller must switch to Dispatchers.IO). */
+class MainThreadNetworkException(request: String) : IllegalStateException("Network request on the main thread: $request")
+
 class SchulnetzClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
@@ -175,6 +178,12 @@ class SchulnetzClient(
     private val timetableParse = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "schulnetz-parse").apply { isDaemon = true }
     }
+
+    /** Requests a person waits for on screen (pairing a browser): a clear error after 15 s, never a hang. */
+    private val interactiveHttp: OkHttpClient = http.newBuilder()
+        .callTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .build()
 
     /** Bound used by the FCM callback so a push finishes inside a few seconds. */
     private val quickHttp: OkHttpClient = http.newBuilder()
@@ -271,6 +280,18 @@ class SchulnetzClient(
 
     /** Main-thread check; JVM tests replace it because they have no Android looper. */
     internal var onMainThread: () -> Boolean = { Looper.myLooper() == Looper.getMainLooper() }
+
+    /**
+     * Every request of this client runs off the main thread. Android would throw a bare
+     * NetworkOnMainThreadException deep inside OkHttp; this says which call was made where, and a
+     * unit test (with [onMainThread] wired to the test's main looper) catches a regression early.
+     */
+    private fun requireBackgroundThread(method: String, url: String) {
+        if (!onMainThread()) return
+        val path = runCatching { java.net.URI(url).path }.getOrNull().orEmpty()
+        DiagnosticTrace.record("network", "main-thread", 0, "error", "$method $path")
+        throw MainThreadNetworkException("$method $path")
+    }
 
     fun fetchWeb(
         baseUrl: String,
@@ -805,6 +826,10 @@ class SchulnetzClient(
     fun commuteConnections(session: SchoolAuth, path: String): List<ch.fasrv.fanotes.commute.Trip> =
         ch.fasrv.fanotes.commute.parseTrips(commuteGet(session, path))
 
+    /** One connection with every stop, platforms and the vehicle position (connection detail). Null when the answer is unreadable. */
+    fun commuteTripDetail(session: SchoolAuth, routeId: String, tripId: String, plannedDeparture: String): ch.fasrv.fanotes.commute.TripDetail? =
+        ch.fasrv.fanotes.commute.parseTripDetail(commuteGet(session, ch.fasrv.fanotes.commute.tripDetailPath(routeId, tripId, plannedDeparture)))
+
     /** Links a connection the phone reads itself (TAM): no school secret, the server never polls it. */
     fun linkDevice(session: SchoolAuth, baseUrl: String, deviceId: String, displayName: String): SchulnetzLinkState {
         val (code, body) = fanotes("PUT", "/link", session, deviceLinkBody(baseUrl, deviceId, displayName))
@@ -814,26 +839,26 @@ class SchulnetzClient(
 
     /** The browser waiting behind a pairing code, or an exception with the server's status. */
     fun webPairInfo(session: SchoolAuth, code: String): WebPairInfo {
-        val (status, body) = fanotes("GET", "/web-pair?code=${displayPairCode(code)}", session, null)
+        val (status, body) = fanotes("GET", "/web-pair?code=${displayPairCode(code)}", session, null, client = interactiveHttp)
         if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
         return parseWebPairInfo(body) ?: throw SchulnetzHttpException(status, errorMessage(body, status))
     }
 
     /** Asks the server for a code the app shows and the user types into the browser. */
     fun webPairOffer(session: SchoolAuth): WebPairOffer {
-        val (status, body) = fanotes("POST", "/web-pair/offer", session, "{}")
+        val (status, body) = fanotes("POST", "/web-pair/offer", session, "{}", client = interactiveHttp)
         if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
         return parseWebPairOffer(body) ?: throw SchulnetzHttpException(status, "Ungültige Antwort des Servers.")
     }
 
     /** Adds this connection to the pairing; [finish] approves it for the browser. */
     fun webPair(session: SchoolAuth, code: String, connectionId: String, label: String, provider: SchoolProvider, finish: Boolean, unrevealed: Collection<String>) {
-        val (status, body) = fanotes("POST", "/web-pair", session, webPairBody(code, connectionId, label, provider, finish, unrevealed))
+        val (status, body) = fanotes("POST", "/web-pair", session, webPairBody(code, connectionId, label, provider, finish, unrevealed), client = interactiveHttp)
         if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
     }
 
     fun webSessions(session: SchoolAuth): List<WebBrowserSession> {
-        val (status, body) = fanotes("GET", "/web-sessions", session, null)
+        val (status, body) = fanotes("GET", "/web-sessions", session, null, client = interactiveHttp)
         if (status == 404) return emptyList()
         if (status !in 200..299) throw SchulnetzHttpException(status, errorMessage(body, status))
         return parseWebSessions(body)
@@ -841,7 +866,7 @@ class SchulnetzClient(
 
     fun revokeWebSession(session: SchoolAuth, id: String) {
         require(id.matches(Regex("^[A-Za-z0-9_-]{6,64}$")))
-        val (status, body) = fanotes("DELETE", "/web-sessions/$id", session, null)
+        val (status, body) = fanotes("DELETE", "/web-sessions/$id", session, null, client = interactiveHttp)
         if (status !in 200..299 && status != 404) throw SchulnetzHttpException(status, errorMessage(body, status))
     }
 
@@ -892,6 +917,7 @@ class SchulnetzClient(
             .header(if (session.guest) "X-Kanti-Guest" else "X-FaNotes-Account", session.accountId)
             .header("Accept", "application/pdf")
             .build()
+        requireBackgroundThread(request.method, request.url.toString())
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw SchulnetzHttpException(response.code, "Der Stundenplan konnte nicht geladen werden (${response.code}).")
             val bytes = response.body?.bytes() ?: ByteArray(0)
@@ -1045,6 +1071,7 @@ class SchulnetzClient(
         )
 
     private fun call(method: String, url: String, headers: Map<String, String>, body: String?, client: OkHttpClient = http, gzip: Boolean = false): Pair<Int, String> {
+        requireBackgroundThread(method, url)
         val media = if (headers["Content-Type"]?.contains("json") == true) "application/json" else "application/x-www-form-urlencoded"
         val compress = gzip && method != "GET" && body != null
         val requestBody = when {

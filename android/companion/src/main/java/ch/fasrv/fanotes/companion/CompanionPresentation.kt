@@ -19,7 +19,7 @@ enum class Page(val title: String) {
     Settings("Settings"), Connections("Account & sync"), Appearance("Appearance"), ArchivedSubjects("Archived subjects"),
     Navigation("Navigation bar"), Planning("Planning & grades"), Notifications("Notifications"),
     Profile("Your activity"), Diagnostics("Diagnostics"), Auth("Connect FaNotes"), Trash("Recently deleted"), DocSearch("Document search"), WebAccess("Kanti+ in the browser"),
-    Commute("Commute routes"), CommuteEdit("Commute route"), CommuteDetail("Commute")
+    Commute("Commute routes"), CommuteEdit("Commute route"), CommuteDetail("Commute"), CommuteTrip("Commute connection")
 }
 data class CompanionRoute(val destination: Destination = Destination.Today, val page: Page? = null)
 
@@ -81,6 +81,7 @@ fun Page.uiTitle(): String = when (this) {
     Page.Commute -> t(R.string.commute_title)
     Page.CommuteEdit -> t(R.string.commute_route)
     Page.CommuteDetail -> t(R.string.commute_route)
+    Page.CommuteTrip -> t(R.string.commute_detail_title)
 }
 fun navPlacement(id: String): NavPlacement = when (startTabId(id)) {
     "planner" -> NavPlacement(CompanionRoute(Destination.Planner))
@@ -138,7 +139,11 @@ fun companionRoute(route: NotifyRoute): CompanionRoute = when {
     route.section == "Pruefungen" -> CompanionRoute(Destination.School, Page.Exams)
     route.section == "Absenzen" -> CompanionRoute(Destination.School, Page.Absences)
     route.section == "Termine" -> CompanionRoute(Destination.School, Page.Updates)
-    route.section == "Pendeln" -> CompanionRoute(Destination.Today, if (route.highlightIds.isNotEmpty()) Page.CommuteDetail else Page.Commute)
+    route.section == "Pendeln" -> CompanionRoute(Destination.Today, when {
+        commuteTripLink(route.highlightIds) != null -> Page.CommuteTrip
+        route.highlightIds.isNotEmpty() -> Page.CommuteDetail
+        else -> Page.Commute
+    })
     else -> CompanionRoute(destinationFor(route.tab))
 }
 
@@ -365,3 +370,15 @@ fun agendaForDay(
     }
     return (school + local + due).sortedWith(compareBy<AgendaEntry> { it.start.ifBlank { "00:00" } }.thenBy { it.kind.ordinal }.thenBy { it.title })
 }
+
+/** A commute link that names one connection: route id, trip id and planned departure (widget and Heute taps). */
+data class CommuteTripRef(val routeId: String, val tripId: String, val plannedDeparture: String)
+
+/** The connection a "commute" link points at, or null when it carries only a route id (or nothing). */
+fun commuteTripLink(ids: List<String>): CommuteTripRef? {
+    if (ids.size < 3 || ids.any { it.isBlank() }) return null
+    return CommuteTripRef(ids[0], ids[1], ids[2])
+}
+
+/** The ids a link carries for [ref]: the order [commuteTripLink] reads. */
+fun commuteTripLinkIds(ref: CommuteTripRef): List<String> = listOf(ref.routeId, ref.tripId, ref.plannedDeparture)

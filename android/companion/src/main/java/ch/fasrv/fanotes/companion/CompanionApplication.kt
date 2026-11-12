@@ -14,6 +14,16 @@ class CompanionApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Debug builds die on network I/O on the main thread, so such a bug shows up at once in testing.
+        if (BuildConfig.DEBUG) {
+            android.os.StrictMode.setThreadPolicy(
+                android.os.StrictMode.ThreadPolicy.Builder()
+                    .detectNetwork()
+                    .penaltyLog()
+                    .penaltyDeath()
+                    .build(),
+            )
+        }
         AppLanguage.install(this)
         if (android.os.Build.VERSION.SDK_INT >= 28) {
             android.webkit.WebView.setDataDirectorySuffix("schulnetz")
