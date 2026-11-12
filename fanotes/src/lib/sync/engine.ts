@@ -998,7 +998,8 @@ export class SyncEngine {
           // A newer revision exists. Apply it now: a changed local file becomes a conflict copy.
           const idIndex = new Map(Object.entries(this.state.files).map(([filePath, known]) => [known.id, filePath]))
           try {
-            await this.applyRemote(current, idIndex)
+            const applied = await this.applyRemote(current, idIndex)
+            if ((applied.result === 'written' || applied.result === 'conflict') && applied.path) this.options?.onApplied?.({ written: [applied.path], removed: [] })
           } catch (applyError) {
             if (applyError instanceof SyncApiError && (applyError.unauthorized || applyError.offline)) throw applyError
             this.log('warn', `„${entry.path}“ konnte nicht abgeglichen werden und wird später erneut versucht (${applyError instanceof Error ? applyError.message : 'unbekannt'}).`)
@@ -1015,6 +1016,8 @@ export class SyncEngine {
   /** The blank (or, after a guard rejection, collapsed) local file is kept beside the note. The server copy is written back. */
   private async restoreInstead(entry: SyncScanEntry, base: LocalBase, localBytes: Uint8Array, why: 'blank' | 'guard' = 'blank'): Promise<'conflict' | 'skipped'> {
     if (!this.session || !this.host || !this.state || !this.keys) return 'skipped'
+    // The editor still holds this note. Writing under it would be saved over again; try once it is quiet.
+    if (this.options?.isPathBusy?.(entry.path)) return 'skipped'
     const download = await this.api.download(this.session, base.id)
     if ('deleted' in download) return 'conflict'
     if (await sha256Hex(download.blob) !== download.sha256) return 'skipped'
@@ -1040,6 +1043,7 @@ export class SyncEngine {
       : `Leere Fassung von „${entry.path}“ wurde nicht hochgeladen. Die lokale Kopie liegt unter „${copyPath}“.`)
     this.options?.onConflict?.(conflict)
     const stat = await this.host.write(entry.path, plain, at.getTime())
+    this.options?.onApplied?.({ written: [entry.path, copyPath], removed: [] })
     const identityBytes = identitySyncBytes(entry.path, plain)
     const { blank: _ignored, ...kept } = base
     this.state.files[entry.path] = {

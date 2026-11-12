@@ -522,8 +522,8 @@ try {
     const createProbe = (host, name) => {
       const api = new ProbeApi()
       const engine = new SyncEngine(api)
-      const events = { conflicts: [] }
-      engine.attach(host, { platform: 'linux', deviceName: () => name, automatic: () => false, isPathBusy: () => false, excludedPrefixes: () => [], onConflict: (conflict) => events.conflicts.push(conflict) })
+      const events = { conflicts: [], applied: [], busy: new Set() }
+      engine.attach(host, { platform: 'linux', deviceName: () => name, automatic: () => false, isPathBusy: (path) => events.busy.has(path), excludedPrefixes: () => [], onConflict: (conflict) => events.conflicts.push(conflict), onApplied: (change) => events.applied.push(change) })
       return { engine, api, events }
     }
     const entryFor = async (api, session, id) => (await api.changes(session, 0)).entries.find((item) => item.id === id) ?? null
@@ -651,8 +651,16 @@ try {
         if (uploadId !== bigId) return null
         return new SyncApiError(409, 'guard', await entryFor(P2.api, session, bigId), 'guard')
       }
+      // While the editor still holds the note, nothing is written under it.
+      const edited = hostP.text('Alt/Gross.md')
+      P2.events.busy.add('Alt/Gross.md')
+      await P2.engine.syncNow()
+      assert.equal(hostP.text('Alt/Gross.md'), edited, 'an open note is not replaced under the editor')
+      assert.equal([...hostP.files.keys()].filter((path) => path.startsWith('Alt/Gross (Konflikt')).length, 0)
+      P2.events.busy.delete('Alt/Gross.md')
       await P2.engine.syncNow()
       P2.api.refuse = null
+      assert.ok(P2.events.applied.some((change) => change.written.includes('Alt/Gross.md')), 'the app is told to reload the restored note')
       assert.equal(hostP.text('Alt/Gross.md'), big, 'the server copy is put back after a guard rejection')
       const guardCopies = [...hostP.files.keys()].filter((path) => path.startsWith('Alt/Gross (Konflikt Laptop '))
       assert.equal(guardCopies.length, 1, 'the refused local version stays beside the note')
