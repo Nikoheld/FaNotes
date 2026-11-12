@@ -40,6 +40,8 @@ export const CommuteCard = () => {
   const first = pinned ? (focus.broken ? focus.trip : null) : board?.trips[0]
   const change = lessonChange(board)
   const open = () => kanti.navigate('commute', { strecke: route.id })
+  // The card itself opens the connection it shows; the link above opens the whole board.
+  const openTrip = () => (trip ? kanti.navigate('commute', { strecke: route.id, verbindung: trip.id, ab: trip.plannedDeparture }) : open())
   const delay = trip ? departureDelay(trip) : null
   const kind = trip ? delayClass(delay, false) : 'ok'
   const { platform, changed } = trip ? departurePlatform(trip) : { platform: '', changed: false }
@@ -47,7 +49,7 @@ export const CommuteCard = () => {
   return (
     <>
       <SectionLabel action={<button type="button" className="link" onClick={open}>{t.commuteCardOpen} <Icon name="right" size={16} /></button>}>{t.commute}</SectionLabel>
-      <Card className={`commute-card commute-card-${kind}`} role="button" tabIndex={0} onClick={open} onKeyDown={(event) => { if (event.key === 'Enter') open() }} aria-label={`${t.commute}: ${routeLabel(route)}`}>
+      <Card className={`commute-card commute-card-${kind}`} role="button" tabIndex={0} onClick={openTrip} onKeyDown={(event) => { if (event.key === 'Enter' && event.target === event.currentTarget) openTrip() }} aria-label={`${t.commute}: ${routeLabel(route)}`}>
         <div className="commute-card-head">
           <Icon name="train" size={20} />
           <strong>{routeLabel(route)}</strong>

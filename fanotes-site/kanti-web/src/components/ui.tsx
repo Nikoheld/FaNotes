@@ -104,7 +104,7 @@ export const Toggle = ({ checked, onChange, label, detail, disabled = false }: {
 export const Kbd = ({ children }: { children: ReactNode }) => <kbd>{children}</kbd>
 
 /** A modal dialog: focus moves in, Escape and the backdrop close it, focus returns afterwards. */
-export const Dialog = ({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) => {
+export const Dialog = ({ title, onClose, children, wide = false, side = false }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; side?: boolean }) => {
   const box = useRef<HTMLDivElement>(null)
   // The latest handler without re-running the focus logic when a parent re-renders (live data refreshes).
   const closeRef = useRef(onClose)
@@ -128,8 +128,8 @@ export const Dialog = ({ title, onClose, children, wide = false }: { title: stri
     return () => { window.removeEventListener('keydown', onKey, true); previous?.focus?.() }
   }, [])
   return (
-    <div className="backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <div className={`dialog${wide ? ' dialog-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={box}>
+    <div className={`backdrop${side ? ' backdrop-side' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <div className={`dialog${wide ? ' dialog-wide' : ''}${side ? ' dialog-side' : ''}`} role="dialog" aria-modal="true" aria-label={title} ref={box}>
         <header className="dialog-head"><h2>{title}</h2><IconButton icon="close" label="×" onClick={onClose} /></header>
         <div className="dialog-body">{children}</div>
       </div>

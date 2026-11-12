@@ -238,6 +238,52 @@ export interface Leg {
   cancelled: boolean
   notes: string[]
   minutes: number
+  /** search.ch trip id of this vehicle; '' for walks. Absent on servers older than the detail view. */
+  journeyId?: string
+  /** Boards: number of intermediate stops. The list itself (`stops`) is only in the detail. */
+  stopCount?: number
+  /** Detail only: the intermediate stops in order (boarding and exit stop are `from` and `to`). */
+  stops?: LegStop[]
+}
+
+/** A time at an intermediate stop; `delay` null = no real-time value. */
+export interface StopTime { planned: string; time: string; delay: number | null }
+
+/** One intermediate stop of a ride leg (connection detail). */
+export interface LegStop {
+  name: string
+  stopId: string
+  arrival: StopTime | null
+  departure: StopTime | null
+  /** '' when no source has it. */
+  platform: string
+  platformChanged: boolean
+  /** false: no real-time data here, so only the planned times are shown (marked). */
+  realtime: boolean
+  /** The vehicle does not call here. */
+  cancelled: boolean
+  occupancy: Occupancy
+}
+
+/** Where the vehicle of a trip is: see commute-api.md. `point` 0 = leg.from, 1..n = stops, n+1 = leg.to. */
+export interface Position {
+  state: 'notStarted' | 'atStop' | 'between' | 'transfer' | 'arrived'
+  legIndex: number
+  point: number
+  progress: number
+  estimated: boolean
+}
+
+export interface TripSources { realtime: string; platforms: string | null; formation: null }
+
+/** Answer of GET /commute/trip. `trip` is null when the timetable has no such trip (`gone`) or was unreachable. */
+export interface TripDetail {
+  trip: Trip | null
+  position?: Position
+  updatedAt?: string
+  stale?: boolean
+  gone: boolean
+  sources?: TripSources
 }
 
 export interface Transfer { at: string; minutes: number; plannedMinutes: number; broken: boolean; tight: boolean }

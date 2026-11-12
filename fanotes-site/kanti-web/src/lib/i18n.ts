@@ -172,6 +172,14 @@ const de = {
   lastCancelled: (line: string, time: string, planned: string) => `Letzte Stunde fällt aus – nimm den ${line || 'Zug'} um ${time}${planned ? ` (statt ${planned})` : ''}`,
   firstCancelled: 'Später zur Schule', firstCancelledBody: (line: string, time: string) => `Die erste Lektion fällt aus – nimm den ${line || 'Zug'} um ${time}`,
   commuteProvider: (name: string) => `Fahrplandaten: ${name}`, commuteRefresh: 'Abfahrten aktualisieren',
+  // Verbindungsdetail
+  detailTitle: 'Verbindungsdetail', detailRefresh: 'Verbindung aktualisieren', tripOpenDetail: 'Verbindungsdetail öffnen', detailLoading: 'Verbindung wird geladen …',
+  detailStops: (n: number) => (n === 1 ? '1 Zwischenhalt' : `${n} Zwischenhalte`), detailStopsHide: 'Zwischenhalte ausblenden', detailStopList: (line: string) => `Halte ${line}`,
+  stopCancelled: 'Halt fällt aus', noRealtime: 'ohne Echtzeit', estimatedShort: 'geschätzt', dwell: (n: number) => `${n} Min. Halt`,
+  posNotStarted: 'Noch nicht abgefahren', posAt: (stop: string) => `Hält in ${stop}`, posBetween: (from: string, to: string) => `Zwischen ${from} und ${to}`, posTransfer: (stop: string) => `Umsteigen in ${stop}`, posArrived: 'Angekommen', vehicleHere: 'Fahrzeug ist hier',
+  transferAtRisk: 'Anschluss gefährdet',
+  detailSources: (realtime: string, platforms: string | null) => `Echtzeit: ${realtime}${platforms ? ` · Gleise: ${platforms}` : ''}`, detailNoFormation: 'Wagenreihung: keine Daten',
+  detailGone: 'Diese Verbindung ist nicht mehr im Fahrplan.', detailFailed: 'Die Verbindung konnte nicht geladen werden.', detailRefreshFailed: (time: string) => `Aktualisierung fehlgeschlagen. Letzter Stand: ${time}.`,
   commuteCardNext: 'Nächste Verbindung', commuteCardNone: 'Keine Verbindung in Sicht.', commuteCardOpen: 'Alle Verbindungen', commuteCardUnreachable: 'Fahrplan gerade nicht erreichbar.',
   commuteSettingsGroup: 'Pendeln', commuteSettingsBody: 'Meldungen zu deinen Pendelstrecken.',
   // Zwei Zwischenhalte und feste Verbindung
@@ -367,6 +375,14 @@ const en: Strings = {
   lastCancelled: (line: string, time: string, planned: string) => `Last lesson is cancelled – take the ${line || 'train'} at ${time}${planned ? ` (instead of ${planned})` : ''}`,
   firstCancelled: 'Later to school', firstCancelledBody: (line: string, time: string) => `The first lesson is cancelled – take the ${line || 'train'} at ${time}`,
   commuteProvider: (name: string) => `Timetable data: ${name}`, commuteRefresh: 'Refresh departures',
+  // Connection detail
+  detailTitle: 'Connection details', detailRefresh: 'Refresh connection', tripOpenDetail: 'Open connection details', detailLoading: 'Loading connection …',
+  detailStops: (n: number) => (n === 1 ? '1 stop in between' : `${n} stops in between`), detailStopsHide: 'Hide stops in between', detailStopList: (line: string) => `Stops of ${line}`,
+  stopCancelled: 'Stop cancelled', noRealtime: 'no real-time', estimatedShort: 'estimated', dwell: (n: number) => `${n} min stop`,
+  posNotStarted: 'Not departed yet', posAt: (stop: string) => `Stopped at ${stop}`, posBetween: (from: string, to: string) => `Between ${from} and ${to}`, posTransfer: (stop: string) => `Change at ${stop}`, posArrived: 'Arrived', vehicleHere: 'Vehicle is here',
+  transferAtRisk: 'Connection at risk',
+  detailSources: (realtime: string, platforms: string | null) => `Real-time: ${realtime}${platforms ? ` · Platforms: ${platforms}` : ''}`, detailNoFormation: 'Carriage formation: no data',
+  detailGone: 'This connection is no longer in the timetable.', detailFailed: 'The connection could not be loaded.', detailRefreshFailed: (time: string) => `Refresh failed. Last update: ${time}.`,
   commuteCardNext: 'Next connection', commuteCardNone: 'No connection in sight.', commuteCardOpen: 'All connections', commuteCardUnreachable: 'Timetable not reachable right now.',
   commuteSettingsGroup: 'Commute', commuteSettingsBody: 'Alerts about your commute routes.',
   // Two via stops and a fixed connection

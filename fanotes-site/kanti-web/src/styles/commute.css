@@ -4,11 +4,11 @@
 .line-chip-walk { color: var(--muted); padding: 0 6px; }
 .delay-badge { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .delay-ok { background: var(--success-soft); color: var(--success); }
-.delay-minor { background: color-mix(in srgb, var(--warning-soft) 55%, var(--sunken)); color: color-mix(in srgb, var(--warning) 75%, var(--text)); }
+.delay-minor { background: var(--sunken); color: var(--text); }
 .delay-moderate { background: var(--warning-soft); color: var(--warning); }
 .delay-major { background: var(--danger-soft); color: var(--danger); }
 .delay-cancelled { background: var(--danger); color: var(--on-danger); }
-.delay-text-minor { color: color-mix(in srgb, var(--warning) 75%, var(--text)); }
+.delay-text-minor { color: var(--text); }
 .delay-text-moderate { color: var(--warning); }
 .delay-text-major, .delay-text-cancelled { color: var(--danger); }
 .platform { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 6px; background: var(--surface); font-size: 13px; font-weight: 600; color: var(--muted); border: 1px solid var(--hairline); white-space: nowrap; }

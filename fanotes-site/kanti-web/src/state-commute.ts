@@ -3,8 +3,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { ApiError, type Api } from './lib/api'
 import { BOARD_MIN_MS, defaultSettings, normalizeRoute, readRoute, type ConnectionsQuery } from './lib/commute'
-import { demoBoardFor, demoCommute, demoConnections } from './lib/demo-commute'
-import type { CommuteProvider, CommuteRoute, CommuteSettings, RouteBoard, Stop, Trip } from './types'
+import { demoBoardFor, demoCommute, demoConnections, demoTripDetail } from './lib/demo-commute'
+import type { CommuteProvider, CommuteRoute, CommuteSettings, RouteBoard, Stop, Trip, TripDetail } from './types'
 
 export interface CommuteState {
   /** The routes have been read (or the demo is on). */
@@ -30,6 +30,8 @@ export interface CommuteActions {
   save: (routes: CommuteRoute[], settings?: Partial<CommuteSettings>) => Promise<void>
   stops: (query: string) => Promise<Stop[]>
   trips: (routeId: string, at: string, timeType: 'depart' | 'arrive') => Promise<Trip[]>
+  /** The detail of one trip of a route's board: every stop, real times, the vehicle position. */
+  tripDetail: (routeId: string, tripId: string, at: string) => Promise<TripDetail>
   /** The connection picker of the editor (works before the route is saved). */
   connections: (query: ConnectionsQuery, stops: { from: Stop; to: Stop; vias: Stop[] }) => Promise<Trip[]>
 }
@@ -143,10 +145,25 @@ export const useCommuteStore = ({ api, connectionId, demo, ready, onUnauthorized
     return (await api.commuteTrips(connectionId, routeId, at, timeType)).trips
   }, [api, connectionId, demo])
 
+  const tripDetail = useCallback(async (routeId: string, tripId: string, at: string): Promise<TripDetail> => {
+    if (demo) {
+      const board = stateRef.current.boards[routeId]
+      const known = board ? [...board.trips, ...board.alternatives, board.pinned?.trip, board.pinned?.nearest, board.change] : []
+      const found = known.find((candidate) => candidate && candidate.id === tripId)
+      return found ? demoTripDetail(found, Date.now()) : { trip: null, gone: true }
+    }
+    try {
+      return await api.commuteTrip(connectionId, routeId, tripId, at)
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) onUnauthorized()
+      throw error
+    }
+  }, [api, connectionId, demo, onUnauthorized])
+
   const connections = useCallback(async (query: ConnectionsQuery, stopsOf: { from: Stop; to: Stop; vias: Stop[] }): Promise<Trip[]> => {
     if (demo) return demoConnections(stopsOf.from, stopsOf.to, stopsOf.vias, query.at)
     return (await api.commuteConnections(connectionId, query)).trips
   }, [api, connectionId, demo])
 
-  return { ...state, ensure, refreshBoards, save, stops, trips, connections }
+  return { ...state, ensure, refreshBoards, save, stops, trips, tripDetail, connections }
 }
