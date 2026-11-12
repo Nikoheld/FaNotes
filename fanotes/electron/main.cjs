@@ -62,6 +62,8 @@ const {
   stripFamdPayload,
   worksheetIdsFromMarkdown,
 } = require('./famd.cjs')
+const { companionInkNeedsRecord, isUnexplainedEmptyPage, recordDocumentForEmptyCompanion, refusesEmptyInkSave } = require('./ink-save-guard.cjs')
+const { packInk: packDrawingInk } = require('./famdPack.mjs')
 const pdfOcrStore = require('./pdf-ocr.cjs')
 const pageTextStore = require('./page-text.cjs')
 const {
@@ -1777,6 +1779,65 @@ function readCompanionInkDocument(loaded, famdRelative, markerHint) {
 }
 
 /**
+ * An existing `.fanotes/assets/<id>.json`, read without creating anything.
+ * Null when it is missing, unsafe, or unreadable.
+ */
+async function readExistingDrawingRecord(id) {
+  try {
+    const root = await assertCurrentVaultRoot()
+    const directory = path.join(root, INTERNAL_VAULT_DIRECTORY, 'assets')
+    for (const cursor of [path.join(root, INTERNAL_VAULT_DIRECTORY), directory]) {
+      const info = await fsp.lstat(cursor)
+      if (!info.isDirectory() || info.isSymbolicLink()) return null
+    }
+    if (!isInsideRoot(root, await fsp.realpath(directory))) return null
+    const dataPath = path.join(directory, `${id}.json`)
+    const [dataInfo, buffer] = await Promise.all([
+      statRegularFileNoFollow(dataPath, MAX_DRAWING_JSON_BYTES),
+      readRegularFileNoFollow(dataPath, MAX_DRAWING_JSON_BYTES),
+    ])
+    return { drawingJson: buffer.toString('utf8'), modifiedAt: dataInfo.mtime.toISOString() }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A `.famd` whose ink is an empty page with no undo step, while the drawing
+ * record under the note's ink id still has strokes. Empty saves from a board
+ * that never loaded its page left notes like that: the record was written
+ * in full again later, the companion was not. The record is the page then.
+ * Nothing is written here; the next real save heals the companion. Null in
+ * every other case, so those notes open exactly as before.
+ */
+async function recordInkForEmptyCompanion(loaded, markerId) {
+  if (!markerId || !companionInkNeedsRecord(loaded)) return null
+  let id
+  try {
+    id = assertDrawingId(markerId)
+  } catch {
+    return null
+  }
+  const record = await readExistingDrawingRecord(id)
+  const document = record ? recordDocumentForEmptyCompanion(loaded, record.drawingJson) : null
+  if (!document) return null
+  let metadata
+  try {
+    metadata = drawingLibraryMetadata(document, id, record.modifiedAt)
+  } catch {
+    return null
+  }
+  console.warn('FaNotes: a note companion held an empty handwriting page; opened its drawing record instead.')
+  // The same open shape as a companion: a heavy page keeps its samples in columns.
+  const packed = packDrawingInk(document)
+  return {
+    ...metadata,
+    drawingJson: packed ? JSON.stringify(packed.slim) : record.drawingJson,
+    ...(packed ? { packedInk: packed.packedInk } : {}),
+  }
+}
+
+/**
  * Rewrite the `.famd` companion with new markdown and/or ink.
  *
  * Text and ink saves both read-modify-write the same file. The write is
@@ -2732,6 +2793,39 @@ function decodePngDataUrl(imageData) {
     throw new Error('Die Bilddaten sind keine gültige PNG-Datei.')
   }
   return buffer
+}
+
+/**
+ * The drawing record and the note's `.famd` as they are on disk, for the
+ * empty-page guard in saveDrawing. A missing file is null; a file that cannot
+ * be read is undefined, and the guard keeps it.
+ */
+async function storedInkTexts(dataPath, noteRelativePath) {
+  let recordText = null
+  try {
+    recordText = (await readRegularFileNoFollow(dataPath, MAX_DRAWING_JSON_BYTES)).toString('utf8')
+  } catch (error) {
+    recordText = error?.code === 'ENOENT' ? null : undefined
+  }
+  let companionText = null
+  if (typeof noteRelativePath === 'string' && noteRelativePath.trim()) {
+    let famdRelativePath = null
+    try {
+      const notePath = normalizeRelativePath(noteRelativePath).split(path.sep).join('/')
+      assertNotePath(notePath)
+      famdRelativePath = companionNotePath(notePath, '.famd')
+    } catch {
+      // An invalid note path fails the companion write in saveDrawing, as before.
+    }
+    if (famdRelativePath) {
+      try {
+        companionText = await readOptionalNoteFile(famdRelativePath)
+      } catch {
+        companionText = undefined
+      }
+    }
+  }
+  return { recordText, companionText }
 }
 
 function validateDrawingJson(drawingJson) {
@@ -4267,6 +4361,22 @@ function registerIpcHandlers() {
     const { root, assetsDirectory } = await ensureInternalAssetsDirectory()
     const imagePath = path.join(assetsDirectory, `${id}.png`)
     const dataPath = path.join(assetsDirectory, `${id}.json`)
+    const savedResult = () => ({
+      ...metadata,
+      imageRelativePath: toRelativePosix(root, imagePath),
+      dataRelativePath: toRelativePosix(root, dataPath),
+    })
+    // An empty page with no undo step is what a board sends when the stored
+    // page never loaded into it. Over a record or companion that still has
+    // strokes, nothing is written; the renderer gets the usual result.
+    if (refusesEmptyInkSave({
+      document: drawingDocument,
+      large: largeDrawing,
+      ...(isUnexplainedEmptyPage(drawingDocument) ? await storedInkTexts(dataPath, payload.noteRelativePath) : {}),
+    })) {
+      console.warn('FaNotes: an empty handwriting page was not written over stored strokes.')
+      return savedResult()
+    }
     if (png) await queueFileWrite(imagePath, async () => atomicWrite(imagePath, png, { mode: 0o600 }))
     await queueFileWrite(dataPath, async () => atomicWrite(dataPath, payload.drawingJson, { encoding: 'utf8', mode: 0o600 }))
     if (typeof payload.noteRelativePath === 'string' && payload.noteRelativePath.trim()) {
@@ -4295,11 +4405,7 @@ function registerIpcHandlers() {
     if (['linux', 'win32'].includes(process.platform) && typeof payload.noteRelativePath === 'string') {
       void require('./handwriting-learning.cjs').request(root, app.getPath('userData'), 'changed', payload.noteRelativePath).catch(() => {})
     }
-    return {
-      ...metadata,
-      imageRelativePath: toRelativePosix(root, imagePath),
-      dataRelativePath: toRelativePosix(root, dataPath),
-    }
+    return savedResult()
   })
 
   handle(IPC.listDrawings, async () => {
@@ -4374,6 +4480,8 @@ function registerIpcHandlers() {
     // that record instead of a `famd-ink` record shared by every note.
     const parsed = { markdown: loaded.markdown, payload: loaded }
     const markerId = noteInkMarkerId(parsed.markdown)
+    const fromRecord = await recordInkForEmptyCompanion(loaded, markerId)
+    if (fromRecord) return fromRecord
     return readCompanionInkDocument(loaded, famdRelative, markerId ?? null)
   })
 
@@ -4447,7 +4555,8 @@ function registerIpcHandlers() {
     let ink = null
     if (loaded.ink) {
       try {
-        ink = readCompanionInkDocument(loaded, famdRelative)
+        ink = await recordInkForEmptyCompanion(loaded, noteInkMarkerId(loaded.markdown))
+          ?? readCompanionInkDocument(loaded, famdRelative)
       } catch {
         ink = null
       }
