@@ -495,7 +495,14 @@ try {
   // upload and can play a stricter (older) server.
   {
     class ProbeApi extends SyncApi {
-      constructor() { super(ORIGIN); this.uploads = []; this.refuse = null }
+      constructor() { super(ORIGIN); this.uploads = []; this.refuse = null; this.corrupt = null }
+      async download(session, id) {
+        const result = await super.download(session, id)
+        if (!this.corrupt?.has(id) || !result.blob) return result
+        const blob = new Uint8Array(result.blob)
+        blob[blob.length - 1] ^= 0xff
+        return { ...result, blob }
+      }
       async upload(session, id, base, ...rest) {
         const refusal = this.refuse ? await this.refuse(id, base, session) : null
         if (refusal) {
@@ -581,6 +588,24 @@ try {
       await Q.engine.syncNow()
       assert.equal(hostQ.text(path), kept, 'the tablet has the note again')
       P.api.refuse = null
+    }
+
+    // One damaged entry does not keep the rest of the pull, or any upload, from happening.
+    {
+      hostP.put('Alt/Kaputt.md', '# Kaputt\n\nkommt beschaedigt an\n')
+      hostP.put('Alt/Gut.md', '# Gut\n\nkommt an\n')
+      await P.engine.syncNow()
+      Q.api.corrupt = new Set([await idOf('Alt/Kaputt.md')])
+      hostQ.put('Alt/Vom Tablet.md', '# Vom Tablet\n')
+      await Q.engine.syncNow()
+      assert.equal(Q.engine.getState().status, 'idle', Q.engine.getState().error)
+      assert.equal(hostQ.text('Alt/Gut.md'), '# Gut\n\nkommt an\n', 'the other entries are applied')
+      assert.equal(hostQ.text('Alt/Kaputt.md'), null, 'the damaged entry is not written')
+      await P.engine.syncNow()
+      assert.equal(hostP.text('Alt/Vom Tablet.md'), '# Vom Tablet\n', 'the local edit was uploaded in the same cycle')
+      Q.api.corrupt = null
+      await Q.engine.syncNow()
+      assert.equal(hostQ.text('Alt/Kaputt.md'), '# Kaputt\n\nkommt beschaedigt an\n', 'the damaged entry arrives once it is served intact')
     }
 
     // A stale 409 whose newer entry is older than the cursor is applied at once.

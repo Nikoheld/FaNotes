@@ -669,7 +669,14 @@ export class SyncEngine {
     // cursor stays in front of it so the next cycle fetches it again.
     let holdCursor = Number.POSITIVE_INFINITY
     await runLimited(pending, CONCURRENCY, async (entry) => {
-      const { result, path } = await this.applyRemote(entry, idIndex)
+      const { result, path } = await this.applyRemote(entry, idIndex).catch((error: unknown) => {
+        // Sign-in and network errors end the cycle. One damaged or undecryptable
+        // entry must not keep every local edit on this device from uploading:
+        // it waits on the skip list and is tried again on the next pull.
+        if (error instanceof SyncApiError && (error.unauthorized || error.offline)) throw error
+        this.log('warn', `Ein Eintrag konnte nicht übernommen werden und wird später erneut versucht (${error instanceof Error ? error.message : 'unbekannt'}).`)
+        return { result: 'skipped' as const, path: null }
+      })
       if (result === 'conflict') conflicts += 1
       if ((result === 'written' || result === 'conflict') && path) written.push(path)
       if (result === 'removed' && path) removed.push(path)
@@ -990,7 +997,12 @@ export class SyncEngine {
         if (current) {
           // A newer revision exists. Apply it now: a changed local file becomes a conflict copy.
           const idIndex = new Map(Object.entries(this.state.files).map(([filePath, known]) => [known.id, filePath]))
-          await this.applyRemote(current, idIndex)
+          try {
+            await this.applyRemote(current, idIndex)
+          } catch (applyError) {
+            if (applyError instanceof SyncApiError && (applyError.unauthorized || applyError.offline)) throw applyError
+            this.log('warn', `„${entry.path}“ konnte nicht abgeglichen werden und wird später erneut versucht (${applyError instanceof Error ? applyError.message : 'unbekannt'}).`)
+          }
           return 'conflict'
         }
         if (kind === 'blank' && base) return this.restoreInstead(entry, base, raw)
