@@ -23,7 +23,8 @@ const views = [
   ['pendeln', '/pendeln?demo'],
   ['einstellungen', '/einstellungen?demo'],
   ['anmelden', '/'],
-  ['about', '/about/'],
+  // The dev server sends /about/ to the app; the file itself is the landing page (nginx serves /about/ as it).
+  ['about', '/about/index.html'],
   ['404', '/404.html'],
 ]
 const sizes = { desktop: { width: 1440, height: 900 }, tablet: { width: 820, height: 1100 }, phone: { width: 390, height: 780 } }
@@ -32,7 +33,7 @@ const themes = (process.env.THEMES || 'light,dark').split(',')
 
 let server
 if (!process.env.BASE_URL) {
-  server = spawn('npx', ['vite', '--port', String(port), '--strictPort', '--host', '127.0.0.1'], { cwd: root, stdio: 'ignore' })
+  server = spawn('npx', ['vite', '--port', String(port), '--strictPort', '--host', '127.0.0.1'], { cwd: root, stdio: 'ignore', detached: true })
   for (let i = 0; i < 60; i += 1) {
     try { if ((await fetch(base)).ok) break } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 500))
@@ -56,5 +57,6 @@ try {
   }
 } finally {
   await browser.close()
-  server?.kill()
+  // npx starts vite as a child: end the whole process group, or the dev server outlives the script.
+  if (server?.pid) try { process.kill(-server.pid) } catch { /* already gone */ }
 }

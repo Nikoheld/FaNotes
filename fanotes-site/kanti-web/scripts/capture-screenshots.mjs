@@ -37,7 +37,7 @@ const jobs = [
 
 let server
 if (!process.env.BASE_URL) {
-  server = spawn('npx', ['vite', '--port', String(port), '--strictPort', '--host', '127.0.0.1'], { cwd: root, stdio: 'ignore' })
+  server = spawn('npx', ['vite', '--port', String(port), '--strictPort', '--host', '127.0.0.1'], { cwd: root, stdio: 'ignore', detached: true })
   for (let i = 0; i < 60; i += 1) {
     try { if ((await fetch(base)).ok) break } catch { /* not up yet */ }
     await new Promise((r) => setTimeout(r, 500))
@@ -86,7 +86,8 @@ try {
   }
 } finally {
   await browser.close()
-  server?.kill()
+  // npx starts vite as a child: end the whole process group, or the dev server outlives the script.
+  if (server?.pid) try { process.kill(-server.pid) } catch { /* already gone */ }
   rmSync(work, { recursive: true, force: true })
 }
 console.log('total', total, 'bytes')
