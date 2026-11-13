@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Picker preview: the large step with invented lessons. Static, no list. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_surface"
+    android:clipToOutline="true"
+    android:orientation="vertical"
+    android:padding="16dp">
+    <TextView
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium" android:maxLines="1"
+        android:text="@string/widget_kicker" android:textColor="@color/widget_accent" android:textSize="13sp" />
+    <TextView
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium" android:maxLines="1" android:paddingTop="2dp"
+        android:text="@string/widget_preview_l1" android:textColor="@color/widget_text" android:textSize="20sp" />
+    <TextView
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:maxLines="1" android:paddingTop="2dp"
+        android:text="@string/widget_preview_l1_detail" android:textColor="@color/widget_muted" android:textSize="14sp" />
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:gravity="center_vertical" android:orientation="horizontal">
+        <TextView android:layout_width="56dp" android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium" android:text="@string/widget_preview_t1" android:textColor="@color/widget_accent" android:textSize="14sp" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:fontFamily="sans-serif-medium" android:maxLines="1" android:text="@string/widget_preview_l2"
+            android:textColor="@color/widget_text" android:textSize="14sp" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:maxLines="1" android:text="@string/widget_preview_room2" android:textColor="@color/widget_muted" android:textSize="12sp" />
+    </LinearLayout>
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="10dp" android:gravity="center_vertical" android:orientation="horizontal">
+        <TextView android:layout_width="56dp" android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium" android:text="@string/widget_preview_t2" android:textColor="@color/widget_accent" android:textSize="14sp" />
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:fontFamily="sans-serif-medium" android:maxLines="1" android:text="@string/widget_preview_l3"
+            android:textColor="@color/widget_text" android:textSize="14sp" />
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:background="@drawable/widget_pill_accent" android:fontFamily="sans-serif-medium" android:maxLines="1"
+            android:paddingStart="8dp" android:paddingEnd="8dp" android:paddingTop="2dp" android:paddingBottom="2dp"
+            android:text="@string/exam" android:textColor="@color/widget_on_accent_container" android:textSize="11sp" />
+    </LinearLayout>
+</LinearLayout>
