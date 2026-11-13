@@ -870,7 +870,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     const read = prepareAgendaRead(stored?.version === 1 ? stored.weeks || {} : {}, snapshot)
     // Durable before any diff/push; a crash cannot turn an imported week into a second first read.
     await writeJson(path, { version: 1, weeks: read.weeks })
-    return diffSnapshots(previous ? { ...previous, events: read.before.events.filter(isLesson).concat((previous.events || []).filter((event) => !isLesson(event) && !isExamLike(event))), exams: read.before.exams } : null, snapshot, resolvedAlertSettings(settings))
+    // The runtime's own clock decides what is past (tests run it at a fixed time; production passes the real one).
+    const at = now()
+    return diffSnapshots(previous ? { ...previous, events: read.before.events.filter(isLesson).concat((previous.events || []).filter((event) => !isLesson(event) && !isExamLike(event))), exams: read.before.exams } : null, snapshot, resolvedAlertSettings(settings), zurichToday(at), at)
   }
 
   const accountStillExists = options.syncAccountExists || syncAccountExists
