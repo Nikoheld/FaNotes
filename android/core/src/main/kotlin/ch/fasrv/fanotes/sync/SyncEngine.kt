@@ -207,6 +207,9 @@ class SyncEngine(
     private var disposed = false
     private var queued = false
     private var timer: Job? = null
+    /** The timer job that is inside a sync cycle right now. It is never cancelled from outside. */
+    private var cycleJob: Job? = null
+    private var autoPaused = false
     private var debounce: Job? = null
     private val cleared = mutableSetOf<String>()
 
@@ -217,6 +220,7 @@ class SyncEngine(
     suspend fun start() = onEngine {
         val current = host ?: return@onEngine
         disposed = false
+        autoPaused = false
         vaultId = current.vaultId()
         val secrets = parseSecrets(current.readSecrets())
         if (secrets == null) {
@@ -230,13 +234,15 @@ class SyncEngine(
 
     /** Stop the automatic timer so a background process does not keep syncing every minute. */
     fun pauseAutomaticSync() {
-        timer?.cancel()
+        autoPaused = true
+        cancelTimer()
         timer = null
         debounce?.cancel()
         debounce = null
     }
 
     fun resumeAutomaticSync() {
+        autoPaused = false
         scope.launch {
             val retry = memoryPaused || memoryCooling
             if (retry) clearMemoryHold()
@@ -452,6 +458,10 @@ class SyncEngine(
             schedule(AUTO_INTERVAL_MS)
         } catch (_: OutOfMemoryError) {
             memoryFailure()
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            // The cycle was stopped (app closed, engine disposed). That is neither a failure nor offline.
+            publish(state.value.copy(status = SyncStatus.IDLE, progress = null, error = null))
+            throw error
         } catch (error: Exception) {
             if (error is SyncDocumentLimitException || error is JsonLimitException) {
                 // A single oversized file is skipped at the file boundary. What
@@ -489,7 +499,7 @@ class SyncEngine(
         emergencyReserve = null
         memoryStrikes += 1
         queued = false
-        timer?.cancel()
+        cancelTimer()
         debounce?.cancel()
         // Do not serialize state here. A transient spike retries on its own;
         // opening the app again and a manual sync both clear the hold.
@@ -823,6 +833,8 @@ class SyncEngine(
         requireSyncDocumentBudget(entry.path, entry.size)
         val raw = try {
             currentHost.read(entry.path)
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
         } catch (_: Exception) {
             return "skipped"
         }
@@ -1192,13 +1204,25 @@ class SyncEngine(
         options.onSignedOut(reason)
     }
 
+    /** Cancels a pending timer delay, never a cycle that is already running. */
+    private fun cancelTimer() {
+        val current = timer
+        if (current != null && current !== cycleJob) current.cancel()
+    }
+
     private fun schedule(delay: Long) {
         if (memoryPaused || memoryCooling) return
         if (disposed || session == null) return
-        timer?.cancel()
+        // Paused while a cycle was running: the cycle finishes, but it does not re-arm the timer.
+        if (autoPaused && delay > 0L) return
+        cancelTimer()
         timer = scope.launch {
             if (delay > 0) delay(delay)
-            if (!disposed && (options.automatic() || delay == 0L)) syncNowOnEngine("timer")
+            if (!disposed && (options.automatic() || delay == 0L)) {
+                // Marks this job as running a cycle, so pause and reschedule never cancel it mid-flight.
+                cycleJob = kotlin.coroutines.coroutineContext[Job]
+                try { syncNowOnEngine("timer") } finally { if (cycleJob === kotlin.coroutines.coroutineContext[Job]) cycleJob = null }
+            }
             else if (!disposed) schedule(AUTO_INTERVAL_MS)
         }
     }
