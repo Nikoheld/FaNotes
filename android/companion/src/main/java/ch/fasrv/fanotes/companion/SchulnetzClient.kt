@@ -85,6 +85,8 @@ import ch.fasrv.fanotes.schulnetz.parseTokenJson
 import ch.fasrv.fanotes.schulnetz.readAbsenceStatement
 import ch.fasrv.fanotes.schulnetz.withAbsenceStatement
 import ch.fasrv.fanotes.schulnetz.readExamsPage
+import ch.fasrv.fanotes.schulnetz.dedupeExams
+import ch.fasrv.fanotes.schulnetz.withOwnExams
 import ch.fasrv.fanotes.schulnetz.readGradesPage
 import ch.fasrv.fanotes.schulnetz.readTerminliste
 import ch.fasrv.fanotes.schulnetz.refreshTokenForm
@@ -651,13 +653,14 @@ class SchulnetzClient(
             }
         }
         if (termine.value.isNotEmpty()) events = mergeById(events, termine.value)
-        val examEvents = mergeById(
+        // An exam listed both in the timetable and in the overview is one exam.
+        val examEvents = dedupeExams(mergeById(
             mergeById(
                 overlayDated(previous?.exams.orEmpty(), examWeeks.values.flatten(), examWeeks.keys.map { it.toString() }.toSet()),
                 lessonWeeks.values.flatten().filter { it.isExamLike() },
             ),
             icalExams,
-        )
+        ))
         val messages = startMessages(pages["1"].orEmpty(), previous, sawSessionProblem)
         if (events.isEmpty() && planHtml.length > 1000 && !planHtml.contains("dhx_cal_container") && !timetableFailed) {
             errors += "Stundenplan: Seite geladen, aber nicht lesbar"
@@ -691,7 +694,7 @@ class SchulnetzClient(
             timetableFailed = timetableFailed,
             okPages = okPages,
             gradesComplete = !pages["21311"].isNullOrBlank() && grades.error == null,
-        )
+        ).withOwnExams() // the class overview lists the whole Abteilung; keep the student's courses
         trace("parsed grades=${snapshot.grades.size} absences=${snapshot.absences.size} exams=${snapshot.exams.size} events=${snapshot.events.size} termine=${termine.value.size} weeks=${if (timetableFailed) 0 else refreshedLessons.size} okPages=$okPages oauth=${oauthPage.orEmpty()} blocked=$blocked timetableFailed=$timetableFailed errors=${errors.size} $context")
         val problem = when {
             oauthPage != null -> SessionProblem.OAUTH_FAILED
@@ -731,7 +734,7 @@ class SchulnetzClient(
                 gradesReadComplete = read.error == null && read.value.isNotEmpty())
         }
         "21111" -> snapshot.withAbsenceStatement(readAbsenceStatement(html).value)
-        "21312" -> snapshot.copy(exams = readExamsPage(html).value.ifEmpty { snapshot.exams })
+        "21312" -> snapshot.copy(exams = readExamsPage(html).value.ifEmpty { snapshot.exams }).withOwnExams()
         // Appointments merge by id; lessons reuse ids across weeks and are never deduplicated by id.
         "22108" -> snapshot.copy(events = mergeById(snapshot.events, readTerminliste(html).value))
         "21411" -> snapshot.copy(konto = parseKontoauszug(html).ifEmpty { snapshot.konto }, kontoSaldo = parseKontoSaldo(html).ifBlank { snapshot.kontoSaldo })

@@ -139,6 +139,11 @@ fun diffSnapshots(
     if (previous == null) return emptyList()
     // The master switch drops the diff before any row is built. Callers still store the snapshot.
     if (!settings.enabled) return emptyList()
+    // Only the student's own exams are news. A foreign exam that the filter now drops from the stored
+    // list leaves silently, so both sides are filtered before they are compared.
+    val lessonPool = next.events + previous.events
+    val previous = previous.copy(exams = ownExams(previous.exams, lessonPool).exams)
+    val next = next.copy(exams = ownExams(next.exams, lessonPool).exams)
     val freshWeeks = introducedWeeks(previous, next) + legacyBackfillWeeks(previous, next) + lessonSeedWeeks(previous, next)
     val changes = mutableListOf<SchulnetzChange>()
     if (settings.grades) diffGrades(previous.grades.withoutSummaryGrades(), next.grades.withoutSummaryGrades(), changes)

@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { GRADE_PARSER_VERSION, addDays, lessonCheckWeeks, isLesson, carryTimetableExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, addDays, lessonCheckWeeks, isLesson, carryTimetableExams, ownExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -280,6 +280,8 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       }
     }
   }
+  // Only the student's own exams leave the scraper (the class overview lists the whole Abteilung).
+  const own = ownExams(exams, events)
   return {
     problem: pages.problem || '',
     lessonsRead: Boolean(options.gradesOnly && lessonCheck.length && !pages.problem && pages['22202']),
@@ -287,7 +289,8 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
     gradeParser: GRADE_PARSER_VERSION,
     gradesRead: !pages.problem && Boolean(pages['21311']),
     events,
-    exams,
+    exams: own.exams,
+    examsUnfiltered: own.unfiltered,
     startHtml: pages['1'] || '',
     absencesHtml: pages['21111'] || '',
     kontoHtml: pages['21411'] || '',
