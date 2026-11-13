@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.31
+
+- Fix: "FaNotes ist offline" no longer shows on every app start. While the app connects it keeps showing your saved data; "offline" appears only after repeated failed attempts or when the phone has no network for a few seconds, and disappears as soon as the connection is back.
+- Android: the back gesture now shows the system preview (back to home, previous page) on Android 13 to 16. Back closes a search first, then goes back one page; the school sign-in goes back inside the web page while it can.
+
 ## 2026.11.2-beta.30
 
 - Never write an empty handwriting page over a note whose ink has not loaded.
