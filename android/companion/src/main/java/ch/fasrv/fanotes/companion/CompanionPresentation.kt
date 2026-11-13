@@ -202,10 +202,10 @@ fun formatSchoolStamp(value: java.time.temporal.TemporalAccessor, pattern: Strin
  * FaNotes sync only. A school-only session does not get this banner, and the action never
  * points at the school connection. School reconnect stays on its own banner.
  */
-fun faNotesSyncCopy(status: SyncStatus, notesAccount: Boolean): Triple<Int, Int, Boolean>? {
+fun faNotesSyncCopy(status: SyncStatus, notesAccount: Boolean, offlineConfirmed: Boolean = true): Triple<Int, Int, Boolean>? {
     if (!notesAccount) return null
     return when (status) {
-        SyncStatus.OFFLINE -> Triple(R.string.fanotes_offline, R.string.fanotes_offline_body, false)
+        SyncStatus.OFFLINE -> if (!offlineConfirmed) null else Triple(R.string.fanotes_offline, R.string.fanotes_offline_body, false)
         SyncStatus.ERROR -> Triple(R.string.fanotes_sync_needs_attention, R.string.fanotes_offline_body, true)
         else -> null
     }

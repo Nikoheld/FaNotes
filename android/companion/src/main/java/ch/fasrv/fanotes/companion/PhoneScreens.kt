@@ -172,7 +172,8 @@ fun CompanionRoot(model: CompanionModel) {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.TopCenter) {
                     Column(Modifier.fillMaxHeight().widthIn(max = 840.dp).fillMaxWidth()) {
                         if (model.busy || sync.status == SyncStatus.SYNCING) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp), trackColor = LocalCompanionSemantics.current.sunken)
-                        val syncCopy = if (route.destination == Destination.Today) null else faNotesSyncCopy(sync.status, model.notesAccount)
+                        val syncBanner = rememberFaNotesSyncCopy(sync.status, model.notesAccount, model.syncOffline, LocalOnline.current)
+                        val syncCopy = if (route.destination == Destination.Today) null else syncBanner
                         if (syncCopy != null) {
                             Box(Modifier.padding(horizontal = Space.page, vertical = 8.dp)) {
                                 InfoBanner(t(syncCopy.first), t(syncCopy.second), t(R.string.account_sync), error = syncCopy.third, tone = if (syncCopy.third) StateTone.Error else StateTone.Offline) { model.navigate(Page.Connections) }
