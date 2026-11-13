@@ -10,6 +10,7 @@
 - Exams that disappear because of this fix leave silently, without an "exam removed" notice. If your timetable has not loaded yet, nothing is hidden until it has.
 - Fix: "FaNotes ist offline" no longer shows on every app start. While the app connects it keeps showing your saved data; "offline" appears only after repeated failed attempts or when the phone has no network for a few seconds, and disappears as soon as the connection is back.
 - Android: the back gesture now shows the system preview (back to home, previous page) on Android 13 to 16. Back closes a search first, then goes back one page; the school sign-in goes back inside the web page while it can.
+- Widgets: the home-screen widgets (Nächste Lektion, Pendeln) are redesigned to match the app: a clear header, whole rows at every size (nothing cut off), Material You colours in light and dark, rounded corners, and clear states for signed out, timetable not loaded, holidays, no route, loading and offline. Their titles follow the app language.
 
 ## 2026.11.2-beta.30
 
