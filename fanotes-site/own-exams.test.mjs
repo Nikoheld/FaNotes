@@ -115,3 +115,15 @@ test('an unloaded timetable keeps the old diff behaviour', () => {
   const none = { ...base, events: [] }
   assert.deepEqual(titles(none, { ...none, exams: [exam('e2', 'Chx_2.3_Salt Test 2')] }), ['Neue Prüfung'])
 })
+
+test('an all-day exam listed twice under different ids is one exam; different courses or days stay apart', () => {
+  const allDay = (id, courseName, day = '2099-02-10') => ({ ...exam(id, courseName, day), start: `${day}T00:00:00`, end: `${day}T00:00:00` })
+  const first = allDay('7', 'Phy 2.3 Test Kapitel 4')
+  const twin = allDay('12', 'Phy 2.3 Test Kapitel 4')
+  assert.deepEqual(ids(carryTimetableExams([], [first, twin])), ['7'])
+  assert.equal(carryTimetableExams([], [first, allDay('13', 'Mat_G24a_Holm Test 1')]).length, 2, 'another course on the same day')
+  assert.equal(carryTimetableExams([], [first, allDay('14', 'Phy 2.3 Test Kapitel 4', '2099-02-11')]).length, 2, 'the same course on another day')
+  // The stored list still has both copies; collapsing them is not news.
+  const previous = { events: timetable, exams: [first, twin], examWeekFetched: {} }
+  assert.equal(diffSnapshots(previous, { ...previous, exams: carryTimetableExams([], [first, twin]) }).filter((change) => change.category === 'exam').length, 0)
+})

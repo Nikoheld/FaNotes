@@ -2394,12 +2394,23 @@ const diffExams = (previous, next, changes, skipWeeks) => {
   }
 }
 
+/**
+ * Two all-day entries (no clock) of the same exam: the class overview can list one exam twice under
+ * different ids. Same day, same label and same course name, so two different exams are never merged.
+ * Kotlin mirror: sameAllDayExam (AgendaBaseline.kt).
+ */
+const sameAllDayExam = (left, right) => !eventClock(left) && !eventClock(right) &&
+  Boolean(eventDay(left)) && eventDay(left) === eventDay(right) &&
+  Boolean(examLabel(left)) && examLabel(left) === examLabel(right) &&
+  cleanSchulnetzText(left.courseName).toLowerCase() === cleanSchulnetzText(right.courseName).toLowerCase()
+
 const distinctExams = (events) => {
   const out = []
   for (const event of events) {
     const index = out.findIndex((candidate) =>
       (sameExamId(candidate, event) && schoolStamp(candidate.start) === schoolStamp(event.start) && schoolStamp(candidate.end) === schoolStamp(event.end)) ||
-      (eventClock(candidate) && eventClock(event) && sameExamSlot(candidate, event)))
+      (eventClock(candidate) && eventClock(event) && sameExamSlot(candidate, event)) ||
+      sameAllDayExam(candidate, event))
     if (index < 0) out.push(event)
     else if (!completeExamTime(out[index]) && completeExamTime(event)) out[index] = event
   }

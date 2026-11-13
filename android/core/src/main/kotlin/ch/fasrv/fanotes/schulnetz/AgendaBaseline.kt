@@ -113,12 +113,27 @@ fun AgendaRead.comparison(previous: SchulnetzSnapshot?): SchulnetzSnapshot? = pr
     exams = before.exams,
 )
 
+/**
+ * Two all-day entries (no clock) of the same exam: the class overview can list one exam twice under
+ * different ids. Same day, same label and same course name, so two different exams are never merged.
+ * Server mirror: sameAllDayExam (schulnetz-logic.mjs).
+ */
+internal fun sameAllDayExam(left: AgendaEvent, right: AgendaEvent): Boolean {
+    fun label(event: AgendaEvent) = listOf(event.text, event.timetableText, event.courseName)
+        .map { cleanSchulnetzText(it).lowercase() }.firstOrNull { it.isNotBlank() }.orEmpty()
+    return eventClock(left).isBlank() && eventClock(right).isBlank() &&
+        eventDay(left).isNotBlank() && eventDay(left) == eventDay(right) &&
+        label(left).isNotBlank() && label(left) == label(right) &&
+        cleanSchulnetzText(left.courseName).lowercase() == cleanSchulnetzText(right.courseName).lowercase()
+}
+
 internal fun distinctExams(events: List<AgendaEvent>): List<AgendaEvent> {
     val out = mutableListOf<AgendaEvent>()
     for (event in events) {
         val index = out.indexOfFirst { candidate ->
             (sameExamId(candidate, event) && candidate.startsAt() == event.startsAt() && candidate.endsAt() == event.endsAt()) ||
-                (eventClock(candidate).isNotBlank() && eventClock(event).isNotBlank() && sameExamSlot(candidate, event))
+                (eventClock(candidate).isNotBlank() && eventClock(event).isNotBlank() && sameExamSlot(candidate, event)) ||
+                sameAllDayExam(candidate, event)
         }
         if (index < 0) out += event else if (!completeExamTime(out[index]) && completeExamTime(event)) out[index] = event
     }

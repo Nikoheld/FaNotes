@@ -81,6 +81,15 @@ class OwnExamsTest {
     }
 
     @Test
+    fun `an all-day exam listed twice under different ids is one exam, other courses and days stay apart`() {
+        fun allDay(id: String, name: String, day: String = "2099-02-10") = exam(id, name, day).copy(start = "${day}T00:00:00", end = "${day}T00:00:00")
+        val first = allDay("7", "Phy 2.3 Test Kapitel 4")
+        assertEquals(listOf("7"), dedupeExams(listOf(first, allDay("12", "Phy 2.3 Test Kapitel 4"))).map { it.id })
+        assertEquals(2, dedupeExams(listOf(first, allDay("13", "Mat_G24a_Holm Test 1"))).size)
+        assertEquals(2, dedupeExams(listOf(first, allDay("14", "Phy 2.3 Test Kapitel 4", "2099-02-11"))).size)
+    }
+
+    @Test
     fun `a stored snapshot loses foreign exams when it is read`() {
         val stored = SchulnetzSnapshot(events = timetable, exams = listOf(exam("e1", "Mat_G24a_Holm Test 1"), exam("e2", "Chx_2.3_Salt Test 2")))
         assertEquals(listOf("e1"), ids(parseNormalizedSnapshot(stored.toNormalizedJson())!!.exams))
