@@ -2,6 +2,10 @@
 
 ## 2026.11.2-beta.31
 
+- Pendeln: the train card on Heute now sits under "Von der Schule" (Android and browser).
+- Pendeln: via stops stay exactly as you enter them. A via equal to the start or the destination is kept, so loop routes like Brugg - Aarau - Lenzburg - Aarau work and are no longer cleaned up on sync.
+- Pendeln: far fewer false "Anschluss gefährdet / verpasst". A change is judged by the official transfer time of the timetable (for example 4 min at Aarau) instead of a fixed extra margin, and the detail shows it ("Umsteigen in Aarau · 4 min (mind. 4 min)").
+- Pendeln: for the way home after the last lesson, the setting is now your walking time from school to the stop (default 5 min instead of a 10 min buffer), and a train you cannot reach in time is no longer shown first.
 - Fix: Prüfungen shows only your own exams. The Prüfungsplan lists the whole Abteilung; exams of courses you do not attend (another group or class) are no longer listed, planned, shown in the widget or in Kanti+ im Browser, and never trigger a notification.
 - Exams that disappear because of this fix leave silently, without an "exam removed" notice. If your timetable has not loaded yet, nothing is hidden until it has.
 

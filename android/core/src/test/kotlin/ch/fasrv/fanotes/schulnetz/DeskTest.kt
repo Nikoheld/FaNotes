@@ -98,7 +98,7 @@ class DeskTest {
         assertTrue(changeIsHidden(change, series))
         assertFalse(changeIsHidden(change.copy(category = "grade"), series))
         val prefs = parseDeskPrefs(serializeDeskPrefs(DeskPrefs(hiddenCards = listOf("tasks"), showPluspunkte = false, startTab = "Noten")))
-        assertEquals(listOf("pluspunkte", "lessons", "commute", "exam", "grades", "absences", "events"), shownTodayCards(prefs))
+        assertEquals(listOf("pluspunkte", "lessons", "exam", "grades", "absences", "events", "commute"), shownTodayCards(prefs))
         assertEquals("Noten", prefs.startTab)
         assertEquals(DEFAULT_NAV_BAR, prefs.navBar)
         assertFalse(prefs.showPluspunkte)

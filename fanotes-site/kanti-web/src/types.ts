@@ -286,7 +286,20 @@ export interface TripDetail {
   sources?: TripSources
 }
 
-export interface Transfer { at: string; minutes: number; plannedMinutes: number; broken: boolean; tight: boolean }
+export interface Transfer {
+  at: string
+  /** The time beyond the footpath (older apps); `gapMinutes` is the whole change. */
+  minutes: number
+  plannedMinutes: number
+  broken: boolean
+  tight: boolean
+  gapMinutes?: number
+  plannedGapMinutes?: number
+  walkMinutes?: number
+  /** Official minimum change time; null when none is known (never guessed). */
+  requiredMinutes?: number | null
+  requiredSource?: 'timetable' | 'planned' | 'default' | 'unknown'
+}
 
 export type TripStatus = 'ok' | 'delayed' | 'cancelled' | 'broken'
 export interface TripIssue { kind: 'cancelled' | 'missedTransfer' | 'platformChange' | 'delay' | 'disruption'; text: string }

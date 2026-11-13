@@ -176,7 +176,7 @@ fun ScheduleEditor(schedule: Schedule, onChange: (Schedule) -> Unit) {
             ScheduleMode.NONE.wire to t(R.string.commute_mode_none), ScheduleMode.TIMES.wire to t(R.string.commute_mode_times),
             ScheduleMode.FIRST_LESSON.wire to t(R.string.commute_mode_first), ScheduleMode.LAST_LESSON.wire to t(R.string.commute_mode_last),
         ),
-        schedule.mode.wire, { onChange(schedule.copy(mode = ScheduleMode.of(it))) },
+        schedule.mode.wire, { onChange(schedule.withMode(ScheduleMode.of(it))) },
     )
     Text(
         when (schedule.mode) {
@@ -193,6 +193,7 @@ fun ScheduleEditor(schedule: Schedule, onChange: (Schedule) -> Unit) {
         BufferStepper(
             if (schedule.mode == ScheduleMode.FIRST_LESSON) t(R.string.commute_buffer_first, schedule.bufferMinutes) else t(R.string.commute_buffer_last, schedule.bufferMinutes),
             schedule.bufferMinutes,
+            max = if (schedule.mode == ScheduleMode.LAST_LESSON) MAX_WALK_MINUTES else MAX_BUFFER_MINUTES,
         ) { onChange(schedule.copy(bufferMinutes = it)) }
     }
 }
@@ -239,11 +240,11 @@ private fun WeekdayPicker(days: List<Int>, onChange: (List<Int>) -> Unit) {
 }
 
 @Composable
-private fun BufferStepper(label: String, minutes: Int, onChange: (Int) -> Unit) {
+private fun BufferStepper(label: String, minutes: Int, max: Int, onChange: (Int) -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).background(LocalCompanionSemantics.current.sunken, MaterialTheme.shapes.medium).padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
         ActionIcon(Icons.Outlined.Remove, t(R.string.commute_less), enabled = minutes > 0) { onChange((minutes - 5).coerceAtLeast(0)) }
-        ActionIcon(Icons.Outlined.Add, t(R.string.commute_more), enabled = minutes < MAX_BUFFER_MINUTES) { onChange((minutes + 5).coerceAtMost(MAX_BUFFER_MINUTES)) }
+        ActionIcon(Icons.Outlined.Add, t(R.string.commute_more), enabled = minutes < max) { onChange((minutes + 5).coerceAtMost(max)) }
     }
 }
 

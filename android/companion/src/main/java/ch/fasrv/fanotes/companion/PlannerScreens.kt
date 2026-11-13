@@ -196,10 +196,6 @@ fun TodayScreen(model: CompanionModel) {
                 }
             }
         }
-        if ("commute" in cards && !model.demo) item(key = "commute") {
-            CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail, onOpenTrip = model::openCommuteTrip,
-                onAdd = { model.editCommuteRoute(null) }, modifier = Modifier.padding(top = 12.dp), onRepick = { model.editCommuteRoute(it, openPicker = true) })
-        }
         if ("tasks" in cards) {
             item(key = "tasks-head") { SectionLabel(t(R.string.on_your_list), if (urgent.isEmpty()) t(R.string.tasks) else t(R.string.all_2, urgent.size)) { model.openPlanner(true) } }
             if (!ready) item(key = "tasks-loading") { SkeletonRows(2) }
@@ -265,6 +261,11 @@ fun TodayScreen(model: CompanionModel) {
                     }
                 }
             }
+        }
+        // The commute card closes the "Von der Schule" section; without that section it sits after the Mensa card, before the notes.
+        if ("commute" in cards && !model.demo) item(key = "commute") {
+            CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail, onOpenTrip = model::openCommuteTrip,
+                onAdd = { model.editCommuteRoute(null) }, modifier = Modifier.padding(top = if (gradesShown || pointsShown || updatesShown || absencesShown) 8.dp else 12.dp), onRepick = { model.editCommuteRoute(it, openPicker = true) })
         }
         if (model.notesAccount) {
             item(key = "notes-head") { SectionLabel(t(R.string.pick_up_a_note), t(R.string.library)) { model.select(Destination.Notes) } }

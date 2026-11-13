@@ -18,14 +18,17 @@ Schedule = {
   mode: 'none' | 'times' | 'firstLesson' | 'lastLesson'
   times: string[]          // 'HH:MM' departure times, mode 'times' only (max 6)
   days: number[]           // 1 = Monday … 7 = Sunday; default [1,2,3,4,5]
-  bufferMinutes: number    // firstLesson: arrive this early; lastLesson: leave this long after the end (0–60, default 10)
+  bufferMinutes: number    // firstLesson: arrive this many minutes early (0–60, default 10).
+                           // lastLesson: WALKING TIME from school to the first stop (default 5 when missing; the apps offer 0–30):
+                           // the target is the real end of the last held lesson + this. Stored values stay.
 }
 
 Route = {
   id: string               // 12 hex chars, made by the client
   name: string             // e.g. 'Schule', max 40 chars; '' → client shows "from → to"
   from: Stop; to: Stop
-  vias: Stop[]             // 0–2 ordered via stops (search.ch via[] in order); duplicates and the ends are dropped
+  vias: Stop[]             // 0–2 ordered via stops (search.ch via[] in order), kept exactly as entered: order, duplicates and vias equal to
+                           // the origin or destination stay (loop routes, e.g. Brugg → Aarau via Aarau, Lenzburg). Only invalid stops are dropped.
   via: Stop | null         // = vias[0], read-only compatibility for clients older than two vias.
                            // PUT: `vias` wins; a body with only `via` (old client) is read as [via].
   schedule: Schedule
@@ -97,7 +100,24 @@ Position = {               // where the trip is now (from real times; planned wh
   estimated: boolean       // a time it relies on has no real-time value
 }
 
-Transfer = { at: string; minutes: number; plannedMinutes: number; broken: boolean; tight: boolean }
+Transfer = {
+  at: string               // the stop where the next ride leaves
+  minutes: number          // gap minus footpath (older apps): the time beyond the walk
+  plannedMinutes: number   // the same with planned times
+  broken: boolean          // "Anschluss verpasst": shortfall > 2 min, a negative gap, or the next ride is cancelled
+  tight: boolean           // "Anschluss gefährdet": below the official minimum by 1–2 min, still possible with a quick change
+  gapMinutes: number       // next ride's departure − arrival (real times where known, else planned)
+  plannedGapMinutes: number
+  walkMinutes: number      // footpath minutes of the walk legs between the two rides (0 when none)
+  requiredMinutes: number | null   // the official minimum change time; null when unknown (never guessed)
+  requiredSource: 'timetable' | 'planned' | 'default' | 'unknown'
+}
+// Rule per change: required = footpath (walk legs, normal_time ?? runningtime) or the leaving ride's
+// `normal_time` (Leg.changeMinutes, seconds → minutes; absent on a first leg). If plannedGap < required the
+// timetable itself plans a shorter change: required = max(0, plannedGap), source 'planned'. shortfall = required − gap:
+// ≤ 0 ok; 0 < shortfall ≤ 2 (TRANSFER_GRACE_MIN) and gap ≥ 0 tight; otherwise broken. Unknown minimum: only gap < 0 is broken.
+// Chained trips (see Vias) use CHAIN_TRANSFER_MIN = 4 as a default ('default'). transport.opendata.ch has no
+// normal_time: the footpath of a walk section, otherwise unknown. Push alerts: broken and cancelled push, tight does not.
 
 Trip = {
   id: string               // stable for the same vehicles: first ride's line + planned departure + last arrival
@@ -140,6 +160,7 @@ RouteBoard = {
   trips: Trip[]             // up to 4 next usable trips for the target, best first
   alternatives: Trip[]      // when trips[0] is cancelled/broken: the next best trips (via kept if possible)
   viaDropped: boolean       // alternatives had to leave out the via stops
+                            // lastLesson before lesson end + walking time: trips leaving earlier are not listed (unreachable from school)
   pinned: PinnedState | null    // pinned routes only; the UI focuses on pinned.trip, `trips` minus it = "andere Verbindungen"
   change: Trip | null       // pinned + lesson change: the earlier way home / later way to school
   updatedAt: string
@@ -189,3 +210,22 @@ Tracked trip = the trip `/commute/board` would put first for a route's next targ
 travel window (from 75 minutes before departure until arrival). The server checks tracked trips
 every 60 s in the last 20 minutes before departure, every 3 minutes before that, and once at
 05:30 / when lessons change for the day's lesson-tied targets. Outside windows nothing is polled.
+
+## Vias
+
+The vias a client sends are stored and returned exactly as entered (up to 2; see `Route.vias`), so a
+route Brugg → Aarau via Aarau and Lenzburg keeps both. The server passes them to search.ch as `via[]` in
+order and, inside the provider (board, alternatives, pinned lookup, `/commute/trip`, `/commute/trips`,
+`/commute/connections` and the background check), keeps only trips that pass the vias in order: the
+trip's point sequence is its start, then every ride's boarding stop, intermediate stops and exit;
+a via matches a point by stop id, else by case-insensitive name; vias must match at increasing indices
+`0 < i1 < i2 < last`. If no trip survives (or the provider fails) and the vias contain a loop (a via equals
+the start, the destination or the other via), the server chains segment searches from→via1, via1→via2,
+via2→to (depart: each next segment leaves at or after the previous arrival + the minimum transfer time;
+arrive: backward from the last segment) into one trip evaluated like any other (ids, pins, changes, status).
+Each segment search counts against the route budget and is cached for 30 s. A route without a loop whose
+trips the guard cannot verify keeps the provider's trips.
+
+New leg field `changeMinutes: number | null` (official minimum change before this ride, or a walk leg's
+footpath minutes). Chained trips set it to `CHAIN_TRANSFER_MIN` (4) on the first ride of each later
+segment and `changeDefault: true`.

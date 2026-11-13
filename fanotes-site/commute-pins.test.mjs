@@ -46,7 +46,7 @@ test('routes keep up to two ordered vias; an old single via still reads and is m
   assert.deepEqual(old.vias.map((item) => item.name), ['V'])
   assert.equal(old.via.name, 'V')
   const [two] = sanitizeRoutes([{ id: 'a1b2c3d4e5f6', from: stop('A', '1'), to: stop('B', '2'), via: stop('Ignored', '9'), vias: [stop('V2', '5'), stop('V1', '4'), stop('V2', '5'), stop('A', '1'), stop('V3', '6')] }])
-  assert.deepEqual(two.vias.map((item) => item.name), ['V2', 'V1'], 'order kept, duplicates and route ends dropped, max 2')
+  assert.deepEqual(two.vias.map((item) => item.name), ['V2', 'V1'], 'order and duplicates kept exactly as entered, max 2')
   assert.equal(two.via.name, 'V2')
   const [none] = sanitizeRoutes([{ id: 'a1b2c3d4e5f6', from: stop('A', '1'), to: stop('B', '2') }])
   assert.deepEqual([none.vias, none.via, none.pins], [[], null, []])
