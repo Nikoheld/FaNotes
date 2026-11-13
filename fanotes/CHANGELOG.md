@@ -8,6 +8,8 @@
 - Pendeln: for the way home after the last lesson, the setting is now your walking time from school to the stop (default 5 min instead of a 10 min buffer), and a train you cannot reach in time is no longer shown first.
 - Fix: Prüfungen shows only your own exams. The Prüfungsplan lists the whole Abteilung; exams of courses you do not attend (another group or class) are no longer listed, planned, shown in the widget or in Kanti+ im Browser, and never trigger a notification.
 - Exams that disappear because of this fix leave silently, without an "exam removed" notice. If your timetable has not loaded yet, nothing is hidden until it has.
+- Fix: "FaNotes ist offline" no longer shows on every app start. While the app connects it keeps showing your saved data; "offline" appears only after repeated failed attempts or when the phone has no network for a few seconds, and disappears as soon as the connection is back.
+- Android: the back gesture now shows the system preview (back to home, previous page) on Android 13 to 16. Back closes a search first, then goes back one page; the school sign-in goes back inside the web page while it can.
 
 ## 2026.11.2-beta.30
 

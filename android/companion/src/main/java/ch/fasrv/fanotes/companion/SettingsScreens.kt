@@ -154,7 +154,8 @@ fun SettingsScreen(model: CompanionModel, page: Page) {
                     Group {
                         Column(Modifier.padding(16.dp)) {
                             Text(sync.account?.email ?: t(R.string.work_on_this_device), style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            StatusLine(syncDescription(sync.status), when (sync.status) { SyncStatus.ERROR -> StateTone.Error; SyncStatus.OFFLINE -> StateTone.Offline; SyncStatus.IDLE -> StateTone.Accent; else -> StateTone.Neutral }, Modifier.padding(top = 6.dp))
+                            val shownStatus = shownSyncStatus(sync.status, rememberDebouncedFlag(model.syncOffline.confirmedOffline(LocalOnline.current)))
+                            StatusLine(syncDescription(shownStatus), when (shownStatus) { SyncStatus.ERROR -> StateTone.Error; SyncStatus.OFFLINE -> StateTone.Offline; SyncStatus.IDLE -> StateTone.Accent; else -> StateTone.Neutral }, Modifier.padding(top = 6.dp))
                             Text(t(R.string.your_notes_stay_available_offline_a_connected_ac), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 14.dp))
                             if (sync.account == null) PrimaryButton(t(R.string.connect_an_account), { model.navigate(Page.Auth) }, Modifier.fillMaxWidth())
                             else {

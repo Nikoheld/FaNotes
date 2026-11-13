@@ -268,6 +268,8 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
     var busy by mutableStateOf(false)
     /** A sync runs (opening the app, a pull, a push): a quiet "Aktualisiere…", never a blocking loader. */
     var syncing by mutableStateOf(false)
+    /** Consecutive offline sync attempts; one failure alone is not shown as offline. */
+    val syncOffline = SyncOfflineTracker()
     /** When the last sync succeeded, for "Aktualisiert 14:32". */
     var lastSyncOk by mutableStateOf(graph.lastSyncOk.value)
     var backgroundRefresh by mutableStateOf(graph.backgroundRefresh())
@@ -366,6 +368,7 @@ class CompanionModel(val graph: CompanionGraph) : ViewModel() {
         }
         viewModelScope.launch { graph.link.collect { link = it } }
         viewModelScope.launch { graph.syncing.collect { syncing = it } }
+        viewModelScope.launch { graph.engine.state.collect { syncOffline.onStatus(it.status) } }
         viewModelScope.launch { graph.lastSyncOk.collect { lastSyncOk = it } }
         viewModelScope.launch { graph.connections.collect { connections = it } }
         // Settings or hidden grades changed in the browser and were taken over.

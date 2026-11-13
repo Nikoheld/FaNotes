@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package ch.fasrv.fanotes.companion
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -97,6 +98,8 @@ fun InkPreview(document: InkDocument, modifier: Modifier = Modifier) {
 @Composable
 fun NotesScreen(model: CompanionModel) {
     var query by rememberSaveable { mutableStateOf("") }
+    // Back clears an active search before it leaves the screen.
+    BackHandler(enabled = query.isNotEmpty()) { query = "" }
     var mode by rememberSaveable { mutableStateOf("browse") }
     var results by remember { mutableStateOf<List<NoteResult>>(emptyList()) }
     var docs by remember { mutableStateOf<List<DocHit>>(emptyList()) }

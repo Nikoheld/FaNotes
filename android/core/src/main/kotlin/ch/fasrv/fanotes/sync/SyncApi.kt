@@ -275,6 +275,8 @@ class SyncApi(
                 throw error // A resource limit is not a transient network failure.
             } catch (error: SyncApiError) {
                 throw error
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error // A cancelled call is not a lost connection.
             } catch (error: Exception) {
                 last = error
                 if (attempt + 1 < attempts) continue

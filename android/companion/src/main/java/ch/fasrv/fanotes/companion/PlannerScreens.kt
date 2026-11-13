@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package ch.fasrv.fanotes.companion
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import android.Manifest
 import android.os.Build
@@ -150,7 +151,7 @@ fun TodayScreen(model: CompanionModel) {
                     if (online) SyncStamp(model.syncing, model.lastSyncOk, stamp, Modifier.padding(bottom = 12.dp))
                     else StatusLine(t(R.string.offline_last_updated, stamp), StateTone.Offline, Modifier.padding(bottom = 12.dp))
                 }
-                val syncCopy = faNotesSyncCopy(sync.status, model.notesAccount)
+                val syncCopy = rememberFaNotesSyncCopy(sync.status, model.notesAccount, model.syncOffline, online)
                 if (model.demo) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(R.string.demo_active_title), t(R.string.demo_active_body), t(R.string.demo_end), tone = StateTone.Warning, onAction = { model.stopDemo() }) }
                 if (model.link.needsReauth) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(R.string.reconnect_your_school), t(R.string.your_last_school_data_is_still_here), t(R.string.sign_in), tone = StateTone.Warning, onAction = { model.navigate(Page.Connections) }) }
                 else if (syncCopy != null) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(syncCopy.first), t(syncCopy.second), t(R.string.account_sync), error = syncCopy.third, tone = if (syncCopy.third) StateTone.Error else StateTone.Offline, onAction = { model.navigate(Page.Connections) }) }
@@ -782,6 +783,8 @@ fun TaskRow(task: HomeworkTask, today: LocalDate, onToggle: () -> Unit, colors: 
 @Composable
 private fun TasksScreen(model: CompanionModel) {
     var query by rememberSaveable { mutableStateOf("") }
+    // Back clears an active search before it leaves the screen.
+    BackHandler(enabled = query.isNotEmpty()) { query = "" }
     var task by remember { mutableStateOf<HomeworkTask?>(null) }
     var schoolTask by remember { mutableStateOf<SchoolHomework?>(null) }
     val today = rememberNow().atZone(ZoneId.systemDefault()).toLocalDate()
