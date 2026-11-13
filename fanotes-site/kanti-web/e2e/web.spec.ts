@@ -55,7 +55,8 @@ const visitEverything = async (page: Page, problems: string[]) => {
     const changed = page.locator('.entry-row', { hasText: CHANGED_SUBJECT })
     await expect(changed.getByText('Geändert')).toBeVisible()
     await changed.click()
-    await expect(page.getByText(`Vertretung: ${SUBSTITUTE}`)).toBeVisible()
+    // The details dialog names the substitute. (Before noon the same lesson is also the "next" card, so look in the dialog.)
+    await expect(page.getByRole('dialog').getByText(`Vertretung: ${SUBSTITUTE}`)).toBeVisible()
   })
   expect(problems).toEqual([])
 }

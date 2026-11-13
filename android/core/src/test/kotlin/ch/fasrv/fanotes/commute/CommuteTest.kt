@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes.commute
 
+import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.schulnetz.AgendaEvent
 import ch.fasrv.fanotes.schulnetz.HiddenLesson
 import ch.fasrv.fanotes.schulnetz.NotifySettings
@@ -293,5 +294,54 @@ class CommuteTest {
         assertNull(occupancyLevel(null))
         assertEquals(2, Occupancy(1, 2).worst())
         assertNotNull(board().boards.single().trips.single().firstRide())
+    }
+
+    private val brugg = Stop("8500309", "Brugg AG", StopType.TRAIN)
+    private val aarau = Stop("8502113", "Aarau", StopType.TRAIN)
+    private val lenzburg = Stop("8502119", "Lenzburg", StopType.TRAIN)
+
+    @Test
+    fun loopViasSurviveEditingSavingAndReading() {
+        // Brugg to Aarau via Aarau and Lenzburg: nothing drops a via equal to the destination.
+        var route = Route(id = "a1b2c3d4e5f6", from = brugg, to = aarau)
+        route = withViaAt(withViaAt(route, 0, aarau), 1, lenzburg)
+        assertEquals(listOf(aarau, lenzburg), route.vias)
+        val sent = commuteBody(listOf(route), CommuteSettings())
+        assertEquals(listOf(aarau, lenzburg), parseCommuteState(sent)!!.routes.single().vias)
+        // Duplicates and a via equal to the origin stay as entered.
+        val twice = withViaAt(withViaAt(route, 0, brugg), 1, brugg)
+        assertEquals(listOf(brugg, brugg), parseCommuteState(commuteBody(listOf(twice), CommuteSettings()))!!.routes.single().vias)
+        assertTrue(routeSavable(route))
+        val path = connectionsPath(brugg, aarau, route.vias, "2026-11-13T07:00:00+01:00")
+        assertTrue(path.contains("via=8502113&via=8502119"), path)
+    }
+
+    @Test
+    fun transferReadsTheOfficialMinimumAndNeverInventsOne() {
+        val state = parseTrips(
+            """{"trips":[{"id":"t","changes":[
+            {"at":"Aarau","minutes":0,"plannedMinutes":0,"broken":false,"tight":true,"gapMinutes":4,"plannedGapMinutes":4,"walkMinutes":0,"requiredMinutes":4,"requiredSource":"timetable"},
+            {"at":"Lenzburg","minutes":2,"plannedMinutes":2,"broken":false,"tight":false,"gapMinutes":2,"plannedGapMinutes":2,"walkMinutes":0,"requiredMinutes":null,"requiredSource":"unknown"},
+            {"at":"Old","minutes":3,"plannedMinutes":3,"broken":false,"tight":false}]}]}""",
+        ).single().changes
+        assertEquals(4, state[0].officialMinutes)
+        assertEquals(4, state[0].shownMinutes)
+        assertTrue(state[0].tight)
+        assertNull(state[1].officialMinutes)
+        assertEquals("unknown", state[1].requiredSource)
+        // An older server: no new fields, the old minutes are shown and no minimum.
+        assertNull(state[2].officialMinutes)
+        assertEquals(3, state[2].shownMinutes)
+    }
+
+    @Test
+    fun walkingTimeDefaultsToFiveForTheLastLesson() {
+        assertEquals(DEFAULT_WALK_MINUTES, parseSchedule(parseJson("""{"mode":"lastLesson"}""") as ch.fasrv.fanotes.json.JsonValue.Obj).bufferMinutes)
+        assertEquals(DEFAULT_EARLY_MINUTES, parseSchedule(parseJson("""{"mode":"firstLesson"}""") as ch.fasrv.fanotes.json.JsonValue.Obj).bufferMinutes)
+        assertEquals(10, parseSchedule(parseJson("""{"mode":"lastLesson","bufferMinutes":10}""") as ch.fasrv.fanotes.json.JsonValue.Obj).bufferMinutes)
+        val schedule = Schedule()
+        assertEquals(5, schedule.withMode(ScheduleMode.LAST_LESSON).bufferMinutes)
+        assertEquals(10, schedule.withMode(ScheduleMode.LAST_LESSON).withMode(ScheduleMode.FIRST_LESSON).bufferMinutes)
+        assertEquals(15, Schedule(ScheduleMode.LAST_LESSON, bufferMinutes = 15).withMode(ScheduleMode.LAST_LESSON).bufferMinutes)
     }
 }

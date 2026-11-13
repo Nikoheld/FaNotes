@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package ch.fasrv.fanotes.companion
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import android.Manifest
 import android.os.Build
@@ -150,7 +151,7 @@ fun TodayScreen(model: CompanionModel) {
                     if (online) SyncStamp(model.syncing, model.lastSyncOk, stamp, Modifier.padding(bottom = 12.dp))
                     else StatusLine(t(R.string.offline_last_updated, stamp), StateTone.Offline, Modifier.padding(bottom = 12.dp))
                 }
-                val syncCopy = faNotesSyncCopy(sync.status, model.notesAccount)
+                val syncCopy = rememberFaNotesSyncCopy(sync.status, model.notesAccount, model.syncOffline, online)
                 if (model.demo) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(R.string.demo_active_title), t(R.string.demo_active_body), t(R.string.demo_end), tone = StateTone.Warning, onAction = { model.stopDemo() }) }
                 if (model.link.needsReauth) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(R.string.reconnect_your_school), t(R.string.your_last_school_data_is_still_here), t(R.string.sign_in), tone = StateTone.Warning, onAction = { model.navigate(Page.Connections) }) }
                 else if (syncCopy != null) Box(Modifier.padding(bottom = 12.dp)) { InfoBanner(t(syncCopy.first), t(syncCopy.second), t(R.string.account_sync), error = syncCopy.third, tone = if (syncCopy.third) StateTone.Error else StateTone.Offline, onAction = { model.navigate(Page.Connections) }) }
@@ -195,10 +196,6 @@ fun TodayScreen(model: CompanionModel) {
                     Icon(Icons.Outlined.ChevronRight, null, Modifier.padding(start = 2.dp).size(18.dp))
                 }
             }
-        }
-        if ("commute" in cards && !model.demo) item(key = "commute") {
-            CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail, onOpenTrip = model::openCommuteTrip,
-                onAdd = { model.editCommuteRoute(null) }, modifier = Modifier.padding(top = 12.dp), onRepick = { model.editCommuteRoute(it, openPicker = true) })
         }
         if ("tasks" in cards) {
             item(key = "tasks-head") { SectionLabel(t(R.string.on_your_list), if (urgent.isEmpty()) t(R.string.tasks) else t(R.string.all_2, urgent.size)) { model.openPlanner(true) } }
@@ -265,6 +262,11 @@ fun TodayScreen(model: CompanionModel) {
                     }
                 }
             }
+        }
+        // The commute card closes the "Von der Schule" section; without that section it sits after the Mensa card, before the notes.
+        if ("commute" in cards && !model.demo) item(key = "commute") {
+            CommuteCard(model.commute, nowMs, showInvite = model.commute.loaded || !model.link.linked, onOpen = model::openCommuteDetail, onOpenTrip = model::openCommuteTrip,
+                onAdd = { model.editCommuteRoute(null) }, modifier = Modifier.padding(top = if (gradesShown || pointsShown || updatesShown || absencesShown) 8.dp else 12.dp), onRepick = { model.editCommuteRoute(it, openPicker = true) })
         }
         if (model.notesAccount) {
             item(key = "notes-head") { SectionLabel(t(R.string.pick_up_a_note), t(R.string.library)) { model.select(Destination.Notes) } }
@@ -781,6 +783,8 @@ fun TaskRow(task: HomeworkTask, today: LocalDate, onToggle: () -> Unit, colors: 
 @Composable
 private fun TasksScreen(model: CompanionModel) {
     var query by rememberSaveable { mutableStateOf("") }
+    // Back clears an active search before it leaves the screen.
+    BackHandler(enabled = query.isNotEmpty()) { query = "" }
     var task by remember { mutableStateOf<HomeworkTask?>(null) }
     var schoolTask by remember { mutableStateOf<SchoolHomework?>(null) }
     val today = rememberNow().atZone(ZoneId.systemDefault()).toLocalDate()

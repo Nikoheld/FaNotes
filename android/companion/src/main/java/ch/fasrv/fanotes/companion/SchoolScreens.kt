@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package ch.fasrv.fanotes.companion
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -112,6 +113,8 @@ fun SchoolScreen(model: CompanionModel) {
 @Composable
 fun GradesScreen(model: CompanionModel) {
     var query by rememberSaveable { mutableStateOf("") }
+    // Back clears an active search before it leaves the screen.
+    BackHandler(enabled = query.isNotEmpty()) { query = "" }
     val official = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { activeCourses(courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook)) }
     val archived = remember(model.snapshot.grades, model.gradeBook, model.unrevealedIds, model.settings.guessGrades) { courseSummaries(model.snapshot.grades, hiddenTargetIds = model.hiddenGradeIds(), book = model.gradeBook).filter { it.archived } }
     val courses = remember(official, model.desk.gradeSort, model.highlightIds, query, model.desk.courseAliases) {
@@ -325,6 +328,8 @@ fun SchoolRecordScreen(model: CompanionModel, page: Page) {
     val tally = remember(model.snapshot) { model.absencePoints() }
     val provisional = remember(model.snapshot, model.plannedAbsences) { model.provisionalPoints(LocalDate.now()) }
     var query by rememberSaveable(page) { mutableStateOf("") }
+    // Back clears an active search before it leaves the screen.
+    BackHandler(enabled = query.isNotEmpty()) { query = "" }
     var filter by rememberSaveable(page) { mutableStateOf("all") }
     var selected by remember { mutableStateOf<AgendaEntry?>(null) }
     val today = LocalDate.now()

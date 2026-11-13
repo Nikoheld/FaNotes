@@ -1,73 +1,114 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/row_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:gravity="center_vertical"
     android:orientation="horizontal"
     android:paddingTop="5dp"
     android:paddingBottom="5dp">
-    <TextView
-        android:id="@+id/row_dep"
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:maxLines="1"
-        android:textColor="@color/widget_text"
-        android:textSize="15sp"
-        android:fontFamily="sans-serif-medium" />
-    <TextView
-        android:id="@+id/row_delay"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="6dp"
-        android:maxLines="1"
-        android:textColor="@color/widget_muted"
-        android:textSize="12sp"
-        android:fontFamily="sans-serif-medium" />
+        android:minWidth="48dp"
+        android:orientation="vertical">
+        <TextView
+            android:id="@+id/row_dep"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:textColor="@color/widget_text"
+            android:textSize="16sp" />
+        <TextView
+            android:id="@+id/row_delay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:textColor="@color/widget_muted"
+            android:textSize="11sp" />
+    </LinearLayout>
     <TextView
         android:id="@+id/row_line"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
         android:background="@drawable/widget_chip"
+        android:fontFamily="sans-serif-medium"
+        android:maxLines="1"
         android:paddingStart="6dp"
-        android:paddingEnd="6dp"
         android:paddingTop="1dp"
+        android:paddingEnd="6dp"
         android:paddingBottom="1dp"
-        android:maxLines="1"
         android:textColor="@color/widget_text"
-        android:textSize="12sp"
-        android:fontFamily="sans-serif-medium" />
-    <TextView
-        android:id="@+id/row_platform"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:maxLines="1"
-        android:textColor="@color/widget_muted"
         android:textSize="12sp" />
-    <TextView
-        android:id="@+id/row_arrive"
+    <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
         android:layout_weight="1"
-        android:gravity="end"
-        android:maxLines="1"
-        android:textColor="@color/widget_muted"
-        android:textSize="12sp" />
-    <ImageView
-        android:id="@+id/row_occ"
-        android:layout_width="36dp"
-        android:layout_height="12dp"
-        android:layout_marginStart="8dp"
-        android:importantForAccessibility="no"
-        android:scaleType="fitCenter" />
-    <TextView
-        android:id="@+id/row_status"
+        android:orientation="vertical">
+        <TextView
+            android:id="@+id/row_platform"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_muted"
+            android:textSize="12sp" />
+        <TextView
+            android:id="@+id/row_arrive"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="@color/widget_muted"
+            android:textSize="11sp" />
+    </LinearLayout>
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginStart="8dp"
-        android:maxLines="1"
-        android:textColor="@color/widget_alert"
-        android:textSize="12sp"
-        android:fontFamily="sans-serif-medium" />
+        android:gravity="end"
+        android:orientation="vertical">
+        <TextView
+            android:id="@+id/row_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/widget_pill_danger"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:maxWidth="84dp"
+            android:paddingStart="7dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="7dp"
+            android:paddingBottom="2dp"
+            android:textColor="@color/widget_alert"
+            android:textSize="11sp"
+            android:visibility="gone" />
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+            <TextView
+                android:id="@+id/row_transfers"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:maxWidth="72dp"
+                android:textColor="@color/widget_muted"
+                android:textSize="11sp" />
+            <ImageView
+                android:id="@+id/row_occ"
+                android:layout_width="30dp"
+                android:layout_height="12dp"
+                android:layout_marginStart="6dp"
+                android:importantForAccessibility="no"
+                android:scaleType="fitCenter" />
+        </LinearLayout>
+    </LinearLayout>
 </LinearLayout>

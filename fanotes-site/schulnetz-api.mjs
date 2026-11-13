@@ -13,7 +13,7 @@ import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
 import { createCommute } from './commute.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   alertAllowed,
   applyEventWindow,
@@ -870,7 +870,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     const read = prepareAgendaRead(stored?.version === 1 ? stored.weeks || {} : {}, snapshot)
     // Durable before any diff/push; a crash cannot turn an imported week into a second first read.
     await writeJson(path, { version: 1, weeks: read.weeks })
-    return diffSnapshots(previous ? { ...previous, events: read.before.events.filter(isLesson).concat((previous.events || []).filter((event) => !isLesson(event) && !isExamLike(event))), exams: read.before.exams } : null, snapshot, resolvedAlertSettings(settings))
+    // The runtime's own clock decides what is past (tests run it at a fixed time; production passes the real one).
+    const at = now()
+    return diffSnapshots(previous ? { ...previous, events: read.before.events.filter(isLesson).concat((previous.events || []).filter((event) => !isLesson(event) && !isExamLike(event))), exams: read.before.exams } : null, snapshot, resolvedAlertSettings(settings), zurichToday(at), at)
   }
 
   const accountStillExists = options.syncAccountExists || syncAccountExists
@@ -1104,6 +1106,10 @@ export const createSchulnetzRuntime = (options = {}) => {
       for (const week of keys) if (snapshot.exams.some((event) => weekMondayKey(event.start) === week) ||
         !(previous?.exams || []).some((event) => weekMondayKey(event.start) === week)) snapshot.examWeekFetched[week] = snapshot.fetchedAt
     }
+    // /me/exams is narrowed to the courses of the personal timetable like the Prüfungsplan is.
+    const ownRest = ownExams(snapshot.exams, snapshot.events)
+    snapshot.exams = ownRest.exams
+    snapshot.examsUnfiltered = ownRest.unfiltered
     snapshot.weekSpanStart = span.start || ''
     snapshot.weekSpanEnd = span.end || ''
     snapshot.icalFetchedAt = previous?.icalFetchedAt || ''
@@ -1203,6 +1209,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       gradeParser: failed ? (Number(previous?.gradeParser) || 0) : (scraped.gradeParser || 0),
       events: failed ? (previous?.events || []) : (scraped.events || []),
       exams: failed ? (previous?.exams || []) : (scraped.exams || previous?.exams || []),
+      // The personal timetable had no lessons, so the exam list could not be narrowed to the student's courses.
+      examsUnfiltered: failed ? Boolean(previous?.examsUnfiltered) : Boolean(scraped.examsUnfiltered),
       ...absencePart,
       homework: previous?.homework || [],
       messages: keepMessages ? (previous?.messages || []) : parsedNotes,
@@ -1555,7 +1563,9 @@ export const createSchulnetzRuntime = (options = {}) => {
         // Apps that handle every timetable week say so; older ones get this week only.
         const weeks = String(request.headers?.[TIMETABLE_WEEKS_HEADER] || '') === 'weeks' ? stored : legacySnapshotView(stored, zurichToday(now()))
         // Apps before the points parser get the absences their own reader produces, so their diff stays quiet.
-        const snapshot = String(request.headers?.[ABSENCES_HEADER] || '') === String(ABSENCE_PARSER_VERSION) ? weeks : legacyAbsenceView(weeks)
+        const absent = String(request.headers?.[ABSENCES_HEADER] || '') === String(ABSENCE_PARSER_VERSION) ? weeks : legacyAbsenceView(weeks)
+        // A snapshot stored before the own-exams filter loses the other courses' exams here, silently.
+        const snapshot = absent && Array.isArray(absent.exams) ? { ...absent, exams: ownExams(absent.exams, absent.events).exams } : absent
         send(response, 200, snapshot || { revision: 0, grades: [], events: [], exams: [], absences: [], homework: [], messages: [], vacations: [], konto: [], kontoSaldo: '', startMessages: [] })
         return true
       }

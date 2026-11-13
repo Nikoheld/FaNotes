@@ -736,9 +736,9 @@
     <string name="what_needs_doing">What needs doing?</string>
     <string name="what_reaches_you_and_when">What reaches you, and when</string>
     <string name="when_you_open_kanti">When you open Kanti+</string>
-    <string name="widget_description">Your next Schulnetz lesson and room.</string>
+    <string name="widget_description">Your next lesson with time and room, then the rest of the day, exams and changes.</string>
     <string name="widget_kicker">Next lesson</string>
-    <string name="widget_name">Kanti+</string>
+    <string name="widget_name">Next lesson</string>
     <string name="with_guess_the_grade_a_long_press_opens_a_hidden">With Guess the grade, a long press opens a hidden mark. A tap leaves it covered.</string>
     <string name="work_on_this_device">Work on this device</string>
     <string name="write_draw_or_collect_your_thoughts">Write, draw or collect your thoughts</string>
@@ -1223,7 +1223,7 @@
     <string name="commute_schedule_none_summary">Any time, next connection</string>
     <string name="commute_schedule_times_summary">%1$s · %2$s</string>
     <string name="commute_schedule_first_summary">To the first lesson, %1$d min early · %2$s</string>
-    <string name="commute_schedule_last_summary">After the last lesson, %1$d min later · %2$s</string>
+    <string name="commute_schedule_last_summary">After the last lesson, %1$d min walk to the stop · %2$s</string>
     <string name="commute_target_now">Next departures</string>
     <string name="commute_target_time">Departures from %1$s</string>
     <string name="commute_target_arrive">Arrive by %1$s</string>
@@ -1269,6 +1269,8 @@
     <string name="commute_first_cancelled_body">The first lesson is cancelled. Take the connection at %1$s.</string>
     <string name="commute_transfer">Change at %1$s · %2$d min</string>
     <string name="commute_transfer_tight">Tight change at %1$s · %2$d min</string>
+    <string name="commute_transfer_required">Change at %1$s · %2$d min (min. %3$d min)</string>
+    <string name="commute_transfer_tight_required">Tight change at %1$s · %2$d min (min. %3$d min)</string>
     <string name="commute_transfer_broken">Change at %1$s is missed</string>
     <string name="commute_class_first">1st class</string>
     <string name="commute_class_second">2nd class</string>
@@ -1311,7 +1313,7 @@
     <string name="commute_times_limit">Up to %1$d times.</string>
     <string name="commute_weekdays">Weekdays</string>
     <string name="commute_buffer_first">Arrive %1$d min early</string>
-    <string name="commute_buffer_last">Leave %1$d min after the lesson</string>
+    <string name="commute_buffer_last">%1$d min walk to the stop</string>
     <string name="commute_less">Less</string>
     <string name="commute_more">More</string>
     <string name="commute_alerts_for_route">Alerts for this route</string>
@@ -1441,4 +1443,28 @@
         <item quantity="one">%1$d route</item>
         <item quantity="other">%1$d routes</item>
     </plurals>
+    <string name="widget_signed_out_body">Open Kanti+ to sign in.</string>
+    <string name="widget_open_to_load">Open Kanti+ to load it.</string>
+    <string name="widget_no_lessons_today">No lessons today</string>
+    <string name="widget_nothing_ahead">Nothing planned ahead.</string>
+    <string name="widget_holidays_until">Until %1$s</string>
+    <string name="commute_widget_loading_title">Loading connections</string>
+    <string name="commute_widget_loading_body">Open Kanti+ to refresh.</string>
+    <string name="commute_widget_offline">Offline</string>
+    <string name="widget_preview_l1">Mathematics</string>
+    <string name="widget_preview_l1_detail">10:15–11:00 · Room 201</string>
+    <string name="widget_preview_l2">Biology</string>
+    <string name="widget_preview_l3">History</string>
+    <string name="widget_preview_room2">Room 105</string>
+    <string name="widget_preview_room3">Room 312</string>
+    <string name="widget_preview_route">School</string>
+    <string name="widget_preview_platform">Pl. 3</string>
+    <string name="widget_preview_t1">11:15</string>
+    <string name="widget_preview_t2">13:30</string>
+    <string name="widget_preview_c1">07:05</string>
+    <string name="widget_preview_c2">+2</string>
+    <string name="widget_preview_c3">371</string>
+    <string name="widget_preview_c4">→ 07:47</string>
+    <string name="widget_preview_c5">07:35</string>
+    <string name="widget_preview_c6">S29</string>
 </resources>

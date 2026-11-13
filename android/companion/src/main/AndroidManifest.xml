@@ -8,6 +8,7 @@
     <application
         android:name=".CompanionApplication"
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
@@ -82,14 +83,6 @@
             android:name="com.google.firebase.provider.FirebaseInitProvider"
             android:authorities="${applicationId}.firebaseinitprovider"
             tools:node="remove" />
-        <service
-            android:name=".NextLessonWidgetService"
-            android:exported="false"
-            android:permission="android.permission.BIND_REMOTEVIEWS" />
-        <service
-            android:name=".CommuteWidgetService"
-            android:exported="false"
-            android:permission="android.permission.BIND_REMOTEVIEWS" />
         <receiver
             android:name=".CommuteWidget"
             android:exported="true"

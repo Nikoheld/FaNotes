@@ -371,7 +371,7 @@ private fun ChangeRow(change: DetailItem.Change) {
         TransferWarning.TIGHT -> s.warningSoft
         TransferWarning.NONE -> Color.Transparent
     }
-    val base = if (transfer == null) t(R.string.commute_detail_change_at, change.at) else t(R.string.commute_transfer, change.at, transfer.minutes)
+    val base = if (transfer == null) t(R.string.commute_detail_change_at, change.at) else commuteTransferText(transfer, tight = false)
     val warnText = when (warning) {
         TransferWarning.BROKEN -> t(R.string.commute_detail_transfer_broken)
         TransferWarning.TIGHT -> t(R.string.commute_detail_transfer_tight)

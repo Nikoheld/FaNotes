@@ -212,7 +212,9 @@ class CommuteUiTest {
         rule.onNodeWithText(t(R.string.commute_mode_first)).performScrollTo().performClick()
         rule.onNodeWithText(t(R.string.commute_buffer_first, 10)).assertIsDisplayed()
         rule.onNodeWithText(t(R.string.commute_mode_last)).performScrollTo().performClick()
-        rule.onNodeWithText(t(R.string.commute_buffer_last, 10)).assertIsDisplayed()
+        // The last lesson is a walking time and starts at 5 minutes.
+        rule.onNodeWithText(t(R.string.commute_buffer_last, 5)).assertIsDisplayed()
+        assertEquals(5, h.route.schedule.bufferMinutes)
     }
 
     @Test fun existingRouteCanBeDeletedAfterConfirmation() {

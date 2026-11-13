@@ -8,7 +8,9 @@ import ch.fasrv.fanotes.desk.serializeHomeworkMarkdown
 import ch.fasrv.fanotes.famd.MAX_SYNC_DOCUMENT_BYTES
 import ch.fasrv.fanotes.famd.emptyFamdPayload
 import ch.fasrv.fanotes.famd.serializeFamd
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.jsonString
@@ -359,7 +361,9 @@ class SyncEngineTest {
             engineB.syncNow()
             assertEquals(SyncStatus.IDLE, engineB.state.value.status)
             assertEquals(null, engineB.state.value.error)
-            assertEquals(stateBefore, hostB.readState("spike-b"))
+            // The timer cycle that login() starts may still stamp lastSyncAt; the tracked files must not change.
+            val withoutStamp = { json: String? -> json?.replace(Regex(""""lastSyncAt":"[^"]*""""), "") }
+            assertEquals(withoutStamp(stateBefore), withoutStamp(hostB.readState("spike-b")))
             kotlin.test.assertContentEquals(original, hostB.read("Notes/synthetic.famd"))
         } finally {
             hostB.failWritesWithOom = false
@@ -673,6 +677,64 @@ class SyncEngineTest {
         return serializeFamd("# Seite\n\n${"Wort ".repeat(40)}", payload)
     }
 
+    @Test
+    fun startThenPauseNeverPublishesOfflineAndTheCycleCompletes() = runBlocking {
+        val server = MemorySyncServer()
+        val host = MemoryHost("vault")
+        val engine = engine(SyncApi(server), host, "Phone")
+        try {
+            engine.register("ada@example.com", "correct horse")
+            host.put("Notes/Hello.md", "Hello\n".encodeToByteArray(), 1_000)
+            engine.syncNow()
+            val seen = java.util.Collections.synchronizedList(mutableListOf<SyncStatus>())
+            val watcher = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch { engine.state.collect { seen += it.status } }
+            // A slow request keeps the first cycle in flight while the timer is paused, as boot() does.
+            server.beforeRequest = { delay(150) }
+            engine.start()
+            engine.pauseAutomaticSync()
+            withTimeout(10_000) { while (engine.state.value.lastSyncAt == null || engine.state.value.status != SyncStatus.IDLE || server.callCount() < 3) delay(20) }
+            delay(400)
+            watcher.cancel()
+            assertTrue(SyncStatus.OFFLINE !in seen, "statuses: $seen")
+            assertEquals(SyncStatus.IDLE, engine.state.value.status)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun cancellingARunningCycleDoesNotPublishOffline() = runBlocking {
+        val server = MemorySyncServer()
+        val engine = engine(SyncApi(server), MemoryHost("vault"), "Phone")
+        try {
+            engine.register("ada@example.com", "correct horse")
+            val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+            server.beforeRequest = { entered.complete(Unit); delay(60_000) }
+            val job = launch { runCatching { engine.syncNow() } }
+            withTimeout(10_000) { entered.await() }
+            job.cancelAndJoin()
+            server.beforeRequest = null
+            assertTrue(engine.state.value.status != SyncStatus.OFFLINE, "status ${engine.state.value.status}")
+            assertEquals(null, engine.state.value.error)
+        } finally {
+            engine.close()
+        }
+    }
+
+    @Test
+    fun aRealTransportFailureStillPublishesOffline() = runBlocking {
+        val server = MemorySyncServer()
+        val engine = engine(SyncApi(server), MemoryHost("vault"), "Phone")
+        try {
+            engine.register("ada@example.com", "correct horse")
+            server.failTransport = true
+            engine.syncNow()
+            assertEquals(SyncStatus.OFFLINE, engine.state.value.status)
+        } finally {
+            engine.close()
+        }
+    }
+
     private fun engine(api: SyncApi, host: MemoryHost, name: String): SyncEngine {
         val engine = SyncEngine(api, SyncEngineOptions(platform = "android", deviceName = { name }, automatic = { true }))
         engine.attach(host)
@@ -739,7 +801,19 @@ private class MemorySyncServer : SyncTransport {
 
     fun callsSince(mark: Int) = synchronized(this) { calls.drop(mark) }
 
-    override suspend fun execute(request: SyncHttpRequest): SyncHttpResponse = synchronized(this) {
+    /** Runs before each request; a test suspends in here to hold a cycle mid-flight. */
+    @Volatile var beforeRequest: (suspend () -> Unit)? = null
+
+    /** Every request fails like a lost connection. */
+    @Volatile var failTransport = false
+
+    override suspend fun execute(request: SyncHttpRequest): SyncHttpResponse {
+        beforeRequest?.invoke()
+        if (failTransport) throw java.io.IOException("synthetic transport failure")
+        return handle(request)
+    }
+
+    private fun handle(request: SyncHttpRequest): SyncHttpResponse = synchronized(this) {
         val path = request.url.substringAfter("/api/v1/sync")
         val response = route(path, request)
         calls += Call(

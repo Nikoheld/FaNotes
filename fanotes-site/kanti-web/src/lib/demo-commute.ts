@@ -124,7 +124,7 @@ export const demoConnections = (from: Stop, to: Stop, vias: Stop[], at: string):
 export const demoCommute = (now: number): { routes: CommuteRoute[]; settings: CommuteSettings; provider: CommuteProvider; boards: Record<string, RouteBoard>; stops: Stop[] } => {
   const base = Math.ceil(now / MIN) * MIN
   const at = (minutes: number) => base + minutes * MIN
-  const schedule = (mode: 'firstLesson' | 'lastLesson') => ({ mode, times: [], days: [1, 2, 3, 4, 5], bufferMinutes: 10 })
+  const schedule = (mode: 'firstLesson' | 'lastLesson') => ({ mode, times: [], days: [1, 2, 3, 4, 5], bufferMinutes: mode === 'lastLesson' ? 5 : 10 })
   const school: CommuteRoute = { id: 'd3m0a1b2c3d4', name: 'Schule', from: TESTDORF, to: KANTI, vias: [], via: null, schedule: schedule('firstLesson'), pins: [], delayThreshold: null, notify: true }
   const home: CommuteRoute = { id: 'd3m0e5f6a7b8', name: 'Heimweg', from: KANTI, to: TESTDORF, vias: [MITTELWIL], via: MITTELWIL, schedule: schedule('lastLesson'), pins: [], delayThreshold: 5, notify: true }
 

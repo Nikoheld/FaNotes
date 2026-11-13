@@ -21,7 +21,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Bundle
-import android.util.TypedValue
 import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
@@ -75,13 +74,11 @@ import ch.fasrv.fanotes.schulnetz.displayClock
 import ch.fasrv.fanotes.schulnetz.startsAt
 import ch.fasrv.fanotes.schulnetz.WidgetSpan
 import ch.fasrv.fanotes.schulnetz.upcomingLessons
-import ch.fasrv.fanotes.schulnetz.upcomingTimetableUnread
 import androidx.work.workDataOf
 import java.time.LocalDate
 import java.util.concurrent.Executors
 import ch.fasrv.fanotes.schulnetz.visibleEvents
 import ch.fasrv.fanotes.schulnetz.widgetSizeDp
-import ch.fasrv.fanotes.schulnetz.widgetSpan
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -796,20 +793,14 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
         internal fun rowsFor(data: WidgetData, zone: ZoneId): List<ch.fasrv.fanotes.schulnetz.WidgetRow> =
             data.snapshot?.let { ch.fasrv.fanotes.schulnetz.widgetRows(it.events, it.exams, data.hidden, java.time.Instant.now(), zone) }.orEmpty()
 
-        /** Template for the list rows; each row's fill-in intent carries its own target. */
-        internal fun rowTemplate(context: Context): PendingIntent =
-            PendingIntent.getActivity(context, 2, Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
-
         fun update(context: Context, manager: AppWidgetManager, ids: IntArray) {
             val data = loadData(context)
             val snapshot = data.snapshot
             val hidden = data.hidden
-            val compact = data.compact
             val zone = ZoneId.systemDefault()
             val rows = rowsFor(data, zone)
-            val lessons = rows.filter { !it.heading && !it.cancelled }.mapNotNull { it.event }.take(1)
-            val unread = snapshot != null && lessons.isEmpty() && upcomingTimetableUnread(snapshot, java.time.LocalDate.now(zone))
+            val today = java.time.LocalDate.now(zone)
+            val content = lessonWidgetContent(snapshot, rows, today)
             val portrait = context.resources.configuration.orientation != Configuration.ORIENTATION_LANDSCAPE
             ids.forEach { id ->
                 val options = runCatching { manager.getAppWidgetOptions(id) }.getOrNull()
@@ -820,52 +811,13 @@ class NextLessonWidget : android.appwidget.AppWidgetProvider() {
                     options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0),
                     portrait,
                 )
-                val span = if (compact) WidgetSpan.SMALL else widgetSpan(width, height)
-                manager.updateAppWidget(id, widgetViews(context, id, span, lessons, zone, unread))
+                // The compact setting keeps the one-line header at every size.
+                val variants = lessonWidgetVariants(context, id, content, rows, today)
+                val views = responsiveViews(variants, width, height, forced = variants.first().takeIf { data.compact })
+                manager.updateAppWidget(id, views)
             }
-            // The list factory reloads its rows from the same cache.
-            if (ids.isNotEmpty()) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_list)
             scheduleWidgetTick(context, snapshot, hidden, zone)
         }
-
-        private fun widgetViews(context: Context, widgetId: Int, span: WidgetSpan, lessons: List<ch.fasrv.fanotes.schulnetz.AgendaEvent>, zone: ZoneId, unread: Boolean = false): RemoteViews {
-            val views = RemoteViews(context.packageName, R.layout.widget_next_lesson)
-            val next = lessons.firstOrNull()
-            val small = span == WidgetSpan.SMALL
-            val pad = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, if (small) 10f else 16f, context.resources.displayMetrics).toInt()
-            views.setViewPadding(R.id.widget_root, pad, pad, pad, pad)
-            views.setViewVisibility(R.id.widget_kicker, if (small) android.view.View.GONE else android.view.View.VISIBLE)
-            views.setTextViewTextSize(R.id.widget_title, TypedValue.COMPLEX_UNIT_SP, if (small) 16f else 18f)
-            views.setInt(R.id.widget_title, "setMaxLines", if (small) 1 else 2)
-            if (next == null) {
-                views.setTextViewText(R.id.widget_title, t(if (unread) R.string.timetable_not_loaded else R.string.no_upcoming_lesson))
-                views.setTextViewText(R.id.widget_detail, t(R.string.open_kanti))
-            } else {
-                val time = lessonClock(next, zone)
-                val roomText = cleanSchulnetzText(next.room)
-                val room = if (roomText.isBlank()) "" else t(R.string.room_named, roomText)
-                val state = if (next.isCancelled()) t(R.string.cancelled) else if (next.isSubstitution()) t(R.string.substitution) else ""
-                views.setTextViewText(R.id.widget_title, ch.fasrv.fanotes.schulnetz.preferredEventTitle(next))
-                views.setTextViewText(R.id.widget_detail, if (small) time else listOf(time, room, state).filter { it.isNotBlank() }.joinToString(" · "))
-            }
-            // The scrolling list shows every remaining lesson; the compact size keeps the header only.
-            views.setViewVisibility(R.id.widget_list, if (small) android.view.View.GONE else android.view.View.VISIBLE)
-            if (!small) {
-                val service = Intent(context, NextLessonWidgetService::class.java)
-                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
-                service.data = android.net.Uri.parse(service.toUri(Intent.URI_INTENT_SCHEME))
-                views.setRemoteAdapter(R.id.widget_list, service)
-                views.setPendingIntentTemplate(R.id.widget_list, rowTemplate(context))
-            }
-            val target = if (next == null) Intent(context, MainActivity::class.java) else CompanionAlerts.notifyIntent(context,
-                ch.fasrv.fanotes.schulnetz.linkedChange("widget-next", "timetable", "", "", ch.fasrv.fanotes.schulnetz.lessonTargetId(next), date = ch.fasrv.fanotes.schulnetz.eventDay(next)))
-            val open = PendingIntent.getActivity(context, 1, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            views.setOnClickPendingIntent(R.id.widget_header, open)
-            return views
-        }
-
-        private fun lessonClock(event: ch.fasrv.fanotes.schulnetz.AgendaEvent, zone: ZoneId): String =
-            ch.fasrv.fanotes.schulnetz.lessonClockText(event, zone)
 
         private fun scheduleWidgetTick(context: Context, snapshot: SchulnetzSnapshot?, hidden: List<ch.fasrv.fanotes.schulnetz.HiddenLesson>, zone: ZoneId) {
             val alarm = context.getSystemService(AlarmManager::class.java) ?: return

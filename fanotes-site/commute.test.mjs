@@ -73,10 +73,13 @@ test('a transfer that the bus delay makes impossible breaks the trip; a tight on
   const [ok] = parseSearchChRoute(answer(connection()))
   assert.equal(ok.status, 'ok')
   assert.deepEqual(ok.changes.map((change) => [change.at, change.plannedMinutes, change.minutes]), [['Knoten', 5, 5]])
-  const [tight] = parseSearchChRoute(answer(connection({ busArrDelay: '+4' })))
+  // 9 min planned, 4 min footpath: +5 still leaves the official 4 min, +6/+7 is tight, +8 is missed.
+  const [still] = parseSearchChRoute(answer(connection({ busArrDelay: '+5' })))
+  assert.deepEqual([still.changes[0].tight, still.changes[0].broken], [false, false])
+  const [tight] = parseSearchChRoute(answer(connection({ busArrDelay: '+6' })))
   assert.equal(tight.changes[0].tight, true)
   assert.equal(tight.status, 'ok')
-  const [broken] = parseSearchChRoute(answer(connection({ busDelay: '+7', busArrDelay: '+7' })))
+  const [broken] = parseSearchChRoute(answer(connection({ busDelay: '+8', busArrDelay: '+8' })))
   assert.equal(broken.changes[0].broken, true)
   assert.equal(broken.status, 'broken')
   assert.ok(broken.issues.some((issue) => issue.kind === 'missedTransfer'))
@@ -192,7 +195,7 @@ test('a cancellation and a missed transfer are announced once, with the alternat
   assert.equal(once.changes[0].title, 'Fällt aus')
   assert.match(once.changes[0].body, /Alternative: Bus um 07:12 \(371 ab Testdorf, Dorfplatz, an Schulstadt 07:57\)/u)
   assert.deepEqual(tripAlerts({ route: route(), tracked: cancelled, alternatives: [alternative], state: once.state, delayThreshold: 3, now }).changes, [])
-  const [broken] = parseSearchChRoute(answer(connection({ busDelay: '+7', busArrDelay: '+7' })))
+  const [broken] = parseSearchChRoute(answer(connection({ busDelay: '+8', busArrDelay: '+8' })))
   const missed = tripAlerts({ route: route(), tracked: broken, alternatives: [alternative], state: {}, delayThreshold: 3, now })
   assert.deepEqual(missed.changes.map((change) => change.title), ['Anschluss verpasst'])
   // Alerts off for this route: nothing.
@@ -411,4 +414,104 @@ test('commute alerts have their own switch: the school-updates master switch doe
   assert.equal(alertAllowed(resolvedAlertSettings({ commute: false }), delay), false)
   assert.equal(alertAllowed(resolvedAlertSettings({ commuteDelay: false }), { ...delay, title: 'Gleisänderung' }), false)
   assert.equal(alertAllowed(resolvedAlertSettings({ commuteDelay: false }), { ...delay, title: 'Fällt aus' }), true)
+})
+
+// ── Transfer reachability from the official transfer times ─────────────────
+
+/** Brugg → Aarau → Lenzburg style change: ride A arrives at [at], ride B leaves [dep]; [walkSec] adds a footpath leg, [normal] is B's normal_time. */
+const changeTrip = ({ arr = '07:10', dep = '07:14', arrDelay = '+0', walkSec = null, normal = null, depDelay = '+0', walkEnd = null }) => {
+  const day = '2026-11-13'
+  const legs = [
+    leg({ name: 'Brugg AG', stopid: '8500309', dep: `${day} 06:50:00`, line: 'RE12', type: 'train', z: '1', exit: { arrival: `${day} ${arr}:00`, name: 'Aarau', stopid: '8502113', arr_delay: arrDelay } }),
+  ]
+  if (walkSec != null) legs.push({ departure: `${day} ${arr}:00`, stopid: '8502113', name: 'Aarau', type: 'walk', normal_time: walkSec, runningtime: walkSec, exit: { arrival: `${day} ${walkEnd || arr}:00`, name: 'Aarau, Bahnhof', stopid: '8502114' } })
+  const second = leg({ name: walkSec != null ? 'Aarau, Bahnhof' : 'Aarau', stopid: walkSec != null ? '8502114' : '8502113', dep: `${day} ${dep}:00`, line: walkSec != null ? '4' : 'S11', type: walkSec != null ? 'bus' : 'train', z: '2', depDelay, exit: { arrival: `${day} 07:40:00`, name: 'Lenzburg', stopid: '8502119' } })
+  if (normal != null) second.normal_time = normal
+  legs.push(second, { arrival: `${day} 07:40:00`, name: 'Lenzburg', stopid: '8502119' })
+  return { from: 'Brugg AG', departure: `${day} 06:50:00`, to: 'Lenzburg', arrival: `${day} 07:40:00`, legs }
+}
+const change = (options) => parseSearchChRoute(answer(changeTrip(options)))[0]
+
+test('train to bus with a 4 min footpath and 2 min planned slack: +2 ok, +3/+4 tight, +5 missed', () => {
+  const run = (delay) => change({ arr: '07:10', walkEnd: '07:14', walkSec: 240, dep: '07:16', arrDelay: `+${delay}` }).changes[0]
+  assert.deepEqual([0, 2].map((d) => [run(d).tight, run(d).broken]), [[false, false], [false, false]])
+  assert.deepEqual([3, 4].map((d) => [run(d).tight, run(d).broken]), [[true, false], [true, false]])
+  assert.deepEqual([run(5).tight, run(5).broken], [false, true])
+  const base = run(0)
+  assert.deepEqual([base.requiredMinutes, base.requiredSource, base.walkMinutes, base.gapMinutes, base.plannedGapMinutes], [4, 'timetable', 4, 6, 6])
+  // Old fields keep their meaning: the time beyond the footpath.
+  assert.deepEqual([base.at, base.minutes, base.plannedMinutes], ['Aarau, Bahnhof', 2, 2])
+  assert.equal(run(5).minutes, -3)
+})
+
+test('same-station change with normal_time 240 and a 4 min planned gap: +0 ok, +1/+2 tight, +3 missed', () => {
+  const run = (delay) => change({ arr: '07:10', dep: '07:14', normal: 240, arrDelay: `+${delay}` })
+  assert.equal(run(0).changes[0].requiredMinutes, 4)
+  assert.deepEqual([0, 1, 2, 3].map((d) => run(d).changes[0]).map((c) => [c.tight, c.broken]), [[false, false], [true, false], [true, false], [false, true]])
+  assert.equal(run(3).status, 'broken')
+})
+
+test('a timetable that plans a shorter change than the official one sets the minimum', () => {
+  const planned = change({ arr: '07:10', dep: '07:12', normal: 240 }).changes[0]
+  assert.deepEqual([planned.requiredMinutes, planned.requiredSource, planned.tight, planned.broken], [2, 'planned', false, false])
+  const late = change({ arr: '07:10', dep: '07:12', normal: 240, arrDelay: '+1' }).changes[0]
+  assert.deepEqual([late.tight, late.broken], [true, false])
+})
+
+test('an unknown change time: only a negative gap is missed; nothing is invented', () => {
+  const unknown = change({ arr: '07:10', dep: '07:11' }).changes[0]
+  assert.deepEqual([unknown.requiredMinutes, unknown.requiredSource, unknown.tight, unknown.broken], [null, 'unknown', false, false])
+  assert.equal(change({ arr: '07:10', dep: '07:11', arrDelay: '+1' }).changes[0].broken, false)
+  assert.equal(change({ arr: '07:10', dep: '07:11', arrDelay: '+2' }).changes[0].broken, true)
+})
+
+test('transport.opendata.ch: the footpath of a walk section is the minimum, otherwise unknown', () => {
+  const section = (journey, from, to, dep, arr, extra = {}) => ({ journey, departure: { station: { id: from[0], name: from[1] }, departure: `2026-11-13T${dep}:00+0100` }, arrival: { station: { id: to[0], name: to[1] }, arrival: `2026-11-13T${arr}:00+0100` }, ...extra })
+  const ride = { category: 'S', number: '11', to: 'X' }
+  const [walked] = parseTransportRoute({ connections: [{ sections: [section(ride, ['1', 'A'], ['2', 'B'], '07:00', '07:10'), section(null, ['2', 'B'], ['3', 'B, Bhf'], '07:10', '07:14'), section(ride, ['3', 'B, Bhf'], ['4', 'C'], '07:16', '07:30')] }] })
+  assert.deepEqual([walked.changes[0].requiredMinutes, walked.changes[0].requiredSource], [4, 'timetable'])
+  const [plain] = parseTransportRoute({ connections: [{ sections: [section(ride, ['1', 'A'], ['2', 'B'], '07:00', '07:10'), section(ride, ['2', 'B'], ['4', 'C'], '07:12', '07:30')] }] })
+  assert.deepEqual([plain.changes[0].requiredMinutes, plain.changes[0].requiredSource], [null, 'unknown'])
+})
+
+test('alerts: a missed transfer pushes, a tight one does not', () => {
+  const now = parseLocal('2026-11-13 06:40:00')
+  const tight = change({ arr: '07:10', dep: '07:14', normal: 240, arrDelay: '+2' })
+  const missed = change({ arr: '07:10', dep: '07:14', normal: 240, arrDelay: '+4' })
+  assert.equal(tight.changes[0].tight, true)
+  const hush = tripAlerts({ route: route({ delayThreshold: 30 }), tracked: tight, state: {}, delayThreshold: 30, now })
+  assert.deepEqual(hush.changes, [])
+  assert.deepEqual(tripAlerts({ route: route(), tracked: missed, state: {}, delayThreshold: 30, now }).changes.map((item) => item.title), ['Anschluss verpasst'])
+})
+
+test('sanitizeSchedule defaults the walking time to 5 for lastLesson and keeps stored values', () => {
+  const defaults = (schedule) => sanitizeRoutes([{ id: 'a1b2c3d4e5f6', from: { name: 'A' }, to: { name: 'B' }, schedule }])[0].schedule.bufferMinutes
+  assert.equal(defaults({ mode: 'lastLesson' }), 5)
+  assert.equal(defaults({ mode: 'lastLesson', bufferMinutes: null }), 5)
+  assert.equal(defaults({ mode: 'firstLesson' }), 10)
+  assert.equal(defaults({ mode: 'lastLesson', bufferMinutes: 10 }), 10)
+  assert.equal(defaults({ mode: 'lastLesson', bufferMinutes: 0 }), 0)
+})
+
+test('lastLesson: the target is lesson end + walking time and an earlier trip never ranks first', async () => {
+  const events = [lesson('2026-11-13', '13:10', '15:50', 'Fach A')]
+  const home = route({ name: 'Heim', schedule: { mode: 'lastLesson', bufferMinutes: 5 } })
+  const target = routeTarget(home, { now: parseLocal('2026-11-13 15:00:00'), events })
+  assert.equal(target.at, '2026-11-13T15:55:00+01:00')
+  assert.equal(target.lesson.end, '2026-11-13T15:50:00+01:00')
+  const early = connection({ bus: '15:30', busArrive: '15:40', train: '15:47', arrive: '16:05', z: '1' })
+  const reachable = connection({ bus: '15:56', busArrive: '16:06', train: '16:15', arrive: '16:40', z: '2' })
+  const root = await mkdtemp(join(tmpdir(), 'commute-walk-'))
+  try {
+    const clock = { value: parseLocal('2026-11-13 15:00:00') }
+    const commute = createCommute({ root, now: () => new Date(clock.value), lessonsFor: async () => events, provider: { trips: async () => ({ trips: parseSearchChRoute(answer(early, reachable)), provider: 'search.ch', at: new Date(clock.value).toISOString() }), stops: async () => ({ stops: [] }) } })
+    const accountId = 'a'.repeat(32)
+    await commute.save(accountId, { routes: [home], settings: {} })
+    const before = (await commute.board(accountId)).boards[0]
+    assert.deepEqual(before.trips.map((trip) => trip.departure.slice(11, 16)), ['15:56'])
+    // Past lesson end + walk the plain "from now" ranking applies again.
+    clock.value = parseLocal('2026-11-13 15:55:30')
+    const after = (await commute.board(accountId)).boards[0]
+    assert.equal(after.trips[0].departure.slice(11, 16), '15:56')
+  } finally { await rm(root, { recursive: true, force: true }) }
 })

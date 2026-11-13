@@ -6,7 +6,7 @@ import { createApi } from '../src/lib/api'
 import {
   assignPin, boardFocus, browseRequest, cleanPins, chipColors, connectionsQuery, defaultPickTime, isoWeekday, nextDateForWeekday, pickerPage, pinFromTrip, pinModeOf, readRoute, removePinDay, routeVias, zurichAt,
   clockOf, createStopSearcher, delayClass, durationLabel, emptyRoute, focusDue, isoZurich, lessonChange, mergeTrips, moveRoute,
-  newRouteId, nextTrip, normalizeRoute, pollDue, relevantRoute, upsertRoute, validateRoute, MAX_ROUTES,
+  newRouteId, nextTrip, normalizeRoute, pollDue, relevantRoute, upsertRoute, validateRoute, MAX_ROUTES, emptySchedule, transferRequired, transferShown,
 } from '../src/lib/commute'
 import { demoCommute, demoConnections } from '../src/lib/demo-commute'
 import { STRINGS } from '../src/lib/i18n'
@@ -128,8 +128,8 @@ describe('route editor validation', () => {
     expect(validateRoute(withSchedule({ mode: 'times', times: ['07:05', '07:40'] }))).toEqual([])
     expect(validateRoute(withSchedule({ mode: 'times', times: Array(7).fill('07:05') }))).toEqual(['times'])
     expect(validateRoute(withSchedule({ mode: 'firstLesson', days: [] }))).toEqual(['days'])
-    expect(validateRoute(withSchedule({ mode: 'lastLesson', bufferMinutes: 61 }))).toEqual(['buffer'])
-    expect(validateRoute(withSchedule({ mode: 'lastLesson', bufferMinutes: Number.NaN }))).toEqual(['buffer'])
+    expect(validateRoute(withSchedule({ mode: 'firstLesson', bufferMinutes: 61 }))).toEqual(['buffer'])
+    expect(validateRoute(withSchedule({ mode: 'lastLesson', bufferMinutes: Number.NaN }))).toEqual(['walk'])
     expect(validateRoute(withSchedule({ mode: 'none', days: [], times: ['zz'] }))).toEqual([])
   })
   it('normalizes before saving and keeps the list within the limit', () => {
@@ -244,7 +244,7 @@ describe('rendering', () => {
     const html = renderToString(<TripCard trip={quiet} t={de} open />)
     expect(html).toContain(de.quietest)
     expect(html).toContain('occupancy-class level-1')
-    expect(html).toContain(de.transferAt('Schulstadt', 3))
+    expect(html).toContain(de.transferAt('Schulstadt', 3, null))
     expect(html).toContain('xfer')
   })
   it('marks tight and broken transfers', () => {
@@ -319,14 +319,19 @@ describe('two vias and pins', () => {
     expect(readRoute({ ...validRoute(), vias: [stop('x'), stop('y'), stop('z')], via: null }).vias.map((v) => v.id)).toEqual(['x', 'y'])
     expect(routeVias({ via: null })).toEqual([])
   })
-  it('saves vias (max 2, ordered, no duplicates or ends), via = first and cleaned pins', () => {
+  it('saves vias (max 2, ordered, exactly as entered), via = first and cleaned pins', () => {
     const route = normalizeRoute({ ...validRoute(), vias: [stop('x'), stop('x'), { id: '', name: '', type: 'other' }, stop('y'), stop('z')], via: null, pins: [pin({ days: [5, 1, 1] }), pin({ days: [1, 2], departure: '08:00' }), pin({ days: [3], departure: '99:00' })] })
-    expect(route.vias.map((v) => v.id)).toEqual(['x', 'y'])
+    expect(route.vias.map((v) => v.id)).toEqual(['x', 'x'])
     expect(route.via?.id).toBe('x')
     expect(route.pins).toHaveLength(2)
     expect(route.pins[0].days).toEqual([1, 5])
     expect(route.pins[1].days).toEqual([2])
-    expect(normalizeRoute({ ...validRoute(), vias: [{ id: 'a', name: 'Testdorf', type: 'train' }, stop('y')], via: null }).vias.map((v) => v.id)).toEqual(['y'])
+    // A via equal to the start or the destination stays (loop routes such as Brugg - Aarau - Lenzburg - Aarau).
+    expect(normalizeRoute({ ...validRoute(), vias: [{ id: 'a', name: 'Testdorf', type: 'train' }, stop('y')], via: null }).vias.map((v) => v.id)).toEqual(['a', 'y'])
+    const loop = normalizeRoute({ ...validRoute(), vias: [{ id: 'b', name: 'Schulstadt', type: 'train' }, stop('y')], via: null })
+    expect(loop.vias.map((v) => v.id)).toEqual(['b', 'y'])
+    expect(validateRoute(loop)).toEqual([])
+    expect(connectionsQuery(loop, 'AT').vias).toEqual(['b', 'y'])
     expect(normalizeRoute(validRoute())).toMatchObject({ vias: [], via: null, pins: [] })
     expect(cleanPins(undefined)).toEqual([])
   })
@@ -452,5 +457,39 @@ describe('pinned board focus', () => {
   it('the demo has a pinned route and a route with two vias', () => {
     expect(demo.routes.some((route) => route.pins.length === 1)).toBe(true)
     expect(demo.routes.some((route) => route.vias.length === 2 && route.via?.id === route.vias[0].id)).toBe(true)
+  })
+})
+
+describe('official transfer times and the walking time', () => {
+  const change = { at: 'Aarau', minutes: 0, plannedMinutes: 0, broken: false, tight: true, gapMinutes: 4, plannedGapMinutes: 4, walkMinutes: 0, requiredMinutes: 4, requiredSource: 'timetable' as const }
+  it('shows the official minimum only where the server named one', () => {
+    expect(transferShown(change)).toBe(4)
+    expect(transferRequired(change)).toBe(4)
+    expect(transferRequired({ ...change, requiredMinutes: null, requiredSource: 'unknown' })).toBeNull()
+    expect(transferRequired({ at: 'Old', minutes: 3, plannedMinutes: 3, broken: false, tight: false })).toBeNull()
+    expect(transferShown({ at: 'Old', minutes: 3, plannedMinutes: 3, broken: false, tight: false })).toBe(3)
+    expect(de.transferAt('Aarau', 4, 4)).toBe('Umsteigen in Aarau: 4 Min. (mind. 4 Min.)')
+    expect(en.transferAt('Aarau', 4, 4)).toBe('Change at Aarau: 4 min (min. 4 min)')
+    expect(de.transferAt('Aarau', 4, null)).toBe('Umsteigen in Aarau: 4 Min.')
+  })
+  it('lastLesson is a walking time: default 5, at most 30; firstLesson keeps 10', () => {
+    expect(emptySchedule('lastLesson').bufferMinutes).toBe(5)
+    expect(emptySchedule('firstLesson').bufferMinutes).toBe(10)
+    const home = { ...validRoute(), schedule: emptySchedule('lastLesson') }
+    expect(validateRoute(home)).toEqual([])
+    expect(validateRoute({ ...home, schedule: { ...home.schedule, bufferMinutes: 31 } })).toEqual(['walk'])
+    expect(validateRoute({ ...validRoute(), schedule: { ...emptySchedule('firstLesson'), bufferMinutes: 45 } })).toEqual([])
+    expect(en.commuteBufferLast).toBe('Walk to the stop')
+    expect(de.commuteBufferLast).toBe('Fussweg zur Haltestelle')
+  })
+  it('puts the commute card under "Von der Schule" on Today', () => {
+    const html = renderToString(<KantiProvider api={createApi(async () => new Response('{}'))} demo><Today /></KantiProvider>)
+    const words = html.includes(de.latestGrades) ? de : en
+    const school = html.indexOf(words.fromSchool)
+    const card = html.indexOf('commute-card')
+    expect(card).toBeGreaterThan(-1)
+    // With the school block shown the card follows it; either way it no longer opens the third column before the grades.
+    if (school > -1) expect(card).toBeGreaterThan(school)
+    expect(card).toBeLessThan(html.indexOf(words.latestGrades))
   })
 })

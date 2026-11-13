@@ -214,6 +214,7 @@ fun SchulnetzSnapshot.toNormalizedJson(): String = buildString {
     append(",\"grades\":").appendGrades(grades)
     append(",\"events\":").appendEvents(events)
     append(",\"exams\":").appendEvents(exams)
+    if (examsUnfiltered) append(",\"examsUnfiltered\":true")
     append(",\"absences\":").appendAbsences(absences)
     append(",\"homework\":").appendHomework(homework)
     append(",\"messages\":").appendMessages(messages)
@@ -273,6 +274,7 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
         grades = obj.array("grades")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toGrade() }.withoutSummaryGrades(),
         events = obj.array("events")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toEvent() },
         exams = obj.array("exams")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toEvent() },
+        examsUnfiltered = obj.bool("examsUnfiltered") == true,
         absences = obj.array("absences")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toAbsence() },
         homework = obj.array("homework")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toHomework() },
         messages = obj.array("messages")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.toMessage() },
@@ -297,7 +299,7 @@ fun parseNormalizedSnapshot(json: String): SchulnetzSnapshot? {
             val stamp = (value as? JsonValue.Str)?.value ?: return@mapNotNull null
             if (weekMondayKey(key) != key) null else key to stamp
         }.toMap(),
-    )
+    ).withOwnExams() // a snapshot stored before the own-exams filter loses the other courses' exams, silently
 }
 
 private fun JsonValue.Obj.toGrade(): SchoolGrade? {

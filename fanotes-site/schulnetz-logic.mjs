@@ -453,7 +453,48 @@ export const mergeEventsById = (base, incoming) => {
 }
 
 /** Exams found inside the timetable feed stay on the exam list after lesson overlay drops them. */
-export const carryTimetableExams = (events, exams) => mergeEventsById(exams || [], (events || []).filter(isExamLike))
+// An exam listed both in the timetable and in the overview (same slot, same label) is one exam.
+export const carryTimetableExams = (events, exams) => distinctExams(mergeEventsById(exams || [], (events || []).filter(isExamLike)))
+
+/**
+ * Course identity of a Schulnetz course label. A label starts with the subject, then a group part
+ * (a class group such as `G24a`, or a group number such as `2.3`), then optionally a teacher. Both
+ * `_` and a space separate the parts (`Sub_G24a_Teach`, `Subj 2.3`). Anything without a group part
+ * (`Bio Test ...`, a class appointment) has no course identity and is never filtered.
+ * Kotlin mirror: courseIdentity (OwnExams.kt).
+ */
+const courseGroupToken = /^(?:[a-z]{1,2}\d{2}[a-z]{0,2}|\d+(?:\.\d+)+)$/iu
+export const courseIdentity = (label) => {
+  const head = cleanSchulnetzText(label).split(/\r?\n/u)[0].trim()
+  const match = /^([^\s_]+)(?:([_\s])([^\s_]+))?(?:([_\s])([^\s_]+))?/u.exec(head)
+  if (!match) return null
+  const group = match[3] || ''
+  if (!courseGroupToken.test(group)) return null
+  // A teacher only counts when the code joins it with `_`; after a space the words are the exam title.
+  const teacher = match[4] === '_' && /^[a-zäöüéèà]+$/iu.test(match[5] || '') ? match[5].toLowerCase() : ''
+  return { subject: match[1].toLowerCase(), group: group.toLowerCase(), teacher }
+}
+
+const sameCourse = (own, exam) => own.subject === exam.subject && own.group === exam.group &&
+  (!own.teacher || !exam.teacher || own.teacher === exam.teacher)
+
+/**
+ * The student's own exams: a class-overview, Prüfungsplan or REST exam stays unless it names a course
+ * (subject plus group) that matches no lesson of the personal timetable. Lessons of every loaded
+ * week count, not only the exam week. Without any lesson the timetable has not loaded: nothing is
+ * filtered and `unfiltered` says so. Kotlin mirror: ownExams (OwnExams.kt).
+ */
+export const ownExams = (exams, events) => {
+  const list = exams || []
+  const lessons = (events || []).filter(isLesson)
+  if (!lessons.length) return { exams: list, unfiltered: list.length > 0 }
+  const courses = lessons.map((event) => courseIdentity(event.courseName) || courseIdentity(event.text)).filter(Boolean)
+  const kept = list.filter((exam) => {
+    const identity = courseIdentity(exam.courseName) || courseIdentity(exam.text) || courseIdentity(exam.timetableText)
+    return !identity || courses.some((own) => sameCourse(own, identity))
+  })
+  return { exams: kept, unfiltered: false }
+}
 
 const gradeKey = (grade) => [numKey(grade.mark), numKey(grade.weight), grade.title || '', grade.date || ''].join('|')
 
@@ -1262,6 +1303,11 @@ export const diffSnapshots = (previous, next, settings = {}, today = zurichToday
   if (!previous) return []
   // Master off: do not build rows. The caller still stores the snapshot.
   if (settings?.enabled === false) return []
+  // Only the student's own exams are news. A foreign exam that the filter now drops from the stored
+  // list leaves silently, so both sides are filtered before they are compared.
+  const lessonPool = [...(next.events || []), ...(previous.events || [])]
+  previous = { ...previous, exams: ownExams(previous.exams, lessonPool).exams }
+  next = { ...next, exams: ownExams(next.exams, lessonPool).exams }
   const freshWeeks = new Set([...introducedWeeks(previous, next), ...legacyBackfillWeeks(previous, next), ...lessonSeedWeeks(previous, next)])
   previous = { ...previous, grades: withoutSummaryGrades(previous.grades) }
   next = { ...next, grades: withoutSummaryGrades(next.grades) }

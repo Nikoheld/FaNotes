@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Picker preview for launchers without previewLayout: a card with a title line and two rows. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_background" />
+            <stroke android:width="1dp" android:color="@color/widget_outline" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+    <item android:left="16dp" android:top="16dp" android:right="96dp" android:height="10dp">
+        <shape android:shape="rectangle"><solid android:color="@color/widget_accent" /><corners android:radius="5dp" /></shape>
+    </item>
+    <item android:left="16dp" android:top="36dp" android:right="56dp" android:height="16dp">
+        <shape android:shape="rectangle"><solid android:color="@color/widget_text" /><corners android:radius="8dp" /></shape>
+    </item>
+    <item android:left="16dp" android:top="64dp" android:right="16dp" android:height="12dp">
+        <shape android:shape="rectangle"><solid android:color="@color/widget_container" /><corners android:radius="6dp" /></shape>
+    </item>
+    <item android:left="16dp" android:top="84dp" android:right="16dp" android:height="12dp">
+        <shape android:shape="rectangle"><solid android:color="@color/widget_container" /><corners android:radius="6dp" /></shape>
+    </item>
+</layer-list>

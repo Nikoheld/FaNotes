@@ -32,6 +32,12 @@ const val MAX_ROUTES = 8
 const val MAX_SCHEDULE_TIMES = 6
 const val MAX_ROUTE_NAME = 40
 const val MAX_BUFFER_MINUTES = 60
+/** firstLesson: default minutes to arrive early. */
+const val DEFAULT_EARLY_MINUTES = 10
+/** lastLesson: default walking time from school to the first stop. */
+const val DEFAULT_WALK_MINUTES = 5
+/** The editors offer 0 to this many minutes of walking time (older stored values up to [MAX_BUFFER_MINUTES] stay). */
+const val MAX_WALK_MINUTES = 30
 val DEFAULT_DAYS = listOf(1, 2, 3, 4, 5)
 val DELAY_THRESHOLD_CHOICES = listOf(2, 3, 5, 10)
 const val DEFAULT_DELAY_THRESHOLD = 3
@@ -42,9 +48,17 @@ data class Schedule(
     val times: List<String> = emptyList(),
     /** 1 = Monday ... 7 = Sunday. */
     val days: List<Int> = DEFAULT_DAYS,
-    /** firstLesson: arrive this early; lastLesson: leave this long after the lesson ends. */
-    val bufferMinutes: Int = 10,
-)
+    /** firstLesson: arrive this early; lastLesson: the walking time from school to the first stop (the trip leaves this long after the lesson ends). */
+    val bufferMinutes: Int = DEFAULT_EARLY_MINUTES,
+) {
+    /** Switches the mode; a lesson mode that was not active before starts at its own default. */
+    fun withMode(next: ScheduleMode): Schedule = when {
+        next == mode -> this
+        next == ScheduleMode.LAST_LESSON -> copy(mode = next, bufferMinutes = DEFAULT_WALK_MINUTES)
+        next == ScheduleMode.FIRST_LESSON -> copy(mode = next, bufferMinutes = DEFAULT_EARLY_MINUTES)
+        else -> copy(mode = next)
+    }
+}
 
 const val MAX_VIAS = 2
 
@@ -144,13 +158,29 @@ data class Leg(
     val walk: Boolean get() = kind == "walk"
 }
 
+/**
+ * A change between two rides. [minutes] and [plannedMinutes] are the time beyond the footpath (older
+ * apps); the rest is the official minimum: [requiredMinutes] is null when no official time is known
+ * (never guessed), [requiredSource] is "timetable", "planned", "default" or "unknown".
+ */
 data class Transfer(
     val at: String = "",
     val minutes: Int = 0,
     val plannedMinutes: Int = 0,
     val broken: Boolean = false,
     val tight: Boolean = false,
+    val gapMinutes: Int? = null,
+    val plannedGapMinutes: Int? = null,
+    val walkMinutes: Int? = null,
+    val requiredMinutes: Int? = null,
+    val requiredSource: String = "unknown",
 )
+
+/** The whole time of the change (arrival to departure); falls back to [Transfer.minutes] on an older server. */
+val Transfer.shownMinutes: Int get() = gapMinutes ?: minutes
+
+/** The official minimum to show, or null when none is known (nothing is invented). */
+val Transfer.officialMinutes: Int? get() = requiredMinutes.takeIf { requiredSource != "unknown" }
 
 data class TripIssue(val kind: String = "", val text: String = "")
 
@@ -274,11 +304,12 @@ private fun parseVias(obj: JsonValue.Obj): List<Stop> {
 fun parseSchedule(obj: JsonValue.Obj?): Schedule {
     if (obj == null) return Schedule()
     val days = obj.array("days")?.items.orEmpty().mapNotNull { (it as? JsonValue.Num)?.value?.toInt() }.filter { it in 1..7 }.distinct().sorted()
+    val mode = ScheduleMode.of(obj.string("mode"))
     return Schedule(
-        mode = ScheduleMode.of(obj.string("mode")),
+        mode = mode,
         times = obj.strings("times").filter { isClockText(it) }.take(MAX_SCHEDULE_TIMES),
         days = if (obj.array("days") == null) DEFAULT_DAYS else days,
-        bufferMinutes = (obj.int("bufferMinutes") ?: 10).coerceIn(0, MAX_BUFFER_MINUTES),
+        bufferMinutes = (obj.int("bufferMinutes") ?: if (mode == ScheduleMode.LAST_LESSON) DEFAULT_WALK_MINUTES else DEFAULT_EARLY_MINUTES).coerceIn(0, MAX_BUFFER_MINUTES),
     )
 }
 
@@ -355,6 +386,18 @@ private fun parseLegStop(obj: JsonValue.Obj): LegStop = LegStop(
     occupancy = parseOccupancy(obj.obj("occupancy")),
 )
 
+private fun parseTransfer(obj: JsonValue.Obj): Transfer {
+    val required = obj.int("requiredMinutes")?.takeIf { it >= 0 }
+    return Transfer(
+        at = obj.str("at"), minutes = obj.int("minutes") ?: 0, plannedMinutes = obj.int("plannedMinutes") ?: 0,
+        broken = obj.bool("broken") == true, tight = obj.bool("tight") == true,
+        gapMinutes = obj.int("gapMinutes"), plannedGapMinutes = obj.int("plannedGapMinutes"), walkMinutes = obj.int("walkMinutes"),
+        requiredMinutes = required,
+        // A minimum without a source is only believed when the server named one.
+        requiredSource = obj.str("requiredSource").ifBlank { "unknown" },
+    )
+}
+
 fun parseTrip(obj: JsonValue.Obj): Trip = Trip(
     id = obj.str("id"),
     departure = obj.str("departure"), arrival = obj.str("arrival"),
@@ -363,7 +406,7 @@ fun parseTrip(obj: JsonValue.Obj): Trip = Trip(
     minutes = obj.int("minutes") ?: 0, transfers = obj.int("transfers") ?: 0,
     status = TripStatus.of(obj.string("status")),
     legs = obj.objects("legs").map(::parseLeg),
-    changes = obj.objects("changes").map { Transfer(it.str("at"), it.int("minutes") ?: 0, it.int("plannedMinutes") ?: 0, it.bool("broken") == true, it.bool("tight") == true) },
+    changes = obj.objects("changes").map(::parseTransfer),
     occupancy = parseOccupancy(obj.obj("occupancy")),
     issues = obj.objects("issues").map { TripIssue(it.str("kind"), it.str("text")) },
     quietest = obj.bool("quietest") == true,

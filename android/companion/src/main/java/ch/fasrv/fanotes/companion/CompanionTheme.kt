@@ -164,7 +164,8 @@ fun CompanionTheme(
     CompositionLocalProvider(
         LocalCompanionSemantics provides semantics,
         LocalKantiMotion provides KantiMotion(reducedMotion),
-        LocalOnline provides online,
+        // A network flap or the first callback after start must not flash "offline".
+        LocalOnline provides !rememberDebouncedFlag(!online),
     ) {
         MaterialTheme(colorScheme = scheme, typography = KantiTypography, shapes = KantiShapes, content = content)
     }

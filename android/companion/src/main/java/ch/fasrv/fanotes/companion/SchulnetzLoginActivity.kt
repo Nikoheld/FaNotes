@@ -65,6 +65,8 @@ class SchulnetzLoginActivity : ComponentActivity() {
         setContent {
             var loading by remember { mutableStateOf(true) }
             var pageError by remember { mutableStateOf<String?>(null) }
+            // Back goes inside the WebView only while it has history; otherwise the system handles it.
+            var canGoBack by remember { mutableStateOf(false) }
             CompanionTheme(themeId = prefs.theme, systemDark = isSystemInDarkTheme(), accent = prefs.accent, amoled = prefs.amoled, reducedMotion = reduced) {
                 val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                 SideEffect {
@@ -73,7 +75,7 @@ class SchulnetzLoginActivity : ComponentActivity() {
                         isAppearanceLightNavigationBars = !dark
                     }
                 }
-                BackHandler { val web = webView; if (web?.canGoBack() == true) web.goBack() else finish() }
+                BackHandler(enabled = canGoBack) { webView?.takeIf { it.canGoBack() }?.goBack() }
                 Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
                     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
                         Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -108,7 +110,8 @@ class SchulnetzLoginActivity : ComponentActivity() {
                                     if (!(if (tam) tamActionBlocked(target) else schulnetzActionBlocked(target))) return null
                                     return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
                                 }
-                                override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) { loading = true; pageError = null }
+                                override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) { loading = true; pageError = null; canGoBack = view.canGoBack() }
+                                override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) { canGoBack = view.canGoBack() }
                                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                                     if (request.isForMainFrame) {
                                         loading = false
@@ -118,6 +121,7 @@ class SchulnetzLoginActivity : ComponentActivity() {
                                 override fun onPageFinished(view: WebView, url: String) {
                                     if (webView !== view || isDestroyed || isFinishing) return
                                     loading = false
+                                    canGoBack = view.canGoBack()
                                     view.evaluateJavascript(HTML_JS) { raw ->
                                         val html = decodeJsString(raw)
                                         val done = if (tam) tamSignedIn(url, html, base) else isLoggedInLanding(url, html)

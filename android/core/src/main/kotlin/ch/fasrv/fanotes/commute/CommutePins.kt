@@ -197,8 +197,8 @@ fun boardFocus(board: RouteBoard): BoardFocus {
 // ── Editor helpers ───────────────────────────────────────────────────────────
 
 /**
- * Sets the via stop at [index] (0 or 1), or removes it when [stop] is null. Order is kept, at most [MAX_VIAS]
- * stay, and a stop that equals the start or the end is ignored.
+ * Sets the via stop at [index] (0 or 1), or removes it when [stop] is null. Order is kept and at most [MAX_VIAS]
+ * stay. Vias stay exactly as entered: a stop equal to the start, the end or the other via is allowed (loop routes).
  */
 fun withViaAt(route: Route, index: Int, stop: Stop?): Route {
     val list = route.vias.toMutableList()

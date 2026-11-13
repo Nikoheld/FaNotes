@@ -259,7 +259,13 @@ export const newRouteId = (): string => {
 
 export const emptyStop = (): Stop => ({ id: '', name: '', type: 'other' })
 
-export const emptySchedule = (mode: ScheduleMode = 'none'): Schedule => ({ mode, times: [], days: [...DEFAULT_DAYS], bufferMinutes: 10 })
+/** firstLesson: arrive this many minutes early; lastLesson: walking time from school to the first stop. */
+export const DEFAULT_EARLY_MIN = 10
+export const DEFAULT_WALK_MIN = 5
+export const MAX_WALK_MIN = 30
+export const defaultBuffer = (mode: ScheduleMode): number => (mode === 'lastLesson' ? DEFAULT_WALK_MIN : DEFAULT_EARLY_MIN)
+
+export const emptySchedule = (mode: ScheduleMode = 'none'): Schedule => ({ mode, times: [], days: [...DEFAULT_DAYS], bufferMinutes: defaultBuffer(mode) })
 
 export const emptyRoute = (id = newRouteId()): CommuteRoute => ({ id, name: '', from: emptyStop(), to: emptyStop(), vias: [], via: null, schedule: emptySchedule(), pins: [], delayThreshold: null, notify: true })
 
@@ -267,7 +273,7 @@ export const routeLabel = (route: Pick<CommuteRoute, 'name' | 'from' | 'to'>): s
 
 export const isClock = (value: string): boolean => /^([01]\d|2[0-3]):[0-5]\d$/u.test(value)
 
-export type RouteError = 'from' | 'to' | 'same' | 'name' | 'times' | 'days' | 'buffer'
+export type RouteError = 'from' | 'to' | 'same' | 'name' | 'times' | 'days' | 'buffer' | 'walk'
 
 const sameStop = (a: Stop, b: Stop) => a.id !== '' && a.id === b.id
 
@@ -281,7 +287,8 @@ export const validateRoute = (route: CommuteRoute): RouteError[] => {
   const { mode, times, days, bufferMinutes } = route.schedule
   if (mode === 'times' && (!times.length || times.length > MAX_TIMES || times.some((time) => !isClock(time)))) errors.push('times')
   if (mode !== 'none' && !days.length) errors.push('days')
-  if ((mode === 'firstLesson' || mode === 'lastLesson') && !(Number.isInteger(bufferMinutes) && bufferMinutes >= 0 && bufferMinutes <= 60)) errors.push('buffer')
+  if (mode === 'firstLesson' && !(Number.isInteger(bufferMinutes) && bufferMinutes >= 0 && bufferMinutes <= 60)) errors.push('buffer')
+  if (mode === 'lastLesson' && !(Number.isInteger(bufferMinutes) && bufferMinutes >= 0 && bufferMinutes <= MAX_WALK_MIN)) errors.push('walk')
   return errors
 }
 
@@ -290,16 +297,8 @@ const rawVias = (route: { vias?: Stop[] | null; via?: Stop | null }): Stop[] => 
 
 export const routeVias = (route: { vias?: Stop[] | null; via?: Stop | null }): Stop[] => rawVias(route).slice(0, MAX_VIAS)
 
-const cleanVias = (route: Pick<CommuteRoute, 'from' | 'to' | 'vias' | 'via'>): Stop[] => {
-  const seen = new Set([route.from.id, route.to.id].filter(Boolean))
-  const out: Stop[] = []
-  for (const stop of rawVias(route)) {
-    if (seen.has(stop.id)) continue
-    seen.add(stop.id)
-    out.push(stop)
-  }
-  return out.slice(0, MAX_VIAS)
-}
+/** Vias exactly as entered: order, duplicates and stops equal to the route ends stay (loop routes); only empty slots go. */
+const cleanVias = (route: Pick<CommuteRoute, 'from' | 'to' | 'vias' | 'via'>): Stop[] => rawVias(route).slice(0, MAX_VIAS)
 
 const cleanDays = (days: readonly number[]): number[] => [...new Set(days)].filter((day) => Number.isInteger(day) && day >= 1 && day <= 7).sort((a, b) => a - b)
 
@@ -666,6 +665,12 @@ export const positionInfo = (trip: Trip, position: Position | undefined): Positi
   const next = position.state === 'between' ? rows[position.point + 1]?.name || '' : ''
   return { state: position.state, at: here.name, next, estimated: position.estimated }
 }
+
+/** The whole time of a change (arrival to departure); an older server sends only `minutes`. */
+export const transferShown = (change: Trip['changes'][number]): number => change.gapMinutes ?? change.minutes
+
+/** The official minimum change time, or null where none is known. */
+export const transferRequired = (change: Trip['changes'][number]): number | null => (change.requiredSource === 'unknown' || change.requiredMinutes == null ? null : change.requiredMinutes)
 
 /** 'tight' or 'broken' for a change (minutes in real time), '' otherwise. */
 export const transferWarning = (change: Trip['changes'][number] | undefined): '' | 'tight' | 'broken' => (change ? (change.broken ? 'broken' : change.tight ? 'tight' : '') : '')

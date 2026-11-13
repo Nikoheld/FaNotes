@@ -2,7 +2,7 @@
 // real times, platforms, the transfers and where the vehicle is now. It opens as a side panel on
 // desktop and fills the screen on a phone; the data comes from the commute store (server or demo).
 import { useState, type CSSProperties } from 'react'
-import { changeAfter, clockOf, delayClass, departureDelay, durationLabel, dwellMinutes, delayBadgeRows, legRows, pinnedPoints, positionInfo, railItems, rowProgress, rowShowsPlanned, rowTime, transferWarning, tripCancelled, type RailRow } from '../lib/commute'
+import { changeAfter, clockOf, delayClass, departureDelay, durationLabel, dwellMinutes, delayBadgeRows, legRows, pinnedPoints, positionInfo, railItems, rowProgress, rowShowsPlanned, rowTime, transferRequired, transferShown, transferWarning, tripCancelled, type RailRow } from '../lib/commute'
 import type { Strings } from '../lib/i18n'
 import { useTripDetail } from '../lib/useTripDetail'
 import type { Commute } from '../state-commute'
@@ -100,7 +100,7 @@ const TransferRow = ({ change, t }: { change: Trip['changes'][number]; t: String
   return (
     <li className={`dt-transfer${warning ? ` dt-transfer-${warning}` : ''}`}>
       <Icon name={warning === 'broken' ? 'warning' : 'swap'} size={16} />
-      <span>{t.transferAt(change.at, change.minutes)}</span>
+      <span>{t.transferAt(change.at, transferShown(change), transferRequired(change))}</span>
       {warning === 'broken' ? <Tag tone="danger">{t.transferBroken}</Tag> : warning === 'tight' ? <Tag tone="warning">{t.transferAtRisk}</Tag> : null}
     </li>
   )
