@@ -23,8 +23,18 @@ export const WINDOW_BEFORE_MS = 75 * 60_000
 export const IMMINENT_MS = 20 * 60_000
 export const CHECK_IMMINENT_MS = 60_000
 export const CHECK_EARLY_MS = 3 * 60_000
-/** A transfer with less slack than this (after delays) is tight, below zero it is broken. */
-export const TIGHT_TRANSFER_MIN = 2
+/**
+ * A change that falls short of the official minimum transfer time by up to this many minutes is
+ * "tight" (still possible with a quick change); more than this, or a negative gap, is "broken".
+ */
+export const TRANSFER_GRACE_MIN = 2
+/**
+ * Default minimum transfer time (minutes) between two chained segment searches when no official
+ * time is known: the usual minimum at medium Swiss stations. Marked as a default (requiredSource 'default').
+ */
+export const CHAIN_TRANSFER_MIN = 4
+/** Default walking time from school to the first stop for a lastLesson route (minutes). */
+export const DEFAULT_WALK_MIN = 5
 /** Lesson-tied targets look this many days ahead for the next school day. */
 const LOOKAHEAD_DAYS = 10
 const MINUTE = 60_000
@@ -101,12 +111,15 @@ export const sanitizeSchedule = (input = {}) => {
   const mode = ['none', 'times', 'firstLesson', 'lastLesson'].includes(input?.mode) ? input.mode : 'none'
   const times = mode === 'times' ? [...new Set((Array.isArray(input.times) ? input.times : []).map(clockOk).filter(Boolean))].sort().slice(0, MAX_TIMES) : []
   const days = [...new Set((Array.isArray(input?.days) ? input.days : [1, 2, 3, 4, 5]).map(Number).filter((day) => Number.isInteger(day) && day >= 1 && day <= 7))].sort()
-  const buffer = Number(input?.bufferMinutes)
+  const given = input?.bufferMinutes
+  const buffer = given == null || given === '' ? Number.NaN : Number(given)
+  // lastLesson: walking time from school to the first stop; firstLesson: minutes to arrive early.
+  const fallback = mode === 'lastLesson' ? DEFAULT_WALK_MIN : 10
   return {
     mode: mode === 'times' && !times.length ? 'none' : mode,
     times,
     days: days.length ? days : [1, 2, 3, 4, 5],
-    bufferMinutes: Number.isFinite(buffer) ? Math.max(0, Math.min(60, Math.round(buffer))) : 10,
+    bufferMinutes: Number.isFinite(buffer) ? Math.max(0, Math.min(60, Math.round(buffer))) : fallback,
   }
 }
 
@@ -153,15 +166,17 @@ export const sanitizePins = (input) => {
   return out
 }
 
-/** Up to two ordered vias; an old single [via] still reads. Duplicates and the route ends are dropped. */
-export const sanitizeVias = (raw, from, to) => {
+/**
+ * Up to two ordered vias, exactly as entered: order, duplicates and vias equal to the route ends
+ * are kept (loop routes such as Brugg - Aarau - Lenzburg - Aarau). An old single [via] still reads.
+ * Only entries that sanitizeStop rejects are dropped.
+ */
+export const sanitizeVias = (raw) => {
   const list = Array.isArray(raw?.vias) ? raw.vias : raw?.via ? [raw.via] : []
-  const key = (stop) => (stop.id || stop.name).toLowerCase()
-  const ends = new Set([from, to].filter(Boolean).map(key))
   const out = []
   for (const item of list) {
     const stop = sanitizeStop(item)
-    if (!stop || ends.has(key(stop)) || out.some((known) => key(known) === key(stop))) continue
+    if (!stop) continue
     out.push(stop)
     if (out.length >= MAX_VIAS) break
   }
@@ -179,7 +194,7 @@ export const sanitizeRoutes = (input) => {
     if (!from || !to) continue
     const id = /^[a-f0-9]{12}$/u.test(String(raw?.id || '')) ? raw.id : ''
     if (!id || out.some((route) => route.id === id)) continue
-    const vias = sanitizeVias(raw, from, to)
+    const vias = sanitizeVias(raw)
     out.push({
       id,
       name: text(raw.name, 40),
@@ -283,6 +298,13 @@ const searchChStop = (raw) => {
   }
 }
 
+/** search.ch seconds → whole minutes, null when absent or unreadable. */
+const officialMinutes = (seconds) => {
+  if (seconds == null || seconds === '') return null
+  const value = Number(seconds)
+  return Number.isFinite(value) && value >= 0 ? Math.round(value / 60) : null
+}
+
 /** One search.ch route answer → Trip[] (evaluated). */
 export const parseSearchChRoute = (json) => (Array.isArray(json?.connections) ? json.connections : []).map((connection) => {
   const legs = []
@@ -309,6 +331,8 @@ export const parseSearchChRoute = (json) => (Array.isArray(json?.connections) ? 
       cancelled: !walk && (from.cancelled || to.cancelled || leg.cancelled === true || notes.some((note) => CANCELLED_NOTE.test(note))),
       notes,
       minutes: Math.max(0, Math.round(Number(leg.runningtime || leg.normal_time || 0) / 60)),
+      // Official minimum change time (minutes). Ride leg: the change before it; walk leg: the footpath. Null when absent.
+      changeMinutes: officialMinutes(walk ? (leg.normal_time ?? leg.runningtime) : leg.normal_time),
       journeyId: walk ? '' : text(leg.tripid, 80),
       stops: walk ? [] : (Array.isArray(leg.stops) ? leg.stops : []).map(searchChStop).filter((stop) => stop.name),
     })
@@ -371,6 +395,8 @@ export const parseTransportRoute = (json) => (Array.isArray(json?.connections) ?
       occupancy: { first: cap(journey.capacity1st), second: cap(journey.capacity2nd) },
       cancelled: false, notes: [],
       minutes: Math.max(0, Math.round((parseLocal(section.arrival?.arrival) - parseLocal(section.departure?.departure)) / MINUTE)) || 0,
+      // No official change times here: the footpath of a walk section, otherwise unknown.
+      changeMinutes: walk ? (Math.max(0, Math.round((parseLocal(section.arrival?.arrival) - parseLocal(section.departure?.departure)) / MINUTE)) || null) : null,
     }
   })
   return evaluateTrip({ legs })
@@ -391,10 +417,26 @@ export const evaluateTrip = ({ legs }) => {
     const arriving = rides[index]
     const leaving = rides[index + 1]
     const between = legs.slice(legs.indexOf(arriving) + 1, legs.indexOf(leaving))
+    const walks = between.filter((leg) => leg.kind === 'walk')
     const walk = between.reduce((sum, leg) => sum + leg.minutes, 0)
-    const plannedMinutes = Math.round((parseLocal(leaving.from.planned) - parseLocal(arriving.to.planned)) / MINUTE) - walk
-    const minutes = Math.round((parseLocal(leaving.from.time) - parseLocal(arriving.to.time)) / MINUTE) - walk
-    changes.push({ at: leaving.from.name, minutes, plannedMinutes, broken: minutes < 0, tight: minutes >= 0 && minutes < TIGHT_TRANSFER_MIN && minutes < plannedMinutes })
+    const gap = Math.round((parseLocal(leaving.from.time) - parseLocal(arriving.to.time)) / MINUTE)
+    const plannedGap = Math.round((parseLocal(leaving.from.planned) - parseLocal(arriving.to.planned)) / MINUTE)
+    // The official minimum: the footpath when search.ch inserted a walk, else the change time of the leaving ride.
+    const footpath = walks.reduce((sum, leg) => sum + (leg.changeMinutes ?? leg.minutes), 0)
+    let required = null
+    let source = 'unknown'
+    if (walks.length && footpath > 0) { required = footpath; source = 'timetable' }
+    else if (leaving.changeMinutes != null) { required = leaving.changeMinutes; source = leaving.changeDefault ? 'default' : 'timetable' }
+    // The timetable itself plans a shorter change (a held or guaranteed connection): that is the minimum.
+    if (required != null && plannedGap < required) { required = Math.max(0, plannedGap); source = 'planned' }
+    const shortfall = (required ?? 0) - gap
+    const broken = gap < 0 || shortfall > TRANSFER_GRACE_MIN || leaving.cancelled === true
+    const tight = !broken && shortfall > 0
+    // minutes / plannedMinutes keep their old meaning for older apps: the time beyond the footpath.
+    changes.push({
+      at: leaving.from.name, minutes: gap - walk, plannedMinutes: plannedGap - walk, broken, tight,
+      gapMinutes: gap, plannedGapMinutes: plannedGap, walkMinutes: walk, requiredMinutes: required, requiredSource: source,
+    })
   }
   const issues = []
   for (const leg of rides) {
@@ -432,6 +474,69 @@ export const evaluateTrip = ({ legs }) => {
       departure: clockOf(first.from.planned), arrival: clockOf(last.to.planned), transfers: Math.max(0, rides.length - 1),
     } : null,
   }
+}
+
+// ── Vias: guard and chained trips ──────────────────────────────────────────
+
+const viaDigits = (value) => String(value || '').replace(/\D/gu, '').replace(/^0+/u, '')
+/** Two stops are the same when their ids match, else when their names match (case-insensitive). */
+export const sameViaStop = (a, b) => {
+  if (!a || !b) return false
+  const idA = viaDigits(a.id ?? a.stopId)
+  const idB = viaDigits(b.id ?? b.stopId)
+  if (idA && idB) return idA === idB
+  const nameA = String(a.name || '').trim().toLowerCase()
+  return Boolean(nameA) && nameA === String(b.name || '').trim().toLowerCase()
+}
+
+/** True when a via equals the origin, the destination or the other via (the trip must come back to a stop). */
+export const hasViaLoop = (from, to, vias = []) => vias.some((via, index) => sameViaStop(via, from) || sameViaStop(via, to) || vias.some((other, at) => at !== index && sameViaStop(via, other)))
+
+/** The stops a trip passes in order: the start, then every ride's boarding stop (after a walk), intermediate stops and end. */
+export const tripPoints = (trip) => {
+  const legs = Array.isArray(trip?.legs) ? trip.legs : []
+  const points = []
+  const add = (stop) => { if (stop?.name || stop?.stopId) points.push({ id: stop.stopId || '', name: stop.name || '' }) }
+  if (legs[0]) add(legs[0].from)
+  for (const leg of legs) {
+    if (leg.kind !== 'ride') continue
+    if (!points.length || !sameViaStop(points[points.length - 1], { id: leg.from.stopId, name: leg.from.name })) add(leg.from)
+    for (const stop of leg.stops || []) add(stop)
+    add(leg.to)
+  }
+  return points
+}
+
+/** Whether the trip passes [vias] in order: matched at indices 0 < i1 < i2 < last. */
+export const passesVias = (trip, vias = []) => {
+  if (!vias.length) return true
+  const points = tripPoints(trip)
+  let from = 1
+  for (const via of vias) {
+    let found = -1
+    for (let index = from; index < points.length - 1; index += 1) {
+      if (sameViaStop(via, points[index])) { found = index; break }
+    }
+    if (found < 0) return false
+    from = found + 1
+  }
+  return true
+}
+
+/**
+ * One trip from consecutive segment trips (from → via1, via1 → via2, via2 → to). The first ride of
+ * every later segment gets [transferMin] as its change time, marked as a default; the whole is
+ * evaluated like any trip, so ids, pins, changes and status stay consistent.
+ */
+export const chainSegments = (segments, transferMin = CHAIN_TRANSFER_MIN) => {
+  const legs = []
+  segments.forEach((segment, index) => {
+    let marked = index === 0
+    for (const leg of segment.legs) {
+      if (!marked && leg.kind === 'ride') { legs.push({ ...leg, changeMinutes: transferMin, changeDefault: true }); marked = true } else legs.push(leg)
+    }
+  })
+  return evaluateTrip({ legs })
 }
 
 const sameStop = (leg, pin) => (pin.stopId && leg.from.stopId ? leg.from.stopId === pin.stopId : leg.from.name.toLowerCase() === pin.stop.toLowerCase())

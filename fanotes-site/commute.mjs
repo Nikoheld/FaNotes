@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs'
 import { resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
-  CHECK_IMMINENT_MS, MAX_VIAS, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
+  CHAIN_TRANSFER_MIN, CHECK_IMMINENT_MS, MAX_VIAS, chainSegments, hasViaLoop, passesVias, sameViaStop, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
   parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizeRoutes,
   sanitizeSettings, sanitizeStop, tripAlerts, usable, zurichWall,
 } from './commute-logic.mjs'
@@ -102,28 +102,113 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     })
   }
 
-  /** Trips around [at] (ms) for from → to (through [vias] in order), departing or arriving at that time. */
-  const trips = ({ from, to, vias = [], at, timeType = 'depart', num = 0 }) => {
+  const stopKey = (stop) => stop?.id || stop?.name || ''
+  const routeKey = ({ from, to, vias, at, timeType, num }) => {
     const when = searchDate(at)
-    const stopKey = (stop) => stop?.id || stop?.name || ''
-    vias = (vias || []).filter(Boolean).slice(0, MAX_VIAS)
     // Cached per minute of the asked time: equal questions from several people share one answer.
-    const key = `route:${stopKey(from)}>${vias.map(stopKey).join('>')}>${stopKey(to)}@${when.isoDay}T${when.time}:${timeType}:${num}`
-    return cached(key, ROUTE_CACHE_MS, async () => {
-      if (await left('route', ROUTE_BUDGET)) {
-        try {
-          await spend('route')
-          // search.ch reads an arrival time as the earliest arrival; `pre` adds the trips that arrive in time.
-          const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.date, time: when.time, time_type: timeType === 'arrive' ? 'arrival' : 'depart', num: String(num || (timeType === 'arrive' ? 2 : 5)), pre: timeType === 'arrive' ? '4' : '1', show_delays: '1', show_trackchanges: '1' })
-          // search.ch reads repeated via[] in order (a plain repeated via keeps only the last one).
-          for (const via of vias) params.append('via[]', stopKey(via))
-          return { trips: parseSearchChRoute(await getJson(`${SEARCH_CH}/route.json?${params}`)), provider: 'search.ch', at: now().toISOString() }
-        } catch (error) { log('warn', `Verbindungen search.ch fehlgeschlagen (${error?.status || error?.name || 'error'})`) }
+    return `route:${stopKey(from)}>${vias.map(stopKey).join('>')}>${stopKey(to)}@${when.isoDay}T${when.time}:${timeType}:${num}`
+  }
+
+  /** One timetable query (search.ch, then transport.opendata.ch) for from → to through [vias] in order; no guard, no cache. */
+  const fetchTrips = async ({ from, to, vias, at, timeType, num }) => {
+    const when = searchDate(at)
+    if (await left('route', ROUTE_BUDGET)) {
+      try {
+        await spend('route')
+        // search.ch reads an arrival time as the earliest arrival; `pre` adds the trips that arrive in time.
+        const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.date, time: when.time, time_type: timeType === 'arrive' ? 'arrival' : 'depart', num: String(num || (timeType === 'arrive' ? 2 : 5)), pre: timeType === 'arrive' ? '4' : '1', show_delays: '1', show_trackchanges: '1' })
+        // search.ch reads repeated via[] in order (a plain repeated via keeps only the last one).
+        for (const via of vias) params.append('via[]', stopKey(via))
+        return { trips: parseSearchChRoute(await getJson(`${SEARCH_CH}/route.json?${params}`)), provider: 'search.ch', at: now().toISOString() }
+      } catch (error) { log('warn', `Verbindungen search.ch fehlgeschlagen (${error?.status || error?.name || 'error'})`) }
+    }
+    await spend('fallback')
+    const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.isoDay, time: when.time, isArrivalTime: timeType === 'arrive' ? '1' : '0', limit: String(Math.min(num || 5, 6)) })
+    for (const via of vias) params.append('via[]', stopKey(via))
+    return { trips: parseTransportRoute(await getJson(`${TRANSPORT}/connections?${params}`)), provider: 'transport.opendata.ch', at: now().toISOString() }
+  }
+
+  /** A single segment search without vias, cached like any other answer. Each one counts against the route budget. */
+  const segmentTrips = (query) => {
+    const full = { ...query, vias: [], num: query.num || 6 }
+    return cached(routeKey(full), ROUTE_CACHE_MS, () => fetchTrips(full))
+  }
+
+  /**
+   * Chained trips for a loop route (a via equals the start, the destination or the other via):
+   * segment searches from → via1 → via2 → to, each next one at or after the previous arrival plus
+   * the minimum transfer time (depart), or backward from the last segment (arrive).
+   */
+  const chainedTrips = async ({ from, to, vias, at, timeType, num }) => {
+    // A via equal to its neighbour (start at the start) adds no ride: those stops collapse.
+    const points = [from, ...vias, to].filter((stop, index, all) => index === 0 || !sameViaStop(stop, all[index - 1]))
+    if (points.length < 2) return { trips: [], provider: 'search.ch', at: now().toISOString(), chained: true }
+    const segments = points.slice(0, -1).map((start, index) => ({ from: start, to: points[index + 1] }))
+    const transfer = CHAIN_TRANSFER_MIN * 60_000
+    const want = num || 4
+    const alive = (trip) => trip.status !== 'cancelled'
+    let providerName = 'search.ch'
+    let stale = false
+    const ask = async (segment, when) => {
+      const answer = await segmentTrips({ ...segment, at: when, timeType })
+      providerName = answer.provider || providerName
+      stale = stale || Boolean(answer.stale)
+      return answer.trips || []
+    }
+    let chains
+    if (timeType === 'arrive') {
+      const last = segments.length - 1
+      chains = (await ask(segments[last], at)).sort((a, b) => parseLocal(b.departure) - parseLocal(a.departure)).slice(0, want).map((trip) => [trip])
+      for (let index = last - 1; index >= 0 && chains.length; index -= 1) {
+        // Arriving in time for the next segment's departure: the latest deadline asks, every chain takes the latest trip that fits.
+        const deadline = (chain) => parseLocal(chain[0].departure) - transfer
+        const list = await ask(segments[index], Math.max(...chains.map(deadline)))
+        chains = chains.map((chain) => {
+          const fit = list.filter((trip) => alive(trip) && parseLocal(trip.arrival) <= deadline(chain)).sort((a, b) => parseLocal(b.departure) - parseLocal(a.departure))[0]
+          return fit ? [fit, ...chain] : null
+        }).filter(Boolean)
       }
-      await spend('fallback')
-      const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.isoDay, time: when.time, isArrivalTime: timeType === 'arrive' ? '1' : '0', limit: String(Math.min(num || 5, 6)) })
-      for (const via of vias) params.append('via[]', stopKey(via))
-      return { trips: parseTransportRoute(await getJson(`${TRANSPORT}/connections?${params}`)), provider: 'transport.opendata.ch', at: now().toISOString() }
+    } else {
+      chains = (await ask(segments[0], at)).sort((a, b) => parseLocal(a.departure) - parseLocal(b.departure)).slice(0, want).map((trip) => [trip])
+      for (let index = 1; index < segments.length && chains.length; index += 1) {
+        const ready = (chain) => parseLocal(chain[chain.length - 1].arrival) + transfer
+        const list = await ask(segments[index], Math.min(...chains.map(ready)))
+        chains = chains.map((chain) => {
+          const fit = list.filter((trip) => alive(trip) && parseLocal(trip.departure) >= ready(chain)).sort((a, b) => parseLocal(a.departure) - parseLocal(b.departure))[0]
+          return fit ? [...chain, fit] : null
+        }).filter(Boolean)
+      }
+    }
+    const chained = chains.map((chain) => chainSegments(chain))
+    return { trips: chained, provider: providerName, at: now().toISOString(), chained: true, ...(stale ? { stale: true } : {}) }
+  }
+
+  /**
+   * Trips around [at] (ms) for from → to (through [vias] in order), departing or arriving at that
+   * time. Only trips that pass the vias in order are returned; when none does (or the provider
+   * fails) and the vias contain a loop, trips are chained from segment searches.
+   */
+  const trips = ({ from, to, vias = [], at, timeType = 'depart', num = 0 }) => {
+    vias = (vias || []).filter(Boolean).slice(0, MAX_VIAS)
+    const query = { from, to, vias, at, timeType, num }
+    const loop = hasViaLoop(from, to, vias)
+    return cached(routeKey(query), ROUTE_CACHE_MS, async () => {
+      let answer = null
+      let failure = null
+      try { answer = await fetchTrips(query) } catch (error) { failure = error }
+      if (answer && vias.length) {
+        const passing = answer.trips.filter((trip) => passesVias(trip, vias))
+        // Without a loop the provider already honoured the vias: a name that does not match must not empty the board.
+        if (passing.length || loop) answer = { ...answer, trips: passing }
+      }
+      if ((!answer || !answer.trips.length) && loop) {
+        try {
+          const chained = await chainedTrips(query)
+          if (chained.trips.length) return chained
+        } catch (error) { failure = failure || error }
+      }
+      if (!answer) throw failure
+      return answer
     })
   }
 
@@ -237,6 +322,9 @@ export const createCommute = (options = {}) => {
     } catch {
       return { ...empty, stale: true }
     }
+    // lastLesson before the lesson has ended: a trip that leaves before lesson end + walking time is
+    // unreachable from school (`pre` can return one), so it never ranks. After that moment the plain "from now" ranking applies.
+    if (target.kind === 'lastLesson' && at < targetMs) answer = { ...answer, trips: answer.trips.filter((trip) => parseLocal(trip.departure) >= targetMs) }
     let ranked = target.timeType === 'arrive' ? rankArrive(answer.trips, targetMs, at) : rankTrips(answer.trips, target.kind === 'pinned' ? Math.min(at, targetMs) : at)
     let pinned = null
     if (target.kind === 'pinned') {
