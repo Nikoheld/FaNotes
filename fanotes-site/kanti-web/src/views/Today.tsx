@@ -164,11 +164,11 @@ export const Today = () => {
               </Card>
             </>
           ) : null}
+          {/* Closes the "Von der Schule" block; without it, the card follows "Demnächst". */}
+          <CommuteCard />
         </div>
 
         <div className="dash-col">
-          <CommuteCard />
-
           <SectionLabel action={<button type="button" className="link" onClick={() => kanti.navigate('grades')}>{t.grades} <Icon name="right" size={16} /></button>}>{t.latestGrades}</SectionLabel>
           <Card className="list">
             {recent.length ? recent.map((grade) => (

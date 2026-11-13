@@ -1,6 +1,6 @@
 // Add or edit one commute route in a dialog. Saving sends the whole list (the parent does that).
 import { useState } from 'react'
-import { emptySchedule, isClock, MAX_TIMES, normalizeRoute, pinModeOf, routeVias, stopsKey, THRESHOLDS, travelDays, validateRoute, type PinMode, type RouteError } from '../lib/commute'
+import { defaultBuffer, emptySchedule, isClock, MAX_TIMES, MAX_WALK_MIN, normalizeRoute, pinModeOf, routeVias, stopsKey, THRESHOLDS, travelDays, validateRoute, type PinMode, type RouteError } from '../lib/commute'
 import type { Strings } from '../lib/i18n'
 import type { CommuteRoute, Pin, ScheduleMode, Stop } from '../types'
 import { PinSection, type ConnectionsFn } from './PinPicker'
@@ -22,7 +22,7 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, connectio
   t: Strings
 }) => {
   // Two via slots; a route read without `vias` has [via].
-  const [draft, setDraftRaw] = useState<CommuteRoute>(() => ({ ...initial, vias: routeVias(initial), pins: initial.pins || [] }))
+  const [draft, setDraftRaw] = useState<CommuteRoute>(() => ({ ...initial, vias: routeVias(initial), pins: initial.pins || [], schedule: initial.schedule.mode === 'lastLesson' ? { ...initial.schedule, bufferMinutes: Math.min(initial.schedule.bufferMinutes, MAX_WALK_MIN) } : initial.schedule }))
   const [pinMode, setPinMode] = useState<PinMode>(() => pinModeOf({ pins: initial.pins || [], schedule: initial.schedule }))
   const [pinsCleared, setPinsCleared] = useState(false)
   const [slots, setSlots] = useState<(Stop | null)[]>(() => { const list = routeVias(initial); return [list[0] ?? null, list[1] ?? null] })
@@ -104,7 +104,7 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, connectio
           <legend className="field-label">{t.commuteSchedule}</legend>
           <div className="segments schedule-modes" role="radiogroup" aria-label={t.commuteSchedule}>
             {MODES.map((mode) => (
-              <button type="button" role="radio" aria-checked={schedule.mode === mode} key={mode} className={schedule.mode === mode ? 'active' : ''} onClick={() => setDraft({ ...draft, schedule: { ...emptySchedule(mode), days: schedule.days.length ? schedule.days : emptySchedule().days, times: mode === 'times' ? (schedule.times.length ? schedule.times : ['07:00']) : [], bufferMinutes: schedule.bufferMinutes } })}>
+              <button type="button" role="radio" aria-checked={schedule.mode === mode} key={mode} className={schedule.mode === mode ? 'active' : ''} onClick={() => setDraft({ ...draft, schedule: { ...emptySchedule(mode), days: schedule.days.length ? schedule.days : emptySchedule().days, times: mode === 'times' ? (schedule.times.length ? schedule.times : ['07:00']) : [], bufferMinutes: mode === schedule.mode || mode === 'none' || mode === 'times' ? schedule.bufferMinutes : defaultBuffer(mode) } })}>
                 {t.scheduleModes[mode]}
               </button>
             ))}
@@ -127,8 +127,9 @@ export const RouteEditor = ({ initial, isNew, globalThreshold, search, connectio
               <p className="muted small">{schedule.mode === 'firstLesson' ? t.scheduleFirstHint : t.scheduleLastHint}</p>
               <label className="field">
                 <span className="field-label">{schedule.mode === 'firstLesson' ? t.commuteBufferFirst : t.commuteBufferLast}</span>
-                <span className="inline-number"><input type="number" min={0} max={60} step={1} value={Number.isFinite(schedule.bufferMinutes) ? schedule.bufferMinutes : ''} onChange={(event) => setSchedule({ bufferMinutes: event.target.value === '' ? Number.NaN : Number(event.target.value) })} /> {t.minutesShort}</span>
+                <span className="inline-number"><input type="number" min={0} max={schedule.mode === 'lastLesson' ? MAX_WALK_MIN : 60} step={1} value={Number.isFinite(schedule.bufferMinutes) ? schedule.bufferMinutes : ''} onChange={(event) => setSchedule({ bufferMinutes: event.target.value === '' ? Number.NaN : Number(event.target.value) })} /> {t.minutesShort}</span>
                 {shown('buffer') ? <small className="field-error" role="alert">{shown('buffer')}</small> : null}
+                {shown('walk') ? <small className="field-error" role="alert">{shown('walk')}</small> : null}
               </label>
             </div>
           ) : null}

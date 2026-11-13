@@ -1,7 +1,7 @@
 // Pieces of the Pendeln view and the Today card: line chips, delay badges, occupancy, trips with
 // their leg timeline, and the board body with its status banners.
 import { createContext, useContext, useState } from 'react'
-import { boardFocus, chipColors, clockOf, dayLabel, delayClass, departureDelay, departurePlatform, durationLabel, hasOccupancy, lessonChange, occupancyLevel, rideLegs, tripCancelled } from '../lib/commute'
+import { boardFocus, chipColors, clockOf, dayLabel, delayClass, departureDelay, departurePlatform, durationLabel, hasOccupancy, lessonChange, occupancyLevel, rideLegs, transferRequired, transferShown, tripCancelled } from '../lib/commute'
 import type { Strings } from '../lib/i18n'
 import type { CommuteRoute, CommuteTarget, Leg, Occupancy, RouteBoard, Stop, Trip, TripPoint } from '../types'
 import { Banner, Button, Icon, Tag, type IconName } from './ui'
@@ -108,7 +108,7 @@ const Timeline = ({ trip, t }: { trip: Trip; t: Strings }) => {
 export const TransferNote = ({ change, t }: { change: Trip['changes'][number]; t: Strings }) => (
   <p className={`transfer${change.broken ? ' transfer-broken' : change.tight ? ' transfer-tight' : ''}`}>
     <Icon name={change.broken ? 'warning' : 'swap'} size={14} />
-    <span>{t.transferAt(change.at, change.minutes)}</span>
+    <span>{t.transferAt(change.at, transferShown(change), transferRequired(change))}</span>
     {change.broken ? <Tag tone="danger">{t.transferBroken}</Tag> : change.tight ? <Tag tone="warning">{t.transferTight}</Tag> : null}
     {change.plannedMinutes !== change.minutes ? <small className="muted">({change.plannedMinutes} min)</small> : null}
   </p>

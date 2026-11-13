@@ -1223,7 +1223,7 @@
     <string name="commute_schedule_none_summary">Jederzeit, nächste Verbindung</string>
     <string name="commute_schedule_times_summary">%1$s · %2$s</string>
     <string name="commute_schedule_first_summary">Zur ersten Lektion, %1$d min früher · %2$s</string>
-    <string name="commute_schedule_last_summary">Nach der letzten Lektion, %1$d min später · %2$s</string>
+    <string name="commute_schedule_last_summary">Nach der letzten Lektion, %1$d min Fussweg zur Haltestelle · %2$s</string>
     <string name="commute_target_now">Nächste Abfahrten</string>
     <string name="commute_target_time">Abfahrten ab %1$s</string>
     <string name="commute_target_arrive">Ankunft bis %1$s</string>
@@ -1269,6 +1269,8 @@
     <string name="commute_first_cancelled_body">Die erste Stunde fällt aus. Nimm die Verbindung um %1$s.</string>
     <string name="commute_transfer">Umsteigen in %1$s · %2$d min</string>
     <string name="commute_transfer_tight">Knapper Umstieg in %1$s · %2$d min</string>
+    <string name="commute_transfer_required">Umsteigen in %1$s · %2$d min (mind. %3$d min)</string>
+    <string name="commute_transfer_tight_required">Knapper Umstieg in %1$s · %2$d min (mind. %3$d min)</string>
     <string name="commute_transfer_broken">Anschluss in %1$s wird verpasst</string>
     <string name="commute_class_first">1. Klasse</string>
     <string name="commute_class_second">2. Klasse</string>
@@ -1311,7 +1313,7 @@
     <string name="commute_times_limit">Bis zu %1$d Zeiten.</string>
     <string name="commute_weekdays">Wochentage</string>
     <string name="commute_buffer_first">%1$d min früher ankommen</string>
-    <string name="commute_buffer_last">%1$d min nach der Lektion losfahren</string>
+    <string name="commute_buffer_last">%1$d min Fussweg zur Haltestelle</string>
     <string name="commute_less">Weniger</string>
     <string name="commute_more">Mehr</string>
     <string name="commute_alerts_for_route">Hinweise für diese Strecke</string>

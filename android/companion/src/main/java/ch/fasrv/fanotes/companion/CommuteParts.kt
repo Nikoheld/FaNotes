@@ -242,6 +242,17 @@ fun OccupancyRow(occupancy: Occupancy, quietest: Boolean, modifier: Modifier = M
     }
 }
 
+/** "Umsteigen in Aarau · 4 min (mind. 4 min)": the minimum only where the timetable names one. */
+fun commuteTransferText(change: Transfer, tight: Boolean = change.tight): String {
+    val required = change.officialMinutes
+    return when {
+        required != null && tight -> t(R.string.commute_transfer_tight_required, change.at, change.shownMinutes, required)
+        required != null -> t(R.string.commute_transfer_required, change.at, change.shownMinutes, required)
+        tight -> t(R.string.commute_transfer_tight, change.at, change.shownMinutes)
+        else -> t(R.string.commute_transfer, change.at, change.shownMinutes)
+    }
+}
+
 /** "Umsteigen in Knoten · 5 min · Gleis 5": tight in amber, broken in red, a changed platform in amber. [next] is the ride that follows. */
 @Composable
 fun TransferLine(change: Transfer, next: Leg? = null, modifier: Modifier = Modifier) {
@@ -254,8 +265,8 @@ fun TransferLine(change: Transfer, next: Leg? = null, modifier: Modifier = Modif
     }
     val base = when {
         change.broken -> t(R.string.commute_transfer_broken, change.at)
-        change.tight -> t(R.string.commute_transfer_tight, change.at, change.minutes)
-        else -> t(R.string.commute_transfer, change.at, change.minutes)
+        change.tight -> commuteTransferText(change, tight = true)
+        else -> commuteTransferText(change, tight = false)
     }
     val platform = if (next == null || change.broken) "" else commutePlatformText(next).let { if (it.isNotBlank() && platformChanged) t(R.string.commute_platform_changed, it) else it }
     val text = if (platform.isBlank()) base else "$base · $platform"
