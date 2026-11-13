@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Extra widget tones. Light fallbacks for API 26-30; values-v31 swaps the neutral ones for Material You. -->
+<resources>
+    <color name="widget_container">#F0F2EE</color>
+    <color name="widget_accent_container">#DCEBF4</color>
+    <color name="widget_on_accent_container">#1B4A66</color>
+    <color name="widget_danger_container">#FBE3E1</color>
+    <color name="widget_warning_container">#FBE8C8</color>
+    <color name="widget_success_container">#D3EEDD</color>
+</resources>

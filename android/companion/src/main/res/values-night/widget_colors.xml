@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="widget_container">#24272B</color>
+    <color name="widget_accent_container">#1F3A4B</color>
+    <color name="widget_on_accent_container">#BFE0F2</color>
+    <color name="widget_danger_container">#4A2321</color>
+    <color name="widget_warning_container">#4A3410</color>
+    <color name="widget_success_container">#1D3D2A</color>
+</resources>

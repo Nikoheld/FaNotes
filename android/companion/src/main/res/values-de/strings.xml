@@ -736,9 +736,9 @@
     <string name="what_needs_doing">Was ist zu tun?</string>
     <string name="what_reaches_you_and_when">Was dich erreicht, und wann</string>
     <string name="when_you_open_kanti">Wenn du Kanti+ öffnest</string>
-    <string name="widget_description">Deine nächste Schulnetz-Lektion und der Raum.</string>
+    <string name="widget_description">Deine nächste Lektion mit Zeit und Raum, dazu der Rest des Tages, Prüfungen und Änderungen.</string>
     <string name="widget_kicker">Nächste Lektion</string>
-    <string name="widget_name">Kanti+</string>
+    <string name="widget_name">Nächste Lektion</string>
     <string name="with_guess_the_grade_a_long_press_opens_a_hidden">Bei Note erraten öffnet ein langes Drücken eine verdeckte Note. Ein Tippen lässt sie zu.</string>
     <string name="work_on_this_device">Auf diesem Gerät arbeiten</string>
     <string name="write_draw_or_collect_your_thoughts">Schreiben, zeichnen oder Gedanken sammeln</string>
@@ -1443,4 +1443,28 @@
         <item quantity="one">%1$d Strecke</item>
         <item quantity="other">%1$d Strecken</item>
     </plurals>
+    <string name="widget_signed_out_body">Öffne Kanti+ zum Anmelden.</string>
+    <string name="widget_open_to_load">Öffne Kanti+, um ihn zu laden.</string>
+    <string name="widget_no_lessons_today">Heute kein Unterricht</string>
+    <string name="widget_nothing_ahead">Nichts mehr geplant.</string>
+    <string name="widget_holidays_until">Bis %1$s</string>
+    <string name="commute_widget_loading_title">Verbindungen laden</string>
+    <string name="commute_widget_loading_body">Öffne Kanti+ zum Aktualisieren.</string>
+    <string name="commute_widget_offline">Offline</string>
+    <string name="widget_preview_l1">Mathematik</string>
+    <string name="widget_preview_l1_detail">10:15–11:00 · Raum 201</string>
+    <string name="widget_preview_l2">Biologie</string>
+    <string name="widget_preview_l3">Geschichte</string>
+    <string name="widget_preview_room2">Raum 105</string>
+    <string name="widget_preview_room3">Raum 312</string>
+    <string name="widget_preview_route">Schule</string>
+    <string name="widget_preview_platform">Gl. 3</string>
+    <string name="widget_preview_t1">11:15</string>
+    <string name="widget_preview_t2">13:30</string>
+    <string name="widget_preview_c1">07:05</string>
+    <string name="widget_preview_c2">+2</string>
+    <string name="widget_preview_c3">371</string>
+    <string name="widget_preview_c4">→ 07:47</string>
+    <string name="widget_preview_c5">07:35</string>
+    <string name="widget_preview_c6">S29</string>
 </resources>
