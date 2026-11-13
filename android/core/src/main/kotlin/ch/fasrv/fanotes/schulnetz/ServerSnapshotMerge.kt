@@ -30,6 +30,7 @@ fun adoptServerSnapshot(phone: SchulnetzSnapshot, server: SchulnetzSnapshot): Sc
     }
     val appointments = server.events.filterNot { it.isLesson() }.ifEmpty { phone.events.filterNot { it.isLesson() } }
     val serverGrades = server.gradeParser >= GRADE_PARSER_VERSION && server.trustedGradeRead() && server.grades.isNotEmpty()
+    val mergedEvents = lessons + appointments
     return adoptAbsences(phone, server).copy(
         revision = phone.revision + 1,
         fetchedAt = later(server.fetchedAt, phone.fetchedAt),
@@ -37,8 +38,9 @@ fun adoptServerSnapshot(phone: SchulnetzSnapshot, server: SchulnetzSnapshot): Sc
         grades = if (serverGrades) keepGradeRead(phone.grades, server.grades, true) else phone.grades,
         gradesReadComplete = if (serverGrades) true else phone.gradesReadComplete,
         gradeParser = if (serverGrades) server.gradeParser else phone.gradeParser,
-        events = lessons + appointments,
-        exams = server.exams.ifEmpty { phone.exams },
+        events = mergedEvents,
+        exams = ownExams(server.exams.ifEmpty { phone.exams }, mergedEvents).exams,
+        examsUnfiltered = ownExams(server.exams.ifEmpty { phone.exams }, mergedEvents).unfiltered,
         homework = server.homework.ifEmpty { phone.homework },
         messages = server.messages.ifEmpty { phone.messages },
         vacations = server.vacations.ifEmpty { phone.vacations },

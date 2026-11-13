@@ -240,6 +240,8 @@ data class SchulnetzSnapshot(
     val gradesReadComplete: Boolean = true,
     /** Only successfully read exam weeks; lesson coverage must not stand in for exam coverage. */
     val examWeekFetched: Map<String, String> = emptyMap(),
+    /** True when the exam list could not be narrowed to the student's courses because no lessons were loaded. */
+    val examsUnfiltered: Boolean = false,
     /**
      * Monday to the instant the lesson scheduler actually answered.
      * An empty readable body is included. An iCal range is not.

@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.companion
 import ch.fasrv.fanotes.schulnetz.PlannedAbsence
 import ch.fasrv.fanotes.schulnetz.parsePlannedAbsences
 import ch.fasrv.fanotes.schulnetz.serializePlannedAbsences
+import ch.fasrv.fanotes.schulnetz.withOwnExams
 import ch.fasrv.fanotes.schulnetz.ConnectionRegistry
 import ch.fasrv.fanotes.schulnetz.PRIMARY_SLOT
 import ch.fasrv.fanotes.schulnetz.newPushKey
@@ -1859,7 +1860,7 @@ class CompanionGraph(private val context: Context, val client: SchulnetzClient =
             weekSpanEnd = next.weekSpanEnd.ifBlank { previous.weekSpanEnd },
             icalFetchedAt = next.icalFetchedAt.ifBlank { previous.icalFetchedAt },
             revision = previous.revision + 1,
-        )
+        ).withOwnExams()
 
         private fun silentLoginAllowed(): Boolean {
             val last = prefs.getLong(SILENT_AT, 0L)

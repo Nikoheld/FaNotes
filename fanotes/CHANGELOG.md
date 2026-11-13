@@ -1,5 +1,10 @@
 # Änderungsverlauf
 
+## 2026.11.2-beta.31
+
+- Fix: Prüfungen shows only your own exams. The Prüfungsplan lists the whole Abteilung; exams of courses you do not attend (another group or class) are no longer listed, planned, shown in the widget or in Kanti+ im Browser, and never trigger a notification.
+- Exams that disappear because of this fix leave silently, without an "exam removed" notice. If your timetable has not loaded yet, nothing is hidden until it has.
+
 ## 2026.11.2-beta.30
 
 - Never write an empty handwriting page over a note whose ink has not loaded.
