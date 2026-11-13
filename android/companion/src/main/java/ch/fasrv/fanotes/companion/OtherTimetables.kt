@@ -43,8 +43,8 @@ fun OtherTimetablesScreen(graph: CompanionGraph, summary: ClassTimetableSummary,
     var openClass by rememberSaveable { mutableStateOf<String?>(null) }
     var openRoom by rememberSaveable { mutableStateOf<String?>(null) }
     val inDetail = openClass != null || openRoom != null
-    // Detail pops to the list; on the list the host's own back handling takes over.
-    BackHandler(enabled = inDetail) { openClass = null; openRoom = null }
+    // Shown through local state, not a Page: it must always consume back while it is composed.
+    BackHandler { if (inDetail) { openClass = null; openRoom = null } else onClose() }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = Space.page - 4.dp, end = Space.page), verticalAlignment = Alignment.CenterVertically) {
             ActionIcon(Icons.Outlined.ChevronLeft, if (inDetail) t(R.string.back_to_list) else t(R.string.back_to_schedule)) { if (inDetail) { openClass = null; openRoom = null } else onClose() }

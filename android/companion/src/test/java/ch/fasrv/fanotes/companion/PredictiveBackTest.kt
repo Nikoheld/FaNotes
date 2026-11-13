@@ -72,4 +72,22 @@ class PredictiveBackTest {
         assertEquals(Destination.Today, route.destination)
         assertFalse(enabled())
     }
+
+    @Test fun `back on the other-timetables list closes the overlay and never reaches the root`() {
+        var overlay by mutableStateOf(true)
+        var detail by mutableStateOf(false)
+        var rootReached = false
+        rule.setContent {
+            // Planner is a nav root, so the root handler is disabled here. Same shape as OtherTimetablesScreen.
+            BackHandler(false) { rootReached = true }
+            if (overlay) BackHandler { if (detail) detail = false else overlay = false }
+        }
+        rule.waitForIdle()
+        assertTrue(enabled())
+        rule.runOnUiThread { detail = true }; rule.waitForIdle()
+        back(); rule.waitForIdle()
+        assertTrue(overlay); assertFalse(detail)
+        back(); rule.waitForIdle()
+        assertFalse(overlay); assertFalse(rootReached); assertFalse(enabled())
+    }
 }
