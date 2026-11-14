@@ -1657,6 +1657,22 @@ export const usesWebsiteSession = (baseUrl) => {
   }
 }
 
+export const FETCH_TIMEOUT_MS = 20_000
+export const TRANSIENT_HTTP = new Set([429, 500, 502, 503, 504])
+
+/** Jittered wait before retry n (0 is the first retry). A full second at most. */
+export const retryBackoffMs = (attempt, random = Math.random) => {
+  const cap = Math.min(1_000, 200 * 2 ** Math.max(0, attempt))
+  return Math.round(cap * (0.5 + random() * 0.5))
+}
+
+const MAINTENANCE_TEXT = ['wartungsarbeiten', 'wegen wartung', 'maintenance mode', 'temporarily unavailable']
+
+export const maintenancePage = (html) => {
+  const lower = String(html || '').toLowerCase()
+  return MAINTENANCE_TEXT.some((phrase) => lower.includes(phrase))
+}
+
 const IP_REJECTED_TEXT = [
   'ihre ip-adresse wurde vom system zurückgewiesen',
   'ihre ip-adresse wurde vom system zurueckgewiesen',
@@ -1681,6 +1697,7 @@ export const sessionProblem = (url, html) => {
   if (text.includes('stsErrorCode') && text.includes('50058')) return 'microsoft'
   const lower = text.toLowerCase()
   if (IP_REJECTED_TEXT.some((phrase) => lower.includes(phrase))) return 'ip'
+  if (maintenancePage(text) && !/pageid=\d+/iu.test(`${parsed?.search || ''} ${text}`)) return 'maintenance'
   if (INACTIVITY_TEXT.some((phrase) => lower.includes(phrase))) return 'inactivity'
   const path = (parsed?.pathname || '').toLowerCase()
   if (path.includes('loginto.php') && parsed?.searchParams.get('mode') === '17') return 'oauth'

@@ -2,7 +2,7 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { GRADE_PARSER_VERSION, addDays, lessonCheckWeeks, isLesson, carryTimetableExams, ownExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, tagErrorStage, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, TRANSIENT_HTTP, addDays, lessonCheckWeeks, isLesson, carryTimetableExams, ownExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, retryBackoffMs, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, tagErrorStage, weekMonday, zurichToday } from './schulnetz-logic.mjs'
 
 const atStage = (stage, read) => {
   try { return read() } catch (error) { throw tagErrorStage(stage, error) }
@@ -100,16 +100,26 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       pages.error = 'blocked'
       return ''
     }
-    const response = await fetchImpl(url, {
-      method: 'GET',
-      headers: {
-        Accept: url.includes('scheduler_processor') ? 'text/xml' : 'text/html',
-        Cookie: `PHPSESSID=${session.php}`,
-        'User-Agent': session.userAgent,
-        Referer: url.includes('scheduler_processor') ? openPage : `${root}/`,
-      },
-      redirect: 'manual',
-    })
+    let response
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt) await new Promise((resolvePause) => setTimeout(resolvePause, retryBackoffMs(attempt - 1)))
+      try {
+        response = await fetchImpl(url, {
+          method: 'GET',
+          headers: {
+            Accept: url.includes('scheduler_processor') ? 'text/xml' : 'text/html',
+            Cookie: `PHPSESSID=${session.php}`,
+            'User-Agent': session.userAgent,
+            Referer: url.includes('scheduler_processor') ? openPage : `${root}/`,
+          },
+          redirect: 'manual',
+        })
+      } catch (error) {
+        if (attempt === 2) throw error
+        continue
+      }
+      if (!TRANSIENT_HTTP.has(response.status)) break
+    }
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers?.get?.('location') || ''
       pages.problem = microsoftLoginRequired(location, '') ? 'microsoft' : 'login'
