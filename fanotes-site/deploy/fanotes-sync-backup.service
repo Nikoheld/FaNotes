@@ -1,0 +1,18 @@
+[Unit]
+Description=Copy the FaNotes sync store (ciphertext only)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+Environment=FANOTES_SYNC_DIR=/var/lib/fanotes-sync
+Environment=FANOTES_SYNC_BACKUP_DIR=/var/lib/fanotes-sync-backups
+ExecStart=/usr/bin/node /opt/fanotes-site/scripts/sync-backup.mjs backup --keep 7
+NoNewPrivileges=true
+UMask=0077
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/fanotes-sync
+ReadWritePaths=/var/lib/fanotes-sync-backups
