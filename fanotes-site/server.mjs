@@ -672,7 +672,7 @@ const server = createServer(async (request, response) => {
         status: 'ok',
         version: releases.linux.version,
         windowsVersion: releases.windows?.version ?? null,
-        ...(kanti ? { schulnetz: { status: kanti.status, gradeCheckMaxAgeSeconds: kanti.gradeChecks.maxAgeSeconds, overdue: kanti.gradeChecks.overdue, slaSeconds: kanti.slaSeconds } } : {}),
+        ...(kanti ? { schulnetz: { status: kanti.status, gradeCheckMaxAgeSeconds: kanti.gradeChecks.maxAgeSeconds, overdue: kanti.gradeChecks.overdue, slaSeconds: kanti.slaSeconds, pollErrors: kanti.pollErrors } } : {}),
       })
       return
     }

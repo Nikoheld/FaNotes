@@ -3145,6 +3145,63 @@ export const pollDelayMs = ({ now = new Date(), snapshot = null, failures = 0, b
  * GET only) at most every 3.5 min ±12.5 % (≤ 4 min), with no backoff, so even with a scheduler tick
  * (15 s), a queue of accounts, a sign-in refresh and the push there is room left in the 10 minutes.
  */
+const NETWORK_ERROR_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH',
+  'EPIPE', 'ECONNABORTED', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET', 'UND_ERR_CONNECT', 'ABORT_ERR',
+])
+
+const walkError = (error, visit) => {
+  const seen = new Set()
+  const queue = [error]
+  while (queue.length) {
+    const current = queue.shift()
+    if (!current || typeof current !== 'object' || seen.has(current)) continue
+    seen.add(current)
+    visit(current)
+    if (current.cause) queue.push(current.cause)
+    if (Array.isArray(current.errors)) queue.push(...current.errors)
+  }
+}
+
+const safeErrorToken = (value) => String(value || '').slice(0, 40).replace(/[^A-Za-z0-9_-]/g, '')
+
+/**
+ * A poll failure as a log token and a health counter. Network failures (DNS, reset, timeout,
+ * HTTP 5xx) are not code bugs. The token never includes the message, so a URL, a cookie or a
+ * token that the runtime put in the message stays out of the log.
+ */
+export const describePollError = (error) => {
+  const codes = []
+  let name = 'error'
+  let status = 0
+  let stage = ''
+  walkError(error, (current) => {
+    if (typeof current.code === 'string' && current.code) codes.push(current.code)
+    if (typeof current.name === 'string' && current.name && name === 'error') name = current.name
+    const currentStatus = Number(current.status)
+    if (!status && Number.isInteger(currentStatus) && currentStatus >= 400 && currentStatus <= 599) status = currentStatus
+    if (!stage && typeof current.stage === 'string' && /^[a-z0-9-]{1,24}$/iu.test(current.stage)) stage = current.stage
+  })
+  const networkCode = codes.find((code) => NETWORK_ERROR_CODES.has(code))
+  const timeout = name === 'TimeoutError' || name === 'AbortError'
+  const caused = Boolean(error?.cause || (Array.isArray(error?.errors) && error.errors.length))
+  const http = status ? `http-${status}` : ''
+  let kind = 'code'
+  let code = safeErrorToken(networkCode || codes[0] || http || name) || 'error'
+  if (networkCode || timeout || (status >= 500 && status <= 599)) kind = 'network'
+  // Node's fetch rejects with TypeError and a cause. A TypeError with no cause is our own code.
+  else if (name === 'TypeError' && caused) kind = 'network'
+  if (timeout && !networkCode) code = name === 'AbortError' ? 'ABORT_ERR' : 'ETIMEDOUT'
+  if (!networkCode && !timeout && http && status >= 500) code = http
+  return { kind, code, ...(stage ? { stage } : {}) }
+}
+
+export const tagErrorStage = (stage, error) => {
+  if (error && typeof error === 'object' && !error.stage) error.stage = stage
+  return error
+}
+
 export const GRADE_SLA_MS = 10 * 60_000
 export const GRADE_CHECK_MS = 210_000
 export const GRADE_CHECK_JITTER = 0.125
@@ -3155,10 +3212,11 @@ export const gradeCheckDelayMs = (random = Math.random) => Math.round(GRADE_CHEC
  * other with [spacingMs] between them, and plans each next read with [pollDelayMs]. New accounts
  * start staggered, so a restart is not a burst.
  */
-export const createPollScheduler = ({ listAccounts, pollAccount, readSnapshot, now = () => new Date(), baseMs = POLL_SCHOOL_DEFAULT_MS, random = Math.random, spacingMs = POLL_SPACING_MS, sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)), log = () => {} }) => {
+export const createPollScheduler = ({ listAccounts, pollAccount, readSnapshot, now = () => new Date(), baseMs = POLL_SCHOOL_DEFAULT_MS, random = Math.random, spacingMs = POLL_SPACING_MS, sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)), log = () => {}, onPollError = () => {} }) => {
   const due = new Map()
   const gradeDue = new Map()
   const failures = new Map()
+  const pollErrors = { network: 0, code: 0, codes: new Map() }
   const tick = async () => {
     const accounts = await listAccounts()
     const started = now().getTime()
@@ -3186,7 +3244,12 @@ export const createPollScheduler = ({ listAccounts, pollAccount, readSnapshot, n
       } catch (error) {
         failed = true
         contacted = true
-        log('warn', `Konto ${accountId.slice(0, 8)} nicht aktualisiert (${error?.status || error?.name || 'error'})`)
+        const described = describePollError(error)
+        pollErrors[described.kind] += 1
+        pollErrors.codes.set(described.code, (pollErrors.codes.get(described.code) || 0) + 1)
+        const where = described.stage ? ` stage=${described.stage}` : ''
+        log('warn', `Konto ${accountId.slice(0, 8)} nicht aktualisiert (${described.kind} ${described.code}${where})`)
+        try { onPollError(described) } catch { /* the counter must not hide the failed read */ }
       }
       // Grade checks never back off: the 10-minute promise holds through a failing read.
       gradeDue.set(accountId, now().getTime() + gradeCheckDelayMs(random))
@@ -3198,5 +3261,5 @@ export const createPollScheduler = ({ listAccounts, pollAccount, readSnapshot, n
     }
     return polled
   }
-  return { tick, due, gradeDue, failures }
+  return { tick, due, gradeDue, failures, pollErrors }
 }
