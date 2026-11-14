@@ -1,13 +1,13 @@
 // The grade promise: a new grade reaches the phone within 10 minutes of appearing in Schulnetz, 24/7.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { createDecipheriv, randomBytes } from 'node:crypto'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
-import { GRADE_CHECK_JITTER, GRADE_CHECK_MS, GRADE_SLA_MS, createPollScheduler, gradeCheckDelayMs, latencyPercentile } from './schulnetz-logic.mjs'
+import { GRADE_CHECK_JITTER, GRADE_CHECK_MS, GRADE_SLA_MS, createPollScheduler, gradeCheckDelayMs, latencyPercentile, sessionProblem } from './schulnetz-logic.mjs'
 import { pushKeyBytes, sealPushChanges, sealPushPayload } from './fcm.mjs'
 
 const openSealed = (keyBase64, sealed) => {
@@ -286,6 +286,49 @@ test('health counts a DNS failure as network and does not repeat the host', asyn
     const warn = lines.find((line) => line.includes('nicht aktualisiert'))
     assert.match(warn, /network ENOTFOUND stage=fetch/)
     assert.equal(warn.includes('schulnetz-ag'), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a transient grade read is retried, a maintenance page keeps the book, and polls do not overlap or leave temp files', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-robust-'))
+  let gradeHits = 0
+  let inFlight = 0
+  let maxInFlight = 0
+  const grade = [{ id: 'g1', course: 'Mathematik', courseId: 'math', title: 'Probe', date: '2026-11-14', mark: '5.5', weight: '1' }]
+  const fetch = async (url, init) => {
+    assert.ok(init?.signal, 'every outbound call has a timeout')
+    inFlight += 1
+    maxInFlight = Math.max(maxInFlight, inFlight)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    inFlight -= 1
+    const target = String(url)
+    const json = (value, status = 200) => ({ status, headers: { get: () => null }, text: async () => (typeof value === 'string' ? value : JSON.stringify(value)) })
+    if (target.endsWith('/token.php')) return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+    if (target.includes('/me/grades')) {
+      gradeHits += 1
+      if (gradeHits < 3) return json('temporarily unavailable', 503)
+      return json(grade)
+    }
+    if (target.includes('pageid=')) return json('<html><body>Wartungsarbeiten</body></html>')
+    return json([])
+  }
+  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false, spacingMs: 0, fetch, fcmSend: async () => ({ status: 200 }) })
+  try {
+    assert.equal(sessionProblem('https://www.schulnetz-ag.ch/aksa/', '<html><body>Wartungsarbeiten</body></html>'), 'maintenance')
+    assert.equal(sessionProblem('https://www.schulnetz-ag.ch/aksa/index.php?pageid=21311', '<html><body><a href="index.php?pageid=21311">Noten</a> wegen Wartung verschoben</body></html>'), '')
+    const accountId = 'b'.repeat(32)
+    await runtime.linkAccount(accountId, { baseUrl: 'https://www.schulnetz-ag.ch/aksa', deviceId: '0123456789abcdef01234567', refreshToken: 'synthetic-refresh-token-long-enough' })
+    await runtime.pollAccount(accountId)
+    const first = JSON.parse(await readFile(join(root, 'accounts', accountId, 'snapshot.json'), 'utf8'))
+    assert.equal(first.grades[0].mark, 5.5)
+    assert.equal(gradeHits, 3)
+    const again = Promise.all([runtime.pollAccount(accountId), runtime.pollAccount(accountId)])
+    await again
+    assert.equal(maxInFlight, 1)
+    const names = await readdir(join(root, 'accounts', accountId))
+    assert.equal(names.some((name) => name.endsWith('.tmp') || name.includes('.tmp')), false)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

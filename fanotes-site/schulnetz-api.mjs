@@ -13,7 +13,7 @@ import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
 import { createCommute } from './commute.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, latencyPercentile, describePollError, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, latencyPercentile, describePollError, FETCH_TIMEOUT_MS, TRANSIENT_HTTP, retryBackoffMs, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   alertAllowed,
   applyEventWindow,
@@ -170,12 +170,15 @@ export const createSchulnetzRuntime = (options = {}) => {
   const timetables = options.timetables || null
   const rawFetch = options.fetch || globalThis.fetch
   const fetchImpl = async (url, init) => {
+    const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
     try {
-      return await rawFetch(url, init)
+      return await rawFetch(url, { ...init, signal })
     } catch (error) {
       throw tagErrorStage('fetch', error)
     }
   }
+  const pause = (ms) => new Promise((resolvePause) => setTimeout(resolvePause, ms))
   const now = options.now || (() => new Date())
   const log = options.log || ((level, message) => {
     console.log(`${now().toISOString()} schulnetz ${level} ${redactSecrets(message)}`)
@@ -654,9 +657,23 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   const schoolFetch = async (url, method, headers, body) => {
     if (!schulnetzCallAllowed(method, url, body || '')) fail(400, 'Diese Schulnetz-Anfrage ist nicht erlaubt.')
-    const response = await fetchImpl(url, { method, headers, body, redirect: 'manual' })
-    const responseBody = await response.text()
-    return { status: response.status, body: responseBody }
+    const verb = String(method || 'GET').toUpperCase()
+    // GET may be repeated. POST is only the token refresh and is not repeated: a retry could rotate the token twice.
+    const attempts = verb === 'GET' || verb === 'HEAD' ? 3 : 1
+    let lastError = null
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (attempt) await pause(retryBackoffMs(attempt - 1))
+      try {
+        const response = await fetchImpl(url, { method, headers, body, redirect: 'manual' })
+        const responseBody = await response.text()
+        if ((verb === 'GET' || verb === 'HEAD') && TRANSIENT_HTTP.has(response.status) && attempt < attempts - 1) continue
+        return { status: response.status, body: responseBody }
+      } catch (error) {
+        lastError = error
+        if (attempt === attempts - 1) throw error
+      }
+    }
+    throw lastError || tagErrorStage('fetch', new Error('read failed'))
   }
 
   const refreshTokens = async (baseUrl, refreshToken, deviceId) => {
