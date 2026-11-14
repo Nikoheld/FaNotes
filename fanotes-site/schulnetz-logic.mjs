@@ -3207,6 +3207,13 @@ export const GRADE_CHECK_MS = 210_000
 export const GRADE_CHECK_JITTER = 0.125
 export const gradeCheckDelayMs = (random = Math.random) => Math.round(GRADE_CHECK_MS * (1 + (random() * 2 - 1) * GRADE_CHECK_JITTER))
 
+/** Nearest-rank percentile of an ascending list. An empty list has no value. */
+export const latencyPercentile = (sorted, fraction) => {
+  if (!sorted?.length) return null
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(fraction * sorted.length) - 1))
+  return sorted[index]
+}
+
 /**
  * Due-time scheduler for the poller. [tick] reads every account whose time has come, one after the
  * other with [spacingMs] between them, and plans each next read with [pollDelayMs]. New accounts

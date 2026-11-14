@@ -13,7 +13,7 @@ import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
 import { createCommute } from './commute.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, latencyPercentile, describePollError, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   alertAllowed,
   applyEventWindow,
@@ -720,7 +720,8 @@ export const createSchulnetzRuntime = (options = {}) => {
   const ping = async (accountId, link, event, priority = 'HIGH', changes = []) => {
     if (event !== 'sync' && event !== 'reauth' && event !== 'test' && event !== 'commute') return
     const tokens = (link.fcmTokens || []).filter(isValidFcmToken)
-    if (!tokens.length) return
+    if (!tokens.length) return []
+    const results = []
     let dropped = false
     const material = event === 'sync' && changes.length ? await key() : null
     for (const token of tokens) {
@@ -733,15 +734,19 @@ export const createSchulnetzRuntime = (options = {}) => {
           if (bytes) sealed = sealPushChanges(bytes, changes)
         }
         const result = await sendFcm(token, event, priority, { route: connectionRouteKey(accountId), ...(sealed?.sealed ? { sealed: sealed.sealed, more: sealed.more } : {}) })
+        const status = Number(result?.status)
+        results.push(Number.isInteger(status) && status >= 100 ? status : (result?.skipped ? 'skipped' : 'failed'))
         if (result?.drop) {
           link.fcmTokens = (link.fcmTokens || []).filter((item) => item !== token)
           dropped = true
         }
       } catch (error) {
-        log('warn', `FCM fehlgeschlagen (${error?.name || 'error'})`)
+        results.push(describePollError(error).code)
+        log('warn', `FCM fehlgeschlagen (${describePollError(error).kind} ${describePollError(error).code})`)
       }
     }
     if (dropped) await saveLink(accountId, link)
+    return results
   }
 
   const pingDevice = async (accountId, link, token, event, priority = 'HIGH', extra = {}) => {
@@ -864,9 +869,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     const fresh = prepareGradeNotifications(unseen, link.settings?.guessGrades === true)
     const priority = fcmPriorityForChanges(fresh, now())
     if (priority && push) {
-      await ping(accountId, link, 'sync', priority, fresh)
-      // Detection (the school page that showed the change was read) to push sent.
-      if (detectedAt > 0) await recordPush(accountId, now().getTime() - detectedAt, fresh.filter((change) => change.category === 'grade').length)
+      const fcm = await ping(accountId, link, 'sync', priority, fresh)
+      // First sight of the change (the read that parsed it) to the FCM HTTP response.
+      if (detectedAt > 0) await recordPush(accountId, detectedAt, fcm, fresh.filter((change) => change.category === 'grade').length)
     }
     return fresh
   }
@@ -909,11 +914,21 @@ export const createSchulnetzRuntime = (options = {}) => {
     await writeJson(monitorPath(accountId), monitor)
     log('info', `Noten geprüft ${accountId.slice(0, 8)} ${kind} ${ok ? 'ok' : 'fehlgeschlagen'} ${Math.round(ms)} ms`)
   }
-  const recordPush = async (accountId, latencyMs, grades) => {
+  const recordPush = async (accountId, seenAt, fcmStatuses, grades) => {
+    const respondedAt = now().getTime()
+    const latencyMs = Math.max(0, Math.round(respondedAt - seenAt))
+    const fcm = (Array.isArray(fcmStatuses) ? fcmStatuses : []).map((status) => {
+      const token = typeof status === 'number' ? String(status) : String(status || 'failed')
+      return /^[A-Za-z0-9_-]{1,24}$/u.test(token) ? token : 'failed'
+    }).slice(0, 8)
     const monitor = await readMonitor(accountId)
-    monitor.pushes = [...(monitor.pushes || []), { at: now().toISOString(), latencyMs: Math.max(0, Math.round(latencyMs)), grades }].slice(-100)
+    // seenAt is when this process first read the grade. respondedAt is the FCM HTTP response, not the phone.
+    monitor.pushes = [...(monitor.pushes || []), { at: new Date(seenAt).toISOString(), respondedAt: new Date(respondedAt).toISOString(), latencyMs, grades, fcm }].slice(-100)
     await writeJson(monitorPath(accountId), monitor)
-    log('info', `Push gesendet ${accountId.slice(0, 8)} ${Math.round(latencyMs)} ms nach Erkennung${grades ? ` (${grades} Noten)` : ''}`)
+    log('info', `Push gesendet ${accountId.slice(0, 8)} ${latencyMs} ms nach Erkennung${grades ? ` (${grades} Noten)` : ''} FCM ${fcm.join(',') || 'none'}`)
+    if (grades > 0 && latencyMs > GRADE_SLA_MS) {
+      log('warn', `Noten-Push über 10 Minuten ${accountId.slice(0, 8)} ${latencyMs} ms FCM ${fcm.join(',') || 'none'}`)
+    }
   }
 
   /** The grade promise across accounts. No account ids: counts, ages and latencies only. */
@@ -938,13 +953,21 @@ export const createSchulnetzRuntime = (options = {}) => {
       for (const push of monitor.pushes || []) if (nowMs - Date.parse(push.at) <= 86_400_000) latencies.push(push.latencyMs)
     }
     latencies.sort((a, b) => a - b)
+    const overduePushes = latencies.filter((ms) => ms > GRADE_SLA_MS).length
     const errors = scheduler.pollErrors
     const codes = [...(errors?.codes || [])].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).slice(0, 8)
     return {
       status: overdue ? 'degraded' : 'ok',
       slaSeconds: GRADE_SLA_MS / 1000,
       gradeChecks: { accounts, maxAgeSeconds: Number.isFinite(maxAge) ? Math.round(maxAge / 1000) : null, overdue, needsReauth },
-      pushes24h: { count: latencies.length, maxLatencyMs: latencies.at(-1) ?? null, medianLatencyMs: latencies.length ? latencies[Math.floor(latencies.length / 2)] : null },
+      pushes24h: {
+        count: latencies.length,
+        p50LatencyMs: latencyPercentile(latencies, 0.5),
+        p95LatencyMs: latencyPercentile(latencies, 0.95),
+        maxLatencyMs: latencies.at(-1) ?? null,
+        medianLatencyMs: latencies.length ? latencies[Math.floor(latencies.length / 2)] : null,
+        overdue: overduePushes,
+      },
       // Counts since this process started. Codes are short tokens (ENOTFOUND, http-503), never URLs.
       pollErrors: { network: errors?.network || 0, code: errors?.code || 0, codes: Object.fromEntries(codes) },
     }
