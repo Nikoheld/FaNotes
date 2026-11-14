@@ -52,6 +52,16 @@ const COLLAPSE_NEW_BYTES = 1024
 // AES-GCM adds a 12-byte IV and a 16-byte tag; a body of this size is an empty file.
 const EMPTY_CIPHERTEXT_BYTES = 28
 const MAX_REVISIONS_KEPT = 8
+
+/** Newest revisions, plus an older blob that is still the largest. The highest revision is always kept. */
+export const revisionNamesToKeep = (files, keep = MAX_REVISIONS_KEPT, nextSize = 0) => {
+  const ranked = [...(files || [])].filter((file) => file && Number.isFinite(file.revision)).sort((left, right) => left.revision - right.revision || String(left.name).localeCompare(String(right.name)))
+  const names = new Set(ranked.slice(-Math.max(1, keep)).map((file) => file.name))
+  if (!ranked.length) return names
+  const largest = ranked.reduce((best, file) => (file.size > best.size ? file : best), ranked[0])
+  if (largest.size > nextSize) names.add(largest.name)
+  return names
+}
 const MAX_FILES = Number(process.env.FANOTES_SYNC_MAX_FILES || 50_000)
 const MAX_DEVICES = 20
 const MAX_SESSIONS = 40
@@ -755,14 +765,9 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   if (move) await fs.rename(blobPath, dest)
   else await fs.copyFile(blobPath, dest)
   const files = await listRevisionFiles(directory)
-  const ranked = [...files].sort((left, right) => left.revision - right.revision)
-  if (ranked.length) {
-    const largest = ranked.reduce((best, file) => (file.size > best.size ? file : best), ranked[0])
-    const keep = new Set(ranked.slice(-MAX_REVISIONS_KEPT).map((file) => file.name))
-    if (largest && largest.size > nextSize) keep.add(largest.name)
-    for (const file of ranked) {
-      if (!keep.has(file.name)) await fs.rm(safeJoin(directory, file.name), { force: true })
-    }
+  const keep = revisionNamesToKeep(files, MAX_REVISIONS_KEPT, nextSize)
+  for (const file of files) {
+    if (!keep.has(file.name)) await fs.rm(safeJoin(directory, file.name), { force: true })
   }
   const after = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
   return after - before
