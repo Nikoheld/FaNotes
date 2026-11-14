@@ -189,3 +189,42 @@ test('sealed notices fit the FCM data limit and open with the device key', () =>
   assert.equal(sealPushPayload(vectorKey, '{"changes":[{"id":"grade:1","category":"grade","title":"Neue Note","body":"Mathematik · 5.5"}]}', vectorIv),
     'CQkJCQkJCQkJCQkJXKfn/N+epgTTQPFjncjKu/aKQZRGj5OlVZ9kivcXYA62goixm3AQMhjBxHIhFs/2CD3q+He2lGwrCnTydlgV+gldpCzrSYja+trrOd6d7JBwiL9/wCcGCl2KeLN9+lAf4R8XRSRky5q4XgYZpTt+Ug==')
 })
+
+test('health counts a DNS failure as network and does not repeat the host', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-poll-error-'))
+  const lines = []
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    autostart: false,
+    spacingMs: 0,
+    log: (level, message) => lines.push(`${level} ${message}`),
+    fetch: async () => {
+      const error = new TypeError('fetch failed')
+      error.cause = Object.assign(new Error('getaddrinfo ENOTFOUND www.schulnetz-ag.ch'), { code: 'ENOTFOUND' })
+      throw error
+    },
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.71')
+    await runtime.linkAccount(guest.accountId, {
+      mode: 'web',
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      userAgent: 'KantiTest',
+      ssoCookies: { 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=synthetic' },
+    })
+    await runtime.scheduler.tick()
+    const health = await runtime.health()
+    assert.equal(health.pollErrors.network, 1)
+    assert.equal(health.pollErrors.code, 0)
+    assert.equal(health.pollErrors.codes.ENOTFOUND, 1)
+    assert.equal(JSON.stringify(health).includes(guest.accountId), false)
+    assert.equal(JSON.stringify(health).includes('schulnetz'), false)
+    const warn = lines.find((line) => line.includes('nicht aktualisiert'))
+    assert.match(warn, /network ENOTFOUND stage=fetch/)
+    assert.equal(warn.includes('schulnetz-ag'), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  POLL_MAX_BACKOFF_MS, POLL_QUIET_MS, POLL_SCHOOL_MAX_MS, POLL_SCHOOL_MIN_MS, POLL_WEEKEND_MS, createPollScheduler, pollDelayMs, pollPhase,
+  POLL_MAX_BACKOFF_MS, POLL_QUIET_MS, POLL_SCHOOL_MAX_MS, POLL_SCHOOL_MIN_MS, POLL_WEEKEND_MS, createPollScheduler, describePollError, pollDelayMs, pollPhase,
 } from './schulnetz-logic.mjs'
 
 // November is CET (UTC+1): 08:00Z is 09:00 in Zurich.
@@ -139,4 +139,46 @@ test('identities without a link are skipped at once; only real reads are spaced 
   assert.equal(read.length, 2)
   // One spacing after the real read, none after the 18 skipped identities.
   assert.ok(read[1] - read[0] <= 5_000, String(read[1] - read[0]))
+})
+
+test('a poll failure is a network or code token and never the message', () => {
+  const dns = new TypeError('fetch failed')
+  dns.cause = Object.assign(new Error('getaddrinfo ENOTFOUND www.schulnetz-ag.ch'), { code: 'ENOTFOUND' })
+  dns.stage = 'fetch'
+  const reset = Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('socket'), { code: 'ECONNRESET' }) })
+  const timedOut = Object.assign(new Error('the request took too long'), { name: 'TimeoutError' })
+  const http = Object.assign(new Error('school page'), { status: 503, stage: 'fetch' })
+  const bug = Object.assign(new TypeError("Cannot read properties of undefined (reading 'mark')"), { stage: 'grades' })
+  assert.deepEqual(describePollError(dns), { kind: 'network', code: 'ENOTFOUND', stage: 'fetch' })
+  assert.deepEqual(describePollError(reset), { kind: 'network', code: 'ECONNRESET' })
+  assert.deepEqual(describePollError(timedOut), { kind: 'network', code: 'ETIMEDOUT' })
+  assert.deepEqual(describePollError(http), { kind: 'network', code: 'http-503', stage: 'fetch' })
+  assert.deepEqual(describePollError(bug), { kind: 'code', code: 'TypeError', stage: 'grades' })
+  const logged = [dns, reset, timedOut, http, bug].map((error) => JSON.stringify(describePollError(error)))
+  assert.equal(logged.some((line) => line.includes('schulnetz') || line.includes('http') && line.includes('://') || line.includes('mark')), false)
+})
+
+test('the scheduler counts a thrown read by kind and logs only the token', async () => {
+  let clock = Date.parse('2026-11-10T08:00:00Z')
+  const lines = []
+  const failure = new TypeError('fetch failed')
+  failure.cause = Object.assign(new Error('getaddrinfo ENOTFOUND secret.example'), { code: 'ENOTFOUND' })
+  const scheduler = createPollScheduler({
+    listAccounts: async () => ['d'.repeat(32)],
+    pollAccount: async () => { throw failure },
+    readSnapshot: async () => schoolWeek,
+    now: () => new Date(clock),
+    baseMs: 150_000,
+    random: middle,
+    sleep: async () => {},
+    log: (level, message) => lines.push(`${level} ${message}`),
+  })
+  await scheduler.tick()
+  assert.equal(scheduler.pollErrors.network, 1)
+  assert.equal(scheduler.pollErrors.code, 0)
+  assert.equal(scheduler.pollErrors.codes.get('ENOTFOUND'), 1)
+  assert.equal(lines.length, 1)
+  assert.match(lines[0], /warn Konto dddddddd nicht aktualisiert \(network ENOTFOUND\)/)
+  assert.equal(lines[0].includes('secret.example'), false)
+  assert.equal(lines[0].includes('fetch failed'), false)
 })

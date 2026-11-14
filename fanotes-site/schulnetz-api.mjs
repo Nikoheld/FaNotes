@@ -13,7 +13,7 @@ import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
 import { createCommute } from './commute.mjs'
 import { localizeSchulnetzPayload, schulnetzLanguage } from './i18n.mjs'
-import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, ownExams, SNAPSHOT_BODY_LIMIT, decodeRequestJson, gradeDiffBase, keepServerLessons, uploadDiffBase, legacySnapshotView, TIMETABLE_WEEKS_HEADER, ABSENCES_HEADER, ABSENCE_PARSER_VERSION, POLL_SCHOOL_DEFAULT_MS, POLL_SPACING_MS, GRADE_SLA_MS, createPollScheduler, tagErrorStage, keepAbsenceRead, legacyAbsenceView, readAbsenceStatement, mergeRevealLedger, newGradeTargetIds, tamSchoolRoot } from './schulnetz-logic.mjs'
 import {
   alertAllowed,
   applyEventWindow,
@@ -168,7 +168,14 @@ export const createSchulnetzRuntime = (options = {}) => {
   const web = options.web || null
   // Class and room timetables from the school's PDF (class-timetables.mjs). Optional.
   const timetables = options.timetables || null
-  const fetchImpl = options.fetch || globalThis.fetch
+  const rawFetch = options.fetch || globalThis.fetch
+  const fetchImpl = async (url, init) => {
+    try {
+      return await rawFetch(url, init)
+    } catch (error) {
+      throw tagErrorStage('fetch', error)
+    }
+  }
   const now = options.now || (() => new Date())
   const log = options.log || ((level, message) => {
     console.log(`${now().toISOString()} schulnetz ${level} ${redactSecrets(message)}`)
@@ -931,11 +938,15 @@ export const createSchulnetzRuntime = (options = {}) => {
       for (const push of monitor.pushes || []) if (nowMs - Date.parse(push.at) <= 86_400_000) latencies.push(push.latencyMs)
     }
     latencies.sort((a, b) => a - b)
+    const errors = scheduler.pollErrors
+    const codes = [...(errors?.codes || [])].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).slice(0, 8)
     return {
       status: overdue ? 'degraded' : 'ok',
       slaSeconds: GRADE_SLA_MS / 1000,
       gradeChecks: { accounts, maxAgeSeconds: Number.isFinite(maxAge) ? Math.round(maxAge / 1000) : null, overdue, needsReauth },
       pushes24h: { count: latencies.length, maxLatencyMs: latencies.at(-1) ?? null, medianLatencyMs: latencies.length ? latencies[Math.floor(latencies.length / 2)] : null },
+      // Counts since this process started. Codes are short tokens (ENOTFOUND, http-503), never URLs.
+      pollErrors: { network: errors?.network || 0, code: errors?.code || 0, codes: Object.fromEntries(codes) },
     }
   }
 
@@ -1079,7 +1090,8 @@ export const createSchulnetzRuntime = (options = {}) => {
         }
       }
     }
-    const snapshot = parseRawSnapshot(raw, now().toISOString())
+    let snapshot
+    try { snapshot = parseRawSnapshot(raw, now().toISOString()) } catch (error) { throw tagErrorStage('parse-rest', error) }
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
     // A missing or rejected Kontoauszug page is not an empty statement.
     if (!kontoStatementRead(raw.kontoHtml || '')) {

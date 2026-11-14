@@ -2,7 +2,11 @@
 // A PHPSESSID is bound to the client IP, so this module always opens its own
 // session with the stored Microsoft SSO cookies and never replays a phone cookie.
 
-import { GRADE_PARSER_VERSION, addDays, lessonCheckWeeks, isLesson, carryTimetableExams, ownExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+import { GRADE_PARSER_VERSION, addDays, lessonCheckWeeks, isLesson, carryTimetableExams, ownExams, confirmedLessonStamps, emptyWeekCountsAsRead, fallbackSchoolSpan, schedulerTransid, withoutUnprovenEmptyReads, extractWebIds, findIcalUrl, icalBodyUsable, microsoftLoginHost, microsoftLoginRequired, mondaysBetween, overlayDated, overlayLessons, parseGradesHtml, parseIcs, parseSchedulerXml, parseWeekSpan, planWeekFetches, redirectTargetAllowed, schedulerBodyUsable, schedulerFetchUrl, schedulerWeekLoaded, schoolHostAllowed, schulnetzCallAllowed, sessionProblem, spanOfEvents, stripPhpSession, tagErrorStage, weekMonday, zurichToday } from './schulnetz-logic.mjs'
+
+const atStage = (stage, read) => {
+  try { return read() } catch (error) { throw tagErrorStage(stage, error) }
+}
 
 const USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36'
 
@@ -200,7 +204,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       if (schedulerWeekLoaded(lessonBody)) {
         // Only lessons inside the requested week answer for it. An answer for another week must not
         // empty this one; the week then stays unread and is asked again.
-        const parsed = parseSchedulerXml(lessonBody).filter((event) => weekMonday(String(event.start || '').slice(0, 10)) === monday)
+        const parsed = atStage('timetable', () => parseSchedulerXml(lessonBody)).filter((event) => weekMonday(String(event.start || '').slice(0, 10)) === monday)
         if (parsed.length) {
           lessonWeeks[monday] = parsed
           weekFetched[monday] = nowIso
@@ -226,7 +230,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
       const examUrl = schedulerFetchUrl({ root, pageId: '21312', ansicht: 'klassenuebersicht', id: session.id, transid: examTransid, today: curr, min: monday, max, extra: 'showOnlyThisClass=-1' })
       const examBody = await get(examUrl)
       if (schedulerWeekLoaded(examBody)) {
-        const parsed = parseSchedulerXml(examBody).map((event) => ({
+        const parsed = atStage('exams', () => parseSchedulerXml(examBody)).map((event) => ({
           ...event,
           eventType: event.eventType && event.eventType !== 'lesson' ? event.eventType : 'exam',
         }))
@@ -285,7 +289,7 @@ export const scrapeWithSession = async (baseUrl, session, fetchImpl, options = {
   return {
     problem: pages.problem || '',
     lessonsRead: Boolean(options.gradesOnly && lessonCheck.length && !pages.problem && pages['22202']),
-    grades: parseGradesHtml(pages['21311'] || ''),
+    grades: atStage('grades', () => parseGradesHtml(pages['21311'] || '')),
     gradeParser: GRADE_PARSER_VERSION,
     gradesRead: !pages.problem && Boolean(pages['21311']),
     events,
