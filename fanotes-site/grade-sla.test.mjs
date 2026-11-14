@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { createDecipheriv, randomBytes } from 'node:crypto'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
-import { GRADE_CHECK_JITTER, GRADE_CHECK_MS, GRADE_SLA_MS, createPollScheduler, gradeCheckDelayMs } from './schulnetz-logic.mjs'
+import { GRADE_CHECK_JITTER, GRADE_CHECK_MS, GRADE_SLA_MS, createPollScheduler, gradeCheckDelayMs, latencyPercentile } from './schulnetz-logic.mjs'
 import { pushKeyBytes, sealPushChanges, sealPushPayload } from './fcm.mjs'
 
 const openSealed = (keyBase64, sealed) => {
@@ -127,6 +127,9 @@ test('a new grade appearing at 03:00 on a Saturday is pushed, sealed for the pho
     assert.ok(health.gradeChecks.maxAgeSeconds < GRADE_SLA_MS / 1000)
     assert.equal(health.pushes24h.count, 1)
     assert.ok(health.pushes24h.maxLatencyMs >= 0 && health.pushes24h.maxLatencyMs < 60_000)
+    assert.equal(health.pushes24h.p50LatencyMs, health.pushes24h.maxLatencyMs)
+    assert.equal(health.pushes24h.p95LatencyMs, health.pushes24h.maxLatencyMs)
+    assert.equal(health.pushes24h.overdue, 0)
     assert.ok(logs.some((line) => /^info Noten geprüft [a-f0-9]{8} kurz ok/u.test(line)), 'grade checks are logged')
     // Without reads for 11 minutes the promise is broken: health says so and the poller warns once.
     clock += 11 * 60_000
@@ -168,6 +171,65 @@ test('an expired sign-in is announced once, not silently dropped', async () => {
     assert.deepEqual(sent, ['reauth'])
     const health = await runtime.health()
     assert.equal(health.gradeChecks.needsReauth, 1)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('percentiles use nearest rank', () => {
+  assert.equal(latencyPercentile([], 0.95), null)
+  assert.equal(latencyPercentile([10, 20, 30, 40], 0.5), 20)
+  assert.equal(latencyPercentile([10, 20, 30, 40], 0.95), 40)
+})
+
+test('a grade whose FCM response arrives after 10 minutes is overdue and logged', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-push-sla-'))
+  let clock = Date.parse('2026-11-14T08:00:00Z')
+  let gradePolls = 0
+  const lines = []
+  const fetch = async (url) => {
+    const target = String(url)
+    const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+    if (target.endsWith('/token.php')) return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+    if (target.includes('/me/grades')) {
+      gradePolls += 1
+      const grades = [{ id: 'g1', course: 'Mathematik', courseId: 'math', title: 'Probe', date: '2026-11-14', mark: '5.5', weight: '1' }]
+      if (gradePolls > 1) grades.push({ id: 'g2', course: 'Englisch', courseId: 'en', title: 'Essay', date: '2026-11-14', mark: '4.5', weight: '1' })
+      return json(grades)
+    }
+    return json([])
+  }
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    autostart: false,
+    now: () => new Date(clock),
+    log: (level, message) => lines.push(`${level} ${message}`),
+    fetch,
+    fcmSend: async () => { clock += 11 * 60_000; return { status: 200 } },
+  })
+  try {
+    const accountId = 'a'.repeat(32)
+    await runtime.linkAccount(accountId, { baseUrl: 'https://www.schulnetz-ag.ch/aksa', deviceId: '0123456789abcdef01234567', refreshToken: 'synthetic-refresh-token-long-enough' })
+    await runtime.addFcmToken(accountId, 'phone:APA91b-sla-device-token')
+    await runtime.pollAccount(accountId)
+    await runtime.pollAccount(accountId)
+    const health = await runtime.health()
+    assert.equal(health.pushes24h.count, 1)
+    assert.ok(health.pushes24h.maxLatencyMs > GRADE_SLA_MS)
+    assert.equal(health.pushes24h.p50LatencyMs, health.pushes24h.maxLatencyMs)
+    assert.equal(health.pushes24h.p95LatencyMs, health.pushes24h.maxLatencyMs)
+    assert.equal(health.pushes24h.overdue, 1)
+    const warn = lines.find((line) => line.startsWith('warn Noten-Push über 10 Minuten'))
+    assert.ok(warn, lines.join('\n'))
+    assert.match(warn, /FCM 200/)
+    assert.equal(warn.includes('APA91b'), false)
+    assert.equal(warn.includes('synthetic'), false)
+    const stored = await readFile(join(root, 'accounts', accountId, 'monitor.json'), 'utf8')
+    assert.equal(stored.includes('APA91b'), false)
+    const row = JSON.parse(stored).pushes[0]
+    assert.equal(row.fcm[0], '200')
+    assert.ok(row.respondedAt > row.at)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

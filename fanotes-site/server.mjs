@@ -672,7 +672,7 @@ const server = createServer(async (request, response) => {
         status: 'ok',
         version: releases.linux.version,
         windowsVersion: releases.windows?.version ?? null,
-        ...(kanti ? { schulnetz: { status: kanti.status, gradeCheckMaxAgeSeconds: kanti.gradeChecks.maxAgeSeconds, overdue: kanti.gradeChecks.overdue, slaSeconds: kanti.slaSeconds, pollErrors: kanti.pollErrors } } : {}),
+        ...(kanti ? { schulnetz: { status: kanti.status, gradeCheckMaxAgeSeconds: kanti.gradeChecks.maxAgeSeconds, overdue: kanti.gradeChecks.overdue, slaSeconds: kanti.slaSeconds, pollErrors: kanti.pollErrors, push: { p50LatencyMs: kanti.pushes24h.p50LatencyMs, p95LatencyMs: kanti.pushes24h.p95LatencyMs, maxLatencyMs: kanti.pushes24h.maxLatencyMs, overdue: kanti.pushes24h.overdue } } } : {}),
       })
       return
     }
