@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily FaNotes sync-store backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=20min
+
+[Install]
+WantedBy=timers.target
