@@ -3,6 +3,7 @@ name: Release
 # A called workflow still reports the caller's event name, so inputs are read
 # directly. Tag pushes leave inputs empty and use github.sha and github.ref_name.
 on:
+  workflow_dispatch:
   push:
     tags:
       - 'v*'
