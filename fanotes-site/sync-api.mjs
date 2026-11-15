@@ -630,22 +630,28 @@ const handleRegister = async (request, response) => {
   await syncDirectory(dirname(accountDirectory(id)))
   await syncDirectory(accountDirectory(id))
   const emailPath = emailIndexPath(email)
+  const temporary = `${emailPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
   let emailCreated = false
   try {
     // 'wx' makes the e-mail index the uniqueness check; two racing registrations cannot both win.
     // The account record is saved first. A failed attempt removes the index
     // entry this attempt created, then its own account directory.
     await saveAccount(account)
-    const emailHandle = await fs.open(emailPath, 'wx', 0o600)
-    emailCreated = true
+    const emailHandle = await fs.open(temporary, 'wx', 0o600)
     try {
       await emailHandle.writeFile(id)
       await emailHandle.sync()
     } finally {
       await emailHandle.close()
     }
+    // Publish the finished file under the address. A crash must not leave an
+    // empty index name, or this address can no longer open the account.
+    await fs.link(temporary, emailPath)
+    emailCreated = true
+    await fs.rm(temporary, { force: true })
     await syncDirectory(dirname(emailPath))
   } catch (error) {
+    await fs.rm(temporary, { force: true }).catch(() => {})
     if (emailCreated) {
       await fs.rm(emailPath, { force: true })
       await syncDirectory(dirname(emailPath))
