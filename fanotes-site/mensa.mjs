@@ -51,6 +51,11 @@ const readLimitedText = async (response, max) => {
     if (bytes) body += decoder.decode(value, { stream: true })
   }
 }
+// An error page is not parsed. Cancel it so the rest is not kept.
+const releaseUnread = async (response) => {
+  const reader = response?.body?.getReader?.()
+  if (reader && typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+}
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', auml: 'ä', ouml: 'ö', uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß', eacute: 'é', egrave: 'è', agrave: 'à' }
 const decode = (value) => value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/giu, (whole, name) => {
@@ -210,9 +215,20 @@ export const createMensa = (options = {}) => {
   let cache = null // { fetchedAt, days }
   let loaded = false
   let loading = null
+  let diskBlocked = false
   let lastFailureAt = 0
   let lastFailed = false
   let inflight = null
+
+  const mergeDisk = (value) => {
+    const merged = new Map()
+    for (const day of value.days) if (day?.date) merged.set(day.date, day)
+    for (const day of cache.days) if (day?.date) merged.set(day.date, day)
+    cache = {
+      fetchedAt: cache.fetchedAt || value.fetchedAt,
+      days: [...merged.values()].sort((left, right) => left.date.localeCompare(right.date)),
+    }
+  }
 
   // One load at a time. A refresh that finishes first must not be replaced by the older disk copy.
   const load = () => {
@@ -221,17 +237,31 @@ export const createMensa = (options = {}) => {
       loading = (async () => {
         try {
           const value = JSON.parse(await readFile(file, 'utf8'))
-          if (!cache && value && Array.isArray(value.days) && typeof value.fetchedAt === 'string') {
-            cache = { fetchedAt: value.fetchedAt, days: value.days }
+          const blocked = diskBlocked
+          if (value && Array.isArray(value.days) && typeof value.fetchedAt === 'string') {
+            if (!cache) cache = { fetchedAt: value.fetchedAt, days: value.days }
+            else if (blocked) mergeDisk(value)
           }
-        } catch { /* no cache yet */ }
-        loaded = true
+          diskBlocked = false
+          loaded = true
+        } catch (error) {
+          // A missing or broken file can start again. A read error must not be replaced by a new menu.
+          if (error?.code === 'ENOENT' || error instanceof SyntaxError) {
+            diskBlocked = false
+            loaded = true
+          } else {
+            diskBlocked = true
+          }
+        } finally {
+          loading = null
+        }
       })()
     }
     return loading
   }
 
   const save = async () => {
+    if (diskBlocked) return
     const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
     try {
       await fs.mkdir(root, { recursive: true })
@@ -262,6 +292,7 @@ export const createMensa = (options = {}) => {
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         })
         if (!response.ok) {
+          await releaseUnread(response)
           last = Object.assign(new Error(`HTTP ${response.status}`), { status: response.status })
           events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!RETRY_STATUS.has(response.status) || attempt === UPSTREAM_ATTEMPTS) throw last

@@ -65,6 +65,8 @@ import {
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
+/** One Schulnetz page. Larger than a semester list, small enough that a runaway reply cannot fill memory. */
+export const SCHOOL_BODY_MAX = 8 * 1024 * 1024
 const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json', 'monitor.json', 'pushed-notices.json']
 // Pendelstrecken move with the identity (guest → account) like the school files.
 const COMMUTE_FILES = ['commute.json', 'commute-state.json']
@@ -154,6 +156,14 @@ const fail = (status, message) => {
   const error = new Error('schulnetz')
   error.status = status
   error.publicMessage = message
+  throw error
+}
+// The response is sent by the caller. The request is closed after that, so the rest of the body is not read.
+const failLarge = (request, message) => {
+  const error = new Error('schulnetz')
+  error.status = 413
+  error.publicMessage = message
+  error.releaseRequest = request
   throw error
 }
 
@@ -248,7 +258,13 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const readJson = async (file) => {
-    try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch { return null }
+    try {
+      return JSON.parse(await fs.readFile(file, 'utf8'))
+    } catch (error) {
+      // A missing or broken file is absent. Any other read error must not look the same, or a later write replaces the account file.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
   }
 
   const writeJson = async (file, value) => {
@@ -492,6 +508,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       for (const name of SCHOOL_FILES) await fs.rm(resolve(accountDir(accountId), name), { force: true })
       return
     }
+    // A broken guest file reads like "not a guest". The directory still belongs to that account.
+    if (await guestFilePresent(accountId)) throw refuseGuestFile()
     await fs.rm(accountDir(accountId), { recursive: true, force: true })
   })
 
@@ -522,9 +540,20 @@ export const createSchulnetzRuntime = (options = {}) => {
     return a.length === b.length && timingSafeEqual(a, b)
   }
 
+  const guestFile = (accountId) => resolve(accountDir(accountId), 'guest.json')
+  const guestFilePresent = async (accountId) => {
+    try {
+      await fs.stat(guestFile(accountId))
+      return true
+    } catch (error) {
+      if (error?.code === 'ENOENT') return false
+      throw error
+    }
+  }
+  const refuseGuestFile = () => Object.assign(new Error('guest file'), { code: 'EBADMSG' })
   const readGuestRecord = async (accountId) => {
     if (!/^[a-f0-9]{32}$/u.test(String(accountId || ''))) return null
-    const parsed = await readJson(resolve(accountDir(accountId), 'guest.json'))
+    const parsed = await readJson(guestFile(accountId))
     if (!parsed || parsed.v !== 1 || typeof parsed.tokenHash !== 'string') return null
     return parsed
   }
@@ -703,6 +732,32 @@ export const createSchulnetzRuntime = (options = {}) => {
     return run()
   }
 
+  const releaseUnread = async (response) => {
+    const reader = response?.body?.getReader?.()
+    if (reader && typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+  }
+  const readSchoolText = async (response) => {
+    const reader = response?.body?.getReader?.()
+    if (!reader) {
+      const text = typeof response.text === 'function' ? await response.text() : ''
+      if (text.length > SCHOOL_BODY_MAX) throw new Error('page too large')
+      return text
+    }
+    const decoder = new TextDecoder('utf-8')
+    let size = 0
+    let text = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) return text + decoder.decode()
+      const bytes = value?.byteLength || 0
+      size += bytes
+      if (size > SCHOOL_BODY_MAX) {
+        if (typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+        throw new Error('page too large')
+      }
+      if (bytes) text += decoder.decode(value, { stream: true })
+    }
+  }
   const schoolFetch = async (url, method, headers, body) => {
     if (!schulnetzCallAllowed(method, url, body || '')) fail(400, 'Diese Schulnetz-Anfrage ist nicht erlaubt.')
     const verb = String(method || 'GET').toUpperCase()
@@ -713,12 +768,17 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (attempt) await pause(retryBackoffMs(attempt - 1))
       try {
         const response = await fetchImpl(url, { method, headers, body, redirect: 'manual' })
-        const responseBody = await response.text()
-        if ((verb === 'GET' || verb === 'HEAD') && TRANSIENT_HTTP.has(response.status) && attempt < attempts - 1) continue
+        // An error page is not stored. Leave it unread so a retry does not buffer it.
+        if ((verb === 'GET' || verb === 'HEAD') && response.status >= 400) {
+          await releaseUnread(response)
+          if (TRANSIENT_HTTP.has(response.status) && attempt < attempts - 1) continue
+          return { status: response.status, body: '' }
+        }
+        const responseBody = await readSchoolText(response)
         return { status: response.status, body: responseBody }
       } catch (error) {
         lastError = error
-        if (attempt === attempts - 1) throw error
+        if (error?.message === 'page too large' || attempt === attempts - 1) throw error
       }
     }
     throw lastError || tagErrorStage('fetch', new Error('read failed'))
@@ -966,6 +1026,8 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   const ownerStillExists = async (accountId) => {
     if (await readGuestRecord(accountId)) return true
+    // Missing means this is not a guest. A file that is there but unreadable must not look the same, or the next poll deletes the account.
+    if (await guestFilePresent(accountId)) throw refuseGuestFile()
     return accountStillExists(accountId)
   }
 
@@ -1015,12 +1077,14 @@ export const createSchulnetzRuntime = (options = {}) => {
     let maxAge = 0
     const latencies = []
     for (const accountId of await listAccounts()) {
-      const link = await readLink(accountId)
+      let link
+      try { link = await readLink(accountId) } catch { continue }
       // A device link (TAM) is read on the phone; the server has nothing to check.
       if (!link || link.mode === 'device') continue
       if (link.needsReauth) { needsReauth += 1; continue }
       accounts += 1
-      const monitor = await readMonitor(accountId)
+      let monitor
+      try { monitor = await readMonitor(accountId) } catch { continue }
       const okAt = Date.parse(monitor.gradeCheckOkAt || '')
       const age = Number.isFinite(okAt) ? Math.max(0, nowMs - okAt) : Number.POSITIVE_INFINITY
       maxAge = Math.max(maxAge, age)
@@ -1465,11 +1529,12 @@ export const createSchulnetzRuntime = (options = {}) => {
   // A snapshot upload carries a semester of lessons: it may be up to SNAPSHOT_BODY_LIMIT raw and gzip.
   // Every other request stays small and plain.
   const readBody = async (request, { limit = MAX_BODY, inflate = false } = {}) => {
+    if (Number(request.headers?.['content-length']) > limit) failLarge(request, 'Die Anfrage ist zu gross.')
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > limit) fail(413, 'Die Anfrage ist zu gross.')
+      if (size > limit) failLarge(request, 'Die Anfrage ist zu gross.')
       chunks.push(chunk)
     }
     if (!chunks.length) return {}
@@ -1767,6 +1832,9 @@ export const createSchulnetzRuntime = (options = {}) => {
       const status = Number(error?.status) || 500
       if (status >= 500) log('warn', `Anfrage fehlgeschlagen (${error?.name || 'error'})`)
       send(response, status, { error: error?.publicMessage || 'Der Schulnetz-Dienst ist vorübergehend nicht erreichbar.' })
+      const release = error?.releaseRequest
+      // Test doubles have no socket. A real response closes the upload only after the 413 is sent.
+      if (release && typeof release.destroy === 'function' && typeof response.on === 'function') response.on('finish', () => release.destroy())
     }
     return true
   }

@@ -230,6 +230,8 @@ fun paletteCommands(
         PaletteCommand("sync-settings", "Sync einrichten", "FaNotes", "Konto erstellen oder anmelden", keywords = "sync konto anmelden cloud geräte"),
         PaletteCommand("bug-report", "Fehler melden", "FaNotes", "Kurz beschreiben; die letzten fünf Minuten werden angehängt", keywords = "bug report fehler logs support"),
         PaletteCommand("import-pdf-note", "PDF importieren", "Dateien", "PDF wird selbst zur Notiz — mit Handschrift und Viewer", keywords = "pdf import notiz viewer"),
+        PaletteCommand("new-story", "Neue Geschichte", "Dateien", "Schreibmodus mit Seiten, Kapiteln und Szenen", keywords = "geschichte roman buch schreiben story novel writing kapitel"),
+        PaletteCommand("import-story", "Geschichte importieren …", "Dateien", "Word (.docx), Markdown oder Text als Geschichte öffnen", keywords = "import docx word markdown geschichte roman story"),
         PaletteCommand("new-subfolder", "Unterordner anlegen", "Dateien", "Im Ordner der offenen Notiz", keywords = "unterordner ordner verschachteln fach"),
         PaletteCommand("drawing", if (penOpen) "Zur Tastatur wechseln" else "Mit Stift schreiben", "Werkzeuge", "Eingabeart auf derselben Notizseite wechseln", "Ctrl D", "tablet stift erkennen"),
         PaletteCommand("text-field", "Textfeld einfügen", "Werkzeuge", "Irgendwo auf der Seite mit der Tastatur schreiben", keywords = "textfeld text tastatur pdf schreiben"),

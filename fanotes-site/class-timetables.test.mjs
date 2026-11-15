@@ -3,8 +3,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { createServer } from 'node:http'
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer, request as httpRequest } from 'node:http'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -194,6 +194,28 @@ test('ingest stores a version, switches the pointer, keeps three versions and re
     await assert.rejects(broken.ingest(PDF), { status: 422 })
     assert.deepEqual((await readdir(store.root)).sort(), before)
     assert.equal((await store.summary()).available, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a PDF with too many pages is refused before text extraction', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetables-pages-'))
+  const calls = []
+  const store = createClassTimetables({
+    root,
+    log: () => {},
+    now: () => new Date(Date.UTC(2026, 10, 11, 8, 0, 0)),
+    run: async (command, args) => {
+      calls.push(command)
+      if (command === 'pdfinfo') return { stdout: 'Title: Stundenplan\nPages:          201\n' }
+      return fakeRun(BBOX, [])(command, args)
+    },
+  })
+  try {
+    await assert.rejects(store.ingest(PDF), (error) => error.status === 413 && error.publicMessage.includes('200'))
+    assert.deepEqual(calls, ['pdfinfo'])
+    assert.deepEqual(await readdir(store.root), [])
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -417,6 +439,42 @@ test('admin route: token hash, origin, content type, rate limit, upload and inde
   }
 })
 
+test('an oversized timetable upload is refused before the rest of the file is read', async () => {
+  const env = await startServer()
+  try {
+    const url = new URL(`${env.base}/api/v1/kanti-web/admin/timetable-pdf`)
+    const result = await new Promise((resolve) => {
+      let settled = false
+      const done = (value) => { if (!settled) { settled = true; resolve(value) } }
+      const req = httpRequest({
+        hostname: '127.0.0.1',
+        port: url.port,
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'X-Forwarded-Host': WEB,
+          Authorization: `Bearer ${TOKEN}`,
+          Origin: ORIGIN,
+          'Content-Type': 'application/pdf',
+          'Content-Length': String(30 * 1024 * 1024),
+        },
+      }, (res) => {
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('end', () => setTimeout(() => done({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8'), destroyed: req.destroyed }), 50))
+      })
+      req.on('error', () => done({ status: 0, body: '', destroyed: req.destroyed }))
+      req.write(Buffer.alloc(1024, 1))
+      setTimeout(() => done({ status: 0, body: '', destroyed: req.destroyed }), 2000)
+    })
+    assert.equal(result.status, 413)
+    assert.equal(JSON.parse(result.body).error, 'Die Datei ist zu gross (höchstens 25 MB).')
+    assert.equal(result.destroyed, true)
+  } finally {
+    await env.close()
+  }
+})
+
 test('admin route answers 503 without a configured token hash', async () => {
   for (const adminHash of [null, '', 'not-hex']) {
     const env = await startServer({ adminHash })
@@ -559,6 +617,45 @@ test('a timetable read is logged without the class code or the room name', async
     assert.equal(text.includes('G26'), false)
     assert.equal(text.includes('Telli'), false)
   } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable timetable file is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-read-'))
+  const runs = []
+  const store = createClassTimetables({
+    root,
+    run: async (tool) => { runs.push(tool); throw new Error('pdf tool') },
+    now: () => new Date('2026-11-15T12:00:00.000Z'),
+  })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const classesFile = join(dir, 'classes.json')
+  const pointer = join(store.root, 'current.json')
+  const classes = { G26A: { teacher: 'Tst', semester: 'SJ', entries: [{ day: 1 }], footnotes: [] } }
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(classesFile, JSON.stringify(classes), { mode: 0o600 })
+  await writeFile(join(dir, 'index.json'), JSON.stringify({
+    uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+    classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: ['T01'], warnings: [],
+  }), { mode: 0o600 })
+  await writeFile(pointer, JSON.stringify({ version }), { mode: 0o600 })
+  const beforeClasses = await readFile(classesFile)
+  const beforePointer = await readFile(pointer)
+  try {
+    await chmod(pointer, 0o000)
+    await assert.rejects(() => store.summary(), (error) => error?.code === 'EACCES')
+    await chmod(pointer, 0o600)
+    assert.deepEqual(await readFile(pointer), beforePointer)
+    await chmod(classesFile, 0o000)
+    await assert.rejects(() => store.classWeek('G26A'), (error) => error?.code === 'EACCES')
+    assert.deepEqual(runs, [])
+    await chmod(classesFile, 0o600)
+    assert.deepEqual(await readFile(classesFile), beforeClasses)
+  } finally {
+    await chmod(pointer, 0o600).catch(() => undefined)
+    await chmod(classesFile, 0o600).catch(() => undefined)
     await rm(root, { recursive: true, force: true })
   }
 })

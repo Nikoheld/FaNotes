@@ -42,3 +42,4 @@ Thumbs.db
 # Local handwriting development and Kotlin compiler caches
 /.scratch/
 /android/.kotlin/
+fanotes/dist-writing/

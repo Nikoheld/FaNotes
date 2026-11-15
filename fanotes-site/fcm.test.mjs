@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { claimPushKeys, deliverFcm, exchangeServiceAccount, FCM_ATTEMPTS, FCM_AUTH_ATTEMPTS, FCM_BODY_MAX, fcmDropToken, pushDedupKey } from './fcm.mjs'
+import { claimPushKeys, deliverFcm, exchangeServiceAccount, FCM_ATTEMPTS, FCM_AUTH_ATTEMPTS, FCM_BODY_MAX, FCM_TIMEOUT_MS, fcmDropToken, pushDedupKey } from './fcm.mjs'
 import { createServiceLog } from './service-log.mjs'
-import { createSchulnetzRuntime, updateChangeLog } from './schulnetz-api.mjs'
+import { createSchulnetzRuntime, SCHOOL_BODY_MAX, updateChangeLog } from './schulnetz-api.mjs'
 
 const grade = (id, mark = '5.5') => ({ id, category: 'grade', title: 'Neue Note', body: `Mathematik · Probe · ${mark}`, targetId: 'course-1', date: '2026-11-10' })
 const cancelled = (id, targetId = 'lesson-1') => ({ id, category: 'timetable', title: 'Lektion fällt aus', body: 'Deutsch · 08:15', targetId, date: '2026-11-16' })
@@ -430,6 +431,178 @@ test('a failed account write removes its temporary file and keeps the link', asy
     assert.equal(before.includes('super-secret-refresh-token-value'), false)
   } finally {
     await chmod(dir, 0o700).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an oversized Schulnetz request is refused and the connection is closed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fcm-large-'))
+  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false, log: () => {} })
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url, 'http://127.0.0.1')
+    if (await runtime.handle(request, response, url)) return
+    response.writeHead(404).end()
+  })
+  await new Promise((done) => server.listen(0, '127.0.0.1', done))
+  try {
+    const result = await new Promise((resolve) => {
+      let settled = false
+      const done = (value) => { if (!settled) { settled = true; resolve(value) } }
+      const req = httpRequest({
+        hostname: '127.0.0.1',
+        port: server.address().port,
+        path: '/api/v1/schulnetz/guest',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': String(1024 * 1024) },
+      }, (res) => {
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('end', () => setTimeout(() => done({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8'), destroyed: req.destroyed }), 50))
+      })
+      req.on('error', () => done({ status: 0, body: '', destroyed: req.destroyed }))
+      req.write('{}')
+      setTimeout(() => done({ status: 0, body: '', destroyed: req.destroyed }), 2000)
+    })
+    assert.equal(result.status, 413)
+    assert.equal(JSON.parse(result.body).error, 'Die Anfrage ist zu gross.')
+    assert.equal(result.destroyed, true)
+    assert.deepEqual(await readdir(join(root, 'accounts')).catch(() => []), [])
+  } finally {
+    await new Promise((done) => server.close(done))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an oversized Schulnetz page is not stored and an error page is not read', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fcm-school-body-'))
+  const accountId = 'd'.repeat(32)
+  let phase = 'retry'
+  let retried = false
+  let cancelled = 0
+  let reads = 0
+  const fetch = async (url) => {
+    const target = String(url)
+    if (target.endsWith('/token.php')) {
+      return { status: 200, text: async () => JSON.stringify({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 }) }
+    }
+    if (target.includes('/me/grades')) {
+      if (phase === 'retry' && !retried) {
+        retried = true
+        return {
+          status: 503,
+          body: {
+            getReader: () => ({
+              read: async () => { reads += 1; return { done: true, value: undefined } },
+              cancel: async () => { cancelled += 1 },
+            }),
+          },
+        }
+      }
+      if (phase === 'huge') return { status: 200, text: async () => 'x'.repeat(SCHOOL_BODY_MAX + 1) }
+    }
+    return { status: 200, text: async () => '[]' }
+  }
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch,
+    autostart: false,
+    fcmSend: async () => ({ status: 200 }),
+  })
+  const snapshot = join(root, 'accounts', accountId, 'snapshot.json')
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    await runtime.pollAccount(accountId)
+    assert.equal(cancelled, 1)
+    assert.equal(reads, 0)
+    const before = await readFile(snapshot)
+    phase = 'huge'
+    await assert.rejects(() => runtime.pollAccount(accountId), (error) => error?.message === 'page too large')
+    assert.equal((await readFile(snapshot)).equals(before), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+const untilAbort = (signal) => new Promise((_, reject) => {
+  const fail = () => reject(signal.reason)
+  if (signal?.aborted) fail()
+  else signal.addEventListener('abort', fail, { once: true })
+})
+
+test('a hung FCM call is abandoned and tried again', async () => {
+  assert.equal(FCM_TIMEOUT_MS, 12_000)
+  let posts = 0
+  const sent = await deliverFcm({
+    fetchImpl: async (_url, init) => {
+      posts += 1
+      assert.equal(init.redirect, 'error')
+      if (posts === 1) await untilAbort(init.signal)
+      return { status: 200, text: async () => '{}' }
+    },
+    url: 'https://fcm.googleapis.com/v1/projects/demo/messages:send',
+    message: { message: { token: 'phone:APA91b-example-token-value', data: { event: 'sync' } } },
+    headers: { Authorization: 'Bearer secret-token' },
+    sleep: async () => {},
+    timeoutMs: 30,
+    jsonLog: createServiceLog('fcm', () => {}, () => new Date('2026-11-15T11:00:00.000Z')),
+  })
+  assert.equal(sent.status, 200)
+  assert.equal(posts, 2)
+
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const account = {
+    client_email: 'push@kanti-test.iam.gserviceaccount.com',
+    private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    project_id: 'kanti-test',
+  }
+  const lines = []
+  let signIns = 0
+  const signed = await exchangeServiceAccount(account, async (_url, init) => {
+    signIns += 1
+    assert.equal(init.redirect, 'error')
+    if (signIns === 1) await untilAbort(init.signal)
+    return { ok: true, status: 200, text: async () => JSON.stringify({ access_token: 'ya29.secret-access-token', expires_in: 3600 }) }
+  }, Date.parse('2026-11-15T11:00:00Z'), {
+    sleep: async () => {},
+    timeoutMs: 30,
+    jsonLog: createServiceLog('fcm', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z')),
+  })
+  assert.equal(signed.projectId, 'kanti-test')
+  assert.equal(signIns, 2)
+  assert.equal(lines.join('\n').includes('ya29'), false)
+  assert.equal(lines.join('\n').includes('PRIVATE'), false)
+})
+
+test('an unreadable push ledger is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fcm-ledger-'))
+  const file = join(root, 'pushed-notices.json')
+  const kept = grade('grade:keep:5')
+  const extra = grade('grade:new:4')
+  try {
+    assert.equal((await claimPushKeys(file, [kept])).length, 1)
+    const before = await readFile(file)
+    await chmod(file, 0o000)
+    try {
+      const during = await claimPushKeys(file, [kept, extra])
+      assert.deepEqual(during.map((change) => change.id), ['grade:keep:5', 'grade:new:4'])
+    } finally {
+      await chmod(file, 0o600)
+    }
+    assert.deepEqual(await readFile(file), before)
+    assert.equal((await claimPushKeys(file, [kept])).length, 0)
+    await writeFile(file, '{', { mode: 0o600 })
+    assert.equal((await claimPushKeys(file, [extra])).length, 1)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(parsed.version, 1)
+    assert.equal(parsed.keys.length, 1)
+    assert.equal(JSON.stringify(parsed).includes('grade:new'), false)
+  } finally {
+    await chmod(file, 0o600).catch(() => undefined)
     await rm(root, { recursive: true, force: true })
   }
 })

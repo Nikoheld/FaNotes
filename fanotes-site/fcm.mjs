@@ -166,6 +166,8 @@ export const fcmRetryableStatus = (status) => status === 408 || status === 429 |
 
 export const FCM_ATTEMPTS = 4
 export const FCM_RETRY_MS = [200, 800, 2000]
+/** A hung Google call must not hold the push. Redirects are refused so the bearer stays on that host. */
+export const FCM_TIMEOUT_MS = 12_000
 /** Error and token JSON are small. Past this, the rest is cancelled and not parsed. */
 export const FCM_BODY_MAX = 64 * 1024
 
@@ -204,7 +206,16 @@ const fcmNetworkRetryable = (error) => {
  * POST one FCM message. 5xx, 408, 429 and a dropped connection are retried with backoff.
  * The response body stays here: callers only see the status, whether to drop the token, and how many tries.
  */
-export const deliverFcm = async ({ fetchImpl, url, message, headers, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), attempts = FCM_ATTEMPTS, jsonLog, now = () => new Date() } = {}) => {
+const boundedFetch = (timeoutMs) => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(Object.assign(new Error('timed out'), { name: 'TimeoutError' })), timeoutMs)
+  return {
+    signal: controller.signal,
+    stop() { clearTimeout(timer) },
+  }
+}
+
+export const deliverFcm = async ({ fetchImpl, url, message, headers, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), attempts = FCM_ATTEMPTS, timeoutMs = FCM_TIMEOUT_MS, jsonLog, now = () => new Date() } = {}) => {
   // Production emits one JSON line per attempt. Tests pass jsonLog when they want the lines.
   const events = jsonLog || createServiceLog('fcm', (line) => {
     if (process.env.NODE_ENV === 'production') console.log(line)
@@ -215,8 +226,9 @@ export const deliverFcm = async ({ fetchImpl, url, message, headers, sleep = (ms
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const started = now().getTime()
     const elapsed = () => Math.max(0, now().getTime() - started)
+    const bounded = boundedFetch(timeoutMs)
     try {
-      const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(message) })
+      const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(message), redirect: 'error', signal: bounded.signal })
       let body = ''
       try {
         body = await readLimitedText(response, FCM_BODY_MAX)
@@ -238,6 +250,8 @@ export const deliverFcm = async ({ fetchImpl, url, message, headers, sleep = (ms
       events.warn({ requestId, method: 'POST', route, status: 0, attempt, drop: false, error: String(error?.name || 'error'), ms: elapsed() })
       if (!fcmNetworkRetryable(error) || attempt === attempts) throw error
       last = { status: 0, drop: false, attempts: attempt }
+    } finally {
+      bounded.stop()
     }
     await sleep(FCM_RETRY_MS[attempt - 1] ?? FCM_RETRY_MS.at(-1))
   }
@@ -280,16 +294,21 @@ const withPushLock = (file, task) => {
  * Drops grades and cancellations this account was already asked to push. Other changes pass through.
  * The ledger stores only those keys, never names, marks or tokens. A failed write still returns the
  * filtered list so a known duplicate is not sent; a brand-new key may be sent once more after a restart.
+ * A read error other than a missing or broken file returns the changes and leaves the ledger in place.
  */
 export const claimPushKeys = (file, changes) => withPushLock(String(file), async () => {
   const list = Array.isArray(changes) ? changes : []
   let stored = []
+  let replaceLedger = true
   try {
     const parsed = JSON.parse(await fs.readFile(file, 'utf8'))
     if (parsed?.version === 1 && Array.isArray(parsed.keys)) {
       stored = parsed.keys.filter((key) => typeof key === 'string' && key.length > 0 && key.length <= 200)
     }
-  } catch { /* no ledger yet */ }
+  } catch (error) {
+    // A missing or broken ledger can start again. Any other read error must not replace the file.
+    if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) replaceLedger = false
+  }
   const known = new Set(stored)
   const fresh = []
   let added = false
@@ -301,7 +320,7 @@ export const claimPushKeys = (file, changes) => withPushLock(String(file), async
     added = true
     fresh.push(change)
   }
-  if (!added) return fresh
+  if (!added || !replaceLedger) return fresh
   const keys = [...known].slice(-PUSH_DEDUP_LIMIT)
   const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
   try {
@@ -323,6 +342,7 @@ export const FCM_AUTH_RETRY_MS = [200, 800]
  */
 export const exchangeServiceAccount = async (account, fetchImpl, nowMs, options = {}) => {
   const sleep = options.sleep || ((ms) => new Promise((done) => setTimeout(done, ms)))
+  const timeoutMs = options.timeoutMs ?? FCM_TIMEOUT_MS
   const now = options.now || (() => new Date(nowMs))
   const events = options.jsonLog || createServiceLog('fcm', (line) => {
     if (process.env.NODE_ENV === 'production') console.log(line)
@@ -333,6 +353,7 @@ export const exchangeServiceAccount = async (account, fetchImpl, nowMs, options 
   for (let attempt = 1; attempt <= FCM_AUTH_ATTEMPTS; attempt += 1) {
     const started = now().getTime()
     const elapsed = () => Math.max(0, now().getTime() - started)
+    const bounded = boundedFetch(timeoutMs)
     try {
       const signed = serviceAccountJwt(account, nowMs)
       const response = await fetchImpl(TOKEN_URL, {
@@ -342,6 +363,8 @@ export const exchangeServiceAccount = async (account, fetchImpl, nowMs, options 
           grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
           assertion: signed.jwt,
         }).toString(),
+        redirect: 'error',
+        signal: bounded.signal,
       })
       let body = ''
       try {
@@ -373,6 +396,8 @@ export const exchangeServiceAccount = async (account, fetchImpl, nowMs, options 
       last = Object.assign(new Error('fcm-auth'), { status: Number(error?.status) || 0, name: String(error?.name || 'Error') })
       events.warn({ requestId, method: 'POST', route, status: last.status, attempt, error: String(error?.name || 'error'), ms: elapsed() })
       if (!fcmNetworkRetryable(error) || attempt === FCM_AUTH_ATTEMPTS) throw last
+    } finally {
+      bounded.stop()
     }
     await sleep(FCM_AUTH_RETRY_MS[attempt - 1] ?? FCM_AUTH_RETRY_MS.at(-1))
   }

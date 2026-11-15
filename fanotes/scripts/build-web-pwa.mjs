@@ -28,8 +28,10 @@ const files = (await walk(output)).filter((file) => file !== 'sw.js').sort()
 const fingerprint = createHash('sha256').update(files.join('\n')).digest('hex').slice(0, 16)
 // The neural OCR runtime is intentionally fetched only when handwriting is
 // converted. Pre-caching it would add more than 30 MB to the first page load.
+// The writing mode's fonts (about 2 MB) load when a story is opened.
 const lazyRecognitionFiles = files.filter((file) => (
   file.startsWith('ocr/')
+  || file.startsWith('writing/')
   || file.includes('trocrWorker-')
   || file.includes('neuralTextRecognition-')
   || /(?:^|\/)ort-wasm[^/]*\.(?:wasm|mjs)$/u.test(file)

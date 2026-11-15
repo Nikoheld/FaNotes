@@ -748,7 +748,9 @@ const server = createServer(async (request, response) => {
 
 server.keepAliveTimeout = 65_000
 server.headersTimeout = 70_000
-server.requestTimeout = 30_000
+// Sync accepts a 110 MB encrypted note and nginx allows 300 s for that body.
+// 30 s aborted a slow upload before it could be stored.
+server.requestTimeout = 300_000
 
 startSystemdWatchdog()
 

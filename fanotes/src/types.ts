@@ -344,7 +344,9 @@ export type SearchHit = {
   /** Document index: where the text came from. */
   source?: 'text' | 'text-layer' | 'ocr' | 'transcript'
   /** Document index: what part of the document matched. */
-  unit?: 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations'
+  unit?: 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations' | 'scene' | 'bible'
+  /** Document index: the story scene of a writing-mode hit. */
+  sceneId?: string
   /** Document index: estimated OCR confidence 0–1. */
   confidence?: number
   /** Document index: [start, end) ranges of matched words in `excerpt`. */
@@ -614,6 +616,13 @@ export type FaNotesApi = {
   convertFamdNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   setFolderColor: (relativePath: string, color: string | null) => Promise<{ color: string | null }>
+  /** Writing mode: a JSON or Markdown file inside a `Name.story/` folder (null when missing). */
+  storyRead?: (relativePath: string) => Promise<string | null>
+  storyWrite?: (relativePath: string, content: string) => Promise<void>
+  /** Files inside a `.story` folder, relative to it. */
+  storyList?: (storyPath: string) => Promise<string[]>
+  /** Creates an empty `Name.story` folder (a free name) and returns its path. */
+  storyCreate?: (parentFolder: string, name: string) => Promise<string>
   /** Colours a note or PDF in the tree. Stored in `.fanotes/file-colors.json`. Hosts without it omit the option. */
   setFileColor?: (relativePath: string, color: string | null) => Promise<{ color: string | null }>
   getFolderLocations: (relativePath: string) => Promise<{ paths: string[] }>

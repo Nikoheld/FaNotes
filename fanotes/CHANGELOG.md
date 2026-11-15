@@ -1,5 +1,91 @@
 # Änderungsverlauf
 
+## 2026.11.3-beta.1
+
+- Offer "Neue Geschichte" and "Geschichte importieren" in the Android command palette.
+- Never write the server's version over a note this device cannot read.
+- Record milestones 6 and 7 of the writing mode.
+- Ship the writing mode inside the Android APK.
+- Sync the archive directory after dropping old revisions.
+- Run the writing mode's checks on pull requests.
+- Jump from a search hit to the paragraph, and keep sync away from a story open on Android.
+- Keep an account when its guest file cannot be read.
+- Link the archive directory before copying the previous note.
+- Keep a published timetable when its file cannot be read.
+- Keep the push ledger when it cannot be read.
+- Keep a saved commute route when its file cannot be read.
+- Remove a delete leftover that still matches its archive.
+- Open stories on Android tablets, and export and import stories everywhere.
+- Re-paginate after a footnote edit, and refuse built-in names and broken emoji in stories.
+- Deny framing on API locations that replace the server headers.
+- Merge stories paragraph by paragraph in sync and index scenes for search.
+- Sync the blobs directory before recording a recovered live file.
+- Keep a Schulnetz account file when it cannot be read.
+- Export stories as PDF, Word, EPUB, Markdown and text, and import Word, Markdown and text files.
+- Keep the mensa cache when its file cannot be read.
+- Add the story tools to the writing mode: corkboard, outline, bible, timeline, goals, versions.
+- Keep an unlogged resurrection until its own upload arrives.
+- Stop a hung FCM call and refuse redirects.
+- Keep a browser session when its file cannot be read.
+- Keep commute files when they cannot be read.
+- Record a full divergent live blob before download or delete.
+- Stop reading a Schulnetz page once it is too large.
+- Refuse a timetable PDF with too many pages before reading it.
+- Join folded iCal lines before reading a Schulnetz calendar event.
+- Give a large sync upload the same 300 seconds nginx allows.
+- Record a newer live blob before another upload replaces it.
+- Send the Schulnetz size error before closing a real upload.
+- Close a Schulnetz request once it is larger than the limit.
+- Add the story tools' data: binder moves and trash, bible, progress, snapshots.
+- Show spelling, grammar and style findings in the writing mode and autocorrect while typing.
+- Close an upload once it is larger than the limit.
+- Do not download a live blob whose size differs from its revision.
+- Mark a sync backup late when it is older than 26 hours.
+- Keep a cancelled calendar lesson instead of showing it as normal.
+- Cancel an upstream error page that is not parsed.
+- Add German and English writing assistance: autocorrect, rules, style, thesaurus.
+- Refuse to delete a live blob that does not match the table revision.
+- Remove a temporary account file when its replace fails.
+- Record a finished upload when its body is already the live blob.
+- Paginate incrementally and keep typing fast in a 600-page novel.
+- Keep a published timetable when a later step fails.
+- Flush the email index before saving a new sync account.
+- Stop reading an oversized FCM response.
+- Flush the account directory after appending a change-log line.
+- Stop reading an oversized Mensa or timetable body.
+- Open stories in a page editor: views, styles, find, notes, autosave.
+- Roll back the grade ledger when the change log cannot be stored.
+- Keep an archived revision when a retried save finds the live blob already replaced.
+- Flush the blob directory before recording a new note revision.
+- Keep every notification line when change-log updates overlap.
+- Flush the note index before truncating the change log.
+- Add the writing mode's editing commands, undo history and saving.
+- Serialize commute saves so a slower write cannot restore older pins.
+- Add the writing mode's document model, layout engine and bundled fonts.
+- Ignore symlinks when measuring the revision archive.
+- Design the writing mode: pages, story tools, autocorrect, sync and export.
+- Let crawlers cache the Schulnetz sitemap and robots file.
+- Share one Mensa cache load so a newer menu is not replaced.
+- Report the newest sync backup age on health.
+- Serve a sync download from the inode that matches its revision.
+- Log timetable reads as JSON without class codes or room names.
+- Count concurrent commute queries once each against the daily budget.
+- Flush an archived note to disk before the live blob is replaced.
+- Save concurrent commute timetables without dropping one.
+- Keep the tree's ⋯ menu on screen and let notes and PDFs have a colour.
+- Stop the hidden-grade check from matching the server clock.
+- Count reserved uploads against the quota and stream the blob when restoring a revision.
+- Count reserved partial uploads against the account quota on a direct put.
+- Generate the sync OpenAPI document from the router.
+- Log each sync request as JSON with a request id and no note or token.
+- Report ciphertext hashes and accept a resumable upload only when its checksum matches.
+- Stream sync uploads to disk so concurrent large notes stay out of the heap.
+- Refuse an empty or truncated upload that would resurrect a deleted note.
+- Do not follow a Mensa redirect off the menu host.
+- Retry a failed FCM sign-in without logging the token.
+- Log a timetable upload as JSON with counts only.
+- Keep the last commute timetable on disk for a restart.
+
 ## 2026.11.2
 
 - **Sync-Konflikte.** Neue Seite unter Einstellungen → Konflikte: beide Fassungen nebeneinander mit Vorschau (Text mit markierten Unterschieden, Handschrift, PDF, Bild). Eine Fassung behalten oder beide; die Wahl gilt auf allen Geräten.
