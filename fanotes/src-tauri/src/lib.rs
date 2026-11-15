@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
+mod native;
+
 use fanotes_host::{find_channel, Host, CHANNELS};
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager, State};
@@ -380,7 +382,14 @@ macro_rules! fanotes_commands {
                 request_close,
                 confirm_close,
                 cancel_close,
-                reset_app_data
+                reset_app_data,
+                native::migration::migration_status,
+                native::migration::migration_plan,
+                native::migration::migration_page,
+                native::migration::migration_done,
+                native::migration::migration_run,
+                native::migration::migration_backups,
+                native::migration::migration_restore_electron
             ]
         }
     };

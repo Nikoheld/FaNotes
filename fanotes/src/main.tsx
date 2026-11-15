@@ -54,7 +54,7 @@ const desktopBootstrap = window.fanotes?.bootstrap()
 // unhandled rejection.
 void desktopBootstrap?.catch(() => undefined)
 
-void initializeUiLocalization().then(() => {
+void ('__TAURI_INTERNALS__' in window ? import('./lib/desktopMigration').then(({ runDesktopMigration }) => runDesktopMigration()).catch(() => undefined) : Promise.resolve()).then(() => initializeUiLocalization()).then(() => {
   if (window.fanotes) {
     renderApp(desktopBootstrap)
   } else if (import.meta.env.DEV && !new URLSearchParams(location.search).has('web')) {
