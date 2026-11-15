@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { claimPushKeys, deliverFcm, exchangeServiceAccount, FCM_ATTEMPTS, FCM_AUTH_ATTEMPTS, fcmDropToken, pushDedupKey } from './fcm.mjs'
+import { claimPushKeys, deliverFcm, exchangeServiceAccount, FCM_ATTEMPTS, FCM_AUTH_ATTEMPTS, FCM_BODY_MAX, fcmDropToken, pushDedupKey } from './fcm.mjs'
 import { createServiceLog } from './service-log.mjs'
 import { createSchulnetzRuntime, updateChangeLog } from './schulnetz-api.mjs'
 
@@ -303,4 +303,102 @@ test('a failed change log does not mark the new grade as already announced', asy
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+const byteStream = (status, chunks, counters) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  text: async () => { counters.text += 1; return '' },
+  body: {
+    getReader: () => ({
+      read: async () => {
+        if (!chunks.length) return { done: true }
+        counters.reads += 1
+        return { done: false, value: chunks.shift() }
+      },
+      cancel: async () => { counters.cancelled += 1 },
+    }),
+  },
+})
+
+test('an oversized FCM body is cancelled and is not retried', async () => {
+  const phrase = Buffer.from('{"error":{"message":"The registration token is not a valid FCM registration token","status":"INVALID_ARGUMENT"}}')
+  const mid = Math.floor(phrase.length / 2)
+  const streamed = { text: 0, reads: 0, cancelled: 0 }
+  const dropped = await deliverFcm({
+    fetchImpl: async () => byteStream(400, [phrase.subarray(0, mid), phrase.subarray(mid)], streamed),
+    url: 'https://fcm.googleapis.com/v1/projects/demo/messages:send',
+    message: { message: { token: 'device-token' } },
+    headers: {},
+    sleep: async () => { throw new Error('should not retry') },
+  })
+  assert.equal(dropped.drop, true)
+  assert.equal(dropped.attempts, 1)
+  assert.equal(streamed.text, 0)
+  assert.equal(streamed.reads, 2)
+  assert.equal(streamed.cancelled, 0)
+
+  const lines = []
+  const jsonLog = createServiceLog('fcm', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const huge = { text: 0, reads: 0, cancelled: 0 }
+  let posts = 0
+  await assert.rejects(
+    () => deliverFcm({
+      fetchImpl: async () => {
+        posts += 1
+        return byteStream(400, [new Uint8Array(FCM_BODY_MAX + 1)], huge)
+      },
+      url: 'https://fcm.googleapis.com/v1/projects/demo/messages:send',
+      message: { message: { token: 'device-token' } },
+      headers: { Authorization: 'Bearer secret-token' },
+      sleep: async () => { throw new Error('should not retry') },
+      jsonLog,
+    }),
+    (error) => error.message === 'page too large',
+  )
+  assert.equal(posts, 1)
+  assert.equal(huge.text, 0)
+  assert.equal(huge.reads, 1)
+  assert.equal(huge.cancelled, 1)
+  assert.equal(lines.join('\n').includes('page too large'), false)
+  assert.equal(lines.join('\n').includes('secret-token'), false)
+  assert.equal(lines.join('\n').includes('device-token'), false)
+
+  const gone = { text: 0, reads: 0, cancelled: 0 }
+  const missing = await deliverFcm({
+    fetchImpl: async () => byteStream(404, [new Uint8Array(FCM_BODY_MAX + 1)], gone),
+    url: 'https://fcm.googleapis.com/v1/projects/demo/messages:send',
+    message: { message: { token: 'device-token' } },
+    headers: {},
+    sleep: async () => { throw new Error('should not retry') },
+  })
+  assert.equal(missing.status, 404)
+  assert.equal(missing.drop, true)
+  assert.equal(gone.cancelled, 1)
+
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const account = {
+    client_email: 'push@kanti-test.iam.gserviceaccount.com',
+    private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    project_id: 'kanti-test',
+  }
+  const authLines = []
+  const authLog = createServiceLog('fcm', (line) => authLines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const authHuge = { text: 0, reads: 0, cancelled: 0 }
+  let authCalls = 0
+  await assert.rejects(
+    () => exchangeServiceAccount(account, async () => {
+      authCalls += 1
+      return byteStream(200, [new Uint8Array(FCM_BODY_MAX + 1)], authHuge)
+    }, Date.parse('2026-11-15T11:00:00Z'), {
+      sleep: async () => { throw new Error('should not retry') },
+      jsonLog: authLog,
+    }),
+    (error) => error.message === 'fcm-auth' && error.status === 200,
+  )
+  assert.equal(authCalls, 1)
+  assert.equal(authHuge.text, 0)
+  assert.equal(authHuge.cancelled, 1)
+  assert.equal(authLines.join('\n').includes('page too large'), false)
+  assert.equal(authLines.join('\n').includes('PRIVATE'), false)
 })

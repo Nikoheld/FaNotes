@@ -166,6 +166,31 @@ export const fcmRetryableStatus = (status) => status === 408 || status === 429 |
 
 export const FCM_ATTEMPTS = 4
 export const FCM_RETRY_MS = [200, 800, 2000]
+/** Error and token JSON are small. Past this, the rest is cancelled and not parsed. */
+export const FCM_BODY_MAX = 64 * 1024
+
+const readLimitedText = async (response, max) => {
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const body = typeof response.text === 'function' ? await response.text() : ''
+    if (body.length > max) throw new Error('page too large')
+    return body
+  }
+  const decoder = new TextDecoder('utf-8')
+  let size = 0
+  let body = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return body + decoder.decode()
+    const bytes = value?.byteLength || 0
+    size += bytes
+    if (size > max) {
+      if (typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+      throw new Error('page too large')
+    }
+    if (bytes) body += decoder.decode(value, { stream: true })
+  }
+}
 
 const fcmNetworkRetryable = (error) => {
   const name = String(error?.name || '')
@@ -192,7 +217,18 @@ export const deliverFcm = async ({ fetchImpl, url, message, headers, sleep = (ms
     const elapsed = () => Math.max(0, now().getTime() - started)
     try {
       const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(message) })
-      const body = await response.text()
+      let body = ''
+      try {
+        body = await readLimitedText(response, FCM_BODY_MAX)
+      } catch (error) {
+        // A 404 is the token itself. Any other oversized body is not an FCM error we can trust.
+        if (error?.message === 'page too large' && response.status === 404) {
+          last = { status: 404, drop: true, attempts: attempt }
+          events.warn({ requestId, method: 'POST', route, status: 404, attempt, drop: true, ms: elapsed() })
+          return last
+        }
+        throw error
+      }
       last = { status: response.status, drop: fcmDropToken(response.status, body), attempts: attempt }
       const fields = { requestId, method: 'POST', route, status: response.status, attempt, drop: last.drop, ms: elapsed() }
       if (last.drop || response.status >= 400) events.warn(fields)
@@ -307,7 +343,15 @@ export const exchangeServiceAccount = async (account, fetchImpl, nowMs, options 
           assertion: signed.jwt,
         }).toString(),
       })
-      const body = await response.text()
+      let body = ''
+      try {
+        body = await readLimitedText(response, FCM_BODY_MAX)
+      } catch (error) {
+        if (error?.message !== 'page too large') throw error
+        last = Object.assign(new Error('fcm-auth'), { status: response.status || 0 })
+        events.warn({ requestId, method: 'POST', route, status: last.status, attempt, error: 'Error', ms: elapsed() })
+        throw last
+      }
       if (!response.ok && response.status !== 200) {
         last = Object.assign(new Error('fcm-auth'), { status: response.status })
         events.warn({ requestId, method: 'POST', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
