@@ -4,6 +4,7 @@
 // Fallback: the page is an Angular app that is server-rendered for the current day only (the active
 // tab "Heute" carries a date and its menus); we parse that. Either result is merged into the last
 // good result and served from a cache.
+import { randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServiceLog, routeOf } from './service-log.mjs'
@@ -172,6 +173,7 @@ const needsRefresh = (fetchedAtMs, nowDate) => {
 
 export const createMensa = (options = {}) => {
   const fetchImpl = options.fetch || globalThis.fetch
+  const readFile = options.readFile || ((path, encoding) => fs.readFile(path, encoding))
   const now = options.now || (() => new Date())
   const sleep = options.sleep || ((ms) => new Promise((done) => setTimeout(done, ms)))
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz')
@@ -183,26 +185,36 @@ export const createMensa = (options = {}) => {
   const file = join(root, 'mensa.json')
   let cache = null // { fetchedAt, days }
   let loaded = false
+  let loading = null
   let lastFailureAt = 0
   let lastFailed = false
   let inflight = null
 
-  const load = async () => {
-    if (loaded) return
-    loaded = true
-    try {
-      const value = JSON.parse(await fs.readFile(file, 'utf8'))
-      if (value && Array.isArray(value.days) && typeof value.fetchedAt === 'string') cache = { fetchedAt: value.fetchedAt, days: value.days }
-    } catch { /* no cache yet */ }
+  // One load at a time. A refresh that finishes first must not be replaced by the older disk copy.
+  const load = () => {
+    if (loaded) return Promise.resolve()
+    if (!loading) {
+      loading = (async () => {
+        try {
+          const value = JSON.parse(await readFile(file, 'utf8'))
+          if (!cache && value && Array.isArray(value.days) && typeof value.fetchedAt === 'string') {
+            cache = { fetchedAt: value.fetchedAt, days: value.days }
+          }
+        } catch { /* no cache yet */ }
+        loaded = true
+      })()
+    }
+    return loading
   }
 
   const save = async () => {
+    const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
     try {
       await fs.mkdir(root, { recursive: true })
-      const temporary = `${file}.${process.pid}.tmp`
-      await fs.writeFile(temporary, JSON.stringify(cache), { mode: 0o640 })
+      await fs.writeFile(temporary, JSON.stringify(cache), { mode: 0o600 })
       await fs.rename(temporary, file)
     } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
       log('warn', `cache not saved: ${error?.code || 'error'}`)
     }
   }
@@ -280,7 +292,7 @@ export const createMensa = (options = {}) => {
     try {
       return await downloadApi()
     } catch (error) {
-      log('warn', `menu API failed, using the page: ${String(error?.message || error).slice(0, 80)}`)
+      log('warn', `menu API failed, using the page: ${error?.name || 'error'}`)
       return parseMensaHtml(await download())
     }
   }
@@ -302,7 +314,7 @@ export const createMensa = (options = {}) => {
       } catch (error) {
         lastFailed = true
         lastFailureAt = now().getTime()
-        log('warn', `refresh failed: ${String(error?.message || error).slice(0, 120)}`)
+        log('warn', `refresh failed: ${error?.name || 'error'}`)
       } finally {
         inflight = null
       }
