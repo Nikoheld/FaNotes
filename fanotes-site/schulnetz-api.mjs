@@ -156,6 +156,14 @@ const fail = (status, message) => {
   error.publicMessage = message
   throw error
 }
+// The response is sent by the caller. The request is closed after that, so the rest of the body is not read.
+const failLarge = (request, message) => {
+  const error = new Error('schulnetz')
+  error.status = 413
+  error.publicMessage = message
+  error.releaseRequest = request
+  throw error
+}
 
 const keptSsoHeader = (value) => String(value || '')
   .split(';')
@@ -1465,11 +1473,12 @@ export const createSchulnetzRuntime = (options = {}) => {
   // A snapshot upload carries a semester of lessons: it may be up to SNAPSHOT_BODY_LIMIT raw and gzip.
   // Every other request stays small and plain.
   const readBody = async (request, { limit = MAX_BODY, inflate = false } = {}) => {
+    if (Number(request.headers?.['content-length']) > limit) failLarge(request, 'Die Anfrage ist zu gross.')
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > limit) fail(413, 'Die Anfrage ist zu gross.')
+      if (size > limit) failLarge(request, 'Die Anfrage ist zu gross.')
       chunks.push(chunk)
     }
     if (!chunks.length) return {}
@@ -1767,6 +1776,9 @@ export const createSchulnetzRuntime = (options = {}) => {
       const status = Number(error?.status) || 500
       if (status >= 500) log('warn', `Anfrage fehlgeschlagen (${error?.name || 'error'})`)
       send(response, status, { error: error?.publicMessage || 'Der Schulnetz-Dienst ist vorübergehend nicht erreichbar.' })
+      const release = error?.releaseRequest
+      // Test doubles have no socket. A real response closes the upload only after the 413 is sent.
+      if (release && typeof release.destroy === 'function' && typeof response.on === 'function') response.on('finish', () => release.destroy())
     }
     return true
   }
