@@ -453,7 +453,7 @@ const appendChange = async (accountId, table, entry) => {
 const compactTable = async (accountId, table) => {
   const directory = accountDirectory(accountId)
   await atomicWrite(safeJoin(directory, 'index.json'), JSON.stringify({ revision: table.revision, entries: Object.fromEntries(table.entries) }))
-  // The index rename has to be durable before the log is truncated. A crash
+  // The index rename has to be durable before the log is replaced. A crash
   // that kept the new index and lost the log would drop every revision that
   // lived only in the log.
   const directoryHandle = await fs.open(directory, 'r')
@@ -462,12 +462,9 @@ const compactTable = async (accountId, table) => {
   } finally {
     await directoryHandle.close()
   }
-  const log = await fs.open(safeJoin(directory, 'changes.jsonl'), 'w', 0o600)
-  try {
-    await log.sync()
-  } finally {
-    await log.close()
-  }
+  // Replace the log by rename. A crash must not tear the log in place after
+  // the index is saved.
+  await atomicWrite(safeJoin(directory, 'changes.jsonl'), '')
   table.logBytes = 0
 }
 
