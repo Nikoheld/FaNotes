@@ -9,7 +9,7 @@ import { blockAt, blockLength, caret, clampPos, isCollapsed, makeDoc, ordered, u
 import { CanvasMeasurer, loadHyphenator, loadWritingFonts, hyphenatorFor, type Hyphenator } from '../layout/measure'
 import { LayoutCache, layoutManuscript } from '../layout/paginate'
 import { LANGUAGE_TYPOGRAPHY } from '../model/defaults'
-import { titleKey } from '../model/flow'
+import { paragraphKey, titleKey } from '../model/flow'
 import { writerId } from '../model/ids'
 import { marksAt, runsText } from '../model/runs'
 import type { Align, BinderNode, FontFamilyId, Marks, StoryLanguage } from '../model/types'
@@ -29,6 +29,7 @@ import { ReferencePane, type Reference } from './ReferencePane'
 import { ScenePanel, SnapshotCompare } from './ScenePanel'
 import { ExportDialog } from '../export/ExportDialog'
 import { androidBridge } from '../androidHost'
+import { paragraphForQuery, subscribeStoryReveal } from '../reveal'
 import { useStoryTools } from './storyTools'
 import { canDrop, findIn, moveNode, moveToTrash, trashedIds, updateNode, TRASH_ID, type DropPosition } from '../model/binder'
 import { diffScene, restoreSnapshot, type DiffRow, type Snapshot } from '../model/snapshots'
@@ -209,6 +210,21 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     }
     onClose()
   }, [controller, onClose, path, save])
+
+  // A search hit opens the story at the scene and paragraph that matched.
+  useEffect(() => {
+    if (!controller) return
+    return subscribeStoryReveal(path, (request) => {
+      const scene = controller.state.doc.scenes.get(request.sceneId)
+      const paragraph = scene ? paragraphForQuery(scene, request.query) : null
+      setArea('manuscript')
+      if (scene && paragraph) {
+        const key = paragraphKey(paragraph)
+        window.setTimeout(() => { controller.select(caret(clampPos(controller.state.doc, { block: key, offset: 0 }))); refocus() }, 0)
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controller, path])
 
   // The Android app asks the editor to close (back button): save first, like the arrow does.
   useEffect(() => {

@@ -118,7 +118,7 @@ fun censusNotes(nodes: List<VaultNode>, skip: Set<String> = emptySet()): NoteCen
                     folders += 1
                     walk(node.children, node.path)
                 }
-                NoteKind.MARKDOWN, NoteKind.PDF -> if (node.path !in skip) {
+                NoteKind.MARKDOWN, NoteKind.PDF, NoteKind.STORY -> if (node.path !in skip) {
                     notes += 1
                     here += 1
                 }

@@ -52,6 +52,8 @@ class AppGraph(context: Context) {
     var vaultId: String = fingerprint(defaultRoot.absolutePath)
     var initialVaultLabel: String = "Auf diesem Tablet"
     @Volatile var busyPaths: Set<String> = emptySet()
+    /** Folders being edited elsewhere (an open story in the writing mode); sync defers everything inside. */
+    @Volatile var busyFolders: Set<String> = emptySet()
     val remoteListeners = mutableListOf<(List<String>, List<String>) -> Unit>()
     private val stateDir = File(context.filesDir, "sync-state").apply { mkdirs() }
     private val glyphFile = File(context.filesDir, "glyph-samples.json")
@@ -78,7 +80,7 @@ class AppGraph(context: Context) {
                 platform = "android",
                 deviceName = { prefs.getString("device-name", null)?.ifBlank { null } ?: android.os.Build.MODEL.ifBlank { "Android tablet" } },
                 automatic = { prefs.getBoolean("sync-automatic", true) },
-                isPathBusy = { path -> path in busyPaths },
+                isPathBusy = { path -> path in busyPaths || busyFolders.any { path.startsWith("$it/") } },
                 excludedPrefixes = { syncPrefixesFromSetting(readDesk()["sync-excluded"]) },
                 includeHistory = { readDesk()["sync-history"] == "on" },
                 onApplied = { written, removed ->

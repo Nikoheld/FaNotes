@@ -14,6 +14,8 @@ object StoryFiles {
 
     /** A normalized story file path, or an exception. */
     fun checkFile(path: String): String {
+        // The editor only sends vault-relative paths; anything absolute-looking is refused, not reinterpreted.
+        if (path.startsWith('/') || path.startsWith('\\')) throw IllegalArgumentException("Kein Pfad in einem .story-Ordner.")
         val clean = normalize(path)
         val match = FILE.matchEntire(clean) ?: throw IllegalArgumentException("Kein Pfad in einem .story-Ordner.")
         if (match.groupValues[2].split('/').any { it.startsWith('.') }) throw IllegalArgumentException("Kein Pfad in einem .story-Ordner.")

@@ -27,6 +27,15 @@ import java.util.Locale
  */
 class WritingActivity : ComponentActivity() {
     private lateinit var web: WebView
+    private var story: String? = null
+
+    /** Sync leaves an open story alone (the editor merges on its next open); released on close. */
+    private fun holdStory(path: String) {
+        val graph = (application as FaNotesApplication).graph
+        story?.let { graph.busyFolders = graph.busyFolders - it }
+        story = path
+        graph.busyFolders = graph.busyFolders + path
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,7 +48,8 @@ class WritingActivity : ComponentActivity() {
         web.settings.allowContentAccess = false
         web.settings.mediaPlaybackRequiresUserGesture = true
         web.webViewClient = AssetClient(this)
-        web.addJavascriptInterface(StoryBridge(graph.vault, onSaved = { graph.engine.notifyLocalChange() }, onClose = { runOnUiThread { finish() } }), "FaNotesAndroid")
+        intent.getStringExtra(EXTRA_PATH)?.let { holdStory(it) }
+        web.addJavascriptInterface(StoryBridge(graph.vault, onSaved = { graph.engine.notifyLocalChange() }, onClose = { runOnUiThread { finish() } }, onCreated = { path -> runOnUiThread { holdStory(path) } }), "FaNotesAndroid")
         setContentView(web)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             // The editor saves and then calls close(); a second press while it saves is ignored.
@@ -65,6 +75,9 @@ class WritingActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        val graph = (application as FaNotesApplication).graph
+        story?.let { graph.busyFolders = graph.busyFolders - it }
+        graph.engine.notifyLocalChange()
         web.destroy()
         super.onDestroy()
     }
@@ -126,7 +139,7 @@ class WritingActivity : ComponentActivity() {
  * [StoryFiles] (story files only), except [readFile] and [listNotes], which
  * only read Markdown notes for linking.
  */
-class StoryBridge(private val vault: VaultIo, private val onSaved: () -> Unit, private val onClose: () -> Unit) {
+class StoryBridge(private val vault: VaultIo, private val onSaved: () -> Unit, private val onClose: () -> Unit, private val onCreated: (String) -> Unit = {}) {
     private fun ok(value: Any?) = JSONObject().put("ok", true).put("value", value ?: JSONObject.NULL).toString()
     private fun fail(error: Throwable) = JSONObject().put("ok", false).put("error", error.message ?: error.javaClass.simpleName).toString()
     private inline fun guard(block: () -> Any?): String = try { ok(block()) } catch (error: Throwable) { fail(error) }
@@ -134,7 +147,7 @@ class StoryBridge(private val vault: VaultIo, private val onSaved: () -> Unit, p
     @JavascriptInterface fun storyRead(path: String): String = guard { StoryFiles.read(vault, path) }
     @JavascriptInterface fun storyWrite(path: String, content: String): String = guard { StoryFiles.write(vault, path, content); null }
     @JavascriptInterface fun storyList(storyPath: String): String = guard { JSONArray(StoryFiles.list(vault, storyPath)) }
-    @JavascriptInterface fun storyCreate(parent: String, name: String): String = guard { StoryFiles.create(vault, parent, name) }
+    @JavascriptInterface fun storyCreate(parent: String, name: String): String = guard { StoryFiles.create(vault, parent, name).also(onCreated) }
 
     @JavascriptInterface fun readFile(path: String): String = guard {
         val clean = normalize(path)
