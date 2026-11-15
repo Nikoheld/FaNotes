@@ -154,6 +154,8 @@ mod export;
 #[cfg(windows)]
 #[path = "export_webview2.rs"]
 mod export;
+#[path = "native/search.rs"]
+mod native_search;
 #[path = "native/sync.rs"]
 mod native_sync;
 mod smoke;
@@ -412,7 +414,8 @@ macro_rules! fanotes_commands {
                 native::migration::migration_done,
                 native::migration::migration_run,
                 native::migration::migration_backups,
-                native::migration::migration_restore_electron
+                native::migration::migration_restore_electron,
+                native_search::search_query, native_search::search_status, native_search::search_notify, native_search::search_rebuild
             ]
         }
     };

@@ -83,7 +83,7 @@ export const listSearchDocuments = (tree: VaultEntry[], storyStamp?: (path: stri
 
 const unitId = (path: string, kind: UnitKind, n: number) => `${path}#${kind}:${n}`
 
-const chunk = (text: string, size = NOTE_CHUNK_CHARS) => {
+export const chunk = (text: string, size = NOTE_CHUNK_CHARS) => {
   const parts: string[] = []
   let rest = text.slice(0, MAX_NOTE_CHARS)
   while (rest.length > size) {

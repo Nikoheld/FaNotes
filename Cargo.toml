@@ -14,6 +14,7 @@ members = [
     "crates/fanotes-host",
     "crates/fanotes-pdf",
     "crates/fanotes-sync",
+    "crates/fanotes-index",
     "apps/paper-proto",
     "fanotes/src-tauri",
 ]
