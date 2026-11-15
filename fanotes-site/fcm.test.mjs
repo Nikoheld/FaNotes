@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { claimPushKeys, deliverFcm, exchangeServiceAccount, FCM_ATTEMPTS, FCM_AUTH_ATTEMPTS, FCM_BODY_MAX, fcmDropToken, pushDedupKey } from './fcm.mjs'
 import { createServiceLog } from './service-log.mjs'
-import { createSchulnetzRuntime, updateChangeLog } from './schulnetz-api.mjs'
+import { createSchulnetzRuntime, SCHOOL_BODY_MAX, updateChangeLog } from './schulnetz-api.mjs'
 
 const grade = (id, mark = '5.5') => ({ id, category: 'grade', title: 'Neue Note', body: `Mathematik · Probe · ${mark}`, targetId: 'course-1', date: '2026-11-10' })
 const cancelled = (id, targetId = 'lesson-1') => ({ id, category: 'timetable', title: 'Lektion fällt aus', body: 'Deutsch · 08:15', targetId, date: '2026-11-16' })
@@ -469,6 +469,61 @@ test('an oversized Schulnetz request is refused and the connection is closed', a
     assert.deepEqual(await readdir(join(root, 'accounts')).catch(() => []), [])
   } finally {
     await new Promise((done) => server.close(done))
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an oversized Schulnetz page is not stored and an error page is not read', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fcm-school-body-'))
+  const accountId = 'd'.repeat(32)
+  let phase = 'retry'
+  let retried = false
+  let cancelled = 0
+  let reads = 0
+  const fetch = async (url) => {
+    const target = String(url)
+    if (target.endsWith('/token.php')) {
+      return { status: 200, text: async () => JSON.stringify({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 }) }
+    }
+    if (target.includes('/me/grades')) {
+      if (phase === 'retry' && !retried) {
+        retried = true
+        return {
+          status: 503,
+          body: {
+            getReader: () => ({
+              read: async () => { reads += 1; return { done: true, value: undefined } },
+              cancel: async () => { cancelled += 1 },
+            }),
+          },
+        }
+      }
+      if (phase === 'huge') return { status: 200, text: async () => 'x'.repeat(SCHOOL_BODY_MAX + 1) }
+    }
+    return { status: 200, text: async () => '[]' }
+  }
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch,
+    autostart: false,
+    fcmSend: async () => ({ status: 200 }),
+  })
+  const snapshot = join(root, 'accounts', accountId, 'snapshot.json')
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    await runtime.pollAccount(accountId)
+    assert.equal(cancelled, 1)
+    assert.equal(reads, 0)
+    const before = await readFile(snapshot)
+    phase = 'huge'
+    await assert.rejects(() => runtime.pollAccount(accountId), (error) => error?.message === 'page too large')
+    assert.equal((await readFile(snapshot)).equals(before), true)
+  } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
