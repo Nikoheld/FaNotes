@@ -854,7 +854,10 @@ const handlePutFile = async (request, response, auth, fileId) => {
     }
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
     const historyDelta = current && !current.deleted && (current.sha256 !== declaredSha) ? (Number(current.size) || 0) : 0
-    if (table.bytes - previousBytes + incoming.size + (table.historyBytes || 0) + historyDelta > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+    // Partials already reserved their declared size. A direct PUT must not
+    // spend that space a second time.
+    const reserved = await reservedPartialBytes(auth.account.id)
+    if (table.bytes - previousBytes + incoming.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
     const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
     if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
     if (current && !current.deleted && current.sha256 !== declaredSha) {
@@ -1294,7 +1297,7 @@ export const handleSyncRequest = async (request, response, url) => {
     const durationMs = Math.max(0, Math.round(Number(process.hrtime.bigint() - started) / 1e5) / 10)
     const entry = {
       time: new Date().toISOString(),
-      level: status >= 500 ? 'error' : 'info',
+      level: failureCode ? 'error' : 'info',
       msg: 'sync',
       requestId,
       method: SAFE_METHOD.has(method) ? method : 'OTHER',
