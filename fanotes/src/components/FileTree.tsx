@@ -46,8 +46,6 @@ export type FileTreeProps = {
   activePath?: string | null
   /** The note shown in the second split pane, marked in the tree. */
   splitPath?: string | null
-  /** Entries (and their folders) that arrived from outside and were not opened yet. */
-  newPaths?: ReadonlySet<string>
   onOpen: (relativePath: string) => MaybePromise<unknown>
   /** Shift+click, Shift+Enter or the context menu open a note in the second pane. */
   onOpenInSplit?: (relativePath: string) => MaybePromise<unknown>
@@ -237,7 +235,6 @@ export const FileTree = memo(function FileTree({
   onCopyPath,
   onShare,
   confirmTrash,
-  newPaths,
   className = '',
   rootLabel = 'Dateien',
   showHeader = true,
@@ -655,7 +652,6 @@ export const FileTree = memo(function FileTree({
             isFolder && dropFolder === entry.relativePath ? 'is-drop-target' : ''
           }`.trim()}
           data-kind={entry.kind}
-          data-new={newPaths?.has(entry.relativePath) ? '' : undefined}
           data-colored={!isFolder && entry.color ? '' : undefined}
           onContextMenu={(event) => {
             event.preventDefault()

@@ -354,14 +354,7 @@ try {
 
   // A note that is being edited is not overwritten; it arrives once the editor is quiet.
   let busy = true
-  // `busyAfter`: the file turns busy only after this many checks (an editor starts on it during the download).
-  let busyAfter = -1
-  let checks = 0
-  const C = createEngine(hostB, 'Tablet', { busy: (path) => {
-    if (path !== 'Mathe/Algebra.md') return false
-    if (busyAfter >= 0) return checks++ >= busyAfter
-    return busy
-  } })
+  const C = createEngine(hostB, 'Tablet', { busy: (path) => busy && path === 'Mathe/Algebra.md' })
   await C.engine.start()
   assert.equal(C.engine.getState().status, 'idle', 'session restored from the host secrets')
   assert.equal(C.engine.getState().account.email, 'fabio@example.com')
@@ -372,23 +365,6 @@ try {
   busy = false
   await C.engine.syncNow()
   assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.', 'applied once the note is idle')
-
-  // The file was free when the pull looked at it, but an editor started on it while it downloaded:
-  // the write is put off, not done over the editor's file.
-  hostA.put('Mathe/Algebra.md', '# Algebra\n\nWährend des Downloads.')
-  await A.engine.syncNow()
-  busyAfter = 1
-  checks = 0
-  await C.engine.syncNow()
-  assert.ok(checks >= 2, 'busy was asked again before writing')
-  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.', 'not written while the editor holds it')
-  busyAfter = -1
-  busy = false
-  await C.engine.syncNow()
-  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nWährend des Downloads.', 'written on the next cycle')
-  hostA.put('Mathe/Algebra.md', '# Algebra\n\nDritte Fassung.')
-  await A.engine.syncNow()
-  await C.engine.syncNow()
 
   // A file that is here but cannot be read (permissions, locked) is not "missing":
   // the server's version is not written over it; it arrives once it can be read.

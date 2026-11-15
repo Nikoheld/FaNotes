@@ -464,9 +464,7 @@ try {
   // ── Wiring ────────────────────────────────────────────────────────────────
   await check('wiring: busy open story, search reveal, web story assets', () => {
     const app = readFileSync(join(appRoot, 'src/App.tsx'), 'utf8')
-    // The open story waits for sync, except its scenes and manifest while the editor has nothing unsaved (liveSync.ts).
-    assert.match(app, /writingPathRef\.current && path\.startsWith\(`\$\{writingPathRef\.current\}\/`\)\) return storySyncBusy\(writingPathRef\.current, path\)/u)
-    assert.match(app, /notifyStoryWritten\(writingPathRef\.current, written\)/u)
+    assert.match(app, /writingPathRef\.current && path\.startsWith\(`\$\{writingPathRef\.current\}\/`\)\) return true/u)
     assert.match(app, /requestStoryReveal\(hit\.relativePath, \{ sceneId: hit\.sceneId/u)
     assert.match(app, /docSearch\.notifyStoryChanged/u)
     const host = readFileSync(join(appRoot, 'src/lib/sync/browserSyncHost.ts'), 'utf8')

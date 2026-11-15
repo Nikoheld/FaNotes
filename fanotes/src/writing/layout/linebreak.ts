@@ -65,12 +65,6 @@ export type Piece = {
   x: number
   /** A hyphen drawn at the end of this piece (line ends inside a word). */
   hyphen?: boolean
-  /**
-   * A space at the end of a line. It hangs past the text: alignment and
-   * justification ignore it and nothing is drawn, but the caret can sit after
-   * it, so a typed space moves the caret right away.
-   */
-  hang?: true
 }
 
 export type LineBox = {
@@ -317,9 +311,8 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
   const hyphenWidth = measurer.width(HYPHEN, baseFont)
 
   const finish = (lineTokens: Token[], forced: boolean, endsParagraph: boolean, hyphen: boolean) => {
-    // Trailing spaces hang outside the line (see `Piece.hang`).
-    const hanging: Token[] = []
-    while (lineTokens.length && lineTokens[lineTokens.length - 1].kind === 'space') hanging.unshift(lineTokens.pop()!)
+    // Trailing spaces hang outside the line.
+    while (lineTokens.length && lineTokens[lineTokens.length - 1].kind === 'space') lineTokens.pop()
     const index = lines.length
     const width = available(index)
     const pieces = lineTokens.flatMap((token) => token.pieces)
@@ -345,21 +338,12 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
         x += extra
       }
     }
-    let hangX = x
-    for (const token of hanging) {
-      for (const piece of token.pieces) {
-        piece.x = hangX
-        piece.hang = true
-        hangX += piece.width
-        pieces.push(piece)
-      }
-    }
     const largest = pieces.reduce((max, piece) => Math.max(max, piece.marks?.size ? ptToPx(piece.marks.size) : 0), style.size)
     const height = largest * style.lineHeight
     const metrics = largest === style.size ? baseMetrics : measurer.metrics({ ...baseFont, size: largest })
     const baseline = (height - (metrics.ascent + metrics.descent)) / 2 + metrics.ascent
-    const from = lineTokens[0]?.from ?? hanging[0]?.from ?? cursor
-    const to = hanging.length ? hanging[hanging.length - 1].to : lineTokens.length ? lineTokens[lineTokens.length - 1].to : cursor
+    const from = lineTokens[0]?.from ?? cursor
+    const to = lineTokens.length ? lineTokens[lineTokens.length - 1].to : cursor
     for (const piece of pieces) if (piece.kind === 'anchor' && piece.marks?.fn) footnotes.push({ id: piece.marks.fn, line: index })
     lines.push({ from: index === 0 ? 0 : from, to, pieces, x: lineStart(index), available: width, width: hyphen ? x + hyphenWidth : x, height, baseline, last })
   }
@@ -385,8 +369,7 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
       continue
     }
     if (token.kind === 'space') {
-      // Spaces at the start of a wrapped line vanish; at the start of the paragraph they are typed text.
-      if (lineTokens.length || lines.length === 0) {
+      if (lineTokens.length) {
         pending.push(token)
         pendingSpace += token.width
       }
@@ -437,8 +420,6 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
         cut -= 1
       }
       const [head, tail] = splitToken(token, token.from + Math.max(1, cut), fragments, measurer)
-      pending.length = 0
-      pendingSpace = 0
       finish([head], false, false, false)
       cursor = head.to
       tokens[index] = tail

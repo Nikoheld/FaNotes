@@ -399,41 +399,6 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
         tree.value = loaded.first
         folderColors.value = loaded.second
-        lastOwnTreeLoadMs = System.currentTimeMillis()
-        treeLoaded = true
-    }
-
-    /** Files that arrived from outside (Files app, another sync tool) and were not opened yet. */
-    val newPaths = MutableStateFlow<Set<String>>(emptySet())
-    private var lastOwnTreeLoadMs = 0L
-    private var treeLoaded = false
-    private val rescanMutex = Mutex()
-
-    /**
-     * Cheap rescan for resume and the foreground timer. Replaces only the tree state, so an
-     * open note and its unsaved edits are never reloaded.
-     */
-    fun rescanTree() {
-        viewModelScope.launch {
-            if (!treeLoaded || !rescanMutex.tryLock()) return@launch
-            try {
-                val loaded = withContext(Dispatchers.IO) {
-                    runCatching { graph.store.tree() }.getOrNull()
-                } ?: return@launch
-                val change = ch.fasrv.fanotes.vault.diffTrees(tree.value, loaded)
-                if (change.isEmpty) return@launch
-                val own = System.currentTimeMillis() - lastOwnTreeLoadMs < 4000
-                tree.value = loaded
-                val marks = ch.fasrv.fanotes.vault.updateArrivals(newPaths.value, change, loaded, open.value?.path, own)
-                newPaths.value = marks
-                if (!own) {
-                    val arrived = change.added.filter { it in marks }
-                    ch.fasrv.fanotes.vault.arrivalMessage(arrived)?.let { message.value = it }
-                }
-            } finally {
-                rescanMutex.unlock()
-            }
-        }
     }
 
     private suspend fun refreshTagIndex() {

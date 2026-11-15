@@ -149,7 +149,6 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import ch.fasrv.fanotes.desk.solveMathExpression
 import ch.fasrv.fanotes.sync.localFolderAction
 import ch.fasrv.fanotes.sync.pathIsSyncExcluded
@@ -517,7 +516,6 @@ fun FaNotesScreen(
     onDismissWorksheet: () -> Unit = {},
 ) {
     val tree by model.tree.collectAsStateWithLifecycle()
-    val newPaths by model.newPaths.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
     val tool by model.tool.collectAsStateWithLifecycle()
     val style by model.style.collectAsStateWithLifecycle()
@@ -592,17 +590,6 @@ fun FaNotesScreen(
 
     LaunchedEffect(Unit) {
         if (desk["update-check"] != "off") model.checkUpdate()
-    }
-
-    // New files from outside: look again on resume and every 20 s while the app is in front.
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    LaunchedEffect(lifecycleOwner, model) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
-            while (true) {
-                model.rescanTree()
-                kotlinx.coroutines.delay(20_000)
-            }
-        }
     }
 
     LaunchedEffect(signedIn) {
@@ -921,7 +908,6 @@ fun FaNotesScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
         Row(Modifier.fillMaxSize()) {
             if (panels.sidebar) {
-                CompositionLocalProvider(LocalNewPaths provides ch.fasrv.fanotes.vault.withParentFolders(newPaths)) {
                 VaultPane(
                     modifier = Modifier.width((chrome.sidebarDp ?: ch.fasrv.fanotes.desk.sidebarWidthDp(desk["sidebar-width"])).dp).fillMaxHeight(),
                     tree = filterVaultByTag(tree, tagFilter, tagIndex),
@@ -978,7 +964,6 @@ fun FaNotesScreen(
                     onResolve = { conflict, choice -> model.resolveConflict(conflict, choice) },
                     onCollapse = { model.setSidebarOpen(false) },
                 )
-                }
             }
             if (focus || wide || !showList || destination != "notes") {
                 if (destination != "notes" && destination != "search") {
@@ -1605,9 +1590,6 @@ private fun TagFilterChip(label: String, active: Boolean, onClick: () -> Unit) {
     )
 }
 
-/** Tree entries (and their folders) that arrived from outside and were not opened yet. */
-private val LocalNewPaths = androidx.compose.runtime.staticCompositionLocalOf<Set<String>> { emptySet() }
-
 @Composable
 private fun VaultPane(
     modifier: Modifier,
@@ -2029,15 +2011,6 @@ private fun NoteRow(
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (node.path != selected && node.path in LocalNewPaths.current) {
-            Box(
-                Modifier
-                    .padding(end = 4.dp)
-                    .size(7.dp)
-                    .clip(androidx.compose.foundation.shape.CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
-            )
-        }
         if (ch.fasrv.fanotes.desk.treeRowShowsMark() && (node.path == selected || inSplit)) {
             Box(
                 Modifier

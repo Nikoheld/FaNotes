@@ -1,5 +1,6 @@
 import {
   Accessibility,
+  BarChart3,
   Bug,
   Brush,
   Check,
@@ -62,6 +63,7 @@ import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, Qw
 import type { McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
+import { StatisticsPage } from './StatisticsPage'
 import { SyncConflictsPage } from './SyncConflictsPage'
 import { ShareSettingsPage, type ShareTarget } from './ShareSettingsPage'
 import { ProfileSettingsCard } from './ProfileSettingsCard'
@@ -97,7 +99,7 @@ const UPDATE_CHANNEL_COPY = {
 
 const updateChannelCopy = (channel: AppSettings['updateChannel']) => UPDATE_CHANNEL_COPY[channel] ?? UPDATE_CHANNEL_COPY.stable
 
-export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'conflicts' | 'profile' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
+export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'conflicts' | 'statistics' | 'profile' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
   platform?: string
@@ -136,6 +138,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 5 },
   { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 1 },
   { id: 'conflicts', label: 'Konflikte', description: 'Zwei Fassungen vergleichen und eine behalten', icon: GitCompareArrows, count: 0 },
+  { id: 'statistics', label: 'Statistik', description: 'Vault, Aktivität, Schule und Diagnose', icon: BarChart3, count: 0 },
   { id: 'profile', label: 'Profil', description: 'Öffentliche Aktivitätsübersicht', icon: User, count: 3 },
   { id: 'share', label: 'Teilen', description: 'Link, Kopie oder Live', icon: Share2, count: 3 },
   { id: 'addons', label: 'Add-ons', description: 'Store, Quelle und Updates', icon: Puzzle, count: 2 },
@@ -150,6 +153,7 @@ const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Stift & Arbeitsbereich', sections: ['drawing'] },
   { label: 'Dateien & Vault', sections: ['files'] },
   { label: 'Sync', sections: ['sync', 'conflicts'] },
+  { label: 'Statistik', sections: ['statistics'] },
   { label: 'Profil', sections: ['profile'] },
   { label: 'Teilen', sections: ['share'] },
   { label: 'Add-ons', sections: ['addons'] },
@@ -181,6 +185,7 @@ const settingsOptionCount = (
       if (!input.syncSignedIn) return 0
       return 5 + 3 + input.syncGrantRows + input.syncDeviceRows + input.syncConflictRows + 1
     case 'conflicts': return input.syncOpenConflicts
+    case 'statistics': return 2
     case 'profile': return 3
     case 'share': return 3
     case 'addons': return 2
@@ -201,6 +206,8 @@ type SettingsSearchItem = {
 }
 
 const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
+  { label: 'Statistik', detail: 'Statistik', section: 'statistics', target: 'settings-stat-activity', keywords: 'statistik aktivität kalender heatmap serie streak wörter notizen grösse fächer lernzeit hausaufgaben karteikarten sync' },
+  { label: 'Diagnose & Verbesserung', detail: 'Statistik', section: 'statistics', target: 'settings-diagnostics', keywords: 'diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz' },
   { label: 'Grok-Connector', detail: 'Sync', section: 'sync', target: 'settings-grok-connector', keywords: 'grok mcp connector server url notizen prüfung klausur hausaufgaben oauth' },
   { label: 'Sync-Konto', detail: 'Sync', section: 'sync', target: 'settings-sync-account', keywords: 'sync konto anmelden registrieren account login passwort e-mail cloud server geräte' },
   { label: 'Öffentliche Aktivitätsübersicht', detail: 'Profil', section: 'profile', target: 'settings-profile', keywords: 'benutzername profil user übersicht aktivität notizen zeit beigetreten tage öffentlich' },
@@ -764,7 +771,7 @@ export function SettingsModal({
           <header>
             <div className="settings-heading">
               <span className="settings-heading-icon"><ActiveSectionIcon size={17} /></span>
-              <div>{active === 'conflicts' ? <span className="eyebrow">{`Sync · ${section.count} offen`}</span> : <span className="eyebrow">{`Anpassung · ${section.count} Optionen`}</span>}<h2>{section.label}</h2><p>{section.description}</p></div>
+              <div>{active === 'conflicts' ? <span className="eyebrow">{`Sync · ${section.count} offen`}</span> : <span className="eyebrow">{active === 'statistics' ? 'Nur auf diesem Gerät berechnet' : `Anpassung · ${section.count} Optionen`}</span>}<h2>{section.label}</h2><p>{section.description}</p></div>
             </div>
             <button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={19} /></button>
           </header>
@@ -1263,6 +1270,10 @@ export function SettingsModal({
                   ? <SyncConflictsPage engine={syncEngine} syncState={syncState} />
                   : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>}
               </div>
+            )}
+
+            {active === 'statistics' && (
+              <StatisticsPage settings={settings} update={update} syncState={syncState} />
             )}
 
             {active === 'profile' && (

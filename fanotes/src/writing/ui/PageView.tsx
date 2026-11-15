@@ -35,7 +35,7 @@ type Props = {
   onContextMenu?: (pointer: PagePointer) => void
 }
 
-export const GAP = 28
+const GAP = 28
 const SPREAD_GAP = 4
 
 export type PageRect = { left: number; top: number; width: number; height: number }
@@ -97,7 +97,7 @@ const LineView = memo(function LineView({ box, x, y, measurer, dimmed, conflict 
   return (
     <div className={`wm-line${dimmed ? ' is-dimmed' : ''}${conflict ? ' is-conflict' : ''}`} style={{ left: x, top: y, height: box.height, width: box.available }}>
       {box.pieces.map((piece) => {
-        if (piece.kind === 'newline' || piece.hang) return null
+        if (piece.kind === 'newline') return null
         if (piece.kind === 'space' && !(piece.marks?.u || piece.marks?.s || piece.marks?.hl || piece.marks?.link)) return null
         return (
           <span key={piece.from * 4 + (piece.kind === 'anchor' ? 1 : 0)} className={piece.kind === 'anchor' ? 'wm-fn-ref' : undefined} style={pieceStyle(measurer, box, piece)}>

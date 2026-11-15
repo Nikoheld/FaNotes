@@ -443,7 +443,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .file-tree ul { list-style: none; margin: 0; padding: 0; }
 .file-tree__item { position: relative; }
 .file-tree__row { min-width: 0; height: var(--row-height, 31px); display: flex; align-items: center; border-radius: 7px; padding-left: calc(var(--tree-depth, 0) * 13px); position: relative; }
-.file-tree__row[data-new]::after { content: ''; position: absolute; right: 8px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; background: var(--accent); opacity: .85; pointer-events: none; }
 .file-tree__row:hover { background: color-mix(in srgb, var(--panel-hover) 74%, transparent); }
 .file-tree__entry-button[draggable="true"] { cursor: grab; }
 .file-tree__item.is-dragging { opacity: .42; }

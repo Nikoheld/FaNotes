@@ -37,25 +37,10 @@ export const defaultAssistSettings = (): AssistSettings => ({
 const settingsKey = (settings: AssistSettings, language: StoryLanguage, dictionaryVersion: number, ignoredVersion: number) => JSON.stringify([settings, language, dictionaryVersion, ignoredVersion])
 
 /** The language a paragraph is checked in. */
-// About 60 words decide the language. The paragraph being typed in is checked on every
-// keystroke, and its start mostly stays the same, so the answer is cached per sample.
-const SAMPLE = 400
-const detected = new Map<string, ReturnType<typeof detectLanguage>>()
-const detectCached = (text: string) => {
-  const sample = text.length > SAMPLE ? text.slice(0, SAMPLE) : text
-  let value = detected.get(sample)
-  if (value === undefined && !detected.has(sample)) {
-    if (detected.size > 1_000) detected.clear()
-    value = detectLanguage(sample)
-    detected.set(sample, value)
-  }
-  return value ?? null
-}
-
 export const paragraphLanguage = (text: string, own: StoryLanguage | undefined, story: StoryLanguage, detect: boolean): StoryLanguage => {
   if (own) return own
   if (!detect) return story
-  const found = detectCached(text)
+  const found = detectLanguage(text)
   if (!found || story.startsWith(found)) return story
   return found === 'de' ? 'de' : 'en-US'
 }
@@ -73,37 +58,9 @@ export class Assistant {
 
   constructor(private spelling: SpellingSource | null, public settings: AssistSettings = defaultAssistSettings()) {}
 
-  /** Dictionary answers per word: a paragraph is checked again on every keystroke, its words mostly are not new. */
-  private misspelled = new Map<string, boolean>()
-  private suggestions = new Map<string, string[]>()
-
   setSpelling(spelling: SpellingSource | null) {
     this.spelling = spelling
-    this.misspelled.clear()
-    this.suggestions.clear()
     this.dictionaryVersion += 1
-  }
-
-  private isMisspelled(word: string) {
-    let value = this.misspelled.get(word)
-    if (value === undefined) {
-      if (this.misspelled.size > 50_000) this.misspelled.clear()
-      value = this.spelling!.isMisspelled(word)
-      this.misspelled.set(word, value)
-    }
-    return value
-  }
-
-  /** Suggestions are slow to compute, so they are made when someone looks at them (popover, check panel). */
-  private suggest(word: string, language: SpellingLanguage) {
-    const key = `${language}:${word}`
-    let value = this.suggestions.get(key)
-    if (value === undefined) {
-      if (this.suggestions.size > 2_000) this.suggestions.clear()
-      value = this.spelling ? this.spelling.suggest(word, language).slice(0, 5) : []
-      this.suggestions.set(key, value)
-    }
-    return value
   }
 
   /** The story's own words (names, invented words) and the ignored findings. */
@@ -157,15 +114,14 @@ export class Assistant {
       // Acronyms, words with digits and parts of addresses are left alone.
       if (/^\p{Lu}{2,}$/u.test(word) || /\d/u.test(word)) continue
       if (/[@/:.]\S*$/u.test(text.slice(Math.max(0, from - 30), from)) && !/\s/u.test(text[from - 1] ?? ' ')) continue
-      if (!this.isMisspelled(word)) continue
-      const assistant = this
+      if (!this.spelling!.isMisspelled(word)) continue
       out.push({
         from,
         to: from + word.length,
         rule: 'spelling',
         category: 'spelling',
         message: { de: `„${word}“ steht in keinem Wörterbuch.`, en: `“${word}” is not in the dictionary.` },
-        get replacements() { return assistant.suggest(word, spellingLanguage) },
+        replacements: this.spelling!.suggest(word, spellingLanguage).slice(0, 5),
       })
     }
     return out

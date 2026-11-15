@@ -4,7 +4,6 @@
 import type { StorageAdapter } from './editor/controller'
 import { newStory, type NewStoryOptions } from './model/defaults'
 import { mergeScenes } from './model/merge'
-import { mergeableManifest, mergeableScene } from './syncMerge'
 import { binderSceneIds, sanitizeManifest, sanitizeScene } from './model/sanitize'
 import { newId } from './model/ids'
 import { STORY_EXTENSION, type BinderNode, type Scene, type StoryManifest, type StoryProject } from './model/types'
@@ -143,20 +142,9 @@ export const loadProgress = (host: StoryHost, path: string, files: string[]) => 
 
 export const writeProgress = (host: StoryHost, path: string, progress: ProgressFile) => host.write(progressPath(path, progress.writer), `${JSON.stringify(progress)}\n`)
 
-const readOrNull = async <T>(host: StoryHost, file: string, accept: (value: unknown) => T | null): Promise<T | null> => {
-  try {
-    const text = await host.read(file)
-    return text === null ? null : accept(JSON.parse(text))
-  } catch {
-    return null
-  }
-}
-
 export const storageAdapter = (host: StoryHost, path: string): StorageAdapter => ({
   writeManifest: (manifest: StoryManifest) => host.write(manifestPath(path), `${JSON.stringify(manifest, null, 1)}\n`),
   writeScene: (scene: Scene) => host.write(scenePath(path, scene.id), `${JSON.stringify(scene)}\n`),
-  readScene: (id: string) => readOrNull(host, scenePath(path, id), (value) => mergeableScene(value, id)),
-  readManifest: () => readOrNull(host, manifestPath(path), mergeableManifest),
 })
 
 /** Creates `Title.story` in a folder with its first chapter and scene. */
