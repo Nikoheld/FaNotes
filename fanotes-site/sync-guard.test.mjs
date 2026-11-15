@@ -1222,3 +1222,89 @@ test('a rejected spool is removed and a stored note leaves no spool name', async
   assert.deepEqual(partNames().sort(), before.sort())
   assert.deepEqual((await readFile(id)).body, next)
 })
+
+test('a session touch does not replace a newer account or its note', async () => {
+  const authKey = b64(32)
+  const email = `touch-${randomBytes(4).toString('hex')}@example.com`
+  const registered = await jsonCall('POST', '/api/v1/sync/register', {
+    email,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Check', platform: 'linux' },
+  })
+  assert.equal(registered.status, 201, JSON.stringify(registered.json))
+  const localToken = registered.json.token
+  const localAccount = registered.json.accountId
+  const asAccount = (method, path, { headers = {}, body } = {}) => call(method, path, {
+    token: localToken,
+    body,
+    headers: { ...headers, 'X-FaNotes-Account': localAccount },
+  })
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await asAccount('PUT', `/api/v1/sync/files/${id}`, {
+    body: original,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(original.length),
+      'If-Match': '0',
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(original),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const accountPath = join(dataDirectory, 'accounts', localAccount, 'account.json')
+  const blobPath = join(dataDirectory, 'accounts', localAccount, 'blobs', id)
+  const backdate = () => {
+    const record = JSON.parse(readFileSync(accountPath, 'utf8'))
+    const old = new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString()
+    for (const session of Object.values(record.sessions)) session.lastSeenAt = old
+    for (const device of Object.values(record.devices)) device.lastSeenAt = old
+    writeFileSync(accountPath, `${JSON.stringify(record, null, 2)}\n`)
+  }
+  let currentKey = authKey
+  for (let round = 0; round < 3; round += 1) {
+    backdate()
+    const nextKey = b64(32)
+    const nextWrap = { iv: b64(12), data: b64(32) }
+    const nextKdf = { algorithm: 'pbkdf2-sha256', iterations: 300000 + round, salt: b64(16) }
+    const body = Buffer.from(JSON.stringify({
+      authKey: currentKey,
+      newAuthKey: nextKey,
+      kdf: nextKdf,
+      vaultKeyWrap: nextWrap,
+    }))
+    const results = await Promise.all([
+      ...Array.from({ length: 6 }, () => asAccount('GET', `/api/v1/sync/files/${id}`)),
+      asAccount('POST', '/api/v1/sync/password', {
+        body,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': String(body.length) },
+      }),
+    ])
+    const changed = results[results.length - 1]
+    assert.equal(changed.status, 204, changed.body.toString('utf8'))
+    const stored = JSON.parse(readFileSync(accountPath, 'utf8'))
+    assert.equal(stored.vaultKeyWrap.data, nextWrap.data)
+    assert.equal(stored.vaultKeyWrap.iv, nextWrap.iv)
+    assert.equal(stored.kdf.iterations, nextKdf.iterations)
+    const live = await asAccount('GET', `/api/v1/sync/files/${id}`)
+    assert.equal(live.status, 200)
+    assert.deepEqual(live.body, original)
+    currentKey = nextKey
+  }
+  backdate()
+  const leaving = await Promise.all([
+    ...Array.from({ length: 6 }, () => asAccount('GET', `/api/v1/sync/files/${id}`)),
+    asAccount('POST', '/api/v1/sync/logout'),
+  ])
+  assert.equal(leaving[leaving.length - 1].status, 204, leaving[leaving.length - 1].body.toString('utf8'))
+  const signedOut = await asAccount('GET', `/api/v1/sync/files/${id}`)
+  assert.equal(signedOut.status, 401)
+  assert.deepEqual(readFileSync(blobPath), original)
+  const stored = JSON.parse(readFileSync(accountPath, 'utf8'))
+  const tokenHash = createHash('sha256').update(localToken).digest('hex')
+  assert.equal(stored.sessions[tokenHash], undefined)
+  assert.equal(stored.vaultKeyWrap.data.length > 0, true)
+})
