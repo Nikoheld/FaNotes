@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { ApiError, type Api } from './lib/api'
 import { BOARD_MIN_MS, defaultSettings, normalizeRoute, readRoute, type ConnectionsQuery } from './lib/commute'
-import { demoBoardFor, demoCommute, demoConnections, demoTripDetail } from './lib/demo-commute'
+import { demoBoardFor, demoCommute, demoConnections, demoFindTrip, demoTripDetail } from './lib/demo-commute'
 import type { CommuteProvider, CommuteRoute, CommuteSettings, RouteBoard, Stop, Trip, TripDetail } from './types'
 
 export interface CommuteState {
@@ -149,7 +149,7 @@ export const useCommuteStore = ({ api, connectionId, demo, ready, onUnauthorized
     if (demo) {
       const board = stateRef.current.boards[routeId]
       const known = board ? [...board.trips, ...board.alternatives, board.pinned?.trip, board.pinned?.nearest, board.change] : []
-      const found = known.find((candidate) => candidate && candidate.id === tripId)
+      const found = demoFindTrip(known, tripId, at)
       return found ? demoTripDetail(found, Date.now()) : { trip: null, gone: true }
     }
     try {

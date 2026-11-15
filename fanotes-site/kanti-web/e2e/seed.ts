@@ -12,15 +12,17 @@ export const SUBSTITUTE = 'Lehrperson Y'
 export const PASSWORD = 'e2e-synthetic-password'
 
 const DEVICE = '0123456789abcdef01234567'
-const day = (offset: number) => {
-  const date = new Date()
-  date.setDate(date.getDate() + offset)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+// Calendar days in Zurich, like the browser (timezoneId) and the server, whatever TZ the runner has:
+// a UTC runner is still on the previous day from 00:00 to 01:00/02:00 Zurich time.
+const zurichToday = () => {
+  const [year, month, date] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()).split('-').map(Number)
+  return Date.UTC(year, month - 1, date)
 }
+const day = (offset: number) => new Date(zurichToday() + offset * 86_400_000).toISOString().slice(0, 10)
 
 /** Monday of the current week, then Monday to Friday lessons plus today, an exam, an absence and a message. */
 export const snapshot = () => {
-  const weekday = (new Date().getDay() + 6) % 7
+  const weekday = (new Date(zurichToday()).getUTCDay() + 6) % 7
   const monday = -weekday
   const lessons: Record<string, unknown>[] = [0, 1, 2, 3, 4, weekday].map((offset, index) => ({
     id: `e2e-lesson-${index}`, eventType: 'lesson', start: `${day(monday + (index === 5 ? weekday : offset))}T09:40:00`, end: `${day(monday + (index === 5 ? weekday : offset))}T10:25:00`,
