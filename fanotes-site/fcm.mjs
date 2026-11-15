@@ -278,25 +278,59 @@ export const claimPushKeys = (file, changes) => withPushLock(String(file), async
   return fresh
 })
 
-export const exchangeServiceAccount = async (account, fetchImpl, nowMs) => {
-  const signed = serviceAccountJwt(account, nowMs)
-  const response = await fetchImpl(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: signed.jwt,
-    }).toString(),
-  })
-  const body = await response.text()
-  if (!response.ok && response.status !== 200) {
-    const error = new Error('fcm-auth')
-    error.status = response.status
-    throw error
+export const FCM_AUTH_ATTEMPTS = 3
+export const FCM_AUTH_RETRY_MS = [200, 800]
+
+/**
+ * Exchange the service-account JWT for an access token.
+ * A 408, 429, 5xx or a dropped connection is tried again. The JWT and the access token stay out of errors and logs.
+ */
+export const exchangeServiceAccount = async (account, fetchImpl, nowMs, options = {}) => {
+  const sleep = options.sleep || ((ms) => new Promise((done) => setTimeout(done, ms)))
+  const now = options.now || (() => new Date(nowMs))
+  const events = options.jsonLog || createServiceLog('fcm', (line) => {
+    if (process.env.NODE_ENV === 'production') console.log(line)
+  }, now)
+  const requestId = events.requestId()
+  const route = routeOf(TOKEN_URL)
+  let last = null
+  for (let attempt = 1; attempt <= FCM_AUTH_ATTEMPTS; attempt += 1) {
+    const started = now().getTime()
+    const elapsed = () => Math.max(0, now().getTime() - started)
+    try {
+      const signed = serviceAccountJwt(account, nowMs)
+      const response = await fetchImpl(TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+          assertion: signed.jwt,
+        }).toString(),
+      })
+      const body = await response.text()
+      if (!response.ok && response.status !== 200) {
+        last = Object.assign(new Error('fcm-auth'), { status: response.status })
+        events.warn({ requestId, method: 'POST', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
+        if (!fcmRetryableStatus(response.status) || attempt === FCM_AUTH_ATTEMPTS) throw last
+      } else {
+        let parsed = {}
+        try { parsed = JSON.parse(body) } catch { parsed = {} }
+        if (typeof parsed.access_token !== 'string' || !parsed.access_token) {
+          last = Object.assign(new Error('fcm-auth'), { status: response.status || 200 })
+          events.warn({ requestId, method: 'POST', route, status: last.status, attempt, error: 'Error', ms: elapsed() })
+          throw last
+        }
+        events.info({ requestId, method: 'POST', route, status: response.status || 200, attempt, ms: elapsed() })
+        const expiresIn = Number(parsed.expires_in) || 3600
+        return { token: parsed.access_token, exp: Math.floor(nowMs / 1000) + expiresIn, projectId: account.project_id }
+      }
+    } catch (error) {
+      if (error === last) throw error
+      last = Object.assign(new Error('fcm-auth'), { status: Number(error?.status) || 0, name: String(error?.name || 'Error') })
+      events.warn({ requestId, method: 'POST', route, status: last.status, attempt, error: String(error?.name || 'error'), ms: elapsed() })
+      if (!fcmNetworkRetryable(error) || attempt === FCM_AUTH_ATTEMPTS) throw last
+    }
+    await sleep(FCM_AUTH_RETRY_MS[attempt - 1] ?? FCM_AUTH_RETRY_MS.at(-1))
   }
-  let parsed = {}
-  try { parsed = JSON.parse(body) } catch { parsed = {} }
-  if (typeof parsed.access_token !== 'string' || !parsed.access_token) throw new Error('fcm-auth')
-  const expiresIn = Number(parsed.expires_in) || 3600
-  return { token: parsed.access_token, exp: Math.floor(nowMs / 1000) + expiresIn, projectId: account.project_id }
+  throw last
 }

@@ -722,7 +722,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (!fcmCache || fcmCache.exp - 60 <= Math.floor(nowMs / 1000)) {
         const account = options.fcmAccount || await readServiceAccount(options.fcmAccountFile || process.env.FANOTES_FCM_SERVICE_ACCOUNT || FCM_ACCOUNT_FILE)
         if (!account) return { skipped: true }
-        fcmCache = await exchangeServiceAccount(account, fetchImpl, nowMs)
+        fcmCache = await exchangeServiceAccount(account, fetchImpl, nowMs, { sleep })
       }
       const result = await deliverFcm({
         fetchImpl,
