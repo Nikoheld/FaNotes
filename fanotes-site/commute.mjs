@@ -9,6 +9,7 @@ import {
   parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizeRoutes,
   sanitizeSettings, sanitizeStop, tripAlerts, usable, zurichWall,
 } from './commute-logic.mjs'
+import { createServiceLog, routeOf } from './service-log.mjs'
 
 export const SEARCH_CH = 'https://timetable.search.ch/api'
 export const TRANSPORT = 'https://transport.opendata.ch/v1'
@@ -52,7 +53,8 @@ export const upstreamRetryable = (error) => {
  * transient upstream failures, and a daily budget that falls back to transport.opendata.ch, then
  * to the last good answer (stale).
  */
-export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(), log = () => {}, budgetFile = '', sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) => {
+export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(), log = () => {}, budgetFile = '', sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), jsonLog } = {}) => {
+  const events = jsonLog || createServiceLog('commute', (line) => console.log(line), now)
   const cache = new Map()
   const inflight = new Map()
   let budget = { day: '', route: 0, completion: 0, fallback: 0, detail: 0 }
@@ -75,18 +77,27 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     return budget.day !== day || budget[kind] < limit
   }
   const getJson = async (url) => {
+    const route = routeOf(url)
+    const requestId = events.requestId()
     let last = null
     for (let attempt = 1; attempt <= UPSTREAM_ATTEMPTS; attempt += 1) {
+      const started = now().getTime()
+      const elapsed = () => Math.max(0, now().getTime() - started)
       try {
         const response = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': USER_AGENT }, redirect: 'error', signal: AbortSignal.timeout?.(UPSTREAM_TIMEOUT_MS) })
         if (!response.ok && response.status !== 200) {
           last = Object.assign(new Error('provider'), { status: response.status })
+          events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!upstreamRetryable(last) || attempt === UPSTREAM_ATTEMPTS) throw last
         } else {
-          return await response.json()
+          const body = await response.json()
+          events.info({ requestId, method: 'GET', route, status: response.status || 200, attempt, ms: elapsed() })
+          return body
         }
       } catch (error) {
+        if (error === last) throw error
         last = error
+        events.warn({ requestId, method: 'GET', route, status: Number(error?.status) || 0, attempt, error: String(error?.name || 'error'), ms: elapsed() })
         if (!upstreamRetryable(error) || attempt === UPSTREAM_ATTEMPTS) throw error
       }
       await sleep(UPSTREAM_RETRY_MS[attempt - 1] ?? UPSTREAM_RETRY_MS.at(-1))
@@ -542,7 +553,7 @@ export const createCommute = (options = {}) => {
   const tick = async () => {
     let checked = 0
     for (const accountId of await listAccounts()) {
-      try { checked += (await checkAccount(accountId)).checked } catch (error) { log('warn', `Pendelstrecke ${accountId.slice(0, 8)} nicht geprüft (${error?.name || 'error'})`) }
+      try { checked += (await checkAccount(accountId)).checked } catch (error) { log('warn', `Pendelstrecke nicht geprüft (${error?.name || 'error'})`) }
     }
     return checked
   }

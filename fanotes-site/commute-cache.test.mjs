@@ -5,6 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hasViaLoop, parseLocal, parseSearchChRoute, passesVias } from './commute-logic.mjs'
 import { UPSTREAM_ATTEMPTS, UPSTREAM_TIMEOUT_MS, createCommuteProvider, upstreamRetryable } from './commute.mjs'
+import { createServiceLog, requestIdFrom } from './service-log.mjs'
 
 const fixture = JSON.parse(await readFile(new URL('./test-fixtures/commute-searchch-brugg-aarau-loop.json', import.meta.url), 'utf8'))
 const BRUGG = { id: '8500309', name: 'Brugg AG' }
@@ -126,4 +127,45 @@ test('timeouts and 5xx are retried; a 400 is not', async () => {
   assert.deepEqual(empty.trips, [])
   assert.deepEqual(client, ['timetable.search.ch', 'transport.opendata.ch'])
   assert.equal(UPSTREAM_TIMEOUT_MS, 12_000)
+})
+
+test('timetable requests are logged as JSON without the query, a token, or a cookie', async () => {
+  assert.equal(requestIdFrom('req-1234.ok'), 'req-1234.ok')
+  const generated = requestIdFrom('short')
+  assert.match(generated, /^[a-f0-9]{16}$/u)
+  assert.notEqual(generated, 'short')
+
+  const lines = []
+  const log = createServiceLog('commute', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  log.info({
+    requestId: 'req-1234.ok', method: 'GET', route: 'https://timetable.search.ch/api/route.json', status: 200,
+    authorization: 'Bearer secret', cookie: 'session=secret', token: 'secret', body: { password: 'secret' },
+  })
+  const scrubbed = JSON.parse(lines[0])
+  assert.equal(scrubbed.time, '2026-11-15T11:00:00.000Z')
+  assert.equal(scrubbed.service, 'commute')
+  assert.equal(scrubbed.status, 200)
+  assert.equal(scrubbed.authorization, undefined)
+  assert.equal(scrubbed.cookie, undefined)
+  assert.equal(scrubbed.token, undefined)
+  assert.equal(scrubbed.body, undefined)
+  assert.equal(JSON.stringify(scrubbed).includes('secret'), false)
+
+  lines.length = 0
+  const provider = createCommuteProvider({
+    jsonLog: log,
+    sleep: async () => {},
+    now: () => new Date(ASK_AT),
+    fetchImpl: async () => ok({ connections: [] }),
+  })
+  await provider.trips({ from: BRUGG, to: AARAU, at: ASK_AT })
+  assert.ok(lines.length >= 1)
+  for (const line of lines) {
+    const row = JSON.parse(line)
+    assert.equal(row.method, 'GET')
+    assert.equal(row.route.includes('?'), false)
+    assert.equal(row.route.includes('8500309'), false)
+    assert.equal(row.route.includes('Brugg'), false)
+    assert.match(row.requestId, /^[A-Za-z0-9._-]{8,64}$/u)
+  }
 })
