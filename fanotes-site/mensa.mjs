@@ -21,6 +21,10 @@ const MAX_HTML_BYTES = 2 * 1024 * 1024
 const HOUR_MS = 3_600_000
 const RETRY_AFTER_FAILURE_MS = 10 * 60_000
 const KEEP_DAYS_MS = 7 * 24 * HOUR_MS
+/** One extra try for a timeout or a 408/429/5xx. A 4xx and a thrown application error are not retried. */
+const UPSTREAM_ATTEMPTS = 2
+const UPSTREAM_RETRY_MS = 250
+const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504])
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', auml: 'ä', ouml: 'ö', uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß', eacute: 'é', egrave: 'è', agrave: 'à' }
 const decode = (value) => value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/giu, (whole, name) => {
@@ -168,6 +172,7 @@ const needsRefresh = (fetchedAtMs, nowDate) => {
 export const createMensa = (options = {}) => {
   const fetchImpl = options.fetch || globalThis.fetch
   const now = options.now || (() => new Date())
+  const sleep = options.sleep || ((ms) => new Promise((done) => setTimeout(done, ms)))
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz')
   const log = options.log || ((level, message) => console.log(`${now().toISOString()} mensa ${level} ${message}`))
   const file = join(root, 'mensa.json')
@@ -197,17 +202,32 @@ export const createMensa = (options = {}) => {
     }
   }
 
+  const retryableThrow = (error) => error?.name === 'TimeoutError' || error?.name === 'AbortError' || error instanceof TypeError
   const getText = async (url) => {
     if (url.protocol !== 'https:' || url.hostname !== MENSA_HOST) throw new Error('unexpected host')
-    const response = await fetchImpl(url, {
-      method: 'GET',
-      headers: { 'User-Agent': MENSA_USER_AGENT, Accept: 'text/html,application/json' },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const body = await response.text()
-    if (body.length > MAX_HTML_BYTES) throw new Error('page too large')
-    return body
+    let last = null
+    for (let attempt = 1; attempt <= UPSTREAM_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await fetchImpl(url, {
+          method: 'GET',
+          headers: { 'User-Agent': MENSA_USER_AGENT, Accept: 'text/html,application/json' },
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        })
+        if (!response.ok) {
+          last = Object.assign(new Error(`HTTP ${response.status}`), { status: response.status })
+          if (!RETRY_STATUS.has(response.status) || attempt === UPSTREAM_ATTEMPTS) throw last
+        } else {
+          const body = await response.text()
+          if (body.length > MAX_HTML_BYTES) throw new Error('page too large')
+          return body
+        }
+      } catch (error) {
+        if (!retryableThrow(error) || attempt === UPSTREAM_ATTEMPTS) throw error
+        last = error
+      }
+      await sleep(UPSTREAM_RETRY_MS)
+    }
+    throw last
   }
   const download = () => getText(new URL(MENSA_URL))
 

@@ -502,6 +502,9 @@ export const createClassTimetables = (options = {}) => {
   const run = options.run || defaultRun
   let tail = Promise.resolve()
   const building = new Map()
+  const weeksCache = new Map()
+  let indexCache = null
+  let indexGeneration = 0
 
   const versionDir = (version) => {
     if (!/^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{6}$/u.test(String(version))) return null
@@ -515,10 +518,14 @@ export const createClassTimetables = (options = {}) => {
     return pointer && versionDir(pointer.version) ? pointer.version : null
   }
   const readIndex = async () => {
+    const at = now().getTime()
+    const generation = indexGeneration
+    if (indexCache && indexCache.generation === generation && at - indexCache.at < 30_000) return indexCache.value
     const version = await currentVersion()
-    if (!version) return null
-    const index = await readJson(join(versionDir(version), 'index.json'))
-    return index ? { ...index, version } : null
+    const index = version ? await readJson(join(versionDir(version), 'index.json')) : null
+    const value = index ? { ...index, version } : null
+    if (generation === indexGeneration) indexCache = { at: now().getTime(), value, generation }
+    return value
   }
 
   /** Public summary for the apps: no warnings, no file names. */
@@ -558,19 +565,26 @@ export const createClassTimetables = (options = {}) => {
   }
 
   /** classes.json of a version; versions uploaded before it existed are built once from their source.pdf. */
-  const readClasses = async (version) => {
+  const readClasses = (version) => {
+    if (weeksCache.has(version)) return weeksCache.get(version)
+    const pending = building.get(version)
+    if (pending) return pending
     const dir = versionDir(version)
-    const stored = await readJson(join(dir, 'classes.json'))
-    if (stored) return stored
-    const pending = building.get(version) || (async () => {
+    const task = (async () => {
+      const stored = await readJson(join(dir, 'classes.json'))
+      if (stored) return stored
       let text
       try { text = (await run('pdftotext', ['-bbox-layout', join(dir, 'source.pdf'), '-'])).stdout } catch { return null }
       const weeks = classWeeksOf(parseTimetableBbox(text))
-      try { await fs.writeFile(join(dir, 'classes.json'), JSON.stringify(weeks), { mode: 0o600 }) } catch { /* served anyway */ }
+      try { await fs.writeFile(join(dir, 'classes.json'), JSON.stringify(weeks), { mode: 0o600 }) } catch { /* served from memory */ }
       return weeks
     })()
-    building.set(version, pending)
-    try { return await pending } finally { building.delete(version) }
+    building.set(version, task)
+    const finished = task.then((weeks) => {
+      if (weeks) weeksCache.set(version, weeks)
+      return weeks
+    }).finally(() => { if (building.get(version) === task) building.delete(version) })
+    return finished
   }
   const classWeek = async (code) => {
     if (!CLASS_CODE.test(String(code))) return null
@@ -634,6 +648,8 @@ export const createClassTimetables = (options = {}) => {
       const pointer = join(root, `current.json.${randomBytes(4).toString('hex')}.tmp`)
       await fs.writeFile(pointer, JSON.stringify({ version, switchedAt: at.toISOString() }), { mode: 0o600 })
       await fs.rename(pointer, join(root, 'current.json'))
+      indexGeneration += 1
+      indexCache = null
       await prune(version)
       log('info', `Stundenplan-PDF übernommen (${index.classes.length} Klassen, ${roomNames.length} Räume, ${index.warnings.length} Hinweise)`)
       return { uploadedAt: index.uploadedAt, classes: index.classes.length, rooms: roomNames.length, warnings: index.warnings }

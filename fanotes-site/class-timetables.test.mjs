@@ -244,17 +244,49 @@ test('classes.json is written at ingest and built lazily from source.pdf for an 
     assert.equal(await store.classWeek('../x'), null)
     assert.equal(await store.classWeek('__proto__'), null)
 
-    // A version uploaded before classes.json existed: built on first request, then stored.
+    // The process keeps the parsed week, so deleting the file does not read the PDF again.
     await rm(file)
     calls.length = 0
-    const [first, second] = await Promise.all([store.classWeek('G26D'), store.classWeek('I26B')])
+    assert.equal((await store.classWeek('G26A')).entries.length, 13)
+    assert.equal(calls.filter((c) => c[0] === 'pdftotext').length, 0)
+
+    // A fresh process, as with a version uploaded before classes.json existed: one shared rebuild.
+    // Wait until pdftotext is actually entered. A fixed number of event-loop turns finishes first
+    // when the missing classes.json read is still in flight (seen on CI).
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    let textRuns = 0
+    let started
+    const startedPromise = new Promise((resolve) => { started = resolve })
+    const fresh = createClassTimetables({
+      root,
+      log: () => {},
+      run: async (command, args) => {
+        if (command === 'pdftotext') {
+          textRuns += 1
+          started()
+          await gate
+        }
+        return fakeRun(BBOX, calls)(command, args)
+      },
+    })
+    const both = Promise.all([fresh.classWeek('G26D'), fresh.classWeek('I26B')])
+    const giveUp = new Promise((_, reject) => { setTimeout(() => reject(new Error('pdftotext did not start')), 3000) })
+    await Promise.race([startedPromise, giveUp])
+    assert.equal(textRuns, 1, 'parallel lookups share one pdftotext')
+    release()
+    const [first, second] = await both
     assert.equal(first.teacher, 'Peter Probe')
     assert.equal(second.class, 'I26B')
-    assert.equal(calls.filter((c) => c[0] === 'pdftotext').length, 1)
     assert.equal((await stat(file)).mode & 0o777, 0o600)
-    calls.length = 0
-    assert.equal((await store.classWeek('G26A')).entries.length, 13)
-    assert.equal(calls.length, 0)
+    const down = createClassTimetables({
+      root,
+      log: () => {},
+      run: async () => { throw Object.assign(new Error('pdftotext down'), { code: 'ENOENT' }) },
+    })
+    await rm(file)
+    assert.equal(await down.classWeek('G26D'), null)
+    assert.equal((await store.summary()).classes.length, 3)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
