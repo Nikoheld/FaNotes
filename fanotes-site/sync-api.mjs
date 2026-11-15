@@ -1088,13 +1088,15 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
     await fs.rename(blobPath, dest)
   } else {
     const existing = await fs.lstat(dest).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+    // Copy into a temporary name and rename it. A crash must not leave a torn
+    // file under the revision name, or a later restore would publish that copy.
     if (!existing) {
-      await fs.copyFile(blobPath, dest)
+      await copyDurable(blobPath, dest)
     } else if (existing.isFile()) {
-      if (!await holdsCurrent(dest, existing.size) && await holdsCurrent(blobPath, stat.size)) await fs.copyFile(blobPath, dest)
+      if (!await holdsCurrent(dest, existing.size) && await holdsCurrent(blobPath, stat.size)) await copyDurable(blobPath, dest)
     } else if (await holdsCurrent(blobPath, stat.size)) {
       await fs.unlink(dest)
-      await fs.copyFile(blobPath, dest)
+      await copyDurable(blobPath, dest)
     }
   }
   // The caller replaces the live blob after this returns. The copy has to be

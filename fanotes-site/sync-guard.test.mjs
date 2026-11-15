@@ -286,8 +286,10 @@ test('a replaced note is flushed to the archive before the live blob changes', a
   const next = randomBytes(5000)
   const replaced = await putFile(id, next, revision, { 'X-FaNotes-Blank': '0' })
   assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
-  const archived = readFileSync(join(dataDirectory, 'accounts', accountId, 'revisions', id, String(revision)))
+  const directory = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  const archived = readFileSync(join(directory, String(revision)))
   assert.deepEqual(archived, original)
+  assert.equal(readdirSync(directory).some((name) => name.endsWith('.tmp')), false)
   assert.deepEqual((await readFile(id)).body, next)
 })
 
@@ -338,6 +340,7 @@ test('a truncated archive copy is repaired from the live note before it changes'
   const replaced = await putFile(id, next, revision, { 'X-FaNotes-Blank': '0' })
   assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
   assert.deepEqual(readFileSync(join(directory, String(revision))), original)
+  assert.equal(readdirSync(directory).some((name) => name.endsWith('.tmp')), false)
   assert.deepEqual((await readFile(id)).body, next)
 })
 
