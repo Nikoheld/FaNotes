@@ -1677,6 +1677,19 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
   if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
   if (decision === 'guard') return guardRejected(request, response, current)
   if (current && !current.deleted && current.sha256 === declaredSha && Number(current.size) === stat.size) {
+    // Same bytes are already the live note. A repeated complete keeps this
+    // revision. New metadata still has to be stored: the rename can finish
+    // before the log, and replacing this inode is not archived first.
+    if (current.meta !== metaHeader) {
+      const reserved = await reservedPartialBytes(auth.account.id)
+      if (table.bytes + (table.historyBytes || 0) + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+      const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: stat.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
+      table.revision = entry.revision
+      table.entries.set(fileId, entry)
+      await recordLiveBlob(auth.account.id, table, entry)
+      sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
+      return
+    }
     sendJson(request, response, 200, { revision: current.revision, tableRevision: table.revision, uploadId }, { ETag: `"${current.revision}"` })
     return
   }
