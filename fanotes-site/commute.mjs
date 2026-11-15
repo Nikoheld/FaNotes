@@ -2,7 +2,7 @@
 // Contract: commute-api.md. Logic: commute-logic.mjs. Routes never go to Schulnetz.
 
 import { promises as fs } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
   CHAIN_TRANSFER_MIN, CHECK_IMMINENT_MS, MAX_VIAS, chainSegments, hasViaLoop, passesVias, sameViaStop, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
@@ -19,6 +19,8 @@ export const COMPLETION_BUDGET = 3000
 /** transport.opendata.ch lookups for the connection detail (platforms and arrival forecasts per stop). */
 export const DETAIL_BUDGET = 900
 export const ROUTE_CACHE_MS = 30_000
+/** Last good timetable kept on disk so a restart can still answer while the source is down. */
+export const ROUTE_DISK_MS = 6 * 60 * 60 * 1000
 export const STOP_CACHE_MS = 24 * 60 * 60_000
 /** One timetable request gives up after this, then retries transient failures. */
 export const UPSTREAM_TIMEOUT_MS = 12_000
@@ -53,7 +55,7 @@ export const upstreamRetryable = (error) => {
  * transient upstream failures, and a daily budget that falls back to transport.opendata.ch, then
  * to the last good answer (stale).
  */
-export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(), log = () => {}, budgetFile = '', sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), jsonLog } = {}) => {
+export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(), log = () => {}, budgetFile = '', routeFile = '', sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), jsonLog } = {}) => {
   // Production emits one JSON line per upstream call. Tests pass jsonLog when they want the lines.
   const events = jsonLog || createServiceLog('commute', (line) => {
     if (process.env.NODE_ENV === 'production') console.log(line)
@@ -78,6 +80,46 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     await loadBudget()
     const day = zurichWall(now().getTime()).day
     return budget.day !== day || budget[kind] < limit
+  }
+  const DISK_LIMIT = 40
+  let disk = { entries: [] }
+  let diskLoading = null
+  const loadDisk = () => {
+    if (!routeFile) return Promise.resolve()
+    if (!diskLoading) {
+      diskLoading = (async () => {
+        try {
+          const parsed = JSON.parse(await fs.readFile(routeFile, 'utf8'))
+          if (parsed?.version === 1 && Array.isArray(parsed.entries)) {
+            disk.entries = parsed.entries.filter((entry) => (
+              entry && typeof entry.key === 'string' && entry.key.startsWith('route:') && entry.key.length <= 300
+              && Number.isFinite(entry.at) && entry.value && Array.isArray(entry.value.trips)
+            )).slice(-DISK_LIMIT)
+          }
+        } catch { /* first run */ }
+      })()
+    }
+    return diskLoading
+  }
+  const remember = async (key, at, value) => {
+    if (!routeFile || !key.startsWith('route:') || !Array.isArray(value?.trips) || !value.trips.length) return
+    await loadDisk()
+    disk.entries = [...disk.entries.filter((entry) => entry.key !== key), { key, at, value }].slice(-DISK_LIMIT)
+    const temporary = `${routeFile}.${process.pid}.tmp`
+    try {
+      await fs.mkdir(dirname(routeFile), { recursive: true })
+      await fs.writeFile(temporary, JSON.stringify({ version: 1, entries: disk.entries }), { mode: 0o600 })
+      await fs.rename(temporary, routeFile)
+    } catch {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+    }
+  }
+  const recall = async (key) => {
+    if (!routeFile || !key.startsWith('route:')) return null
+    await loadDisk()
+    const at = now().getTime()
+    const found = [...disk.entries].reverse().find((entry) => entry.key === key && at - entry.at < ROUTE_DISK_MS && at >= entry.at)
+    return found ? { ...found.value, stale: true } : null
   }
   const getJson = async (url) => {
     const route = routeOf(url)
@@ -115,11 +157,17 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     const task = (async () => {
       try {
         const value = await load()
-        cache.set(key, { at: now().getTime(), value })
+        const at = now().getTime()
+        cache.set(key, { at, value })
         if (cache.size > 2000) cache.delete(cache.keys().next().value)
+        await remember(key, at, value)
         return value
       } catch (error) {
         if (hit) return { ...hit.value, stale: true }
+        try {
+          const stored = await recall(key)
+          if (stored) return stored
+        } catch { /* the disk copy is optional */ }
         throw error
       } finally {
         inflight.delete(key)
@@ -302,7 +350,7 @@ export const createCommute = (options = {}) => {
   const root = options.root
   const now = options.now || (() => new Date())
   const log = options.log || (() => {})
-  const provider = options.provider || createCommuteProvider({ fetchImpl: options.fetch, now, log, sleep: options.sleep, budgetFile: root ? resolve(root, 'commute-budget.json') : '' })
+  const provider = options.provider || createCommuteProvider({ fetchImpl: options.fetch, now, log, sleep: options.sleep, budgetFile: root ? resolve(root, 'commute-budget.json') : '', routeFile: root ? resolve(root, 'commute-routes.json') : '' })
   const lessonsFor = options.lessonsFor || (async () => [])
   const publish = options.publish || (async () => [])
   const ping = options.ping || (async () => {})
