@@ -3,6 +3,7 @@
 
 import { createCipheriv, createHash, createSign, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { credentialOr } from './credentials.mjs'
 
 export const FCM_ACCOUNT_FILE = credentialOr('fcm-service-account', '/etc/fanotes/fcm-service-account.json')
@@ -148,11 +149,121 @@ export const fcmDataMessage = (token, event, options = {}) => {
   }
 }
 
+/**
+ * Forget the device token only when FCM says that token is gone or not a registration token.
+ * A payload error (INVALID_ARGUMENT, "message is too big") keeps the token.
+ */
 export const fcmDropToken = (status, body) => {
   const text = String(body || '')
-  if (status === 404) return true
-  return text.includes('UNREGISTERED') || text.includes('INVALID_ARGUMENT')
+  if (status === 404 || text.includes('UNREGISTERED') || text.includes('NOT_FOUND')) return true
+  if (!text.includes('INVALID_ARGUMENT')) return false
+  return /registration token|not a valid FCM registration token/iu.test(text)
 }
+
+/** HTTP statuses worth sending again. A 4xx other than 408/429 is the message, not the outage. */
+export const fcmRetryableStatus = (status) => status === 408 || status === 429 || (status >= 500 && status <= 599)
+
+export const FCM_ATTEMPTS = 4
+export const FCM_RETRY_MS = [200, 800, 2000]
+
+const fcmNetworkRetryable = (error) => {
+  const name = String(error?.name || '')
+  if (name === 'TimeoutError' || name === 'AbortError') return true
+  const code = String(error?.code || error?.cause?.code || '')
+  if (['ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'UND_ERR_HEADERS_TIMEOUT'].includes(code)) return true
+  return error instanceof TypeError
+}
+
+/**
+ * POST one FCM message. 5xx, 408, 429 and a dropped connection are retried with backoff.
+ * The response body stays here: callers only see the status, whether to drop the token, and how many tries.
+ */
+export const deliverFcm = async ({ fetchImpl, url, message, headers, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), attempts = FCM_ATTEMPTS } = {}) => {
+  let last = { status: 0, drop: false, attempts: 0 }
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(message) })
+      const body = await response.text()
+      last = { status: response.status, drop: fcmDropToken(response.status, body), attempts: attempt }
+      if (last.drop || !fcmRetryableStatus(response.status) || attempt === attempts) return last
+    } catch (error) {
+      if (!fcmNetworkRetryable(error) || attempt === attempts) throw error
+      last = { status: 0, drop: false, attempts: attempt }
+    }
+    await sleep(FCM_RETRY_MS[attempt - 1] ?? FCM_RETRY_MS.at(-1))
+  }
+  return last
+}
+
+const CANCELLATION_TITLE = /fällt aus|faellt aus|entfällt|entfaellt|abgesagt|entfernt/iu
+export const PUSH_DEDUP_LIMIT = 2000
+const pushChains = new Map()
+
+/**
+ * Key for a grade or a cancellation. Probes are never keyed, so a delivery test can be repeated.
+ * A cancellation is the lesson (or exam) on that day, so a changed event key does not push it again.
+ * A grade uses its change id, so a later mark on the same row is still news.
+ */
+const pushDigest = (value) => createHash('sha256').update(value).digest('hex').slice(0, 32)
+
+export const pushDedupKey = (change) => {
+  const id = String(change?.id || '')
+  if (!id || id.startsWith('probe:')) return ''
+  const category = String(change?.category || '')
+  if (category === 'grade') return `g:${pushDigest(id)}`
+  const title = String(change?.title || '')
+  if ((category === 'timetable' || category === 'exam') && CANCELLATION_TITLE.test(title)) {
+    const target = String(change?.targetId || id).slice(0, 120)
+    const day = String(change?.date || '').slice(0, 10)
+    return `c:${pushDigest(`${category}:${title}:${target}:${day}`)}`
+  }
+  return ''
+}
+
+const withPushLock = (file, task) => {
+  const previous = pushChains.get(file) || Promise.resolve()
+  const run = previous.then(task, task)
+  pushChains.set(file, run.then(() => undefined, () => undefined))
+  return run
+}
+
+/**
+ * Drops grades and cancellations this account was already asked to push. Other changes pass through.
+ * The ledger stores only those keys, never names, marks or tokens. A failed write still returns the
+ * filtered list so a known duplicate is not sent; a brand-new key may be sent once more after a restart.
+ */
+export const claimPushKeys = (file, changes) => withPushLock(String(file), async () => {
+  const list = Array.isArray(changes) ? changes : []
+  let stored = []
+  try {
+    const parsed = JSON.parse(await fs.readFile(file, 'utf8'))
+    if (parsed?.version === 1 && Array.isArray(parsed.keys)) {
+      stored = parsed.keys.filter((key) => typeof key === 'string' && key.length > 0 && key.length <= 200)
+    }
+  } catch { /* no ledger yet */ }
+  const known = new Set(stored)
+  const fresh = []
+  let added = false
+  for (const change of list) {
+    const key = pushDedupKey(change)
+    if (!key) { fresh.push(change); continue }
+    if (known.has(key)) continue
+    known.add(key)
+    added = true
+    fresh.push(change)
+  }
+  if (!added) return fresh
+  const keys = [...known].slice(-PUSH_DEDUP_LIMIT)
+  const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  try {
+    await fs.mkdir(dirname(resolve(file)), { recursive: true })
+    await fs.writeFile(temporary, JSON.stringify({ version: 1, keys }), { mode: 0o600 })
+    await fs.rename(temporary, file)
+  } catch {
+    await fs.rm(temporary, { force: true }).catch(() => undefined)
+  }
+  return fresh
+})
 
 export const exchangeServiceAccount = async (account, fetchImpl, nowMs) => {
   const signed = serviceAccountJwt(account, nowMs)
