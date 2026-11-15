@@ -122,6 +122,9 @@ fun applyDesktopCommand(before: DeskWork, rawId: String, extras: CommandExtras =
 private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWork = when (id) {
     "new-note" -> addNote(work, parentOf(work.openPath), "Unbenannte Notiz", "# Unbenannte Notiz\n\n")
     "import-pdf-note" -> importPdf(work, extras)
+    // Stories open in the writing screen (a WebView with the shared editor).
+    "new-story" -> work.copy(destination = "writing", message = null)
+    "import-story" -> work.copy(destination = "writing", overlays = work.overlays + "import-story", message = null)
     "new-folder" -> addFolder(work, "", "Neuer Ordner")
     "new-subfolder" -> addFolder(work, parentOf(work.openPath), "Neuer Ordner")
     "save" -> work.copy(saveGeneration = work.saveGeneration + 1, message = null)

@@ -7,7 +7,8 @@ import '../styles.css'
 import { setUiLanguage } from '../i18n'
 import { writerId } from './model/ids'
 import { androidBridge, installAndroidHost } from './androidHost'
-import { createProject, storyHost } from './storage'
+import { createProject, saveImportedProject, storyHost } from './storage'
+import { ImportDialog } from './import/ImportDialog'
 import { WritingMode } from './ui/WritingMode'
 
 const params = new URLSearchParams(window.location.search)
@@ -26,6 +27,21 @@ function Standalone() {
       .then((created) => { setPath(created); bridge?.saved(JSON.stringify([`${created}/story.json`])) })
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)))
   }, [path])
+  const importInto = params.get('import')
+  if (!path && importInto !== null) {
+    return (
+      <ImportDialog
+        onImport={async (story) => {
+          const host = storyHost()
+          if (!host) throw new Error('No story host.')
+          const created = await saveImportedProject(host, importInto, story)
+          bridge?.saved(JSON.stringify([`${created}/story.json`]))
+          setPath(created)
+        }}
+        onClose={() => bridge?.close()}
+      />
+    )
+  }
   if (error) return <p style={{ padding: 24 }}>{error}</p>
   if (!path) return null
   return <WritingMode path={path} onClose={() => bridge?.close()} onSaved={(paths) => bridge?.saved(JSON.stringify(paths))} />

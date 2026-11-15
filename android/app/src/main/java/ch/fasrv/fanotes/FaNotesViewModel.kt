@@ -195,6 +195,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         context.startActivity(WritingActivity.intent(context, path).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    /** Imports a Word, Markdown or text file as a new story in a folder. */
+    fun importStory(parent: String) {
+        val context = getApplication<Application>()
+        context.startActivity(WritingActivity.importIntent(context, parent).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     /** Creates a story in a folder and opens it. */
     fun createStory(parent: String) {
         val context = getApplication<Application>()
@@ -4490,6 +4496,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         when (id) {
             "new-note" -> createNoteIn(defaultCreateFolder())
             "new-folder" -> createFolderIn("")
+            "new-story" -> createStory(currentFolder())
+            "import-story" -> importStory(currentFolder())
             "new-subfolder" -> createFolderIn(currentFolder())
             "note-here" -> createNoteIn(currentFolder())
             "save" -> saveFromShortcut()

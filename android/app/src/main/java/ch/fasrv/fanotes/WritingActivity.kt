@@ -7,12 +7,15 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import ch.fasrv.fanotes.vault.StoryFiles
 import ch.fasrv.fanotes.vault.VaultIo
 import ch.fasrv.fanotes.vault.normalize
@@ -28,6 +31,12 @@ import java.util.Locale
 class WritingActivity : ComponentActivity() {
     private lateinit var web: WebView
     private var story: String? = null
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+    /** The import dialog's file input (DOCX, Markdown, text). */
+    private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        fileCallback?.onReceiveValue(if (uri == null) emptyArray() else arrayOf(uri))
+        fileCallback = null
+    }
 
     /** Sync leaves an open story alone (the editor merges on its next open); released on close. */
     private fun holdStory(path: String) {
@@ -48,6 +57,14 @@ class WritingActivity : ComponentActivity() {
         web.settings.allowContentAccess = false
         web.settings.mediaPlaybackRequiresUserGesture = true
         web.webViewClient = AssetClient(this)
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+                fileCallback?.onReceiveValue(emptyArray())
+                fileCallback = callback
+                pickFile.launch(arrayOf("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/markdown", "text/plain", "application/octet-stream"))
+                return true
+            }
+        }
         intent.getStringExtra(EXTRA_PATH)?.let { holdStory(it) }
         web.addJavascriptInterface(StoryBridge(graph.vault, onSaved = { graph.engine.notifyLocalChange() }, onClose = { runOnUiThread { finish() } }, onCreated = { path -> runOnUiThread { holdStory(path) } }), "FaNotesAndroid")
         setContentView(web)
@@ -87,6 +104,7 @@ class WritingActivity : ComponentActivity() {
         val builder = Uri.parse("$ORIGIN/writing.html").buildUpon().appendQueryParameter("lang", lang)
         intent.getStringExtra(EXTRA_PATH)?.let { builder.appendQueryParameter("path", it) }
         intent.getStringExtra(EXTRA_CREATE)?.let { builder.appendQueryParameter("create", it) }
+        intent.getStringExtra(EXTRA_IMPORT)?.let { builder.appendQueryParameter("import", it) }
         return builder.build().toString()
     }
 
@@ -127,9 +145,11 @@ class WritingActivity : ComponentActivity() {
         private const val ORIGIN = "https://$HOST"
         private const val EXTRA_PATH = "path"
         private const val EXTRA_CREATE = "create"
+        private const val EXTRA_IMPORT = "import"
 
         fun intent(context: Context, storyPath: String): Intent = Intent(context, WritingActivity::class.java).putExtra(EXTRA_PATH, storyPath)
         fun createIntent(context: Context, parentFolder: String): Intent = Intent(context, WritingActivity::class.java).putExtra(EXTRA_CREATE, parentFolder)
+        fun importIntent(context: Context, parentFolder: String): Intent = Intent(context, WritingActivity::class.java).putExtra(EXTRA_IMPORT, parentFolder)
     }
 }
 
