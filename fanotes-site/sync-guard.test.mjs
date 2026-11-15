@@ -735,3 +735,107 @@ test('a restore that already reached the live slot is recorded without touching 
   assert.deepEqual(readFileSync(join(archive, String(second))), secondBody)
   assert.deepEqual((await readFile(id)).body, original)
 })
+
+test('a resurrection that reached the live slot is not replaced or published early', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(revisionOf(created)), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 200, removed.body.toString('utf8'))
+  const tombstone = revisionOf(removed)
+  const planted = randomBytes(4600)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const archive = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  writeFileSync(blobPath, planted)
+  const hidden = await readFile(id)
+  assert.equal(hidden.status, 204)
+  const blocked = await putFile(id, randomBytes(4200), tombstone, { 'X-FaNotes-Blank': '0' })
+  assert.equal(blocked.status, 409, blocked.body.toString('utf8'))
+  assert.equal(jsonOf(blocked).reason, 'stale')
+  assert.deepEqual(readFileSync(blobPath), planted)
+  const restored = await call('POST', `/api/v1/sync/files/${id}/restore`, {
+    token,
+    body: Buffer.from(JSON.stringify({ revision: revisionOf(created) })),
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': String(Buffer.from(JSON.stringify({ revision: revisionOf(created) })).length),
+      'If-Match': String(tombstone),
+    },
+  })
+  assert.equal(restored.status, 409, restored.body.toString('utf8'))
+  assert.deepEqual(readFileSync(blobPath), planted)
+  const removedAgain = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(tombstone), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removedAgain.status, 409, removedAgain.body.toString('utf8'))
+  assert.equal(jsonOf(removedAgain).reason, 'guard')
+  assert.deepEqual(readFileSync(blobPath), planted)
+  const stillHidden = await call('GET', '/api/v1/sync/changes?since=0', { token })
+  const hiddenEntry = JSON.parse(stillHidden.body.toString('utf8')).entries.find((item) => item.id === id)
+  assert.equal(hiddenEntry.deleted, true)
+  assert.equal(hiddenEntry.revision, tombstone)
+  const recorded = await putFile(id, planted, tombstone, { 'X-FaNotes-Blank': '0' })
+  assert.equal(recorded.status, 200, recorded.body.toString('utf8'))
+  assert.ok(revisionOf(recorded) > tombstone)
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, planted)
+  assert.equal(live.headers['x-fanotes-sha256'], sha256(planted))
+  const archived = readdirSync(archive).map((name) => readFileSync(join(archive, name)))
+  assert.ok(archived.some((bytes) => bytes.equals(original)))
+})
+
+test('a delete leftover that matches the archive is not turned back into the note', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(revisionOf(created)), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 200, removed.body.toString('utf8'))
+  const tombstone = revisionOf(removed)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  writeFileSync(blobPath, original)
+  assert.equal((await readFile(id)).status, 204)
+  const blank = await putFile(id, randomBytes(200), tombstone, { 'X-FaNotes-Blank': '1' })
+  assert.equal(blank.status, 409, blank.body.toString('utf8'))
+  assert.equal(jsonOf(blank).reason, 'guard')
+  assert.deepEqual(readFileSync(blobPath), original)
+  const again = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(tombstone), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(again.status, 200, again.body.toString('utf8'))
+  assert.deepEqual(readFileSync(blobPath), original)
+  const changes = await call('GET', '/api/v1/sync/changes?since=0', { token })
+  const entry = JSON.parse(changes.body.toString('utf8')).entries.find((item) => item.id === id)
+  assert.equal(entry.deleted, true)
+  assert.equal(entry.revision, tombstone)
+})
+
+test('a first upload that reached the live slot is not replaced by a different body', async () => {
+  const id = randomBytes(32).toString('hex')
+  const planted = randomBytes(4400)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  mkdirSync(join(dataDirectory, 'accounts', accountId, 'blobs'), { recursive: true })
+  writeFileSync(blobPath, planted)
+  assert.equal((await readFile(id)).status, 404)
+  const blocked = await putFile(id, randomBytes(3900), 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(blocked.status, 409, blocked.body.toString('utf8'))
+  assert.equal(jsonOf(blocked).reason, 'stale')
+  assert.deepEqual(readFileSync(blobPath), planted)
+  const absent = await call('GET', '/api/v1/sync/changes?since=0', { token })
+  assert.equal(JSON.parse(absent.body.toString('utf8')).entries.some((item) => item.id === id), false)
+  const recorded = await putFile(id, planted, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(recorded.status, 200, recorded.body.toString('utf8'))
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, planted)
+  assert.equal(live.headers['x-fanotes-sha256'], sha256(planted))
+})

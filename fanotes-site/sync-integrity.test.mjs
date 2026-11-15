@@ -290,6 +290,36 @@ test('a complete does not replace a newer live blob the log has not recorded', a
   assert.equal((await call('GET', `/api/v1/sync/files/${id}/uploads/${upload.uploadId}`, { token, accountId })).status, 200)
 })
 
+test('a complete does not replace a resurrection the log has not recorded', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    accountId,
+    headers: { 'If-Match': String(JSON.parse(created.body.toString('utf8')).revision), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 200, removed.body.toString('utf8'))
+  const tombstone = JSON.parse(removed.body.toString('utf8')).revision
+  const planted = randomBytes(4800)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  writeFileSync(blobPath, planted)
+  const other = randomBytes(4300)
+  const upload = await startUpload(id, other, tombstone)
+  assert.equal((await patchUpload(id, upload.uploadId, other, 0)).status, 200)
+  const blocked = await finishUpload(id, upload.uploadId, other, tombstone)
+  assert.equal(blocked.status, 409, blocked.body.toString('utf8'))
+  assert.equal(JSON.parse(blocked.body.toString('utf8')).reason, 'stale')
+  assert.deepEqual(readFileSync(blobPath), planted)
+  assert.equal((await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })).status, 204)
+  assert.equal((await call('GET', `/api/v1/sync/files/${id}/uploads/${upload.uploadId}`, { token, accountId })).status, 200)
+  const recorded = await putFile(id, planted, tombstone)
+  assert.equal(recorded.status, 200, recorded.body.toString('utf8'))
+  assert.deepEqual((await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })).body, planted)
+  assert.equal((await call('DELETE', `/api/v1/sync/files/${id}/uploads/${upload.uploadId}`, { token, accountId })).status, 204)
+})
+
 test('completing an upload whose body was already renamed records that live blob', async () => {
   const id = randomBytes(32).toString('hex')
   const original = randomBytes(5000)
