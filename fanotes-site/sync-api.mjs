@@ -1147,14 +1147,15 @@ const recordLiveBlob = async (accountId, table, entry) => {
   await appendChange(accountId, table, entry)
 }
 
-/** Hash of the newest archived blob for this note, or null when the archive is empty. */
+/** Hash of the archived copy a restore of the newest revision would publish. */
 const newestArchivedIdentity = async (accountId, fileId) => {
   const directory = revisionsDirectory(accountId, fileId)
   const files = await listRevisionFiles(directory)
   if (!files.length) return null
   const newestRevision = files.reduce((max, file) => Math.max(max, file.revision), 0)
-  const exact = files.find((file) => file.revision === newestRevision && !file.name.startsWith('c-'))
-    ?? files.find((file) => file.revision === newestRevision)
+  // The same file a restore would publish. A short torn sibling must not hide
+  // the archived delete, or the leftover live copy stays in the way.
+  const exact = archivedRevisionFile(files, newestRevision)
   if (!exact) return null
   return { size: exact.size, sha256: await hashFile(safeJoin(directory, exact.name)) }
 }
