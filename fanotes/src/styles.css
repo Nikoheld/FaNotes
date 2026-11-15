@@ -4067,3 +4067,44 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
   .study-modal { max-height: 96vh; }
 }
 .study-panel .inspector-tabs { display: flex; flex: 1; gap: 2px; min-width: 0; }
+
+/* PDF toolbar in the ribbon: never wrap or overlap, shed detail as the room shrinks (panel open, narrow window). */
+.toolbar-context .pdf-toolbar-slot { container-type: inline-size; container-name: pdftoolbar; }
+.toolbar-context .pdf-note-toolbar { overflow: hidden; }
+.toolbar-context .pdf-note-toolbar > * { flex: none; white-space: nowrap; }
+.toolbar-context .pdf-note-toolbar button { white-space: nowrap; }
+.toolbar-context .pdf-note-toolbar .pdf-note-identity { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.toolbar-context .pdf-note-toolbar .pdf-note-identity strong { display: inline-block; max-width: 11em; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.toolbar-context .pdf-note-toolbar .pdf-note-zoom button:nth-child(2) { min-width: 3.6em; }
+@container pdftoolbar (max-width: 820px) {
+  .toolbar-context .pdf-note-identity small { display: none; }
+  .toolbar-context .pdf-note-identity strong { max-width: 7em; }
+}
+@container pdftoolbar (max-width: 700px) {
+  .toolbar-context .pdf-note-identity { display: none; }
+  .toolbar-context .pdf-note-zoom button[title="An Breite anpassen"] { display: none; }
+}
+@container pdftoolbar (max-width: 560px) {
+  .toolbar-context .pdf-note-pager button[aria-label="Auswahl markieren"] { display: none; }
+}
+@container pdftoolbar (max-width: 470px) {
+  .toolbar-context .pdf-note-toolbar { gap: 2px; padding-inline: 2px; }
+  .toolbar-context .pdf-note-toolbar button { min-width: 22px; padding-inline: 3px; }
+  .toolbar-context .pdf-note-toolbar > * { gap: 1px; }
+  .toolbar-context .pdf-note-pager input { width: 2.4em; }
+  .toolbar-context .pdf-note-toolbar .pdf-note-zoom button:nth-child(2) { min-width: 3em; }
+}
+/* Last resort for very narrow windows: the bar scrolls instead of clipping. */
+.toolbar-context .pdf-note-toolbar { overflow-x: auto; scrollbar-width: none; }
+.toolbar-context .pdf-note-toolbar::-webkit-scrollbar { display: none; }
+/* The task panel is opened on purpose: keep it on narrower windows, slimmer. */
+@media (max-width: 1180px) {
+  .right-inspector.study-panel { display: flex; width: min(var(--right-panel-width), 240px); }
+}
+/* The floating zoom control covers zoom, so a very narrow bar gives that group up first. */
+@container pdftoolbar (max-width: 340px) {
+  .toolbar-context .pdf-note-zoom { display: none; }
+}
+@container pdftoolbar (max-width: 230px) {
+  .toolbar-context .pdf-note-tools button[aria-label="PDF-Gliederung"] { display: none; }
+}
