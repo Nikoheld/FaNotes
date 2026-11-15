@@ -181,9 +181,14 @@ export const createKantiWebStore = (options = {}) => {
       await fs.writeFile(file, JSON.stringify(value), { mode: 0o600, flag: 'wx' })
       return
     }
-    const temporary = `${file}.${randomBytes(6).toString('hex')}.tmp`
-    await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
-    await fs.rename(temporary, file)
+    const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+    try {
+      await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
+      await fs.rename(temporary, file)
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+      throw error
+    }
   }
   const sessionPath = (hash) => {
     if (!HASH_PATTERN.test(hash)) fail(400, 'Ungültige Sitzung.')
