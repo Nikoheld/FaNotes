@@ -1302,6 +1302,40 @@ const handleUploadPatch = async (request, response, auth, fileId, uploadId) => {
   }
 }
 
+// The partial is already gone and the live blob is the uploaded body. Record
+// the revision without copying that body onto the archive slot.
+const finishRenamedUpload = async (request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear) => {
+  const table = await loadTable(auth.account.id)
+  const current = table.entries.get(fileId) ?? null
+  const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
+  const stat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (!stat?.isFile()) fail(404, 'Dieser Upload ist nicht bekannt.')
+  if (await hashFile(blobPath) !== declaredSha) fail(404, 'Dieser Upload ist nicht bekannt.')
+  const archivedSize = current?.deleted
+    ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
+    : 0
+  const decision = evaluateSyncWrite({ current, base, nextSize: stat.size, blank, clear, archivedSize })
+  if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
+  if (decision === 'guard') return guardRejected(request, response, current)
+  if (current && !current.deleted && current.sha256 === declaredSha && Number(current.size) === stat.size) {
+    sendJson(request, response, 200, { revision: current.revision, tableRevision: table.revision, uploadId }, { ETag: `"${current.revision}"` })
+    return
+  }
+  const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
+  // The archive copy was counted when the table was loaded. Adding it again
+  // would reserve the previous note twice.
+  const reserved = await reservedPartialBytes(auth.account.id)
+  if (table.bytes - previousBytes + stat.size + (table.historyBytes || 0) + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+  const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
+  if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+  const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: stat.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
+  table.revision = entry.revision
+  table.entries.set(fileId, entry)
+  table.bytes += stat.size - previousBytes
+  await appendChange(auth.account.id, table, entry)
+  sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
+}
+
 const handleUploadComplete = async (request, response, auth, fileId, uploadId) => {
   const base = parseIfMatch(request)
   const metaHeader = parseMeta(request)
@@ -1311,7 +1345,10 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
   const clear = request.headers['x-fanotes-clear'] === '1'
   await withAccountLock(auth.account.id, async () => {
     const meta = await readPartial(auth.account.id, uploadId)
-    if (!meta || meta.fileId !== fileId) fail(404, 'Dieser Upload ist nicht bekannt.')
+    if (!meta || meta.fileId !== fileId) {
+      await finishRenamedUpload(request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear)
+      return
+    }
     if (meta.received !== meta.size) fail(409, 'Der Upload ist noch nicht vollständig.', { offset: meta.received, size: meta.size, reason: 'incomplete' })
     if (declaredSha !== meta.sha256) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
     const bodyPath = safeJoin(partialDirectory(auth.account.id, uploadId), 'body.bin')

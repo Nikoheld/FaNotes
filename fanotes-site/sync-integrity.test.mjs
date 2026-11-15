@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { connect as connectTcp } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -236,6 +236,34 @@ test('a resumable upload survives a truncated patch and does not replace a note 
   assert.equal(blocked.status, 409)
   assert.equal(JSON.parse(blocked.body.toString('utf8')).reason, 'guard')
   assert.deepEqual((await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })).body, newer)
+})
+
+test('completing a removed upload records the blob already in the live slot', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const next = randomBytes(5000)
+  const directory = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, String(revision)), original)
+  writeFileSync(join(dataDirectory, 'accounts', accountId, 'blobs', id), next)
+  const uploadId = randomBytes(16).toString('hex')
+  const finished = await finishUpload(id, uploadId, next, revision)
+  assert.equal(finished.status, 200, finished.body.toString('utf8'))
+  const recorded = JSON.parse(finished.body.toString('utf8')).revision
+  assert.ok(recorded > revision)
+  assert.deepEqual(readFileSync(join(directory, String(revision))), original)
+  assert.deepEqual((await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })).body, next)
+  const again = await finishUpload(id, uploadId, next, revision)
+  assert.equal(again.status, 409, again.body.toString('utf8'))
+  assert.equal(JSON.parse(again.body.toString('utf8')).reason, 'stale')
+  assert.deepEqual(readFileSync(join(directory, String(revision))), original)
+  const unknown = randomBytes(16).toString('hex')
+  const missing = await finishUpload(id, unknown, randomBytes(5000), recorded)
+  assert.equal(missing.status, 404, missing.body.toString('utf8'))
+  assert.deepEqual((await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })).body, next)
 })
 
 test('the integrity report names damaged and orphaned blobs and deletes nothing', async () => {
