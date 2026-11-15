@@ -1008,6 +1008,9 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   for (const file of files) {
     if (!keep.has(file.name)) await fs.rm(safeJoin(directory, file.name), { force: true })
   }
+  // Dropped archive names have to be durable before historyBytes is recorded.
+  // A crash that brings those files back would count them again after restart.
+  await syncDirectory(directory)
   const after = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
   return after - before
 }
