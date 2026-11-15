@@ -1,5 +1,12 @@
 'use strict'
 
+// `FaNotes --mcp` is the stdio MCP server for AI clients. It must run before
+// any app startup (windows, single-instance lock, profile migration).
+if (process.argv.slice(1).includes('--mcp')) {
+  require('./fanotes-mcp.cjs').runCli(process.argv.slice(1)).then(() => process.exit(0), () => process.exit(1))
+  return
+}
+
 const {
   applyLinuxOzoneLaunchEnvironment,
   cleanupStaleSingletonLocks,
@@ -21,6 +28,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const folderLocations = require('./folder-locations.cjs')
+const vaultWatch = require('./vault-watch.cjs')
 const { coerceWorksheetBytes } = require('./worksheet-bytes.cjs')
 const { encodeWindowCapture } = require('./window-capture.cjs')
 const { publishNewFile } = require('./exclusive-publish.cjs')
@@ -58,6 +66,7 @@ const {
   parseNoteBackups,
   parseNoteLinks,
   parseNoteTextFields,
+  parseAnnotations: parseNoteAnnotations,
   serializeFamd,
   stripFamdPayload,
   worksheetIdsFromMarkdown,
@@ -218,6 +227,7 @@ const IPC = Object.freeze({
   readNoteBackups: 'fanotes:read-note-backups',
   writeNoteBackups: 'fanotes:write-note-backups',
   writeNoteTextFields: 'fanotes:write-note-text-fields',
+  writeNoteAnnotations: 'fanotes:write-note-annotations',
   readNoteCompanion: 'fanotes:read-note-companion',
   readSubjectBooks: 'fanotes:read-subject-books',
   writeSubjectBooks: 'fanotes:write-subject-books',
@@ -253,6 +263,7 @@ const IPC = Object.freeze({
   aiListModels: 'fanotes:ai-list-models',
   aiTransform: 'fanotes:ai-transform',
   grokBuild: 'fanotes:grok-build',
+  mcpLocal: 'fanotes:mcp-local',
   loadSecureSettings: 'fanotes:load-secure-settings',
   saveSettings: 'fanotes:save-settings',
   resetAppData: 'fanotes:reset-app-data',
@@ -264,6 +275,7 @@ const IPC = Object.freeze({
   openExternal: 'fanotes:open-external',
   beforeClose: 'fanotes:before-close',
   shareOpen: 'fanotes:share-open',
+  vaultChanged: 'fanotes:vault-changed',
   confirmClose: 'fanotes:confirm-close',
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
@@ -301,6 +313,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   syncAutomatic: true,
   syncDeviceName: '',
   syncExcludedFolders: '',
+  mcpEnabled: false,
+  mcpWriteAccess: false,
+  mcpHttpEnabled: false,
+  mcpExcludedFolders: '',
   syncHandwritingModel: false,
   syncNoteHistory: false,
   profileOwnerId: '',
@@ -344,6 +360,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   experimentalRemoteSupport: false,
   experimentalNoteBackup: false,
   experimentalSendData: false,
+  diagnosticsUsage: false,
+  diagnosticsLogs: false,
   lastOpenNotePath: '',
   dashboardLayout: '',
   homeworkApiChannelId: '',
@@ -934,6 +952,19 @@ async function loadSecureSettings() {
     throw error
   })
   return protectedSettingsLoadPromise
+}
+
+let localMcpHostInstance = null
+/** Local MCP server (loopback HTTP transport + settings info). See local-mcp-host.cjs. */
+function localMcpHost() {
+  localMcpHostInstance ??= require('./local-mcp-host.cjs').createLocalMcpHost({
+    userData: app.getPath('userData'),
+    getState: () => ({ settings: currentSettings, vaultPath: currentVaultPath }),
+    packaged: app.isPackaged,
+    execPath: process.execPath,
+    appImage: process.env.APPIMAGE || '',
+  })
+  return localMcpHostInstance
 }
 
 function configPath() {
@@ -1577,6 +1608,40 @@ let folderLocationStore = null
 function folderLocationStoreNow() {
   if (!folderLocationStore) folderLocationStore = folderLocations.loadStore(app.getPath('userData'))
   return folderLocationStore
+}
+
+// Notices files added, changed or removed from outside FaNotes (Explorer, other
+// programs, other sync tools) in the vault and its linked folder locations.
+let vaultWatcher = null
+let vaultWatcherRoot = null
+function ensureVaultWatch(root) {
+  if (vaultWatcher && vaultWatcherRoot === root) return
+  vaultWatcher?.stop()
+  vaultWatcherRoot = root
+  const scanRoot = async () => {
+    if (currentVaultPath !== root) throw new Error('vault changed')
+    return readTreeDirectory(root, root, 0, new Map())
+  }
+  const getRoots = () => {
+    const roots = [root]
+    const map = folderLocationMap(root)
+    for (const list of Object.values(map || {})) {
+      if (Array.isArray(list)) for (const location of list) if (typeof location === 'string') roots.push(location)
+    }
+    return roots
+  }
+  vaultWatcher = vaultWatch.createVaultWatcher({
+    getRoots,
+    scan: scanRoot,
+    watch: fs.watch,
+    onChange: (diff) => {
+      const visible = (list) => list.filter((entry) => !vaultWatch.isIgnoredWatchPath(entry)).slice(0, 500)
+      const payload = { added: visible(diff.added), removed: visible(diff.removed), changed: visible(diff.changed) }
+      if (!payload.added.length && !payload.removed.length && !payload.changed.length) return
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.vaultChanged, payload)
+    },
+  })
+  vaultWatcher.start()
 }
 
 function folderLocationMap(vault) {
@@ -3638,6 +3703,7 @@ function registerIpcHandlers() {
     const folderColors = await readFolderColors(root)
     const entries = applyFileColors(await readFastTreeDirectory(root, root, 0, folderColors), await readFileColorsForTree(root))
     setImmediate(() => { void writeTreeCache(root, entries) })
+    ensureVaultWatch(root)
     return entries
   })
 
@@ -3650,6 +3716,7 @@ function registerIpcHandlers() {
     // The verified local cache makes subsequent starts independent of a full
     // NAS/disk traversal. Refreshing it must never delay the live tree result.
     setImmediate(() => { void writeTreeCache(root, entries) })
+    ensureVaultWatch(root)
     return entries
   })
 
@@ -4731,6 +4798,7 @@ function registerIpcHandlers() {
       noteLinks: loaded.noteLinks ?? [],
       noteBackups: loaded.noteBackups ?? [],
       textFields: loaded.textFields ?? [],
+      annotations: loaded.annotations ?? [],
     }
   })
 
@@ -4750,6 +4818,15 @@ function registerIpcHandlers() {
     assertNotePath(notePath)
     const fields = parseNoteTextFields(rawFields)
     return mutateFamdCompanion(notePath, () => ({ payload: { textFields: fields }, result: fields }))
+  })
+
+  handle(IPC.writeNoteAnnotations, async (_event, relativePath, rawList) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const list = parseNoteAnnotations(rawList)
+    return mutateFamdCompanion(notePath, () => ({ payload: { annotations: list }, result: list }))
   })
 
   handle(IPC.readSubjectBooks, async () => {
@@ -5392,6 +5469,12 @@ function registerIpcHandlers() {
     throw new Error('Unbekannte Grok-Build-Aktion.')
   })
 
+  handle(IPC.mcpLocal, async (_event, request) => {
+    const host = localMcpHost()
+    if (request?.action === 'regenerate') return host.regenerate()
+    return host.info()
+  })
+
   handle(IPC.loadSecureSettings, async () => loadSecureSettings())
 
   handle(IPC.saveSettings, async (_event, settings, options) => {
@@ -5407,6 +5490,7 @@ function registerIpcHandlers() {
           preserveProtectedSecrets: !clearProtectedSecrets,
         })
         currentSettings = nextSettings
+        void localMcpHost().apply(currentSettings).catch(() => {})
         if (clearProtectedSecrets) {
           protectedSettingsOnDisk.clear()
           protectedSettingsLoaded = true
@@ -5696,6 +5780,7 @@ async function createWindow() {
     mainWindow.show()
   }
   mainWindow.once('ready-to-show', revealWindow)
+  mainWindow.on('focus', () => vaultWatcher?.nudge())
   mainWindow.webContents.on('did-fail-load', revealWindow)
 
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
@@ -5809,6 +5894,7 @@ if (!app.requestSingleInstanceLock()) {
     installSecurityPolicy()
     registerIpcHandlers()
     await createWindow()
+    void readConfig().then(() => localMcpHost().apply(currentSettings)).catch(() => {})
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) void createWindow()
@@ -5828,6 +5914,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  void localMcpHostInstance?.stop()
   stopNativeOcr(new Error('FaNotes wird beendet.'))
   inkOcr?.stop()
   updateManager?.stop()

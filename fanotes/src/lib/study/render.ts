@@ -90,30 +90,30 @@ const tableHtml = (data: KeyData) => {
   if (!features.length && !items.length) return ''
   const head = features.map((feature, index) => `<th>${esc(feature || `Merkmal ${index + 1}`)}</th>`).join('')
   const rows = items.map((item) => `<tr><th scope="row">${esc(item.name)}</th>${item.values.map((value) => `<td>${esc(value)}</td>`).join('')}</tr>`).join('')
-  return `<div class="study-table-wrap"><table class="study-table"><thead><tr><th>Art</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`
+  return `<div class="lw-table-wrap"><table class="lw-table"><thead><tr><th>Art</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`
 }
 
 const renderKeyHtml = (data: KeyData) => {
   const tree = renderKeyTreeSvg(data)
-  const compare = data.compareImage ? `<figure class="study-compare">${imgTag(data.compareImage, data.compareLabel || 'Vergleichsbaum')}<figcaption>${esc(data.compareLabel || 'Vergleich')}</figcaption></figure>` : ''
-  return `${data.title ? `<div class="study-title">${esc(data.title)}</div>` : ''}${tableHtml(data)}<div class="study-key-views${compare ? ' is-compare' : ''}"><div class="study-svg">${data.tree.nodes.length ? tree.svg : ''}</div>${compare}</div>`
+  const compare = data.compareImage ? `<figure class="lw-compare">${imgTag(data.compareImage, data.compareLabel || 'Vergleichsbaum')}<figcaption>${esc(data.compareLabel || 'Vergleich')}</figcaption></figure>` : ''
+  return `${data.title ? `<div class="lw-title">${esc(data.title)}</div>` : ''}${tableHtml(data)}<div class="lw-key-views${compare ? ' is-compare' : ''}"><div class="lw-svg">${data.tree.nodes.length ? tree.svg : ''}</div>${compare}</div>`
 }
 
 const renderSortHtml = (data: SortData) => {
   const text = new Map(data.cards.map((card) => [card.id, card.text]))
   const pool = unsortedCards(data)
-  const groups = data.groups.map((group) => `<div class="study-group"><div class="study-group-title">${esc(group.title || 'Gruppe')}</div>${group.cards.map((id, index) => `<div class="study-card">${data.mode === 'sequence' ? `<b>${index + 1}.</b> ` : ''}${esc(text.get(id) ?? '')}</div>`).join('')}</div>`).join('')
-  const open = pool.length ? `<div class="study-pool">${pool.map((card) => `<span class="study-card is-open">${esc(card.text)}</span>`).join('')}</div>` : ''
-  return `${data.title ? `<div class="study-title">${esc(data.title)}</div>` : ''}<div class="study-groups">${groups}</div>${open}`
+  const groups = data.groups.map((group) => `<div class="lw-group"><div class="lw-group-title">${esc(group.title || 'Gruppe')}</div>${group.cards.map((id, index) => `<div class="lw-card">${data.mode === 'sequence' ? `<b>${index + 1}.</b> ` : ''}${esc(text.get(id) ?? '')}</div>`).join('')}</div>`).join('')
+  const open = pool.length ? `<div class="lw-pool">${pool.map((card) => `<span class="lw-card is-open">${esc(card.text)}</span>`).join('')}</div>` : ''
+  return `${data.title ? `<div class="lw-title">${esc(data.title)}</div>` : ''}<div class="lw-groups">${groups}</div>${open}`
 }
 
 const renderPlateHtml = (data: PlateData) => {
-  const cells = data.items.map((item) => `<figure class="study-plate-item">${item.img ? imgTag(item.img, item.label) : '<div class="study-plate-empty"></div>'}${data.showLabels ? `<figcaption>${esc(item.label)}</figcaption>` : ''}</figure>`).join('')
-  return `${data.title ? `<div class="study-title">${esc(data.title)}</div>` : ''}<div class="study-plate" style="grid-template-columns:repeat(${data.cols},minmax(0,1fr))">${cells}</div>`
+  const cells = data.items.map((item) => `<figure class="lw-plate-item">${item.img ? imgTag(item.img, item.label) : '<div class="lw-plate-empty"></div>'}${data.showLabels ? `<figcaption>${esc(item.label)}</figcaption>` : ''}</figure>`).join('')
+  return `${data.title ? `<div class="lw-title">${esc(data.title)}</div>` : ''}<div class="lw-plate" style="grid-template-columns:repeat(${data.cols},minmax(0,1fr))">${cells}</div>`
 }
 
 const renderTermHtml = (data: TermData) => data.terms.map((entry) => (
-  `<div class="study-term"><div class="study-term-name">${esc(entry.term || 'Begriff')}</div>${entry.definition ? `<p>${esc(entry.definition)}</p>` : ''}${entry.example ? `<p class="study-term-example"><b>Beispiel:</b> ${esc(entry.example)}</p>` : ''}${entry.source ? `<p class="study-term-source">Quelle: ${esc(entry.source)}</p>` : ''}</div>`
+  `<div class="lw-term"><div class="lw-term-name">${esc(entry.term || 'Begriff')}</div>${entry.definition ? `<p>${esc(entry.definition)}</p>` : ''}${entry.example ? `<p class="lw-term-example"><b>Beispiel:</b> ${esc(entry.example)}</p>` : ''}${entry.source ? `<p class="lw-term-source">Quelle: ${esc(entry.source)}</p>` : ''}</div>`
 )).join('')
 
 export type StudyAnyData = KeyData | SortData | MapData | PlateData | TermData
@@ -122,7 +122,7 @@ export const renderStudyHtml = (kind: StudyKind, data: StudyAnyData): string => 
   switch (kind) {
     case 'key': return renderKeyHtml(data as KeyData)
     case 'sort': return renderSortHtml(data as SortData)
-    case 'map': return `<div class="study-svg">${(data as MapData).nodes.length ? renderMapSvg(data as MapData).svg : ''}</div>`
+    case 'map': return `<div class="lw-svg">${(data as MapData).nodes.length ? renderMapSvg(data as MapData).svg : ''}</div>`
     case 'plate': return renderPlateHtml(data as PlateData)
     case 'term': return renderTermHtml(data as TermData)
   }

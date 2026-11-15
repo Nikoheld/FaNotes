@@ -56,13 +56,21 @@ const COLLAPSE_NEW_BYTES = 1024
 const EMPTY_CIPHERTEXT_BYTES = 28
 const MAX_REVISIONS_KEPT = 8
 
-/** Newest revisions, plus an older blob that is still the largest. The highest revision is always kept. */
+/** Newest revisions, plus an older blob that is still the largest. The highest revision is always kept.
+ * A revision earns its slot with the file a restore would publish. A short sibling must not take that slot.
+ */
 export const revisionNamesToKeep = (files, keep = MAX_REVISIONS_KEPT, nextSize = 0) => {
-  const ranked = [...(files || [])].filter((file) => file && Number.isFinite(file.revision)).sort((left, right) => left.revision - right.revision || String(left.name).localeCompare(String(right.name)))
-  const names = new Set(ranked.slice(-Math.max(1, keep)).map((file) => file.name))
-  if (!ranked.length) return names
-  const largest = ranked.reduce((best, file) => (file.size > best.size ? file : best), ranked[0])
+  const list = [...(files || [])].filter((file) => file && Number.isFinite(file.revision) && typeof file.name === 'string')
+  const revisions = [...new Set(list.map((file) => file.revision))].sort((left, right) => left - right)
+  const chosen = revisions.map((revision) => archivedRevisionFile(list, revision)).filter(Boolean)
+  const names = new Set(chosen.slice(-Math.max(1, keep)).map((file) => file.name))
+  if (!chosen.length) return names
+  const largest = chosen.reduce((best, file) => (file.size > best.size ? file : best), chosen[0])
   if (largest.size > nextSize) names.add(largest.name)
+  const keptRevisions = new Set(chosen.filter((file) => names.has(file.name)).map((file) => file.revision))
+  for (const file of list) {
+    if (keptRevisions.has(file.revision)) names.add(file.name)
+  }
   return names
 }
 const MAX_FILES = Number(process.env.FANOTES_SYNC_MAX_FILES || 50_000)
@@ -310,6 +318,39 @@ const copyDurable = async (source, destination) => {
   await syncDirectory(dirname(destination))
 }
 
+// The original file stays until the live name is durable. Renaming the only
+// name across directories can drop both if the process stops first.
+export const placeDurable = async (source, destination) => {
+  const directory = dirname(destination)
+  const held = await fs.open(source, 'r')
+  try {
+    await held.sync()
+  } finally {
+    await held.close()
+  }
+  const temporary = `${destination}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
+  let linked = false
+  try {
+    await fs.link(source, temporary)
+    linked = true
+  } catch (error) {
+    if (error?.code !== 'EXDEV' && error?.code !== 'EPERM' && error?.code !== 'ENOTSUP' && error?.code !== 'EOPNOTSUPP') throw error
+  }
+  if (!linked) {
+    await copyDurable(source, destination)
+    return
+  }
+  try {
+    await syncDirectory(directory)
+    await fs.rename(temporary, destination)
+    await syncDirectory(directory)
+  } catch (error) {
+    await fs.rm(temporary, { force: true })
+    await syncDirectory(directory)
+    throw error
+  }
+}
+
 const readJsonFile = async (target, fallback = null) => {
   try {
     return JSON.parse(await fs.readFile(target, 'utf8'))
@@ -453,7 +494,7 @@ const appendChange = async (accountId, table, entry) => {
 const compactTable = async (accountId, table) => {
   const directory = accountDirectory(accountId)
   await atomicWrite(safeJoin(directory, 'index.json'), JSON.stringify({ revision: table.revision, entries: Object.fromEntries(table.entries) }))
-  // The index rename has to be durable before the log is truncated. A crash
+  // The index rename has to be durable before the log is replaced. A crash
   // that kept the new index and lost the log would drop every revision that
   // lived only in the log.
   const directoryHandle = await fs.open(directory, 'r')
@@ -462,12 +503,9 @@ const compactTable = async (accountId, table) => {
   } finally {
     await directoryHandle.close()
   }
-  const log = await fs.open(safeJoin(directory, 'changes.jsonl'), 'w', 0o600)
-  try {
-    await log.sync()
-  } finally {
-    await log.close()
-  }
+  // Replace the log by rename. A crash must not tear the log in place after
+  // the index is saved.
+  await atomicWrite(safeJoin(directory, 'changes.jsonl'), '')
   table.logBytes = 0
 }
 
@@ -1150,14 +1188,15 @@ const recordLiveBlob = async (accountId, table, entry) => {
   await appendChange(accountId, table, entry)
 }
 
-/** Hash of the newest archived blob for this note, or null when the archive is empty. */
+/** Hash of the archived copy a restore of the newest revision would publish. */
 const newestArchivedIdentity = async (accountId, fileId) => {
   const directory = revisionsDirectory(accountId, fileId)
   const files = await listRevisionFiles(directory)
   if (!files.length) return null
   const newestRevision = files.reduce((max, file) => Math.max(max, file.revision), 0)
-  const exact = files.find((file) => file.revision === newestRevision && !file.name.startsWith('c-'))
-    ?? files.find((file) => file.revision === newestRevision)
+  // The same file a restore would publish. A short torn sibling must not hide
+  // the archived delete, or the leftover live copy stays in the way.
+  const exact = archivedRevisionFile(files, newestRevision)
   if (!exact) return null
   return { size: exact.size, sha256: await hashFile(safeJoin(directory, exact.name)) }
 }
@@ -1303,9 +1342,10 @@ const handlePutFile = async (request, response, auth, fileId) => {
       await syncDirectory(dirname(incoming.path))
     } else {
       await ensureBlobDirectory(auth.account.id)
-      await fs.rename(incoming.path, blobPath)
+      await placeDurable(incoming.path, blobPath)
       // The new name has to be durable before the change log records it.
       await syncDirectory(blobDirectory)
+      await fs.rm(incoming.path, { force: true })
       // The old spool name has to be gone too. A crash must not bring it back
       // as a second link to this note.
       await syncDirectory(dirname(incoming.path))
@@ -1340,8 +1380,9 @@ const moveToQuarantine = async (accountId, fileId, base, sourcePath) => {
       await syncDirectory(dirname(dirname(directory)))
       await syncDirectory(dirname(directory))
     }
-    await fs.rename(sourcePath, safeJoin(directory, String(base)))
+    await placeDurable(sourcePath, safeJoin(directory, String(base)))
     await syncDirectory(directory)
+    await fs.rm(sourcePath, { force: true })
     await syncDirectory(dirname(sourcePath))
     const names = (await fs.readdir(directory)).filter((name) => /^\d+$/u.test(name)).sort((left, right) => Number(left) - Number(right))
     for (const name of names.slice(0, Math.max(0, names.length - MAX_REVISIONS_KEPT))) {
@@ -1384,11 +1425,13 @@ const metaForRestore = async (accountId, fileId, current) => {
 const handleListRevisions = async (request, response, auth, fileId) => {
   const directory = revisionsDirectory(auth.account.id, fileId)
   const files = await listRevisionFiles(directory)
-  sendJson(request, response, 200, {
-    revisions: files
-      .sort((left, right) => left.revision - right.revision)
-      .map((file) => ({ revision: file.revision, size: file.size, collapse: file.name.startsWith('c-') })),
-  })
+  // One row per revision: the file a restore of that revision would publish.
+  const revisions = [...new Set(files.map((file) => file.revision))]
+    .sort((left, right) => left - right)
+    .map((revision) => archivedRevisionFile(files, revision))
+    .filter(Boolean)
+    .map((file) => ({ revision: file.revision, size: file.size, collapse: file.name.startsWith('c-') }))
+  sendJson(request, response, 200, { revisions })
 }
 
 const handleRestoreFile = async (request, response, auth, fileId) => {
@@ -1809,8 +1852,9 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     const blobPath = safeJoin(blobDirectory, fileId)
     if (!await liveBlobMatches(auth.account.id, fileId, current, Number(meta.size) || 0, declaredSha)) {
       await ensureBlobDirectory(auth.account.id)
-      await fs.rename(bodyPath, blobPath)
+      await placeDurable(bodyPath, blobPath)
       await syncDirectory(blobDirectory)
+      await fs.rm(bodyPath, { force: true })
       // The partial name has to be gone too. A crash must not bring that file
       // back as a second link to this note.
       await syncDirectory(dirname(bodyPath))

@@ -9,13 +9,13 @@ import {
   BookOpen,
   CalendarDays,
   CheckCircle2,
+  GraduationCap,
   CircleAlert,
   Clock,
   Cloud,
   CloudOff,
   BookMarked,
   ClipboardList,
-  GraduationCap,
   Columns2,
   Command,
   Copy,
@@ -63,6 +63,7 @@ import {
   Type,
   X,
 } from 'lucide-react'
+import { notifyStoryWritten, storySyncBusy } from './writing/liveSync'
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
@@ -73,6 +74,7 @@ import { EditorExportControls } from './components/EditorExportControls'
 import { FormattingToolbar } from './components/FormattingToolbar'
 import { NoteLinkLayer } from './components/NoteLinkLayer'
 import { NoteTextFieldLayer } from './components/NoteTextFieldLayer'
+import { StudyAnnotationLayer } from './components/StudyAnnotationLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
@@ -229,6 +231,7 @@ import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSqua
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { flushPaperViewMemory } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
+import { configureDiagnostics, markStartupReady, recordFeature, sendDailyIfDue, setDiagnosticsVault } from './lib/diagnosticsClient'
 import {
   collectSendDataNutzerdaten,
   linuxHyprlandRuntimeContext,
@@ -502,6 +505,13 @@ const INITIAL_UPDATE_STATE: UpdateState = {
 }
 
 const stripExtension = (name: string) => name.replace(/\.(md|markdown|famd|pdf)$/i, '')
+function collectTreePaths(entries: VaultEntry[], files = false, out: string[] = []): string[] {
+  for (const entry of entries) {
+    if (!files || entry.kind !== 'folder') out.push(entry.relativePath)
+    if (entry.children) collectTreePaths(entry.children, files, out)
+  }
+  return out
+}
 const fileName = (path: string) => path.split('/').pop() ?? path
 const parentPath = (path: string) => path.split('/').slice(0, -1).join('/')
 const NOTE_INK_MARKER = /<!--\s*fanotes-ink:([a-zA-Z0-9_-]{1,96})\s*-->/u
@@ -834,6 +844,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteTextFields, setNoteTextFields] = useState<NoteTextField[]>([])
   const [noteLinkPlacing, setNoteLinkPlacing] = useState(false)
   const [textFieldPlacing, setTextFieldPlacing] = useState(false)
+  const [studyToolsOpen, setStudyToolsOpen] = useState(false)
   const [textFieldFocusId, setTextFieldFocusId] = useState<string | null>(null)
   const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
   const [selectedNoteLinkId, setSelectedNoteLinkId] = useState<string | null>(null)
@@ -906,6 +917,16 @@ export default function App({ startupBootstrap }: AppProps) {
   const worksheetDirtyCallbacks = useRef(new Map<string, (dirty: boolean) => void>())
   const focusRestoreRef = useRef({ sidebar: true, inspector: true })
   const treeRef = useRef(tree)
+  const lastOwnTreeRefreshRef = useRef(0)
+  const [newArrivals, setNewArrivals] = useState<Set<string>>(() => new Set())
+  const newMarkedPaths = useMemo(() => {
+    const marked = new Set(newArrivals)
+    for (const entryPath of newArrivals) {
+      let cut = entryPath.lastIndexOf('/')
+      while (cut > 0) { marked.add(entryPath.slice(0, cut)); cut = entryPath.lastIndexOf('/', cut - 1) }
+    }
+    return marked
+  }, [newArrivals])
   const saveTimers = useRef(new Map<string, number>())
   const pendingWrites = useRef(new Map<string, string>())
   const settingsTimer = useRef<number | null>(null)
@@ -1625,8 +1646,59 @@ export default function App({ startupBootstrap }: AppProps) {
     treeRef.current = nextTree
     setTree(nextTree)
     syncEngine.notifyLocalChange()
+    lastOwnTreeRefreshRef.current = Date.now()
     return nextTree
   }, [])
+
+  // Files that arrived from outside FaNotes; the mark goes away when the note is opened.
+  useEffect(() => {
+    if (!window.fanotes?.onVaultChanged) return undefined
+    return window.fanotes.onVaultChanged((change) => {
+      const session = vaultSessionGenerationRef.current
+      const known = new Set(collectTreePaths(treeRef.current))
+      const ownRecently = Date.now() - lastOwnTreeRefreshRef.current < 4000
+      const active = activePathRef.current
+      const onlyActiveChanged = !change.added.length && !change.removed.length &&
+        change.changed.every((entryPath) => entryPath === active)
+      // The open note's own autosave also shows up as a change: nothing to do then.
+      if (onlyActiveChanged) return
+      void window.fanotes.getTree().then((nextTree) => {
+        // Only the tree is swapped. Open tabs, unsaved edits, selection, expanded
+        // folders and scroll position live elsewhere and stay untouched.
+        if (session !== vaultSessionGenerationRef.current) return
+        treeRef.current = nextTree
+        setTree(nextTree)
+        syncEngine.notifyLocalChange()
+        const present = new Set(collectTreePaths(nextTree))
+        const arrived = change.added.filter((entryPath) => !known.has(entryPath) && present.has(entryPath) && !tabsRef.current.some((tab) => tab.path === entryPath))
+        const fileSet = new Set(collectTreePaths(nextTree, true))
+        const files = arrived.filter((entryPath) => fileSet.has(entryPath))
+        setNewArrivals((current) => {
+          const next = new Set([...current].filter((entryPath) => present.has(entryPath)))
+          if (!ownRecently) for (const entryPath of files) next.add(entryPath)
+          return next.size === current.size && [...next].every((entryPath) => current.has(entryPath)) ? current : next
+        })
+        if (!ownRecently && files.length) {
+          const folder = files[0].includes('/') ? files[0].slice(0, files[0].lastIndexOf('/')).split('/').pop() : ''
+          const sameFolder = files.every((entryPath) => entryPath.slice(0, Math.max(0, entryPath.lastIndexOf('/'))) === files[0].slice(0, Math.max(0, files[0].lastIndexOf('/'))))
+          const where = sameFolder && folder ? ` in ${folder}` : ''
+          toast(files.length === 1
+            ? `1 neue Datei${where}`
+            : `${files.length} neue Dateien${where}`, 'info')
+        }
+      }).catch(() => undefined)
+    })
+  }, [toast])
+
+  useEffect(() => {
+    if (!activePath) return
+    setNewArrivals((current) => {
+      if (!current.has(activePath)) return current
+      const next = new Set(current)
+      next.delete(activePath)
+      return next
+    })
+  }, [activePath])
 
   const rememberLastOpenNote = useCallback((path: string) => {
     if (!path || settingsRef.current.lastOpenNotePath === path) return
@@ -2358,9 +2430,10 @@ export default function App({ startupBootstrap }: AppProps) {
 
   /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
   const isSyncPathBusy = useCallback((path: string) => {
-    // The open story's files: the writing mode holds them in memory and saves from there,
-    // so remote changes wait until it is closed (the sync then merges them paragraph by paragraph).
-    if (writingPathRef.current && path.startsWith(`${writingPathRef.current}/`)) return true
+    // The open story's files: the writing mode holds them in memory and saves from there.
+    // Its other files wait until it is closed (the sync then merges them paragraph by paragraph).
+    // Its scenes and manifest may be written while nothing is unsaved there; the editor then merges them live.
+    if (writingPathRef.current && path.startsWith(`${writingPathRef.current}/`)) return storySyncBusy(writingPathRef.current, path)
     const companionOwner = path.endsWith('.famd') ? tabsRef.current.find((tab) => companionNotePath(tab.path, '.famd') === path)?.path : undefined
     const notePath = companionOwner ?? path
     if (pendingWrites.current.has(notePath) || saveTimers.current.has(notePath)) return true
@@ -2373,6 +2446,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
   /** Files another device changed: refresh the tree, reload clean open tabs, drop tabs of deleted notes. */
   const applyRemoteChanges = useCallback(async ({ written, removed }: { written: string[]; removed: string[] }) => {
+    if (writingPathRef.current) notifyStoryWritten(writingPathRef.current, written)
     await refreshTree()
     const stories = new Set([...written, ...removed].flatMap((path) => /^(.+?\.story)\//iu.exec(path)?.[1] ?? []))
     if (stories.size) void import('./lib/docSearch/service').then(({ docSearch }) => { for (const story of stories) docSearch.notifyStoryChanged(story) })
@@ -3105,7 +3179,9 @@ export default function App({ startupBootstrap }: AppProps) {
       return
     }
     const field = placeNoteTextField(point)
-    rememberNoteTextFields(path, [...noteTextFieldsRef.current, field], true)
+    // Not committed yet: an empty box that is never typed into is dropped again
+    // by the layer and must not reach the disk.
+    rememberNoteTextFields(path, [...noteTextFieldsRef.current, field], false)
     setTextFieldPlacing(false)
     setTextFieldFocusId(field.id)
   }, [rememberNoteTextFields, toast])
@@ -3121,6 +3197,14 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!path) return
     rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), commit)
   }, [rememberNoteTextFields])
+
+  const changeTextFieldStyle = useCallback((id: string, patch: { fontSize?: number; color?: string | undefined; bold?: boolean | undefined }) => {
+    const path = activePathRef.current
+    if (!path) return
+    rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), true)
+  }, [rememberNoteTextFields])
+
+  const finishTextFieldEdit = useCallback(() => { void flushNoteTextFieldsRef.current() }, [])
 
   const clearTextFieldFocus = useCallback(() => setTextFieldFocusId(null), [])
 
@@ -4492,6 +4576,27 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [remoteSupportSession, settings.experimentalRemoteSupport])
 
+  // Opt-in diagnostics: counters and the daily report run only while a toggle is on.
+  useEffect(() => {
+    configureDiagnostics({ usage: settings.diagnosticsUsage, logs: settings.diagnosticsLogs }, { vaultPath: bootstrap?.vaultPath })
+    if (!settings.diagnosticsUsage && !settings.diagnosticsLogs) return undefined
+    const first = window.setTimeout(() => { void sendDailyIfDue() }, 90_000)
+    const timer = window.setInterval(() => { void sendDailyIfDue() }, 3_600_000)
+    return () => { window.clearTimeout(first); window.clearInterval(timer) }
+  }, [settings.diagnosticsUsage, settings.diagnosticsLogs, bootstrap?.vaultPath])
+
+  useEffect(() => {
+    if (!bootstrap) return
+    markStartupReady()
+    let notes = 0
+    let bytes = 0
+    const walk = (entries: VaultEntry[]) => { for (const entry of entries) { if (entry.kind === 'folder') walk(entry.children ?? []); else { notes += 1; bytes += entry.size ?? 0 } } }
+    walk(tree)
+    setDiagnosticsVault(notes, bytes)
+  }, [bootstrap, tree])
+
+  useEffect(() => { if (settingsOpen) recordFeature(`view.settings-${settingsSection ?? 'open'}`) }, [settingsOpen, settingsSection])
+
   useEffect(() => {
     if (overviewOpen || glyphenWerkOpen) setSidebarToolsOpen(true)
   }, [overviewOpen, glyphenWerkOpen])
@@ -5772,6 +5877,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 entries={visibleTree}
                 activePath={activePath}
                 splitPath={splitPath}
+                newPaths={newMarkedPaths}
                 revealPath={revealPath}
                 expansionStorageKey={`fanotes.treeExpanded.v1:${bootstrap?.vaultPath || 'default'}`}
                 rootLabel="Notizen"
@@ -5963,7 +6069,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 </div>
               )}
               {activeTab && isPdfActive && (
-                <button type="button" className={`toolbar-button ${studyPanel ? 'active' : ''}`} title="Aufträge und Markierungen dieses PDFs" aria-label="Lernwerkzeuge" aria-pressed={Boolean(studyPanel)} onClick={() => setStudyPanel((value) => (value ? null : 'tasks'))}>
+                <button type="button" className={`toolbar-button ${studyPanel ? 'active' : ''}`} title="Aufträge und Markierungen dieses PDFs" aria-label="Aufträge dieses PDFs" aria-pressed={Boolean(studyPanel)} onClick={() => setStudyPanel((value) => (value ? null : 'tasks'))}>
                   <ClipboardList size={14} /><span>Aufträge</span>
                 </button>
               )}
@@ -6090,6 +6196,17 @@ export default function App({ startupBootstrap }: AppProps) {
                 onClick={startTextFieldPlacement}
               >
                 <Type size={14} /><span>Textfeld</span>
+              </button>
+              <button
+                type="button"
+                className={`toolbar-button ${studyToolsOpen ? 'active' : ''}`}
+                title="Lernwerkzeuge: Beschriften, Zeichen, Bilder, Messen"
+                aria-label="Lernwerkzeuge"
+                aria-pressed={studyToolsOpen}
+                disabled={!activeTab}
+                onClick={() => setStudyToolsOpen((open) => !open)}
+              >
+                <GraduationCap size={14} /><span>Lernen</span>
               </button>
               {!isPdfActive && <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>}
               {hasConnectedAiProvider(settings) && (
@@ -6275,8 +6392,16 @@ export default function App({ startupBootstrap }: AppProps) {
                     onPlace={placeTextFieldAt}
                     onText={changeTextFieldText}
                     onGeometry={changeTextFieldGeometry}
+                    onStyle={changeTextFieldStyle}
+                    onFinish={finishTextFieldEdit}
                     onRemove={removePlacedTextField}
                     onFocusHandled={clearTextFieldFocus}
+                  />
+                  <StudyAnnotationLayer
+                    path={activeTab.path}
+                    pdf={isPdfActive}
+                    open={studyToolsOpen}
+                    onClose={() => setStudyToolsOpen(false)}
                   />
                 </article>
               </PaperView>

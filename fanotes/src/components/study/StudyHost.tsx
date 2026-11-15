@@ -173,20 +173,20 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
   const learn = () => { close(); window.dispatchEvent(new CustomEvent(STUDY_EVENT.openCards)) }
 
   return (
-    <div className="modal-backdrop study-backdrop" role="presentation" data-study-modal="" onPointerDown={(event) => { if (event.target === event.currentTarget) close() }}>
-      <section className="study-modal" role="dialog" aria-modal="true" aria-label={STUDY_KIND_LABELS[session.kind]} onPointerDown={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop lw-backdrop" role="presentation" data-lw-modal="" onPointerDown={(event) => { if (event.target === event.currentTarget) close() }}>
+      <section className="lw-modal" role="dialog" aria-modal="true" aria-label={STUDY_KIND_LABELS[session.kind]} onPointerDown={(event) => event.stopPropagation()}>
         <header>
           <h2>{STUDY_KIND_LABELS[session.kind]}</h2>
           <button type="button" aria-label="Schließen" onClick={close}><X size={17} /></button>
         </header>
-        <div className="study-body">
+        <div className="lw-body">
           {session.kind === 'key' && <KeyEditor data={session.data as KeyData} onChange={update} onError={setError} />}
           {session.kind === 'sort' && <SortEditor data={session.data as SortData} onChange={update} />}
           {session.kind === 'map' && <MapEditor data={session.data as MapData} onChange={update} />}
           {session.kind === 'plate' && <PlateEditor data={session.data as PlateData} onChange={update} onError={setError} onLearn={learn} />}
           {session.kind === 'term' && <TermEditor data={session.data as TermData} onChange={update} onLearn={learn} />}
         </div>
-        {(error || notice) && <p className={error ? 'study-error' : 'study-notice'} role="status">{error || notice}</p>}
+        {(error || notice) && <p className={error ? 'lw-error' : 'lw-notice'} role="status">{error || notice}</p>}
         <footer>
           {exported && (
             <>
@@ -203,7 +203,7 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
             </>
           )}
           {(session.kind === 'plate' || session.kind === 'term') && <button type="button" className="secondary-button" onClick={learn}><GraduationCap size={14} /> Karteikarten</button>}
-          <span className="study-spacer" />
+          <span className="lw-spacer" />
           <button type="button" className="primary-button" onClick={close}>Fertig</button>
         </footer>
       </section>

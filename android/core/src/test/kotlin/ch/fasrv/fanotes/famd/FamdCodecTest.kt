@@ -3,6 +3,7 @@ package ch.fasrv.fanotes.famd
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.jsonNumber
 import ch.fasrv.fanotes.json.jsonString
+import ch.fasrv.fanotes.json.stringify
 import ch.fasrv.fanotes.vault.DirectoryVault
 import ch.fasrv.fanotes.vault.NoteStore
 import java.nio.file.Files
@@ -24,6 +25,24 @@ class FamdCodecTest {
         assertEquals("Hello", parsed.markdown)
         assertEquals(FAMD_SCHEMA, parsed.payload?.string("schema"))
         assertNull(parsed.payload?.obj("ink"))
+    }
+
+    @Test
+    fun annotationsSurviveEverySavePath() {
+        val annotations = """[{"kind":"callout","id":"c1","page":3,"ax":0.2,"ay":0.3,"lx":0.4,"ly":0.5,"text":"Caput","color":"#1d4ed8"},{"kind":"measure","id":"m1","page":10,"mode":"angle","pts":[[0.2,0.2],[0.4,0.4],[0.6,0.3]],"color":"#dc2626"}]"""
+        for (encoding in listOf("v1", "v2")) {
+            val payload = emptyFamdPayload("2026-01-02T03:04:05.000Z")
+            payload.put("annotations", ch.fasrv.fanotes.json.parseJson(annotations))
+            val first = serializeFamd("Body", payload, encoding)
+            val parsed = parseFamd(first)
+            assertEquals(2, parsed.payload?.array("annotations")?.items?.size, encoding)
+            // A second save of the parsed payload (an ordinary Android edit) must keep them byte for byte.
+            parsed.payload!!.put("pageStats", null)
+            val second = serializeFamd("Body edited", parsed.payload!!, encoding)
+            val again = parseFamd(second).payload?.array("annotations")
+            val wrap = { value: JsonValue? -> JsonValue.Obj().also { it.put("a", value) }.stringify() }
+            assertEquals(wrap(ch.fasrv.fanotes.json.parseJson(annotations)), wrap(again), encoding)
+        }
     }
 
     @Test

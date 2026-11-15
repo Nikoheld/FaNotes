@@ -71,7 +71,7 @@ export function SortEditor({ data, onChange }: Props) {
       role="button"
       tabIndex={0}
       aria-pressed={selected === id}
-      className={`study-card ${selected === id ? 'is-selected' : ''} ${drag?.id === id && drag.moved ? 'is-dragging' : ''}`}
+      className={`lw-card ${selected === id ? 'is-selected' : ''} ${drag?.id === id && drag.moved ? 'is-dragging' : ''}`}
       onClick={(event) => event.stopPropagation()}
       onPointerDown={(event) => {
         if (event.button !== 0 && event.pointerType === 'mouse') return
@@ -108,38 +108,38 @@ export function SortEditor({ data, onChange }: Props) {
   }
 
   return (
-    <div className="study-editor">
-      <div className="study-actions">
-        <input className="study-title-input" aria-label="Titel" placeholder="Titel" value={data.title} onChange={(event) => onChange({ ...data, title: event.target.value })} />
+    <div className="lw-editor">
+      <div className="lw-actions">
+        <input className="lw-title-input" aria-label="Titel" placeholder="Titel" value={data.title} onChange={(event) => onChange({ ...data, title: event.target.value })} />
         <button type="button" className={`secondary-button ${data.mode === 'sequence' ? 'is-active' : ''}`} aria-pressed={data.mode === 'sequence'} onClick={() => onChange(setMode(data, data.mode === 'sequence' ? 'groups' : 'sequence'))}><ArrowLeftRight size={14} /> {data.mode === 'sequence' ? 'Reihenfolge' : 'Gruppen'}</button>
         <button type="button" className="secondary-button" onClick={() => onChange(shuffleCards(data))} title="Alle Karten mischen und zurück in den Stapel legen"><Shuffle size={14} /> Mischen</button>
       </div>
-      <div className="study-add">
+      <div className="lw-add">
         <textarea aria-label="Karten hinzufügen" rows={2} placeholder="Karten eingeben oder einfügen, eine pro Zeile (oder mit Komma getrennt)" value={draft} onChange={(event) => setDraft(event.target.value)} />
         <button type="button" className="primary-button" disabled={!parseCardList(draft).length} onClick={() => { onChange(addCards(data, parseCardList(draft))); setDraft('') }}><Plus size={14} /> Hinzufügen</button>
       </div>
-      <div className="study-board">
-        <div className={`study-pool-zone ${selected ? 'can-drop' : ''}`} data-drop-zone="pool" onClick={() => place(null)}>
-          <div className="study-group-title">Stapel ({pool.length})</div>
-          <div className="study-cards">{pool.map((entry) => card(entry.id))}</div>
+      <div className="lw-board">
+        <div className={`lw-pool-zone ${selected ? 'can-drop' : ''}`} data-drop-zone="pool" onClick={() => place(null)}>
+          <div className="lw-group-title">Stapel ({pool.length})</div>
+          <div className="lw-cards">{pool.map((entry) => card(entry.id))}</div>
         </div>
-        <div className="study-groups-zone">
+        <div className="lw-groups-zone">
           {data.groups.map((group) => (
-            <div key={group.id} className={`study-group ${selected ? 'can-drop' : ''}`} data-drop-zone={group.id} onClick={() => place(group.id)}>
-              <div className="study-group-title">
+            <div key={group.id} className={`lw-group ${selected ? 'can-drop' : ''}`} data-drop-zone={group.id} onClick={() => place(group.id)}>
+              <div className="lw-group-title">
                 {data.mode === 'groups'
                   ? <input aria-label="Gruppenname" value={group.title} placeholder="Gruppe" onClick={(event) => event.stopPropagation()} onChange={(event) => onChange({ ...data, groups: data.groups.map((entry) => (entry.id === group.id ? { ...entry, title: event.target.value } : entry)) })} />
                   : <span>{group.title || 'Reihenfolge'}</span>}
-                {data.mode === 'groups' && data.groups.length > 1 && <button type="button" className="study-icon-btn" aria-label="Gruppe löschen" title="Gruppe löschen" onClick={(event) => { event.stopPropagation(); onChange(removeGroup(data, group.id)) }}><X size={12} /></button>}
+                {data.mode === 'groups' && data.groups.length > 1 && <button type="button" className="lw-icon-btn" aria-label="Gruppe löschen" title="Gruppe löschen" onClick={(event) => { event.stopPropagation(); onChange(removeGroup(data, group.id)) }}><X size={12} /></button>}
               </div>
-              <div className="study-cards">{group.cards.map((id, index) => card(id, index))}</div>
+              <div className="lw-cards">{group.cards.map((id, index) => card(id, index))}</div>
             </div>
           ))}
-          {data.mode === 'groups' && <button type="button" className="secondary-button study-add-group" onClick={() => onChange(addGroup(data, `Gruppe ${data.groups.length + 1}`))}><Plus size={14} /> Gruppe</button>}
+          {data.mode === 'groups' && <button type="button" className="secondary-button lw-add-group" onClick={() => onChange(addGroup(data, `Gruppe ${data.groups.length + 1}`))}><Plus size={14} /> Gruppe</button>}
         </div>
       </div>
-      <p className="study-hint"><Trash2 size={12} /> Karten ziehen oder antippen und dann eine Gruppe antippen. Pfeiltasten verschieben die fokussierte Karte, Entf löscht sie.</p>
-      {drag?.moved && <div className="study-ghost" style={{ left: drag.x + 8, top: drag.y + 8 }}>{drag.text}</div>}
+      <p className="lw-hint"><Trash2 size={12} /> Karten ziehen oder antippen und dann eine Gruppe antippen. Pfeiltasten verschieben die fokussierte Karte, Entf löscht sie.</p>
+      {drag?.moved && <div className="lw-ghost" style={{ left: drag.x + 8, top: drag.y + 8 }}>{drag.text}</div>}
     </div>
   )
 }

@@ -51,9 +51,9 @@ export function KeyEditor({ data, onChange, onError }: Props) {
     if (!node || seen.has(id)) return null
     seen.add(id)
     return (
-      <li key={id} className={`study-node is-${node.kind}`} style={{ marginLeft: depth ? 14 : 0 }}>
-        <div className="study-node-row">
-          {label !== null && <input className="study-branch-label" aria-label="Zweig" placeholder="ja / nein" value={label} onChange={(event) => {
+      <li key={id} className={`lw-node is-${node.kind}`} style={{ marginLeft: depth ? 14 : 0 }}>
+        <div className="lw-node-row">
+          {label !== null && <input className="lw-branch-label" aria-label="Zweig" placeholder="ja / nein" value={label} onChange={(event) => {
             const parent = tree.nodes.find((entry) => entry.branches.some((branch) => branch.to === id))
             if (parent) patchNode(parent.id, { branches: parent.branches.map((branch) => (branch.to === id ? { ...branch, label: event.target.value } : branch)) })
           }} />}
@@ -62,8 +62,8 @@ export function KeyEditor({ data, onChange, onError }: Props) {
             <option value="leaf">Ergebnis</option>
           </select>
           <input aria-label={node.kind === 'leaf' ? 'Ergebnis' : 'Frage'} placeholder={node.kind === 'leaf' ? 'Art / Ordnung' : 'Frage oder Merkmal'} value={node.text} onChange={(event) => patchNode(id, { text: event.target.value })} />
-          {node.kind === 'question' && <button type="button" className="study-icon-btn" title="Zweig hinzufügen" aria-label="Zweig hinzufügen" onClick={() => onChange({ ...data, tree: addChild(tree, id, 'leaf', node.branches.length === 0 ? 'ja' : node.branches.length === 1 ? 'nein' : '') })}><Plus size={14} /></button>}
-          {id !== tree.root && <button type="button" className="study-icon-btn" title="Zweig löschen" aria-label="Zweig löschen" onClick={() => onChange({ ...data, tree: removeSubtree(tree, id) })}><Trash2 size={14} /></button>}
+          {node.kind === 'question' && <button type="button" className="lw-icon-btn" title="Zweig hinzufügen" aria-label="Zweig hinzufügen" onClick={() => onChange({ ...data, tree: addChild(tree, id, 'leaf', node.branches.length === 0 ? 'ja' : node.branches.length === 1 ? 'nein' : '') })}><Plus size={14} /></button>}
+          {id !== tree.root && <button type="button" className="lw-icon-btn" title="Zweig löschen" aria-label="Zweig löschen" onClick={() => onChange({ ...data, tree: removeSubtree(tree, id) })}><Trash2 size={14} /></button>}
         </div>
         {node.kind === 'question' && node.branches.length > 0 && <ul>{node.branches.map((branch) => renderNode(branch.to, depth + 1, branch.label, seen))}</ul>}
       </li>
@@ -71,23 +71,23 @@ export function KeyEditor({ data, onChange, onError }: Props) {
   }
 
   return (
-    <div className="study-editor">
-      <input className="study-title-input" aria-label="Titel" placeholder="Titel" value={data.title} onChange={(event) => onChange({ ...data, title: event.target.value })} />
-      <div className="study-tabs" role="tablist">
+    <div className="lw-editor">
+      <input className="lw-title-input" aria-label="Titel" placeholder="Titel" value={data.title} onChange={(event) => onChange({ ...data, title: event.target.value })} />
+      <div className="lw-tabs" role="tablist">
         {([['table', 'Tabelle'], ['key', 'Bestimmungsschlüssel'], ['compare', 'Vergleich']] as const).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'is-active' : ''} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
       {tab === 'table' && (
-        <div className="study-pane">
-          <div className="study-grid-scroll">
-            <table className="study-grid">
+        <div className="lw-pane">
+          <div className="lw-grid-scroll">
+            <table className="lw-grid">
               <thead>
                 <tr>
                   <th>Art</th>
                   {table.features.map((feature, index) => (
                     <th key={index}><input aria-label={`Merkmal ${index + 1}`} value={feature} onChange={(event) => setFeature(index, event.target.value)} />
-                      <button type="button" className="study-icon-btn" title="Merkmal löschen" aria-label={`Merkmal ${index + 1} löschen`} onClick={() => setTable({ features: table.features.filter((_, at) => at !== index), items: table.items.map((item) => ({ ...item, values: item.values.filter((_, at) => at !== index) })) })}><X size={12} /></button></th>
+                      <button type="button" className="lw-icon-btn" title="Merkmal löschen" aria-label={`Merkmal ${index + 1} löschen`} onClick={() => setTable({ features: table.features.filter((_, at) => at !== index), items: table.items.map((item) => ({ ...item, values: item.values.filter((_, at) => at !== index) })) })}><X size={12} /></button></th>
                   ))}
                   <th />
                 </tr>
@@ -97,20 +97,20 @@ export function KeyEditor({ data, onChange, onError }: Props) {
                   <tr key={item.id}>
                     <td><input aria-label={`Art ${row + 1}`} value={item.name} onChange={(event) => setTable({ ...table, items: table.items.map((entry, at) => (at === row ? { ...entry, name: event.target.value } : entry)) })} /></td>
                     {item.values.map((value, column) => <td key={column}><input aria-label={`${item.name || `Art ${row + 1}`}, ${table.features[column] || `Merkmal ${column + 1}`}`} value={value} onChange={(event) => setCell(row, column, event.target.value)} /></td>)}
-                    <td><button type="button" className="study-icon-btn" title="Zeile löschen" aria-label={`Zeile ${row + 1} löschen`} onClick={() => setTable({ ...table, items: table.items.filter((_, at) => at !== row) })}><Trash2 size={14} /></button></td>
+                    <td><button type="button" className="lw-icon-btn" title="Zeile löschen" aria-label={`Zeile ${row + 1} löschen`} onClick={() => setTable({ ...table, items: table.items.filter((_, at) => at !== row) })}><Trash2 size={14} /></button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <div className="study-actions">
+          <div className="lw-actions">
             <button type="button" className="secondary-button" onClick={addItem}><Plus size={14} /> Art</button>
             <button type="button" className="secondary-button" onClick={addFeature}><Plus size={14} /> Merkmal</button>
             <button type="button" className="secondary-button" onClick={() => setPasteOpen((open) => !open)}>Aus Text einfügen</button>
             <button type="button" className="primary-button" onClick={generate} title="Erzeugt einen Schlüssel aus den Merkmalen der Tabelle"><Wand2 size={14} /> Schlüssel erzeugen</button>
           </div>
           {pasteOpen && (
-            <div className="study-paste">
+            <div className="lw-paste">
               <p>Kopfzeile zuerst, Spalten mit Tab, Semikolon oder | trennen (Excel, Word, Markdown).</p>
               <textarea aria-label="Tabelle als Text" rows={5} value={pasteText} onChange={(event) => setPasteText(event.target.value)} />
               <button type="button" className="primary-button" onClick={applyPaste}>Übernehmen</button>
@@ -119,23 +119,23 @@ export function KeyEditor({ data, onChange, onError }: Props) {
         </div>
       )}
       {tab === 'key' && (
-        <div className="study-pane study-split">
-          <ul className="study-tree-editor">{renderNode(tree.root, 0, null, new Set())}</ul>
-          <div className="study-preview" dangerouslySetInnerHTML={{ __html: preview }} />
+        <div className="lw-pane lw-split">
+          <ul className="lw-tree-editor">{renderNode(tree.root, 0, null, new Set())}</ul>
+          <div className="lw-preview" dangerouslySetInnerHTML={{ __html: preview }} />
         </div>
       )}
       {tab === 'compare' && (
-        <div className="study-pane">
-          <div className="study-actions">
+        <div className="lw-pane">
+          <div className="lw-actions">
             <input ref={fileRef} type="file" accept="image/*" hidden onChange={(event) => { void pickImage(event.target.files?.[0]); event.target.value = '' }} />
             <button type="button" className="secondary-button" onClick={() => fileRef.current?.click()}><ImagePlus size={14} /> Vergleichsbild wählen</button>
-            <span className="study-hint">oder Bild hier einfügen (Strg+V) oder hineinziehen</span>
+            <span className="lw-hint">oder Bild hier einfügen (Strg+V) oder hineinziehen</span>
             {data.compareImage && <button type="button" className="secondary-button" onClick={() => onChange({ ...data, compareImage: '' })}>Entfernen</button>}
-            <input className="study-title-input" aria-label="Beschriftung des Vergleichsbilds" placeholder="z. B. Abb. 9 im Skript" value={data.compareLabel} onChange={(event) => onChange({ ...data, compareLabel: event.target.value })} />
+            <input className="lw-title-input" aria-label="Beschriftung des Vergleichsbilds" placeholder="z. B. Abb. 9 im Skript" value={data.compareLabel} onChange={(event) => onChange({ ...data, compareLabel: event.target.value })} />
           </div>
-          <div className="study-compare-view">
-            <div className="study-preview" dangerouslySetInnerHTML={{ __html: preview }} />
-            {data.compareImage ? <figure className="study-compare"><VaultImg src={data.compareImage} alt={data.compareLabel || 'Vergleichsbaum'} /><figcaption>{data.compareLabel}</figcaption></figure> : <div className="study-compare-empty">Kein Vergleichsbild</div>}
+          <div className="lw-compare-view">
+            <div className="lw-preview" dangerouslySetInnerHTML={{ __html: preview }} />
+            {data.compareImage ? <figure className="lw-compare"><VaultImg src={data.compareImage} alt={data.compareLabel || 'Vergleichsbaum'} /><figcaption>{data.compareLabel}</figcaption></figure> : <div className="lw-compare-empty">Kein Vergleichsbild</div>}
           </div>
         </div>
       )}

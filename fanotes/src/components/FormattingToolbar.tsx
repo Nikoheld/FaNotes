@@ -111,12 +111,12 @@ export const FormattingToolbar = memo(function FormattingToolbar({
         </button>
       ))}
       {onInsertStudy && (
-        <div className="study-insert-menu has-divider" ref={studyRef}>
-          <button type="button" aria-label="Lernwerkzeuge" aria-haspopup="menu" aria-expanded={studyOpen} disabled={disabled} title="Lernwerkzeuge: Tabelle und Schlüssel, Sortier-Board, Begriffsnetz, Bildtafel, Definitionen" onClick={() => setStudyOpen((open) => !open)}>
+        <div className="lw-insert-menu has-divider" ref={studyRef}>
+          <button type="button" aria-label="Lernblöcke einfügen" aria-haspopup="menu" aria-expanded={studyOpen} disabled={disabled} title="Lernwerkzeuge: Tabelle und Schlüssel, Sortier-Board, Begriffsnetz, Bildtafel, Definitionen" onClick={() => setStudyOpen((open) => !open)}>
             <GraduationCap aria-hidden="true" size={14} strokeWidth={2} />
           </button>
           {studyOpen && (
-            <div className="study-insert-popover" role="menu" aria-label="Lernwerkzeuge">
+            <div className="lw-insert-popover" role="menu" aria-label="Lernblöcke einfügen">
               {STUDY_KINDS.map((kind) => <button key={kind} type="button" role="menuitem" onClick={() => { setStudyOpen(false); onInsertStudy(kind) }}>{STUDY_KIND_LABELS[kind]}</button>)}
             </div>
           )}

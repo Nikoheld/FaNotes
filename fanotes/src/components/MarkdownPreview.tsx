@@ -202,7 +202,7 @@ function createComponents(onOpenLink?: MarkdownLinkHandler, resolveImage?: (src:
       const language = isValidElement<{ className?: string; children?: ReactNode }>(child) ? /language-fanotes-(key|sort|map|plate|term)\b/u.exec(child.props.className ?? '')?.[1] : undefined
       if (language && isValidElement<{ children?: ReactNode }>(child)) {
         const body = Children.toArray(child.props.children).map((part) => (typeof part === 'string' ? part : '')).join('')
-        return <div className="study-block markdown-study" ref={(node) => { if (node) hydrateVaultImages(node) }} dangerouslySetInnerHTML={{ __html: renderStudyBlockHtml(language as StudyKind, body) }} />
+        return <div className="lw-block markdown-lw" ref={(node) => { if (node) hydrateVaultImages(node) }} dangerouslySetInnerHTML={{ __html: renderStudyBlockHtml(language as StudyKind, body) }} />
       }
       return <pre className="markdown-code-block" tabIndex={0} {...props} />
     },

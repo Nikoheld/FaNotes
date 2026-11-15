@@ -577,13 +577,13 @@ class StudyBlockWidget extends WidgetType {
   eq(other: StudyBlockWidget) { return other.kind === this.kind && other.body === this.body && other.index === this.index }
   toDOM(view: EditorView) {
     const shell = document.createElement('div')
-    shell.className = `cm-study-shell study-block study-kind-${this.kind}`
+    shell.className = `cm-lw-shell lw-block lw-kind-${this.kind}`
     const content = document.createElement('div')
-    content.className = 'study-block-content'
+    content.className = 'lw-block-content'
     try { content.innerHTML = renderStudyBlockHtml(this.kind, this.body); hydrateVaultImages(content) } catch { content.textContent = 'Lernblock konnte nicht dargestellt werden.' }
     const edit = document.createElement('button')
     edit.type = 'button'
-    edit.className = 'cm-study-edit'
+    edit.className = 'cm-lw-edit'
     edit.textContent = 'Bearbeiten'
     edit.ariaLabel = `${STUDY_KIND_LABELS[this.kind]} bearbeiten`
     edit.addEventListener('click', (event) => {
@@ -642,11 +642,11 @@ const buildLivePreviewDecorations = (view: EditorView) => {
     if (isEditing) return
     for (let number = block.startLine; number <= block.endLine; number += 1) studyLines.add(number)
     const hostLine = view.state.doc.line(block.startLine)
-    decorations.push(Decoration.line({ attributes: { class: 'cm-study-host' } }).range(hostLine.from))
+    decorations.push(Decoration.line({ attributes: { class: 'cm-lw-host' } }).range(hostLine.from))
     decorations.push(Decoration.replace({ widget: new StudyBlockWidget(block.kind, block.body, index) }).range(hostLine.from, hostLine.to))
     for (let number = block.startLine + 1; number <= block.endLine; number += 1) {
       const hidden = view.state.doc.line(number)
-      decorations.push(Decoration.line({ attributes: { class: 'cm-study-hidden' } }).range(hidden.from))
+      decorations.push(Decoration.line({ attributes: { class: 'cm-lw-hidden' } }).range(hidden.from))
       if (hidden.to > hidden.from) decorations.push(Decoration.replace({}).range(hidden.from, hidden.to))
     }
   })

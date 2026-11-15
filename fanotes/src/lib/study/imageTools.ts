@@ -105,4 +105,4 @@ export const STUDY_EVENT = {
   openPanel: 'fanotes:study-open-panel',
 } as const
 
-export const studyModalOpen = () => typeof document !== 'undefined' && Boolean(document.querySelector('[data-study-modal]'))
+export const studyModalOpen = () => typeof document !== 'undefined' && Boolean(document.querySelector('[data-lw-modal]'))

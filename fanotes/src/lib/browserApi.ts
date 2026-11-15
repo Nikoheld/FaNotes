@@ -17,6 +17,7 @@ import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './sear
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
 import { parseNoteTextFields } from './noteTextField'
+import { parseAnnotations } from '../../electron/noteAnnotation.mjs'
 import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
 import { isPaperStyle } from './paperStyles'
 import { browserInitialFiles, browserStarterFolders, browserStarterSubjects } from './browserPreview'
@@ -888,6 +889,12 @@ export function createBrowserApi(): FaNotesApi {
       if (!record) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
       return parseFamd(record.content).markdown
     },
+    readNotePageStats: async (rawPath) => {
+      await ready
+      const logical = resolveStored(normalizePath(rawPath), false)
+      const source = files.get(companionNotePath(logical, '.famd'))?.content ?? files.get(logical)?.content ?? ''
+      try { return parseFamd(source).payload?.pageStats ?? null } catch { return null }
+    },
     readAssetDataUrl: async (rawPath) => {
       await ready
       const path = resolveStored(normalizePath(rawPath), false)
@@ -1583,6 +1590,7 @@ export function createBrowserApi(): FaNotesApi {
         noteLinks: payload?.noteLinks ?? [],
         noteBackups: payload?.noteBackups ?? [],
         textFields: payload?.textFields ?? [],
+        annotations: payload?.annotations ?? [],
       }
     },
     readNotePaperStyle: async (rawPath) => {
@@ -1656,6 +1664,28 @@ export function createBrowserApi(): FaNotesApi {
       files.set(famdPath, record)
       cachedTree = null
       return backups
+    },
+    writeNoteAnnotations: async (rawPath, rawList) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const list = parseAnnotations(rawList)
+      const famdPath = companionNotePath(path, '.famd')
+      const existing = files.get(famdPath)
+      const parsed = parseFamd(existing?.content ?? '')
+      const payload = {
+        ...(parsed.payload || emptyFamdPayload()),
+        updatedAt: new Date().toISOString(),
+        annotations: list,
+      }
+      const record = {
+        path: famdPath,
+        content: serializeFamd(parsed.markdown, payload, famdEncodingForSave(existing?.content ?? '')),
+        modifiedAt: new Date().toISOString(),
+      }
+      await write('files', (store) => { store.put(record) })
+      files.set(famdPath, record)
+      cachedTree = null
+      return list
     },
     writeNoteTextFields: async (rawPath, rawFields) => {
       await ready

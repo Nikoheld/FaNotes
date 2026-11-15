@@ -10,5 +10,5 @@ export function VaultImg({ src, alt = '', ...props }: { src: string } & ImgHTMLA
     void resolveStudyImage(src).then((value) => { if (live) setUrl(value) }).catch(() => undefined)
     return () => { live = false }
   }, [src])
-  return url ? <img {...props} alt={alt} src={url} /> : <div className={`${props.className ?? ''} study-plate-empty`.trim()} role="img" aria-label={alt} />
+  return url ? <img {...props} alt={alt} src={url} /> : <div className={`${props.className ?? ''} lw-plate-empty`.trim()} role="img" aria-label={alt} />
 }
