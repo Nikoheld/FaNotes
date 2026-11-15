@@ -213,7 +213,7 @@ const probe = `<!doctype html>
       await frame()
       const path = 'Bench/Book-' + PAGES + '.pdf'
       const started = performance.now()
-      const { pdf } = await openPdfDocument(await loadVaultPdfBytes(path))
+      const { pdf, task } = await openPdfDocument(await loadVaultPdfBytes(path))
       const ratio = 842 / 595
       const painted = new Set()
       const painters = new Map()
@@ -262,7 +262,7 @@ const probe = `<!doctype html>
       }
       observer.disconnect()
       for (const host of hosts) unmount(host)
-      await pdf.destroy()
+      await task.destroy()
       deltas.sort((a, b) => a - b)
       const q = (p) => deltas[Math.min(deltas.length - 1, Math.floor(p * deltas.length))]
       return {
