@@ -829,7 +829,7 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("fanotes"));
             app.manage(HostState(Mutex::new(Host::open(app_data))));
-            smoke::arm();
+            smoke::arm(app.handle());
             if let Some(window) = app.get_webview_window("main") {
                 install_webview_guards(&window, true);
                 install_main_window_reveal(&window);

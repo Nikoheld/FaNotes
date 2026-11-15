@@ -6,6 +6,10 @@
 //! the host answered. Without the signal within `FANOTES_SMOKE_TIMEOUT_SECS`
 //! (default 120) the process exits with status 3. Without the variable
 //! nothing changes. CI runs the installed packages this way.
+//!
+//! The messages go to stderr and, when `FANOTES_SMOKE_LOG` names a file, are
+//! appended there too (a Windows release build has no console). The log also
+//! lists the commands the page invoked, so a timeout shows how far it got.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -14,11 +18,30 @@ use tauri::Manager;
 
 pub const ENV: &str = "FANOTES_SMOKE_TEST";
 pub const TIMEOUT_ENV: &str = "FANOTES_SMOKE_TIMEOUT_SECS";
+pub const LOG_ENV: &str = "FANOTES_SMOKE_LOG";
 pub const TIMEOUT_EXIT_CODE: i32 = 3;
 const READY_COMMAND: &str = "fanotes:renderer-ready";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 
 static REPORTED: AtomicBool = AtomicBool::new(false);
+
+fn say(message: &str) {
+    eprintln!("FaNotes smoke test: {message}");
+    if let Some(path) = std::env::var_os(LOG_ENV) {
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(
+                file,
+                "[{:>6} ms] {message}",
+                started().elapsed().as_millis()
+            );
+        }
+    }
+}
 
 fn started() -> Instant {
     static STARTED: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
@@ -42,23 +65,28 @@ fn timeout_from(value: Option<&str>) -> Duration {
 }
 
 /// Start the timeout. Called once from `setup`.
-pub fn arm() {
+pub fn arm(app: &tauri::AppHandle) {
     if !enabled() {
         return;
     }
+    let app = app.clone();
     let begun = started();
     let limit = timeout_from(std::env::var(TIMEOUT_ENV).ok().as_deref());
-    eprintln!(
-        "FaNotes smoke test: waiting up to {} s for the renderer.",
+    say(&format!(
+        "waiting up to {} s for the renderer.",
         limit.as_secs()
-    );
+    ));
     std::thread::spawn(move || {
         std::thread::sleep(limit.saturating_sub(begun.elapsed()));
         if !REPORTED.load(Ordering::Acquire) {
-            eprintln!(
-                "FaNotes smoke test: the renderer did not report ready within {} s.",
-                limit.as_secs()
-            );
+            let window = app.get_webview_window("main");
+            let visible = window.as_ref().and_then(|window| window.is_visible().ok());
+            let url = window.as_ref().and_then(|window| window.url().ok());
+            say(&format!(
+                "the renderer did not report ready within {} s (main window visible: {visible:?}, url: {}).",
+                limit.as_secs(),
+                url.map(|url| url.to_string()).unwrap_or_default()
+            ));
             std::process::exit(TIMEOUT_EXIT_CODE);
         }
     });
@@ -74,15 +102,18 @@ where
         started();
     }
     move |invoke| {
+        if enabled {
+            say(&format!("invoke {}", invoke.message.command()));
+        }
         let app = (enabled && invoke.message.command() == READY_COMMAND)
             .then(|| invoke.message.webview().app_handle().clone());
         let handled = handler(invoke);
         if let Some(app) = app {
             if !REPORTED.swap(true, Ordering::AcqRel) {
-                eprintln!(
-                    "FaNotes smoke test: the renderer was ready after {} ms.",
+                say(&format!(
+                    "the renderer was ready after {} ms.",
                     started().elapsed().as_millis()
-                );
+                ));
                 finish(app);
             }
         }
