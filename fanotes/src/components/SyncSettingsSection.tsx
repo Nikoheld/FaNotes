@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react'
 import { getUiLocale } from '../i18n'
 import { MCP_CONNECTOR_NAME, mcpServerUrl, type McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
-import { diffLines, isMarkdownConflictPath, resolveMarkdownConflict, type ConflictChoice } from '../lib/sync/markdownConflict'
 import { syncStatusLabel } from '../lib/sync/status'
 import type { AppSettings } from '../types'
 
@@ -15,6 +14,8 @@ type Props = {
   platform?: string
   grants: McpGrantInfo[]
   onGrants: (grants: McpGrantInfo[]) => void
+  /** Opens Settings → Konflikte. */
+  onOpenConflicts?: () => void
 }
 
 type Notice = { kind: 'success' | 'error'; text: string } | null
@@ -28,7 +29,7 @@ const formatWhen = (iso: string | null) => {
   return date.toLocaleString(getUiLocale(), { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-export function SyncSettingsSection({ engine, syncState, settings, update, platform, grants, onGrants }: Props) {
+export function SyncSettingsSection({ engine, syncState, settings, update, platform, grants, onGrants, onOpenConflicts }: Props) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -43,7 +44,6 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
   const [logOpen, setLogOpen] = useState(false)
   const [connectorPassword, setConnectorPassword] = useState('')
   const connectorUrl = mcpServerUrl()
-  const [review, setReview] = useState<{ path: string; copyPath: string; remote: string; local: string } | null>(null)
   const signedIn = Boolean(syncState.account)
   const unavailable = syncState.status === 'unavailable'
 
@@ -250,43 +250,18 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
             ))}
           </div>
 
-          {syncState.conflicts.length > 0 && (
+          {syncState.openConflicts > 0 && (
             <div id="settings-sync-conflicts" className="setting-card">
-              <div className="setting-card-title"><TriangleAlert size={16} /><span>Konfliktkopien</span><button type="button" className="sync-card-action" onClick={() => engine.clearConflicts()}>Liste leeren</button></div>
-              {syncState.conflicts.slice().reverse().map((conflict) => (
-                <div key={`${conflict.copyPath}-${conflict.at}`} className="setting-row">
-                  <div className="setting-copy"><span data-i18n-ignore>{conflict.path}</span><small>Lokale Fassung gesichert als „{conflict.copyPath}“ · {formatWhen(conflict.at)}</small></div>
-                  {isMarkdownConflictPath(conflict.path) && (
-                    <div className="setting-control">
-                      <button type="button" className="secondary-button" onClick={() => void (async () => {
-                        const [remote, local] = await Promise.all([
-                          window.fanotes.readFile(conflict.path),
-                          window.fanotes.readFile(conflict.copyPath),
-                        ])
-                        setReview({ path: conflict.path, copyPath: conflict.copyPath, remote, local })
-                      })()}>Vergleichen</button>
-                    </div>
-                  )}
+              <div className="setting-card-title"><TriangleAlert size={16} /><span>Konflikte</span></div>
+              <div className="setting-row">
+                <div className="setting-copy">
+                  <span>{syncState.openConflicts === 1 ? 'Eine Datei hat zwei Fassungen' : `${syncState.openConflicts} Dateien haben zwei Fassungen`}</span>
+                  <small>Beide Fassungen sind gesichert. Vergleiche sie und entscheide, welche auf allen Geräten gilt.</small>
                 </div>
-              ))}
-              {review && (
-                <div className="sync-conflict-review">
-                  <p>Markdown-Konflikt. Die Serverfassung behält den Pfad, die lokale Fassung liegt in der Kopie. Binärdateien bleiben Kopien.</p>
-                  <pre>{diffLines(review.local, review.remote).slice(0, 80).map((row) => `${row.kind === 'added' ? '+' : row.kind === 'removed' ? '-' : ' '} ${row.text}`).join('\n')}</pre>
-                  <div className="sync-form-actions">
-                    {(['remote', 'local', 'both'] as ConflictChoice[]).map((choice) => (
-                      <button key={choice} type="button" className="secondary-button" onClick={() => void (async () => {
-                        const next = resolveMarkdownConflict(review.remote, review.local, choice)
-                        await window.fanotes.writeFile(review.path, next)
-                        if (choice !== 'local') await window.fanotes.trashEntry(review.copyPath).catch(() => undefined)
-                        engine.dismissConflict(review.copyPath)
-                        setReview(null)
-                        setNotice({ kind: 'success', text: choice === 'both' ? 'Beide Fassungen wurden zusammengeführt.' : choice === 'local' ? 'Die lokale Fassung behält den Pfad.' : 'Die Serverfassung bleibt.' })
-                      })()}>{choice === 'remote' ? 'Serverfassung behalten' : choice === 'local' ? 'Lokale Fassung behalten' : 'Zusammenführen'}</button>
-                    ))}
-                  </div>
+                <div className="setting-control">
+                  <button type="button" className="secondary-button" onClick={() => onOpenConflicts?.()}>Vergleichen</button>
                 </div>
-              )}
+              </div>
             </div>
           )}
 
