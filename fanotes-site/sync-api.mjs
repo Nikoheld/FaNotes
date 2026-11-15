@@ -961,6 +961,10 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   const collapse = currentSize >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < currentSize)
   const directory = revisionsDirectory(accountId, fileId)
   await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+  // Link the new archive directory before the previous note is copied into it.
+  // A crash after the live blob is replaced must not drop that directory.
+  await syncDirectory(dirname(dirname(directory)))
+  await syncDirectory(dirname(directory))
   const before = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
   const name = `${collapse ? 'c-' : ''}${current.revision}`
   const dest = safeJoin(directory, name)
