@@ -358,6 +358,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   experimentalRemoteSupport: false,
   experimentalNoteBackup: false,
   experimentalSendData: false,
+  diagnosticsUsage: false,
+  diagnosticsLogs: false,
   lastOpenNotePath: '',
   dashboardLayout: '',
   homeworkApiChannelId: '',

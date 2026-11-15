@@ -226,6 +226,7 @@ import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSqua
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { flushPaperViewMemory } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
+import { configureDiagnostics, markStartupReady, recordFeature, sendDailyIfDue, setDiagnosticsVault } from './lib/diagnosticsClient'
 import {
   collectSendDataNutzerdaten,
   linuxHyprlandRuntimeContext,
@@ -4544,6 +4545,27 @@ export default function App({ startupBootstrap }: AppProps) {
       window.clearInterval(timer)
     }
   }, [remoteSupportSession, settings.experimentalRemoteSupport])
+
+  // Opt-in diagnostics: counters and the daily report run only while a toggle is on.
+  useEffect(() => {
+    configureDiagnostics({ usage: settings.diagnosticsUsage, logs: settings.diagnosticsLogs }, { vaultPath: bootstrap?.vaultPath })
+    if (!settings.diagnosticsUsage && !settings.diagnosticsLogs) return undefined
+    const first = window.setTimeout(() => { void sendDailyIfDue() }, 90_000)
+    const timer = window.setInterval(() => { void sendDailyIfDue() }, 3_600_000)
+    return () => { window.clearTimeout(first); window.clearInterval(timer) }
+  }, [settings.diagnosticsUsage, settings.diagnosticsLogs, bootstrap?.vaultPath])
+
+  useEffect(() => {
+    if (!bootstrap) return
+    markStartupReady()
+    let notes = 0
+    let bytes = 0
+    const walk = (entries: VaultEntry[]) => { for (const entry of entries) { if (entry.kind === 'folder') walk(entry.children ?? []); else { notes += 1; bytes += entry.size ?? 0 } } }
+    walk(tree)
+    setDiagnosticsVault(notes, bytes)
+  }, [bootstrap, tree])
+
+  useEffect(() => { if (settingsOpen) recordFeature(`view.settings-${settingsSection ?? 'open'}`) }, [settingsOpen, settingsSection])
 
   useEffect(() => {
     if (overviewOpen || glyphenWerkOpen) setSidebarToolsOpen(true)

@@ -888,6 +888,12 @@ export function createBrowserApi(): FaNotesApi {
       if (!record) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
       return parseFamd(record.content).markdown
     },
+    readNotePageStats: async (rawPath) => {
+      await ready
+      const logical = resolveStored(normalizePath(rawPath), false)
+      const source = files.get(companionNotePath(logical, '.famd'))?.content ?? files.get(logical)?.content ?? ''
+      try { return parseFamd(source).payload?.pageStats ?? null } catch { return null }
+    },
     readAssetDataUrl: async (rawPath) => {
       await ready
       const path = resolveStored(normalizePath(rawPath), false)
