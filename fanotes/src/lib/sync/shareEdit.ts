@@ -262,6 +262,8 @@ export const applyRemoteTextFields = (
       width: field.width,
       fontSize: field.fontSize,
       text: field.text,
+      ...(existing?.color ? { color: existing.color } : {}),
+      ...(existing?.bold ? { bold: true } : {}),
     }
   })
 }

@@ -149,17 +149,22 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   const DISK_LIMIT = 40
   let disk = { entries: [] }
   let diskLoading = null
+  let diskBlocked = false
   const loadDisk = () => {
     if (!routeFile) return Promise.resolve()
     if (!diskLoading) {
       diskLoading = (async () => {
         try {
           const parsed = JSON.parse(await fs.readFile(routeFile, 'utf8'))
+          // A missing or broken file can start again. A file that is there but not this timetable must not look empty, or the next route replaces it.
           if (parsed?.version === 1 && Array.isArray(parsed.entries)) {
             disk.entries = parsed.entries.filter((entry) => (
               entry && typeof entry.key === 'string' && entry.key.startsWith('route:') && entry.key.length <= 300
               && Number.isFinite(entry.at) && entry.value && Array.isArray(entry.value.trips)
             )).slice(-DISK_LIMIT)
+            diskBlocked = false
+          } else {
+            diskBlocked = true
           }
         } catch (error) {
           if (error?.code === 'ENOENT' || error instanceof SyntaxError) return
@@ -178,6 +183,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
       if (!routeFile || !key.startsWith('route:') || !Array.isArray(value?.trips) || !value.trips.length) return
       // Leave an unreadable timetable file as it is. The live answer is still returned.
       try { await loadDisk() } catch { return }
+      if (diskBlocked) return
       disk.entries = [...disk.entries.filter((entry) => entry.key !== key), { key, at, value }].slice(-DISK_LIMIT)
       const temporary = `${routeFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
       try {

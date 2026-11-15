@@ -1483,13 +1483,20 @@ class InkSurfaceView @JvmOverloads constructor(
             canvas.drawRoundRect(sx, sy, sx + boxWidth, sy + boxHeight, 6f * density, 6f * density, cardEdge)
             cardEdge.alpha = edgeAlpha
             cardFill.color = Color.WHITE
-            textPaint.color = if (field.text.isEmpty()) Color.parseColor("#747887") else Color.parseColor("#20222B")
+            textPaint.color = when {
+                field.text.isEmpty() -> Color.parseColor("#747887")
+                field.color != null -> Color.parseColor(field.color)
+                else -> Color.parseColor("#20222B")
+            }
+            val regularFace = textPaint.typeface
+            if (field.bold) textPaint.typeface = android.graphics.Typeface.create(regularFace, android.graphics.Typeface.BOLD)
             textPaint.textSize = fontSize
             var baseline = sy + 6f * scale + fontSize
             for (line in lines) {
                 canvas.drawText(line, sx + 8f * scale, baseline, textPaint)
                 baseline += lineHeight
             }
+            textPaint.typeface = regularFace
             textPaint.color = Color.parseColor("#252630")
         }
         linkMarks.forEach { link ->

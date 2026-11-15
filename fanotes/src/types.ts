@@ -75,6 +75,14 @@ export type HandwritingRecognitionResources = {
   characters: string[]
 }
 
+export type LocalMcpInfo = {
+  httpRunning: boolean
+  httpUrl: string
+  httpToken: string
+  httpError: string
+  stdio: { packaged: boolean; appImage: string; execPath: string; entryPath: string; platform: string; userData: string }
+}
+
 export type AppSettings = {
   uiLanguage: UiLanguagePreference
   theme: ThemeMode
@@ -111,6 +119,10 @@ export type AppSettings = {
   syncDeviceName: string
   /** Newline-separated vault folders that stay on this device. */
   syncExcludedFolders: string
+  mcpEnabled: boolean
+  mcpWriteAccess: boolean
+  mcpHttpEnabled: boolean
+  mcpExcludedFolders: string
   /** Upload the personal handwriting model as its own encrypted file. */
   syncHandwritingModel: boolean
   /** Also synchronise the local note-history folder. */
@@ -185,6 +197,10 @@ export type AppSettings = {
   experimentalNoteBackup: boolean
   /** Experimental: ongoing batched diagnostics to fasrv. Off by default. */
   experimentalSendData: boolean
+  /** Opt-in: anonymous usage statistics, at most once a day. Off by default. */
+  diagnosticsUsage: boolean
+  /** Opt-in: scrubbed error logs with the daily report. Off by default. */
+  diagnosticsLogs: boolean
   /** Last opened note path. Restored on launch when the file still exists. */
   lastOpenNotePath: string
   /** Persisted start-dashboard cards. Empty means the default clock, date, note, and subject. */
@@ -711,6 +727,8 @@ export type FaNotesApi = {
     expiresAt?: number
     rotated?: boolean
   } | null>
+  /** Local MCP server (Electron only): connection info for Settings → KI-Zugriff (MCP). */
+  mcpLocal?: (request: { action: 'info' | 'regenerate' }) => Promise<LocalMcpInfo>
   loadSecureSettings?: () => Promise<Partial<AppSettings>>
   saveSettings: (settings: AppSettings, options?: { clearProtectedSecrets?: boolean }) => Promise<AppSettings>
   getServerBackupState?: () => Promise<ServerBackupState>
@@ -738,6 +756,8 @@ export type FaNotesApi = {
   addons?: AddonsHostApi
   sync?: SyncHostApi
   /** An editable share opened from fanotes://share/<id>. Missing until the desktop build that registers the protocol. */
+  /** Files added, changed or removed outside FaNotes. Desktop only. */
+  onVaultChanged?: (callback: (change: { added: string[]; removed: string[]; changed: string[] }) => void) => () => void
   onShareOpen?: (callback: (id: string) => void) => () => void
   platform: string
 }

@@ -133,6 +133,7 @@ function sanitizeNoteTextField(value) {
   const y = Number(value.y)
   const width = Number(value.width)
   const fontSize = Number(value.fontSize)
+  const color = typeof value.color === 'string' && /^#[0-9a-f]{6}$/iu.test(value.color) ? value.color.toLowerCase() : null
   return {
     id: typeof value.id === 'string' && TEXT_FIELD_ID.test(value.id) ? value.id : `tf-${Date.now().toString(36)}`,
     page: Number.isSafeInteger(page) && page >= 1 && page <= 10000 ? page : 1,
@@ -141,6 +142,8 @@ function sanitizeNoteTextField(value) {
     width: Number.isFinite(width) ? Math.min(0.92, Math.max(0.12, width)) : 0.32,
     fontSize: Number.isSafeInteger(fontSize) && fontSize >= 10 && fontSize <= 48 ? fontSize : 16,
     text: typeof value.text === 'string' ? value.text.slice(0, TEXT_FIELD_MAX_CHARS) : '',
+    ...(color ? { color } : {}),
+    ...(value.bold === true ? { bold: true } : {}),
   }
 }
 
