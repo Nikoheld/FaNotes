@@ -172,6 +172,43 @@ test('a restart serves the last stored timetable when the source is down', async
   }
 })
 
+test('two timetables saved together both stay on disk', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-disk-pair-'))
+  const routeFile = join(root, 'commute-routes.json')
+  let waiting = 0
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const fetchImpl = async () => {
+    waiting += 1
+    if (waiting >= 2) release()
+    await gate
+    return ok(fixture)
+  }
+  try {
+    const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, routeFile, log: () => {} })
+    const second = { from: BRUGG, to: LENZBURG, vias: [], at: ASK_AT, timeType: 'depart' }
+    const [left, right] = await Promise.all([provider.trips(query), provider.trips(second)])
+    assert.ok(left.trips.length > 0)
+    assert.ok(right.trips.length > 0)
+    const stored = JSON.parse(await readFile(routeFile, 'utf8'))
+    assert.equal(stored.entries.length, 2)
+    const restarted = createCommuteProvider({
+      fetchImpl: async () => { throw Object.assign(new Error('down'), { name: 'TimeoutError' }) },
+      now: () => new Date(ASK_AT + 60_000),
+      sleep: async () => {},
+      routeFile,
+      log: () => {},
+    })
+    const again = await Promise.all([restarted.trips(query), restarted.trips(second)])
+    assert.equal(again[0].stale, true)
+    assert.equal(again[1].stale, true)
+    assert.equal(again[0].trips[0].legs[0].line, 'IR 16')
+    assert.equal(again[1].trips[0].legs[0].line, 'IR 16')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('timetable requests are logged as JSON without the query, a token, or a cookie', async () => {
   assert.equal(requestIdFrom('req-1234.ok'), 'req-1234.ok')
   const generated = requestIdFrom('short')
