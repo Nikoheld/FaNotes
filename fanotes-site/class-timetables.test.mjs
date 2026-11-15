@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { createServer } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -412,6 +412,42 @@ test('admin route: token hash, origin, content type, rate limit, upload and inde
     for (let n = 0; n < 10; n += 1) assert.equal((await admin(env.base, 'GET', { token: `bad${n}`, ip: '203.0.113.9' })).status, 401)
     assert.equal((await admin(env.base, 'GET', { ip: '203.0.113.9' })).status, 429)
     assert.equal((await admin(env.base, 'GET', { ip: '203.0.113.10' })).status, 200)
+  } finally {
+    await env.close()
+  }
+})
+
+test('an oversized timetable upload is refused before the rest of the file is read', async () => {
+  const env = await startServer()
+  try {
+    const url = new URL(`${env.base}/api/v1/kanti-web/admin/timetable-pdf`)
+    const result = await new Promise((resolve) => {
+      let settled = false
+      const done = (value) => { if (!settled) { settled = true; resolve(value) } }
+      const req = httpRequest({
+        hostname: '127.0.0.1',
+        port: url.port,
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'X-Forwarded-Host': WEB,
+          Authorization: `Bearer ${TOKEN}`,
+          Origin: ORIGIN,
+          'Content-Type': 'application/pdf',
+          'Content-Length': String(30 * 1024 * 1024),
+        },
+      }, (res) => {
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('end', () => setTimeout(() => done({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8'), destroyed: req.destroyed }), 50))
+      })
+      req.on('error', () => done({ status: 0, body: '', destroyed: req.destroyed }))
+      req.write(Buffer.alloc(1024, 1))
+      setTimeout(() => done({ status: 0, body: '', destroyed: req.destroyed }), 2000)
+    })
+    assert.equal(result.status, 413)
+    assert.equal(JSON.parse(result.body).error, 'Die Datei ist zu gross (höchstens 25 MB).')
+    assert.equal(result.destroyed, true)
   } finally {
     await env.close()
   }

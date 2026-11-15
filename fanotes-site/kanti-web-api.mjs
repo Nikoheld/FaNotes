@@ -49,6 +49,12 @@ const webError = (status, message) => {
   return error
 }
 const fail = (status, message) => { throw webError(status, message) }
+// The response is sent by the caller. The request is closed after that, so the rest of the body is not read.
+const failLarge = (request, message) => {
+  const error = webError(413, message)
+  error.releaseRequest = request
+  throw error
+}
 const BAD_QUERY = 'Ungültige Anfrage.'
 const REVEAL_ID = /^[A-Za-z0-9_-]{1,64}$/u
 const ROUTE_ID = /^[a-f0-9]{12}$/u
@@ -659,11 +665,12 @@ export const createKantiWebApi = (options = {}) => {
   }
 
   const readBody = async (request) => {
+    if (Number(request.headers['content-length']) > MAX_BODY) failLarge(request, 'Die Anfrage ist zu gross.')
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > MAX_BODY) fail(413, 'Die Anfrage ist zu gross.')
+      if (size > MAX_BODY) failLarge(request, 'Die Anfrage ist zu gross.')
       chunks.push(chunk)
     }
     if (!chunks.length) return {}
@@ -677,12 +684,12 @@ export const createKantiWebApi = (options = {}) => {
 
 
   const readRaw = async (request, limit) => {
-    if (Number(request.headers['content-length']) > limit) fail(413, 'Die Datei ist zu gross (höchstens 25 MB).')
+    if (Number(request.headers['content-length']) > limit) failLarge(request, 'Die Datei ist zu gross (höchstens 25 MB).')
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > limit) fail(413, 'Die Datei ist zu gross (höchstens 25 MB).')
+      if (size > limit) failLarge(request, 'Die Datei ist zu gross (höchstens 25 MB).')
       chunks.push(chunk)
     }
     return Buffer.concat(chunks)
@@ -1201,6 +1208,8 @@ export const createKantiWebApi = (options = {}) => {
       if (status >= 500) log('warn', `Anfrage fehlgeschlagen (${error?.name || 'error'})`)
       const cookies = status === 401 ? [clearCookie(SESSION_COOKIE)] : []
       send(response, status, { error: error?.publicMessage || 'Kanti+ ist vorübergehend nicht erreichbar.' }, cookies)
+      const release = error?.releaseRequest
+      if (release && typeof release.destroy === 'function') response.on('finish', () => release.destroy())
     }
     return true
   }
