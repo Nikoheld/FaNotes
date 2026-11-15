@@ -45,6 +45,16 @@ test('a health check does not wait for a share that never answers', async () => 
   assert.equal(await cache.get('stable', 30), null)
 })
 
+test('a second health check does not wait again while the share is still silent', async () => {
+  const cache = createReleaseCache(() => new Promise(() => {}), 5_000, () => 0)
+  const first = Date.now()
+  assert.equal(await cache.get('stable', 40), null)
+  assert.ok(Date.now() - first >= 30)
+  const second = Date.now()
+  assert.equal(await cache.get('stable', 40), null)
+  assert.ok(Date.now() - second < 25)
+})
+
 test('the first load failure is visible', async () => {
   const cache = createReleaseCache(async () => { throw new Error('share down') }, 10, () => 0)
   await assert.rejects(cache.get(), /share down/)
