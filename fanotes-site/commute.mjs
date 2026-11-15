@@ -445,7 +445,15 @@ export const createCommute = (options = {}) => {
     return run
   }
 
-  const readJson = async (path) => { try { return JSON.parse(await fs.readFile(path, 'utf8')) } catch { return null } }
+  const readJson = async (path) => {
+    try {
+      return JSON.parse(await fs.readFile(path, 'utf8'))
+    } catch (error) {
+      // A missing or broken file can start again. A read error must not look empty, or the next save replaces the route.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
+  }
   const writeJson = async (path, value) => {
     const temp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
     await fs.mkdir(resolve(path, '..'), { recursive: true, mode: 0o700 })
