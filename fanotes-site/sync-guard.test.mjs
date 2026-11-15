@@ -277,6 +277,20 @@ test('a stale base revision is rejected and the body stays', async () => {
   assert.deepEqual((await readFile(id)).body, original)
 })
 
+test('a replaced note is flushed to the archive before the live blob changes', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const next = randomBytes(5000)
+  const replaced = await putFile(id, next, revision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  const archived = readFileSync(join(dataDirectory, 'accounts', accountId, 'revisions', id, String(revision)))
+  assert.deepEqual(archived, original)
+  assert.deepEqual((await readFile(id)).body, next)
+})
+
 test('an explicit clear keeps the previous blob in the revision archive', async () => {
   const id = randomBytes(32).toString('hex')
   const original = randomBytes(5000)

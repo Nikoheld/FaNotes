@@ -837,7 +837,7 @@ const listRevisionFiles = async (directory) => {
 const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) => {
   if (!current || current.deleted) return 0
   const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
-  const stat = await fs.stat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  const stat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
   if (!stat?.isFile()) return 0
   const collapse = stat.size >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < stat.size)
   const directory = revisionsDirectory(accountId, fileId)
@@ -847,6 +847,20 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   const dest = safeJoin(directory, name)
   if (move) await fs.rename(blobPath, dest)
   else await fs.copyFile(blobPath, dest)
+  // The caller deletes or replaces the live blob after this returns. The copy
+  // has to be on disk first, or a crash loses the only copy of the note.
+  const archived = await fs.open(dest, 'r+')
+  try {
+    await archived.sync()
+  } finally {
+    await archived.close()
+  }
+  const directoryHandle = await fs.open(directory, 'r')
+  try {
+    await directoryHandle.sync()
+  } finally {
+    await directoryHandle.close()
+  }
   const files = await listRevisionFiles(directory)
   const keep = revisionNamesToKeep(files, MAX_REVISIONS_KEPT, nextSize)
   for (const file of files) {
