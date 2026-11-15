@@ -382,6 +382,42 @@ try {
   await C.engine.syncNow()
   assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.')
 
+  // A large first sync runs into the server's request budget (HTTP 429). That is a pause, not
+  // an error: no error state, and the cycle goes on by itself after the server's retryAfter,
+  // even with automatic sync off.
+  {
+    const realFetch = globalThis.fetch
+    let throttle = true
+    globalThis.fetch = (input, init) => {
+      if (throttle && String(input).includes('/api/v1/sync/') && !String(input).endsWith('/prelogin')) {
+        throttle = false
+        return Promise.resolve(new Response(JSON.stringify({ error: 'Zu viele Anfragen. Bitte später erneut versuchen.', retryAfter: 1 }), { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '1' } }))
+      }
+      return realFetch(input, init)
+    }
+    try {
+      hostA.put('Mathe/Gedrosselt.md', '# Gedrosselt')
+      await A.engine.syncNow()
+      const paused = A.engine.getState()
+      assert.equal(paused.status, 'idle', 'throttling is not an error')
+      assert.equal(paused.error, null)
+      assert.ok(paused.log.some((entry) => /bremst kurz/u.test(entry.text)), 'the pause is logged')
+      let calls = 0
+      const counting = globalThis.fetch
+      globalThis.fetch = (input, init) => { calls += 1; return counting(input, init) }
+      await A.engine.syncNow('focus')
+      assert.equal(calls, 0, 'automatic triggers wait while the server throttles')
+      for (let waited = 0; waited < 4_000 && A.engine.getState().lastSyncAt === paused.lastSyncAt; waited += 100) await new Promise((resolve) => setTimeout(resolve, 100))
+      assert.notEqual(A.engine.getState().lastSyncAt, paused.lastSyncAt, 'the cycle resumed by itself after retryAfter')
+      assert.ok(calls > 0)
+      await C.engine.syncNow()
+      assert.equal(hostB.text('Mathe/Gedrosselt.md'), '# Gedrosselt', 'the resumed cycle uploaded the note')
+      assert.equal(A.engine.getState().status, 'idle', A.engine.getState().error)
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
+
   // Password change re-wraps the same vault secret; other sessions are signed out.
   await A.engine.changePassword('korrektes pferd batterie', 'neues sicheres passwort 42')
   await assert.rejects(A.engine.changePassword('korrektes pferd batterie', 'irgendwas anderes 99'), /aktuelle Passwort/u)

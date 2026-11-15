@@ -77,6 +77,9 @@ export type SyncEngineOptions = {
 const AUTO_INTERVAL_MS = 60_000
 const LOCAL_DEBOUNCE_MS = 2_500
 const OFFLINE_RETRY_MS = 30_000
+/** Without a hint from the server, a throttled cycle goes on after this long. */
+const THROTTLE_RETRY_MS = 20_000
+const THROTTLE_MAX_MS = 65_000
 const MAX_LOG = 120
 const MAX_FILE_BYTES = 100 * 1024 * 1024
 const CONCURRENCY = 3
@@ -205,6 +208,8 @@ export class SyncEngine {
   private inFlight: Promise<void> | null = null
   private queued = false
   private timer: number | null = null
+  /** While the server throttles, only the scheduled resume and a manual sync start a cycle. */
+  private throttledUntil = 0
   private debounce: number | null = null
   private readonly cleared = new Set<string>()
   /** Server copies of story scenes this session saw (revision and plain bytes), to check uploads against without a download. */
@@ -581,12 +586,13 @@ export class SyncEngine {
     this.notifyLocalChange()
   }
 
-  private schedule(delay: number) {
+  /** `resume`: go on with an interrupted cycle even when automatic sync is off (it was started on purpose). */
+  private schedule(delay: number, resume = false) {
     if (this.disposed || !this.session) return
     if (this.timer !== null) window.clearTimeout(this.timer)
     this.timer = window.setTimeout(() => {
       this.timer = null
-      if (this.options?.automatic() || delay === 0) void this.syncNow('timer')
+      if (this.options?.automatic() || delay === 0 || resume) void this.syncNow(resume ? 'resume' : 'timer')
       else this.schedule(AUTO_INTERVAL_MS)
     }, delay)
   }
@@ -599,6 +605,7 @@ export class SyncEngine {
   /** Runs one full cycle; concurrent calls coalesce into at most one follow-up cycle. The promise settles when the engine is idle again. */
   syncNow(reason = 'manual'): Promise<void> {
     if (!this.session || !this.host) return Promise.resolve()
+    if (reason !== 'manual' && reason !== 'resume' && Date.now() < this.throttledUntil) return Promise.resolve()
     if (this.inFlight) {
       this.queued = true
       return this.waitIdle()
@@ -629,6 +636,16 @@ export class SyncEngine {
       await this.persistState().catch(() => undefined)
       if (error instanceof SyncApiError && error.unauthorized) {
         await this.handleUnauthorized()
+        return
+      }
+      if (error instanceof SyncApiError && error.throttled) {
+        // A large first sync uses up the server's request budget. What is done so far is saved,
+        // so the next cycle goes on from there; this is a pause, not an error.
+        const wait = Math.min(THROTTLE_MAX_MS, Math.max(1_000, error.retryAfterMs ?? THROTTLE_RETRY_MS))
+        this.setState({ status: 'idle', error: null, progress: null })
+        this.log('info', `Der Server bremst kurz. Der Sync geht in ${Math.round(wait / 1000)} s weiter.`)
+        this.throttledUntil = Date.now() + wait
+        this.schedule(wait, true)
         return
       }
       const offline = error instanceof SyncApiError && error.offline
