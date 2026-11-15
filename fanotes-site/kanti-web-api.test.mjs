@@ -835,3 +835,44 @@ test('a failed session replace removes its temporary file and keeps the session'
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('an unreadable account keeps the browser session', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  let guestFile
+  try {
+    const app = await appIdentity(env.base)
+    const paired = await pairBrowser(env.base, [app])
+    guestFile = join(env.root, 'accounts', app.accountId, 'guest.json')
+    const guestBefore = await readFile(guestFile)
+    const sessions = join(env.store.root, 'sessions')
+    const [sessionName] = await readdir(sessions)
+    const sessionBefore = await readFile(join(sessions, sessionName))
+    await chmod(guestFile, 0o000)
+    const during = await paired.client.session()
+    assert.equal(during.status, 200)
+    assert.equal(during.body.signedIn, true)
+    assert.equal(during.body.connections.length, 1)
+    assert.equal(typeof paired.client.jar[SESSION_COOKIE], 'string')
+    await chmod(guestFile, 0o600)
+    assert.deepEqual(await readFile(guestFile), guestBefore)
+    assert.deepEqual(await readFile(join(sessions, sessionName)), sessionBefore)
+    const gone = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: 'a'.repeat(32),
+      provider: 'schulnetz',
+      label: 'Weg',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const other = browser(env.base)
+    other.jar[SESSION_COOKIE] = gone.token
+    const dropped = await other.session()
+    assert.equal(dropped.status, 401)
+    assert.equal(other.jar[SESSION_COOKIE], undefined)
+    const left = await readdir(sessions)
+    assert.equal(left.includes(`${gone.hash}.json`), false)
+    assert.equal(left.includes(sessionName), true)
+  } finally {
+    if (guestFile) await chmod(guestFile, 0o600).catch(() => undefined)
+    await env.close()
+  }
+})
