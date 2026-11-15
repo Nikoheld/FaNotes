@@ -895,27 +895,50 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
   const stat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
   if (!stat?.isFile()) return 0
-  const collapse = stat.size >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < stat.size)
+  // Name the slot from the table's size, not the live file. After a crash the
+  // live file can already be the newer body, and the archived name must stay
+  // the one written on the first attempt.
+  const currentSize = Number(current.size) || 0
+  const collapse = currentSize >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < currentSize)
   const directory = revisionsDirectory(accountId, fileId)
   await fs.mkdir(directory, { recursive: true, mode: 0o700 })
   const before = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
   const name = `${collapse ? 'c-' : ''}${current.revision}`
   const dest = safeJoin(directory, name)
-  if (move) await fs.rename(blobPath, dest)
-  else await fs.copyFile(blobPath, dest)
-  // The caller deletes or replaces the live blob after this returns. The copy
-  // has to be on disk first, or a crash loses the only copy of the note.
-  const archived = await fs.open(dest, 'r+')
-  try {
-    await archived.sync()
-  } finally {
-    await archived.close()
+  const holdsCurrent = async (path, size) => size === currentSize && await hashFile(path) === current.sha256
+  // A crash can replace the live blob before the change log records it. The
+  // retry still believes this revision is current, so copying the live blob
+  // again would overwrite the archived copy with the newer body.
+  if (move) {
+    await fs.rename(blobPath, dest)
+  } else {
+    const existing = await fs.lstat(dest).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+    if (!existing) {
+      await fs.copyFile(blobPath, dest)
+    } else if (existing.isFile()) {
+      if (!await holdsCurrent(dest, existing.size) && await holdsCurrent(blobPath, stat.size)) await fs.copyFile(blobPath, dest)
+    } else if (await holdsCurrent(blobPath, stat.size)) {
+      await fs.unlink(dest)
+      await fs.copyFile(blobPath, dest)
+    }
   }
-  const directoryHandle = await fs.open(directory, 'r')
-  try {
-    await directoryHandle.sync()
-  } finally {
-    await directoryHandle.close()
+  // The caller replaces the live blob after this returns. The copy has to be
+  // on disk first, or a crash loses the only copy of the note. A non-file
+  // left in the slot is not opened, so a symlink is not followed.
+  const archivedStat = await fs.lstat(dest).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (archivedStat?.isFile()) {
+    const archived = await fs.open(dest, 'r+')
+    try {
+      await archived.sync()
+    } finally {
+      await archived.close()
+    }
+    const directoryHandle = await fs.open(directory, 'r')
+    try {
+      await directoryHandle.sync()
+    } finally {
+      await directoryHandle.close()
+    }
   }
   const files = await listRevisionFiles(directory)
   const keep = revisionNamesToKeep(files, MAX_REVISIONS_KEPT, nextSize)
