@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes } from 'node:crypto'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { claimPushKeys, deliverFcm, exchangeServiceAccount, FCM_ATTEMPTS, FCM_AUTH_ATTEMPTS, fcmDropToken, pushDedupKey } from './fcm.mjs'
 import { createServiceLog } from './service-log.mjs'
-import { createSchulnetzRuntime } from './schulnetz-api.mjs'
+import { createSchulnetzRuntime, updateChangeLog } from './schulnetz-api.mjs'
 
 const grade = (id, mark = '5.5') => ({ id, category: 'grade', title: 'Neue Note', body: `Mathematik · Probe · ${mark}`, targetId: 'course-1', date: '2026-11-10' })
 const cancelled = (id, targetId = 'lesson-1') => ({ id, category: 'timetable', title: 'Lektion fällt aus', body: 'Deutsch · 08:15', targetId, date: '2026-11-16' })
@@ -226,4 +226,31 @@ test('FCM sign-in retries a 503 and never logs the signed assertion or the acces
     (error) => error.message === 'fcm-auth' && error.name === 'TimeoutError',
   )
   assert.equal(timeouts, FCM_AUTH_ATTEMPTS)
+})
+
+test('overlapping change-log updates keep both new lines', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fcm-changes-'))
+  const file = join(root, 'changes.jsonl')
+  await writeFile(file, '{"id":"one"}\n', { mode: 0o600 })
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  let entered = 0
+  try {
+    const first = updateChangeLog(file, async (lines) => {
+      entered += 1
+      await gate
+      return [...lines, '{"id":"two"}']
+    })
+    for (let i = 0; i < 20 && entered < 1; i += 1) await new Promise((resolve) => setImmediate(resolve))
+    const second = updateChangeLog(file, async (lines) => [...lines, '{"id":"three"}'])
+    release()
+    await Promise.all([first, second])
+    assert.equal(await readFile(file, 'utf8'), '{"id":"one"}\n{"id":"two"}\n{"id":"three"}\n')
+    assert.equal((await stat(file)).mode & 0o777, 0o600)
+    assert.equal((await readdir(root)).some((name) => name.endsWith('.tmp')), false)
+    await updateChangeLog(file, () => [])
+    await assert.rejects(stat(file))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

@@ -7,7 +7,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { resolve, sep } from 'node:path'
+import { dirname, resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
@@ -162,6 +162,48 @@ const keptSsoHeader = (value) => String(value || '')
   .map((part) => part.trim())
   .filter((part) => SSO_COOKIE_NAMES.has(part.slice(0, part.indexOf('='))))
   .join('; ')
+
+const changeLogs = new Map()
+
+/**
+ * Read, change and replace one change log. Overlapping updates for the same file wait, and the
+ * replacement is one rename, so a slower update cannot drop a line the earlier one just added.
+ * A mutate result of null leaves the file alone. An empty list removes it.
+ */
+export const updateChangeLog = (file, mutate) => {
+  const previous = changeLogs.get(file) || Promise.resolve()
+  const run = previous.then(() => replaceChangeLog(file, mutate), () => replaceChangeLog(file, mutate))
+  const tail = run.then(() => undefined, () => undefined)
+  changeLogs.set(file, tail)
+  tail.then(() => { if (changeLogs.get(file) === tail) changeLogs.delete(file) })
+  return run
+}
+
+const replaceChangeLog = async (file, mutate) => {
+  let existing = []
+  let missing = false
+  try {
+    existing = (await fs.readFile(file, 'utf8')).split('\n').filter((line) => line.length > 0)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    missing = true
+  }
+  const next = await mutate(existing, { missing })
+  if (!next) return
+  if (!next.length) {
+    await fs.rm(file, { force: true })
+    return
+  }
+  const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  try {
+    await fs.mkdir(dirname(file), { recursive: true, mode: 0o700 })
+    await fs.writeFile(temporary, `${next.join('\n')}\n`, { mode: 0o600 })
+    await fs.rename(temporary, file)
+  } catch (error) {
+    await fs.rm(temporary, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
 
 export const createSchulnetzRuntime = (options = {}) => {
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz')
@@ -789,18 +831,14 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   const rollbackProbe = async (accountId, link, revision) => {
     const file = resolve(accountDir(accountId), 'changes.jsonl')
-    const text = await fs.readFile(file, 'utf8').catch(() => '')
-    const kept = text.split('\n').filter((line) => {
-      if (!line) return false
+    await updateChangeLog(file, (existing) => existing.filter((line) => {
       try {
         const row = JSON.parse(line)
         return !(row.revision === revision && isNotificationProbe(row.id))
       } catch {
         return true
       }
-    })
-    if (kept.length) await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
-    else await fs.rm(file, { force: true })
+    }))
     if (link.revision === revision) {
       link.revision = revision - 1
       await saveLink(accountId, link)
@@ -811,45 +849,36 @@ export const createSchulnetzRuntime = (options = {}) => {
   const clearProbeChanges = async (accountId, deviceHash) => {
     if (!/^[a-f0-9]{32}$/u.test(String(deviceHash || ''))) return { removed: 0, failed: true }
     const file = resolve(accountDir(accountId), 'changes.jsonl')
-    let text = ''
-    try {
-      text = await fs.readFile(file, 'utf8')
-    } catch (error) {
-      if (error?.code === 'ENOENT') return { removed: 0, failed: false }
-      return { removed: 0, failed: true }
-    }
-    const kept = []
     let removed = 0
-    for (const line of text.split('\n')) {
-      if (!line) continue
-      try {
-        const row = JSON.parse(line)
-        if (isNotificationProbe(row?.id) && row?.device === deviceHash) {
-          removed += 1
-          continue
-        }
-      } catch {
-        /* unreadable lines are not probe rows */
-      }
-      kept.push(line)
-    }
     try {
-      if (kept.length) await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
-      else await fs.rm(file, { force: true })
+      await updateChangeLog(file, (existing, info) => {
+        if (info.missing) return null
+        const kept = []
+        for (const line of existing) {
+          try {
+            const row = JSON.parse(line)
+            if (isNotificationProbe(row?.id) && row?.device === deviceHash) {
+              removed += 1
+              continue
+            }
+          } catch {
+            /* unreadable lines are not probe rows */
+          }
+          kept.push(line)
+        }
+        return kept
+      })
     } catch {
       return { removed: 0, failed: true }
     }
     return { removed, failed: false }
   }
 
-  const appendChanges = async (accountId, changes, revision) => {
-    if (!changes.length) return
+  const appendChanges = (accountId, changes, revision) => {
+    if (!changes.length) return Promise.resolve()
     const file = resolve(accountDir(accountId), 'changes.jsonl')
     const lines = changes.map((change) => JSON.stringify({ ...change, revision, at: now().toISOString() }))
-    await fs.appendFile(file, `${lines.join('\n')}\n`, { mode: 0o600 })
-    const text = await fs.readFile(file, 'utf8')
-    const kept = text.trim().split('\n').slice(-200)
-    await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
+    return updateChangeLog(file, (existing) => [...existing, ...lines].slice(-200))
   }
 
   const knownChangeIds = async (accountId) => {
