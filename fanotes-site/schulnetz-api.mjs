@@ -1503,7 +1503,14 @@ export const createSchulnetzRuntime = (options = {}) => {
       return true
     } catch (error) {
       if (error?.code !== 'EEXIST') return false
-      const pid = Number(await fs.readFile(lockPath, 'utf8').catch(() => '0'))
+      let recorded = ''
+      try {
+        recorded = await fs.readFile(lockPath, 'utf8')
+      } catch (readError) {
+        // A lock we cannot read may still belong to the running poller. Do not remove it.
+        if (readError?.code !== 'ENOENT') return false
+      }
+      const pid = Number(recorded)
       if (pid && alive(pid)) return false
       await fs.rm(lockPath, { force: true })
       return acquireLock()
@@ -1512,7 +1519,13 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   const changesSince = async (accountId, since, deviceHash = '') => {
     const file = resolve(accountDir(accountId), 'changes.jsonl')
-    const text = await fs.readFile(file, 'utf8').catch(() => '')
+    let text = ''
+    try {
+      text = await fs.readFile(file, 'utf8')
+    } catch (error) {
+      // A missing log has no rows. Any other read error must not look the same, or the client is told nothing changed.
+      if (error?.code !== 'ENOENT') throw error
+    }
     const changes = text.split('\n').filter(Boolean).map((line) => {
       try { return JSON.parse(line) } catch { return null }
     }).filter((change) => change && Number(change.revision) > since && changeVisibleToDevice(change, deviceHash))
@@ -1872,6 +1885,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     detachGuest,
     deleteGuestAccount,
     unlink,
+    claimPoller: acquireLock,
     publicStatusOf: async (accountId) => publicStatus(await readLink(accountId)),
     commute,
     commutePublish,
