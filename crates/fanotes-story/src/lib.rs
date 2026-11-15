@@ -31,4 +31,8 @@ pub use model::merge::merge_scene_json;
 pub use model::merge::{
     merge_scene_json_with, merge_scenes, stamp_edits, MergedSceneJson, SceneMerge,
 };
+pub use model::sync_merge::{
+    judge_story_shrink, merge_scene_versions, merge_story_scene, story_role, SceneSyncOutcome,
+    ShrinkVerdict, StoryRole,
+};
 pub use model::types::{Paragraph, Run, Scene, StoryManifest};

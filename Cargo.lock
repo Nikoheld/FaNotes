@@ -1534,6 +1534,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "fanotes-famd",
+ "fanotes-story",
  "icu_collator",
  "icu_locale_core",
  "ring",

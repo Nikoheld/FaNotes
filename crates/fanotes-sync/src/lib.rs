@@ -23,5 +23,5 @@ pub mod paths;
 pub mod state;
 
 pub use api::{SyncApi, SyncApiError, SyncError};
-pub use engine::{EngineOptions, SyncEngine};
+pub use engine::{story_content_merge, ContentMerge, EngineOptions, SyncEngine};
 pub use host::{FsHost, MemoryHost, ScanEntry, SyncHost};

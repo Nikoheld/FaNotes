@@ -30,6 +30,7 @@ struct MemoryInner {
     clock: f64,
     state: BTreeMap<String, String>,
     secrets: Option<String>,
+    unreadable: Vec<String>,
 }
 
 /// The in-memory vault of `scripts/check-sync.mjs` (`createFakeHost`): the
@@ -40,6 +41,11 @@ pub struct MemoryHost {
 }
 
 impl MemoryHost {
+    /// Files the scan lists but `read` refuses (the parity harness's `unreadable` setting).
+    pub fn set_unreadable(&self, paths: Vec<String>) {
+        self.lock().unreadable = paths;
+    }
+
     pub fn new(id: &str) -> Self {
         Self {
             id: id.to_owned(),
@@ -122,11 +128,17 @@ impl SyncHost for MemoryHost {
             .collect())
     }
     fn read(&self, path: &str) -> Result<Vec<u8>, String> {
-        self.lock()
+        let inner = self.lock();
+        let bytes = inner
             .files
             .get(path)
             .map(|(bytes, _)| bytes.clone())
-            .ok_or_else(|| format!("missing {path}"))
+            .ok_or_else(|| format!("missing {path}"))?;
+        // Listed by the scan, but reading fails (permissions, locked).
+        if inner.unreadable.iter().any(|known| known == path) {
+            return Err(format!("EACCES {path}"));
+        }
+        Ok(bytes)
     }
     fn write(&self, path: &str, bytes: &[u8], mtime_ms: f64) -> Result<ScanEntry, String> {
         let mut inner = self.lock();

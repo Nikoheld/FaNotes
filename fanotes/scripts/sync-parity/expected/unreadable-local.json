@@ -1,0 +1,250 @@
+{
+ "scenario": "unreadable-local",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Geheim.md 200",
+    "PUT /files/Weg.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Geheim.md",
+    "Weg.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Geheim.md 200",
+    "GET /files/Weg.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "delete",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 1 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "DELETE /files/Weg.md 200",
+    "GET /changes 200",
+    "PUT /files/Geheim.md 200"
+   ]
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht).",
+    "warn: „Geheim.md“ ist auf diesem Gerät vorhanden, lässt sich aber nicht lesen. Die Fassung vom Server wird nicht darübergeschrieben; der Abgleich versucht es später erneut.",
+    "warn: „Weg.md“ ist auf diesem Gerät vorhanden, lässt sich aber nicht lesen. Die Fassung vom Server wird nicht darübergeschrieben; der Abgleich versucht es später erneut."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Geheim.md"
+   ],
+   "removed": [
+    "Weg.md"
+   ],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Geheim.md 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Geheim.md": {
+     "sha256": "ef435985999766def5a1f8d40bbbc2787f6292858823db7a42f9bf479981c25f",
+     "size": 26
+    }
+   },
+   "state": {
+    "cursorLag": 2,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Geheim.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "ef435985999766def5a1f8d40bbbc2787f6292858823db7a42f9bf479981c25f",
+      "size": 26,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "ef435985999766def5a1f8d40bbbc2787f6292858823db7a42f9bf479981c25f",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Geheim.md": {
+     "sha256": "ef435985999766def5a1f8d40bbbc2787f6292858823db7a42f9bf479981c25f",
+     "size": 26
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Geheim.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "ef435985999766def5a1f8d40bbbc2787f6292858823db7a42f9bf479981c25f",
+      "size": 26,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "ef435985999766def5a1f8d40bbbc2787f6292858823db7a42f9bf479981c25f",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "Geheim.md": {
+   "deleted": false,
+   "sha256": "ef435985999766def5a1f8d40bbbc2787f6292858823db7a42f9bf479981c25f",
+   "revisions": 2
+  },
+  "Weg.md": {
+   "deleted": true,
+   "sha256": null,
+   "revisions": 2
+  }
+ }
+}

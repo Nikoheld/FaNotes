@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 fanotes-famd = { path = "../fanotes-famd" }
+# Story scene merge in sync (`src/writing/syncMerge.ts`).
+fanotes-story = { path = "../fanotes-story", default-features = false, features = ["os-random"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 base64 = "0.22"

@@ -267,6 +267,9 @@ impl Device {
                     if command.get("excluded").is_some() {
                         settings.excluded = strings(command, "excluded");
                     }
+                    if command.get("unreadable").is_some() {
+                        self.host.set_unreadable(strings(command, "unreadable"));
+                    }
                     if let Some(now) = command.get("now").and_then(Value::as_f64) {
                         settings.now = Some(now);
                     }

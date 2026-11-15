@@ -83,14 +83,19 @@ const createTsDevice = (id, name) => {
   const files = new Map()
   let clock = 1_700_000_000_000
   const store = { state: new Map(), secrets: null }
-  const settings = { busy: [], excluded: [], now: SCENARIO_NOW, includeHistory: false, includeModel: false }
+  const settings = { busy: [], excluded: [], unreadable: [], now: SCENARIO_NOW, includeHistory: false, includeModel: false }
   const faults = []
   let events = []
   let requests = []
   const host = {
     async vaultId() { return `vault-${id}` },
     async scan() { return [...files.entries()].map(([path, file]) => ({ path, size: file.bytes.byteLength, mtimeMs: file.mtimeMs })) },
-    async read(path) { if (!files.has(path)) throw new Error(`missing ${path}`); return files.get(path).bytes },
+    async read(path) {
+      if (!files.has(path)) throw new Error(`missing ${path}`)
+      // Listed by the scan, but reading fails (permissions, locked).
+      if (settings.unreadable.includes(path)) throw new Error(`EACCES ${path}`)
+      return files.get(path).bytes
+    },
     async write(path, bytes, mtimeMs) { files.set(path, { bytes: new Uint8Array(bytes), mtimeMs: mtimeMs || (clock += 1000) }); return { path, size: bytes.byteLength, mtimeMs: files.get(path).mtimeMs } },
     async remove(path) { files.delete(path) },
     async readState(vaultId) { return store.state.get(vaultId) ?? null },
@@ -160,6 +165,7 @@ const createTsDevice = (id, name) => {
           case 'settings':
             if (command.busy) settings.busy = command.busy
             if (command.excluded) settings.excluded = command.excluded
+            if (command.unreadable) settings.unreadable = command.unreadable
             if (typeof command.now === 'number') settings.now = command.now
             if (typeof command.includeHistory === 'boolean') settings.includeHistory = command.includeHistory
             if (typeof command.includeModel === 'boolean') settings.includeModel = command.includeModel

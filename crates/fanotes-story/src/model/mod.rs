@@ -7,4 +7,5 @@ pub mod keys;
 pub mod merge;
 pub mod runs;
 pub mod sanitize;
+pub mod sync_merge;
 pub mod types;

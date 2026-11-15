@@ -38,11 +38,50 @@ pub struct EngineOptions {
     pub on_signed_out: Arc<dyn Fn(&str) + Send + Sync>,
     pub on_log: Arc<dyn Fn(&LogEntry) + Send + Sync>,
     pub now: Option<Callback<f64>>,
-    /// Extension point for structured merges (story scenes from `fanotes-story`):
-    /// `(path, local, remote)` → merged bytes, or `None` for the ordinary conflict copy.
-    /// Consulted where the homework merge is, only when both sides changed and are present.
-    /// Unset by default, so the engine behaves exactly like the TypeScript one.
-    pub content_merge: Option<Arc<dyn Fn(&str, &[u8], &[u8]) -> Option<Vec<u8>> + Send + Sync>>,
+    /// Structured merges of a file both sides changed: `(path, local, remote)` →
+    /// [`ContentMerge`], or `None` for the ordinary conflict copy. Consulted after the
+    /// homework merge when the local file changed and is present. The default is
+    /// [`story_content_merge`] (story scenes, as `mergeStoryFile` in the TypeScript engine).
+    pub content_merge:
+        Option<Arc<dyn Fn(&str, &[u8], &[u8]) -> Option<ContentMerge> + Send + Sync>>,
+}
+
+/// What [`EngineOptions::content_merge`] decided (`StoryMergeOutcome`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ContentMerge {
+    /// One file with both versions. `same_as_remote`: the remote version already
+    /// holds everything (it is applied as downloaded, without a conflict copy);
+    /// `same_as_local`: nothing changes here.
+    Merged {
+        bytes: Vec<u8>,
+        same_as_remote: bool,
+        same_as_local: bool,
+        conflicts: usize,
+    },
+    /// The remote file is damaged: the local one keeps the path and the remote
+    /// one is kept beside it.
+    KeepLocal,
+}
+
+/// Story scenes merge paragraph by paragraph (`src/writing/syncMerge.ts`).
+pub fn story_content_merge(path: &str, local: &[u8], remote: &[u8]) -> Option<ContentMerge> {
+    let mut ids = fanotes_story::model::ids::OsIds;
+    Some(
+        match fanotes_story::merge_story_scene(path, local, remote, &mut ids)? {
+            fanotes_story::SceneSyncOutcome::Merged {
+                bytes,
+                same_as_remote,
+                same_as_local,
+                conflicts,
+            } => ContentMerge::Merged {
+                bytes,
+                same_as_remote,
+                same_as_local,
+                conflicts,
+            },
+            fanotes_story::SceneSyncOutcome::KeepLocal => ContentMerge::KeepLocal,
+        },
+    )
 }
 
 impl EngineOptions {
@@ -61,7 +100,7 @@ impl EngineOptions {
             on_signed_out: Arc::new(|_| {}),
             on_log: Arc::new(|_| {}),
             now: None,
-            content_merge: None,
+            content_merge: Some(Arc::new(story_content_merge)),
         }
     }
 }
@@ -130,7 +169,19 @@ struct Inner {
     state: Option<PersistedState>,
     cleared: HashSet<String>,
     scan_cache: Option<HashMap<String, ScanEntry>>,
+    /// Server copies of story scenes this session saw (path, revision, plain bytes),
+    /// to check uploads against without a download (`storyBases`).
+    story_bases: Vec<(String, i64, Vec<u8>)>,
     public: PublicState,
+}
+
+/// `judgeStoryShrink` of the engine: the file verdict, or `Stale` when the
+/// server has a newer version than the base.
+enum StoryVerdict {
+    Cut,
+    Merge(Vec<u8>),
+    Guard,
+    Stale,
 }
 
 pub struct SyncEngine {
@@ -918,6 +969,9 @@ impl SyncEngine {
                 return Ok((Applied::Deferred, Some(known)));
             }
             let Some(local) = self.local_snapshot(&known) else {
+                if self.present_here(&known)? {
+                    return Ok(self.unreadable_here(known));
+                }
                 self.with_state(|state| state.files.remove(&known));
                 id_index
                     .lock()
@@ -983,6 +1037,11 @@ impl SyncEngine {
             return Ok((Applied::Deferred, Some(path)));
         }
         let local = self.local_snapshot(&path);
+        // A file that is here but cannot be read (permissions, locked, too large) is not
+        // "missing": writing the server's version would replace it without a copy.
+        if local.is_none() && self.present_here(&path)? {
+            return Ok(self.unreadable_here(path));
+        }
         let index = |path: &str| {
             id_index
                 .lock()
@@ -1084,11 +1143,17 @@ impl SyncEngine {
                 && local.kind == NoteSyncKind::Present
                 && remote_kind == NoteSyncKind::Present
         };
-        let merged = match (&self.options.content_merge, local.as_ref()) {
-            (Some(merge), Some(local)) if path != HOMEWORK_NOTE_PATH && both_present(local) => {
-                merge(&path, &local.bytes, &plain)
-            }
-            (_, Some(local)) if path == HOMEWORK_NOTE_PATH && both_present(local) => {
+        let remote_base = || LocalBase {
+            id: entry.id.clone(),
+            revision,
+            sha256: meta.sha256.clone(),
+            size: plain.len() as f64,
+            mtime_ms: 0.0,
+            content_sha256: (!plain_identity.is_empty()).then(|| plain_identity.clone()),
+            blank: false,
+        };
+        let merged = match local.as_ref() {
+            Some(local) if path == HOMEWORK_NOTE_PATH && both_present(local) => {
                 merge_homework_markdown_bytes(&local.bytes, &plain)
             }
             _ => None,
@@ -1098,18 +1163,7 @@ impl SyncEngine {
             self.host
                 .write(&path, &merged, now_ms())
                 .map_err(host_err)?;
-            self.set_base(
-                &path,
-                LocalBase {
-                    id: entry.id.clone(),
-                    revision,
-                    sha256: meta.sha256.clone(),
-                    size: plain.len() as f64,
-                    mtime_ms: 0.0,
-                    content_sha256: (!plain_identity.is_empty()).then(|| plain_identity.clone()),
-                    blank: false,
-                },
-            );
+            self.set_base(&path, remote_base());
             index(&path);
             self.log(
                 "info",
@@ -1117,9 +1171,76 @@ impl SyncEngine {
             );
             return Ok((Applied::Written, Some(path)));
         }
+        // Story files merge instead of becoming whole-file conflict copies. The base
+        // becomes the remote revision with the remote size and no mtime, so the push
+        // uploads what stays here.
+        let mut story_adopt = false;
+        let content_merge = match (&self.options.content_merge, local.as_ref()) {
+            (Some(merge), Some(local))
+                if path != HOMEWORK_NOTE_PATH
+                    && local_changed
+                    && local.kind == NoteSyncKind::Present =>
+            {
+                merge(&path, &local.bytes, &plain)
+            }
+            _ => None,
+        };
+        match content_merge {
+            Some(ContentMerge::Merged {
+                same_as_remote: true,
+                ..
+            }) => story_adopt = true,
+            Some(ContentMerge::Merged {
+                bytes,
+                same_as_local,
+                conflicts,
+                ..
+            }) => {
+                if !same_as_local {
+                    self.host.write(&path, &bytes, now_ms()).map_err(host_err)?;
+                }
+                self.set_base(&path, remote_base());
+                index(&path);
+                self.log(
+                    "info",
+                    if conflicts > 0 {
+                        format!("„{path}“ wurde Absatz für Absatz zusammengeführt; {conflicts} Absatz/Absätze waren auf beiden Geräten geändert und stehen jetzt doppelt da.")
+                    } else {
+                        format!("„{path}“ wurde Absatz für Absatz zusammengeführt.")
+                    },
+                );
+                return Ok((Applied::Written, Some(path)));
+            }
+            Some(ContentMerge::KeepLocal) => {
+                let mut result = Applied::Written;
+                if remote_kind == NoteSyncKind::Present {
+                    let at = self.now();
+                    let copy_path = self.free_conflict_copy_path(&path, at);
+                    let mtime = if meta.mtime_ms != 0.0 {
+                        meta.mtime_ms
+                    } else {
+                        at
+                    };
+                    self.host
+                        .write(&copy_path, &plain, mtime)
+                        .map_err(host_err)?;
+                    self.record_conflict(&path, &copy_path, at);
+                    self.log(
+                        "warn",
+                        format!("Konflikt bei „{path}“: die neuere Fassung dieses Geräts bleibt, die andere liegt unter „{copy_path}“."),
+                    );
+                    result = Applied::Conflict;
+                }
+                self.set_base(&path, remote_base());
+                index(&path);
+                return Ok((result, Some(path)));
+            }
+            None => {}
+        }
         if let Some(local) = local.as_ref().filter(|local| {
-            local_changed
-                || (remote_kind == NoteSyncKind::Blank && local.kind != NoteSyncKind::Blank)
+            !story_adopt
+                && (local_changed
+                    || (remote_kind == NoteSyncKind::Blank && local.kind != NoteSyncKind::Blank))
         }) {
             let at = self.now();
             let copy_path = self.free_conflict_copy_path(&path, at);
@@ -1135,6 +1256,9 @@ impl SyncEngine {
             );
             result = Applied::Conflict;
         }
+        // The server's copy of a scene (`rememberStoryBase`); it is the server's version
+        // whether or not the write below succeeds.
+        self.remember_story_base(&path, revision, &plain);
         let body = match local.as_ref() {
             Some(local) if famd::is_famd_sync_path(&path) => {
                 let downloaded = crate::jsjson::text_decode(&plain);
@@ -1261,7 +1385,7 @@ impl SyncEngine {
         self.lock().public.pending_local = changed.len() + deleted.len();
         let counts = Mutex::new(Pushed::default());
         run_limited(&changed, CONCURRENCY, |entry| {
-            let outcome = self.upload_path(entry)?;
+            let outcome = self.upload_path(entry, 0)?;
             let mut counts = counts.lock().unwrap_or_else(|e| e.into_inner());
             match outcome {
                 Upload::Uploaded => counts.uploads += 1,
@@ -1285,7 +1409,7 @@ impl SyncEngine {
     }
 
     /// `uploadPath(entry)`.
-    fn upload_path(&self, entry: &ScanEntry) -> Result<Upload, SyncError> {
+    fn upload_path(&self, entry: &ScanEntry, depth: usize) -> Result<Upload, SyncError> {
         let Ok((session, keys)) = self.require() else {
             return Ok(Upload::Skipped);
         };
@@ -1354,7 +1478,41 @@ impl SyncEngine {
             !base.blank
                 && (base.size > raw_len + 64.0 || kind == NoteSyncKind::Blank || severe_shrink)
         });
-        if (kind == NoteSyncKind::Blank || severe_shrink) && base_holds_content && !clearing {
+        // A scene or manifest that shrank a lot is checked against the server's version:
+        // a cut the writer made (every paragraph still there, deleted ones as tombstones)
+        // is uploaded; one that lost paragraphs is merged with the server's version first.
+        let story_role = fanotes_story::story_role(&entry.path);
+        let story_shrinkable = kind == NoteSyncKind::Present
+            && matches!(
+                story_role,
+                Some(fanotes_story::StoryRole::Scene | fanotes_story::StoryRole::Manifest)
+            );
+        let mut story_clear = false;
+        if let Some(base) = base.as_ref().filter(|base| {
+            story_role == Some(fanotes_story::StoryRole::Scene)
+                && kind == NoteSyncKind::Present
+                && !base.blank
+                && !clearing
+                && !(severe_shrink && base_holds_content)
+        }) {
+            // Every scene upload keeps every paragraph of the server's version (deleted ones as
+            // tombstones). A file that lost paragraphs without a trace is merged back first.
+            if let StoryVerdict::Merge(bytes) = self.judge_story_shrink(entry, base, &raw)? {
+                return self.rewrite_story(entry, &bytes, depth);
+            }
+        }
+        if severe_shrink && base_holds_content && !clearing && story_shrinkable {
+            let base = base.as_ref().expect("checked");
+            match self.judge_story_shrink(entry, base, &raw)? {
+                StoryVerdict::Merge(bytes) => return self.rewrite_story(entry, &bytes, depth),
+                StoryVerdict::Guard => return self.restore_instead(entry, base, &raw, false),
+                // A cut uploads with the clear flag; a stale base is refused by the server
+                // and merged below.
+                StoryVerdict::Cut => story_clear = true,
+                StoryVerdict::Stale => {}
+            }
+        } else if (kind == NoteSyncKind::Blank || severe_shrink) && base_holds_content && !clearing
+        {
             self.log(
                 "warn",
                 format!(
@@ -1379,6 +1537,8 @@ impl SyncEngine {
             },
         );
         let blob = crypto::encrypt_bytes(&keys, &id, &canonical);
+        let story_bytes =
+            (story_role == Some(fanotes_story::StoryRole::Scene)).then(|| canonical.to_vec());
         drop(canonical);
         let blob_sha = sha256_hex(&blob);
         let mut base_revision = base.as_ref().map_or(0, |base| base.revision);
@@ -1391,10 +1551,13 @@ impl SyncEngine {
                 &blob_sha,
                 &blob,
                 kind == NoteSyncKind::Blank,
-                clearing && kind == NoteSyncKind::Blank,
+                (clearing && kind == NoteSyncKind::Blank) || story_clear,
             ) {
                 Ok(revision) => {
                     self.lock().cleared.remove(&entry.path);
+                    if let Some(bytes) = &story_bytes {
+                        self.remember_story_base(&entry.path, revision, bytes);
+                    }
                     self.set_base(
                         &entry.path,
                         LocalBase {
@@ -1430,6 +1593,30 @@ impl SyncEngine {
                             !current.deleted && current.revision == base_revision
                         })
                     {
+                        if let Some(base) = base
+                            .as_ref()
+                            .filter(|_| story_shrinkable && !story_clear && attempt == 0)
+                        {
+                            // The server's guard counts encrypted bytes; check the story file
+                            // the same way as above.
+                            let revision = current
+                                .as_ref()
+                                .map_or(base.revision, |current| current.revision);
+                            let at_server = LocalBase {
+                                revision,
+                                ..base.clone()
+                            };
+                            match self.judge_story_shrink(entry, &at_server, &raw)? {
+                                StoryVerdict::Merge(bytes) => {
+                                    return self.rewrite_story(entry, &bytes, depth)
+                                }
+                                StoryVerdict::Cut => {
+                                    story_clear = true;
+                                    continue;
+                                }
+                                StoryVerdict::Guard | StoryVerdict::Stale => {}
+                            }
+                        }
                         if let Some(base) = &base {
                             let revision = current
                                 .as_ref()
@@ -1475,7 +1662,29 @@ impl SyncEngine {
                             Ok((applied, Some(path)))
                                 if matches!(applied, Applied::Written | Applied::Conflict) =>
                             {
-                                (self.options.on_applied)(&[path], &[])
+                                (self.options.on_applied)(std::slice::from_ref(&path), &[]);
+                                if applied == Applied::Written
+                                    && path == entry.path
+                                    && story_role.is_some()
+                                    && depth == 0
+                                {
+                                    // A story file was merged with the newer version: upload
+                                    // the merge in this cycle.
+                                    let fresh = self
+                                        .host
+                                        .scan()
+                                        .map_err(host_err)?
+                                        .into_iter()
+                                        .find(|item| item.path == entry.path);
+                                    if let Some(fresh) = fresh {
+                                        let again = self.upload_path(&fresh, depth + 1)?;
+                                        return Ok(if matches!(again, Upload::Uploaded) {
+                                            Upload::Uploaded
+                                        } else {
+                                            Upload::Conflict
+                                        });
+                                    }
+                                }
                             }
                             Ok(_) => {}
                             Err(apply_error) => {
@@ -1497,6 +1706,107 @@ impl SyncEngine {
             }
         }
         Ok(Upload::Conflict)
+    }
+
+    /// `rememberStoryBase`: the server's copy of a scene, at most 400 of them.
+    fn remember_story_base(&self, path: &str, revision: i64, bytes: &[u8]) {
+        if fanotes_story::story_role(path) != Some(fanotes_story::StoryRole::Scene) {
+            return;
+        }
+        let mut inner = self.lock();
+        inner.story_bases.retain(|(known, _, _)| known != path);
+        inner
+            .story_bases
+            .push((path.to_owned(), revision, bytes.to_vec()));
+        if inner.story_bases.len() > 400 {
+            inner.story_bases.remove(0);
+        }
+    }
+
+    /// What the server's version says about a much smaller story file (`judgeStoryShrink`).
+    fn judge_story_shrink(
+        &self,
+        entry: &ScanEntry,
+        base: &LocalBase,
+        raw: &[u8],
+    ) -> Result<StoryVerdict, SyncError> {
+        let Ok((session, keys)) = self.require() else {
+            return Ok(StoryVerdict::Guard);
+        };
+        let judge = |server: &[u8]| match fanotes_story::judge_story_shrink(
+            &entry.path,
+            raw,
+            server,
+            &mut fanotes_story::model::ids::OsIds,
+        ) {
+            fanotes_story::ShrinkVerdict::Cut => StoryVerdict::Cut,
+            fanotes_story::ShrinkVerdict::Merge(bytes) => StoryVerdict::Merge(bytes),
+            fanotes_story::ShrinkVerdict::Guard => StoryVerdict::Guard,
+        };
+        let missing = |path: &str| {
+            format!(
+                "„{path}“ fehlten Absätze der Fassung auf dem Server; sie wurden wieder eingefügt."
+            )
+        };
+        let cached = self
+            .lock()
+            .story_bases
+            .iter()
+            .find(|(path, revision, _)| *path == entry.path && *revision == base.revision)
+            .map(|(_, _, bytes)| bytes.clone());
+        if let Some(cached) = cached {
+            let verdict = judge(&cached);
+            if matches!(verdict, StoryVerdict::Merge(_)) {
+                self.log("warn", missing(&entry.path));
+            }
+            return Ok(verdict);
+        }
+        let (revision, blob, blob_sha) = match self.api.download(&session, &base.id)? {
+            Download::Deleted { .. } => return Ok(StoryVerdict::Stale),
+            Download::Blob {
+                revision,
+                blob,
+                sha256,
+                ..
+            } => (revision, blob, sha256),
+        };
+        if revision != base.revision {
+            return Ok(StoryVerdict::Stale);
+        }
+        if sha256_hex(&blob) != blob_sha {
+            return Ok(StoryVerdict::Guard);
+        }
+        let plain = crypto::decrypt_bytes(&keys, &base.id, &blob)?;
+        self.remember_story_base(&entry.path, revision, &plain);
+        let verdict = judge(&plain);
+        match verdict {
+            StoryVerdict::Cut => self.log("info", format!("„{}“ wurde stark gekürzt; alle Absätze sind als gelöscht vermerkt, die Kürzung wird hochgeladen.", entry.path)),
+            StoryVerdict::Merge(_) => self.log("warn", missing(&entry.path)),
+            _ => {}
+        }
+        Ok(verdict)
+    }
+
+    /// `rewriteStory`: writes a merged story file here and uploads it (once per push).
+    /// The editor still holding the file waits for the next cycle.
+    fn rewrite_story(
+        &self,
+        entry: &ScanEntry,
+        bytes: &[u8],
+        depth: usize,
+    ) -> Result<Upload, SyncError> {
+        if self.busy(&entry.path) {
+            return Ok(Upload::Skipped);
+        }
+        let stat = self
+            .host
+            .write(&entry.path, bytes, now_ms())
+            .map_err(host_err)?;
+        (self.options.on_applied)(std::slice::from_ref(&entry.path), &[]);
+        if depth > 0 {
+            return Ok(Upload::Conflict);
+        }
+        self.upload_path(&stat, depth + 1)
     }
 
     /// `restoreInstead(entry, base, localBytes, why)`.
@@ -1649,6 +1959,22 @@ impl SyncEngine {
 
     fn exists(&self, path: &str) -> bool {
         self.host.read(path).is_ok()
+    }
+
+    /// `presentHere`: the file is listed here (the scan needs no read access), even if
+    /// reading it fails.
+    fn present_here(&self, path: &str) -> Result<bool, SyncError> {
+        Ok(self.stat_of(path)?.is_some() || self.exists(path))
+    }
+
+    /// `unreadableHere`: a file this device cannot read is left alone (retried next
+    /// cycle, like a busy file).
+    fn unreadable_here(&self, path: String) -> (Applied, Option<String>) {
+        self.log(
+            "warn",
+            format!("„{path}“ ist auf diesem Gerät vorhanden, lässt sich aber nicht lesen. Die Fassung vom Server wird nicht darübergeschrieben; der Abgleich versucht es später erneut."),
+        );
+        (Applied::Deferred, Some(path))
     }
 
     /// `freeConflictCopyPath(path, at)`.
