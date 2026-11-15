@@ -119,7 +119,12 @@ export const stampEdits = (current: Scene, saved: Scene | null, writer: string):
   let changed = false
   const paragraphs = current.paragraphs.map((paragraph) => {
     const previous = before.get(paragraph.id)
-    if (previous && previous.key === paragraph.key && content(previous) === content(paragraph)) return paragraph
+    if (previous && previous.key === paragraph.key && content(previous) === content(paragraph)) {
+      // Unchanged, but the saved copy may carry newer counters (saved while this was being edited elsewhere in the doc).
+      if (compareVectors(previous.v, paragraph.v) === 'equal') return paragraph
+      changed = true
+      return { ...paragraph, v: mergeVectors(previous.v, paragraph.v) }
+    }
     changed = true
     const base = previous ? mergeVectors(previous.v, paragraph.v) : paragraph.v
     return { ...paragraph, v: { ...base, [writer]: (base[writer] ?? 0) + 1 } }

@@ -327,6 +327,116 @@ try {
     assert.ok(result.pages.length >= 300, `${result.pages.length} pages`)
     assert.ok(repaginate < 120, `re-pagination ${repaginate} ms`)
   })
+  const docMod = await load('/src/writing/editor/doc.ts')
+  const commands = await load('/src/writing/editor/commands.ts')
+  const controllerMod = await load('/src/writing/editor/controller.ts')
+  const texts = (doc) => doc.flow.map((block) => `${block.ref.kind}:${runs.runsText(block.runs)}`)
+  const freshState = () => {
+    const created = defaults.newStory({ title: 'Probe', language: 'de', deviceId: 'dev1' })
+    const doc = docMod.makeDoc(created.manifest, new Map(created.scenes.map((scene) => [scene.id, scene])))
+    const first = doc.flow.find((block) => block.ref.kind === 'para')
+    return { doc, selection: docMod.caret({ block: first.key, offset: 0 }), storedMarks: null }
+  }
+  const type = (state, text) => commands.insertText(state, text)
+
+  await test('typing, Enter, Backspace across paragraphs, Delete', () => {
+    let state = type(freshState(), 'Hallo Welt')
+    state = commands.splitParagraph(state)
+    state = type(state, 'Zweite Zeile')
+    assert.deepEqual(texts(state.doc).slice(1), ['para:Hallo Welt', 'para:Zweite Zeile'])
+    assert.equal(state.doc.flow[2].style, 'body', 'Enter after a first paragraph continues with body text')
+    state = { ...state, selection: docMod.caret({ block: state.doc.flow[2].key, offset: 0 }) }
+    state = commands.deleteBackward(state)
+    assert.deepEqual(texts(state.doc).slice(1), ['para:Hallo WeltZweite Zeile'])
+    assert.equal(state.selection.head.offset, 10)
+    state = commands.deleteBackward(state, 'word')
+    assert.deepEqual(texts(state.doc).slice(1), ['para:Hallo WeltZweite Zeile'.replace('Welt', '')])
+    state = commands.deleteForward({ ...state, selection: docMod.caret({ block: state.doc.flow[1].key, offset: 0 }) })
+    assert.equal(runs.runsText(state.doc.flow[1].runs), 'allo Zweite Zeile')
+    // Grapheme-safe: an emoji with a modifier is one Backspace.
+    state = type({ ...state, selection: docMod.caret({ block: state.doc.flow[1].key, offset: 0 }) }, '👍🏽')
+    state = commands.deleteBackward(state)
+    assert.equal(runs.runsText(state.doc.flow[1].runs), 'allo Zweite Zeile')
+  })
+
+  await test('a selection across paragraphs deletes and joins; titles stay', () => {
+    let state = type(freshState(), 'Eins zwei drei')
+    state = commands.splitParagraph(state)
+    state = type(state, 'Vier fünf')
+    state = commands.splitParagraph(state)
+    state = type(state, 'Sechs sieben')
+    const [, a, , c] = state.doc.flow
+    state = { ...state, selection: { anchor: { block: a.key, offset: 5 }, head: { block: c.key, offset: 6 } } }
+    state = commands.deleteSelection(state)
+    assert.deepEqual(texts(state.doc).slice(1), ['para:Eins sieben'])
+    // Select from the title into the text: the title is shortened, not removed.
+    state = { ...state, selection: { anchor: { block: state.doc.flow[0].key, offset: 7 }, head: { block: state.doc.flow[1].key, offset: 5 } } }
+    state = commands.deleteSelection(state)
+    assert.equal(state.doc.flow[0].ref.kind, 'title')
+    assert.equal(runs.runsText(state.doc.flow[0].runs), 'Kapitel')
+    assert.equal(runs.runsText(state.doc.flow[1].runs), 'sieben')
+  })
+
+  await test('formatting: toggle on a selection, stored marks on a caret, styles and alignment', () => {
+    let state = type(freshState(), 'Ein kühner Satz')
+    const block = state.doc.flow[1]
+    state = { ...state, selection: { anchor: { block: block.key, offset: 4 }, head: { block: block.key, offset: 10 } } }
+    state = commands.toggleMark(state, 'i')
+    assert.deepEqual(state.doc.flow[1].runs, [{ text: 'Ein ' }, { text: 'kühner', m: { i: true } }, { text: ' Satz' }])
+    state = commands.toggleMark(state, 'i')
+    assert.deepEqual(state.doc.flow[1].runs, [{ text: 'Ein kühner Satz' }])
+    state = { ...state, selection: docMod.caret({ block: block.key, offset: 15 }) }
+    state = commands.toggleMark(state, 'b')
+    state = type(state, '!')
+    assert.deepEqual(state.doc.flow[1].runs.at(-1), { text: '!', m: { b: true } })
+    state = commands.setParagraphStyle(state, 'quote')
+    state = commands.setAlign(state, 'center')
+    assert.equal(state.doc.flow[1].style, 'quote')
+    assert.equal(state.doc.flow[1].align, 'center')
+  })
+
+  await test('page break, new scene and new chapter at the caret', () => {
+    let state = type(freshState(), 'Anfang. Mitte. Ende.')
+    const key = state.doc.flow[1].key
+    state = commands.insertPageBreak({ ...state, selection: docMod.caret({ block: key, offset: 8 }) })
+    assert.equal(state.doc.flow[2].breakBefore, 'page')
+    state = commands.splitScene({ ...state, selection: docMod.caret({ block: state.doc.flow[2].key, offset: 6 }) }, { titles: { scene: 'Szene 2', chapter: 'Kapitel 2' } })
+    assert.deepEqual(texts(state.doc), ['title:Kapitel 1', 'para:Anfang. ', 'para:Mitte.', 'break:* * *', 'para: Ende.'])
+    state = commands.splitScene({ ...state, selection: docMod.caret({ block: state.doc.flow[1].key, offset: 3 }) }, { chapter: true, titles: { scene: 'Szene', chapter: 'Kapitel 2' } })
+    assert.deepEqual(texts(state.doc), ['title:Kapitel 1', 'para:Anf', 'title:Kapitel 2', 'para:ang. ', 'para:Mitte.', 'break:* * *', 'para: Ende.'])
+    assert.equal(state.doc.manifest.binder.length, 2)
+    assert.equal(state.doc.manifest.binder[1].children.length, 2, 'the later scene moved into the new chapter')
+  })
+
+  await test('undo groups typing by word, redo restores, and saving writes only changed scenes with stamps', async () => {
+    const controller = new controllerMod.WritingController(freshState().doc, 'dev1')
+    for (const char of 'Ein Wort') controller.apply(commands.insertText(controller.state, char), 'typing', char)
+    assert.equal(runs.runsText(controller.state.doc.flow[1].runs), 'Ein Wort')
+    controller.undo()
+    assert.equal(runs.runsText(controller.state.doc.flow[1].runs), 'Ein ')
+    controller.undo()
+    assert.equal(runs.runsText(controller.state.doc.flow[1].runs), '')
+    controller.redo()
+    controller.redo()
+    assert.equal(runs.runsText(controller.state.doc.flow[1].runs), 'Ein Wort')
+    const written = []
+    const storage = { writeManifest: async (manifest) => written.push(['manifest', manifest]), writeScene: async (scene) => written.push(['scene', scene]) }
+    assert.equal(await controller.save(storage), true)
+    assert.equal(written.length, 1)
+    assert.equal(written[0][1].paragraphs[0].v.dev1, 2, 'the edited paragraph is stamped')
+    written.length = 0
+    assert.equal(await controller.save(storage), true)
+    assert.equal(written.length, 0, 'nothing changed, nothing written')
+    controller.undo()
+    await controller.save(storage)
+    assert.equal(written.length, 1, 'an undo is an edit too')
+    assert.ok(written[0][1].paragraphs.find((p) => !p.deleted).v.dev1 >= 3)
+    const failing = { writeManifest: async () => { throw new Error('disk full') }, writeScene: async () => { throw new Error('disk full') } }
+    controller.apply(commands.insertText(controller.state, 'x'), 'typing', 'x')
+    assert.equal(await controller.save(failing), false)
+    assert.equal(controller.isDirty(), true, 'a failed save keeps the change pending')
+    assert.equal(controller.lastSaveError, 'disk full')
+  })
 } finally {
   await vite.close()
 }
