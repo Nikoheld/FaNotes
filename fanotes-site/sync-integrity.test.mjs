@@ -415,3 +415,35 @@ test('a registration publishes the e-mail index only after the account id is sto
   assert.equal(login.status, 200, JSON.stringify(login.json))
   assert.equal(login.json.accountId, accountId)
 })
+
+test('an idempotent delete removes a leftover that matches the larger archive', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const noteRevision = JSON.parse(created.body.toString('utf8')).revision
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    accountId,
+    headers: { 'If-Match': String(noteRevision), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 200, removed.body.toString('utf8'))
+  const tombstone = JSON.parse(removed.body.toString('utf8')).revision
+  const archive = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  writeFileSync(join(archive, String(noteRevision)), original.subarray(0, 64))
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  writeFileSync(blobPath, original)
+  const again = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    accountId,
+    headers: { 'If-Match': String(tombstone), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(again.status, 200, again.body.toString('utf8'))
+  assert.equal(JSON.parse(again.body.toString('utf8')).revision, tombstone)
+  assert.equal(existsSync(blobPath), false)
+  assert.equal(readFileSync(join(archive, `c-${noteRevision}`)).equals(original), true)
+  assert.equal(readFileSync(join(archive, String(noteRevision))).length, 64)
+  const fetched = await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })
+  assert.equal(fetched.status, 204)
+  assert.equal(fetched.headers['x-fanotes-deleted'], '1')
+})

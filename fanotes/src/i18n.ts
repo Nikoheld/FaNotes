@@ -224,6 +224,8 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (updateMessage) return updateMessage
   if (/^1 Treffer$/u.test(source)) return '1 match'
   if (/^\d+ Treffer$/u.test(source)) return source.replace('Treffer', 'matches')
+  const arrivedFiles = /^(\d+) neue(?:s|n)? (?:Datei|Dateien)(?: in (.+))?$/u.exec(source)
+  if (arrivedFiles) return `${arrivedFiles[1]} new ${arrivedFiles[1] === '1' ? 'file' : 'files'}${arrivedFiles[2] ? ` in ${arrivedFiles[2]}` : ''}`
   const selectedOf = /^(\d+) von (\d+) ausgewählt$/u.exec(source)
   if (selectedOf) return `${selectedOf[1]} of ${selectedOf[2]} selected`
   if (/^Nur Eingang$/u.test(source)) return 'Only Inbox'

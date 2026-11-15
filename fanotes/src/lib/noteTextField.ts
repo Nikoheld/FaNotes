@@ -9,7 +9,25 @@ export type NoteTextField = {
   width: number
   text: string
   fontSize: number
+  /** Optional #rrggbb ink colour. Absent means the default dark ink. */
+  color?: string
+  /** Optional bold weight. Absent means regular. */
+  bold?: boolean
 }
+
+export const NOTE_TEXT_FIELD_FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48] as const
+export const NOTE_TEXT_FIELD_COLORS = [
+  { value: undefined, label: 'Schwarz', css: '#20222b' },
+  { value: '#c62f4a', label: 'Rot', css: '#c62f4a' },
+  { value: '#c8741a', label: 'Orange', css: '#c8741a' },
+  { value: '#1f8a5b', label: 'Grün', css: '#1f8a5b' },
+  { value: '#2563c9', label: 'Blau', css: '#2563c9' },
+  { value: '#7a4bc4', label: 'Violett', css: '#7a4bc4' },
+] as const
+/** Page width (layout px) at which a stored font size is shown 1:1 on a PDF. */
+export const NOTE_TEXT_FIELD_REFERENCE_PAGE_WIDTH = 820
+
+const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu
 
 const TEXT_FIELD_ID = /^[a-zA-Z0-9._-]{1,96}$/u
 export const NOTE_TEXT_FIELD_LIMIT = 200
@@ -56,6 +74,7 @@ export const sanitizeNoteTextField = (value: unknown): NoteTextField | null => {
   const raw = value as Record<string, unknown>
   const id = typeof raw.id === 'string' && TEXT_FIELD_ID.test(raw.id) ? raw.id : newNoteTextFieldId()
   const text = typeof raw.text === 'string' ? raw.text.slice(0, TEXT_FIELD_MAX_CHARS) : ''
+  const color = typeof raw.color === 'string' && COLOR_PATTERN.test(raw.color) ? raw.color.toLowerCase() : undefined
   return {
     id,
     page: clampPage(raw.page),
@@ -64,6 +83,8 @@ export const sanitizeNoteTextField = (value: unknown): NoteTextField | null => {
     width: clampWidth(raw.width),
     fontSize: clampFontSize(raw.fontSize),
     text,
+    ...(color ? { color } : {}),
+    ...(raw.bold === true ? { bold: true } : {}),
   }
 }
 
@@ -100,7 +121,7 @@ export const placeNoteTextField = (point: { page: number; x: number; y: number }
 export const patchNoteTextField = (
   fields: readonly NoteTextField[],
   id: string,
-  patch: Partial<Pick<NoteTextField, 'page' | 'x' | 'y' | 'width' | 'text' | 'fontSize'>>,
+  patch: Partial<Pick<NoteTextField, 'page' | 'x' | 'y' | 'width' | 'text' | 'fontSize'>> & { color?: string | undefined; bold?: boolean | undefined },
 ): NoteTextField[] => {
   const current = parseNoteTextFields(fields)
   return parseNoteTextFields(current.map((field) => field.id === id ? { ...field, ...patch } : field))
@@ -130,4 +151,47 @@ export const noteTextFieldsAfterOriginGrow = (
     return { ...field, x, y, width }
   })
   return changed ? remapped : fields
+}
+
+/** Next/previous step of the font-size ladder; unknown sizes snap to the nearest rung first. */
+export const stepNoteTextFieldFontSize = (size: number, direction: 1 | -1): number => {
+  const sizes = NOTE_TEXT_FIELD_FONT_SIZES
+  let nearest = 0
+  for (let index = 1; index < sizes.length; index += 1) {
+    if (Math.abs(sizes[index] - size) < Math.abs(sizes[nearest] - size)) nearest = index
+  }
+  const exact = sizes[nearest] === size
+  const target = exact ? nearest + direction : (direction > 0 ? (sizes[nearest] > size ? nearest : nearest + 1) : (sizes[nearest] < size ? nearest : nearest - 1))
+  return sizes[Math.max(0, Math.min(sizes.length - 1, target))]
+}
+
+export type NoteTextFieldPageRect = { page: number; left: number; top: number; width: number; height: number }
+
+/**
+ * Map a client point to a page fraction. A point outside every page (gutter,
+ * margin, drag past the edge) snaps to the nearest page instead of page 1.
+ */
+export const noteTextFieldPointFromRects = (
+  rects: readonly NoteTextFieldPageRect[],
+  clientX: number,
+  clientY: number,
+): { page: number; x: number; y: number } | null => {
+  let best: NoteTextFieldPageRect | null = null
+  let bestDistance = Infinity
+  for (const rect of rects) {
+    if (!(rect.width > 0) || !(rect.height > 0)) continue
+    const dx = Math.max(rect.left - clientX, 0, clientX - (rect.left + rect.width))
+    const dy = Math.max(rect.top - clientY, 0, clientY - (rect.top + rect.height))
+    const distance = dy * 4 + dx
+    if (distance < bestDistance) {
+      best = rect
+      bestDistance = distance
+    }
+  }
+  if (!best) return null
+  return {
+    page: best.page,
+    x: clampUnit((clientX - best.left) / best.width, 0),
+    y: clampUnit((clientY - best.top) / best.height, 0),
+  }
 }

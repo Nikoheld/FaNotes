@@ -11,6 +11,7 @@ const CHANNELS = Object.freeze({
   getFastTree: 'fanotes:get-fast-tree',
   selectVault: 'fanotes:select-vault',
   getTree: 'fanotes:get-tree',
+  vaultChanged: 'fanotes:vault-changed',
   readFile: 'fanotes:read-file',
   writeFile: 'fanotes:write-file',
   readRecognitionModel: 'fanotes:read-recognition-model',
@@ -231,6 +232,12 @@ const api = Object.freeze({
     const listener = (_event, id) => callback(id)
     ipcRenderer.on(CHANNELS.shareOpen, listener)
     return () => ipcRenderer.removeListener(CHANNELS.shareOpen, listener)
+  },
+  onVaultChanged: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, change) => callback(change)
+    ipcRenderer.on(CHANNELS.vaultChanged, listener)
+    return () => ipcRenderer.removeListener(CHANNELS.vaultChanged, listener)
   },
   onBeforeClose: (callback) => {
     if (typeof callback !== 'function') return () => {}

@@ -22,8 +22,12 @@ data class NoteTextField(
     val width: Double,
     val text: String,
     val fontSize: Int,
+    /** Optional #rrggbb ink colour written by desktop; null means the default dark ink. */
+    val color: String? = null,
+    val bold: Boolean = false,
 )
 
+private val TEXT_FIELD_COLOR = Regex("^#[0-9a-fA-F]{6}$")
 private val TEXT_FIELD_ID = Regex("^[a-zA-Z0-9._-]{1,96}$")
 const val NOTE_TEXT_FIELD_LIMIT = 200
 const val TEXT_FIELD_LIMIT_MESSAGE = "Auf dieser Notiz sind schon 200 Textfelder."
@@ -86,7 +90,7 @@ fun acceptPlacedTextField(existing: List<NoteTextField>, field: NoteTextField): 
     if (current.size >= NOTE_TEXT_FIELD_LIMIT) {
         return ArmedTextFieldTap(current, null, TEXT_FIELD_LIMIT_MESSAGE, true)
     }
-    val clean = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize)
+    val clean = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold)
     if (current.any { it.id == clean.id }) return ArmedTextFieldTap(current, null, null, true)
     return ArmedTextFieldTap(current + clean, clean, null, false)
 }
@@ -105,6 +109,8 @@ fun parseNoteTextFields(array: JsonValue.Arr?): List<NoteTextField> {
             width = obj.double("width"),
             text = obj.string("text"),
             fontSize = wholeInt(obj, "fontSize"),
+            color = obj.string("color"),
+            bold = (obj.get("bold") as? JsonValue.Bool)?.value == true,
         )
         if (field.id in seen) continue
         seen += field.id
@@ -118,7 +124,7 @@ fun parseNoteTextFieldList(fields: List<NoteTextField>): List<NoteTextField> {
     val seen = linkedSetOf<String>()
     val clean = mutableListOf<NoteTextField>()
     for (field in fields) {
-        val next = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize)
+        val next = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold)
         if (next.id in seen) continue
         seen += next.id
         clean += next
@@ -128,7 +134,7 @@ fun parseNoteTextFieldList(fields: List<NoteTextField>): List<NoteTextField> {
 }
 
 fun noteTextFieldsJson(fields: List<NoteTextField>): JsonValue.Arr = JsonValue.Arr(parseNoteTextFieldList(fields).map { field ->
-    ch.fasrv.fanotes.json.jsonObject(
+    val obj = ch.fasrv.fanotes.json.jsonObject(
         "id" to jsonString(field.id),
         "page" to jsonNumber(field.page.toDouble()),
         "x" to jsonNumber(field.x),
@@ -137,6 +143,9 @@ fun noteTextFieldsJson(fields: List<NoteTextField>): JsonValue.Arr = JsonValue.A
         "fontSize" to jsonNumber(field.fontSize.toDouble()),
         "text" to jsonString(field.text),
     )
+    field.color?.let { obj.put("color", jsonString(it)) }
+    if (field.bold) obj.put("bold", JsonValue.Bool(true))
+    obj
 }.toMutableList())
 
 /** Writes `textFields` on a payload copy. An empty list removes the key. Markdown is not touched. */
@@ -156,6 +165,8 @@ fun patchNoteTextField(
     y: Double? = null,
     width: Double? = null,
     fontSize: Int? = null,
+    color: String? = null,
+    bold: Boolean? = null,
 ): List<NoteTextField> {
     val current = parseNoteTextFieldList(fields)
     return parseNoteTextFieldList(current.map { field ->
@@ -167,6 +178,8 @@ fun patchNoteTextField(
             width = width ?: field.width,
             text = text ?: field.text,
             fontSize = fontSize ?: field.fontSize,
+            color = color ?: field.color,
+            bold = bold ?: field.bold,
         )
     })
 }
@@ -235,6 +248,8 @@ private fun sanitizeNoteTextField(
     width: Double?,
     text: String?,
     fontSize: Int?,
+    color: String? = null,
+    bold: Boolean = false,
 ): NoteTextField {
     val safeId = if (id != null && TEXT_FIELD_ID.matches(id)) id else newNoteTextFieldId()
     return NoteTextField(
@@ -245,6 +260,8 @@ private fun sanitizeNoteTextField(
         width = clampWidth(width),
         text = text?.take(TEXT_FIELD_MAX_CHARS) ?: "",
         fontSize = clampFontSize(fontSize),
+        color = color?.takeIf { TEXT_FIELD_COLOR.matches(it) }?.lowercase(),
+        bold = bold,
     )
 }
 

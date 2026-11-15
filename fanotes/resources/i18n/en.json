@@ -4026,5 +4026,16 @@
   "Neu erzeugen": "Regenerate",
   "Der lokale MCP-Server gehört zur Desktop-App.": "The local MCP server is part of the desktop app.",
   "Im Browser und auf dem Handy ist er nicht verfügbar.": "It is not available in the browser or on the phone.",
-  "Die Verbindungsdaten konnten nicht geladen werden.": "The connection details could not be loaded."
+  "Die Verbindungsdaten konnten nicht geladen werden.": "The connection details could not be loaded.",
+  "Textfeld-Werkzeuge": "Text box tools",
+  "Schrift kleiner": "Smaller text",
+  "Schrift größer": "Larger text",
+  "Fett": "Bold",
+  "Fett (Strg+B)": "Bold (Ctrl+B)",
+  "Schwarz": "Black",
+  "Rot": "Red",
+  "Orange": "Orange",
+  "Grün": "Green",
+  "Blau": "Blue",
+  "Violett": "Purple"
 }

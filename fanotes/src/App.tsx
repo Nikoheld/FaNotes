@@ -61,6 +61,7 @@ import {
   Type,
   X,
 } from 'lucide-react'
+import { notifyStoryWritten, storySyncBusy } from './writing/liveSync'
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
@@ -497,6 +498,13 @@ const INITIAL_UPDATE_STATE: UpdateState = {
 }
 
 const stripExtension = (name: string) => name.replace(/\.(md|markdown|famd|pdf)$/i, '')
+function collectTreePaths(entries: VaultEntry[], files = false, out: string[] = []): string[] {
+  for (const entry of entries) {
+    if (!files || entry.kind !== 'folder') out.push(entry.relativePath)
+    if (entry.children) collectTreePaths(entry.children, files, out)
+  }
+  return out
+}
 const fileName = (path: string) => path.split('/').pop() ?? path
 const parentPath = (path: string) => path.split('/').slice(0, -1).join('/')
 const NOTE_INK_MARKER = /<!--\s*fanotes-ink:([a-zA-Z0-9_-]{1,96})\s*-->/u
@@ -900,6 +908,16 @@ export default function App({ startupBootstrap }: AppProps) {
   const worksheetDirtyCallbacks = useRef(new Map<string, (dirty: boolean) => void>())
   const focusRestoreRef = useRef({ sidebar: true, inspector: true })
   const treeRef = useRef(tree)
+  const lastOwnTreeRefreshRef = useRef(0)
+  const [newArrivals, setNewArrivals] = useState<Set<string>>(() => new Set())
+  const newMarkedPaths = useMemo(() => {
+    const marked = new Set(newArrivals)
+    for (const entryPath of newArrivals) {
+      let cut = entryPath.lastIndexOf('/')
+      while (cut > 0) { marked.add(entryPath.slice(0, cut)); cut = entryPath.lastIndexOf('/', cut - 1) }
+    }
+    return marked
+  }, [newArrivals])
   const saveTimers = useRef(new Map<string, number>())
   const pendingWrites = useRef(new Map<string, string>())
   const settingsTimer = useRef<number | null>(null)
@@ -1619,8 +1637,59 @@ export default function App({ startupBootstrap }: AppProps) {
     treeRef.current = nextTree
     setTree(nextTree)
     syncEngine.notifyLocalChange()
+    lastOwnTreeRefreshRef.current = Date.now()
     return nextTree
   }, [])
+
+  // Files that arrived from outside FaNotes; the mark goes away when the note is opened.
+  useEffect(() => {
+    if (!window.fanotes?.onVaultChanged) return undefined
+    return window.fanotes.onVaultChanged((change) => {
+      const session = vaultSessionGenerationRef.current
+      const known = new Set(collectTreePaths(treeRef.current))
+      const ownRecently = Date.now() - lastOwnTreeRefreshRef.current < 4000
+      const active = activePathRef.current
+      const onlyActiveChanged = !change.added.length && !change.removed.length &&
+        change.changed.every((entryPath) => entryPath === active)
+      // The open note's own autosave also shows up as a change: nothing to do then.
+      if (onlyActiveChanged) return
+      void window.fanotes.getTree().then((nextTree) => {
+        // Only the tree is swapped. Open tabs, unsaved edits, selection, expanded
+        // folders and scroll position live elsewhere and stay untouched.
+        if (session !== vaultSessionGenerationRef.current) return
+        treeRef.current = nextTree
+        setTree(nextTree)
+        syncEngine.notifyLocalChange()
+        const present = new Set(collectTreePaths(nextTree))
+        const arrived = change.added.filter((entryPath) => !known.has(entryPath) && present.has(entryPath) && !tabsRef.current.some((tab) => tab.path === entryPath))
+        const fileSet = new Set(collectTreePaths(nextTree, true))
+        const files = arrived.filter((entryPath) => fileSet.has(entryPath))
+        setNewArrivals((current) => {
+          const next = new Set([...current].filter((entryPath) => present.has(entryPath)))
+          if (!ownRecently) for (const entryPath of files) next.add(entryPath)
+          return next.size === current.size && [...next].every((entryPath) => current.has(entryPath)) ? current : next
+        })
+        if (!ownRecently && files.length) {
+          const folder = files[0].includes('/') ? files[0].slice(0, files[0].lastIndexOf('/')).split('/').pop() : ''
+          const sameFolder = files.every((entryPath) => entryPath.slice(0, Math.max(0, entryPath.lastIndexOf('/'))) === files[0].slice(0, Math.max(0, files[0].lastIndexOf('/'))))
+          const where = sameFolder && folder ? ` in ${folder}` : ''
+          toast(files.length === 1
+            ? `1 neue Datei${where}`
+            : `${files.length} neue Dateien${where}`, 'info')
+        }
+      }).catch(() => undefined)
+    })
+  }, [toast])
+
+  useEffect(() => {
+    if (!activePath) return
+    setNewArrivals((current) => {
+      if (!current.has(activePath)) return current
+      const next = new Set(current)
+      next.delete(activePath)
+      return next
+    })
+  }, [activePath])
 
   const rememberLastOpenNote = useCallback((path: string) => {
     if (!path || settingsRef.current.lastOpenNotePath === path) return
@@ -2352,9 +2421,10 @@ export default function App({ startupBootstrap }: AppProps) {
 
   /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
   const isSyncPathBusy = useCallback((path: string) => {
-    // The open story's files: the writing mode holds them in memory and saves from there,
-    // so remote changes wait until it is closed (the sync then merges them paragraph by paragraph).
-    if (writingPathRef.current && path.startsWith(`${writingPathRef.current}/`)) return true
+    // The open story's files: the writing mode holds them in memory and saves from there.
+    // Its other files wait until it is closed (the sync then merges them paragraph by paragraph).
+    // Its scenes and manifest may be written while nothing is unsaved there; the editor then merges them live.
+    if (writingPathRef.current && path.startsWith(`${writingPathRef.current}/`)) return storySyncBusy(writingPathRef.current, path)
     const companionOwner = path.endsWith('.famd') ? tabsRef.current.find((tab) => companionNotePath(tab.path, '.famd') === path)?.path : undefined
     const notePath = companionOwner ?? path
     if (pendingWrites.current.has(notePath) || saveTimers.current.has(notePath)) return true
@@ -2367,6 +2437,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
   /** Files another device changed: refresh the tree, reload clean open tabs, drop tabs of deleted notes. */
   const applyRemoteChanges = useCallback(async ({ written, removed }: { written: string[]; removed: string[] }) => {
+    if (writingPathRef.current) notifyStoryWritten(writingPathRef.current, written)
     await refreshTree()
     const stories = new Set([...written, ...removed].flatMap((path) => /^(.+?\.story)\//iu.exec(path)?.[1] ?? []))
     if (stories.size) void import('./lib/docSearch/service').then(({ docSearch }) => { for (const story of stories) docSearch.notifyStoryChanged(story) })
@@ -3086,7 +3157,9 @@ export default function App({ startupBootstrap }: AppProps) {
       return
     }
     const field = placeNoteTextField(point)
-    rememberNoteTextFields(path, [...noteTextFieldsRef.current, field], true)
+    // Not committed yet: an empty box that is never typed into is dropped again
+    // by the layer and must not reach the disk.
+    rememberNoteTextFields(path, [...noteTextFieldsRef.current, field], false)
     setTextFieldPlacing(false)
     setTextFieldFocusId(field.id)
   }, [rememberNoteTextFields, toast])
@@ -3102,6 +3175,14 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!path) return
     rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), commit)
   }, [rememberNoteTextFields])
+
+  const changeTextFieldStyle = useCallback((id: string, patch: { fontSize?: number; color?: string | undefined; bold?: boolean | undefined }) => {
+    const path = activePathRef.current
+    if (!path) return
+    rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), true)
+  }, [rememberNoteTextFields])
+
+  const finishTextFieldEdit = useCallback(() => { void flushNoteTextFieldsRef.current() }, [])
 
   const clearTextFieldFocus = useCallback(() => setTextFieldFocusId(null), [])
 
@@ -5725,6 +5806,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 entries={visibleTree}
                 activePath={activePath}
                 splitPath={splitPath}
+                newPaths={newMarkedPaths}
                 revealPath={revealPath}
                 expansionStorageKey={`fanotes.treeExpanded.v1:${bootstrap?.vaultPath || 'default'}`}
                 rootLabel="Notizen"
@@ -6223,6 +6305,8 @@ export default function App({ startupBootstrap }: AppProps) {
                     onPlace={placeTextFieldAt}
                     onText={changeTextFieldText}
                     onGeometry={changeTextFieldGeometry}
+                    onStyle={changeTextFieldStyle}
+                    onFinish={finishTextFieldEdit}
                     onRemove={removePlacedTextField}
                     onFocusHandled={clearTextFieldFocus}
                   />
