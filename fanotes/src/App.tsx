@@ -3237,6 +3237,22 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [refreshTree, toast])
 
+  const setFileColor = useCallback(async (path: string, color: string | null) => {
+    const session = vaultSessionGenerationRef.current
+    try {
+      if (!window.fanotes.setFileColor) throw new Error('Dokumentfarben gibt es in dieser Version nicht.')
+      await window.fanotes.setFileColor(path, color)
+      if (session !== vaultSessionGenerationRef.current) return
+      await refreshTree()
+      if (session !== vaultSessionGenerationRef.current) return
+      toast(color ? 'Dokumentfarbe gespeichert.' : 'Dokumentfarbe auf Standard zurückgesetzt.', 'success')
+    } catch (error) {
+      if (session === vaultSessionGenerationRef.current) {
+        toast(error instanceof Error ? error.message : 'Dokumentfarbe konnte nicht gespeichert werden.', 'error')
+      }
+    }
+  }, [refreshTree, toast])
+
   const createDailyNote = useCallback(async (when?: Date) => {
     const session = vaultSessionGenerationRef.current
     vaultStructureRevisionRef.current += 1
@@ -5665,6 +5681,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onToggleLocalOnly={(folder) => applySettings({ ...settingsRef.current, syncExcludedFolders: toggleSyncPrefix(settingsRef.current.syncExcludedFolders, folder) })}
                 bookFolderPaths={subjectBooks.map((book) => book.subjectPath)}
                 onSetFolderColor={setFolderColor}
+                onSetFileColor={window.fanotes.setFileColor ? setFileColor : undefined}
                 onEditFolderPath={openFolderPath}
                 onRename={renameEntry}
                 onMove={moveEntry}

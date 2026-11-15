@@ -614,6 +614,8 @@ export type FaNotesApi = {
   convertFamdNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   setFolderColor: (relativePath: string, color: string | null) => Promise<{ color: string | null }>
+  /** Colours a note or PDF in the tree. Stored in `.fanotes/file-colors.json`. Hosts without it omit the option. */
+  setFileColor?: (relativePath: string, color: string | null) => Promise<{ color: string | null }>
   getFolderLocations: (relativePath: string) => Promise<{ paths: string[] }>
   pickFolderLocation: () => Promise<string | null>
   setFolderLocations: (relativePath: string, paths: string[], moveContents?: boolean) => Promise<{ paths: string[]; moved: number; conflicts: string[] }>

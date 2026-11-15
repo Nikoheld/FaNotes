@@ -8,6 +8,7 @@
 //   drawings   →  .fanotes/assets/<id>.json    (the drawing document)
 //   worksheets →  .fanotes/worksheets/<id>.json
 //   folders    →  .fanotes/folder-colors.json  { version: 1, colors: { path: colour } }
+//   fileColors →  .fanotes/file-colors.json    { version: 1, colors: { path: colour } } (notes, PDFs)
 //   meta       →  .fanotes/subject-books.json  { version: 1, books: [...] }
 import type { DrawingLibraryDocument, SyncHostApi, SyncScanEntry, WorksheetDocument } from '../../types'
 import { parseSubjectBooks, type SubjectBookRecord } from '../subjectBook'
@@ -29,12 +30,16 @@ export type BrowserSyncVault = {
   putWorksheet: (document: WorksheetDocument) => Promise<void>
   deleteWorksheet: (id: string) => Promise<void>
   putFolders: (folders: Array<{ path: string; color?: string }>) => Promise<void>
+  /** Note and PDF colours by path. Optional so older callers keep working. */
+  fileColors?: Map<string, string>
+  putFileColors?: (colors: Map<string, string>) => Promise<void>
   readMeta: (key: string) => Promise<unknown>
   writeMeta: (key: string, value: unknown) => Promise<void>
   invalidateTree: () => void
 }
 
 const FOLDER_COLORS_PATH = '.fanotes/folder-colors.json'
+const FILE_COLORS_PATH = '.fanotes/file-colors.json'
 const RECOGNITION_MODEL_PATH = '.fanotes/recognition-model.json'
 const SUBJECT_BOOKS_PATH = '.fanotes/subject-books.json'
 const DRAWING_PREFIX = '.fanotes/assets/'
@@ -91,6 +96,10 @@ export const createBrowserSyncHost = (vault: BrowserSyncVault): SyncHostApi => {
     const colors = Object.fromEntries(pairs.sort(([left], [right]) => left.localeCompare(right, 'de')))
     return stableJson({ version: 1, colors })
   }
+  const fileColorsJson = () => {
+    const colors = Object.fromEntries([...(vault.fileColors ?? new Map<string, string>()).entries()].sort(([left], [right]) => left.localeCompare(right, 'de')))
+    return stableJson({ version: 1, colors })
+  }
   const subjectBooksJson = () => stableJson({ version: 1, books: vault.getSubjectBooks() })
 
   const scan = async (): Promise<SyncScanEntry[]> => {
@@ -102,6 +111,8 @@ export const createBrowserSyncHost = (vault: BrowserSyncVault): SyncHostApi => {
     const times = await loadAssetTimes()
     let stamped = false
     for (const [path, blob] of vault.assets) {
+      // An older web version kept an unknown file-colors.json as a plain asset.
+      if (path === FILE_COLORS_PATH && vault.fileColors) continue
       if (!times[path]) {
         times[path] = Date.now()
         stamped = true
@@ -117,11 +128,13 @@ export const createBrowserSyncHost = (vault: BrowserSyncVault): SyncHostApi => {
       out.push({ path: worksheetPath(document.id), size: encoder.encode(stableJson(document)).byteLength, mtimeMs: Math.round(Date.parse(document.updatedAt) || 0) })
     }
     if ([...vault.folders.values()].some((folder) => folder.color)) out.push({ path: FOLDER_COLORS_PATH, size: encoder.encode(folderColorsJson()).byteLength, mtimeMs: 0 })
+    if (vault.fileColors?.size) out.push({ path: FILE_COLORS_PATH, size: encoder.encode(fileColorsJson()).byteLength, mtimeMs: 0 })
     if (vault.getSubjectBooks().length) out.push({ path: SUBJECT_BOOKS_PATH, size: encoder.encode(subjectBooksJson()).byteLength, mtimeMs: 0 })
     return out
   }
 
   const read = async (path: string): Promise<Uint8Array> => {
+    if (path === FILE_COLORS_PATH && vault.fileColors) return encoder.encode(fileColorsJson())
     const file = vault.files.get(path)
     if (file) return encoder.encode(file.content)
     const asset = vault.assets.get(path)
@@ -149,6 +162,17 @@ export const createBrowserSyncHost = (vault: BrowserSyncVault): SyncHostApi => {
         if (typeof color === 'string' && /^#[0-9a-f]{6}$/iu.test(color)) next.set(folderPath, { path: folderPath, color })
       }
       await vault.putFolders([...next.values()])
+      vault.invalidateTree()
+      return { path, size: bytes.byteLength, mtimeMs: 0 }
+    }
+    if (path === FILE_COLORS_PATH && vault.putFileColors) {
+      const parsed = JSON.parse(decoder.decode(bytes)) as { colors?: Record<string, unknown> }
+      const colors = parsed && typeof parsed.colors === 'object' && parsed.colors ? parsed.colors : {}
+      const next = new Map<string, string>()
+      for (const [filePath, color] of Object.entries(colors)) {
+        if (typeof color === 'string' && /^#[0-9a-f]{6}$/iu.test(color)) next.set(filePath, color.toLowerCase())
+      }
+      await vault.putFileColors(next)
       vault.invalidateTree()
       return { path, size: bytes.byteLength, mtimeMs: 0 }
     }
@@ -224,6 +248,11 @@ export const createBrowserSyncHost = (vault: BrowserSyncVault): SyncHostApi => {
     }
     if (path === FOLDER_COLORS_PATH) {
       await vault.putFolders([...vault.folders.values()].map((folder) => ({ path: folder.path })))
+      vault.invalidateTree()
+      return
+    }
+    if (path === FILE_COLORS_PATH && vault.putFileColors) {
+      await vault.putFileColors(new Map())
       vault.invalidateTree()
       return
     }
