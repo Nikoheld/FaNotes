@@ -1178,12 +1178,24 @@ const handlePutFile = async (request, response, auth, fileId) => {
 const moveToQuarantine = async (accountId, fileId, base, sourcePath) => {
   try {
     const directory = safeJoin(accountDirectory(accountId), 'quarantine', fileId)
+    const existing = await fs.lstat(directory).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
     await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+    if (!existing) {
+      // Link the quarantine directory before the rejected body is renamed into
+      // it. A crash must not drop the only server copy of that upload.
+      await syncDirectory(dirname(dirname(directory)))
+      await syncDirectory(dirname(directory))
+    }
     await fs.rename(sourcePath, safeJoin(directory, String(base)))
+    await syncDirectory(directory)
+    await syncDirectory(dirname(sourcePath))
     const names = (await fs.readdir(directory)).filter((name) => /^\d+$/u.test(name)).sort((left, right) => Number(left) - Number(right))
     for (const name of names.slice(0, Math.max(0, names.length - MAX_REVISIONS_KEPT))) {
       await fs.rm(safeJoin(directory, name), { force: true })
     }
+    // Dropped quarantine names have to be durable. A crash must not bring an
+    // older rejected body back under this note.
+    await syncDirectory(directory)
     return true
   } catch (error) {
     if (error instanceof SyncApiError) throw error
