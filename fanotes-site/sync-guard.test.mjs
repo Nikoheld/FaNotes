@@ -391,6 +391,29 @@ test('a download serves one inode and does not follow a symlink', async () => {
   assert.equal(blocked.body.includes(marker), false)
 })
 
+test('a download does not send a live blob whose size differs from the revision', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(80)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const next = randomBytes(120)
+  const blob = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  writeFileSync(blob, next)
+  const got = await readFile(id)
+  assert.equal(got.status, 409, got.body.toString('utf8'))
+  assert.equal(JSON.parse(got.body.toString('utf8')).reason, 'guard')
+  assert.equal(got.body.includes(next), false)
+  const head = await call('HEAD', `/api/v1/sync/files/${id}`, { token })
+  assert.equal(head.status, 409)
+  assert.deepEqual(readFileSync(blob), next)
+  const changes = await call('GET', '/api/v1/sync/changes?since=0', { token })
+  const entry = JSON.parse(changes.body.toString('utf8')).entries.find((item) => item.id === id)
+  assert.equal(entry.deleted, false)
+  assert.equal(entry.revision, revision)
+  assert.equal(entry.size, original.length)
+})
+
 test('an explicit clear keeps the previous blob in the revision archive', async () => {
   const id = randomBytes(32).toString('hex')
   const original = randomBytes(5000)
