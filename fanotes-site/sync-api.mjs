@@ -586,10 +586,24 @@ const handleRegister = async (request, response) => {
   const deviceId = registerDevice(account, device)
   const session = issueSession(account, deviceId)
   await fs.mkdir(safeJoin(accountDirectory(id), 'blobs'), { recursive: true, mode: 0o700 })
+  const emailPath = emailIndexPath(email)
+  let emailCreated = false
   try {
     // 'wx' makes the e-mail index the uniqueness check; two racing registrations cannot both win.
-    await fs.writeFile(emailIndexPath(email), id, { flag: 'wx', mode: 0o600 })
+    // The name is flushed before the account record is saved, and a failed
+    // attempt removes only the index entry this attempt created.
+    const emailHandle = await fs.open(emailPath, 'wx', 0o600)
+    emailCreated = true
+    try {
+      await emailHandle.writeFile(id)
+      await emailHandle.sync()
+    } finally {
+      await emailHandle.close()
+    }
+    await syncDirectory(dirname(emailPath))
+    await saveAccount(account)
   } catch (error) {
+    if (emailCreated) await fs.rm(emailPath, { force: true })
     await fs.rm(accountDirectory(id), { recursive: true, force: true })
     if (error?.code === 'EEXIST') {
       const existing = await loadAccountByEmail(email)
@@ -604,7 +618,6 @@ const handleRegister = async (request, response) => {
     }
     throw error
   }
-  await saveAccount(account)
   await scryptHash(authKey, randomBytes(16))
   sendJson(request, response, 201, { accountId: id, deviceId, token: session.token, expiresAt: session.expiresAt, revision: 0 })
 }
