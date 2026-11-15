@@ -49,7 +49,7 @@ await new Promise((resolve) => httpServer.listen(PORT, '127.0.0.1', resolve))
 const vite = await createServer({ root: appRoot, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true } })
 const crypto = await vite.ssrLoadModule('/src/lib/sync/crypto.ts')
 const { SyncApi, SyncApiError } = await vite.ssrLoadModule('/src/lib/sync/api.ts')
-const { SyncEngine, isSyncablePath, conflictCopyPath } = await vite.ssrLoadModule('/src/lib/sync/engine.ts')
+const { SyncEngine, isSyncablePath, conflictCopyPath, loadPersistedSyncState } = await vite.ssrLoadModule('/src/lib/sync/engine.ts')
 const homework = await vite.ssrLoadModule('/src/lib/homeworkStore.ts')
 const conflictsModule = await vite.ssrLoadModule('/src/lib/sync/conflicts.ts')
 
@@ -158,6 +158,32 @@ try {
   assert.ok(!isSyncablePath('.DS_Store'))
   assert.equal(conflictCopyPath('Mathe/Algebra.md', 'Laptop', new Date(2026, 8, 8, 9, 5)), 'Mathe/Algebra (Konflikt Laptop 2026-09-08 09-05).md')
   assert.equal(conflictCopyPath('README', 'A/B:C', new Date(2026, 0, 1, 0, 0)), 'README (Konflikt A B C 2026-01-01 00-00)')
+  const persistedBase = (id, revision) => ({ id, revision, sha256: 'ab'.repeat(32), size: 4, mtimeMs: 1 })
+  const persistedRaw = JSON.stringify({
+    version: 1,
+    accountId: 'acct',
+    cursor: 9,
+    lastSyncAt: '2026-11-01T00:00:00.000Z',
+    files: {
+      'Mathe/Algebra.md': persistedBase('a'.repeat(64), 3),
+      '.fanotes/recognition-model.json': persistedBase('b'.repeat(64), 2),
+      '.fanotes/history/abc/index.json': persistedBase('c'.repeat(64), 7),
+      '.fanotes/trash/gone.md': persistedBase('d'.repeat(64), 1),
+      '.fanotes/onboarding.json': persistedBase('e'.repeat(64), 1),
+    },
+    conflicts: [],
+    pendingDeletes: [],
+    skipped: [],
+  })
+  const persisted = loadPersistedSyncState(persistedRaw, 'acct')
+  assert.deepEqual(Object.keys(persisted.files).sort(), [
+    '.fanotes/history/abc/index.json',
+    '.fanotes/recognition-model.json',
+    'Mathe/Algebra.md',
+  ])
+  assert.equal(persisted.files['.fanotes/history/abc/index.json'].revision, 7)
+  assert.equal(persisted.cursor, 9)
+  assert.equal(Object.keys(loadPersistedSyncState(persistedRaw, 'other').files).length, 0)
 
   // ── Two devices, one account ───────────────────────────────────────────
   const hostA = createFakeHost('a')

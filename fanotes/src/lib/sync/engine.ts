@@ -129,14 +129,17 @@ const defaultDeviceName = (platform: string) => {
 
 const emptyState = (accountId: string): PersistedState => ({ version: 1, accountId, cursor: 0, lastSyncAt: null, files: {}, conflicts: [], pendingDeletes: [], skipped: [] })
 
-const parseState = (raw: string | null, accountId: string): PersistedState => {
+/** Bases for optional paths stay saved while that setting is off, and when a folder is excluded. Trash and caches still drop. */
+const PERSISTED_SYNC_PATHS: SyncPathOptions = { includeRecognitionModel: true, includeHistory: true }
+
+export const loadPersistedSyncState = (raw: string | null, accountId: string): PersistedState => {
   if (!raw) return emptyState(accountId)
   try {
     const parsed = JSON.parse(raw) as Partial<PersistedState>
     if (parsed.version !== 1 || parsed.accountId !== accountId || typeof parsed.files !== 'object' || !parsed.files) return emptyState(accountId)
     const files: Record<string, LocalBase> = {}
     for (const [path, base] of Object.entries(parsed.files)) {
-      if (!isSyncablePath(path) || !base || typeof base !== 'object') continue
+      if (!isSyncablePath(path, PERSISTED_SYNC_PATHS) || !base || typeof base !== 'object') continue
       const candidate = base as Partial<LocalBase>
       if (typeof candidate.id !== 'string' || typeof candidate.sha256 !== 'string') continue
       files[path] = {
@@ -163,6 +166,8 @@ const parseState = (raw: string | null, accountId: string): PersistedState => {
     return emptyState(accountId)
   }
 }
+
+const parseState = loadPersistedSyncState
 
 const parseSecrets = (raw: string | null): Secrets | null => {
   if (!raw) return null
