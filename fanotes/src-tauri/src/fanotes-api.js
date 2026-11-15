@@ -192,6 +192,14 @@ if (typeof window !== 'undefined') {
       writeData: (id, value) => invoke('fanotes:addons-write-data', id, value),
       netFetch: (url, init) => invoke('fanotes:addons-net-fetch', url, init),
     },
+    // Desktop-only native sync engine (preview). Not a preload channel.
+    nativeSync: Object.freeze({
+      cycle: (request) => invoke('fanotes-native:sync-cycle', request),
+      setBusy: (paths) => invoke('fanotes-native:sync-busy', paths),
+      enabled: () => invoke('fanotes-native:sync-enabled'),
+      setEnabled: (on) => invoke('fanotes-native:sync-set-enabled', on === true),
+      onEvent: (callback) => listen('fanotes-native:sync-event', callback),
+    }),
     sync: {
       vaultId: () => invoke('fanotes:sync-vault-id'),
       scan: () => invoke('fanotes:sync-scan'),

@@ -154,6 +154,8 @@ mod export;
 #[cfg(windows)]
 #[path = "export_webview2.rs"]
 mod export;
+#[path = "native/sync.rs"]
+mod native_sync;
 mod smoke;
 #[cfg(windows)]
 mod webview2;
@@ -934,7 +936,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(smoke::observe(register()))
+        .invoke_handler(smoke::observe(native_sync::with_sync_commands(register())))
         .run(tauri::generate_context!())
         .expect("FaNotes Tauri host failed");
 }

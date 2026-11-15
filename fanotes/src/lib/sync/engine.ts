@@ -20,6 +20,7 @@ const syncText = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
 const cycleWide = (error: unknown) => error instanceof SyncApiError && (error.unauthorized || error.offline || error.status === 429 || error.status >= 500)
 import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
 import { judgeStoryShrink, mergeStoryFile, storyRoleOf } from '../../writing/syncMerge'
+import { nativeSyncFor, runNativeCycle } from './nativeCycle'
 import { conflictFingerprint, groupConflicts, keptVersionPath, numberedVariant, type ConflictGroup, type ConflictKeep } from './conflicts'
 import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncRemoteEntry, type SyncSession } from './api'
 import { mcpReaderRequest, newReaderKey, type McpGrantInfo } from '../mcp/client'
@@ -617,9 +618,7 @@ export class SyncEngine {
     if (!this.session || !this.host || !this.state || !this.keys) return
     this.setState({ status: 'syncing', error: null, progress: null })
     try {
-      let conflicts = await this.pull()
-      const pushed = await this.push()
-      if (pushed.conflicts > 0) conflicts += await this.pull()
+      const { conflicts, pushed } = await this.cycleBody()
       this.state.lastSyncAt = new Date(this.options?.now?.() ?? Date.now()).toISOString()
       await this.persistState()
       this.setState({ status: 'idle', progress: null, pendingLocal: 0 })
@@ -637,6 +636,50 @@ export class SyncEngine {
       this.log(offline ? 'warn' : 'error', message)
       this.schedule(offline ? OFFLINE_RETRY_MS : AUTO_INTERVAL_MS)
     }
+  }
+
+  /**
+   * Pull, push, and pull again after push conflicts. On the desktop, when the
+   * native engine exists and its preview preference is on, the native engine
+   * runs this body on the same state file instead; everywhere else nothing changes.
+   */
+  private async cycleBody(): Promise<{ conflicts: number; pushed: { uploads: number; deletes: number; conflicts: number } }> {
+    const native = await nativeSyncFor()
+    if (native && this.host && this.state && this.vaultId && this.session) {
+      const accountId = this.session.accountId
+      const paths = this.pathOptions()
+      await this.persistState()
+      const outcome = await runNativeCycle(native, {
+        host: this.host,
+        trackedPaths: Object.keys(this.state.files),
+        platform: this.options?.platform ?? 'unknown',
+        deviceName: this.options?.deviceName() ?? '',
+        excludedPrefixes: paths.excludedPrefixes ?? [],
+        includeRecognitionModel: paths.includeRecognitionModel ?? false,
+        includeHistory: paths.includeHistory ?? false,
+        cleared: this.cleared,
+        isPathBusy: (path) => this.options?.isPathBusy?.(path) ?? false,
+        onEvent: (event) => {
+          if (event.kind === 'log') this.log(event.level, event.text)
+          else if (event.kind === 'applied') this.options?.onApplied?.({ written: event.written, removed: event.removed })
+          else this.options?.onConflict?.({ path: event.path, copyPath: event.copyPath, at: event.at })
+        },
+      })
+      if (outcome.ran) {
+        this.state = parseState(await this.host.readState(this.vaultId), accountId)
+        this.publishCounts()
+        if (outcome.error) {
+          throw outcome.error.status >= 0
+            ? new SyncApiError(outcome.error.status, outcome.error.message, (outcome.error.entry as SyncRemoteEntry | null) ?? null, outcome.error.reason)
+            : new Error(outcome.error.message)
+        }
+        return { conflicts: outcome.conflicts ?? 0, pushed: outcome.pushed ?? { uploads: 0, deletes: 0, conflicts: 0 } }
+      }
+    }
+    let conflicts = await this.pull()
+    const pushed = await this.push()
+    if (pushed.conflicts > 0) conflicts += await this.pull()
+    return { conflicts, pushed }
   }
 
   // ── Pull ────────────────────────────────────────────────────────────────

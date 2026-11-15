@@ -1,0 +1,195 @@
+{
+ "about": "A lost upload response, failed downloads, a server error and a damaged blob; every retry converges without loss.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Eins.md",
+   "text": "# Eins\n"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Zwei.md",
+   "text": "# Zwei\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Eins.md",
+   "text": "# Eins\n\nNeu."
+  },
+  {
+   "do": "fault",
+   "device": "Laptop",
+   "rule": {
+    "method": "PUT",
+    "file": "Eins.md",
+    "mode": "drop"
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Zwei.md",
+   "text": "# Zwei\n\nNeu."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "fault",
+   "device": "Tablet",
+   "rule": {
+    "method": "GET",
+    "file": "Zwei.md",
+    "mode": "offline",
+    "count": 1
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Zwei.md",
+   "text": "# Zwei\n\nNeuer."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "fault",
+   "device": "Tablet",
+   "rule": {
+    "method": "GET",
+    "file": "Zwei.md",
+    "mode": "offline",
+    "count": 2
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "fault",
+   "device": "Tablet",
+   "rule": {
+    "method": "GET",
+    "path": "/changes",
+    "mode": "status",
+    "status": 503,
+    "message": "Wartung"
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Drei.md",
+   "text": "# Drei\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "fault",
+   "device": "Tablet",
+   "rule": {
+    "method": "GET",
+    "file": "Drei.md",
+    "mode": "corrupt",
+    "count": 1
+   }
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Vier.md",
+   "text": "# Vier\n"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "Eins.md",
+   "text": "# Eins\n\nNeu."
+  },
+  {
+   "device": "Tablet",
+   "path": "Zwei.md",
+   "text": "# Zwei\n\nNeuer."
+  },
+  {
+   "device": "Tablet",
+   "path": "Drei.md",
+   "text": "# Drei\n"
+  },
+  {
+   "device": "Laptop",
+   "path": "Vier.md",
+   "text": "# Vier\n"
+  }
+ ]
+}
