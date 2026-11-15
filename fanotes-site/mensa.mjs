@@ -221,6 +221,7 @@ export const createMensa = (options = {}) => {
       try {
         const response = await fetchImpl(url, {
           method: 'GET',
+          redirect: 'manual',
           headers: { 'User-Agent': MENSA_USER_AGENT, Accept: 'text/html,application/json' },
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         })

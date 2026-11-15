@@ -403,7 +403,8 @@ test('FaNotes sign-in shows the account connection and ends with a password chan
 })
 
 test('hidden grades: a new mark never reaches the browser until it is revealed', async () => {
-  const env = await start()
+  // Changes are stamped with this clock. A live clock's milliseconds can contain the digits 3.5.
+  const env = await start({ clock: () => new Date('2026-11-10T12:00:00.000Z') })
   try {
     const app = await appIdentity(env.base)
     await linkSchulnetz(app)
