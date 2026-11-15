@@ -2202,6 +2202,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun recordBugTool(name: String) {
         recordBug("tool", open.value?.path, name)
+        // Same as the desktop listener: only a slugged tool name is counted, and only while sharing is on.
+        graph.diagnostics.recordFeature("tool." + name.lowercase().replace(Regex("[^a-z0-9]+"), "-").take(30))
     }
 
     fun openBugReport() {
@@ -2663,6 +2665,69 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val historyBusy = MutableStateFlow(false)
     val historyComparison = MutableStateFlow<Pair<String, String>?>(null)
     val study = MutableStateFlow<StudyPicture?>(null)
+
+    /** Settings → Statistik. Computed off the main thread, cached per file signature, cancelled on leave. */
+    val vaultStats = MutableStateFlow<ch.fasrv.fanotes.desk.VaultStats?>(null)
+    val vaultStatsProgress = MutableStateFlow<ch.fasrv.fanotes.desk.StatsProgress?>(null)
+    val vaultStatsFailed = MutableStateFlow(false)
+    private var statsJob: kotlinx.coroutines.Job? = null
+    private var statsLoader: ch.fasrv.fanotes.desk.VaultStatsLoader? = null
+    private var statsLoaderVault: ch.fasrv.fanotes.vault.VaultIo? = null
+
+    fun loadVaultStats(force: Boolean = false) {
+        statsJob?.cancel()
+        val io = graph.vault
+        val loader = statsLoader?.takeIf { statsLoaderVault === io }
+            ?: ch.fasrv.fanotes.desk.VaultStatsLoader(io).also { statsLoader = it; statsLoaderVault = io }
+        vaultStatsFailed.value = false
+        vaultStatsProgress.value = ch.fasrv.fanotes.desk.StatsProgress("tree", 0, 0)
+        statsJob = viewModelScope.launch {
+            try {
+                val done = loader.load(force) { stats, progress ->
+                    vaultStats.value = stats
+                    vaultStatsProgress.value = progress
+                }
+                diagnostics.setVault(done.totals.notes.toLong(), done.totals.bytes)
+                vaultStatsProgress.value = null
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                diagnostics.recordError(error)
+                vaultStatsFailed.value = true
+                vaultStatsProgress.value = null
+            }
+        }
+    }
+
+    /** The Statistik page was left: stop reading the vault. Keeps what was computed. */
+    fun cancelVaultStats() {
+        statsJob?.cancel()
+        statsJob = null
+        vaultStatsProgress.value = null
+    }
+
+    val diagnostics: ch.fasrv.fanotes.desk.DiagnosticsClient get() = graph.diagnostics
+
+    /** At most one report a day, and only while a toggle is on; the client checks both. */
+    private fun diagnosticsTick() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val notes = graph.vault.walkFiles().filter { !it.directory && !it.path.startsWith(".") }
+                diagnostics.setVault(notes.count { it.path.endsWith(".md") || it.path.endsWith(".famd") || it.path.endsWith(".pdf") }.toLong(), notes.sumOf { it.size })
+                diagnostics.sendDailyIfDue()
+            }
+        }
+    }
+
+    init {
+        diagnostics.markStartupReady(android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime())
+        viewModelScope.launch {
+            while (true) {
+                diagnosticsTick()
+                kotlinx.coroutines.delay(6L * 60 * 60 * 1000)
+            }
+        }
+    }
     val deskSettings = MutableStateFlow(graph.readDesk())
     val spellingLanguage = MutableStateFlow("unknown")
     val spellingEpoch = MutableStateFlow(0)
@@ -4271,6 +4336,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val next = deskSettings.value + (key to value)
         deskSettings.value = next
         graph.writeDesk(next)
+        if (key == "diagnostics-usage" || key == "diagnostics-logs") {
+            graph.configureDiagnostics(next)
+            diagnosticsTick()
+        }
     }
 
     fun runAi(

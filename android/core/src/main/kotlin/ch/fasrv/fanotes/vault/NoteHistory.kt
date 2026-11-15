@@ -121,6 +121,10 @@ fun listNoteHistory(io: VaultIo, notePath: String, nowMs: Long = System.currentT
     return retained.kept.asReversed()
 }
 
+/** Snapshot times of a note, read-only (unlike [listNoteHistory] it never prunes). Newest last. */
+fun noteHistoryStamps(io: VaultIo, notePath: String): List<String> =
+    readHistoryIndex(io, historyDirectory(notePath)).snapshots.map { it.createdAt }
+
 fun readNoteHistory(io: VaultIo, notePath: String, snapshotId: String): HistorySnapshotFile {
     if (!SNAPSHOT_ID.matches(snapshotId)) throw IllegalArgumentException("Ungültiger Verlaufseintrag.")
     val directory = historyDirectory(notePath)

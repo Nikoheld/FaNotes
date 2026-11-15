@@ -26,6 +26,7 @@ class FaNotesApplication : Application() {
         super.onCreate()
         graph = AppGraph(this)
         graph.handwritingLearning.attach()
+        graph.installDiagnosticsHook()
         if (Build.VERSION.SDK_INT >= 26) {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
@@ -47,6 +48,44 @@ class AppGraph(context: Context) {
     private val secrets = VaultSecrets(context)
     val defaultRoot: File = File(context.filesDir, "vault").apply { mkdirs() }
     var vault: VaultIo = DirectoryVault(defaultRoot.toPath())
+    /** Opt-in diagnostics. Both toggles are off until the user switches them on in Settings → Statistik. */
+    val diagnostics: ch.fasrv.fanotes.desk.DiagnosticsClient = ch.fasrv.fanotes.desk.DiagnosticsClient(
+        PrefsDiagnosticsStorage(context.getSharedPreferences("fanotes-diagnostics", Context.MODE_PRIVATE)),
+        OkHttpDiagnosticsTransport(),
+        {
+            ch.fasrv.fanotes.desk.DiagnosticsApp(
+                version = installedAppVersion(context),
+                platform = "android",
+                arch = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
+                language = java.util.Locale.getDefault().language,
+            )
+        },
+    )
+    private val diagnosticsContext = ch.fasrv.fanotes.desk.DiagnosticsContext(
+        vaultPath = File(context.filesDir, "vault").absolutePath,
+        homeDir = context.filesDir.parent.orEmpty(),
+    )
+
+    fun configureDiagnostics(settings: Map<String, String> = readDesk()) {
+        diagnostics.configure(
+            ch.fasrv.fanotes.desk.DiagnosticsConsent(usage = settings["diagnostics-usage"] == "on", logs = settings["diagnostics-logs"] == "on"),
+            diagnosticsContext,
+        )
+    }
+
+    /** Uncaught errors go to the diagnostics ring (class, code, app frames, hash only) and then on to the system handler. */
+    fun installDiagnosticsHook() {
+        configureDiagnostics()
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                diagnostics.recordError(error)
+                diagnostics.flush()
+            }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
     val handwritingLearning by lazy { HandwritingLearning(context.applicationContext, this) }
     var store: NoteStore = NoteStore(vault) { path -> handwritingLearning.changed(path) }
     var vaultId: String = fingerprint(defaultRoot.absolutePath)

@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Circle
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
@@ -7167,7 +7168,7 @@ private fun TabletButtonMap(raw: String?, modifier: Modifier = Modifier, onChang
 }
 
 @Composable
-private fun SettingCard(
+internal fun SettingCard(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier,
@@ -7211,7 +7212,7 @@ private fun SettingCard(
 }
 
 @Composable
-private fun SettingRow(
+internal fun SettingRow(
     title: String,
     description: String? = null,
     divider: Boolean = true,
@@ -7498,6 +7499,7 @@ private fun settingsSectionIcon(section: String) = when (section) {
     "drawing" -> Icons.Filled.Brush
     "files" -> Icons.Filled.Folder
     "sync" -> Icons.Filled.Cloud
+    "statistics" -> Icons.Filled.BarChart
     "addons" -> Icons.Filled.Extension
     "updates" -> Icons.Filled.SystemUpdate
     "accessibility" -> Icons.Filled.Accessibility
@@ -7988,7 +7990,7 @@ private fun SettingsPage(
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
-                        ch.fasrv.fanotes.desk.settingsEyebrow(current.count),
+                        if (current.id == "statistics") ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.desk.SETTINGS_STATISTICS_EYEBROW) else ch.fasrv.fanotes.desk.settingsEyebrow(current.count),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_EYEBROW_TRACKING.em,
@@ -8497,6 +8499,7 @@ private fun SettingsPage(
                     ConflictList(model)
                     SyncLogCard(sync.log)
                 }
+                "statistics" -> StatisticsSection(model, viewportWidth, anchorY)
                 "addons" -> SettingCard("Add-ons", Icons.Filled.Extension) {
                     SettingRow("Erweiterungen", "Add-ons des Desktops bleiben Dateien im Vault. Andere Erweiterungen werden nicht ausgeführt.", divider = false) {}
                 }
@@ -8628,7 +8631,7 @@ private fun SettingsPage(
     }
 }
 
-private fun Modifier.settingsAnchor(section: String, id: String, positions: MutableMap<String, Int>): Modifier =
+internal fun Modifier.settingsAnchor(section: String, id: String, positions: MutableMap<String, Int>): Modifier =
     onGloballyPositioned { positions["$section:$id"] = it.positionInParent().y.toInt().coerceAtLeast(0) }
 
 @Composable

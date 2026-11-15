@@ -141,6 +141,9 @@ private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWor
     "study" -> work.copy(destination = "study", message = null)
     "flashcards" -> work.copy(overlays = work.overlays + "flashcards", destination = "notes", message = null)
     "homework" -> work.copy(destination = "homework", message = null)
+    // The study tools (blocks, task panel) live in the shared editor on desktop and web; on Android they only point there.
+    "study-key", "study-sort", "study-map", "study-plate", "study-term", "study-tasks", "study-marks" ->
+        work.copy(message = "Lernwerkzeuge öffnest du in der Computer-App oder im Browser. Die Blöcke bleiben als Text in der Notiz lesbar.")
     "calendar" -> work.copy(destination = "calendar", message = null)
     "daily" -> openDaily(work, extras.today, extras)
     "daily-previous" -> openAdjacentDaily(work, extras, -1)

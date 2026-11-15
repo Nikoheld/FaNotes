@@ -1,0 +1,324 @@
+import assert from 'node:assert/strict'
+import { createServer } from 'vite'
+
+const server = await createServer({
+  appType: 'custom',
+  logLevel: 'error',
+  optimizeDeps: { noDiscovery: true },
+  server: { middlewareMode: true },
+})
+
+const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+try {
+  const load = (path) => server.ssrLoadModule(path)
+  const blocks = await load('/src/lib/study/blocks.ts')
+  const tasks = await load('/src/lib/study/tasks.ts')
+  const key = await load('/src/lib/study/keyTree.ts')
+  const sort = await load('/src/lib/study/sortBoard.ts')
+  const map = await load('/src/lib/study/conceptMap.ts')
+  const cards = await load('/src/lib/study/cardsModels.ts')
+  const render = await load('/src/lib/study/render.ts')
+  const registry = await load('/src/lib/study/registry.ts')
+  const marks = await load('/src/lib/study/marks.ts')
+  const flash = await load('/src/lib/flashcards.ts')
+  const lines = await load('/src/lib/study/pdfLines.ts')
+
+  // -- fenced blocks ------------------------------------------------------------
+  const note = [
+    '# Notiz', '', '```js', '```fanotes-key', 'not a block', '```', '',
+    '```fanotes-sort', '{"v":1,"title":"S","mode":"groups","cards":[],"groups":[]}', '```', '', 'Text', '',
+    '````fanotes-term', '{"v":1,"terms":[]}', '````',
+  ].join('\n')
+  const found = blocks.findStudyBlocks(note)
+  assert.deepEqual(found.map((block) => block.kind), ['sort', 'term'], 'blocks inside other fences are ignored')
+  assert.equal(note.slice(found[0].from, found[0].to).startsWith('```fanotes-sort'), true)
+  assert.equal(note.slice(found[0].from, found[0].to).endsWith('```'), true)
+  const crlf = '```fanotes-map\r\n{"v":1}\r\n```\r\ntext'
+  assert.equal(blocks.findStudyBlocks(crlf).length, 1)
+  assert.equal(blocks.findStudyBlocks('```fanotes-map\n{"v":1}').length, 0, 'unclosed block is not a block')
+  const replaced = blocks.replaceStudyBlock(note, found[0], 'sort', { v: 1, title: 'neu' })
+  assert.equal(blocks.findStudyBlocks(replaced).length, 2)
+  assert.ok(replaced.includes('"title": "neu"'))
+  assert.ok(replaced.endsWith('````'), 'text after the block is untouched')
+  const appended = blocks.insertStudyBlock('Hallo', 'map', { v: 1 })
+  assert.equal(appended, 'Hallo\n\n```fanotes-map\n{\n "v": 1\n}\n```\n')
+  assert.equal(blocks.findStudyBlocks(appended)[0].kind, 'map')
+  assert.deepEqual(blocks.parseJsonObject('[1]'), {})
+  assert.deepEqual(blocks.parseJsonObject('{broken'), {})
+
+  // -- task detection -----------------------------------------------------------
+  const page = (n, text) => ({ page: n, lines: text.split('\n') })
+  const detected = tasks.detectTasks([
+    page(3, [
+      'Rechercheauftrag (erweitertes Lernziel): Der Stamm der Gliederfüsser',
+      'Auftrag 1: Zeichnen Sie ein Insekt oder Ausschnitte davon ab und achten Sie auf die im',
+      'Grundbauplan beschriebenen Details! Schreiben Sie diese Details an! (ca. 1 Lektion)',
+      '',
+      'Auftrag 2: Zeichnen Sie die einzelnen Teile der Mundwerkzeuge einer Biene so genau wie',
+      'möglich unter dem Binokular ab. Vergleichen Sie dann Ihre Skizze mit der Abbildung (Ca. 20',
+      'Minuten)',
+      'Aufgabe der Hormone ist die Steuerung der Häutung.',
+    ].join('\n')),
+    page(4, [
+      'Auftrag 4: Lesen Sie die folgenden Texte durch und markieren Sie die wesentlichen Punkte!',
+      '(Ca. 20 Minuten)',
+      '   Auftrag 5 (ca. 60 Minuten): In der Powerpoint-Präsentation zu den Gliederfüssern finden Sie',
+      'auf der letzten Folie eine Zusammenstellung mit 15 Insektenordnungen.',
+      'Auftrag 7: Recherchieren Sie im Internet, was man unter Mimikry versteht. (10 Minuten)',
+      'Auftrag 10: Studieren Sie zur Hemi- und Holometablie die Seiten 48 und 49 in Ihrem Biolo-',
+      'giebuch',
+      'Auftrag 12: Erklären Sie den Zusam-',
+      'menhang zwischen den beiden Hor-',
+      'monen und den Häutungen. Task 3 ist ein Hinweis.',
+    ].join('\n')),
+    page(6, 'Auftrag 4 beantwortet die Frage nicht.\nAuftrag: Nennen Sie die Nützlinge aus dem Film. Weshalb ist es von Vorteil? (ca. 1,5 h)\nExercise 9: Übung für Fortgeschrittene (15 min)'),
+    page(7, 'Hier steht alles in einer Zeile. Auftrag 14: Beobachten Sie die Grillen (ca. 15 Minuten) und schreiben Sie auf. Auftrag 15: Fassen Sie die Bienensprache zusammen (ca. 15 Minuten). Das war es.'),
+  ])
+  const byId = Object.fromEntries(detected.map((task) => [task.id, task]))
+  assert.deepEqual(detected.filter((task) => task.number).map((task) => task.number), ['1', '2', '4', '5', '7', '10', '12', '9', '14', '15'])
+  assert.equal(byId['auftrag-1'].minutes, 45, '1 Lektion = 45 min')
+  assert.equal(byId['auftrag-2'].minutes, 20, 'hint split across lines')
+  assert.equal(byId['auftrag-2'].page, 3)
+  assert.equal(byId['auftrag-4'].page, 4, 'first heading per number wins')
+  assert.equal(byId['auftrag-4'].minutes, 20)
+  assert.equal(byId['auftrag-5'].minutes, 60)
+  assert.ok(byId['auftrag-5'].title.startsWith('In der Powerpoint-Präsentation'), 'time hint is not part of the title')
+  assert.equal(byId['auftrag-7'].minutes, 10)
+  assert.ok(byId['auftrag-10'].title.includes('Biologiebuch'), 'line-end hyphen joined')
+  assert.ok(byId['auftrag-10'].title.includes('Hemi- und'), 'hyphen before "und" kept')
+  assert.ok(byId['auftrag-12'].title.startsWith('Erklären Sie den Zusammenhang zwischen den beiden Hormonen'))
+  assert.equal(byId['auftrag-9'].minutes, 15)
+  assert.equal(byId['auftrag-14'].minutes, 15, 'collapsed one-line pages are split')
+  assert.equal(byId['auftrag-15'].page, 7)
+  assert.ok(!detected.some((task) => /Hormone ist/u.test(task.title)), '"Aufgabe der Hormone" is prose')
+  const unnumbered = detected.find((task) => !task.number)
+  assert.ok(unnumbered && unnumbered.minutes === 90 && unnumbered.page === 6, '"Auftrag:" without number and 1,5 h')
+  assert.equal(tasks.parseTimeHint('siehe Abb. 9 h'), 0, 'loose hours need "ca."')
+  assert.equal(tasks.parseTimeHint('(10-20 Min.)'), 15)
+  assert.equal(tasks.parseTimeHint('Doppellektion'), 0)
+  assert.equal(tasks.parseTimeHint('(2 Doppellektionen)'), 180)
+  assert.deepEqual(tasks.dehyphenate(['Beob-', 'achte', 'Ein-', 'Zahl']), ['Beobachte', 'Ein-', 'Zahl'])
+
+  // stored list round trip, edits survive a re-scan, JSON containing "-->" stays intact
+  let pdfNote = 'Notiz\n<!-- fanotes-pdf-marks-v1\n{"marks":[]}\n-->\n'
+  let list = tasks.mergeDetected(null, detected)
+  list.tasks[0] = { ...list.tasks[0], done: true, spentSec: 125, title: 'Mit --> im Titel' }
+  pdfNote = tasks.writeTaskList(pdfNote, list)
+  const read = tasks.readTaskList(pdfNote)
+  assert.equal(read.tasks.length, list.tasks.length)
+  assert.equal(read.tasks[0].title, 'Mit --> im Titel')
+  assert.ok(pdfNote.includes('fanotes-pdf-marks-v1'), 'other embedded data is kept')
+  const again = tasks.mergeDetected({ tasks: read.tasks.map((task) => (task.id === 'auftrag-2' ? { ...task, manual: true, title: 'Mein Text', minutes: 30 } : task)), removed: ['auftrag-7'] }, detected)
+  assert.equal(again.tasks.find((task) => task.id === 'auftrag-2').title, 'Mein Text')
+  assert.equal(again.tasks.find((task) => task.id === 'auftrag-2').minutes, 30)
+  assert.ok(!again.tasks.some((task) => task.id === 'auftrag-7'), 'removed tasks stay removed')
+  assert.equal(again.tasks.find((task) => task.id === read.tasks[0].id).done, true, 'progress survives re-detection')
+  assert.equal(tasks.writeTaskList(pdfNote, { tasks: [], removed: [] }).includes('fanotes-tasks'), false)
+  assert.equal(tasks.readTaskList('plain'), null)
+  const progress = tasks.taskProgress([{ ...list.tasks[0], done: true, minutes: 10 }, { ...list.tasks[1], done: false, minutes: 20, spentSec: 600 }])
+  assert.equal(progress.done, 1)
+  assert.equal(progress.ratio, 0.5)
+  assert.equal(progress.remainingMinutes, 10)
+  assert.equal(tasks.formatClock(3725), '1:02:05')
+  assert.equal(tasks.formatClock(65), '01:05')
+  assert.equal(tasks.newManualTask([{ ...list.tasks[0], number: '4' }], 2).number, '5')
+
+  // pdf.js items -> lines
+  assert.deepEqual(lines.itemsToLines([
+    { str: 'Auftrag 3:', transform: [1, 0, 0, 1, 0, 700] }, { str: ' Skizzieren', transform: [1, 0, 0, 1, 50, 700], hasEOL: false },
+    { str: 'zweite Zeile', transform: [1, 0, 0, 1, 0, 686] }, { str: ' dritte', hasEOL: true }, { str: 'vierte' },
+  ]), ['Auftrag 3: Skizzieren', 'zweite Zeile dritte', 'vierte'])
+
+  // -- table and key ---------------------------------------------------------------
+  const table = {
+    features: ['Flügel', 'Mundwerkzeuge saugend', 'Verwandlung'],
+    items: [
+      { id: 'a', name: 'Käfer', values: ['ja', 'nein', 'holometabol'] },
+      { id: 'b', name: 'Schmetterlinge', values: ['ja', 'ja', 'holometabol'] },
+      { id: 'c', name: 'Wanzen', values: ['ja', 'ja', 'hemimetabol'] },
+      { id: 'd', name: 'Flöhe', values: ['nein', 'ja', 'holometabol'] },
+      { id: 'e', name: 'Silberfischchen', values: ['nein', 'nein', 'ametabol'] },
+    ],
+  }
+  const tree = key.skeletonFromTable(table)
+  const leafNames = tree.nodes.filter((node) => node.kind === 'leaf').flatMap((node) => node.text.split(', ')).sort()
+  assert.deepEqual(leafNames, table.items.map((item) => item.name).sort(), 'every item ends in exactly one leaf')
+  assert.equal(tree.nodes.find((node) => node.id === tree.root).kind, 'question')
+  assert.deepEqual(key.normaliseKeyTree(tree), tree, 'skeleton is already normalised')
+  const layout = key.layoutKeyTree(tree)
+  assert.equal(layout.nodes.length, tree.nodes.length)
+  for (let i = 0; i < layout.nodes.length; i += 1) for (let j = i + 1; j < layout.nodes.length; j += 1) assert.ok(!overlap(layout.nodes[i], layout.nodes[j]), `tree nodes ${i}/${j} overlap`)
+  for (const node of layout.nodes) assert.ok(node.x >= 0 && node.x + node.w <= layout.width + 1 && node.y + node.h <= layout.height + 1)
+  const root = layout.nodes.find((node) => node.id === tree.root)
+  assert.equal(root.y, Math.min(...layout.nodes.map((node) => node.y)), 'root is on top')
+  const kids = layout.edges.filter((edge) => edge.from === tree.root)
+  assert.ok(Math.abs((Math.min(...kids.map((edge) => edge.x2)) + Math.max(...kids.map((edge) => edge.x2))) / 2 - (root.x + root.w / 2)) < 1, 'parent centred above children')
+  const cyclic = key.normaliseKeyTree({ root: 'a', nodes: [
+    { id: 'a', kind: 'question', text: 'A?', branches: [{ label: 'x', to: 'b' }, { label: 'y', to: 'a' }, { label: 'z', to: 'ghost' }] },
+    { id: 'b', kind: 'question', text: 'B?', branches: [{ label: 'back', to: 'a' }, { label: 'again', to: 'c' }] },
+    { id: 'c', kind: 'leaf', text: 'C', branches: [{ label: 'no', to: 'a' }] },
+    { id: 'orphan', kind: 'leaf', text: 'unreachable', branches: [] },
+  ] })
+  assert.deepEqual(cyclic.nodes.map((node) => node.id), ['a', 'b', 'c'])
+  assert.deepEqual(cyclic.nodes[0].branches.map((branch) => branch.to), ['b'])
+  assert.deepEqual(cyclic.nodes[2].branches, [])
+  const grown = key.addChild(tree, tree.root, 'leaf', 'vielleicht')
+  assert.equal(grown.nodes.length, tree.nodes.length + 1)
+  const shrunk = key.removeSubtree(grown, tree.nodes.find((node) => node.id === tree.root).branches[0].to)
+  assert.ok(shrunk.nodes.length < grown.nodes.length)
+  assert.equal(key.removeSubtree(tree, tree.root), tree, 'root cannot be removed')
+  assert.deepEqual(key.wrapText('Mundwerkzeuge saugend leckend', 14), ['Mundwerkzeuge', 'saugend', 'leckend'])
+  const md = key.keyTableToMarkdown({ features: ['A|B'], items: [{ id: 'x', name: 'Käfer', values: ['ja\nnein'] }] })
+  assert.equal(md, '| Art | A\\|B |\n| --- | --- |\n| Käfer | ja nein |')
+  const grid = key.parseTablePaste('Art\tFlügel\tBeine\nKäfer\tja\t6\nFloh\tnein\t6')
+  assert.deepEqual(key.tableFromGrid(grid).features, ['Flügel', 'Beine'])
+  assert.equal(key.tableFromGrid(grid).items[1].values[0], 'nein')
+  assert.deepEqual(key.parseTablePaste('| Art | X |\n| --- | --- |\n| a | b |'), [['Art', 'X'], ['a', 'b']])
+  const keyData = key.normaliseKeyData({ title: 'Schlüssel', table, tree, compareImage: 'data:image/png;base64,AAAA' })
+  assert.equal(keyData.compareImage, 'data:image/png;base64,AAAA')
+  assert.equal(key.normaliseKeyData({ compareImage: 'javascript:alert(1)' }).compareImage, '', 'only small image data URLs are kept')
+  const keyBlock = blocks.serializeStudyBlock('key', keyData)
+  assert.deepEqual(key.parseKeyData(blocks.findStudyBlocks(keyBlock)[0].body), keyData, 'key block round-trips')
+  assert.equal(key.parseKeyData('garbage').table.items.length, 2, 'bad JSON yields the starter key')
+
+  // -- sort board -------------------------------------------------------------------
+  assert.deepEqual(sort.parseCardList('1. Käfer\n- Fliegen\n• Flöhe\n\n  Wanzen '), ['Käfer', 'Fliegen', 'Flöhe', 'Wanzen'])
+  assert.deepEqual(sort.parseCardList('Käfer, Fliegen; Flöhe'), ['Käfer', 'Fliegen', 'Flöhe'])
+  let board = sort.addCards(sort.normaliseSortData({ title: 'Verwandlung', groups: [{ id: 'g1', title: 'hemimetabol' }, { id: 'g2', title: 'holometabol' }, { id: 'g3', title: 'ametabol' }] }), ['Käfer', 'Wanzen', 'Silberfischchen', 'Flöhe'])
+  const ids = board.cards.map((card) => card.id)
+  assert.equal(sort.unsortedCards(board).length, 4)
+  board = sort.moveCard(board, ids[0], 'g2')
+  board = sort.moveCard(board, ids[3], 'g2', 0)
+  board = sort.moveCard(board, ids[1], 'g1')
+  assert.deepEqual(board.groups[1].cards, [ids[3], ids[0]])
+  board = sort.moveCard(board, ids[0], 'g3')
+  assert.deepEqual(board.groups.map((group) => group.cards.length), [1, 1, 1], 'a card lives in one group only')
+  assert.equal(sort.unsortedCards(board).length, 1)
+  assert.equal(sort.moveCard(board, 'nope', 'g1'), board)
+  const stored = blocks.findStudyBlocks(blocks.serializeStudyBlock('sort', board))[0]
+  const reloaded = sort.parseSortData(stored.body)
+  assert.deepEqual(reloaded, board, 'sorting persists through the fenced block')
+  const text = sort.sortToMarkdown(board)
+  assert.ok(text.startsWith('| hemimetabol | holometabol | ametabol |'))
+  assert.ok(text.includes('| Wanzen | Flöhe | Käfer |'))
+  const seq = sort.setMode(board, 'sequence')
+  assert.equal(seq.groups.length, 1)
+  assert.equal(seq.groups[0].cards.length, 3)
+  assert.ok(sort.sortToMarkdown(seq).startsWith('1. '))
+  assert.equal(sort.removeCard(board, ids[1]).cards.length, 3)
+  const shuffled = sort.shuffleCards(board, () => 0.3)
+  assert.equal(shuffled.cards.length, 4)
+  assert.equal(sort.unsortedCards(shuffled).length, 4)
+  assert.equal(sort.normaliseSortData({ cards: [{ id: 'a', text: 'x' }], groups: [{ id: 'g', cards: ['a'] }, { id: 'h', cards: ['a', 'zzz'] }] }).groups[1].cards.length, 0, 'duplicate placements are dropped')
+
+  // -- concept map ------------------------------------------------------------------
+  let cmap = map.defaultMapData()
+  cmap = map.mapFromText({ ...cmap, nodes: [], edges: [] }, 'Häutungshormon -> löst aus -> Häutung\nJuvenilhormon -(hemmt)-> Verpuppung\nHäutung -> Wachstum\nWachstum -> Häutungshormon')
+  assert.equal(cmap.nodes.length, 5)
+  assert.equal(cmap.edges.length, 4)
+  assert.equal(cmap.edges[0].label, 'löst aus')
+  assert.equal(cmap.edges[1].label, 'hemmt')
+  const placed = map.layoutMap(cmap)
+  assert.equal(placed.nodes.length, 5)
+  assert.equal(placed.edges.length, 4)
+  for (let i = 0; i < placed.nodes.length; i += 1) for (let j = i + 1; j < placed.nodes.length; j += 1) assert.ok(!overlap(placed.nodes[i], placed.nodes[j]), 'map nodes overlap')
+  const layerOf = (id) => placed.layers.findIndex((layer) => layer.includes(id))
+  const idOf = (name) => cmap.nodes.find((node) => node.text === name).id
+  assert.ok(layerOf(idOf('Häutungshormon')) < layerOf(idOf('Häutung')) && layerOf(idOf('Häutung')) < layerOf(idOf('Wachstum')), 'causes sit above effects despite the cycle')
+  const sideways = map.layoutMap({ ...cmap, dir: 'LR' })
+  assert.ok(sideways.nodes.find((node) => node.id === idOf('Wachstum')).x > sideways.nodes.find((node) => node.id === idOf('Häutungshormon')).x, 'left-to-right layout')
+  assert.equal(map.normaliseMapData({ nodes: [{ id: 'a', text: 'A' }], edges: [{ from: 'a', to: 'a' }, { from: 'a', to: 'zz' }] }).edges.length, 0)
+  assert.deepEqual(map.parseMapData(blocks.findStudyBlocks(blocks.serializeStudyBlock('map', cmap))[0].body), cmap)
+
+  // -- plate, terms, flashcards ----------------------------------------------------
+  const png = 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+  const plate = cards.normalisePlateData({ title: 'Schmetterlinge', cols: 3, items: [{ id: 'p1', label: 'Distelfalter', img: png }, { id: 'p2', label: 'Admiral', img: 'http://evil/x.png' }, { id: 'p3', label: '', img: png }] })
+  assert.equal(plate.items[1].img, '', 'remote images are not accepted')
+  const terms = cards.normaliseTermData({ terms: [{ id: 't1', term: 'Mimikry', definition: 'Nachahmung einer wehrhaften Art.', example: 'Schwebfliege', source: 'Buch S. 52' }, { id: 't2', term: 'Mimese', definition: '' }] })
+  const cardNote = `# Biologie\n\n${blocks.serializeStudyBlock('plate', plate)}\n\n${blocks.serializeStudyBlock('term', terms)}\n`
+  const sources = cards.studyCardSources(cardNote)
+  assert.deepEqual(sources.map((source) => source.id), ['plate:p1', 'term:t1'], 'only complete entries become cards')
+  const now = new Date(2026, 10, 15, 12)
+  const deck = flash.cardsFromMarkdown(cardNote, now)
+  assert.equal(deck.length, 2)
+  const imageCard = deck.find((card) => card.id === 'plate:p1')
+  assert.equal(imageCard.frontImage, png)
+  assert.equal(imageCard.back, 'Distelfalter')
+  const termCard = deck.find((card) => card.id === 'term:t1')
+  assert.equal(termCard.front, 'Mimikry')
+  assert.ok(termCard.back.includes('Beispiel: Schwebfliege') && termCard.back.includes('Quelle: Buch S. 52'))
+  const graded = flash.applyReview(cardNote, 'plate:p1', 'good', now)
+  assert.ok(!graded.includes('frontImage'), 'the schedule does not copy the picture')
+  assert.equal(graded.split(png).length, cardNote.split(png).length, 'pictures stay only in the plate block')
+  const regraded = flash.cardsFromMarkdown(graded, now)
+  assert.equal(regraded.find((card) => card.id === 'plate:p1').reps, 1, 'schedule is kept by id')
+  assert.equal(regraded.find((card) => card.id === 'plate:p1').frontImage, png)
+  assert.equal(flash.cardsFromMarkdown('## Lernfragen\n\n<details><summary>Q?</summary>A</details>', now).length, 1, 'existing question cards still work')
+
+  // sort result as Markdown: separator row, padded columns, escaped pipes, list form
+  {
+    let uneven = sort.addCards(sort.normaliseSortData({ groups: [{ id: 'g1', title: 'hemi | holo' }, { id: 'g2', title: 'ametabol' }, { id: 'g3', title: '' }] }), ['A | B', 'C', 'D', 'E'])
+    const [a, c, d, e] = uneven.cards.map((card) => card.id)
+    uneven = sort.moveCard(sort.moveCard(sort.moveCard(sort.moveCard(uneven, a, 'g1'), c, 'g1'), d, 'g1'), e, 'g2')
+    const rows = sort.sortToMarkdown(uneven).split('\n')
+    assert.equal(rows.length, 5, 'header, separator and three rows')
+    assert.equal(rows[0], '| hemi \\| holo | ametabol | Gruppe 3 |')
+    assert.equal(rows[1], '| --- | --- | --- |')
+    assert.equal(rows[2], '| A \\| B | E |  |')
+    assert.equal(rows[4], '| D |  |  |')
+    assert.ok(rows.every((row) => row.split(/(?<!\\)\|/u).length === 5), 'every row has the same number of cells')
+    assert.equal(sort.sortToMarkdown(uneven, 'list'), '**hemi | holo**\n- A | B\n- C\n- D\n\n**ametabol**\n- E')
+    assert.equal(sort.sortToMarkdown(sort.normaliseSortData({ groups: [{ id: 'g1', title: 'x' }, { id: 'g2', title: 'y' }] })).split('\n').length, 3, 'empty board still yields a valid table')
+  }
+
+  // pictures: vault files are kept as paths, data URLs still read, hydration hook rendered
+  {
+    const ref = '.fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg'
+    assert.equal(blocks.asImage(ref), ref)
+    assert.equal(blocks.asImage('.fanotes/worksheets/../../secret.jpg'), '')
+    assert.equal(blocks.asImage('notes/x.png'), '')
+    assert.equal(blocks.asImage('data:image/jpeg;base64,AAAA'), 'data:image/jpeg;base64,AAAA', 'old data URLs still read')
+    const sheet = cards.normalisePlateData({ items: [{ id: 'p1', label: 'Admiral', img: ref }] })
+    assert.equal(sheet.items[0].img, ref)
+    const html = registry.renderStudyBlockHtml('plate', JSON.stringify(sheet))
+    assert.ok(html.includes(`data-vault-src="${ref}"`) && !html.includes('src="."'), 'vault pictures are resolved after rendering')
+    const note = `${blocks.serializeStudyBlock('plate', sheet)}\n`
+    assert.ok(!note.includes('base64'), 'the note holds only the path')
+    const deck = flash.cardsFromMarkdown(note, new Date(2026, 10, 15))
+    assert.equal(deck[0].frontImage, ref, 'flashcards reference the same file')
+    assert.ok(!flash.applyReview(note, 'plate:p1', 'good', new Date(2026, 10, 15)).includes('frontImage'))
+  }
+
+  // -- rendering ----------------------------------------------------------------------
+  const evil = '<img src=x onerror=alert(1)>"&'
+  const html = registry.renderStudyBlockHtml('key', JSON.stringify({ title: evil, table: { features: [evil], items: [{ id: 'a', name: evil, values: [evil] }] }, tree: { root: 'a', nodes: [{ id: 'a', kind: 'leaf', text: evil, branches: [] }] } }))
+  assert.ok(!html.includes('<img src=x'), 'user text is escaped in the key view')
+  assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'))
+  for (const kind of ['sort', 'map', 'plate', 'term']) {
+    const out = registry.renderStudyBlockHtml(kind, JSON.stringify({ title: evil, terms: [{ id: 'a', term: evil, definition: evil }], items: [{ id: 'a', label: evil }], cards: [{ id: 'c', text: evil }], nodes: [{ id: 'a', text: evil }, { id: 'b', text: 'B' }], edges: [{ from: 'a', to: 'b', label: evil }], groups: [{ id: 'g', title: evil, cards: ['c'] }] }))
+    assert.ok(!/<img src=x/u.test(out), `${kind} escapes user text`)
+  }
+  const exported = render.renderKeyTreeSvg(keyData, render.EXPORT_PALETTE)
+  assert.ok(exported.svg.startsWith('<svg xmlns='))
+  assert.ok(exported.svg.includes('#ffffff') && !exported.svg.includes('var(--'), 'export uses fixed colours')
+  assert.ok(render.renderKeyTreeSvg(keyData).svg.includes('var(--text'), 'live view follows the theme')
+  assert.ok(render.renderMapSvg(cmap, render.EXPORT_PALETTE).svg.includes('marker-end'))
+  assert.equal(registry.renderStudyBlockHtml('map', '{}').includes('<svg'), true, 'broken data falls back to the starter map')
+
+  // -- highlights overview -------------------------------------------------------------
+  const sample = [
+    { id: 'm2', page: 5, quote: 'Zweite Stelle', kind: 'highlight' },
+    { id: 'm1', page: 2, quote: 'Erste Stelle', kind: 'underline' },
+    { id: 'm3', page: 5, quote: 'Dritte Stelle', kind: 'highlight' },
+  ]
+  const grouped = marks.groupMarksByPage(sample)
+  assert.deepEqual(grouped.map((group) => [group.page, group.marks.length]), [[2, 1], [5, 2]])
+  const noteMd = marks.marksToMarkdown('Gliederfüsser.pdf', sample)
+  assert.ok(noteMd.startsWith('# Markierungen: Gliederfüsser.pdf\n\n## Seite 2\n\n- __Erste Stelle__ (S. 2)'))
+  assert.ok(noteMd.includes('## Seite 5\n\n- ==Zweite Stelle== (S. 5)\n- ==Dritte Stelle== (S. 5)'))
+
+  console.log('study tools checks passed')
+} finally {
+  await server.close()
+}

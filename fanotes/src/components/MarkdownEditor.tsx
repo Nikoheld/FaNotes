@@ -83,7 +83,11 @@ import { clientYFromTextAnchor, registerPaperTextAnchorProvider, textAnchorFromV
 import { minimalReplacement } from '../lib/textReplacement'
 import { primeSpellingCorrections, rerunSpellingCheck, spellingCorrections } from '../lib/spellingCorrections'
 import type { SpellingLanguage } from '../types'
+import { findStudyBlocks, STUDY_KIND_LABELS, type StudyBlockRef, type StudyKind } from '../lib/study/blocks'
+import { hydrateVaultImages, STUDY_EVENT } from '../lib/study/imageTools'
+import { renderStudyBlockHtml } from '../lib/study/registry'
 
+const LazyStudyHost = lazy(() => import('./study/StudyHost'))
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
 })))
@@ -568,6 +572,42 @@ class DetailsWidget extends WidgetType {
   ignoreEvent() { return true }
 }
 
+class StudyBlockWidget extends WidgetType {
+  constructor(readonly kind: StudyKind, readonly body: string, readonly index: number) { super() }
+  eq(other: StudyBlockWidget) { return other.kind === this.kind && other.body === this.body && other.index === this.index }
+  toDOM(view: EditorView) {
+    const shell = document.createElement('div')
+    shell.className = `cm-lw-shell lw-block lw-kind-${this.kind}`
+    const content = document.createElement('div')
+    content.className = 'lw-block-content'
+    try { content.innerHTML = renderStudyBlockHtml(this.kind, this.body); hydrateVaultImages(content) } catch { content.textContent = 'Lernblock konnte nicht dargestellt werden.' }
+    const edit = document.createElement('button')
+    edit.type = 'button'
+    edit.className = 'cm-lw-edit'
+    edit.textContent = 'Bearbeiten'
+    edit.ariaLabel = `${STUDY_KIND_LABELS[this.kind]} bearbeiten`
+    edit.addEventListener('click', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      window.dispatchEvent(new CustomEvent(STUDY_EVENT.edit, { detail: { view, index: this.index } }))
+    })
+    shell.append(content, edit)
+    return shell
+  }
+  ignoreEvent() { return true }
+}
+
+const studyBlockCache = new WeakMap<object, StudyBlockRef[]>()
+const studyBlocksOf = (state: EditorView['state']) => {
+  const key = state.doc as unknown as object
+  let blocks = studyBlockCache.get(key)
+  if (!blocks) {
+    blocks = state.doc.length > 20 && state.doc.toString().includes('```fanotes-') ? findStudyBlocks(state.doc.toString()) : []
+    studyBlockCache.set(key, blocks)
+  }
+  return blocks
+}
+
 const buildLivePreviewDecorations = (view: EditorView) => {
   const decorations: Range<Decoration>[] = []
   const visited = new Set<number>()
@@ -596,6 +636,20 @@ const buildLivePreviewDecorations = (view: EditorView) => {
       if (hiddenLine.to > hiddenLine.from) decorations.push(Decoration.replace({}).range(hiddenLine.from, hiddenLine.to))
     }
   }
+  const studyLines = new Set<number>()
+  studyBlocksOf(view.state).forEach((block, index) => {
+    const isEditing = view.state.selection.ranges.some((range) => range.from <= block.to && range.to >= block.from)
+    if (isEditing) return
+    for (let number = block.startLine; number <= block.endLine; number += 1) studyLines.add(number)
+    const hostLine = view.state.doc.line(block.startLine)
+    decorations.push(Decoration.line({ attributes: { class: 'cm-lw-host' } }).range(hostLine.from))
+    decorations.push(Decoration.replace({ widget: new StudyBlockWidget(block.kind, block.body, index) }).range(hostLine.from, hostLine.to))
+    for (let number = block.startLine + 1; number <= block.endLine; number += 1) {
+      const hidden = view.state.doc.line(number)
+      decorations.push(Decoration.line({ attributes: { class: 'cm-lw-hidden' } }).range(hidden.from))
+      if (hidden.to > hidden.from) decorations.push(Decoration.replace({}).range(hidden.from, hidden.to))
+    }
+  })
   let mathStart: ReturnType<typeof view.state.doc.line> | null = null
   for (let number = 1; number <= view.state.doc.lines; number += 1) {
     const line = view.state.doc.line(number)
@@ -719,6 +773,11 @@ const buildLivePreviewDecorations = (view: EditorView) => {
       if (!visited.has(line.from)) {
         visited.add(line.from)
         if (mathLines.has(line.number)) {
+          if (line.to >= visible.to || line.to >= view.state.doc.length) break
+          position = line.to + 1
+          continue
+        }
+        if (studyLines.has(line.number)) {
           if (line.to >= visible.to || line.to >= view.state.doc.length) break
           position = line.to + 1
           continue
@@ -1686,11 +1745,14 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   }, [focusToken])
 
   return (
-    <div
-      className={`markdown-editor ${paperMode ? 'paper-mode' : ''} ${className}`.trim()}
-      data-theme={dark ? 'dark' : 'light'}
-      ref={hostRef}
-    />
+    <>
+      <div
+        className={`markdown-editor ${paperMode ? 'paper-mode' : ''} ${className}`.trim()}
+        data-theme={dark ? 'dark' : 'light'}
+        ref={hostRef}
+      />
+      {!readOnly && <Suspense fallback={null}><LazyStudyHost getView={() => viewRef.current} /></Suspense>}
+    </>
   )
 })
 
