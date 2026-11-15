@@ -784,10 +784,28 @@ const handleGetFile = async (request, response, auth, fileId) => {
     try {
       const info = await handle.stat()
       if (!info.isFile()) fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
-      // The headers would name this revision's checksum. A different size is a
-      // newer or truncated body, so it is not sent under that checksum.
+      // The headers would name this revision's checksum. A different size is
+      // not sent under that checksum. A full ciphertext is recorded first, so
+      // the download names the body that is actually on disk.
       if (info.size !== (Number(entry.size) || 0)) {
         await handle.close()
+        if (info.size >= EMPTY_CIPHERTEXT_BYTES) {
+          const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, entry, null)
+          if (settled) {
+            const reopened = await fs.open(blobPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+            try {
+              const again = await reopened.stat()
+              if (!again.isFile() || again.size !== settled.entry.size) {
+                await reopened.close()
+                return { entry: settled.entry, handle: null, size: again.size, mismatch: true }
+              }
+              return { entry: settled.entry, handle: reopened, size: again.size }
+            } catch (error) {
+              await reopened.close()
+              throw error
+            }
+          }
+        }
         return { entry, handle: null, size: info.size, mismatch: true }
       }
       return { entry, handle, size: info.size }
@@ -1203,6 +1221,12 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
     const liveStat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
     const currentSize = Number(current.size) || 0
     if (liveStat?.isFile() && (liveStat.size !== currentSize || await hashFile(blobPath) !== current.sha256)) {
+      // A full ciphertext is the newer note. Record it and leave it in place.
+      // A shorter remnant is not published and is not deleted.
+      if (liveStat.size >= EMPTY_CIPHERTEXT_BYTES) {
+        const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, null)
+        if (settled) return conflict(request, response, settled.entry)
+      }
       sendJson(request, response, 409, {
         error: 'Die gespeicherte Datei gehört zu einer neueren Fassung und wurde nicht gelöscht.',
         entry: publicEntry(current),
