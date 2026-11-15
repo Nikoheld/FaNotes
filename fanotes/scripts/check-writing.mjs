@@ -209,6 +209,26 @@ try {
     for (const line of long.lines) assert.ok(line.width <= line.available + 0.5)
   })
 
+  await test('a typed space moves the caret at once (trailing and leading spaces)', () => {
+    for (const align of ['left', 'justify', 'center', 'right']) {
+      const plain = linebreak.layoutParagraph({ runs: [{ text: 'Es war einmal' }], style: resolved({ align, indentFirst: 0 }), width: 400, measurer })
+      const spaced = linebreak.layoutParagraph({ runs: [{ text: 'Es war einmal ' }], style: resolved({ align, indentFirst: 0 }), width: 400, measurer })
+      const before = linebreak.caretX(spaced, 0, 13, measurer)
+      const after = linebreak.caretX(spaced, linebreak.lineAt(spaced, 14), 14, measurer)
+      assert.ok(after > before + 1, `${align}: the caret moved past the space (${before} → ${after})`)
+      assert.equal(spaced.lines[0].width, plain.lines[0].width, `${align}: the hanging space does not change the alignment`)
+      assert.equal(spaced.lines[0].pieces.at(-1).hang, true)
+    }
+    const only = linebreak.layoutParagraph({ runs: [{ text: ' ' }], style: resolved({ indentFirst: 0 }), width: 400, measurer })
+    assert.ok(linebreak.caretX(only, 0, 1, measurer) > linebreak.caretX(only, 0, 0, measurer), 'a space in an empty paragraph moves the caret')
+    const leading = linebreak.layoutParagraph({ runs: [{ text: ' Hallo' }], style: resolved({ indentFirst: 0 }), width: 400, measurer })
+    assert.ok(linebreak.caretX(leading, 0, 1, measurer) > 0, 'a leading space is kept')
+    // Spaces at a soft wrap still vanish: the next line starts with its word.
+    const wrapped = linebreak.layoutParagraph({ runs: [{ text: lorem }], style: resolved({ indentFirst: 0, align: 'left' }), width: 300, measurer })
+    for (const line of wrapped.lines.slice(1)) assert.notEqual(line.pieces[0].kind, 'space')
+    for (const line of wrapped.lines) assert.ok(line.width <= line.available + 0.5)
+  })
+
   await test('list paragraphs hang their marker left of the text', () => {
     const style = linebreak.resolveStyle(story.manifest.styles.list)
     const layout = linebreak.layoutParagraph({ runs: [{ text: lorem }], style, width: 300, measurer })

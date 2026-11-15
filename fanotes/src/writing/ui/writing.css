@@ -20,6 +20,8 @@
 .wm-segmented button { display: grid; place-items: center; width: 32px; height: 28px; border: 0; color: var(--text-soft); background: transparent; cursor: pointer; }
 .wm-segmented button.is-on { color: var(--accent-readable); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .wm-zoom { flex: none; display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--text-soft); }
+.wm-zoom-value { min-width: 46px; padding: 2px 4px; border: 0; border-radius: 6px; color: inherit; background: transparent; font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
+.wm-zoom-value:hover { background: var(--hover, rgba(127, 127, 127, .12)); }
 .wm-zoom span { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
 .wm-menu { position: relative; flex: none; }
 .wm-menu > summary { list-style: none; }
@@ -57,10 +59,11 @@
 .wm-binder-row.is-chapter .wm-binder-title, .wm-binder-row.is-part .wm-binder-title { font-weight: 650; }
 .wm-binder-row input { flex: 1; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid var(--accent); border-radius: 5px; color: var(--text); background: var(--bg-elevated); font: inherit; }
 
-.wm-scroll { position: relative; flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; background: color-mix(in srgb, var(--bg) 88%, #6b7280); }
+.wm-scroll { position: relative; flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y; background: color-mix(in srgb, var(--bg) 88%, #6b7280); }
 .wm-scroll.theme-night { background: #0b0d12; }
-.wm-pages { position: relative; margin: 0 auto; }
-.wm-page { position: absolute; overflow: hidden; background: #fffefb; box-shadow: 0 1px 2px rgba(0, 0, 0, .18), 0 8px 26px rgba(0, 0, 0, .16); cursor: text; touch-action: pan-y pinch-zoom; }
+/* Each page has a fixed size: layout containment keeps a keystroke's relayout inside its page (paint containment would clip the shadow). */
+.wm-pages { position: relative; margin: 0 auto; contain: layout style; }
+.wm-page { position: absolute; overflow: hidden; contain: layout style; background: #fffefb; box-shadow: 0 1px 2px rgba(0, 0, 0, .18), 0 8px 26px rgba(0, 0, 0, .16); cursor: text; touch-action: pan-x pan-y; }
 .theme-sepia .wm-page { background: #f6efdf; }
 .theme-night .wm-page { background: #171a21; box-shadow: 0 0 0 1px rgba(255, 255, 255, .06); }
 .wm-page.is-draft { box-shadow: none; }
@@ -68,7 +71,7 @@
 .wm-page-inner { position: absolute; top: 0; left: 0; transform-origin: 0 0; color: #1d1b18; }
 .theme-sepia .wm-page-inner { color: #3b2f22; }
 .theme-night .wm-page-inner { color: #d9d6cf; }
-.wm-line { position: absolute; }
+.wm-line { position: absolute; contain: layout style; }
 .wm-line > span { position: absolute; white-space: pre; font-kerning: normal; font-variant-ligatures: common-ligatures; }
 .wm-line.is-dimmed, .wm-dropcap.is-dimmed { opacity: .22; transition: opacity .2s ease; }
 .wm-line.is-conflict { background: rgba(234, 179, 8, .16); box-shadow: -6px 0 0 rgba(234, 179, 8, .55); }
