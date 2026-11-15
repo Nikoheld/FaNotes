@@ -190,24 +190,39 @@ const readJsonBody = async (request) => {
   }
 }
 
-const readBinaryBody = async (request, limit) => {
+// The body is hashed and written as it arrives. A 100 MB note must not sit in
+// the heap, and a short or extra-long body is deleted before it can replace one.
+const spoolUpload = async (directory, request, limit) => {
   const declared = Number(request.headers['content-length'])
   if (!Number.isInteger(declared) || declared < 0) fail(400, 'Die Datei kam unvollständig an.')
   if (declared > limit) fail(413, 'Die Datei ist zu groß für den Sync.')
-  const chunks = []
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+  const target = safeJoin(directory, `${process.pid}.${randomBytes(6).toString('hex')}.part`)
+  const handle = await fs.open(target, 'wx', 0o600)
+  const hash = createHash('sha256')
   let size = 0
   try {
     for await (const chunk of request) {
       size += chunk.length
       if (size > declared) fail(400, 'Die Datei kam unvollständig an.')
-      chunks.push(chunk)
+      hash.update(chunk)
+      let offset = 0
+      while (offset < chunk.length) {
+        const result = await handle.write(chunk.subarray(offset))
+        if (!result.bytesWritten) fail(400, 'Die Datei kam unvollständig an.')
+        offset += result.bytesWritten
+      }
     }
+    if (size !== declared) fail(400, 'Die Datei kam unvollständig an.')
+    await handle.sync()
   } catch (error) {
+    await handle.close().catch(() => {})
+    await fs.rm(target, { force: true })
     if (error instanceof SyncApiError) throw error
     fail(400, 'Die Datei kam unvollständig an.')
   }
-  if (size !== declared) fail(400, 'Die Datei kam unvollständig an.')
-  return Buffer.concat(chunks)
+  await handle.close()
+  return { path: target, size, sha256: hash.digest('hex') }
 }
 
 const atomicWrite = async (target, data) => {
@@ -810,12 +825,14 @@ const handlePutFile = async (request, response, auth, fileId) => {
   const meta = parseMeta(request)
   const declaredSha = request.headers['x-fanotes-sha256']
   if (typeof declaredSha !== 'string' || !FILE_ID_PATTERN.test(declaredSha)) fail(400, 'Die Prüfsumme der Datei fehlt.')
-  const body = await readBinaryBody(request, MAX_BLOB_BYTES)
-  if (body.length < 28) fail(400, 'Der verschlüsselte Inhalt ist zu kurz.')
-  if (sha256(body) !== declaredSha) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
-  const blank = headerFlag(request.headers['x-fanotes-blank'])
-  const clear = request.headers['x-fanotes-clear'] === '1'
-  await withAccountLock(auth.account.id, async () => {
+  const incoming = await spoolUpload(safeJoin(accountDirectory(auth.account.id), 'incoming'), request, MAX_BLOB_BYTES)
+  let committed = false
+  try {
+    if (incoming.size < 28) fail(400, 'Der verschlüsselte Inhalt ist zu kurz.')
+    if (incoming.sha256 !== declaredSha) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
+    const blank = headerFlag(request.headers['x-fanotes-blank'])
+    const clear = request.headers['x-fanotes-clear'] === '1'
+    await withAccountLock(auth.account.id, async () => {
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
     // A tombstone's live size is zero. The blob that was deleted is the newest
@@ -825,43 +842,50 @@ const handlePutFile = async (request, response, auth, fileId) => {
     const archivedSize = current?.deleted
       ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
       : 0
-    const decision = evaluateSyncWrite({ current: current ?? null, base, nextSize: body.length, blank, clear, archivedSize })
+    const decision = evaluateSyncWrite({ current: current ?? null, base, nextSize: incoming.size, blank, clear, archivedSize })
     if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
     if (decision === 'guard') {
-      await quarantineRejected(auth.account.id, fileId, base, body)
+      committed = await moveToQuarantine(auth.account.id, fileId, base, incoming.path)
       return guardRejected(request, response, current)
     }
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
     const historyDelta = current && !current.deleted && (current.sha256 !== declaredSha) ? (Number(current.size) || 0) : 0
-    if (table.bytes - previousBytes + body.length + (table.historyBytes || 0) + historyDelta > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+    if (table.bytes - previousBytes + incoming.size + (table.historyBytes || 0) + historyDelta > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
     const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
     if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
     if (current && !current.deleted && current.sha256 !== declaredSha) {
-      table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, body.length, false)
+      table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, incoming.size, false)
     }
     const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
-    await atomicWrite(blobPath, body)
-    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: body.length, sha256: declaredSha, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
+    await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
+    await fs.rename(incoming.path, blobPath)
+    committed = true
+    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: incoming.size, sha256: declaredSha, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
     table.entries.set(fileId, entry)
-    table.bytes += body.length - previousBytes
+    table.bytes += incoming.size - previousBytes
     await appendChange(auth.account.id, table, entry)
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision }, { ETag: `"${entry.revision}"` })
   })
+  } finally {
+    if (!committed) await fs.rm(incoming.path, { force: true })
+  }
 }
 
-/** Keep a rejected body without ever replacing the live blob. Failures here still reject the write. */
-const quarantineRejected = async (accountId, fileId, base, body) => {
+/** Move a rejected spool aside. The live blob is never replaced. Returns false when the copy could not be kept. */
+const moveToQuarantine = async (accountId, fileId, base, sourcePath) => {
   try {
     const directory = safeJoin(accountDirectory(accountId), 'quarantine', fileId)
     await fs.mkdir(directory, { recursive: true, mode: 0o700 })
-    await atomicWrite(safeJoin(directory, String(base)), body)
+    await fs.rename(sourcePath, safeJoin(directory, String(base)))
     const names = (await fs.readdir(directory)).filter((name) => /^\d+$/u.test(name)).sort((left, right) => Number(left) - Number(right))
     for (const name of names.slice(0, Math.max(0, names.length - MAX_REVISIONS_KEPT))) {
       await fs.rm(safeJoin(directory, name), { force: true })
     }
+    return true
   } catch (error) {
     if (error instanceof SyncApiError) throw error
+    return false
   }
 }
 
