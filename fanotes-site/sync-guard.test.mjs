@@ -2,12 +2,12 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, promises as fsPromises } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { connect as connectTcp } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 
 const dataDirectory = mkdtempSync(join(tmpdir(), 'fanotes-sync-guard-'))
 process.env.FANOTES_SYNC_DIR = dataDirectory
@@ -1388,4 +1388,82 @@ test('a session touch does not replace a newer account or its note', async () =>
   const tokenHash = createHash('sha256').update(localToken).digest('hex')
   assert.equal(stored.sessions[tokenHash], undefined)
   assert.equal(stored.vaultKeyWrap.data.length > 0, true)
+})
+
+test('a login does not accept a key the account no longer has', async () => {
+  const authKey = b64(32)
+  const email = `login-${randomBytes(4).toString('hex')}@example.com`
+  const wrap = { iv: b64(12), data: b64(32) }
+  const registered = await jsonCall('POST', '/api/v1/sync/register', {
+    email,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: wrap,
+    device: { name: 'Check', platform: 'linux' },
+  })
+  assert.equal(registered.status, 201, JSON.stringify(registered.json))
+  const localToken = registered.json.token
+  const localAccount = registered.json.accountId
+  const asAccount = (method, path, { headers = {}, body } = {}) => call(method, path, {
+    token: localToken,
+    body,
+    headers: { ...headers, 'X-FaNotes-Account': localAccount },
+  })
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await asAccount('PUT', `/api/v1/sync/files/${id}`, {
+    body: original,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(original.length),
+      'If-Match': '0',
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(original),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const allowed = await jsonCall('POST', '/api/v1/sync/login', {
+    email,
+    authKey,
+    device: { name: 'Other', platform: 'linux' },
+  })
+  assert.equal(allowed.status, 200, JSON.stringify(allowed.json))
+  assert.equal(allowed.json.vaultKeyWrap.data, wrap.data)
+  const accountPath = join(dataDirectory, 'accounts', localAccount, 'account.json')
+  const blobPath = join(dataDirectory, 'accounts', localAccount, 'blobs', id)
+  const before = JSON.parse(readFileSync(accountPath, 'utf8'))
+  let swapped = false
+  const originalRead = fsPromises.readFile
+  const mocked = mock.method(fsPromises, 'readFile', async (path, ...rest) => {
+    const value = await originalRead.call(fsPromises, path, ...rest)
+    if (!swapped && String(path) === accountPath) {
+      swapped = true
+      const record = JSON.parse(String(value))
+      record.auth = { salt: b64(16), hash: b64(32) }
+      writeFileSync(accountPath, `${JSON.stringify(record, null, 2)}\n`)
+    }
+    return value
+  })
+  try {
+    const denied = await jsonCall('POST', '/api/v1/sync/login', {
+      email,
+      authKey,
+      device: { name: 'Later', platform: 'linux' },
+    })
+    assert.equal(denied.status, 401, JSON.stringify(denied.json))
+    assert.equal(swapped, true)
+  } finally {
+    mocked.mock.restore()
+  }
+  const stored = JSON.parse(readFileSync(accountPath, 'utf8'))
+  assert.equal(Object.keys(stored.sessions).length, Object.keys(before.sessions).length)
+  assert.equal(Object.keys(stored.devices).length, Object.keys(before.devices).length)
+  assert.equal(stored.vaultKeyWrap.data, wrap.data)
+  assert.equal(stored.vaultKeyWrap.iv, wrap.iv)
+  assert.notEqual(stored.auth.hash, before.auth.hash)
+  const live = await asAccount('GET', `/api/v1/sync/files/${id}`)
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, original)
+  assert.deepEqual(readFileSync(blobPath), original)
 })
