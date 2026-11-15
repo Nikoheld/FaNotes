@@ -318,6 +318,39 @@ const copyDurable = async (source, destination) => {
   await syncDirectory(dirname(destination))
 }
 
+// The original file stays until the live name is durable. Renaming the only
+// name across directories can drop both if the process stops first.
+export const placeDurable = async (source, destination) => {
+  const directory = dirname(destination)
+  const held = await fs.open(source, 'r')
+  try {
+    await held.sync()
+  } finally {
+    await held.close()
+  }
+  const temporary = `${destination}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
+  let linked = false
+  try {
+    await fs.link(source, temporary)
+    linked = true
+  } catch (error) {
+    if (error?.code !== 'EXDEV' && error?.code !== 'EPERM' && error?.code !== 'ENOTSUP' && error?.code !== 'EOPNOTSUPP') throw error
+  }
+  if (!linked) {
+    await copyDurable(source, destination)
+    return
+  }
+  try {
+    await syncDirectory(directory)
+    await fs.rename(temporary, destination)
+    await syncDirectory(directory)
+  } catch (error) {
+    await fs.rm(temporary, { force: true })
+    await syncDirectory(directory)
+    throw error
+  }
+}
+
 const readJsonFile = async (target, fallback = null) => {
   try {
     return JSON.parse(await fs.readFile(target, 'utf8'))
@@ -1309,9 +1342,10 @@ const handlePutFile = async (request, response, auth, fileId) => {
       await syncDirectory(dirname(incoming.path))
     } else {
       await ensureBlobDirectory(auth.account.id)
-      await fs.rename(incoming.path, blobPath)
+      await placeDurable(incoming.path, blobPath)
       // The new name has to be durable before the change log records it.
       await syncDirectory(blobDirectory)
+      await fs.rm(incoming.path, { force: true })
       // The old spool name has to be gone too. A crash must not bring it back
       // as a second link to this note.
       await syncDirectory(dirname(incoming.path))
@@ -1346,8 +1380,9 @@ const moveToQuarantine = async (accountId, fileId, base, sourcePath) => {
       await syncDirectory(dirname(dirname(directory)))
       await syncDirectory(dirname(directory))
     }
-    await fs.rename(sourcePath, safeJoin(directory, String(base)))
+    await placeDurable(sourcePath, safeJoin(directory, String(base)))
     await syncDirectory(directory)
+    await fs.rm(sourcePath, { force: true })
     await syncDirectory(dirname(sourcePath))
     const names = (await fs.readdir(directory)).filter((name) => /^\d+$/u.test(name)).sort((left, right) => Number(left) - Number(right))
     for (const name of names.slice(0, Math.max(0, names.length - MAX_REVISIONS_KEPT))) {
@@ -1817,8 +1852,9 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     const blobPath = safeJoin(blobDirectory, fileId)
     if (!await liveBlobMatches(auth.account.id, fileId, current, Number(meta.size) || 0, declaredSha)) {
       await ensureBlobDirectory(auth.account.id)
-      await fs.rename(bodyPath, blobPath)
+      await placeDurable(bodyPath, blobPath)
       await syncDirectory(blobDirectory)
+      await fs.rm(bodyPath, { force: true })
       // The partial name has to be gone too. A crash must not bring that file
       // back as a second link to this note.
       await syncDirectory(dirname(bodyPath))
