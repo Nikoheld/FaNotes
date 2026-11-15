@@ -194,6 +194,12 @@ if (typeof window !== 'undefined') {
       readSecrets: () => invoke('fanotes:sync-read-secrets'),
       writeSecrets: (json) => invoke('fanotes:sync-write-secrets', json),
     },
+    nativeSearch: {
+      query: (query, limit) => invoke('fanotes-native:search-query', query, limit),
+      status: () => invoke('fanotes-native:search-status'),
+      notify: () => invoke('fanotes-native:search-notify'),
+      rebuild: () => invoke('fanotes-native:search-rebuild'),
+    },
     platform,
   })
 })()

@@ -139,6 +139,8 @@ fn arm_close_warning(handle: tauri::AppHandle) {
 
 mod capture;
 mod export;
+#[path = "native/search.rs"]
+mod native_search;
 
 pub use capture::capture_html;
 pub use export::print_html_to_pdf;
@@ -380,7 +382,8 @@ macro_rules! fanotes_commands {
                 request_close,
                 confirm_close,
                 cancel_close,
-                reset_app_data
+                reset_app_data,
+                native_search::search_query, native_search::search_status, native_search::search_notify, native_search::search_rebuild
             ]
         }
     };

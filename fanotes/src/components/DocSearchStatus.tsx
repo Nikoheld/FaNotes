@@ -40,13 +40,18 @@ const toHit = (result: SearchResult, query: string): SearchHit => {
 }
 
 /** Index results for a query; recomputed when the index changes. */
-export const useDocIndexHits = (query: string, version: number) => useMemo(() => {
-  const trimmed = query.trim()
-  if (trimmed.length < 2) return []
-  return docSearch.search(trimmed).map((result) => toHit(result, trimmed))
-  // `version` changes when indexing commits new text.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [query, version])
+export const useDocIndexHits = (query: string, version: number) => {
+  // Desktop native index: results arrive asynchronously (never fires elsewhere).
+  const [nativeVersion, setNativeVersion] = useState(0)
+  useEffect(() => docSearch.onResults(() => setNativeVersion((value) => value + 1)), [])
+  return useMemo(() => {
+    const trimmed = query.trim()
+    if (trimmed.length < 2) return []
+    return docSearch.search(trimmed).map((result) => toHit(result, trimmed))
+    // `version` changes when indexing commits new text.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, version, nativeVersion])
+}
 
 const reasonText = (reason = '') => {
   const known: Record<string, [string, string]> = {

@@ -7,7 +7,7 @@ import { foldPlain, foldSearch, makeSnippet, matchRanges, parseDocQuery, tokeniz
 
 export const DOC_INDEX_FORMAT = 'fanotes-doc-index-v1'
 
-export type UnitKind = 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations'
+export type UnitKind = 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations' | 'scene'
 export type UnitSource = 'text' | 'text-layer' | 'ocr' | 'transcript'
 
 export type IndexUnit = {

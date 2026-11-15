@@ -344,7 +344,7 @@ export type SearchHit = {
   /** Document index: where the text came from. */
   source?: 'text' | 'text-layer' | 'ocr' | 'transcript'
   /** Document index: what part of the document matched. */
-  unit?: 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations'
+  unit?: 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations' | 'scene'
   /** Document index: estimated OCR confidence 0–1. */
   confidence?: number
   /** Document index: [start, end) ranges of matched words in `excerpt`. */
@@ -609,6 +609,8 @@ export type FaNotesApi = {
   writePdfOcr?: (payload: import('./lib/pdfOcr').PdfOcrWrite) => Promise<import('./lib/pdfOcr').PdfOcrCache | null>
   /** `fanotes-page-text-v1` sidecar of a PDF (document search contract). */
   readPageText?: (relativePath: string) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
+  /** Desktop (Tauri) only: the native vault search index. Absent on Electron, web and Android. */
+  nativeSearch?: import('./lib/docSearch/native').NativeSearchApi
   writePageText?: (record: import('./lib/docSearch/pageText').PageTextRecord) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   convertFamdNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
