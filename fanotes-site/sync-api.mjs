@@ -982,6 +982,39 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   return after - before
 }
 
+/**
+ * A crash after the live blob is replaced, and before the change log records
+ * it, leaves a newer body in the live slot. Copying that slot onto the archive
+ * name of the old revision, or replacing it, would drop the only copy.
+ * The bytes are already on disk, so this records them and does not copy them.
+ * Returns null when the live file matches the table entry.
+ */
+const settleDivergentLiveBlob = async (accountId, table, fileId, current, incoming) => {
+  if (!current || current.deleted) return null
+  const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
+  const stat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (!stat?.isFile()) return null
+  const currentSize = Number(current.size) || 0
+  const liveSha = await hashFile(blobPath)
+  if (stat.size === currentSize && liveSha === current.sha256) return null
+  const matchesRequest = Boolean(incoming) && incoming.size === stat.size && incoming.sha256 === liveSha
+  const entry = {
+    id: fileId,
+    revision: table.revision + 1,
+    deleted: false,
+    size: stat.size,
+    sha256: liveSha,
+    meta: matchesRequest ? incoming.meta : current.meta,
+    updatedAt: nowIso(),
+    deviceId: matchesRequest ? incoming.deviceId : current.deviceId,
+  }
+  table.revision = entry.revision
+  table.entries.set(fileId, entry)
+  table.bytes += stat.size - currentSize
+  await appendChange(accountId, table, entry)
+  return { matchesRequest, entry }
+}
+
 const handlePutFile = async (request, response, auth, fileId) => {
   const base = parseIfMatch(request)
   const meta = parseMeta(request)
@@ -997,6 +1030,17 @@ const handlePutFile = async (request, response, auth, fileId) => {
     await withAccountLock(auth.account.id, async () => {
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
+    const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, {
+      size: incoming.size,
+      sha256: declaredSha,
+      meta,
+      deviceId: auth.deviceId,
+    })
+    if (settled?.matchesRequest) {
+      sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision }, { ETag: `"${settled.entry.revision}"` })
+      return
+    }
+    if (settled) return conflict(request, response, settled.entry)
     // A tombstone's live size is zero. The blob that was deleted is the newest
     // file in the revision archive; a short or empty upload must not become the
     // live note in its place. A device that still has the note puts that copy
@@ -1109,6 +1153,17 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     const digest = await hashFile(source)
     const meta = await metaForRestore(auth.account.id, fileId, current)
     if (!meta) fail(404, 'Diese Fassung liegt nicht im Archiv.')
+    const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, {
+      size: info.size,
+      sha256: digest,
+      meta,
+      deviceId: auth.deviceId,
+    })
+    if (settled?.matchesRequest) {
+      sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision, size: info.size }, { ETag: `"${settled.entry.revision}"` })
+      return
+    }
+    if (settled) return conflict(request, response, settled.entry)
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
     const replaces = Boolean(current && !current.deleted && current.sha256 !== digest)
     const historyDelta = replaces ? previousBytes : 0
@@ -1379,10 +1434,31 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     if (meta.received !== meta.size) fail(409, 'Der Upload ist noch nicht vollständig.', { offset: meta.received, size: meta.size, reason: 'incomplete' })
     if (declaredSha !== meta.sha256) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
     const bodyPath = safeJoin(partialDirectory(auth.account.id, uploadId), 'body.bin')
+    const bodyStat = await fs.lstat(bodyPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+    if (!bodyStat?.isFile()) {
+      // The body was already renamed onto the live blob. Drop the partial
+      // before the response so a retry cannot reserve its bytes again, then
+      // record the revision from the live file.
+      await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+      await finishRenamedUpload(request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear)
+      return
+    }
     const actual = await hashFile(bodyPath)
     if (actual !== declaredSha) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
+    const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, {
+      size: Number(meta.size) || 0,
+      sha256: declaredSha,
+      meta: metaHeader,
+      deviceId: auth.deviceId,
+    })
+    if (settled?.matchesRequest) {
+      await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+      sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${settled.entry.revision}"` })
+      return
+    }
+    if (settled) return conflict(request, response, settled.entry)
     const archivedSize = current?.deleted
       ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
       : 0
