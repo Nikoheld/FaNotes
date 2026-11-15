@@ -199,6 +199,28 @@ test('ingest stores a version, switches the pointer, keeps three versions and re
   }
 })
 
+test('a PDF with too many pages is refused before text extraction', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetables-pages-'))
+  const calls = []
+  const store = createClassTimetables({
+    root,
+    log: () => {},
+    now: () => new Date(Date.UTC(2026, 10, 11, 8, 0, 0)),
+    run: async (command, args) => {
+      calls.push(command)
+      if (command === 'pdfinfo') return { stdout: 'Title: Stundenplan\nPages:          201\n' }
+      return fakeRun(BBOX, [])(command, args)
+    },
+  })
+  try {
+    await assert.rejects(store.ingest(PDF), (error) => error.status === 413 && error.publicMessage.includes('200'))
+    assert.deepEqual(calls, ['pdfinfo'])
+    assert.deepEqual(await readdir(store.root), [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a failure after the pointer switches leaves the new timetable in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'timetables-keep-'))
   const store = createClassTimetables({
