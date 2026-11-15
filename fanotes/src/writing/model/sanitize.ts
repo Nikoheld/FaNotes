@@ -273,6 +273,7 @@ export const sanitizeManifest = (value: unknown): StoryManifest | null => {
     binder: sanitizeBinder(source.binder),
     goals,
     dictionary,
+    ...(Array.isArray(source.ignored) ? { ignored: [...new Set(source.ignored.filter((value): value is string => typeof value === 'string' && value.length <= 200).slice(0, 20_000))] } : {}),
     createdAt: text(source.createdAt, 40) || new Date(0).toISOString(),
     updatedAt: text(source.updatedAt, 40) || new Date(0).toISOString(),
   }

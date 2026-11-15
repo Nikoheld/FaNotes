@@ -299,6 +299,21 @@ export const splitParagraph = (state: EditorState, options: { breakBefore?: 'pag
   return { doc: next, selection: caret({ block: paragraphKey(created.id), offset: 0 }), storedMarks: current.storedMarks }
 }
 
+/** Replaces text inside one block (autocorrect, a suggestion, a synonym), keeping the formatting there. */
+export const replaceInBlockRange = (state: EditorState, blockKey: string, from: number, to: number, text: string, caretAt: 'after' | 'keep' = 'after'): Result => {
+  const block = blockAt(state.doc, blockKey)
+  if (!block?.editable) return null
+  const marks = sliceRuns(block.runs, from, Math.max(from + 1, to))[0]?.m ?? marksAt(block.runs, from)
+  const clean = marks ? (() => { const { fn: _fn, cm: _cm, ...rest } = marks; return Object.keys(rest).length ? rest : undefined })() : undefined
+  const doc = replaceInBlock(state.doc, block, from, to, [{ text, ...(clean ? { m: clean } : {}) }])
+  const head = state.selection.head
+  const shift = text.length - (to - from)
+  const selection = caretAt === 'keep' && head.block === blockKey && head.offset >= to
+    ? caret({ block: blockKey, offset: head.offset + shift })
+    : caretAt === 'keep' ? state.selection : caret({ block: blockKey, offset: from + text.length })
+  return { ...state, doc, selection }
+}
+
 /** Shift+Enter: a line break inside the paragraph. */
 export const insertLineBreak = (state: EditorState): Result => {
   let current = state

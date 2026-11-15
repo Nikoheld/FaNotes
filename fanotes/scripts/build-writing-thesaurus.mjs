@@ -26,12 +26,14 @@ const germanGroups = new Set()
 for (const line of fs.readFileSync(path.join(work, germanSource), 'utf8').split('\n')) {
   if (!line || line.startsWith('#')) continue
   const words = [...new Set(line.split(';')
-    .map((word) => word.replace(/\([^)]*\)/gu, '').replace(/\s+/gu, ' ').trim())
-    .filter((word) => word && word.length <= 40 && !word.includes('|') && !/^\.\.\.|…/u.test(word)))]
+    .map((word) => word.replace(/\([^)]*\)?/gu, '').replace(/\s+/gu, ' ').trim())
+    // Placeholders ("in ...dingen", "Darm...") and unbalanced notes are not words a writer can insert.
+    .filter((word) => word && word.length <= 40 && !/[|()]|\.\.\.|…/u.test(word)))]
   if (words.length >= 2) germanGroups.add(words.slice(0, 24).join('|'))
 }
 fs.writeFileSync(path.join(out, 'de.txt'), `${[...germanGroups].join('\n')}\n`)
-fs.copyFileSync(path.join(work, fs.readdirSync(work).find((name) => /lizenz|license|lgpl/iu.test(name)) ?? germanSource), path.join(out, 'LICENSE-openthesaurus.txt'))
+// writeFileSync, not copyFileSync: a read-only source licence must not make the output read-only.
+fs.writeFileSync(path.join(out, 'LICENSE-openthesaurus.txt'), fs.readFileSync(path.join(work, fs.readdirSync(work).find((name) => /lizenz|license|lgpl/iu.test(name)) ?? germanSource)))
 
 // English: WordNet data.{noun,verb,adj,adv}: "offset lex_filenum ss_type w_cnt(hex) word lex_id …".
 execFileSync('tar', ['-xzf', wordnetTarball, '-C', work])
@@ -56,6 +58,6 @@ fs.writeFileSync(path.join(out, 'en.txt'), `${[...englishGroups].join('\n')}\n`)
 // (pass its path as the third argument, from WordNet-3.0.tar.gz: WordNet-3.0/LICENSE).
 const wordnetLicense = process.argv[4] ?? path.join(dictDir, '..', 'LICENSE')
 if (!fs.existsSync(wordnetLicense)) throw new Error('WordNet LICENSE not found; pass it as the third argument')
-fs.copyFileSync(wordnetLicense, path.join(out, 'LICENSE-wordnet.txt'))
+fs.writeFileSync(path.join(out, 'LICENSE-wordnet.txt'), fs.readFileSync(wordnetLicense))
 fs.rmSync(work, { recursive: true, force: true })
 console.log(`thesaurus: ${germanGroups.size} German and ${englishGroups.size} English synonym groups`)

@@ -25,12 +25,14 @@ type Props = {
   selection: { from: Pos; to: Pos } | null
   focusBlock: string | null
   highlights: Highlight[]
-  underlines: Underline[]
+  /** Assistant underlines for a block, asked for the pages in view only. */
+  underlinesFor?: (blockIndex: number) => Underline[]
   /** The scrolling element (set once it is mounted; the view listens to it). */
   scroller: HTMLDivElement | null
   onPointerDown: (pointer: PagePointer) => void
   onPointerMove: (pointer: PagePointer) => void
   onPointerUp: () => void
+  onContextMenu?: (pointer: PagePointer) => void
 }
 
 const GAP = 28
@@ -153,8 +155,9 @@ const PageBox = memo(function PageBox(props: {
   selection: { from: Pos; to: Pos } | null
   focusBlock: string | null
   highlights: Highlight[]
-  underlines: Underline[]
+  underlinesFor?: Props['underlinesFor']
   onPointerDown: Props['onPointerDown']
+  onContextMenu?: (pointer: PagePointer) => void
   onPointerMove: Props['onPointerMove']
   onPointerUp: Props['onPointerUp']
 }) {
@@ -165,7 +168,9 @@ const PageBox = memo(function PageBox(props: {
   }
   const selectionRects = props.selection ? rangeRects(layout, page, props.doc, props.selection.from, props.selection.to, measurer) : []
   const highlightRects = props.highlights.flatMap((highlight) => rangeRects(layout, page, props.doc, { block: highlight.block, offset: highlight.from }, { block: highlight.block, offset: highlight.to }, measurer).map((value) => ({ ...value, current: highlight.current })))
-  const underlineRects = props.underlines.flatMap((underline) => rangeRects(layout, page, props.doc, { block: underline.block, offset: underline.from }, { block: underline.block, offset: underline.to }, measurer).map((value) => ({ ...value, kind: underline.kind })))
+  const pageBlocks = [...new Set(page.lines.map((placed) => placed.blockIndex))]
+  const underlines = props.underlinesFor ? pageBlocks.flatMap((blockIndex) => props.underlinesFor!(blockIndex)) : []
+  const underlineRects = underlines.flatMap((underline) => rangeRects(layout, page, props.doc, { block: underline.block, offset: underline.from }, { block: underline.block, offset: underline.to }, measurer).map((value) => ({ ...value, kind: underline.kind })))
   const setup = layout
   return (
     <div
@@ -175,6 +180,7 @@ const PageBox = memo(function PageBox(props: {
       onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); props.onPointerDown(pointer(event)) }}
       onPointerMove={(event) => { if (event.buttons & 1) props.onPointerMove(pointer(event)) }}
       onPointerUp={() => props.onPointerUp()}
+      onContextMenu={(event) => { if (props.onContextMenu) { event.preventDefault(); props.onContextMenu(pointer(event as unknown as ReactPointerEvent<HTMLDivElement>)) } }}
       // The hidden input keeps the focus; a click on paper must not take it away.
       onMouseDown={(event) => event.preventDefault()}
     >
@@ -264,7 +270,8 @@ export function PageView(props: Props) {
           selection={props.selection}
           focusBlock={props.focusBlock}
           highlights={props.highlights}
-          underlines={props.underlines}
+          underlinesFor={props.underlinesFor}
+          onContextMenu={props.onContextMenu}
           onPointerDown={props.onPointerDown}
           onPointerMove={props.onPointerMove}
           onPointerUp={props.onPointerUp}

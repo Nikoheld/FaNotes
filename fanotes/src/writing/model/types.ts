@@ -175,6 +175,8 @@ export type StoryManifest = {
   goals?: StoryGoals
   /** Words that are correct in this project (names, invented words). */
   dictionary?: string[]
+  /** Assistant findings the writer ignored ("rule:text"). */
+  ignored?: string[]
   createdAt: string
   updatedAt: string
 }

@@ -138,3 +138,30 @@
 .wm-dialog { display: grid; gap: 10px; width: min(440px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel-strong); box-shadow: var(--shadow); }
 .wm-dialog textarea { min-height: 90px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-elevated); font: inherit; resize: vertical; }
 .wm-dialog > div { display: flex; justify-content: flex-end; gap: 8px; }
+
+.wm-assist { position: absolute; z-index: 30; display: grid; gap: 8px; width: 300px; max-height: 360px; overflow: auto; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 12px; color: var(--text); background: var(--panel-strong); box-shadow: var(--shadow); font-size: 13px; }
+.wm-assist section { display: grid; gap: 6px; }
+.wm-assist h5 { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.wm-assist-close { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; color: var(--text-muted); background: transparent; cursor: pointer; }
+.wm-assist-message { margin: 0 20px 0 0; padding-left: 8px; border-left: 3px solid #2563eb; line-height: 1.4; }
+.wm-assist-message.is-spelling { border-left-color: #dc2626; }
+.wm-assist-message.is-style { border-left-color: #a855f7; }
+.wm-assist-replacements { display: flex; flex-wrap: wrap; gap: 5px; }
+.wm-assist-replacements button { min-height: 28px; }
+.wm-assist-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.wm-assist-actions button, .wm-assist-group button { display: inline-flex; align-items: center; gap: 4px; min-height: 26px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-soft); background: var(--bg-elevated); font: inherit; font-size: 12px; cursor: pointer; }
+.wm-assist-actions button:hover, .wm-assist-group button:hover { color: var(--text); background: var(--panel-hover); }
+.wm-assist-group { display: grid; gap: 3px; }
+.wm-assist-group small { color: var(--text-muted); font-size: 11px; }
+.wm-assist-group > div { display: flex; flex-wrap: wrap; gap: 4px; }
+.wm-assist-hint { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--text-muted); font-size: 12px; }
+.wm-finding { display: grid; gap: 4px; padding: 7px 8px; border: 1px solid var(--border); border-left: 3px solid #2563eb; border-radius: 8px; background: var(--bg-elevated); }
+.wm-finding.is-spelling { border-left-color: #dc2626; }
+.wm-finding.is-style { border-left-color: #a855f7; }
+.wm-finding p { margin: 0; color: var(--text-soft); font-size: 12px; }
+.wm-finding-text { display: grid; gap: 2px; padding: 0; border: 0; color: var(--text); background: transparent; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.wm-finding-text small { color: var(--text-muted); font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.wm-finding-text mark { padding: 0 1px; border-radius: 3px; color: inherit; background: rgba(250, 204, 21, .4); }
+.wm-dictionary { display: flex; flex-wrap: wrap; gap: 4px; }
+.wm-dictionary span { display: inline-flex; align-items: center; gap: 3px; padding: 2px 4px 2px 8px; border: 1px solid var(--border); border-radius: 99px; font-size: 12px; }
+.wm-dictionary button { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; color: var(--text-muted); background: transparent; cursor: pointer; }

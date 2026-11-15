@@ -1,6 +1,6 @@
 import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowLeft, Bold, BookOpen, ChevronDown, ChevronRight, Columns2, Eye, FilePlus2, FileText,
-  Focus, Italic, LoaderCircle, MessageSquarePlus, Minus, Plus, Redo2, Replace, Search, SlidersHorizontal, Strikethrough, Subscript, Superscript, Underline, Undo2, X,
+  Focus, Italic, LoaderCircle, MessageSquarePlus, Minus, Plus, Redo2, Replace, Search, SlidersHorizontal, SpellCheck, Strikethrough, Subscript, Superscript, Underline, Undo2, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as commands from '../editor/commands'
@@ -16,7 +16,12 @@ import type { Align, BinderNode, FontFamilyId, Marks, StoryLanguage } from '../m
 import { loadProject, recoverJournal, storageAdapter, storyHost, storyTitleFromPath, writeJournal } from '../storage'
 import { L, formatNumber, styleName } from './i18n'
 import { caretBox, hitTest, move, type Motion } from './navigation'
-import { Inspector } from './Inspector'
+import { Assistant, defaultAssistSettings, issueSignature, paragraphLanguage, type AssistSettings } from '../assist/checker'
+import type { Issue } from '../assist/rules'
+import { autocorrectAfterInput, startsSentence } from '../assist/typography'
+import { AssistPopover, type PopoverTarget } from './AssistPopover'
+import { defaultAutocorrectSettings, type AutocorrectSettings } from './CheckPanel'
+import { Inspector, type InspectorTab } from './Inspector'
 import { PageView, caretPageRect, type Highlight, type PagePointer, type PageTheme, type ViewMode } from './PageView'
 import { countBlocks, countRuns, countText, htmlToParagraphs, runsToHtml, textToParagraphs } from './text'
 import './writing.css'
@@ -62,6 +67,21 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const [focusMode, setFocusMode] = useState(false)
   const [binderOpen, setBinderOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('check')
+  const [assistSettings, setAssistSettings] = useState<AssistSettings>(() => {
+    try { return { ...defaultAssistSettings(), ...JSON.parse(localStorage.getItem('fanotes.writing.assist.v1') ?? '{}') } } catch { return defaultAssistSettings() }
+  })
+  const [autocorrect, setAutocorrect] = useState<AutocorrectSettings>(() => {
+    try { return { ...defaultAutocorrectSettings(), ...JSON.parse(localStorage.getItem('fanotes.writing.autocorrect.v1') ?? '{}') } } catch { return defaultAutocorrectSettings() }
+  })
+  const [popover, setPopover] = useState<PopoverTarget | null>(null)
+  const [lexiconReady, setLexiconReady] = useState(false)
+  const lexicon = useRef<import('../../lib/spelling').SpellingLexicon | null>(null)
+  const suggestRef = useRef<typeof import('../../lib/spellingSuggest') | null>(null)
+  /** controller.version right after an autocorrect: Backspace then undoes just the correction. */
+  const lastAutocorrect = useRef(-1)
+  const assistant = useMemo(() => new Assistant(null), [])
+  assistant.settings = assistSettings
   /** The small in-app dialog for footnote and comment text (window.prompt does not exist in Electron). */
   const [noteDialog, setNoteDialog] = useState<{ kind: 'footnote' | 'comment'; text: string; selection: commands.EditorState['selection'] } | null>(null)
   const [find, setFind] = useState<FindState>({ open: false, replace: false, query: '', replacement: '', caseSensitive: false, wholeWord: false, regex: false, current: 0 })
@@ -169,6 +189,29 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     onClose()
   }, [controller, onClose, path, save])
 
+  // ── Writing assistance ────────────────────────────────────────────────
+  useEffect(() => {
+    let alive = true
+    void Promise.all([import('../../lib/spelling'), import('../../lib/spellingSuggest')]).then(async ([spelling, suggest]) => {
+      const loadedLexicon = await spelling.loadSpellingLexicon()
+      if (!alive) return
+      lexicon.current = loadedLexicon
+      suggestRef.current = suggest
+      assistant.setSpelling({
+        isMisspelled: (word) => loadedLexicon.isMisspelled(word),
+        suggest: (word, language) => suggest.suggestCorrections(word, [language], loadedLexicon).map((entry) => entry.word),
+      })
+      setLexiconReady(true)
+    }).catch(() => undefined)
+    return () => { alive = false }
+  }, [assistant])
+  useEffect(() => { try { localStorage.setItem('fanotes.writing.assist.v1', JSON.stringify(assistSettings)) } catch { /* ignore */ } }, [assistSettings])
+  useEffect(() => { try { localStorage.setItem('fanotes.writing.autocorrect.v1', JSON.stringify(autocorrect)) } catch { /* ignore */ } }, [autocorrect])
+  const manifestForLists = doc?.manifest
+  useEffect(() => {
+    if (manifestForLists) assistant.setProjectLists(manifestForLists.dictionary ?? [], manifestForLists.ignored ?? [])
+  }, [assistant, manifestForLists])
+
   // ── Persisted view settings ────────────────────────────────────────────
   useEffect(() => { try { localStorage.setItem('fanotes.writing.zoom', String(zoom)); localStorage.setItem('fanotes.writing.view', view); localStorage.setItem('fanotes.writing.theme', theme) } catch { /* ignore */ } }, [zoom, view, theme])
 
@@ -214,8 +257,78 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
 
   const insertTyped = useCallback((text: string) => {
     if (!controller) return
-    run(commands.insertText(controller.state, text), 'typing', text)
-  }, [controller, run])
+    setPopover(null)
+    if (!run(commands.insertText(controller.state, text), 'typing', text) || !autocorrect.enabled) return
+    const st = controller.state
+    const head = st.selection.head
+    const block = blockAt(st.doc, head.block)
+    if (block?.ref.kind !== 'para') return
+    const paragraph = runsText(block.runs)
+    const language = paragraphLanguage(paragraph, block.lang, st.doc.manifest.language, assistSettings.detectLanguage)
+    const spellingLanguage = language.startsWith('de') ? 'de' : 'en'
+    const fix = autocorrectAfterInput(paragraph, head.offset, text, language, {
+      ...autocorrect,
+      swissSs: autocorrect.swissSs && language === 'de-CH',
+      isKnown: (word) => assistant.knows(word),
+      correctWord: (word, sentenceStart) => {
+        const loaded = lexicon.current
+        const suggest = suggestRef.current
+        if (!loaded || !suggest || !loaded.isMisspelled(word)) return null
+        const decision = suggest.decideAutocorrect(word, suggest.suggestCorrections(word, [spellingLanguage], loaded), { language: spellingLanguage, sentenceStart, isProperName: () => false })
+        return decision?.word ?? null
+      },
+    })
+    if (!fix) return
+    if (controller.apply(commands.replaceInBlockRange(st, block.key, fix.from, fix.to, fix.text, 'keep'), 'other')) lastAutocorrect.current = controller.version
+  }, [controller, run, autocorrect, assistSettings.detectLanguage, assistant])
+
+  /** Backspace right after an autocorrect gives back what was typed. */
+  const undoAutocorrect = () => {
+    if (!controller || lastAutocorrect.current !== controller.version) return false
+    lastAutocorrect.current = -1
+    controller.undo()
+    return true
+  }
+
+  /** The assistant's finding at a position, if any. */
+  const issueAt = (pos: Pos): { issue: Issue; language: StoryLanguage } | null => {
+    if (!doc) return null
+    const block = blockAt(doc, pos.block)
+    if (block?.ref.kind !== 'para') return null
+    const result = assistant.check(block.runs, block.lang, doc.manifest.language)
+    const issue = result.issues.find((candidate) => pos.offset >= candidate.from && pos.offset <= candidate.to && candidate.to > candidate.from) ?? null
+    return issue ? { issue, language: result.language } : null
+  }
+  const wordAround = (pos: Pos) => {
+    const block = doc ? blockAt(doc, pos.block) : undefined
+    if (!block) return null
+    const text = runsText(block.runs)
+    const [from, to] = commands.wordAt(text, pos.offset)
+    const word = text.slice(from, to)
+    return /\p{L}/u.test(word) ? { from, to, text: word } : null
+  }
+  const openPopover = (pos: Pos, withIssue: boolean, page: number, x: number, y: number) => {
+    if (!doc || !layout || !scroller.current) return
+    const rect = caretPageRect(layout, page, zoom, view, scroller.current.clientWidth)
+    if (!rect) return
+    const found = withIssue ? issueAt(pos) : null
+    const block = blockAt(doc, pos.block)
+    const language = found?.language ?? (block ? paragraphLanguage(runsText(block.runs), block.lang, doc.manifest.language, assistSettings.detectLanguage) : doc.manifest.language)
+const spelling = found?.issue.category === 'spelling' ? found.issue : null
+    const word = spelling && block ? { from: spelling.from, to: spelling.to, text: runsText(block.runs).slice(spelling.from, spelling.to) } : wordAround(pos)
+    if (!found && !word) return
+    setPopover({ block: pos.block, left: rect.left + x * zoom, top: rect.top + y * zoom + 18, issue: found?.issue ?? null, word, synonyms: !spelling, language: language.startsWith('de') ? 'de' : 'en' })
+  }
+  const underlinesFor = useCallback((blockIndex: number) => {
+    if (!layout) return []
+    const block = layout.blocks[blockIndex]
+    if (block?.ref.kind !== 'para') return []
+    return assistant.check(block.runs, block.lang, layout.blocks.length ? (doc?.manifest.language ?? 'de') : 'de').issues
+      .filter((issue) => issue.to > issue.from)
+      .map((issue) => ({ block: block.key, from: issue.from, to: issue.to, kind: issue.category === 'spelling' ? 'spelling' as const : issue.category === 'style' ? 'style' as const : 'grammar' as const }))
+    // The assistant's lists, settings and lexicon are part of its cache key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, assistant, assistSettings, lexiconReady, doc?.manifest.dictionary, doc?.manifest.ignored, doc?.manifest.language])
 
   const moveCaret = (motion: Motion, extend: boolean) => {
     if (!controller || !layout || !measurer) return
@@ -290,11 +403,20 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
         case 'End': moveCaret('lineEnd', event.shiftKey); return true
         case 'PageUp': moveCaret('pageUp', event.shiftKey); return true
         case 'PageDown': moveCaret('pageDown', event.shiftKey); return true
-        case 'Backspace': run(commands.deleteBackward(st), 'delete'); return true
+        case 'Backspace': if (!undoAutocorrect()) run(commands.deleteBackward(st), 'delete'); return true
         case 'Delete': run(commands.deleteForward(st), 'delete'); return true
         case 'Enter': run(event.shiftKey ? commands.insertLineBreak(st) : commands.splitParagraph(st), 'structure'); return true
         case 'Tab': return true
+        case 'F7':
+          if (event.shiftKey && caretGeometry) {
+            openPopover(st.selection.head, false, caretGeometry.page, caretGeometry.x, caretGeometry.y + caretGeometry.height - 14)
+          } else {
+            setInspectorOpen(true)
+            setInspectorTab('check')
+          }
+          return true
         case 'Escape':
+          if (popover) { setPopover(null); return true }
           if (find.open) { setFind((value) => ({ ...value, open: false })); return true }
           if (focusMode) { setFocusMode(false); return true }
           return false
@@ -318,7 +440,7 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     }
     if (type === 'insertParagraph') { event.preventDefault(); run(commands.splitParagraph(st), 'structure'); return }
     if (type === 'insertLineBreak') { event.preventDefault(); run(commands.insertLineBreak(st), 'structure'); return }
-    if (type === 'deleteContentBackward') { event.preventDefault(); run(commands.deleteBackward(st), 'delete'); return }
+    if (type === 'deleteContentBackward') { event.preventDefault(); if (!undoAutocorrect()) run(commands.deleteBackward(st), 'delete'); return }
     if (type === 'deleteContentForward') { event.preventDefault(); run(commands.deleteForward(st), 'delete'); return }
     if (type === 'deleteWordBackward') { event.preventDefault(); run(commands.deleteBackward(st, 'word'), 'delete'); return }
     if (type === 'deleteWordForward') { event.preventDefault(); run(commands.deleteForward(st, 'word'), 'delete'); return }
@@ -406,6 +528,15 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     const anchor = pointer.shift ? controller.state.selection.anchor : pos
     controller.select({ anchor, head: pos })
     dragging.current = { anchor, unit: 'char' }
+    setPopover(null)
+    if (!pointer.shift && pointer.pointerType !== 'pen' && issueAt(pos)) openPopover(pos, true, pointer.page, pointer.x, pointer.y)
+  }
+  const onContextMenu = (pointer: PagePointer) => {
+    if (!controller || !layout || !measurer) return
+    const pos = hitTest(layout, pointer.page, pointer.x, pointer.y, measurer)
+    if (!pos) return
+    controller.select(caret(pos))
+    openPopover(pos, true, pointer.page, pointer.x, pointer.y)
   }
   const onPointerMove = (pointer: PagePointer) => {
     if (!controller || !layout || !measurer || !dragging.current) return
@@ -633,7 +764,8 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
           <option value="sepia">{L('Sepia', 'Sepia')}</option>
           <option value="night">{L('Nacht', 'Night')}</option>
         </select>
-        <button type="button" className={`wm-icon${inspectorOpen ? ' is-on' : ''}`} title={L('Seite, Formate und Notizen', 'Page, styles and notes')} onClick={() => setInspectorOpen((value) => !value)}><SlidersHorizontal size={16} /></button>
+        <button type="button" className={`wm-icon${inspectorOpen && inspectorTab === 'check' ? ' is-on' : ''}`} title={L('Prüfen: Rechtschreibung, Grammatik, Stil (F7)', 'Check spelling, grammar and style (F7)')} onClick={() => { if (inspectorOpen && inspectorTab === 'check') setInspectorOpen(false); else { setInspectorOpen(true); setInspectorTab('check') } }}><SpellCheck size={16} /></button>
+        <button type="button" className={`wm-icon${inspectorOpen && inspectorTab !== 'check' ? ' is-on' : ''}`} title={L('Seite, Formate und Notizen', 'Page, styles and notes')} onClick={() => { if (inspectorOpen && inspectorTab !== 'check') setInspectorOpen(false); else { setInspectorOpen(true); setInspectorTab('page') } }}><SlidersHorizontal size={16} /></button>
         <button type="button" className={`wm-icon${focusMode ? ' is-on' : ''}`} title={L('Fokusmodus (F11)', 'Focus mode (F11)')} onClick={() => { setFocusMode((value) => !value); refocus() }}><Focus size={16} /></button>
         <div className="wm-zoom">
           <button type="button" className="wm-icon" title={L('Verkleinern', 'Zoom out')} onClick={() => setZoom((value) => ZOOMS.filter((step) => step < value - 0.001).at(-1) ?? value)}><Minus size={14} /></button>
@@ -691,12 +823,28 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
             selection={range}
             focusBlock={focusMode ? selection?.head.block ?? null : null}
             highlights={highlights}
-            underlines={[]}
+            underlinesFor={underlinesFor}
+            onContextMenu={onContextMenu}
             scroller={scrollElement}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
           />
+          {popover && (
+            <AssistPopover
+              target={popover}
+              onClose={() => { setPopover(null); refocus() }}
+              onReplace={(from, to, text) => { run(commands.replaceInBlockRange(controller.state, popover.block, from, to, text), 'format'); setPopover(null); refocus() }}
+              onIgnore={(issue) => {
+                const block = blockAt(controller.state.doc, popover.block)
+                if (block) controller.replaceDoc(makeDoc({ ...doc.manifest, ignored: [...new Set([...(doc.manifest.ignored ?? []), issueSignature(issue, runsText(block.runs))])] }, controller.state.doc.scenes))
+                setPopover(null)
+                refocus()
+              }}
+              onAddWord={(word) => { controller.replaceDoc(makeDoc({ ...doc.manifest, dictionary: [...new Set([...(doc.manifest.dictionary ?? []), word])] }, controller.state.doc.scenes)); setPopover(null); refocus() }}
+              onDisableRule={(rule) => { setAssistSettings((value) => ({ ...value, disabledRules: [...new Set([...value.disabledRules, rule])] })); setPopover(null); refocus() }}
+            />
+          )}
           <textarea
             ref={input}
             className="wm-input"
@@ -718,7 +866,25 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
             data-i18n-ignore
           />
         </div>
-        {inspectorOpen && !focusMode && <Inspector controller={controller} manifest={doc.manifest} footnoteNumbers={layout.footnoteNumbers} onClose={() => setInspectorOpen(false)} />}
+        {inspectorOpen && !focusMode && (
+          <Inspector
+            controller={controller}
+            manifest={doc.manifest}
+            footnoteNumbers={layout.footnoteNumbers}
+            onClose={() => setInspectorOpen(false)}
+            tab={inspectorTab}
+            onTab={setInspectorTab}
+            check={{
+              assistant,
+              settings: assistSettings,
+              onSettings: setAssistSettings,
+              autocorrect,
+              onAutocorrect: setAutocorrect,
+              sceneId: headBlock?.sceneId ?? null,
+              onJump: (block, from, to) => { controller.select({ anchor: { block, offset: from }, head: { block, offset: to } }); refocus() },
+            }}
+          />
+        )}
       </div>
 
       {noteDialog && (

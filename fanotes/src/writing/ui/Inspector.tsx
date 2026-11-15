@@ -8,8 +8,11 @@ import { paragraphKey } from '../model/flow'
 import { runsText } from '../model/runs'
 import type { Align, FontFamilyId, PageSetup, PageSizeId, ParagraphStyle, StoryManifest } from '../model/types'
 import { L, styleName } from './i18n'
+import { CheckPanel } from './CheckPanel'
+import type { ComponentProps } from 'react'
 
-type Tab = 'page' | 'styles' | 'notes'
+export type InspectorTab = 'page' | 'styles' | 'notes' | 'check'
+type Tab = InspectorTab
 
 const FONTS: Array<{ id: FontFamilyId; label: string }> = [
   { id: 'literata', label: 'Literata' },
@@ -35,8 +38,9 @@ const Toggle = ({ label, checked, onChange }: { label: string; checked: boolean;
   <label className="wm-toggle"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /> <span>{label}</span></label>
 )
 
-export function Inspector({ controller, manifest, footnoteNumbers, onClose }: { controller: WritingController; manifest: StoryManifest; footnoteNumbers: Map<string, string>; onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('page')
+export function Inspector({ controller, manifest, footnoteNumbers, onClose, tab: requestedTab, onTab, check }: { controller: WritingController; manifest: StoryManifest; footnoteNumbers: Map<string, string>; onClose: () => void; tab: Tab; onTab: (tab: Tab) => void; check: Omit<ComponentProps<typeof CheckPanel>, 'controller'> }) {
+  const tab = requestedTab
+  const setTab = onTab
   const [styleId, setStyleId] = useState('body')
   const doc = controller.state.doc
   const setManifest = (next: StoryManifest) => controller.replaceDoc(makeDoc(next, controller.state.doc.scenes))
@@ -81,11 +85,13 @@ export function Inspector({ controller, manifest, footnoteNumbers, onClose }: { 
   return (
     <aside className="wm-inspector" aria-label={L('Einstellungen der Geschichte', 'Story settings')}>
       <div className="wm-tabs" role="tablist">
-        {([['page', L('Seite', 'Page')], ['styles', L('Formate', 'Styles')], ['notes', L('Notizen', 'Notes')]] as Array<[Tab, string]>).map(([id, label]) => (
+        {([['check', L('Prüfen', 'Check')], ['page', L('Seite', 'Page')], ['styles', L('Formate', 'Styles')], ['notes', L('Notizen', 'Notes')]] as Array<[Tab, string]>).map(([id, label]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'is-on' : ''} onClick={() => setTab(id)}>{label}</button>
         ))}
         <button type="button" className="wm-icon" onClick={onClose} aria-label={L('Schliessen', 'Close')}>×</button>
       </div>
+
+      {tab === 'check' && <CheckPanel controller={controller} {...check} />}
 
       {tab === 'page' && (
         <div className="wm-inspector-body">
