@@ -82,6 +82,17 @@ const createProfile = (name) => {
   return dirs
 }
 
+/** Every session starts on the same note: the previous session ended on another one. */
+const resetLastNote = (profile) => {
+  const file = host === 'electron'
+    ? path.join(profile.config, 'FaNotes', 'config.json')
+    : path.join(profile.data, args['tauri-identifier'] || 'de.fanotes.app', 'settings.json')
+  const stored = JSON.parse(fs.readFileSync(file, 'utf8'))
+  const target = host === 'electron' ? (stored.settings ||= {}) : stored
+  target.lastOpenNotePath = LAST_NOTE
+  fs.writeFileSync(file, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 })
+}
+
 const resetTypingNote = (profile) => {
   const source = path.join(fixture, ...TYPING_NOTE.split('/'))
   const target = path.join(profile.vault, ...TYPING_NOTE.split('/'))
@@ -176,10 +187,11 @@ const waitStartup = async (session, timeoutMs = 90_000) => {
     // The agent may have landed in the document before the app's own page loaded: inject again.
     marks = await session.evaluate('window.__fanotesBench ? window.__fanotesBench.marks() : null').catch(() => null)
     if (!marks) await session.agent()
-    if (marks?.ready && marks.tree !== null && marks.note !== null) break
+    // A build without the startup marks (feature/writing-mode) only waits for the DOM.
+    if (marks?.ready && ((marks.tree !== null && marks.note !== null) || variant === 'writing')) break
     await wait(50)
   }
-  if (!marks?.ready || marks.tree === null || marks.note === null) throw new Error(`startup did not finish: ${JSON.stringify(marks)}\n${session.stderr().slice(-800)}`)
+  if (!marks?.ready || (variant !== 'writing' && (marks.tree === null || marks.note === null))) throw new Error(`startup did not finish: ${JSON.stringify(marks)}\n${session.stderr().slice(-800)}`)
   const clock = await clockOffset(session)
   const toMono = (pageMs) => pageMs + clock.offset
   return {
@@ -221,7 +233,7 @@ const typingTest = async (session, xin, clock, { open, rootSelector, clickSelect
   await xin.click(1)
   await wait(300)
   // Navigation only: if the click did not leave the caret in the editor, focus it from the page. The keys stay XTest.
-  const focusedBefore = await session.evaluate(`(() => { const root = [...document.querySelectorAll(${JSON.stringify(rootSelector)})].find((element) => element.contains(document.activeElement)); if (root) return true; const target = [...document.querySelectorAll(${JSON.stringify(clickSelector)})].filter((element) => element.getClientRects().length).at(-1); target?.focus(); return false })()`)
+  const focusedBefore = await session.evaluate(`(() => { const root = [...document.querySelectorAll(${JSON.stringify(rootSelector)})].find((element) => element.contains(document.activeElement)); if (root) return true; const target = [...document.querySelectorAll(${JSON.stringify(clickSelector)})].filter((element) => element.getClientRects().length).at(-1); (document.querySelector(${JSON.stringify(`${rootSelector} textarea`)}) || target)?.focus(); return false })()`)
   await xin.key('End', 'Control_L')
   await xin.key('Return')
   await xin.key('Return')
@@ -364,6 +376,7 @@ try {
   if (suites.has('session')) {
     for (let run = 1; run <= runs; run += 1) {
       resetTypingNote(warmProfile)
+      resetLastNote(warmProfile)
       const load = await waitForCalm()
       const session = await launch(warmProfile)
       const step = async (name, task) => {

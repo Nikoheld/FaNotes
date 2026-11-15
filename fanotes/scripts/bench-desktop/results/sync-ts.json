@@ -1,0 +1,293 @@
+{
+ "metric": "sync",
+ "engine": "ts",
+ "engineDescription": "src/lib/sync/engine.ts + electron/sync.cjs host, in-process (no IPC hop)",
+ "date": "2026-11-15T16:51:12.556Z",
+ "machine": {
+  "cpuModel": "12th Gen Intel(R) Core(TM) i3-12100F",
+  "logicalCpus": 8,
+  "containerCpuLimit": 4,
+  "containerMemoryLimitMb": 6144,
+  "totalMemoryMb": 39871,
+  "kernel": "6.17.13-13-pve",
+  "os": "Debian GNU/Linux 12 (bookworm)",
+  "node": "v22.23.2",
+  "webkitgtk": "2.50.6",
+  "hostname": "51b61291a387"
+ },
+ "fixture": {
+  "path": "/srv/agents/fanotes/.site-redesign-tools/tmp/bench/fx1",
+  "files": 2000,
+  "digest": "9b149342eef8f96aea7ba8a8543cb032b119a262f5d91fefb358f1f24bc8ef7c"
+ },
+ "edits": 20,
+ "server": {
+  "module": "fanotes-site/sync-api.mjs",
+  "bind": "127.0.0.1",
+  "accountRequestLimitPerMinute": 1000000
+ },
+ "runs": [
+  {
+   "full-upload": {
+    "ms": 8270.1,
+    "requests": 2005,
+    "clientCpuMs": 7627.8,
+    "serverCpuMs": 5060.9,
+    "load": [
+     25.68,
+     17.6,
+     14.11
+    ]
+   },
+   "full-download": {
+    "ms": 8487.6,
+    "requests": 2005,
+    "clientCpuMs": 5710.8,
+    "serverCpuMs": 1769.5,
+    "load": [
+     25.7,
+     17.74,
+     14.18
+    ]
+   },
+   "incremental-upload": {
+    "ms": 337.3,
+    "requests": 21,
+    "clientCpuMs": 115.1,
+    "serverCpuMs": 69.2,
+    "load": [
+     26.34,
+     18.15,
+     14.35
+    ]
+   },
+   "incremental-download": {
+    "ms": 149.9,
+    "requests": 21,
+    "clientCpuMs": 130,
+    "serverCpuMs": 16.9,
+    "load": [
+     26.34,
+     18.15,
+     14.35
+    ]
+   },
+   "noop": {
+    "ms": 80.8,
+    "requests": 1,
+    "clientCpuMs": 68.8,
+    "serverCpuMs": 1.3,
+    "load": [
+     26.34,
+     18.15,
+     14.35
+    ]
+   },
+   "verified": {
+    "files": 2000
+   }
+  },
+  {
+   "full-upload": {
+    "ms": 7785.4,
+    "requests": 2005,
+    "clientCpuMs": 4751.2,
+    "serverCpuMs": 3450.5,
+    "load": [
+     26.08,
+     18.23,
+     14.39
+    ]
+   },
+   "full-download": {
+    "ms": 5191,
+    "requests": 2005,
+    "clientCpuMs": 4611.7,
+    "serverCpuMs": 1396.6,
+    "load": [
+     25.19,
+     18.17,
+     14.4
+    ]
+   },
+   "incremental-upload": {
+    "ms": 205.6,
+    "requests": 21,
+    "clientCpuMs": 124,
+    "serverCpuMs": 111.3,
+    "load": [
+     24.29,
+     18.1,
+     14.4
+    ]
+   },
+   "incremental-download": {
+    "ms": 267.1,
+    "requests": 21,
+    "clientCpuMs": 293.2,
+    "serverCpuMs": 34.7,
+    "load": [
+     24.29,
+     18.1,
+     14.4
+    ]
+   },
+   "noop": {
+    "ms": 60.5,
+    "requests": 1,
+    "clientCpuMs": 65.4,
+    "serverCpuMs": 1,
+    "load": [
+     24.29,
+     18.1,
+     14.4
+    ]
+   },
+   "verified": {
+    "files": 2000
+   }
+  },
+  {
+   "full-upload": {
+    "ms": 7622.9,
+    "requests": 2005,
+    "clientCpuMs": 5013.6,
+    "serverCpuMs": 3812.1,
+    "load": [
+     23.39,
+     18.02,
+     14.39
+    ]
+   },
+   "full-download": {
+    "ms": 4799.9,
+    "requests": 2005,
+    "clientCpuMs": 3932.1,
+    "serverCpuMs": 1386.7,
+    "load": [
+     22.96,
+     18.02,
+     14.41
+    ]
+   },
+   "incremental-upload": {
+    "ms": 109.2,
+    "requests": 21,
+    "clientCpuMs": 57.7,
+    "serverCpuMs": 26.1,
+    "load": [
+     22.24,
+     17.95,
+     14.4
+    ]
+   },
+   "incremental-download": {
+    "ms": 87.3,
+    "requests": 21,
+    "clientCpuMs": 74.2,
+    "serverCpuMs": 7.6,
+    "load": [
+     22.24,
+     17.95,
+     14.4
+    ]
+   },
+   "noop": {
+    "ms": 50.7,
+    "requests": 1,
+    "clientCpuMs": 44.5,
+    "serverCpuMs": 0.6,
+    "load": [
+     22.24,
+     17.95,
+     14.4
+    ]
+   },
+   "verified": {
+    "files": 2000
+   }
+  }
+ ],
+ "summary": {
+  "full-upload": {
+   "ms": {
+    "n": 3,
+    "median": 7785.4,
+    "min": 7622.9,
+    "max": 8270.1,
+    "spreadPct": 4.15649806047217
+   },
+   "requests": {
+    "n": 3,
+    "median": 2005,
+    "min": 2005,
+    "max": 2005,
+    "spreadPct": 0
+   }
+  },
+  "full-download": {
+   "ms": {
+    "n": 3,
+    "median": 5191,
+    "min": 4799.9,
+    "max": 8487.6,
+    "spreadPct": 35.520130995954545
+   },
+   "requests": {
+    "n": 3,
+    "median": 2005,
+    "min": 2005,
+    "max": 2005,
+    "spreadPct": 0
+   }
+  },
+  "incremental-upload": {
+   "ms": {
+    "n": 3,
+    "median": 205.6,
+    "min": 109.2,
+    "max": 337.3,
+    "spreadPct": 55.471789883268485
+   },
+   "requests": {
+    "n": 3,
+    "median": 21,
+    "min": 21,
+    "max": 21,
+    "spreadPct": 0
+   }
+  },
+  "incremental-download": {
+   "ms": {
+    "n": 3,
+    "median": 149.9,
+    "min": 87.3,
+    "max": 267.1,
+    "spreadPct": 59.97331554369579
+   },
+   "requests": {
+    "n": 3,
+    "median": 21,
+    "min": 21,
+    "max": 21,
+    "spreadPct": 0
+   }
+  },
+  "noop": {
+   "ms": {
+    "n": 3,
+    "median": 60.5,
+    "min": 50.7,
+    "max": 80.8,
+    "spreadPct": 24.876033057851235
+   },
+   "requests": {
+    "n": 3,
+    "median": 1,
+    "min": 1,
+    "max": 1,
+    "spreadPct": 0
+   }
+  }
+ }
+}
