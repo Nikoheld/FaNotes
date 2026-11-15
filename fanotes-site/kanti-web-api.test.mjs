@@ -2,7 +2,7 @@
 // Synthetic accounts and grades only.
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -733,5 +733,25 @@ test('a request is logged as JSON with a request id and without cookies or the q
     assert.equal(changes.headers.get('x-request-id'), denied.requestId)
   } finally {
     await env.close()
+  }
+})
+
+test('a failed session replace removes its temporary file and keeps the session', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'kanti-web-write-'))
+  const store = createKantiWebStore({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const sessions = join(store.root, 'sessions')
+  try {
+    const created = await store.createSession('Browser', [])
+    const file = join(sessions, `${created.hash}.json`)
+    const before = await readFile(file, 'utf8')
+    await chmod(sessions, 0o500)
+    await assert.rejects(() => store.updateSession(created.hash, (session) => ({ ...session, browser: 'Other' })), { code: 'EACCES' })
+    await chmod(sessions, 0o700)
+    assert.equal(await readFile(file, 'utf8'), before)
+    assert.equal((await readdir(sessions)).some((name) => name.endsWith('.tmp')), false)
+    assert.equal(before.includes('Other'), false)
+  } finally {
+    await chmod(sessions, 0o700).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
   }
 })

@@ -253,9 +253,14 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   const writeJson = async (file, value) => {
     await fs.mkdir(resolve(file, '..'), { recursive: true, mode: 0o700 })
-    const temporary = `${file}.${randomBytes(6).toString('hex')}.tmp`
-    await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
-    await fs.rename(temporary, file)
+    const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+    try {
+      await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
+      await fs.rename(temporary, file)
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+      throw error
+    }
   }
 
   const stripLegacyPush = (link) => {

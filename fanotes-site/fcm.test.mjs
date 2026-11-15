@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -401,4 +401,35 @@ test('an oversized FCM body is cancelled and is not retried', async () => {
   assert.equal(authHuge.cancelled, 1)
   assert.equal(authLines.join('\n').includes('page too large'), false)
   assert.equal(authLines.join('\n').includes('PRIVATE'), false)
+})
+
+test('a failed account write removes its temporary file and keeps the link', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fcm-write-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('no network') },
+    autostart: false,
+    fcmSend: async () => ({ status: 200 }),
+  })
+  const accountId = 'c'.repeat(32)
+  const dir = join(root, 'accounts', accountId)
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'super-secret-refresh-token-value',
+    })
+    const linkFile = join(dir, 'link.json')
+    const before = await readFile(linkFile, 'utf8')
+    await chmod(dir, 0o500)
+    await assert.rejects(() => runtime.webAccess.updateSettings(accountId, { gradePush: false }), { code: 'EACCES' })
+    await chmod(dir, 0o700)
+    assert.equal(await readFile(linkFile, 'utf8'), before)
+    assert.equal((await readdir(dir)).some((name) => name.endsWith('.tmp')), false)
+    assert.equal(before.includes('super-secret-refresh-token-value'), false)
+  } finally {
+    await chmod(dir, 0o700).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
 })
