@@ -3968,5 +3968,14 @@
   "Der Vault wurde unvollständig gelesen.": "The vault was read incompletely.",
   "Eine Löschung braucht eine ausdrückliche Bestätigung.": "A deletion needs an explicit confirmation.",
   "Diese Fassung liegt nicht im Archiv.": "This revision is not in the archive.",
-  "Die leere oder stark gekürzte Fassung wurde nicht über die vorhandene Notiz gelegt.": "The empty or heavily shortened version was not saved over the existing note."
+  "Die leere oder stark gekürzte Fassung wurde nicht über die vorhandene Notiz gelegt.": "The empty or heavily shortened version was not saved over the existing note.",
+  "Konflikte": "Conflicts",
+  "Zwei Fassungen vergleichen und eine behalten": "Compare two versions and keep one",
+  "Sync-Konflikte lösen": "Resolve sync conflicts",
+  "Eine Datei hat zwei Fassungen": "One file has two versions",
+  "Beide Fassungen sind gesichert. Vergleiche sie und entscheide, welche auf allen Geräten gilt.": "Both versions are saved. Compare them and choose which one applies on all devices.",
+  "Melde dich beim Sync an, um einen Konflikt zu lösen.": "Sign in to sync to resolve a conflict.",
+  "Die Originaldatei fehlt. Behalte die Kopie oder beide Fassungen.": "The original file is missing. Keep the copy or both versions.",
+  "Die Sync-Anmeldung ist abgelaufen. Melde dich erneut an; der Konflikt bleibt bis dahin bestehen.": "The sync sign-in has expired. Sign in again; the conflict stays until then.",
+  "Keine Verbindung zum Sync-Server. Der Konflikt bleibt bestehen; löse ihn, sobald du online bist.": "No connection to the sync server. The conflict stays; resolve it once you are online."
 }

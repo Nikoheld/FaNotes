@@ -735,6 +735,47 @@ class SyncEngineTest {
         }
     }
 
+    @Test
+    fun aFolderDeleteFromAStaleDeviceKeepsTheNewerNoteAndLeavesNoMarkBehind() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Laptop")
+        val engineB = engine(SyncApi(server), hostB, "Tablet")
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            hostA.put("Old/Note.md", "old\n".encodeToByteArray(), 1_000)
+            hostA.put("Old/Other.md", "other\n".encodeToByteArray(), 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            assertEquals("old\n", hostB.read("Old/Note.md").decodeToString())
+
+            // The laptop publishes a newer version; the tablet then deletes the folder with its old view.
+            hostA.put("Old/Note.md", "new from the laptop\n".encodeToByteArray(), 2_000)
+            engineA.syncNow()
+            hostB.files.remove("Old/Note.md")
+            hostB.files.remove("Old/Other.md")
+            engineB.markDeleted("Old")
+            engineB.syncNow()
+            assertEquals("new from the laptop\n", hostB.read("Old/Note.md").decodeToString())
+            assertTrue("Old/Other.md" !in hostB.files)
+            engineA.syncNow()
+            assertEquals("new from the laptop\n", hostA.read("Old/Note.md").decodeToString())
+            assertTrue("Old/Other.md" !in hostA.files)
+
+            // Later the note is missing without a delete. The used-up mark must not delete it everywhere.
+            hostB.files.remove("Old/Note.md")
+            engineB.syncNow()
+            assertEquals("new from the laptop\n", hostB.read("Old/Note.md").decodeToString())
+            engineA.syncNow()
+            assertEquals("new from the laptop\n", hostA.read("Old/Note.md").decodeToString())
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
     private fun engine(api: SyncApi, host: MemoryHost, name: String): SyncEngine {
         val engine = SyncEngine(api, SyncEngineOptions(platform = "android", deviceName = { name }, automatic = { true }))
         engine.attach(host)

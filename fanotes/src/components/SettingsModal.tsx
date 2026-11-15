@@ -5,6 +5,7 @@ import {
   Check,
   ChevronRight,
   Cloud,
+  GitCompareArrows,
   Code2,
   Copy,
   Cpu,
@@ -61,6 +62,7 @@ import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, Qw
 import type { McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
+import { SyncConflictsPage } from './SyncConflictsPage'
 import { ShareSettingsPage, type ShareTarget } from './ShareSettingsPage'
 import { ProfileSettingsCard } from './ProfileSettingsCard'
 import { InkPersonalizationCard } from './InkPersonalizationCard'
@@ -95,7 +97,7 @@ const UPDATE_CHANNEL_COPY = {
 
 const updateChannelCopy = (channel: AppSettings['updateChannel']) => UPDATE_CHANNEL_COPY[channel] ?? UPDATE_CHANNEL_COPY.stable
 
-export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'profile' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
+export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'conflicts' | 'profile' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
   platform?: string
@@ -133,6 +135,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 18 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 5 },
   { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 1 },
+  { id: 'conflicts', label: 'Konflikte', description: 'Zwei Fassungen vergleichen und eine behalten', icon: GitCompareArrows, count: 0 },
   { id: 'profile', label: 'Profil', description: 'Öffentliche Aktivitätsübersicht', icon: User, count: 3 },
   { id: 'share', label: 'Teilen', description: 'Link, Kopie oder Live', icon: Share2, count: 3 },
   { id: 'addons', label: 'Add-ons', description: 'Store, Quelle und Updates', icon: Puzzle, count: 2 },
@@ -146,7 +149,7 @@ const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Bedienung', sections: ['accessibility'] },
   { label: 'Stift & Arbeitsbereich', sections: ['drawing'] },
   { label: 'Dateien & Vault', sections: ['files'] },
-  { label: 'Sync', sections: ['sync'] },
+  { label: 'Sync', sections: ['sync', 'conflicts'] },
   { label: 'Profil', sections: ['profile'] },
   { label: 'Teilen', sections: ['share'] },
   { label: 'Add-ons', sections: ['addons'] },
@@ -164,6 +167,7 @@ const settingsOptionCount = (
     syncSignedIn: boolean
     syncDeviceRows: number
     syncConflictRows: number
+    syncOpenConflicts: number
     syncGrantRows: number
   },
 ) => {
@@ -176,6 +180,7 @@ const settingsOptionCount = (
       if (!input.hasSync || input.syncUnavailable) return 1
       if (!input.syncSignedIn) return 0
       return 5 + 3 + input.syncGrantRows + input.syncDeviceRows + input.syncConflictRows + 1
+    case 'conflicts': return input.syncOpenConflicts
     case 'profile': return 3
     case 'share': return 3
     case 'addons': return 2
@@ -202,6 +207,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Angemeldete Geräte', detail: 'Sync', section: 'sync', target: 'settings-sync-devices', keywords: 'sync geräte devices laptop tablet abmelden' },
   { label: 'Sync-Passwort ändern', detail: 'Sync', section: 'sync', target: 'settings-sync-password', keywords: 'sync passwort ändern password schlüssel' },
   { label: 'Sync-Konto löschen', detail: 'Sync', section: 'sync', target: 'settings-sync-delete', keywords: 'sync konto löschen account delete server' },
+  { label: 'Sync-Konflikte lösen', detail: 'Konflikte', section: 'conflicts', target: 'settings-conflicts', keywords: 'konflikt konfliktkopie fassung version vergleichen behalten sync zwei geräte' },
   { label: 'Freigaben', detail: 'Teilen', section: 'share', target: 'settings-share', keywords: 'teilen freigabe link kopie live ordner notiz öffentlich stoppen beenden' },
   { label: 'App-Sprache', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'sprache language system deutsch englisch english' },
   { label: 'Farbschema & Themes', detail: 'Darstellung', section: 'appearance', target: 'settings-surface', keywords: 'theme dunkel hell system graphit klar mitternacht wald aurora sepia schnee farbe' },
@@ -464,7 +470,8 @@ export function SettingsModal({
         syncUnavailable: syncState?.status === 'unavailable',
         syncSignedIn: Boolean(syncState?.account),
         syncDeviceRows: syncState?.info ? syncState.info.devices.length : 1,
-        syncConflictRows: syncState?.conflicts.length ?? 0,
+        syncConflictRows: syncState?.openConflicts ? 1 : 0,
+        syncOpenConflicts: syncState?.openConflicts ?? 0,
         syncGrantRows: visibleMcpGrants.length,
       }),
     }
@@ -742,6 +749,7 @@ export function SettingsModal({
                     <button key={item.id} type="button" className={active === item.id ? 'active' : ''} title={item.description} onClick={() => setActive(item.id)}>
                       <Icon size={14} />
                       <span><b>{item.label}</b><small>{item.description}</small></span>
+                      {item.id === 'conflicts' && (syncState?.openConflicts ?? 0) > 0 && <em className="settings-nav-badge" aria-label={`${syncState?.openConflicts} offen`}>{syncState?.openConflicts}</em>}
                       <ChevronRight size={12} />
                     </button>
                   )
@@ -756,7 +764,7 @@ export function SettingsModal({
           <header>
             <div className="settings-heading">
               <span className="settings-heading-icon"><ActiveSectionIcon size={17} /></span>
-              <div><span className="eyebrow">{`Anpassung · ${section.count} Optionen`}</span><h2>{section.label}</h2><p>{section.description}</p></div>
+              <div>{active === 'conflicts' ? <span className="eyebrow">{`Sync · ${section.count} offen`}</span> : <span className="eyebrow">{`Anpassung · ${section.count} Optionen`}</span>}<h2>{section.label}</h2><p>{section.description}</p></div>
             </div>
             <button type="button" className="icon-button" onClick={onClose} aria-label="Schließen"><X size={19} /></button>
           </header>
@@ -1245,8 +1253,16 @@ export function SettingsModal({
 
             {active === 'sync' && (
               syncEngine && syncState
-                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} grants={visibleMcpGrants} onGrants={replaceMcpGrants} />
+                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} grants={visibleMcpGrants} onGrants={replaceMcpGrants} onOpenConflicts={() => setActive('conflicts')} />
                 : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>
+            )}
+
+            {active === 'conflicts' && (
+              <div id="settings-conflicts">
+                {syncEngine && syncState
+                  ? <SyncConflictsPage engine={syncEngine} syncState={syncState} />
+                  : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>}
+              </div>
             )}
 
             {active === 'profile' && (

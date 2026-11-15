@@ -778,6 +778,8 @@ class SyncEngine(
         publish(state.value.copy(progress = SyncProgress("scan", 0, 0)))
         val entries = currentHost.scan().filter { acceptsPath(it.path) }
         val present = entries.map { it.path }.toSet()
+        // Deletes the user asked for before this scan. One marked while the push runs waits for the next cycle.
+        val consideredDeletes = table.pendingDeletes.toSet()
         val changed = entries.filter { entry ->
             if (entry.size > MAX_FILE_BYTES || options.isPathBusy(entry.path)) return@filter false
             val base = table.files[entry.path]
@@ -820,14 +822,28 @@ class SyncEngine(
                 publish(state.value.copy(progress = SyncProgress("push", done, total)))
             }
         }
-        table.pendingDeletes.removeAll { prefix ->
-            table.files.keys.none { it == prefix || it.startsWith("$prefix/") }
-        }
+        settlePendingDeletes(table, consideredDeletes, currentHost)
         persistState()
         return PushResult(uploads, deletes, conflicts)
     }
 
     private data class PushResult(val uploads: Int, val deletes: Int, val conflicts: Int)
+
+    /**
+     * A delete mark lives only until it has been applied. It used to stay while any
+     * tracked file was left under it: after a folder delete lost the race against a
+     * newer edit from another device, the restored note kept the mark, and the next
+     * time it was missing for another reason it was deleted on every device. A mark
+     * set before this cycle's scan is dropped once nothing tracked under it is missing.
+     */
+    private suspend fun settlePendingDeletes(table: EngineState, considered: Set<String>, currentHost: SyncHost) {
+        if (table.pendingDeletes.none { it in considered }) return
+        val presentNow = currentHost.scan().map { it.path }.toSet()
+        val tracked = table.files.keys.toList()
+        table.pendingDeletes.removeAll { entry ->
+            entry in considered && tracked.none { (it == entry || it.startsWith("$entry/")) && it !in presentNow }
+        }
+    }
 
     private suspend fun uploadPath(entry: SyncScanEntry, table: EngineState, syncKeys: SyncKeys, active: SyncSession, currentHost: SyncHost): String {
         requireSyncDocumentBudget(entry.path, entry.size)

@@ -206,7 +206,9 @@ try {
   assert.match(read('src/lib/addons/protocol.ts'), /'recognition.run': 'recognition'/)
   assert.match(read('src/lib/addons/protocol.ts'), /'calendar.write': 'calendar:write'/)
   assert.match(read('src/lib/addons/protocol.ts'), /'homework.write': 'homework:write'/)
-  assert.match(read('src/components/SyncSettingsSection.tsx'), /Zusammenführen/)
+  // Conflicts are resolved on their own settings page: compare, then keep one version, or both.
+  assert.match(read('src/components/SyncConflictsPage.tsx'), /Diese Fassung behalten/)
+  assert.match(read('src/components/SyncConflictsPage.tsx'), /Beide behalten/)
   assert.match(read('src/components/CalendarView.tsx'), /exportIcs/)
   assert.match(read('src/components/HomeworkBoard.tsx'), /calendarMarkdownWithHomework/)
   assert.match(read('src/components/HomeworkBoard.tsx'), /skipCalendarWrite/)

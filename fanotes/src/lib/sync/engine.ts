@@ -19,6 +19,7 @@ const syncText = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
 /** Sign-in, network, rate-limit and server errors concern every entry, so they end the cycle instead of skipping one file. */
 const cycleWide = (error: unknown) => error instanceof SyncApiError && (error.unauthorized || error.offline || error.status === 429 || error.status >= 500)
 import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
+import { conflictFingerprint, groupConflicts, keptVersionPath, numberedVariant, type ConflictGroup, type ConflictKeep } from './conflicts'
 import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncRemoteEntry, type SyncSession } from './api'
 import { mcpReaderRequest, newReaderKey, type McpGrantInfo } from '../mcp/client'
 import {
@@ -41,6 +42,8 @@ export type SyncPublicState = {
   pendingLocal: number
   trackedFiles: number
   conflicts: SyncConflict[]
+  /** Documents with a conflict copy in this vault, from any device. */
+  openConflicts: number
   log: SyncLogEntry[]
   info: SyncAccountInfo | null
   /** This device holds a connector key and can answer an approved Grok. */
@@ -208,7 +211,7 @@ export class SyncEngine {
 
   constructor(api?: SyncApi) {
     this.api = api ?? new SyncApi()
-    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pendingLocal: 0, trackedFiles: 0, conflicts: [], log: [], info: null, mcpReader: false }
+    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pendingLocal: 0, trackedFiles: 0, conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false }
   }
 
   // ── External store API ──────────────────────────────────────────────────
@@ -398,7 +401,7 @@ export class SyncEngine {
     this.timer = null
     await this.persistSecrets(null)
     if (this.host && this.vaultId) await this.host.writeState(this.vaultId, null)
-    this.setState({ status: 'signed-out', account: null, info: null, progress: null, pendingLocal: 0, trackedFiles: 0, conflicts: [], error: null, mcpReader: false })
+    this.setState({ status: 'signed-out', account: null, info: null, progress: null, pendingLocal: 0, trackedFiles: 0, conflicts: [], openConflicts: 0, error: null, mcpReader: false })
   }
 
   async refreshAccount() {
@@ -811,7 +814,7 @@ export class SyncEngine {
     }
     if (local && (localChanged || (remoteKind === 'blank' && local.kind !== 'blank'))) {
       const at = new Date(this.options?.now?.() ?? Date.now())
-      const copyPath = conflictCopyPath(path, this.deviceInfo().name, at)
+      const copyPath = await this.freeConflictCopyPath(path, at)
       await this.host.write(copyPath, local.bytes, at.getTime())
       const conflict = { path, copyPath, at: at.toISOString() }
       this.state.conflicts = [...this.state.conflicts, conflict].slice(-50)
@@ -856,6 +859,9 @@ export class SyncEngine {
     const entries = (await this.host.scan()).filter((entry) => this.acceptsPath(entry.path))
     this.scanCache = new Map(entries.map((entry) => [entry.path, entry]))
     const present = new Set(entries.map((entry) => entry.path))
+    this.setState({ openConflicts: groupConflicts(present).length })
+    // Deletes the user asked for before this scan. One marked while the push runs waits for the next cycle.
+    const consideredDeletes = new Set(this.state.pendingDeletes)
     const changed: SyncScanEntry[] = []
     for (const entry of entries) {
       if (entry.size > MAX_FILE_BYTES) continue
@@ -892,9 +898,7 @@ export class SyncEngine {
         tick()
       }
     }
-    this.state.pendingDeletes = this.state.pendingDeletes.filter((prefix) => (
-      Object.keys(this.state!.files).some((candidate) => candidate === prefix || candidate.startsWith(`${prefix}/`))
-    ))
+    await this.settlePendingDeletes(consideredDeletes)
     this.scanCache = null
     await this.persistState()
     return { uploads, deletes, conflicts }
@@ -1036,7 +1040,7 @@ export class SyncEngine {
       return 'skipped'
     }
     const at = new Date(this.options?.now?.() ?? Date.now())
-    const copyPath = conflictCopyPath(entry.path, this.deviceInfo().name, at)
+    const copyPath = await this.freeConflictCopyPath(entry.path, at)
     await this.host.write(copyPath, localBytes, at.getTime())
     const conflict = { path: entry.path, copyPath, at: at.toISOString() }
     this.state.conflicts = [...this.state.conflicts, conflict].slice(-50)
@@ -1076,6 +1080,47 @@ export class SyncEngine {
         return 'conflict'
       }
       throw error
+    }
+  }
+
+  /**
+   * A delete mark lives only until it has been applied. It used to stay while
+   * any tracked file was left under it: after a folder delete lost the race
+   * against a newer edit from another device, the restored note kept the mark,
+   * and the next time that note was missing for any other reason (a linked
+   * folder offline, a scan that missed it) it was deleted on every device.
+   * Now a mark set before this cycle's scan is dropped once nothing tracked
+   * under it is missing any more: its files were deleted, or a newer version
+   * came back and is present again.
+   */
+  private async settlePendingDeletes(considered: ReadonlySet<string>) {
+    if (!this.host || !this.state || !this.state.pendingDeletes.length) return
+    const tracked = Object.keys(this.state.files)
+    if (!this.state.pendingDeletes.some((entry) => considered.has(entry))) return
+    const presentNow = new Set((await this.host.scan()).map((entry) => entry.path))
+    this.state.pendingDeletes = this.state.pendingDeletes.filter((entry) => (
+      !considered.has(entry)
+      || tracked.some((candidate) => (candidate === entry || candidate.startsWith(`${entry}/`)) && !presentNow.has(candidate))
+    ))
+  }
+
+  /** `conflictCopyPath`, numbered when a copy from the same minute exists, so no earlier copy is overwritten. */
+  private async freeConflictCopyPath(path: string, at: Date) {
+    const first = conflictCopyPath(path, this.deviceInfo().name, at)
+    for (let number = 1; number < 1000; number += 1) {
+      const candidate = number === 1 ? first : numberedVariant(first, number)
+      if (!(await this.exists(candidate))) return candidate
+    }
+    return numberedVariant(first, Date.now())
+  }
+
+  private async exists(path: string) {
+    if (!this.host) return false
+    try {
+      await this.host.read(path)
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -1144,6 +1189,286 @@ export class SyncEngine {
     this.state.conflicts = this.state.conflicts.filter((conflict) => conflict.copyPath !== copyPath)
     void this.persistState()
     this.setState({ conflicts: this.state.conflicts })
+  }
+
+  // ── Conflict resolution ─────────────────────────────────────────────────
+
+  /** Runs `task` while no sync cycle runs; cycles asked for meanwhile follow afterwards. */
+  private async exclusive<T>(task: () => Promise<T>): Promise<T> {
+    while (this.inFlight) await this.waitIdle()
+    let release!: () => void
+    this.inFlight = new Promise<void>((resolve) => { release = resolve })
+    try {
+      return await task()
+    } finally {
+      this.inFlight = null
+      release()
+      if (this.queued && !this.disposed) {
+        this.queued = false
+        void this.syncNow('queued')
+      }
+    }
+  }
+
+  /** Every document with a conflict copy in this vault, whichever device made the copy. */
+  async listConflicts(): Promise<ConflictGroup[]> {
+    if (!this.host) return []
+    const scanned = (await this.host.scan()).filter((entry) => this.acceptsPath(entry.path))
+    const present = new Set(scanned.map((entry) => entry.path))
+    const stats = new Map(scanned.map((entry) => [entry.path, { size: entry.size, mtimeMs: entry.mtimeMs }]))
+    const groups = groupConflicts(present, this.state?.conflicts ?? []).map((group) => ({
+      ...group,
+      files: Object.fromEntries(group.pairs.flatMap((pair) => [pair.path, pair.copyPath]).flatMap((path) => (stats.has(path) ? [[path, stats.get(path)!]] : []))),
+    }))
+    if (this.state) {
+      const kept = this.state.conflicts.filter((conflict) => present.has(conflict.copyPath))
+      if (kept.length !== this.state.conflicts.length) {
+        this.state.conflicts = kept
+        await this.persistState()
+      }
+    }
+    this.setState({ openConflicts: groups.length })
+    return groups
+  }
+
+  /** The bytes of one side of a conflict, for the preview. Null when the file is gone. */
+  async readConflictFile(path: string): Promise<Uint8Array | null> {
+    if (!this.host || !this.acceptsPath(path)) return null
+    try {
+      return await this.host.read(path)
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Keeps one version of a conflicted document (or both) and makes every
+   * device agree. `expected` holds the SHA-256 of each file as the user saw it
+   * in the preview; if any of them changed in the meantime nothing is touched
+   * and the result is `changed`.
+   *
+   * - `original`: the conflict copy is removed (desktop: system trash). The
+   *   server keeps the removed copy in its archive.
+   * - `copy`: the copy's exact bytes (text, handwriting, page data) become the
+   *   document. They are uploaded first, with the revision this device holds
+   *   as the base, so a newer edit from another device is never replaced; only
+   *   then is the local file replaced (the old one goes to the system trash on
+   *   desktop, and the server archives its previous revision) and the copy removed.
+   * - `both`: the copy is renamed to `Name (Fassung …).ext` and stays an ordinary file.
+   *
+   * `expected` maps each path to `conflictFingerprint` of the bytes shown.
+   */
+  async resolveConflict(group: ConflictGroup, keep: ConflictKeep, expected: Record<string, string | null>): Promise<{ status: 'resolved' | 'changed'; message: string }> {
+    if (!this.session || !this.host || !this.state || !this.keys) throw new Error('Melde dich beim Sync an, um einen Konflikt zu lösen.')
+    for (const pair of group.pairs) {
+      for (const path of [pair.path, pair.copyPath]) {
+        if (!this.acceptsPath(path)) throw new Error(`„${path}“ wird nicht synchronisiert.`)
+        if (this.options?.isPathBusy?.(path)) throw new Error(`„${path}“ ist gerade geöffnet und noch nicht gespeichert. Speichere die Notiz und versuche es dann erneut.`)
+      }
+    }
+    if (keep === 'original' && group.pairs.some((pair) => expected[pair.path] === null)) {
+      throw new Error('Die Originaldatei fehlt. Behalte die Kopie oder beide Fassungen.')
+    }
+    const changed = { status: 'changed' as const, message: 'Eine der beiden Fassungen hat sich inzwischen geändert. Vergleiche sie bitte noch einmal.' }
+    return this.exclusive(async () => {
+      const session = this.session
+      const host = this.host
+      const keys = this.keys
+      if (!session || !host || !this.state || !keys) throw new Error('Melde dich beim Sync an, um einen Konflikt zu lösen.')
+      let offline = false
+      try {
+        // Converge first: edits made here go up, edits from other devices come down.
+        // Nothing is decided on an outdated view.
+        this.setState({ status: 'syncing', error: null })
+        await this.pull()
+        await this.push()
+        const fingerprint = async (path: string) => conflictFingerprint(path, await this.readConflictFile(path))
+        for (const pair of group.pairs) {
+          if (await fingerprint(pair.copyPath) !== expected[pair.copyPath]) return changed
+          if (await fingerprint(pair.path) !== expected[pair.path]) return changed
+          if (!expected[pair.copyPath]) return changed
+        }
+        // A file that is replaced or removed must be on the server exactly as it is
+        // here (its archive is the way back). Edits the sync could not upload, a file
+        // that is too large or one the server refused, stop the resolution instead.
+        for (const pair of group.pairs) {
+          const leaving = keep === 'copy' ? pair.path : keep === 'original' ? pair.copyPath : null
+          if (leaving && !(await this.uploadedAsIs(leaving))) {
+            throw new Error(`„${leaving}“ hat Änderungen, die noch nicht im Sync sind. Beide Fassungen bleiben erhalten; versuche es nach dem nächsten erfolgreichen Abgleich erneut.`)
+          }
+        }
+        const now = this.options?.now?.() ?? Date.now()
+        const written: string[] = []
+        const removed: string[] = []
+
+        if (keep === 'copy') {
+          const chosen = new Map<string, Uint8Array>()
+          for (const pair of group.pairs) {
+            const bytes = await host.read(pair.copyPath)
+            if (noteSyncKind(pair.path, bytes) === 'unreadable') throw new Error(`„${pair.copyPath}“ ist beschädigt und kann nicht übernommen werden.`)
+            chosen.set(pair.path, bytes)
+          }
+          // Upload every file of the document before anything local changes.
+          const uploaded: Array<{ path: string; previous: LocalBase | undefined }> = []
+          try {
+            for (const pair of group.pairs) {
+              const previous = this.state.files[pair.path] ? { ...this.state.files[pair.path] } : undefined
+              await this.uploadChosen(pair.path, chosen.get(pair.path)!, now)
+              uploaded.push({ path: pair.path, previous })
+            }
+          } catch (error) {
+            if (error instanceof SyncApiError && error.conflict) {
+              this.log('warn', `Konflikt bei „${group.title}“ nicht gelöst: die Datei wurde auf einem anderen Gerät erneut geändert.`)
+              await this.revertChosen(uploaded, now)
+              return changed
+            }
+            await this.revertChosen(uploaded, now)
+            throw error
+          }
+          for (const pair of group.pairs) {
+            const bytes = chosen.get(pair.path)!
+            // The server archived the replaced version on upload. On desktop it also goes to the
+            // system trash; the browser vault deletes for good, so there the file is overwritten in place.
+            const browser = this.options?.platform === 'web' || this.options?.platform === 'browser-preview'
+            if (!browser && await this.exists(pair.path)) await host.remove(pair.path)
+            const stat = await host.write(pair.path, bytes, now)
+            this.state.files[pair.path] = { ...this.state.files[pair.path], size: stat.size, mtimeMs: stat.mtimeMs }
+            written.push(pair.path)
+          }
+          for (const pair of group.pairs) {
+            if (await this.discardCopy(pair.copyPath)) removed.push(pair.copyPath)
+          }
+        } else if (keep === 'original') {
+          for (const pair of group.pairs) {
+            if (!this.state.files[pair.path]) throw new Error(`„${pair.path}“ ist noch nicht im Sync. Versuche es nach dem nächsten Abgleich erneut.`)
+          }
+          for (const pair of group.pairs) {
+            if (await this.discardCopy(pair.copyPath)) removed.push(pair.copyPath)
+          }
+        } else {
+          for (const pair of group.pairs) {
+            const target = await this.freeName(keptVersionPath(pair.copyPath))
+            const bytes = await host.read(pair.copyPath)
+            await this.uploadChosen(target, bytes, now)
+            await host.write(target, bytes, now).then((stat) => {
+              this.state!.files[target] = { ...this.state!.files[target], size: stat.size, mtimeMs: stat.mtimeMs }
+            })
+            written.push(target)
+            if (await this.discardCopy(pair.copyPath)) removed.push(pair.copyPath)
+          }
+        }
+
+        const copies = new Set(group.pairs.map((pair) => pair.copyPath))
+        this.state.conflicts = this.state.conflicts.filter((conflict) => !copies.has(conflict.copyPath))
+        await this.persistState()
+        if (written.length || removed.length) this.options?.onApplied?.({ written, removed })
+        const message = keep === 'copy'
+          ? `„${group.title}“: die Fassung von ${group.device ?? 'dem anderen Gerät'} gilt jetzt auf allen Geräten.`
+          : keep === 'original'
+            ? `„${group.title}“: die bisherige Fassung bleibt, die Konfliktkopie wurde entfernt.`
+            : `„${group.title}“: beide Fassungen bleiben als eigene Dateien.`
+        this.log('info', message)
+        return { status: 'resolved' as const, message }
+      } catch (error) {
+        if (error instanceof SyncApiError && error.unauthorized) {
+          await this.handleUnauthorized()
+          throw new Error('Die Sync-Anmeldung ist abgelaufen. Melde dich erneut an; der Konflikt bleibt bis dahin bestehen.')
+        }
+        offline = error instanceof SyncApiError && error.offline
+        if (offline) throw new Error('Keine Verbindung zum Sync-Server. Der Konflikt bleibt bestehen; löse ihn, sobald du online bist.')
+        throw error
+      } finally {
+        await this.persistState().catch(() => undefined)
+        this.setState({ status: !this.session ? this.snapshot.status : offline ? 'offline' : 'idle', progress: null })
+        void this.listConflicts().catch(() => undefined)
+      }
+    })
+  }
+
+  /**
+   * Uploads exactly these bytes as `path`, on top of the revision this device
+   * holds. A 409 means another device changed the file since; it is thrown,
+   * never retried. The deliberate choice may replace a much larger version, so
+   * the server's shrink guard is lifted; it archives the previous blob anyway.
+   */
+  private async uploadChosen(path: string, raw: Uint8Array, mtimeMs: number) {
+    if (!this.session || !this.state || !this.keys) throw new Error('Nicht angemeldet.')
+    const kind = noteSyncKind(path, raw)
+    if (kind === 'unreadable') throw new Error(`„${path}“ ist beschädigt.`)
+    const bytes = canonicalSyncBytes(path, raw)
+    const sha256 = await sha256Hex(bytes)
+    const identityBytes = identitySyncBytes(path, raw)
+    const base = this.state.files[path]
+    const id = base?.id ?? await fileIdFor(this.keys, path)
+    const meta = await encryptMeta(this.keys, id, { path, mtimeMs, size: bytes.byteLength, sha256 })
+    const blob = await encryptBytes(this.keys, id, bytes)
+    const revision = await this.api.upload(this.session, id, base?.revision ?? 0, meta, await sha256Hex(blob), blob, { blank: kind === 'blank', clear: true })
+    this.state.files[path] = {
+      id,
+      revision,
+      sha256,
+      size: raw.byteLength,
+      mtimeMs,
+      ...(identityBytes ? { contentSha256: await sha256Hex(identityBytes) } : {}),
+      ...(kind === 'blank' ? { blank: true } : {}),
+    }
+  }
+
+  /** True when the file is missing here, or the server holds exactly this content as its tracked revision. */
+  private async uploadedAsIs(path: string) {
+    if (!this.state) return false
+    const local = await this.localSnapshot(path)
+    if (!local) return !(await this.exists(path))
+    const base = this.state.files[path]
+    if (!base || local.kind === 'unreadable') return false
+    return base.contentSha256 === local.identity || base.sha256 === local.sha256 || base.sha256 === local.rawSha256
+  }
+
+  /** Puts back what an aborted "keep the copy" already uploaded, so a note is never left half replaced. */
+  private async revertChosen(uploaded: Array<{ path: string; previous: LocalBase | undefined }>, mtimeMs: number) {
+    for (const { path, previous } of uploaded.reverse()) {
+      try {
+        const local = await this.host?.read(path)
+        if (local) await this.uploadChosen(path, local, mtimeMs)
+        else if (previous) this.state!.files[path] = previous
+      } catch (error) {
+        this.log('error', `„${path}“ konnte nach dem Abbruch nicht zurückgesetzt werden (${error instanceof Error ? error.message : 'unbekannt'}). Die Konfliktkopie bleibt erhalten.`)
+      }
+    }
+  }
+
+  /**
+   * Removes a conflict copy everywhere. The server delete names the revision
+   * this device holds, so a copy edited elsewhere in the meantime is kept.
+   * The server archives the deleted blob; on desktop the local file goes to the system trash.
+   */
+  private async discardCopy(copyPath: string): Promise<boolean> {
+    if (!this.session || !this.host || !this.state) return false
+    const base = this.state.files[copyPath]
+    if (base) {
+      try {
+        await this.api.remove(this.session, base.id, base.revision)
+      } catch (error) {
+        if (!(error instanceof SyncApiError && error.conflict && error.entry?.deleted)) {
+          if (error instanceof SyncApiError && error.conflict) {
+            this.log('warn', `„${copyPath}“ wurde auf einem anderen Gerät geändert und bleibt erhalten.`)
+            return false
+          }
+          throw error
+        }
+      }
+      delete this.state.files[copyPath]
+    }
+    await this.host.remove(copyPath)
+    return true
+  }
+
+  private async freeName(path: string) {
+    for (let number = 1; number < 1000; number += 1) {
+      const candidate = number === 1 ? path : numberedVariant(path, number)
+      if (!this.state?.files[candidate] && !(await this.exists(candidate))) return candidate
+    }
+    return numberedVariant(path, Date.now())
   }
 }
 

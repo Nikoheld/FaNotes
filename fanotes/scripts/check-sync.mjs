@@ -51,6 +51,7 @@ const crypto = await vite.ssrLoadModule('/src/lib/sync/crypto.ts')
 const { SyncApi, SyncApiError } = await vite.ssrLoadModule('/src/lib/sync/api.ts')
 const { SyncEngine, isSyncablePath, conflictCopyPath } = await vite.ssrLoadModule('/src/lib/sync/engine.ts')
 const homework = await vite.ssrLoadModule('/src/lib/homeworkStore.ts')
+const conflictsModule = await vite.ssrLoadModule('/src/lib/sync/conflicts.ts')
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -452,6 +453,193 @@ try {
   const archivedAfter = revisionSizes()
   assert.ok(archivedAfter.length > archivedBefore.length, 'the previous blob is kept in the revision archive')
   assert.ok(Math.max(...archivedAfter) > Math.max(0, ...archivedBefore))
+
+
+  // ── No version is lost to a stale device ──────────────────────────────
+  // A device that deletes a folder after another device published a newer
+  // version of a note in it: the newer version stays everywhere, the other
+  // notes are deleted as asked.
+  {
+    hostA.put('Stale/Notiz.md', '# Notiz\n\nAlt.')
+    hostA.put('Stale/Andere.md', '# Andere\n\nAlt.')
+    await A.engine.syncNow()
+    await C.engine.syncNow()
+    assert.equal(hostB.text('Stale/Notiz.md'), '# Notiz\n\nAlt.')
+    hostA.put('Stale/Notiz.md', '# Notiz\n\nNeu vom Laptop.')
+    await A.engine.syncNow()
+    hostB.files.delete('Stale/Notiz.md')
+    hostB.files.delete('Stale/Andere.md')
+    C.engine.markDeleted('Stale')
+    await C.engine.syncNow()
+    assert.equal(C.engine.getState().status, 'idle', C.engine.getState().error)
+    assert.equal(hostB.text('Stale/Notiz.md'), '# Notiz\n\nNeu vom Laptop.', 'the newer version comes back on the stale device')
+    assert.ok(!hostB.files.has('Stale/Andere.md'), 'the untouched note is deleted as asked')
+    await A.engine.syncNow()
+    assert.equal(hostA.text('Stale/Notiz.md'), '# Notiz\n\nNeu vom Laptop.', 'the newer version survives where it was written')
+    assert.ok(!hostA.files.has('Stale/Andere.md'))
+    // Later the restored note goes missing without a delete (a linked folder
+    // offline, a scan that missed it). The used-up delete mark must not turn
+    // that into a delete on every device; the note is restored instead.
+    hostB.files.delete('Stale/Notiz.md')
+    await C.engine.syncNow()
+    assert.equal(hostB.text('Stale/Notiz.md'), '# Notiz\n\nNeu vom Laptop.', 'an old delete mark does not delete a note later')
+    await A.engine.syncNow()
+    assert.equal(hostA.text('Stale/Notiz.md'), '# Notiz\n\nNeu vom Laptop.')
+  }
+  // The same when the pull missed the newer version: the delete names the
+  // revision this device saw, the server refuses it, and the newer version is restored.
+  {
+    hostA.put('Stale/Zweite.md', '# Zweite\n\nAlt.')
+    await A.engine.syncNow()
+    await C.engine.syncNow()
+    hostA.put('Stale/Zweite.md', '# Zweite\n\nNeu.')
+    await A.engine.syncNow()
+    hostB.files.delete('Stale/Zweite.md')
+    C.engine.markDeleted('Stale/Zweite.md')
+    const api = C.engine.api
+    const realChanges = api.changes.bind(api)
+    api.changes = async (_session, since) => {
+      api.changes = realChanges
+      return { entries: [], nextSince: since, more: false }
+    }
+    await C.engine.syncNow()
+    assert.equal(api.changes, realChanges, 'the stale pull ran')
+    assert.equal(hostB.text('Stale/Zweite.md'), '# Zweite\n\nNeu.', 'the server refused the stale delete; the newer version is back')
+    await A.engine.syncNow()
+    assert.equal(hostA.text('Stale/Zweite.md'), '# Zweite\n\nNeu.', 'and it is still on the device that wrote it')
+    hostB.files.delete('Stale/Zweite.md')
+    await C.engine.syncNow()
+    assert.equal(hostB.text('Stale/Zweite.md'), '# Zweite\n\nNeu.', 'the refused delete leaves no mark behind')
+  }
+  // Two conflicts on one note within a minute: the second copy gets a number, the first is not overwritten.
+  {
+    hostA.put('Doppelt.md', '# Doppelt\n\nA1')
+    await A.engine.syncNow()
+    await C.engine.syncNow()
+    for (const round of [2, 3]) {
+      hostA.put('Doppelt.md', `# Doppelt\n\nA${round}`)
+      hostB.put('Doppelt.md', `# Doppelt\n\nB${round}`)
+      await A.engine.syncNow()
+      await C.engine.syncNow()
+    }
+    const twins = [...hostB.files.keys()].filter((path) => path.startsWith('Doppelt (Konflikt Tablet ')).sort()
+    assert.equal(twins.length, 2, 'two copies')
+    assert.deepEqual(twins.map((path) => hostB.text(path)).sort(), ['# Doppelt\n\nB2', '# Doppelt\n\nB3'], 'both local versions are kept')
+  }
+
+  // ── Resolving a conflict ───────────────────────────────────────────────
+  const { conflictFingerprint, parseConflictCopyPath, groupConflicts, keptVersionPath } = conflictsModule
+  assert.equal(parseConflictCopyPath('Mathe/Algebra (Konflikt Mein Laptop 2026-11-15 09-04).md').originalPath, 'Mathe/Algebra.md')
+  assert.equal(parseConflictCopyPath('Mathe/Algebra (Konflikt Tablet 2026-11-15 09-04 2).famd').device, 'Tablet')
+  assert.equal(parseConflictCopyPath('Mathe/Algebra.md'), null)
+  assert.equal(keptVersionPath('A (Konflikt Tablet 2026-11-15 09-04).md'), 'A (Fassung Tablet 2026-11-15 09-04).md')
+  {
+    const grouped = groupConflicts(new Set(['N.md', 'N.famd', 'N (Konflikt X 2026-01-01 10-00).md', 'N (Konflikt X 2026-01-01 10-00).famd', 'Solo (Konflikt X 2026-01-01 10-00).pdf']))
+    assert.equal(grouped.length, 2)
+    const note = grouped.find((group) => group.title === 'N')
+    assert.equal(note.pairs.length, 2, '.md and .famd of one note are one conflict')
+    assert.equal(note.path, 'N.md')
+    assert.equal(grouped.find((group) => group.title === 'Solo').originalMissing, true)
+  }
+  const expectedFor = async (host, group) => {
+    const out = {}
+    for (const pair of group.pairs) {
+      for (const path of [pair.path, pair.copyPath]) out[path] = await conflictFingerprint(path, host.files.has(path) ? host.files.get(path).bytes : null)
+    }
+    return out
+  }
+  const makeConflict = async (path, laptop, tablet) => {
+    hostA.put(path, laptop.base)
+    await A.engine.syncNow()
+    await C.engine.syncNow()
+    hostA.put(path, laptop.next)
+    hostB.put(path, tablet)
+    await A.engine.syncNow()
+    await C.engine.syncNow()
+    await A.engine.syncNow()
+    const stem = path.replace(/\.[^.]+$/u, '')
+    const groups = await A.engine.listConflicts()
+    const group = groups.find((candidate) => candidate.copyPath.startsWith(`${stem} (Konflikt Tablet `))
+    assert.ok(group, `the laptop finds the tablet's copy of ${path} by its name`)
+    return group
+  }
+  // Keep the copy, on a device that did not make it. A handwriting note: the
+  // chosen version's ink must arrive byte for byte, not just its text.
+  {
+    const tabletInk = inkFamd('2026-04-04T00:00:00.000Z').replace('# Seite', '# Tablet-Seite')
+    const group = await makeConflict('Konflikt/Heft.famd', { base: inkFamd('2026-03-01T00:00:00.000Z'), next: inkFamd('2026-03-02T00:00:00.000Z').replace('Wort ', 'Laptop ') }, tabletInk)
+    assert.equal(group.device, 'Tablet')
+    const expected = await expectedFor(hostA, group)
+    const result = await A.engine.resolveConflict(group, 'copy', expected)
+    assert.equal(result.status, 'resolved', result.message)
+    assert.equal(hostA.text('Konflikt/Heft.famd'), tabletInk, 'the chosen version, ink included, is the note now')
+    assert.ok(!hostA.files.has(group.copyPath), 'the copy is gone here')
+    await C.engine.syncNow()
+    assert.equal(hostB.text('Konflikt/Heft.famd'), tabletInk, 'and on the other device')
+    assert.ok(!hostB.files.has(group.copyPath), 'the copy is gone there too')
+    assert.equal((await C.engine.listConflicts()).filter((candidate) => candidate.title === 'Heft').length, 0)
+    await A.engine.syncNow()
+    assert.equal(hostA.text('Konflikt/Heft.famd'), tabletInk, 'nothing flips back')
+  }
+  // Keep the original: the copy is removed everywhere, the note is untouched.
+  {
+    const group = await makeConflict('Konflikt/Plan.md', { base: '# Plan\n\nAlt.', next: '# Plan\n\nLaptop.' }, '# Plan\n\nTablet.')
+    const result = await C.engine.resolveConflict(group, 'original', await expectedFor(hostB, group))
+    assert.equal(result.status, 'resolved', result.message)
+    assert.equal(hostB.text('Konflikt/Plan.md'), '# Plan\n\nLaptop.')
+    assert.ok(!hostB.files.has(group.copyPath))
+    await A.engine.syncNow()
+    assert.equal(hostA.text('Konflikt/Plan.md'), '# Plan\n\nLaptop.')
+    assert.ok(!hostA.files.has(group.copyPath), 'the copy is removed on the other device')
+  }
+  // Keep both: the copy becomes an ordinary file on every device.
+  {
+    const group = await makeConflict('Konflikt/Liste.md', { base: '# Liste\n\nAlt.', next: '# Liste\n\nLaptop.' }, '# Liste\n\nTablet.')
+    const result = await A.engine.resolveConflict(group, 'both', await expectedFor(hostA, group))
+    assert.equal(result.status, 'resolved', result.message)
+    const kept = keptVersionPath(group.copyPath)
+    assert.equal(hostA.text(kept), '# Liste\n\nTablet.')
+    assert.equal(hostA.text('Konflikt/Liste.md'), '# Liste\n\nLaptop.')
+    await C.engine.syncNow()
+    assert.equal(hostB.text(kept), '# Liste\n\nTablet.')
+    assert.ok(!hostB.files.has(group.copyPath))
+    assert.equal((await A.engine.listConflicts()).filter((candidate) => candidate.title === 'Liste').length, 0)
+  }
+  // A version that changed after the preview is not decided on: nothing is touched.
+  {
+    const group = await makeConflict('Konflikt/Brief.md', { base: '# Brief\n\nAlt.', next: '# Brief\n\nLaptop.' }, '# Brief\n\nTablet.')
+    const expected = await expectedFor(hostA, group)
+    hostB.put('Konflikt/Brief.md', '# Brief\n\nTablet hat nochmal geändert.')
+    await C.engine.syncNow()
+    const result = await A.engine.resolveConflict(group, 'copy', expected)
+    assert.equal(result.status, 'changed')
+    assert.equal(hostA.text('Konflikt/Brief.md'), '# Brief\n\nTablet hat nochmal geändert.', 'the newer edit arrived and stays')
+    assert.equal(hostA.text(group.copyPath), '# Brief\n\nTablet.', 'the copy stays')
+    await assert.rejects(A.engine.resolveConflict(group, 'original', { ...expected, 'Konflikt/Brief.md': null }), /Originaldatei fehlt/u)
+  }
+  // A version that exists only on this device (an edit the sync could not upload) is never replaced or removed.
+  {
+    const group = await makeConflict('Konflikt/Notizblock.md', { base: '# Block\n\nAlt.', next: '# Block\n\nLaptop.' }, '# Block\n\nTablet.')
+    const api = A.engine.api
+    const realUpload = api.upload.bind(api)
+    // The laptop edits the note again, and that upload fails (quota, size): the edit is only here.
+    api.upload = async (...args) => { const { SyncApiError: Failure } = await vite.ssrLoadModule('/src/lib/sync/api.ts'); throw new Failure(507, 'voll') }
+    hostA.put('Konflikt/Notizblock.md', '# Block\n\nNur auf dem Laptop.')
+    const expected = await expectedFor(hostA, group)
+    await assert.rejects(A.engine.resolveConflict(group, 'copy', expected), /noch nicht im Sync/u)
+    api.upload = realUpload
+    assert.equal(hostA.text('Konflikt/Notizblock.md'), '# Block\n\nNur auf dem Laptop.', 'the local-only edit is untouched')
+    assert.equal(hostA.text(group.copyPath), '# Block\n\nTablet.', 'and so is the copy')
+    await A.engine.syncNow()
+  }
+  // A note being edited is not replaced underneath the editor.
+  {
+    const group = (await A.engine.listConflicts()).find((candidate) => candidate.title === 'Brief')
+    busy = true
+    const busyGroup = { ...group, pairs: [{ path: 'Mathe/Algebra.md', copyPath: group.copyPath }] }
+    await assert.rejects(C.engine.resolveConflict(busyGroup, 'copy', {}), /gerade geöffnet/u)
+    busy = false
+  }
 
   // A write that names an older base revision does not replace the body.
   {

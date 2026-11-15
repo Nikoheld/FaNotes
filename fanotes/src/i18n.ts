@@ -408,6 +408,18 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (trashEntry) return `Move ${trashEntry[1] === 'Ordner' ? 'folder' : 'note'} “${trashEntry[2]}” to the trash?`
   const pageTimestamps = /^Erstellt (.+) · Geändert (.+)$/u.exec(source)
   if (pageTimestamps) return `Created ${pageTimestamps[1]} · Modified ${pageTimestamps[2]}`
+  const openConflicts = /^Sync · (\d+) offen$/u.exec(source)
+  if (openConflicts) return `Sync · ${openConflicts[1]} open`
+  const openCount = /^(\d+) offen$/u.exec(source)
+  if (openCount) return `${openCount[1]} open`
+  const conflictCount = /^(\d+) Konflikt\(e\)$/u.exec(source)
+  if (conflictCount) return `${conflictCount[1]} ${conflictCount[1] === '1' ? 'conflict' : 'conflicts'}`
+  const twoVersions = /^(\d+) Dateien haben zwei Fassungen$/u.exec(source)
+  if (twoVersions) return `${twoVersions[1]} files have two versions`
+  const conflictToast = /^Sync-Konflikt bei „(.+)“ – beide Fassungen sind gesichert\. Vergleichen unter Einstellungen → Konflikte\.$/u.exec(source)
+  if (conflictToast) return `Sync conflict in “${conflictToast[1]}”: both versions are saved. Compare them under Settings → Conflicts.`
+  const busyConflict = /^„(.+)“ ist gerade geöffnet und noch nicht gespeichert\. Speichere die Notiz und versuche es dann erneut\.$/u.exec(source)
+  if (busyConflict) return `“${busyConflict[1]}” is open and not saved yet. Save the note, then try again.`
   const customizationOptions = /^Anpassung · (\d+) Optionen$/u.exec(source)
   if (customizationOptions) {
     const count = Number(customizationOptions[1])
