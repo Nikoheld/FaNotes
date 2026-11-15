@@ -260,6 +260,7 @@ fn the_tree_shows_pdf_notes_and_hides_their_famd_companion() {
         .any(|entry| entry["extension"] == "pdf"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_legacy_lernwerk_directory_becomes_fanotes() {
     let dir = std::env::temp_dir().join(format!("fanotes-legacy-internal-{}", std::process::id()));
@@ -433,7 +434,8 @@ fn a_fast_tree_skips_a_folder_that_cannot_be_listed() {
         expected
     );
     assert_eq!(
-        host.dispatch("fanotes:search", &[json!("Sichtwort")]).unwrap_err(),
+        host.dispatch("fanotes:search", &[json!("Sichtwort")])
+            .unwrap_err(),
         expected
     );
     drop(restore);
@@ -446,11 +448,7 @@ fn an_unreadable_folder_color_file_uses_the_desktop_open_error() {
     let (mut host, vault, _) = host();
     fs::create_dir_all(vault.join(".fanotes")).unwrap();
     let path = vault.join(".fanotes/folder-colors.json");
-    fs::write(
-        &path,
-        br##"{"version":1,"colors":{"Mathe":"#A1B2C3"}}"##,
-    )
-    .unwrap();
+    fs::write(&path, br##"{"version":1,"colors":{"Mathe":"#A1B2C3"}}"##).unwrap();
     let canonical = fs::canonicalize(&path).unwrap();
     fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
     struct Restore(std::path::PathBuf);
@@ -499,14 +497,18 @@ fn an_unlistable_vault_metadata_folder_uses_the_desktop_lstat_error() {
         )
     );
     assert_eq!(
-        host.dispatch("fanotes:read-subject-books", &[]).unwrap_err(),
+        host.dispatch("fanotes:read-subject-books", &[])
+            .unwrap_err(),
         format!(
             "EACCES: permission denied, lstat '{}'",
             books_path.display()
         )
     );
     fs::set_permissions(&internal, fs::Permissions::from_mode(0o700)).unwrap();
-    assert_eq!(fs::read(&colors).unwrap(), br##"{"version":1,"colors":{"Mathe":"#A1B2C3"}}"##);
+    assert_eq!(
+        fs::read(&colors).unwrap(),
+        br##"{"version":1,"colors":{"Mathe":"#A1B2C3"}}"##
+    );
 }
 
 #[cfg(unix)]
@@ -526,16 +528,14 @@ fn an_unsearchable_vault_reports_the_desktop_lstat_for_its_internal_folder() {
         }
     }
     let _restore = Restore(vault);
-    let expected = format!(
-        "EACCES: permission denied, lstat '{}'",
-        internal.display()
-    );
+    let expected = format!("EACCES: permission denied, lstat '{}'", internal.display());
     assert_eq!(
         host.dispatch("fanotes:get-tree", &[]).unwrap_err(),
         expected
     );
     assert_eq!(
-        host.dispatch("fanotes:read-subject-books", &[]).unwrap_err(),
+        host.dispatch("fanotes:read-subject-books", &[])
+            .unwrap_err(),
         expected
     );
 }
@@ -589,7 +589,9 @@ fn an_unwritable_internal_folder_reports_the_desktop_color_open_error() {
     let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
     assert_eq!(suffix.len(), 20, "{error}");
     assert!(
-        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        suffix
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()),
         "{error}"
     );
     assert!(error.ends_with(".tmp'"), "{error}");

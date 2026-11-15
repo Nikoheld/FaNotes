@@ -21,6 +21,8 @@ mod resources;
 mod secrets;
 mod settings;
 mod vault;
+#[cfg(windows)]
+mod windows_desktop;
 mod worksheets;
 
 mod ai;
@@ -151,9 +153,7 @@ impl Host {
             ensure_remembered_vault_writable(self)?;
         }
         // `write-file` checks the path and the note text before this gate.
-        if self.onboarding_required
-            && channel != "fanotes:write-file"
-            && !onboarding_open(channel)
+        if self.onboarding_required && channel != "fanotes:write-file" && !onboarding_open(channel)
         {
             return Err("Bitte schließe zuerst die FaNotes-Ersteinrichtung ab.".to_owned());
         }
@@ -164,9 +164,7 @@ impl Host {
             "fanotes:get-fast-tree" => self.tree(false),
             "fanotes:get-tree" => self.tree(true),
             "fanotes:select-vault" => self.select_vault(args),
-            "fanotes:read-file" => {
-                self.read_file(&arg_text(args, 0, "Ungültiger Markdown-Pfad.")?)
-            }
+            "fanotes:read-file" => self.read_file(&arg_text(args, 0, "Ungültiger Markdown-Pfad.")?),
             "fanotes:write-file" => self.write_file(
                 args.first().unwrap_or(&Value::Null),
                 args.get(1).unwrap_or(&Value::Null),
@@ -183,10 +181,9 @@ impl Host {
             "fanotes:create-folder" => {
                 self.create_entry(&folder_parent(args)?, loose_string_opt(args, 1), false)
             }
-            "fanotes:set-folder-color" => self.set_folder_color(
-                &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
-                args.get(1),
-            ),
+            "fanotes:set-folder-color" => {
+                self.set_folder_color(&arg_text(args, 0, "Ungültiger Vault-Pfad.")?, args.get(1))
+            }
             "fanotes:get-folder-locations" => {
                 self.get_folder_locations(&arg_text(args, 0, "Ungültiger Vault-Pfad.")?)
             }
@@ -200,7 +197,9 @@ impl Host {
                 &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
                 &loose_string(args, 1),
             ),
-            "fanotes:trash-entry" => self.trash_entry(&arg_text(args, 0, "Ungültiger Vault-Pfad.")?),
+            "fanotes:trash-entry" => {
+                self.trash_entry(&arg_text(args, 0, "Ungültiger Vault-Pfad.")?)
+            }
             "fanotes:search" => self.search(&arg_text(args, 0, "Ungültige Suchanfrage.")?),
             "fanotes:list-drawings" => drawings::list_drawings(self),
             "fanotes:save-drawing" => {
@@ -268,9 +267,10 @@ impl Host {
             "fanotes:save-worksheet" => {
                 worksheets::save_worksheet(self, args.first().unwrap_or(&Value::Null))
             }
-            "fanotes:delete-worksheet" => {
-                worksheets::delete_worksheet(self, &arg_text(args, 0, "Ungültige Arbeitsblatt-ID.")?)
-            }
+            "fanotes:delete-worksheet" => worksheets::delete_worksheet(
+                self,
+                &arg_text(args, 0, "Ungültige Arbeitsblatt-ID.")?,
+            ),
             "fanotes:list-note-history" => {
                 notes::list_history(self, &arg_text(args, 0, "Ungültiger Vault-Pfad.")?)
             }
@@ -318,17 +318,15 @@ impl Host {
             "fanotes:qwen-vision-install" | "fanotes:qwen-vision-recognize" => {
                 Err("Qwen Vision ist nicht installiert.".to_owned())
             }
-            "fanotes:lm-studio-list-models" => {
-                ai::list_lm_studio(args.first(), args.get(1))
-            }
+            "fanotes:lm-studio-list-models" => ai::list_lm_studio(args.first(), args.get(1)),
             "fanotes:lm-studio-transform" => {
                 ai::transform_lm_studio(args.first().unwrap_or(&Value::Null))
             }
             "fanotes:ai-list-models" => ai::list_models(args.first().unwrap_or(&Value::Null)),
             "fanotes:ai-transform" => ai::transform(args.first().unwrap_or(&Value::Null)),
-            "fanotes:grok-build" => {
-                Err("Grok Build ist in dieser Version nur in der Electron-App verfügbar.".to_owned())
-            }
+            "fanotes:grok-build" => Err(
+                "Grok Build ist in dieser Version nur in der Electron-App verfügbar.".to_owned(),
+            ),
             "fanotes:load-secure-settings" => Ok(self.load_secure_settings()),
             "fanotes:save-settings" => self.save_settings(
                 args.first().cloned().unwrap_or(Value::Null),
@@ -377,9 +375,7 @@ impl Host {
             "fanotes:sync-scan" => self.sync_scan(),
             "fanotes:sync-read" => self.sync_read(&arg_text(args, 0, "Ungültiger Sync-Pfad.")?),
             "fanotes:sync-write" => self.sync_write(args),
-            "fanotes:sync-remove" => {
-                self.sync_remove(&arg_text(args, 0, "Ungültiger Sync-Pfad.")?)
-            }
+            "fanotes:sync-remove" => self.sync_remove(&arg_text(args, 0, "Ungültiger Sync-Pfad.")?),
             "fanotes:sync-read-state" => {
                 self.read_sync_state(args.first().and_then(Value::as_str).unwrap_or(""))
             }
@@ -395,7 +391,9 @@ impl Host {
     fn render_pdf_page(&self, args: &[Value]) -> Result<Value, String> {
         let (path, job) = fanotes_pdf::parse_vault_request(args.first().unwrap_or(&Value::Null))
             .map_err(|error| error.to_string())?;
-        let file = self.folder_locations.resolve_existing(self.require_vault()?, &path)?;
+        let file = self
+            .folder_locations
+            .resolve_existing(self.require_vault()?, &path)?;
         let bytes = read_regular_limited(&file, PDF_ASSET_MAX)?;
         let bitmap =
             fanotes_pdf::render_pdf_page(&bytes, &job).map_err(|error| error.to_string())?;
@@ -436,8 +434,8 @@ impl Host {
 
     fn sync_read(&self, relative: &str) -> Result<Value, String> {
         let (file, _) = vault::resolve_sync_path(self.require_vault()?, relative, false)?;
-        let meta = fs::symlink_metadata(&file)
-            .map_err(|error| vault::node_lstat_error(&file, &error))?;
+        let meta =
+            fs::symlink_metadata(&file).map_err(|error| vault::node_lstat_error(&file, &error))?;
         if !meta.is_file() {
             return Err("Die Datei ist keine reguläre Datei.".to_owned());
         }
@@ -461,8 +459,8 @@ impl Host {
         create_sync_directories(&root, &path)?;
         let mtime = arg_mtime_ms(args.get(2)).and_then(system_time_from_millis);
         notes::atomic_write_with_mtime(&path, &bytes, 0o600, mtime, 8)?;
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|error| vault::node_lstat_error(&path, &error))?;
+        let meta =
+            fs::symlink_metadata(&path).map_err(|error| vault::node_lstat_error(&path, &error))?;
         if meta.file_type().is_symlink() || !meta.is_file() {
             return Err("Die Datei ist keine reguläre Datei.".to_owned());
         }
@@ -894,8 +892,8 @@ impl Host {
             .folder_locations
             .resolve_note(self.require_vault()?, &normalized, false)?;
         let limit = note_byte_limit(&normalized);
-        let meta = fs::symlink_metadata(&path)
-            .map_err(|error| vault::node_lstat_error(&path, &error))?;
+        let meta =
+            fs::symlink_metadata(&path).map_err(|error| vault::node_lstat_error(&path, &error))?;
         if meta.file_type().is_symlink() {
             return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
         }
@@ -928,7 +926,9 @@ impl Host {
             return Err("Bitte schließe zuerst die FaNotes-Ersteinrichtung ab.".to_owned());
         }
         let root = self.require_vault()?.to_path_buf();
-        let path = self.folder_locations.resolve_note(&root, &normalized, true)?;
+        let path = self
+            .folder_locations
+            .resolve_note(&root, &normalized, true)?;
         if notes::records_history(&normalized) {
             if let Some(text) = notes::read_lossy_string(&path) {
                 let _ = notes::record_history(&root, &normalized, &text);
@@ -962,9 +962,8 @@ impl Host {
             vault::normalize_relative_path(parent, true, false)?
         };
         // Desktop resolveVaultPath runs before safeEntryName.
-        let (parent_mapped, parent_roots) = self
-            .folder_locations
-            .content_roots(&root, &parent_relative);
+        let (parent_mapped, parent_roots) =
+            self.folder_locations.content_roots(&root, &parent_relative);
         let parent_path = if parent_relative.is_empty() {
             root.clone()
         } else if parent_mapped {
@@ -1015,7 +1014,11 @@ impl Host {
                 &parent_path,
                 &desired,
                 note,
-                if parent_mapped { parent_roots.as_slice() } else { &[] },
+                if parent_mapped {
+                    parent_roots.as_slice()
+                } else {
+                    &[]
+                },
             )?;
             let relative = if parent_relative.is_empty() {
                 candidate.clone()
@@ -1094,7 +1097,8 @@ impl Host {
         let root = self.require_vault()?.to_path_buf();
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         let path = vault::resolve_existing_entry(&root, &normalized)?;
-        let meta = fs::symlink_metadata(&path).map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
+        let meta = fs::symlink_metadata(&path)
+            .map_err(|_| "Der Ordner wurde nicht gefunden.".to_owned())?;
         if meta.file_type().is_symlink() || !meta.is_dir() {
             return Err("Der gewählte Pfad ist kein Ordner.".to_owned());
         }
@@ -1114,7 +1118,9 @@ impl Host {
             return Ok(Value::Null);
         }
         let Some(path) = rfd::FileDialog::new()
-            .set_title(crate::dialogs::folder_location_picker_title(self.ui_language()))
+            .set_title(crate::dialogs::folder_location_picker_title(
+                self.ui_language(),
+            ))
             .pick_folder()
         else {
             return Ok(Value::Null);
@@ -1163,8 +1169,14 @@ impl Host {
                 &normalized,
             )?);
         }
-        let old_primary = previous.first().cloned().unwrap_or_else(|| placeholder.clone());
-        let new_primary = validated.first().cloned().unwrap_or_else(|| placeholder.clone());
+        let old_primary = previous
+            .first()
+            .cloned()
+            .unwrap_or_else(|| placeholder.clone());
+        let new_primary = validated
+            .first()
+            .cloned()
+            .unwrap_or_else(|| placeholder.clone());
         let mut moved = 0_u64;
         let mut conflicts = Vec::new();
         if args.get(2).and_then(Value::as_bool) == Some(true) && old_primary != new_primary {
@@ -1172,7 +1184,8 @@ impl Host {
             moved = report.0;
             conflicts = report.1;
         }
-        self.folder_locations.replace(&normalized, validated.clone());
+        self.folder_locations
+            .replace(&normalized, validated.clone());
         self.folder_locations.save(&self.app_data, &root)?;
         Ok(json!({
             "paths": validated.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>(),
@@ -1181,11 +1194,7 @@ impl Host {
         }))
     }
 
-    fn set_folder_color(
-        &mut self,
-        relative: &str,
-        color: Option<&Value>,
-    ) -> Result<Value, String> {
+    fn set_folder_color(&mut self, relative: &str, color: Option<&Value>) -> Result<Value, String> {
         let root = self.require_vault()?.to_path_buf();
         let normalized = vault::normalize_relative_path(relative, false, false)?;
         // Desktop checks the hex color after the path shape and before the folder exists.
@@ -1378,7 +1387,9 @@ impl Host {
         }
         if !is_dir {
             if let Some(companion) = note_companion_relative(&normalized) {
-                if let Ok(companion_path) = self.folder_locations.resolve_existing(&root, &companion) {
+                if let Ok(companion_path) =
+                    self.folder_locations.resolve_existing(&root, &companion)
+                {
                     if fs::symlink_metadata(&companion_path)
                         .is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink())
                     {
@@ -1630,6 +1641,9 @@ impl Host {
         }
         match kind {
             "reveal" => reveal_on_desktop(Path::new(target)),
+            #[cfg(windows)]
+            _ => windows_desktop::open_external(target),
+            #[cfg(not(windows))]
             _ => spawn_detached("xdg-open", &[target.to_owned()]),
         }
         .map(|()| Value::Null)
@@ -2258,9 +2272,8 @@ fn mkdir_profile(path: &Path, reported: &Path) -> Result<(), String> {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|_| {
-                    "Der Ordner konnte nicht angelegt werden.".to_owned()
-                })?;
+                fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                    .map_err(|_| "Der Ordner konnte nicht angelegt werden.".to_owned())?;
             }
             Ok(())
         }
@@ -2294,8 +2307,7 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 // Node's recursive `mkdir` reports the full directory it was
                 // asked to create, even when an earlier missing piece fails.
-                fs::create_dir(&cursor)
-                    .map_err(|error| vault::node_mkdir_error(parent, &error))?;
+                fs::create_dir(&cursor).map_err(|error| vault::node_mkdir_error(parent, &error))?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -2306,8 +2318,7 @@ fn create_sync_directories(root: &Path, file: &Path) -> Result<(), String> {
             // Desktop `mkdir` does not lstat first. A parent that cannot be
             // searched fails that mkdir.
             Err(_) => {
-                fs::create_dir(&cursor)
-                    .map_err(|error| vault::node_mkdir_error(parent, &error))?;
+                fs::create_dir(&cursor).map_err(|error| vault::node_mkdir_error(parent, &error))?;
             }
         }
     }
@@ -2425,11 +2436,17 @@ fn recognition_model_path(root: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn scan_sync_directory(root: &Path, directory: &Path, depth: usize, out: &mut Vec<Value>) -> Result<(), String> {
+fn scan_sync_directory(
+    root: &Path,
+    directory: &Path,
+    depth: usize,
+    out: &mut Vec<Value>,
+) -> Result<(), String> {
     if depth > MAX_SYNC_DEPTH || out.len() >= MAX_SYNC_ENTRIES {
         return Err("Der Vault wurde unvollständig gelesen.".to_owned());
     }
-    let entries = fs::read_dir(directory).map_err(|_| "Der Vault wurde unvollständig gelesen.".to_owned())?;
+    let entries =
+        fs::read_dir(directory).map_err(|_| "Der Vault wurde unvollständig gelesen.".to_owned())?;
     for entry in entries {
         let entry = entry.map_err(|_| "Der Vault wurde unvollständig gelesen.".to_owned())?;
         if out.len() >= MAX_SYNC_ENTRIES {
@@ -2788,6 +2805,14 @@ fn reveal_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 
 fn reveal_on_desktop(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    return windows_desktop::reveal(path);
+    #[cfg(not(windows))]
+    reveal_on_freedesktop(path)
+}
+
+#[cfg(not(windows))]
+fn reveal_on_freedesktop(path: &Path) -> Result<(), String> {
     let uri = file_uri(path);
     if spawn_detached(
         "dbus-send",
@@ -3043,6 +3068,9 @@ fn send_to_trash(host: &Host, path: &Path) -> Result<(), String> {
     if let Some(dir) = &host.trash_dir {
         return place_in_trash(dir, path);
     }
+    #[cfg(windows)]
+    return windows_desktop::trash(path);
+    #[cfg(not(windows))]
     if gio_trash(path).is_ok() {
         return Ok(());
     }
@@ -3074,7 +3102,9 @@ fn make_trash_private(directory: &Path) -> Result<(), String> {
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = fs::metadata(directory)
-            .map_err(|_| "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned())?
+            .map_err(|_| {
+                "Der Eintrag konnte nicht in den Papierkorb verschoben werden.".to_owned()
+            })?
             .permissions()
             .mode()
             & 0o777;
@@ -3317,6 +3347,10 @@ fn note_byte_limit(relative: &str) -> u64 {
 /// A missing or unquoted documents entry is the home directory. `$HOME/Documents`
 /// is used only when the config file says so. The last matching line wins.
 fn default_documents_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(documents) = windows_desktop::documents_dir() {
+        return documents;
+    }
     documents_directory(
         std::env::var_os("HOME").as_deref(),
         std::env::var_os("XDG_CONFIG_HOME").as_deref(),
@@ -3401,7 +3435,9 @@ fn stored_vault_path(text: &str) -> &str {
     let Some(without_newline) = text.strip_suffix('\n') else {
         return text;
     };
-    without_newline.strip_suffix('\r').unwrap_or(without_newline)
+    without_newline
+        .strip_suffix('\r')
+        .unwrap_or(without_newline)
 }
 
 fn strip_trailing_separators(path: PathBuf) -> PathBuf {
@@ -3466,6 +3502,9 @@ fn language_list_choice(language: &str) -> Option<&str> {
 }
 
 fn current_system_ui_language() -> &'static str {
+    #[cfg(windows)]
+    return system_ui_language(&windows_desktop::ui_language(), "", "", "");
+    #[cfg(not(windows))]
     system_ui_language(
         &std::env::var("LANGUAGE").unwrap_or_default(),
         &std::env::var("LC_ALL").unwrap_or_default(),
@@ -3490,22 +3529,19 @@ mod system_language_tests {
 
     #[test]
     fn the_language_list_selects_the_desktop_ui_language() {
-        assert_eq!(
-            system_ui_language("de_DE:de", "", "", "en_US.UTF-8"),
-            "de"
-        );
+        assert_eq!(system_ui_language("de_DE:de", "", "", "en_US.UTF-8"), "de");
         assert_eq!(
             system_ui_language("en", "de_DE.UTF-8", "de_DE.UTF-8", "de_DE.UTF-8"),
             "en"
         );
         assert_eq!(system_ui_language(":de", "", "", "en_US.UTF-8"), "de");
-        assert_eq!(
-            system_ui_language("en_US:de", "", "", "de_DE.UTF-8"),
-            "en"
-        );
+        assert_eq!(system_ui_language("en_US:de", "", "", "de_DE.UTF-8"), "en");
         assert_eq!(system_ui_language(":::", "", "", "de_DE.UTF-8"), "en");
         assert_eq!(system_ui_language(" ", "", "", "de_DE.UTF-8"), "en");
-        assert_eq!(system_ui_language("", "", "de_CH.UTF-8", "en_US.UTF-8"), "de");
+        assert_eq!(
+            system_ui_language("", "", "de_CH.UTF-8", "en_US.UTF-8"),
+            "de"
+        );
         assert_eq!(
             system_ui_language("", "en_US.UTF-8", "de_DE.UTF-8", "de_DE.UTF-8"),
             "en"
@@ -4887,7 +4923,7 @@ mod recognition_model_write_tests {
 
 #[cfg(all(test, unix))]
 mod local_zone_tests {
-    use super::{TRASH_CLOCK, unix_millis_from_iso};
+    use super::{unix_millis_from_iso, TRASH_CLOCK};
     use std::ffi::OsString;
 
     unsafe extern "C" {
@@ -4928,10 +4964,7 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10-13T16:00:00Z"),
             Some(1_791_907_200_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("2026-10-13"),
-            Some(1_791_849_600_000)
-        );
+        assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
     }
 
     #[test]
@@ -5097,7 +5130,10 @@ mod local_zone_tests {
             Some(1_791_921_600_000)
         );
         assert_eq!(unix_millis_from_iso("2026/ 10/13"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("2026 /10 /13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026 /10 /13"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("10/ 13/ 2026 16:00"),
             Some(1_791_921_600_000)
@@ -5169,9 +5205,15 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 - 5"), None);
         assert_eq!(unix_millis_from_iso("16:00 -10-13"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 -10-13"), None);
-        assert_eq!(unix_millis_from_iso("Oct -13 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct -13 2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("-10-13"), Some(1_002_945_600_000));
-        assert_eq!(unix_millis_from_iso("-10-13 16:00"), Some(1_003_003_200_000));
+        assert_eq!(
+            unix_millis_from_iso("-10-13 16:00"),
+            Some(1_003_003_200_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026-10-13 16:00 -5"),
             Some(1_791_925_200_000)
@@ -5192,7 +5234,10 @@ mod local_zone_tests {
             unix_millis_from_iso(" -000001-10-13 16:00"),
             Some(1_357_851_600_000)
         );
-        assert_eq!(unix_millis_from_iso(" -000000-10-13"), Some(971_409_600_000));
+        assert_eq!(
+            unix_millis_from_iso(" -000000-10-13"),
+            Some(971_409_600_000)
+        );
     }
 
     #[test]
@@ -5226,7 +5271,10 @@ mod local_zone_tests {
             Some(1_791_936_000_000)
         );
         assert_eq!(unix_millis_from_iso("2026-10-13:"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13::"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13::"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("2026-10-13:16"), None);
         assert_eq!(
             unix_millis_from_iso("2026-10-13:EST"),
@@ -5245,7 +5293,10 @@ mod local_zone_tests {
             Some(1_791_921_600_000)
         );
         assert_eq!(unix_millis_from_iso("2026-10-13-"), None);
-        assert_eq!(unix_millis_from_iso(" 2026-10-13-"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso(" 2026-10-13-"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("16:00 2026-10-13--"), None);
         // Node 22. An open field takes the next in-range number. The hyphen
         // after that number is an offset, so `10-13` is 10 seconds at UTC−13.
@@ -5298,10 +5349,7 @@ mod local_zone_tests {
             unix_millis_from_iso("16:00:5 2026-10-13"),
             Some(1_791_921_605_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("16:00: 2026"),
-            Some(1_767_301_200_000)
-        );
+        assert_eq!(unix_millis_from_iso("16:00: 2026"), Some(1_767_301_200_000));
         assert_eq!(
             unix_millis_from_iso("16:00: 13 2026"),
             Some(1_767_301_213_000)
@@ -5352,29 +5400,14 @@ mod local_zone_tests {
             unix_millis_from_iso("GMT+5 Oct 13 2026"),
             Some(1_380_945_600_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("13:Oct:2026"),
-            Some(1_790_874_000_000)
-        );
-        assert_eq!(
-            unix_millis_from_iso("13:Oct-2026"),
-            Some(1_790_874_000_000)
-        );
-        assert_eq!(
-            unix_millis_from_iso("13:Oct.2026"),
-            Some(1_790_874_000_000)
-        );
-        assert_eq!(
-            unix_millis_from_iso("13:Oct/2026"),
-            Some(1_790_874_000_000)
-        );
+        assert_eq!(unix_millis_from_iso("13:Oct:2026"), Some(1_790_874_000_000));
+        assert_eq!(unix_millis_from_iso("13:Oct-2026"), Some(1_790_874_000_000));
+        assert_eq!(unix_millis_from_iso("13:Oct.2026"), Some(1_790_874_000_000));
+        assert_eq!(unix_millis_from_iso("13:Oct/2026"), Some(1_790_874_000_000));
         assert_eq!(unix_millis_from_iso("13:Oct:2026:5"), None);
         assert_eq!(unix_millis_from_iso("16:.5.5"), None);
         assert_eq!(unix_millis_from_iso("16:00:.5.5"), None);
-        assert_eq!(
-            unix_millis_from_iso("Oct 13-5:30"),
-            Some(1_002_965_400_000)
-        );
+        assert_eq!(unix_millis_from_iso("Oct 13-5:30"), Some(1_002_965_400_000));
         assert_eq!(
             unix_millis_from_iso("Oct 13-5:30:10"),
             Some(1_002_965_410_000)
@@ -5383,14 +5416,8 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13-16:00 EST"),
             Some(1_003_006_800_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("13-Oct-5:30"),
-            Some(1_002_965_400_000)
-        );
-        assert_eq!(
-            unix_millis_from_iso("Oct-13-5:30"),
-            Some(1_002_965_400_000)
-        );
+        assert_eq!(unix_millis_from_iso("13-Oct-5:30"), Some(1_002_965_400_000));
+        assert_eq!(unix_millis_from_iso("Oct-13-5:30"), Some(1_002_965_400_000));
         assert_eq!(
             unix_millis_from_iso("2026-Oct-13-5:30"),
             Some(1_791_883_800_000)
@@ -5402,14 +5429,8 @@ mod local_zone_tests {
         );
         assert_eq!(unix_millis_from_iso("16:.5/5"), None);
         assert_eq!(unix_millis_from_iso("16:00:.5/1"), None);
-        assert_eq!(
-            unix_millis_from_iso("16:00:00.5/1"),
-            Some(978_382_800_500)
-        );
-        assert_eq!(
-            unix_millis_from_iso("13-5:30 Oct"),
-            Some(1_002_965_400_000)
-        );
+        assert_eq!(unix_millis_from_iso("16:00:00.5/1"), Some(978_382_800_500));
+        assert_eq!(unix_millis_from_iso("13-5:30 Oct"), Some(1_002_965_400_000));
         assert_eq!(unix_millis_from_iso("13-5:30-2026"), None);
         assert_eq!(
             unix_millis_from_iso("Oct 13-24:00"),
@@ -5447,12 +5468,18 @@ mod local_zone_tests {
             unix_millis_from_iso("T 16:00 2026-10-13"),
             Some(1_791_921_600_000)
         );
-        assert_eq!(unix_millis_from_iso("T 2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("T 2026-10-13"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("T:16:00 2026-10-13"),
             Some(1_791_921_600_000)
         );
-        assert_eq!(unix_millis_from_iso("T: 2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("T: 2026-10-13"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("hello 2026-10-13"),
             Some(1_791_864_000_000)
@@ -5470,7 +5497,10 @@ mod local_zone_tests {
         // Node 22. The scanner stops at NUL, so the rest of the text is never
         // a clock or a month. A leading NUL leaves nothing to parse.
         assert_eq!(unix_millis_from_iso("\u{0}2026-10-13"), None);
-        assert_eq!(unix_millis_from_iso("2026-10-13\u{0}"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13\u{0}"),
+            Some(1_791_849_600_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026-10-13\u{0}16:00"),
             Some(1_791_849_600_000)
@@ -5479,7 +5509,10 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10-13 \u{0}"),
             Some(1_791_864_000_000)
         );
-        assert_eq!(unix_millis_from_iso("2026\u{0} 10-13"), Some(1_767_225_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026\u{0} 10-13"),
+            Some(1_767_225_600_000)
+        );
         assert_eq!(unix_millis_from_iso("202\u{0}6-10-13"), None);
         assert_eq!(unix_millis_from_iso("Oct\u{0} 13 2026"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16\u{0}:00"), None);
@@ -5492,8 +5525,14 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10-13 16:00\u{0}"),
             Some(1_791_921_600_000)
         );
-        assert_eq!(unix_millis_from_iso("Oct 13\u{0} 2026"), Some(1_002_945_600_000));
-        assert_eq!(unix_millis_from_iso("2026/10\u{0}/13"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13\u{0} 2026"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026/10\u{0}/13"),
+            Some(1_790_827_200_000)
+        );
         assert_eq!(unix_millis_from_iso("4\u{0}"), Some(986_101_200_000));
         // A control below `A` is ignored. DEL is a word, so it rejects the date.
         assert_eq!(unix_millis_from_iso("2026\u{1}-10-13"), None);
@@ -5501,7 +5540,10 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10-13\u{1}16:00"),
             Some(1_791_921_600_000)
         );
-        assert_eq!(unix_millis_from_iso("\u{1}2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("\u{1}2026-10-13"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("2026-10-13\u{7f}"), None);
         assert_eq!(unix_millis_from_iso("\u{7f}2026-10-13"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13\u{7f}16:00"), None);
@@ -5515,7 +5557,10 @@ mod local_zone_tests {
         let _restore = RestoreTz(std::env::var_os("TZ"));
         unsafe { std::env::set_var("TZ", "America/New_York") };
         unsafe { tzset() };
-        assert_eq!(unix_millis_from_iso("Oct 13, 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13, 2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("Oct 13, 2026 GMT"),
             Some(1_791_849_600_000)
@@ -5597,7 +5642,10 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct-2026 16:00 GMT"),
             Some(1_790_870_400_000)
         );
-        assert_eq!(unix_millis_from_iso("13-Oct 16:00"), Some(1_003_003_200_000));
+        assert_eq!(
+            unix_millis_from_iso("13-Oct 16:00"),
+            Some(1_003_003_200_000)
+        );
         assert_eq!(
             unix_millis_from_iso("13 Oct 16:00 EST"),
             Some(1_003_006_800_000)
@@ -5619,7 +5667,10 @@ mod local_zone_tests {
         unsafe { tzset() };
         // `Date.parse` skips words until the month or a number. A word after
         // the date is NaN. `GMT` before the date is not a zone.
-        assert_eq!(unix_millis_from_iso("foo Oct 2026"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("foo Oct 2026"),
+            Some(1_790_827_200_000)
+        );
         assert_eq!(
             unix_millis_from_iso("foo 13 Oct 2026"),
             Some(1_791_864_000_000)
@@ -5671,7 +5722,10 @@ mod local_zone_tests {
         unsafe { std::env::set_var("TZ", "America/New_York") };
         unsafe { tzset() };
         // Noise is skipped only before the first number. The last month name wins.
-        assert_eq!(unix_millis_from_iso("Oct foo 2026"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct foo 2026"),
+            Some(1_790_827_200_000)
+        );
         assert_eq!(
             unix_millis_from_iso("foo Oct foo 2026"),
             Some(1_790_827_200_000)
@@ -5697,21 +5751,36 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct Tuesday 2026"),
             Some(1_790_827_200_000)
         );
-        assert_eq!(unix_millis_from_iso("Oct foo 32 16"), Some(1_981_512_000_000));
-        assert_eq!(unix_millis_from_iso("Oct-foo-2026"), Some(1_790_827_200_000));
-        assert_eq!(unix_millis_from_iso("foo-Oct-2026"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct foo 32 16"),
+            Some(1_981_512_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct-foo-2026"),
+            Some(1_790_827_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("foo-Oct-2026"),
+            Some(1_790_827_200_000)
+        );
         assert_eq!(unix_millis_from_iso("Oct--2026"), Some(1_790_827_200_000));
         assert_eq!(
             unix_millis_from_iso("Oct foo bar 2026"),
             Some(1_790_827_200_000)
         );
-        assert_eq!(unix_millis_from_iso("Oct foo +2026"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct foo +2026"),
+            Some(1_790_827_200_000)
+        );
         // `Nov` replaces `Oct`. November 2026 is standard time.
         assert_eq!(
             unix_millis_from_iso("Oct 13 2026 Nov"),
             Some(1_794_546_000_000)
         );
-        assert_eq!(unix_millis_from_iso("Oct-Nov-2026"), Some(1_793_505_600_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct-Nov-2026"),
+            Some(1_793_505_600_000)
+        );
         assert_eq!(unix_millis_from_iso("Oct 13 foo 2026"), None);
         assert_eq!(unix_millis_from_iso("Oct foo 13 foo 2026"), None);
         assert_eq!(unix_millis_from_iso("13 Oct foo 2026"), None);
@@ -5729,7 +5798,10 @@ mod local_zone_tests {
         unsafe { tzset() };
         // One bare number after the day and year is not a time. `Oct 13 16`
         // is still 13 October 2016, because that 16 is the year.
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 16"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("13 Oct 2026 16"),
             Some(1_791_864_000_000)
@@ -5857,7 +5929,10 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 16:00:2026"),
             Some(1_791_921_600_000)
         );
-        assert_eq!(unix_millis_from_iso("Oct 13 16:00:70"), Some(24_696_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 16:00:70"),
+            Some(24_696_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("Oct 13 16:00:99"),
             Some(939_844_800_000)
@@ -6034,14 +6109,8 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13 4:00:60 PM"), None);
         assert_eq!(unix_millis_from_iso("10/13/2026 16:00:60"), None);
         // `10/13 16:00:70` has no year yet, so 70 is 1970. 59 stays a second.
-        assert_eq!(
-            unix_millis_from_iso("10/13 16:00:70"),
-            Some(24_696_000_000)
-        );
-        assert_eq!(
-            unix_millis_from_iso("10/13 16:70"),
-            Some(24_696_000_000)
-        );
+        assert_eq!(unix_millis_from_iso("10/13 16:00:70"), Some(24_696_000_000));
+        assert_eq!(unix_millis_from_iso("10/13 16:70"), Some(24_696_000_000));
         assert_eq!(
             unix_millis_from_iso("10/13 16:00:99"),
             Some(939_844_800_000)
@@ -6061,10 +6130,7 @@ mod local_zone_tests {
             unix_millis_from_iso("16:00:70 10-13-2026"),
             Some(131_170_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("16:70 10-13-2026"),
-            Some(131_760_000)
-        );
+        assert_eq!(unix_millis_from_iso("16:70 10-13-2026"), Some(131_760_000));
         assert_eq!(
             unix_millis_from_iso("16:00:99 1-2-3"),
             Some(915_217_201_000)
@@ -6210,24 +6276,63 @@ mod local_zone_tests {
         unsafe { tzset() };
         // `Date.parse` treats any word whose first three letters name a month
         // as that month. Digits glued to that word are separate fields.
-        assert_eq!(unix_millis_from_iso("Octopus 13 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Octopus 13 2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("Octxxx 2026"), Some(1_790_827_200_000));
-        assert_eq!(unix_millis_from_iso("OCTOPUS 13 2026"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("Market 13 2026"), Some(1_773_374_400_000));
-        assert_eq!(unix_millis_from_iso("Maybe 13 2026"), Some(1_778_644_800_000));
-        assert_eq!(unix_millis_from_iso("Julian 4 2026"), Some(1_783_137_600_000));
-        assert_eq!(unix_millis_from_iso("Janitor 2026"), Some(1_767_243_600_000));
+        assert_eq!(
+            unix_millis_from_iso("OCTOPUS 13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Market 13 2026"),
+            Some(1_773_374_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Maybe 13 2026"),
+            Some(1_778_644_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Julian 4 2026"),
+            Some(1_783_137_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Janitor 2026"),
+            Some(1_767_243_600_000)
+        );
         assert_eq!(
             unix_millis_from_iso("Decemberish 13 2026"),
             Some(1_797_138_000_000)
         );
-        assert_eq!(unix_millis_from_iso("Septober 13 2026"), Some(1_789_272_000_000));
-        assert_eq!(unix_millis_from_iso("Augusto 13 2026"), Some(1_786_593_600_000));
-        assert_eq!(unix_millis_from_iso("Aprilfool 2026"), Some(1_775_016_000_000));
-        assert_eq!(unix_millis_from_iso("13-Octopus-26"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("13.Octopus.26"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("13/Octopus/26"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("13octopus2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Septober 13 2026"),
+            Some(1_789_272_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Augusto 13 2026"),
+            Some(1_786_593_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Aprilfool 2026"),
+            Some(1_775_016_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13-Octopus-26"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13.Octopus.26"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13/Octopus/26"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13octopus2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("Oct2026"), Some(1_790_827_200_000));
         assert_eq!(unix_millis_from_iso("4Jul2026"), Some(1_783_137_600_000));
         assert_eq!(unix_millis_from_iso("2026Oct13"), Some(1_791_864_000_000));
@@ -6239,7 +6344,10 @@ mod local_zone_tests {
             unix_millis_from_iso("foo Octopus 13 2026 16:00 EST"),
             Some(1_791_925_200_000)
         );
-        assert_eq!(unix_millis_from_iso("Octopus 32 16"), Some(1_981_512_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Octopus 32 16"),
+            Some(1_981_512_000_000)
+        );
         assert_eq!(unix_millis_from_iso("Ma 13 2026"), None);
         assert_eq!(unix_millis_from_iso("Octopus"), None);
         assert_eq!(unix_millis_from_iso("Octopus 13 foo 2026"), None);
@@ -6259,32 +6367,101 @@ mod local_zone_tests {
         // `GMT5` is the zone `GMT` and then the number 5. Before any number,
         // that glue is not a date. `16:00EST` stays empty; only `Z` may sit
         // against a finished clock.
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 GMT5"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 GMT5"),
+            Some(1_791_849_600_000)
+        );
         assert_eq!(unix_millis_from_iso("Oct 13 GMT5"), Some(1_129_161_600_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 EST13"), Some(1_791_867_600_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 EST13"), Some(1_381_640_400_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 UT5"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 UTC5"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 Z5"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("oct 13 2026 gmt5"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026EST"), Some(1_791_867_600_000));
-        assert_eq!(unix_millis_from_iso("Oct13EST2026"), Some(1_791_867_600_000));
-        assert_eq!(unix_millis_from_iso("13OctEST2026"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026PST"), Some(1_791_878_400_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 pst8"), Some(1_791_878_400_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 EDT4"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 CDT5"), Some(1_791_867_600_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 CST6"), Some(1_791_871_200_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 MST7"), Some(1_791_874_800_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 MDT6"), Some(1_791_871_200_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 PDT7"), Some(1_791_874_800_000));
-        assert_eq!(unix_millis_from_iso("Oct 2026 GMT5"), Some(1_791_158_400_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 EST13"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 EST13"),
+            Some(1_381_640_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 UT5"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 UTC5"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 Z5"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("oct 13 2026 gmt5"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026EST"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct13EST2026"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13OctEST2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026PST"),
+            Some(1_791_878_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 pst8"),
+            Some(1_791_878_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 EDT4"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 CDT5"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 CST6"),
+            Some(1_791_871_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 MST7"),
+            Some(1_791_874_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 MDT6"),
+            Some(1_791_871_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 PDT7"),
+            Some(1_791_874_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 2026 GMT5"),
+            Some(1_791_158_400_000)
+        );
         assert_eq!(unix_millis_from_iso("Oct 13UT5"), Some(1_129_161_600_000));
         assert_eq!(unix_millis_from_iso("Oct13GMT5"), Some(1_129_161_600_000));
-        assert_eq!(unix_millis_from_iso("13Oct2026GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026UTC"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("13-Oct-26GMT5"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("5GMT Oct 13 2026"), Some(1_380_931_200_000));
+        assert_eq!(
+            unix_millis_from_iso("13Oct2026GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026UTC"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("13-Oct-26GMT5"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("5GMT Oct 13 2026"),
+            Some(1_380_931_200_000)
+        );
         assert_eq!(
             unix_millis_from_iso("Wed Oct 13 2026 GMT5"),
             Some(1_791_849_600_000)
@@ -6329,8 +6506,14 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 2026GMT+5"),
             Some(1_791_831_600_000)
         );
-        assert_eq!(unix_millis_from_iso("EST Oct 13 2026"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("Z Oct 13 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("EST Oct 13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Z Oct 13 2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("GMT5 Oct 13 2026"), None);
         assert_eq!(unix_millis_from_iso("EST13 Oct 13 2026"), None);
         assert_eq!(unix_millis_from_iso("UT5 Oct 13 2026"), None);
@@ -6348,11 +6531,23 @@ mod local_zone_tests {
         // Node 22. A month or zone between numbers is its own word, and the
         // clock stays on the colon. A dot before the zone is only a separator.
         // `16:00EST` and `2026Oct16:00.5` still finish the field and stay empty.
-        assert_eq!(unix_millis_from_iso("2026Oct16:00"), Some(1_790_884_800_000));
-        assert_eq!(unix_millis_from_iso("2026EST16:00"), Some(1_767_301_200_000));
-        assert_eq!(unix_millis_from_iso("2026GMT16:00"), Some(1_767_283_200_000));
+        assert_eq!(
+            unix_millis_from_iso("2026Oct16:00"),
+            Some(1_790_884_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026EST16:00"),
+            Some(1_767_301_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026GMT16:00"),
+            Some(1_767_283_200_000)
+        );
         assert_eq!(unix_millis_from_iso("2026Z16:00"), Some(1_767_283_200_000));
-        assert_eq!(unix_millis_from_iso("2026UTC16:00"), Some(1_767_283_200_000));
+        assert_eq!(
+            unix_millis_from_iso("2026UTC16:00"),
+            Some(1_767_283_200_000)
+        );
         assert_eq!(unix_millis_from_iso("2026.EST"), Some(1_767_243_600_000));
         assert_eq!(unix_millis_from_iso("2026.Z"), Some(1_767_225_600_000));
         assert_eq!(unix_millis_from_iso("10.EST"), Some(1_001_912_400_000));
@@ -6360,18 +6555,30 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("10Oct16:00"), Some(1_002_744_000_000));
         assert_eq!(unix_millis_from_iso("13Oct16:00"), Some(1_003_003_200_000));
         assert_eq!(unix_millis_from_iso("10EST16:00"), Some(1_001_970_000_000));
-        assert_eq!(unix_millis_from_iso("Oct16:002026"), Some(1_790_884_800_000));
-        assert_eq!(unix_millis_from_iso("16:002026EST"), Some(1_767_301_200_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct16:002026"),
+            Some(1_790_884_800_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("16:002026EST"),
+            Some(1_767_301_200_000)
+        );
         assert_eq!(unix_millis_from_iso("16:EST2026"), Some(1_767_301_200_000));
         assert_eq!(unix_millis_from_iso("16:Z2026"), Some(1_767_283_200_000));
-        assert_eq!(unix_millis_from_iso("2026.EST16:00"), Some(1_767_301_200_000));
+        assert_eq!(
+            unix_millis_from_iso("2026.EST16:00"),
+            Some(1_767_301_200_000)
+        );
         assert_eq!(unix_millis_from_iso("13.Oct16:00"), Some(1_003_003_200_000));
         assert_eq!(unix_millis_from_iso("2026/EST"), Some(1_767_243_600_000));
         assert_eq!(
             unix_millis_from_iso("2026Oct16:00:00.5"),
             Some(1_790_884_800_500)
         );
-        assert_eq!(unix_millis_from_iso("2026Oct16::30"), Some(1_790_884_830_000));
+        assert_eq!(
+            unix_millis_from_iso("2026Oct16::30"),
+            Some(1_790_884_830_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026Oct16:00:00.5EST"),
             Some(1_790_888_400_500)
@@ -6448,7 +6655,10 @@ mod local_zone_tests {
             unix_millis_from_iso("PM 5 Oct 13 2026"),
             Some(1_380_945_600_000)
         );
-        assert_eq!(unix_millis_from_iso("AM Oct 13 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("AM Oct 13 2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("Oct 13 2026 4:00 PM EST5"),
             Some(1_791_925_200_000)
@@ -6491,8 +6701,14 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("hello 10 13"), Some(1_002_945_600_000));
         assert_eq!(unix_millis_from_iso("2026 10"), Some(1_790_827_200_000));
         assert_eq!(unix_millis_from_iso("2026 10 GMT"), Some(1_790_812_800_000));
-        assert_eq!(unix_millis_from_iso("10 13 2026 GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("10 13 2026 EST"), Some(1_791_867_600_000));
+        assert_eq!(
+            unix_millis_from_iso("10 13 2026 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10 13 2026 EST"),
+            Some(1_791_867_600_000)
+        );
         assert_eq!(
             unix_millis_from_iso("10 13 2026 16:00"),
             Some(1_791_921_600_000)
@@ -6559,24 +6775,45 @@ mod local_zone_tests {
         // `2026-10-13` alone is UTC. The same fields with `GMT` stay UTC, and
         // `EST` is midnight Eastern. A fourth number is not a date.
         assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 EST"), Some(1_791_867_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13EST"), Some(1_791_867_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 EST"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13EST"),
+            Some(1_791_867_600_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026-10-13 16:00 GMT"),
             Some(1_791_907_200_000)
         );
-        assert_eq!(unix_millis_from_iso("2026-10-13 UTC"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 UTC"),
+            Some(1_791_849_600_000)
+        );
         assert_eq!(unix_millis_from_iso("2026-10-13Z"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 Z"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 Z"),
+            Some(1_791_849_600_000)
+        );
         assert_eq!(unix_millis_from_iso("2026-1 GMT"), Some(1_767_225_600_000));
         assert_eq!(unix_millis_from_iso("2026-1GMT"), Some(1_767_225_600_000));
         assert_eq!(unix_millis_from_iso("2026-10 GMT"), Some(1_790_812_800_000));
         assert_eq!(unix_millis_from_iso("2026-10GMT"), Some(1_790_812_800_000));
         assert_eq!(unix_millis_from_iso("2-31-1 GMT"), Some(983_577_600_000));
         assert_eq!(unix_millis_from_iso("2-31-1GMT"), Some(983_577_600_000));
-        assert_eq!(unix_millis_from_iso("2026-02-31 GMT"), Some(1_772_496_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-02-31 GMT"),
+            Some(1_772_496_000_000)
+        );
         assert_eq!(unix_millis_from_iso("49-1-1 GMT"), Some(2_493_072_000_000));
         assert_eq!(unix_millis_from_iso("99-1-2 EST"), Some(915_253_200_000));
         assert_eq!(unix_millis_from_iso("2026-10-13 GMT5"), None);
@@ -6678,7 +6915,10 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 2026 16:00 GMT+05:30"),
             Some(1_791_887_400_000)
         );
-        assert_eq!(unix_millis_from_iso("GMT+ Oct 13 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("GMT+ Oct 13 2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("Oct 13 2026 +5"), None);
     }
 
@@ -6692,11 +6932,26 @@ mod local_zone_tests {
         unsafe { tzset() };
         // Signs before the first number are padding. The date is local unless
         // a zone says otherwise. A `T` after those signs is not a date.
-        assert_eq!(unix_millis_from_iso("++2026-10-13"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("+++2026-10-13"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("--2026-10-13"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("-+2026-10-13"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("+-2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("++2026-10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+++2026-10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("--2026-10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("-+2026-10-13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+-2026-10-13"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("+2026-10-13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("-2026-10-13"), Some(1_791_864_000_000));
         assert_eq!(
@@ -6705,9 +6960,18 @@ mod local_zone_tests {
         );
         assert_eq!(unix_millis_from_iso("++2026-1-1"), Some(1_767_243_600_000));
         assert_eq!(unix_millis_from_iso("++5"), Some(988_689_600_000));
-        assert_eq!(unix_millis_from_iso("++10/13/2026"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("++Oct 13 2026"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("++ 2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("++10/13/2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("++Oct 13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("++ 2026-10-13"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("++2026-10-13 16:00"),
             Some(1_791_921_600_000)
@@ -6718,8 +6982,14 @@ mod local_zone_tests {
             unix_millis_from_iso("-+5 Oct 13 2026"),
             Some(1_380_945_600_000)
         );
-        assert_eq!(unix_millis_from_iso("++2026-02-31"), Some(1_772_514_000_000));
-        assert_eq!(unix_millis_from_iso("+002026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("++2026-02-31"),
+            Some(1_772_514_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13"),
+            Some(1_791_849_600_000)
+        );
         assert_eq!(unix_millis_from_iso("2026-10-13 ++"), None);
         assert_eq!(unix_millis_from_iso("++2026-10-13T16:00"), None);
     }
@@ -6735,14 +7005,35 @@ mod local_zone_tests {
         // `10/13/2026` is local midnight. `GMT` makes that midnight UTC, and
         // `EST` makes it Eastern. A fourth number is not a date.
         assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("2026/10/13 GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("2026/10/13GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("10/13/2026 GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("10/13/2026EST"), Some(1_791_867_600_000));
-        assert_eq!(unix_millis_from_iso("10/13/2026 EST"), Some(1_791_867_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026/10/13 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026/10/13GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026EST"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 EST"),
+            Some(1_791_867_600_000)
+        );
         assert_eq!(unix_millis_from_iso("10/13/2026Z"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("10/13/2026 Z"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("10/13/2026UTC"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 Z"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026UTC"),
+            Some(1_791_849_600_000)
+        );
         assert_eq!(unix_millis_from_iso("5/1/01 GMT"), Some(988_675_200_000));
         assert_eq!(unix_millis_from_iso("2/31/1 GMT"), Some(983_577_600_000));
         assert_eq!(
@@ -6826,12 +7117,30 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026."), Some(1_767_243_600_000));
         assert_eq!(unix_millis_from_iso("2026..10.13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("2.31.1"), Some(983_595_600_000));
-        assert_eq!(unix_millis_from_iso("2026.10.13 GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("2026.10.13GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("2026.10.13 EST"), Some(1_791_867_600_000));
-        assert_eq!(unix_millis_from_iso("2026.10.13EST"), Some(1_791_867_600_000));
-        assert_eq!(unix_millis_from_iso("10.13.2026 GMT"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("10.13.2026EST"), Some(1_791_867_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026.10.13 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026.10.13GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026.10.13 EST"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026.10.13EST"),
+            Some(1_791_867_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10.13.2026 GMT"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10.13.2026EST"),
+            Some(1_791_867_600_000)
+        );
         assert_eq!(unix_millis_from_iso("2026.10 GMT"), Some(1_790_812_800_000));
         assert_eq!(unix_millis_from_iso("2026.10GMT"), Some(1_790_812_800_000));
         assert_eq!(unix_millis_from_iso("2.31.1 GMT"), Some(983_577_600_000));
@@ -6860,9 +7169,18 @@ mod local_zone_tests {
         unsafe { tzset() };
         // A parenthetical group is skipped, including an unclosed one. A `)`
         // with no `(`, after a number, is not a date.
-        assert_eq!(unix_millis_from_iso("Oct 13 (2026)"), Some(1_002_945_600_000));
-        assert_eq!(unix_millis_from_iso("Oct (13) 2026"), Some(1_790_827_200_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 (foo) 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 (2026)"),
+            Some(1_002_945_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct (13) 2026"),
+            Some(1_790_827_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 (foo) 2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("Oct 13 2026 (comment) 16:00"),
             Some(1_791_921_600_000)
@@ -6875,7 +7193,10 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 2026 (foo (bar) baz) 16:00 EST"),
             Some(1_791_925_200_000)
         );
-        assert_eq!(unix_millis_from_iso("Oct 13 (2026"), Some(1_002_945_600_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 (2026"),
+            Some(1_002_945_600_000)
+        );
         assert_eq!(
             unix_millis_from_iso("Oct 13 2026 16:00 (EST) GMT"),
             Some(1_791_907_200_000)
@@ -6977,11 +7298,23 @@ mod local_zone_tests {
         // A `(` stops a strict ISO date, so the calendar stays local. The
         // same mark after a finished clock is empty. A fraction, `Z`, or a
         // real zone after the comment still counts.
-        assert_eq!(unix_millis_from_iso("2026-10-13(EST)"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13(GMT)"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13()"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13(EST)"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13(GMT)"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13()"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("2026(EST)"), Some(1_767_243_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10(EST)"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10(EST)"),
+            Some(1_790_827_200_000)
+        );
         assert_eq!(
             unix_millis_from_iso("(EST)2026-10-13"),
             Some(1_791_864_000_000)
@@ -7002,8 +7335,14 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10-13(EST)GMT"),
             Some(1_791_849_600_000)
         );
-        assert_eq!(unix_millis_from_iso("2026-10-13Z(EST)"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("10/13/2026(EST)"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13Z(EST)"),
+            Some(1_791_849_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026(EST)"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026-10-13 16:00:00.5(EST)"),
             Some(1_791_921_600_500)
@@ -7039,18 +7378,54 @@ mod local_zone_tests {
         unsafe { tzset() };
         // A legacy clock may leave a field empty. `16:` is 16:00, `16::30`
         // is 16:00:30, and `16:.5` is 16:05. A `T` clock still needs two digits.
-        assert_eq!(unix_millis_from_iso("2026-10-13 16:"), Some(1_791_921_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 16:00:"), Some(1_791_921_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 16::"), Some(1_791_921_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 16::00"), Some(1_791_921_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 16::30"), Some(1_791_921_630_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 4:00"), Some(1_791_878_400_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 4:5"), Some(1_791_878_700_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 4:5:6"), Some(1_791_878_706_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 016:00"), Some(1_791_921_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 16:000"), Some(1_791_921_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 16:.5"), Some(1_791_921_900_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 16:00:.5"), Some(1_791_921_605_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16::"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16::00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16::30"),
+            Some(1_791_921_630_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:00"),
+            Some(1_791_878_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:5"),
+            Some(1_791_878_700_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4:5:6"),
+            Some(1_791_878_706_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 016:00"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:000"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:.5"),
+            Some(1_791_921_900_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:00:.5"),
+            Some(1_791_921_605_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026-10-13 16:00:00:.5"),
             Some(1_791_921_600_005)
@@ -7067,14 +7442,38 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10-13 16:00:00.5"),
             Some(1_791_921_600_500)
         );
-        assert_eq!(unix_millis_from_iso("2026-10-13 16:(EST)"), Some(1_791_921_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 4: PM"), Some(1_791_921_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 16: GMT"), Some(1_791_907_200_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 16: EST"), Some(1_791_925_200_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 24:"), Some(1_791_950_400_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13 24::"), Some(1_791_950_400_000));
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 16:"), Some(1_791_921_600_000));
-        assert_eq!(unix_millis_from_iso("10/13/2026 16:"), Some(1_791_921_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16:(EST)"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4: PM"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16: GMT"),
+            Some(1_791_907_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 16: EST"),
+            Some(1_791_925_200_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 24:"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 24::"),
+            Some(1_791_950_400_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 16:"),
+            Some(1_791_921_600_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("10/13/2026 16:"),
+            Some(1_791_921_600_000)
+        );
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00::"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:60:"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00:00:1234"), None);
@@ -7617,7 +8016,10 @@ mod local_zone_tests {
         unsafe { tzset() };
         // `4: :5` is 4:05. `+5: :30` is +5:30. The colon at the start of
         // the next field is only a separator.
-        assert_eq!(unix_millis_from_iso("2026-10-13 4: :5"), Some(1_791_878_700_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13 4: :5"),
+            Some(1_791_878_700_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026-10-13 4: :5 PM"),
             Some(1_791_921_900_000)
@@ -7638,7 +8040,10 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 2026 4: :5 PM"),
             Some(1_791_921_900_000)
         );
-        assert_eq!(unix_millis_from_iso("Oct :13 2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct :13 2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026-10-13 :16:00"),
             Some(1_791_921_600_000)
@@ -7942,7 +8347,10 @@ mod local_zone_tests {
             unix_millis_from_iso("2026/10/13 January"),
             Some(1_768_021_200_000)
         );
-        assert_eq!(unix_millis_from_iso("10/13 January"), Some(1_357_794_000_000));
+        assert_eq!(
+            unix_millis_from_iso("10/13 January"),
+            Some(1_357_794_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("10/13/2026 January 16:00"),
             Some(1_357_851_600_000)
@@ -7951,7 +8359,10 @@ mod local_zone_tests {
             unix_millis_from_iso("10/13/2026 16:00 January"),
             Some(1_357_851_600_000)
         );
-        assert_eq!(unix_millis_from_iso("1/2/3 January"), Some(1_009_861_200_000));
+        assert_eq!(
+            unix_millis_from_iso("1/2/3 January"),
+            Some(1_009_861_200_000)
+        );
         assert_eq!(
             unix_millis_from_iso("13/10/2026 January"),
             Some(1_263_358_800_000)
@@ -7968,7 +8379,10 @@ mod local_zone_tests {
             unix_millis_from_iso("2026/13/01 January"),
             Some(1_768_280_400_000)
         );
-        assert_eq!(unix_millis_from_iso("99/1/2 January"), Some(915_166_800_000));
+        assert_eq!(
+            unix_millis_from_iso("99/1/2 January"),
+            Some(915_166_800_000)
+        );
         assert_eq!(
             unix_millis_from_iso("10/13/2026 Oct"),
             Some(1_381_377_600_000)
@@ -7977,20 +8391,23 @@ mod local_zone_tests {
             unix_millis_from_iso("January 10/13/2026"),
             Some(1_357_794_000_000)
         );
-        assert_eq!(unix_millis_from_iso("10//13 January"), Some(1_357_794_000_000));
+        assert_eq!(
+            unix_millis_from_iso("10//13 January"),
+            Some(1_357_794_000_000)
+        );
         assert_eq!(unix_millis_from_iso("10/ January"), Some(979_102_800_000));
         assert_eq!(
             unix_millis_from_iso("/10/13/2026 January"),
             Some(1_357_794_000_000)
         );
-        assert_eq!(unix_millis_from_iso("10/13/50 January"), Some(1_357_794_000_000));
+        assert_eq!(
+            unix_millis_from_iso("10/13/50 January"),
+            Some(1_357_794_000_000)
+        );
         assert_eq!(unix_millis_from_iso("10/13/2026 January +5"), None);
         assert_eq!(unix_millis_from_iso("10/13/2026 January PM"), None);
         assert_eq!(unix_millis_from_iso("10/13/2026/1 January"), None);
-        assert_eq!(
-            unix_millis_from_iso("10/13/2026"),
-            Some(1_791_864_000_000)
-        );
+        assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
     }
 
     #[test]
@@ -8025,7 +8442,10 @@ mod local_zone_tests {
             Some(1_357_851_600_000)
         );
         assert_eq!(unix_millis_from_iso("10-13- Oct"), Some(1_381_377_600_000));
-        assert_eq!(unix_millis_from_iso("1-2- January"), Some(1_009_861_200_000));
+        assert_eq!(
+            unix_millis_from_iso("1-2- January"),
+            Some(1_009_861_200_000)
+        );
         assert_eq!(unix_millis_from_iso("99-1- January"), Some(915_166_800_000));
         assert_eq!(
             unix_millis_from_iso("10-13-50- January"),
@@ -8034,10 +8454,7 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13- January"), None);
         assert_eq!(unix_millis_from_iso("10-13-- January"), None);
         assert_eq!(unix_millis_from_iso("10--13 January"), None);
-        assert_eq!(
-            unix_millis_from_iso("10-13-2026-"),
-            Some(1_791_864_000_000)
-        );
+        assert_eq!(unix_millis_from_iso("10-13-2026-"), Some(1_791_864_000_000));
     }
 
     #[test]
@@ -8059,7 +8476,10 @@ mod local_zone_tests {
             Some(1_791_921_600_000)
         );
         assert_eq!(unix_millis_from_iso("Mäy 13 2026"), None);
-        assert_eq!(unix_millis_from_iso("ä 2026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("ä 2026-10-13"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("2026-10-13 ä"), None);
         assert_eq!(unix_millis_from_iso("xä 13 2026"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00 UTä"), None);
@@ -8172,7 +8592,10 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 2026 16:,30"),
             Some(1_791_923_400_000)
         );
-        assert_eq!(unix_millis_from_iso("Oct 13, 2026,"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13, 2026,"),
+            Some(1_791_864_000_000)
+        );
     }
 
     #[test]
@@ -8357,8 +8780,14 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13!"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("#2026-10-13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso(")2026-10-13"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("*2026-10-13*"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("!!2026-10-13!!"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("*2026-10-13*"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("!!2026-10-13!!"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("#2026-10-13 16:00"),
             Some(1_791_921_600_000)
@@ -8371,19 +8800,37 @@ mod local_zone_tests {
             unix_millis_from_iso("foo 2026-10-13 16:00:00Z"),
             Some(1_791_907_200_000)
         );
-        assert_eq!(unix_millis_from_iso("foo 10/13/2026"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("foo 10/13/2026"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("#10/13/2026"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("hello 2026-10"), Some(1_790_827_200_000));
+        assert_eq!(
+            unix_millis_from_iso("hello 2026-10"),
+            Some(1_790_827_200_000)
+        );
         assert_eq!(unix_millis_from_iso("*2026*"), Some(1_767_243_600_000));
         assert_eq!(unix_millis_from_iso("hello 2026"), Some(1_767_243_600_000));
-        assert_eq!(unix_millis_from_iso("foo bar 2026"), Some(1_767_243_600_000));
+        assert_eq!(
+            unix_millis_from_iso("foo bar 2026"),
+            Some(1_767_243_600_000)
+        );
         assert_eq!(unix_millis_from_iso("hello 99"), Some(915_166_800_000));
         assert_eq!(unix_millis_from_iso("hello 0"), Some(946_702_800_000));
         assert_eq!(unix_millis_from_iso("10 13 2026"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("2026 10 13"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("hello 10 13 2026"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("hello 2026 10 13"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("hello 32 1 2"), Some(1_956_632_400_000));
+        assert_eq!(
+            unix_millis_from_iso("hello 10 13 2026"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("hello 2026 10 13"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("hello 32 1 2"),
+            Some(1_956_632_400_000)
+        );
         assert_eq!(unix_millis_from_iso("hello 2 31 1"), Some(983_595_600_000));
         assert_eq!(unix_millis_from_iso("2026-10-13 16:00!"), None);
         assert_eq!(unix_millis_from_iso("2026-10-13)"), None);
@@ -8589,8 +9036,14 @@ mod local_zone_tests {
             unix_millis_from_iso(" 2026-10-13 "),
             Some(1_791_864_000_000)
         );
-        assert_eq!(unix_millis_from_iso("2026-10-13\n"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13\t"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13\n"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13\t"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(
             unix_millis_from_iso("\u{00A0}2026-10-13"),
             Some(1_791_864_000_000)
@@ -8616,14 +9069,20 @@ mod local_zone_tests {
         unsafe { tzset() };
         // Four digits and `+YYYYYY` stay UTC. Any other year width is local.
         assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
-        assert_eq!(unix_millis_from_iso("+002026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13"),
+            Some(1_791_849_600_000)
+        );
         assert_eq!(unix_millis_from_iso("+002026-11"), Some(1_793_491_200_000));
         assert_eq!(unix_millis_from_iso("+002026"), Some(1_767_225_600_000));
         assert_eq!(unix_millis_from_iso("2026-02-31"), Some(1_772_496_000_000));
         assert_eq!(unix_millis_from_iso("02026-10-13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("02026-11"), Some(1_793_505_600_000));
         assert_eq!(unix_millis_from_iso("02026"), Some(1_767_243_600_000));
-        assert_eq!(unix_millis_from_iso("002026-10-13"), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("002026-10-13"),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("+2026-10-13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("02026-02-31"), Some(1_772_514_000_000));
         assert_eq!(unix_millis_from_iso("02026-10-13T00:00:00Z"), None);
@@ -8666,8 +9125,14 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13"), Some(1_791_849_600_000));
         assert_eq!(unix_millis_from_iso("2026-10-13,"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso(",2026-10-13"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13,,"), Some(1_791_864_000_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13,16:00"), Some(1_791_921_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13,,"),
+            Some(1_791_864_000_000)
+        );
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13,16:00"),
+            Some(1_791_921_600_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026-10-13,16:00:00Z"),
             Some(1_791_907_200_000)
@@ -8692,7 +9157,10 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-13."), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("2026."), Some(1_767_243_600_000));
         assert_eq!(unix_millis_from_iso("2026-10."), Some(1_790_827_200_000));
-        assert_eq!(unix_millis_from_iso("2026-10-13..."), Some(1_791_864_000_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13..."),
+            Some(1_791_864_000_000)
+        );
         assert_eq!(unix_millis_from_iso("2026.10.13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("10.13.2026"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("13.10.2026"), None);
@@ -8700,7 +9168,10 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso(":2026-10-13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso(".2026-10-13T16:00"), None);
         assert_eq!(unix_millis_from_iso(":2026-10-13T16:00"), None);
-        assert_eq!(unix_millis_from_iso("2026-10-13.16:00"), Some(1_791_921_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10-13.16:00"),
+            Some(1_791_921_600_000)
+        );
         assert_eq!(
             unix_millis_from_iso("2026-10-13.16:00:00Z"),
             Some(1_791_907_200_000)
@@ -8852,11 +9323,11 @@ mod local_zone_tests {
             unix_millis_from_iso("2026/10 GMT+24:00"),
             Some(1_790_726_400_000)
         );
-        assert_eq!(unix_millis_from_iso("/10 GMT+24:00"), Some(1_001_808_000_000));
         assert_eq!(
-            unix_millis_from_iso("10/13 GMT+5:70"),
-            Some(24_606_000_000)
+            unix_millis_from_iso("/10 GMT+24:00"),
+            Some(1_001_808_000_000)
         );
+        assert_eq!(unix_millis_from_iso("10/13 GMT+5:70"), Some(24_606_000_000));
         assert_eq!(
             unix_millis_from_iso("10/13/2026GMT+24:00"),
             Some(1_791_763_200_000)
@@ -9090,10 +9561,7 @@ mod local_zone_tests {
             unix_millis_from_iso("Oct 13 2026 16: +5: 30"),
             Some(1_791_887_400_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("5 GMT+5: 1"),
-            Some(988_657_140_000)
-        );
+        assert_eq!(unix_millis_from_iso("5 GMT+5: 1"), Some(988_657_140_000));
         assert_eq!(
             unix_millis_from_iso("2026-10-13 16:00 +5:"),
             Some(1_791_889_200_000)
@@ -9217,10 +9685,7 @@ mod local_zone_tests {
             unix_millis_from_iso("5 GMT+24:00:00"),
             Some(988_588_800_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("5 GMT+5:3:0"),
-            Some(988_668_000_000)
-        );
+        assert_eq!(unix_millis_from_iso("5 GMT+5:3:0"), Some(988_668_000_000));
         assert_eq!(
             unix_millis_from_iso("10/13/2026 GMT+5:3:0"),
             Some(1_791_842_400_000)
@@ -9344,31 +9809,28 @@ mod local_zone_tests {
         assert_eq!(unix_millis_from_iso("2026-10-1-"), Some(1_790_827_200_000));
         assert_eq!(unix_millis_from_iso("-2026-"), Some(1_767_243_600_000));
         assert_eq!(unix_millis_from_iso("+002026-"), Some(1_767_243_600_000));
-        assert_eq!(
-            unix_millis_from_iso("+002026-10-"),
-            Some(1_790_827_200_000)
-        );
+        assert_eq!(unix_millis_from_iso("+002026-10-"), Some(1_790_827_200_000));
         assert_eq!(unix_millis_from_iso("5-"), Some(988_689_600_000));
         assert_eq!(unix_millis_from_iso("0-"), Some(946_702_800_000));
         assert_eq!(unix_millis_from_iso("32-"), Some(1_956_546_000_000));
         assert_eq!(unix_millis_from_iso("99-"), Some(915_166_800_000));
         assert_eq!(unix_millis_from_iso("99-10-"), Some(938_750_400_000));
-        assert_eq!(
-            unix_millis_from_iso("2026- GMT"),
-            Some(1_767_225_600_000)
-        );
-        assert_eq!(
-            unix_millis_from_iso("2026- GMT+5"),
-            Some(1_767_207_600_000)
-        );
+        assert_eq!(unix_millis_from_iso("2026- GMT"), Some(1_767_225_600_000));
+        assert_eq!(unix_millis_from_iso("2026- GMT+5"), Some(1_767_207_600_000));
         assert_eq!(
             unix_millis_from_iso("2026-10- EST"),
             Some(1_790_830_800_000)
         );
         assert_eq!(unix_millis_from_iso("2026- EST"), Some(1_767_243_600_000));
-        assert_eq!(unix_millis_from_iso("2026-10- GMT"), Some(1_790_812_800_000));
+        assert_eq!(
+            unix_millis_from_iso("2026-10- GMT"),
+            Some(1_790_812_800_000)
+        );
         assert_eq!(unix_millis_from_iso("2026- GMT-5"), Some(1_767_243_600_000));
-        assert_eq!(unix_millis_from_iso("2026- GMT-0500"), Some(1_767_243_600_000));
+        assert_eq!(
+            unix_millis_from_iso("2026- GMT-0500"),
+            Some(1_767_243_600_000)
+        );
         assert_eq!(unix_millis_from_iso("2026-(10)-13"), None);
         assert_eq!(unix_millis_from_iso("2026-(10)-13 16:00"), None);
         assert_eq!(unix_millis_from_iso("2026- -13"), None);
@@ -9756,30 +10218,15 @@ mod local_zone_tests {
             ("1970-01-01 00:00:00.0001234567", Some(18_000_001)),
             ("1970-01-01 00:00:00.0123456789", Some(18_000_123)),
             ("1970-01-01 24:00:00.000000001", Some(104_400_000)),
-            (
-                "2026-10-13T16:00:00.0001234567Z",
-                Some(1_791_907_200_001),
-            ),
-            (
-                "2026-10-13T16:00:00.0123456789Z",
-                Some(1_791_907_200_123),
-            ),
+            ("2026-10-13T16:00:00.0001234567Z", Some(1_791_907_200_001)),
+            ("2026-10-13T16:00:00.0123456789Z", Some(1_791_907_200_123)),
             (
                 "2026-10-13T16:00:00.0001234567+05:30",
                 Some(1_791_887_400_001),
             ),
-            (
-                "2026-02-31T00:00:00.0001234567Z",
-                Some(1_772_496_000_001),
-            ),
-            (
-                "Oct 13 2026 16:00:00.0001234567",
-                Some(1_791_921_600_001),
-            ),
-            (
-                "10/13/2026 16:00:00.0123456789",
-                Some(1_791_921_600_123),
-            ),
+            ("2026-02-31T00:00:00.0001234567Z", Some(1_772_496_000_001)),
+            ("Oct 13 2026 16:00:00.0001234567", Some(1_791_921_600_001)),
+            ("10/13/2026 16:00:00.0123456789", Some(1_791_921_600_123)),
             ("1970-01-01T00:00:00.0001234567+05:30", None),
             ("1970-01-01T24:00:00.0001234567Z", None),
             ("1970-01-01T24:00:00.0000000001Z", None),
@@ -10029,7 +10476,10 @@ mod local_zone_tests {
         // `4:00 PM` must not be folded into the open minute of `13:`.
         assert_eq!(unix_millis_from_iso("13:Oct:2026 4:00 PM"), None);
         assert_eq!(unix_millis_from_iso("Monday 13:Oct:2026 4:00 PM"), None);
-        assert_eq!(unix_millis_from_iso("Oct 13 2026 4:00 PM"), Some(1_791_921_600_000));
+        assert_eq!(
+            unix_millis_from_iso("Oct 13 2026 4:00 PM"),
+            Some(1_791_921_600_000)
+        );
         assert_eq!(unix_millis_from_iso("13:Oct:2026"), Some(1_790_874_000_000));
     }
 
@@ -10043,7 +10493,10 @@ mod local_zone_tests {
         unsafe { tzset() };
         // `+002026-10-13` alone is UTC. A space and a clock make it local.
         // `+000001-10-13 16:00` is 10 January 2013, not year 1.
-        assert_eq!(unix_millis_from_iso("+002026-10-13"), Some(1_791_849_600_000));
+        assert_eq!(
+            unix_millis_from_iso("+002026-10-13"),
+            Some(1_791_849_600_000)
+        );
         assert_eq!(
             unix_millis_from_iso("+002026-10-13 16:00"),
             Some(1_791_921_600_000)
@@ -10060,7 +10513,10 @@ mod local_zone_tests {
             unix_millis_from_iso("+002026-10 16:00"),
             Some(1_790_884_800_000)
         );
-        assert_eq!(unix_millis_from_iso("+002026 16:00"), Some(1_767_301_200_000));
+        assert_eq!(
+            unix_millis_from_iso("+002026 16:00"),
+            Some(1_767_301_200_000)
+        );
         assert_eq!(
             unix_millis_from_iso("+002026-10-13T16:00"),
             Some(1_791_921_600_000)
@@ -10098,7 +10554,10 @@ mod local_zone_tests {
         // once and the rest is legacy, so `-10-13` is 13 October 2001.
         // A leading space keeps year 0, which is 2000. Year -1 still does
         // not fit in `u64`.
-        assert_eq!(unix_millis_from_iso("-000000-10-13"), Some(1_002_945_600_000));
+        assert_eq!(
+            unix_millis_from_iso("-000000-10-13"),
+            Some(1_002_945_600_000)
+        );
         assert_eq!(
             unix_millis_from_iso("-000000-10-13 16:00"),
             Some(1_003_003_200_000)
@@ -10363,10 +10822,7 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-1-2-3:16:00"),
             Some(1_767_341_760_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("2026-1-2"),
-            Some(1_767_330_000_000)
-        );
+        assert_eq!(unix_millis_from_iso("2026-1-2"), Some(1_767_330_000_000));
         assert_eq!(
             unix_millis_from_iso("2026-10-13:16:00"),
             Some(1_791_921_600_000)
@@ -10401,18 +10857,9 @@ mod local_zone_tests {
             unix_millis_from_iso("２０２６-10-13-"),
             Some(1_002_945_600_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("２-10-13"),
-            Some(1_002_945_600_000)
-        );
-        assert_eq!(
-            unix_millis_from_iso("hello-10-13"),
-            Some(1_002_945_600_000)
-        );
-        assert_eq!(
-            unix_millis_from_iso("Monday-1-"),
-            Some(978_325_200_000)
-        );
+        assert_eq!(unix_millis_from_iso("２-10-13"), Some(1_002_945_600_000));
+        assert_eq!(unix_millis_from_iso("hello-10-13"), Some(1_002_945_600_000));
+        assert_eq!(unix_millis_from_iso("Monday-1-"), Some(978_325_200_000));
         assert_eq!(unix_millis_from_iso("２026-10-13"), None);
         assert_eq!(unix_millis_from_iso("10-hello-13"), None);
     }
@@ -10436,10 +10883,7 @@ mod local_zone_tests {
             unix_millis_from_iso("+002026/10/13"),
             Some(1_791_864_000_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("+2026/10/13"),
-            Some(1_791_864_000_000)
-        );
+        assert_eq!(unix_millis_from_iso("+2026/10/13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("10/13/2026"), Some(1_791_864_000_000));
     }
 
@@ -10505,11 +10949,7 @@ mod local_zone_tests {
             unix_millis_from_iso("2026-10-13\n16:00"),
             Some(1_791_921_600_000)
         );
-        assert_eq!(
-            unix_millis_from_iso("2026\n10-13"),
-            Some(1_791_864_000_000)
-        );
+        assert_eq!(unix_millis_from_iso("2026\n10-13"), Some(1_791_864_000_000));
         assert_eq!(unix_millis_from_iso("-000001-10-13\u{2028}16:00"), None);
     }
-
 }

@@ -43,6 +43,20 @@ pub fn capture_html(html: &str) -> Result<String, String> {
     Ok(image)
 }
 
+/// The bug-report image of `window`, as Electron `capturePage` + `encodeWindowCapture`.
+pub fn capture_window(window: &tauri::WebviewWindow) -> Result<String, String> {
+    let (captured, captured_rx) = mpsc::channel();
+    window
+        .with_webview(move |webview| {
+            let result = capture_view(&webview.inner());
+            let _ = captured.send(result);
+        })
+        .map_err(|_| "Das Fensterbild ist ungültig.".to_owned())?;
+    captured_rx
+        .recv_timeout(Duration::from_secs(20))
+        .map_err(|_| "Das Fensterbild ist ungültig.".to_owned())?
+}
+
 pub fn capture_view(view: &webkit2gtk::WebView) -> Result<String, String> {
     let (captured, captured_rx) = mpsc::channel();
     view.snapshot(

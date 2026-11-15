@@ -277,11 +277,7 @@ fn a_vault_path_keeps_a_trailing_space_in_the_folder_name() {
     fs::create_dir_all(&spaced).unwrap();
     fs::write(plain.join("Falsch.md"), b"# Falsch\n").unwrap();
     fs::write(spaced.join("Seite.md"), b"# Seite\n").unwrap();
-    fs::write(
-        app.join("vault-path"),
-        format!("{}\n", spaced.display()),
-    )
-    .unwrap();
+    fs::write(app.join("vault-path"), format!("{}\n", spaced.display())).unwrap();
     let mut host = Host::open(app);
     host.documents_dir = Some(dir.join("docs"));
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
@@ -313,11 +309,7 @@ fn a_missing_vault_path_resolves_before_the_cache_lookup() {
     drop(host);
     fs::remove_dir_all(&vault).unwrap();
     let spelled = dir.join("other").join("..").join("notes");
-    fs::write(
-        app.join("vault-path"),
-        format!("{}/\n", spelled.display()),
-    )
-    .unwrap();
+    fs::write(app.join("vault-path"), format!("{}/\n", spelled.display())).unwrap();
     let mut host = Host::open(app);
     host.documents_dir = Some(dir.join("docs"));
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
@@ -374,6 +366,7 @@ fn an_oversized_note_is_rejected() {
     assert!(!vault.join("klein.md").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_untouched_welcome_note_is_refreshed() {
     let dir = scratch();
@@ -591,6 +584,7 @@ fn a_reset_profile_does_not_import_the_electron_config_again() {
     assert!(!app.join(".fanotes-reset-complete").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_imported_vault_symlink_opens_the_real_folder() {
     let dir = scratch();
@@ -626,6 +620,7 @@ fn an_imported_vault_symlink_opens_the_real_folder() {
         .any(|entry| entry["name"] == "Mathe"));
 }
 
+#[cfg(unix)]
 #[test]
 fn reopening_a_linked_vault_uses_the_real_folder_and_refreshes_the_welcome_note() {
     let dir = scratch();

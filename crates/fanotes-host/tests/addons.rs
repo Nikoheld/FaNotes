@@ -261,11 +261,17 @@ fn an_addon_file_list_uses_desktop_entry_names() {
     )
     .unwrap();
     let root = dir.join("app/addons/margin-notes");
-    assert_eq!(std::fs::read_to_string(root.join("0")).unwrap(), "export {}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("0")).unwrap(),
+        "export {}"
+    );
     assert_eq!(std::fs::read_to_string(root.join("1")).unwrap(), "zwei");
     assert_eq!(
-        host.dispatch("fanotes:addons-write-files", &[json!("margin-notes"), json!(1)])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:addons-write-files",
+            &[json!("margin-notes"), json!(1)]
+        )
+        .unwrap_err(),
         "Keine Dateien übergeben."
     );
     host.dispatch(

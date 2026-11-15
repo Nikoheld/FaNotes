@@ -71,7 +71,10 @@ pub(crate) fn read_optional_text(path: &Path, max: u64) -> Result<Option<String>
 }
 
 pub(crate) fn optional_note_limit(path: &Path) -> u64 {
-    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
     if crate::vault::posix_extname_en_us(name) == ".famd" {
         MAX_COMPANION_BYTES
     } else {
@@ -299,7 +302,11 @@ pub fn read_paper_style(host: &Host, relative: &str) -> Result<Value, String> {
         .unwrap_or(Value::Null))
 }
 
-pub fn set_paper_style(host: &Host, relative: &Value, paper_style: &Value) -> Result<Value, String> {
+pub fn set_paper_style(
+    host: &Host,
+    relative: &Value,
+    paper_style: &Value,
+) -> Result<Value, String> {
     let Some(paper_style) = paper_style.as_str().filter(|style| is_paper_style(style)) else {
         return Err("Diese Papierart wird nicht unterstützt.".to_owned());
     };
@@ -603,7 +610,9 @@ fn read_companion(host: &Host, relative: &str) -> Result<Option<FamdPayload>, St
     let root = vault_root(host)?;
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
-    let path = host.folder_locations.resolve_note(root, &famd_relative, true)?;
+    let path = host
+        .folder_locations
+        .resolve_note(root, &famd_relative, true)?;
     match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(vault::node_lstat_error(&path, &error)),
@@ -629,7 +638,8 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
     let famd_path = host
         .folder_locations
         .resolve_note(root, &famd_relative, true)?;
-    let source = read_optional_text(&famd_path, optional_note_limit(&famd_path))?.unwrap_or_default();
+    let source =
+        read_optional_text(&famd_path, optional_note_limit(&famd_path))?.unwrap_or_default();
     let parsed = if source.is_empty() {
         parse_famd("")
     } else {
@@ -726,7 +736,9 @@ fn subject_book_page(value: Option<&Value>) -> i64 {
         Some(Value::Bool(true)) => 1.0,
         Some(Value::Bool(false)) => 0.0,
         Some(Value::Null) => 0.0,
-        Some(other) => vault::js_tonumber(&fanotes_famd::js_value_string(other)).unwrap_or(f64::NAN),
+        Some(other) => {
+            vault::js_tonumber(&fanotes_famd::js_value_string(other)).unwrap_or(f64::NAN)
+        }
         None => f64::NAN,
     };
     if number.is_finite()
@@ -907,10 +919,7 @@ pub(crate) fn node_open_error(path: &Path, error: &std::io::Error) -> String {
             return format!("EACCES: permission denied, open '{}'", path.display());
         }
         Some(libc::EPERM) => {
-            return format!(
-                "EPERM: operation not permitted, open '{}'",
-                path.display()
-            );
+            return format!("EPERM: operation not permitted, open '{}'", path.display());
         }
         Some(libc::EIO) => return format!("EIO: i/o error, open '{}'", path.display()),
         Some(libc::ELOOP) => {
@@ -1074,8 +1083,7 @@ pub(crate) enum NewFileError {
 /// appears, and the file mode is private.
 pub(crate) fn publish_new_file(path: &Path, bytes: &[u8], mode: u32) -> Result<(), NewFileError> {
     let _parent = parent_directory(path)?;
-    let temporary = temporary_path(path, 10)
-        .map_err(|error| NewFileError::Io(error))?;
+    let temporary = temporary_path(path, 10).map_err(|error| NewFileError::Io(error))?;
     if let Err(error) = write_exclusive(&temporary, bytes, mode) {
         let _ = fs::remove_file(&temporary);
         return Err(NewFileError::Io(error));
@@ -1110,12 +1118,9 @@ fn parent_directory(path: &Path) -> Result<&Path, NewFileError> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
-        .ok_or_else(|| {
-            NewFileError::Io("Die Datei konnte nicht geschrieben werden.".to_owned())
-        })?;
-    let meta = fs::symlink_metadata(parent).map_err(|_| {
-        NewFileError::Io("Die Datei konnte nicht geschrieben werden.".to_owned())
-    })?;
+        .ok_or_else(|| NewFileError::Io("Die Datei konnte nicht geschrieben werden.".to_owned()))?;
+    let meta = fs::symlink_metadata(parent)
+        .map_err(|_| NewFileError::Io("Die Datei konnte nicht geschrieben werden.".to_owned()))?;
     if meta.file_type().is_symlink() || !meta.is_dir() {
         return Err(NewFileError::Io(
             "Die Datei konnte nicht geschrieben werden.".to_owned(),
@@ -1332,8 +1337,7 @@ fn is_leap(year: i32) -> bool {
 mod publish_tests {
     use super::{
         atomic_write, file_mtime_iso, history_dir, iso_from_date, iso_from_system_time,
-        mtime_millis_of, publish_new_file, record_history, write_note_file,
-        NewFileError,
+        mtime_millis_of, publish_new_file, record_history, write_note_file, NewFileError,
     };
     use std::time::UNIX_EPOCH;
 
@@ -1484,10 +1488,7 @@ mod publish_tests {
         let directory = history_dir(&root, "Seite.md").unwrap();
         assert_eq!(
             record_history(&root, "Seite.md", "Hallo\n").unwrap_err(),
-            format!(
-                "EACCES: permission denied, mkdir '{}'",
-                directory.display()
-            )
+            format!("EACCES: permission denied, mkdir '{}'", directory.display())
         );
         assert!(std::fs::read_dir(&history).unwrap().next().is_none());
 
@@ -1496,10 +1497,7 @@ mod publish_tests {
         std::fs::write(&history, b"datei").unwrap();
         assert_eq!(
             record_history(&root, "Seite.md", "Hallo\n").unwrap_err(),
-            format!(
-                "ENOTDIR: not a directory, mkdir '{}'",
-                directory.display()
-            )
+            format!("ENOTDIR: not a directory, mkdir '{}'", directory.display())
         );
         assert_eq!(std::fs::read(&history).unwrap(), b"datei");
     }
@@ -1522,7 +1520,10 @@ mod publish_tests {
         std::fs::write(&directory, b"datei").unwrap();
         assert_eq!(
             record_history(&root, "Seite.md", "Hallo\n").unwrap_err(),
-            format!("EEXIST: file already exists, mkdir '{}'", directory.display())
+            format!(
+                "EEXIST: file already exists, mkdir '{}'",
+                directory.display()
+            )
         );
         assert_eq!(std::fs::read(&directory).unwrap(), b"datei");
         std::fs::remove_file(&directory).unwrap();
@@ -1531,7 +1532,11 @@ mod publish_tests {
         std::fs::create_dir(&elsewhere).unwrap();
         std::os::unix::fs::symlink(&elsewhere, &directory).unwrap();
         record_history(&root, "Seite.md", "Hallo\n").unwrap();
-        assert!(directory.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(directory
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
         assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_some());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1568,10 +1573,7 @@ mod publish_tests {
         }
         let _restore = Restore(directory.clone());
         let error = record_history(&root, "Seite.md", "Hallo\n").unwrap_err();
-        let prefix = format!(
-            "EACCES: permission denied, open '{}/",
-            directory.display()
-        );
+        let prefix = format!("EACCES: permission denied, open '{}/", directory.display());
         assert!(error.starts_with(&prefix), "{error}");
         assert!(error.trim_end_matches('\'').ends_with(".md"), "{error}");
         assert!(!error.contains(".tmp"), "{error}");
@@ -1594,7 +1596,8 @@ mod publish_tests {
         let temporary = directory.join(format!(".index-{}.tmp", std::process::id()));
         std::fs::create_dir(&temporary).unwrap();
         assert_eq!(
-            record_history(&root, "Seite.md", "Hallo\n").expect_err("history index write succeeded"),
+            record_history(&root, "Seite.md", "Hallo\n")
+                .expect_err("history index write succeeded"),
             format!(
                 "EISDIR: illegal operation on a directory, open '{}'",
                 temporary.display()
@@ -1643,7 +1646,10 @@ mod publish_tests {
             blocked.display(),
             std::process::id()
         );
-        assert!(blocked_error.starts_with(&blocked_prefix), "{blocked_error}");
+        assert!(
+            blocked_error.starts_with(&blocked_prefix),
+            "{blocked_error}"
+        );
         assert_eq!(std::fs::read(&blocked).unwrap(), b"datei");
 
         let folder = root.join("Mathe");

@@ -162,10 +162,9 @@ fn a_drawing_schema_of_one_point_zero_still_opens() {
     }"##;
     let doc = InkDocument::from_json(raw).unwrap();
     assert_eq!(doc.live_ids().len(), 1);
-    assert!(InkDocument::from_json(
-        r##"{"schemaVersion":1.5,"title":"Halb","strokes":[]}"##
-    )
-    .is_err());
+    assert!(
+        InkDocument::from_json(r##"{"schemaVersion":1.5,"title":"Halb","strokes":[]}"##).is_err()
+    );
 }
 
 #[test]

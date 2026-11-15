@@ -72,10 +72,7 @@ fn an_unreadable_worksheet_uses_the_desktop_open_error() {
         }
     }
     let _restore = Restore(path.clone());
-    let expected = format!(
-        "EACCES: permission denied, open '{}'",
-        canonical.display()
-    );
+    let expected = format!("EACCES: permission denied, open '{}'", canonical.display());
     assert_eq!(
         host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
             .unwrap_err(),
@@ -224,8 +221,7 @@ fn a_saved_worksheet_uses_javascript_number_text() {
         })],
     )
     .unwrap();
-    let text =
-        fs::read_to_string(dir.join("vault/.fanotes/worksheets/blatt-1.json")).unwrap();
+    let text = fs::read_to_string(dir.join("vault/.fanotes/worksheets/blatt-1.json")).unwrap();
     assert!(text.contains("\"fontSize\": 16\n"), "{text}");
     assert!(text.contains("\"x\": 0,"), "{text}");
     assert!(text.contains("\"y\": 1,"), "{text}");
@@ -475,7 +471,7 @@ fn an_unreadable_html_worksheet_is_not_a_missing_safety_marker() {
 #[cfg(unix)]
 #[test]
 fn a_linked_or_unreadable_worksheet_source_uses_the_desktop_open_error() {
-    use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::os::unix::fs::{symlink, PermissionsExt};
     let (dir, mut host) = host();
     let worksheets = dir.join("vault/.fanotes/worksheets");
     let json = r#"{"schemaVersion":1,"id":"blatt-1","title":"Übung","kind":"pdf","mimeType":"application/pdf","sourceRelativePath":".fanotes/worksheets/blatt-1.pdf","dataRelativePath":".fanotes/worksheets/blatt-1.json","createdAt":"2026-01-02T03:04:05.000Z","updatedAt":"2026-01-02T03:04:05.000Z","textBoxes":[],"highlights":[]}"#;
@@ -522,7 +518,10 @@ fn a_linked_or_unreadable_worksheet_source_uses_the_desktop_open_error() {
     assert_eq!(
         host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
             .unwrap_err(),
-        format!("EACCES: permission denied, open '{}'", opened("blatt-1.pdf"))
+        format!(
+            "EACCES: permission denied, open '{}'",
+            opened("blatt-1.pdf")
+        )
     );
     fs::set_permissions(&pdf, fs::Permissions::from_mode(0o600)).unwrap();
     fs::remove_file(&pdf).unwrap();
@@ -532,7 +531,10 @@ fn a_linked_or_unreadable_worksheet_source_uses_the_desktop_open_error() {
     assert_eq!(
         host.dispatch("fanotes:read-worksheet", &[json!("blatt-1")])
             .unwrap_err(),
-        format!("EACCES: permission denied, open '{}'", opened("blatt-1.pdf"))
+        format!(
+            "EACCES: permission denied, open '{}'",
+            opened("blatt-1.pdf")
+        )
     );
     fs::set_permissions(&pdf, fs::Permissions::from_mode(0o700)).unwrap();
     fs::remove_dir(&pdf).unwrap();
@@ -563,7 +565,11 @@ fn a_linked_or_unreadable_worksheet_source_uses_the_desktop_open_error() {
             .unwrap_err(),
         json_eloop
     );
-    assert!(json_path.symlink_metadata().unwrap().file_type().is_symlink());
+    assert!(json_path
+        .symlink_metadata()
+        .unwrap()
+        .file_type()
+        .is_symlink());
 }
 
 #[test]
@@ -830,13 +836,18 @@ fn an_unwritable_worksheet_folder_reports_the_desktop_open_error() {
     let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
     assert_eq!(suffix.len(), 20, "{error}");
     assert!(
-        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        suffix
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()),
         "{error}"
     );
     assert!(error.ends_with(".tmp'"), "{error}");
     fs::set_permissions(&worksheets, fs::Permissions::from_mode(0o700)).unwrap();
     assert!(!worksheets.join("blatt-1.json").exists());
-    assert_eq!(fs::read(worksheets.join("blatt-1.pdf")).unwrap(), b"%PDF-1.4\n");
+    assert_eq!(
+        fs::read(worksheets.join("blatt-1.pdf")).unwrap(),
+        b"%PDF-1.4\n"
+    );
 }
 
 #[cfg(unix)]

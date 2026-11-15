@@ -7,7 +7,10 @@ use serde_json::{json, Value};
 fn host() -> (Host, std::path::PathBuf) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-folder-locations-{}-{id}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "fanotes-folder-locations-{}-{id}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(vault.join("amat")).unwrap();
@@ -54,7 +57,10 @@ fn several_directories_appear_in_one_folder_and_can_move() {
         .unwrap()
         .iter()
         .any(|item| item == "Gleich.md"));
-    assert_eq!(fs::read_to_string(vault.join("amat/Gleich.md")).unwrap(), "im vault\n");
+    assert_eq!(
+        fs::read_to_string(vault.join("amat/Gleich.md")).unwrap(),
+        "im vault\n"
+    );
 
     let tree = host.dispatch("fanotes:get-tree", &[]).unwrap();
     let amat = child(&tree, "amat");
@@ -77,7 +83,8 @@ fn several_directories_appear_in_one_folder_and_can_move() {
         .unwrap();
     assert_eq!(unter["children"][0]["relativePath"], "amat/Unter/Tief.md");
     assert_eq!(
-        host.dispatch("fanotes:read-file", &[json!("amat/Gleich.md")]).unwrap(),
+        host.dispatch("fanotes:read-file", &[json!("amat/Gleich.md")])
+            .unwrap(),
         "erste"
     );
 

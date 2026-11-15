@@ -1209,6 +1209,7 @@ mod tests {
         assert_eq!(super::canonical_iso("2026-13"), None);
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_local_time_uses_the_desktop_daylight_saving_choice() {
         // `Date.parse` without a zone uses the local zone. In an overlap it
@@ -1266,6 +1267,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_name_is_local_midnight() {
         with_tz("America/New_York", || {
@@ -1284,6 +1286,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_hyphenated_month_matches_date_parse() {
         with_tz("America/New_York", || {
@@ -1347,6 +1350,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_and_one_number_defaults_the_missing_field() {
         with_tz("America/New_York", || {
@@ -1425,6 +1429,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn words_before_a_month_date_are_ignored() {
         with_tz("America/New_York", || {
@@ -1486,6 +1491,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_word_between_the_month_and_its_number_is_ignored() {
         with_tz("America/New_York", || {
@@ -1563,6 +1569,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_trailing_number_after_a_month_date_is_ignored() {
         with_tz("America/New_York", || {
@@ -1632,6 +1639,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_out_of_range_month_time_field_is_a_date_number() {
         with_tz("America/New_York", || {
@@ -1822,6 +1830,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_hyphen_run_after_an_open_clock_is_an_offset() {
         with_tz("America/New_York", || {
@@ -1869,6 +1878,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_sign_after_a_leading_word_is_padding() {
         with_tz("America/New_York", || {
@@ -1904,6 +1914,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_numeric_offset_after_a_time_is_a_fixed_zone() {
         with_tz("America/New_York", || {
@@ -2010,6 +2021,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_longer_month_word_uses_its_first_three_letters() {
         with_tz("America/New_York", || {
@@ -2108,6 +2120,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_zone_keyword_glued_to_digits_is_still_a_zone() {
         with_tz("America/New_York", || {
@@ -2353,6 +2366,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_meridiem_glued_to_digits_is_still_a_meridiem() {
         with_tz("America/New_York", || {
@@ -2444,6 +2458,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_number_without_a_month_is_a_legacy_date() {
         with_tz("America/New_York", || {
@@ -2609,6 +2624,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_hyphen_date_keeps_a_zone_keyword() {
         with_tz("America/New_York", || {
@@ -2692,6 +2708,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_leading_gmt_offset_is_a_date_field() {
         with_tz("America/New_York", || {
@@ -2805,6 +2822,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn parentheses_are_comments_in_a_date() {
         with_tz("America/New_York", || {
@@ -2929,6 +2947,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_glued_parenthetical_keeps_a_date_local() {
         with_tz("America/New_York", || {
@@ -3022,6 +3041,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_space_before_an_open_clock_fills_the_missing_fields() {
         with_tz("America/New_York", || {
@@ -3145,6 +3165,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_later_zone_replaces_a_numeric_offset() {
         with_tz("America/New_York", || {
@@ -3318,6 +3339,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_meridiem_can_carry_an_offset() {
         with_tz("America/New_York", || {
@@ -3424,6 +3446,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_later_meridiem_replaces_an_earlier_one() {
         with_tz("America/New_York", || {
@@ -3527,6 +3550,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_fraction_can_carry_a_glued_meridiem() {
         with_tz("America/New_York", || {
@@ -3664,6 +3688,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_extra_colon_in_an_offset_is_ignored() {
         with_tz("America/New_York", || {
@@ -3716,6 +3741,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_field_may_start_with_a_colon() {
         with_tz("America/New_York", || {
@@ -3784,6 +3810,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_later_sign_replaces_a_glued_offset() {
         with_tz("America/New_York", || {
@@ -4108,6 +4135,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_name_replaces_a_slash_date() {
         with_tz("America/New_York", || {
@@ -4215,6 +4243,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_trailing_hyphen_is_padding_before_a_month() {
         with_tz("America/New_York", || {
@@ -4287,6 +4316,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_non_ascii_letter_does_not_panic() {
         with_tz("America/New_York", || {
@@ -4331,6 +4361,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_comma_glued_to_a_finished_clock_is_empty() {
         with_tz("America/New_York", || {
@@ -4468,6 +4499,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn junk_glued_to_a_finished_clock_is_empty() {
         with_tz("America/New_York", || {
@@ -4578,6 +4610,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dot_after_a_fraction_starts_a_new_field() {
         with_tz("America/New_York", || {
@@ -4635,6 +4668,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_inside_an_offset_is_a_separator() {
         with_tz("America/New_York", || {
@@ -4694,6 +4728,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn ignored_symbols_and_leading_words_make_a_legacy_date() {
         with_tz("America/New_York", || {
@@ -4804,6 +4839,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_date_is_local_midnight() {
         with_tz("America/New_York", || {
@@ -4831,6 +4867,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dot_after_minutes_fills_seconds() {
         with_tz("America/New_York", || {
@@ -4899,6 +4936,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_clock_before_a_slash_date_stays_on_that_day() {
         with_tz("America/New_York", || {
@@ -4977,6 +5015,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_extra_sign_after_a_number_is_empty() {
         with_tz("America/New_York", || {
@@ -5037,6 +5076,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_keyword_glued_to_a_number_is_empty() {
         with_tz("America/New_York", || {
@@ -5318,6 +5358,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_nul_ends_the_date_string() {
         with_tz("America/New_York", || {
@@ -5384,6 +5425,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_date_keeps_a_named_zone() {
         with_tz("America/New_York", || {
@@ -5398,6 +5440,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_date_keeps_a_zone_keyword() {
         with_tz("America/New_York", || {
@@ -5468,6 +5511,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_two_field_slash_date_is_a_legacy_date() {
         with_tz("America/New_York", || {
@@ -5573,6 +5617,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn repeated_leading_signs_are_padding() {
         with_tz("America/New_York", || {
@@ -5659,6 +5704,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_pm_clock_is_twelve_hours_later() {
         with_tz("America/New_York", || {
@@ -5677,6 +5723,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_named_zone_after_a_hyphen_date_is_a_fixed_offset() {
         with_tz("America/New_York", || {
@@ -5691,6 +5738,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_numeric_offset_glued_to_a_named_zone_replaces_that_zone() {
         with_tz("America/New_York", || {
@@ -5828,6 +5876,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_short_hyphen_date_is_local_midnight() {
         // `2026-01` and `2026-10-03` are UTC. A one-digit month or day is local.
@@ -5863,6 +5912,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn whitespace_around_a_date_makes_it_local_midnight() {
         // `2026-10-13` is UTC. The same text with surrounding whitespace is local.
@@ -5919,6 +5969,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_wide_year_is_local_midnight() {
         // Four digits and `+YYYYYY` stay UTC. Any other year width is local.
@@ -5971,6 +6022,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_extra_month_digit_is_local_midnight() {
         // Two digits stay UTC. Any other month or day width is local.
@@ -6005,6 +6057,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_negative_expanded_year_stays_utc() {
         with_tz("America/New_York", || {
@@ -6043,6 +6096,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_expanded_year_keeps_its_clock() {
         with_tz("America/New_York", || {
@@ -6086,6 +6140,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_short_first_field_is_month_day_year() {
         // A hyphen date that is not `YYYY-MM-DD` or `±YYYYYY-MM-DD` uses the
@@ -6144,6 +6199,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_comma_separates_a_date_from_its_clock() {
         with_tz("America/New_York", || {
@@ -6180,6 +6236,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_period_separates_a_date_from_its_clock() {
         with_tz("America/New_York", || {
@@ -6246,6 +6303,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dotted_date_keeps_a_zone_keyword() {
         with_tz("America/New_York", || {
@@ -6327,6 +6385,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_line_separator_is_not_date_padding() {
         with_tz("America/New_York", || {
@@ -6376,10 +6435,7 @@ mod tests {
             text_fields: Vec::new(),
         };
         let saved = serialize_famd("", &payload);
-        assert!(
-            saved.contains("\"updatedAt\":\"Oct 13, 2026\""),
-            "{saved}"
-        );
+        assert!(saved.contains("\"updatedAt\":\"Oct 13, 2026\""), "{saved}");
         let invalid = FamdPayload {
             updated_at: "not-a-date".to_string(),
             ..payload
@@ -6388,6 +6444,7 @@ mod tests {
         assert!(saved.contains("\"updatedAt\":\"not-a-date\""), "{saved}");
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dotted_meridiem_is_not_a_clock() {
         with_tz("America/New_York", || {
@@ -6408,6 +6465,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_gmt_colon_offset_can_pass_twenty_three_hours() {
         with_tz("America/New_York", || {
@@ -6559,6 +6617,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dotted_offset_keeps_the_hour_and_a_later_number() {
         with_tz("America/New_York", || {
@@ -6686,6 +6745,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_later_number_can_be_the_offset_minute() {
         with_tz("America/New_York", || {
@@ -6816,6 +6876,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_colon_after_an_offset_starts_a_clock() {
         with_tz("America/New_York", || {
@@ -6950,6 +7011,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_space_before_hour_24_ignores_later_fraction_digits() {
         with_tz("America/New_York", || {
@@ -7015,6 +7077,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_trailing_hyphen_keeps_an_unfinished_date_local() {
         with_tz("America/New_York", || {
@@ -7129,12 +7192,14 @@ mod tests {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe extern "C" {
+            #[cfg_attr(windows, link_name = "_tzset")]
             fn tzset();
         }
         struct Restore(Option<String>);
         impl Drop for Restore {
             fn drop(&mut self) {
                 unsafe extern "C" {
+                    #[cfg_attr(windows, link_name = "_tzset")]
                     fn tzset();
                 }
                 match self.0.take() {
@@ -7296,6 +7361,7 @@ mod tests {
         assert!(!again.contains("textFields"), "{again}");
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn page_stats_follow_the_desktop_creation_time() {
         with_tz("America/New_York", || {
@@ -7340,6 +7406,7 @@ mod tests {
         assert_eq!(super::js_json_number(0.5).to_string(), "0.5");
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_compact_gmt_offset_matches_date_parse() {
         with_tz("America/New_York", || {
@@ -7350,22 +7417,43 @@ mod tests {
                 ("2026-10-13 16:00 GMT+530", Some("2026-10-13T10:30:00.000Z")),
                 ("2026-10-13 16:00 GMT+53", Some("2026-10-11T11:00:00.000Z")),
                 ("2026-10-13 16:00 GMT+24", Some("2026-10-12T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT+24:00", Some("2026-10-12T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT+2360", Some("2026-10-12T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT+2399", Some("2026-10-12T15:21:00.000Z")),
+                (
+                    "2026-10-13 16:00 GMT+24:00",
+                    Some("2026-10-12T16:00:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+2360",
+                    Some("2026-10-12T16:00:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+2399",
+                    Some("2026-10-12T15:21:00.000Z"),
+                ),
                 ("2026-10-13 16:00 GMT+130", Some("2026-10-13T14:30:00.000Z")),
                 ("2026-10-13 16:00 GMT+001", Some("2026-10-13T15:59:00.000Z")),
                 ("2026-10-13 16:00 GMT+5:", Some("2026-10-13T11:00:00.000Z")),
                 ("2026-10-13 16:00 GMT+5:3", Some("2026-10-13T10:57:00.000Z")),
                 ("2026-10-13 16:00 GMT+3:5", Some("2026-10-13T12:55:00.000Z")),
-                ("2026-10-13 16:00 GMT+0530", Some("2026-10-13T10:30:00.000Z")),
-                ("2026-10-13 16:00 GMT+2400", Some("2026-10-12T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT+9999", Some("2026-10-09T11:21:00.000Z")),
+                (
+                    "2026-10-13 16:00 GMT+0530",
+                    Some("2026-10-13T10:30:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+2400",
+                    Some("2026-10-12T16:00:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+9999",
+                    Some("2026-10-09T11:21:00.000Z"),
+                ),
                 ("2026-10-13 16:00 GMT+90", Some("2026-10-09T22:00:00.000Z")),
                 ("2026-10-13 16:00 GMT-530", Some("2026-10-13T21:30:00.000Z")),
                 ("2026-10-13 16:00 GMT-53", Some("2026-10-15T21:00:00.000Z")),
                 ("2026-10-13 16:00 GMT-24", Some("2026-10-14T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT-2360", Some("2026-10-14T16:00:00.000Z")),
+                (
+                    "2026-10-13 16:00 GMT-2360",
+                    Some("2026-10-14T16:00:00.000Z"),
+                ),
                 ("2026-10-13 16:00 GMT-5:", Some("2026-10-13T21:00:00.000Z")),
                 ("2026-10-13 16:00 UTC-530", Some("2026-10-13T21:30:00.000Z")),
                 ("2026-10-13 16:00 UT-530", Some("2026-10-13T21:30:00.000Z")),
@@ -7373,7 +7461,10 @@ mod tests {
                 ("2026-10-13 GMT-530", Some("2026-10-13T05:30:00.000Z")),
                 ("2026-10-13 GMT-53", Some("2026-10-15T05:00:00.000Z")),
                 ("Oct 13 2026 GMT-530", Some("2026-10-13T05:30:00.000Z")),
-                ("Oct 13 2026 16:00 GMT-530", Some("2026-10-13T21:30:00.000Z")),
+                (
+                    "Oct 13 2026 16:00 GMT-530",
+                    Some("2026-10-13T21:30:00.000Z"),
+                ),
                 ("Oct 13 2026 GMT-53", Some("2026-10-15T05:00:00.000Z")),
                 ("10/13/2026 16:00 GMT-530", Some("2026-10-13T21:30:00.000Z")),
                 ("10/13/2026 GMT-530", Some("2026-10-13T05:30:00.000Z")),
@@ -7388,26 +7479,32 @@ mod tests {
                 ("2026-10-13 16:00 gmt+530", Some("2026-10-13T10:30:00.000Z")),
                 ("2026-10-13 GMT+530", Some("2026-10-12T18:30:00.000Z")),
                 ("2026-10-13 GMT+53", Some("2026-10-10T19:00:00.000Z")),
-                ("Oct 13 2026 16:00 GMT+530", Some("2026-10-13T10:30:00.000Z")),
+                (
+                    "Oct 13 2026 16:00 GMT+530",
+                    Some("2026-10-13T10:30:00.000Z"),
+                ),
                 ("Oct 13 2026 16:00 GMT+53", Some("2026-10-11T11:00:00.000Z")),
                 ("10/13/2026 16:00 GMT+530", Some("2026-10-13T10:30:00.000Z")),
-                ("2026-10-13 4:00 PM GMT+530", Some("2026-10-13T10:30:00.000Z")),
-                ("2026-10-13 16:00 GMT+530 EST", Some("2026-10-13T21:00:00.000Z")),
+                (
+                    "2026-10-13 4:00 PM GMT+530",
+                    Some("2026-10-13T10:30:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+530 EST",
+                    Some("2026-10-13T21:00:00.000Z"),
+                ),
                 ("2026-10-13 16:00 GMT+5:60", None),
                 ("2026-10-13 16:00 GMT+5:30.5", None),
                 ("2026-10-13 16:00 GMT+12345", None),
                 ("2026-10-13T16:00:00 GMT+530", None),
             ];
             for (input, expected) in cases {
-                assert_eq!(
-                    super::canonical_iso(input).as_deref(),
-                    expected,
-                    "{input}"
-                );
+                assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");
             }
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_repeated_colon_after_an_empty_minute_is_a_separator() {
         with_tz("America/New_York", || {
@@ -7446,6 +7543,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_third_offset_field_on_a_hyphen_date_is_empty() {
         with_tz("America/New_York", || {
@@ -7465,6 +7563,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_strict_iso_year_before_the_epoch_keeps_its_calendar() {
         with_tz("America/New_York", || {
@@ -7834,6 +7933,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_name_year_10000_is_local_midnight() {
         with_tz("America/New_York", || {
@@ -7856,6 +7956,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_or_colon_between_a_date_and_a_clock_is_a_separator() {
         with_tz("America/New_York", || {
@@ -7892,6 +7993,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_glued_irregular_gmt_offset_matches_the_spaced_form() {
         with_tz("America/New_York", || {
@@ -7946,6 +8048,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_long_fraction_keeps_nine_significant_digits() {
         with_tz("America/New_York", || {
@@ -7986,10 +8089,7 @@ mod tests {
                     "1970-01-01T00:00:00.000000001234Z",
                     Some("1970-01-01T00:00:00.000Z"),
                 ),
-                (
-                    "1970-01-01T00:00:00.5Z",
-                    Some("1970-01-01T00:00:00.500Z"),
-                ),
+                ("1970-01-01T00:00:00.5Z", Some("1970-01-01T00:00:00.500Z")),
                 (
                     "1970-01-01t00:00:00.0001234567z",
                     Some("1970-01-01T00:00:00.001Z"),
@@ -8052,6 +8152,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_word_continues_through_characters_at_or_above_a() {
         with_tz("America/New_York", || {
@@ -8116,6 +8217,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_colon_after_a_word_is_a_separator() {
         with_tz("America/New_York", || {
@@ -8138,7 +8240,10 @@ mod tests {
                 ("note: 16:00 Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
                 ("note:16:00 Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
                 ("note : 16:00 Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
-                ("note: 4:00 PM Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
+                (
+                    "note: 4:00 PM Oct 13 2026",
+                    Some("2026-10-13T20:00:00.000Z"),
+                ),
                 ("note:4:5 Oct 13 2026", Some("2026-10-13T08:05:00.000Z")),
                 ("note: 10/13/1950", Some("1950-10-13T05:00:00.000Z")),
                 ("note:10/13/1950", Some("1950-10-13T05:00:00.000Z")),
@@ -8202,6 +8307,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_after_a_time_colon_defaults_the_day() {
         with_tz("America/New_York", || {
@@ -8263,6 +8369,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_second_clock_after_a_time_colon_month_is_empty() {
         with_tz("America/New_York", || {
@@ -8279,6 +8386,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_positive_expanded_year_with_a_clock_is_local() {
         with_tz("America/New_York", || {
@@ -8323,6 +8431,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn date_parse_reads_open_clocks_and_dotted_seconds() {
         with_tz("America/New_York", || {
@@ -8377,6 +8486,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_line_separator_inside_a_month_is_not_a_year() {
         with_tz("America/New_York", || {
@@ -8397,6 +8507,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_colon_takes_the_last_short_hyphen_field_as_the_hour() {
         with_tz("America/New_York", || {
@@ -8459,6 +8570,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_fullwidth_digit_prefix_is_a_word() {
         with_tz("America/New_York", || {
@@ -8489,6 +8601,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_sign_after_a_slash_field_is_empty() {
         with_tz("America/New_York", || {
@@ -8514,6 +8627,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_negative_expanded_year_keeps_slash_fields() {
         with_tz("America/New_York", || {
@@ -8576,6 +8690,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_trailing_dot_keeps_a_negative_expanded_year() {
         with_tz("America/New_York", || {
@@ -8616,6 +8731,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_newline_before_a_negative_year_clock_is_a_separator() {
         with_tz("America/New_York", || {

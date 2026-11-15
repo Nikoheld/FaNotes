@@ -99,7 +99,8 @@ impl FolderLocations {
         }
         let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
         fs::write(&temporary, text.as_bytes()).map_err(|error| error.to_string())?;
-        fs::rename(&temporary, &path).map_err(|error| vault::node_rename_error(&temporary, &path, &error))?;
+        fs::rename(&temporary, &path)
+            .map_err(|error| vault::node_rename_error(&temporary, &path, &error))?;
         Ok(())
     }
 
@@ -115,7 +116,10 @@ impl FolderLocations {
         let mut best: Option<(&str, &[PathBuf])> = None;
         for (folder, paths) in &self.folders {
             if logical == folder || logical.starts_with(&format!("{folder}/")) {
-                if best.map(|(current, _)| folder.len() > current.len()).unwrap_or(true) {
+                if best
+                    .map(|(current, _)| folder.len() > current.len())
+                    .unwrap_or(true)
+                {
                     best = Some((folder.as_str(), paths.as_slice()));
                 }
             }
@@ -127,7 +131,10 @@ impl FolderLocations {
     pub fn content_roots(&self, vault: &Path, logical_folder: &str) -> (bool, Vec<PathBuf>) {
         let Some((folder, paths)) = self.longest(logical_folder) else {
             let mut primary = vault.to_path_buf();
-            for segment in logical_folder.split('/').filter(|segment| !segment.is_empty()) {
+            for segment in logical_folder
+                .split('/')
+                .filter(|segment| !segment.is_empty())
+            {
                 primary.push(segment);
             }
             return (false, vec![primary]);
@@ -218,15 +225,22 @@ impl FolderLocations {
             }
             match fs::symlink_metadata(&candidate) {
                 Ok(info) if info.file_type().is_symlink() => {
-                    return Err("Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned());
+                    return Err(
+                        "Symbolische Links sind innerhalb des Vaults nicht erlaubt.".to_owned()
+                    );
                 }
                 Ok(info) if file == Some(true) && !info.is_file() => continue,
                 Ok(info) if file == Some(false) && !info.is_dir() => continue,
                 Ok(info) if file.is_none() && !info.is_file() && !info.is_dir() => continue,
                 Ok(_) => {
-                    if let (Ok(anchor), Ok(real)) = (fs::canonicalize(root), fs::canonicalize(&candidate)) {
+                    if let (Ok(anchor), Ok(real)) =
+                        (fs::canonicalize(root), fs::canonicalize(&candidate))
+                    {
                         if !vault::is_inside_root(&anchor, &real) {
-                            return Err("Der Pfad verlässt den verknüpften Ordner über einen Link.".to_owned());
+                            return Err(
+                                "Der Pfad verlässt den verknüpften Ordner über einen Link."
+                                    .to_owned(),
+                            );
                         }
                     }
                     return Ok(candidate);
@@ -242,11 +256,11 @@ impl FolderLocations {
         if allow_missing {
             if let Ok(anchor) = fs::canonicalize(&paths[0]) {
                 let parent_inside = missing
-                .parent()
-                .is_some_and(|parent| vault::is_inside_root(&anchor, parent));
-            if !vault::is_inside_root(&anchor, &missing) && !parent_inside {
-                return Err("Der Pfad liegt außerhalb des verknüpften Ordners.".to_owned());
-            }
+                    .parent()
+                    .is_some_and(|parent| vault::is_inside_root(&anchor, parent));
+                if !vault::is_inside_root(&anchor, &missing) && !parent_inside {
+                    return Err("Der Pfad liegt außerhalb des verknüpften Ordners.".to_owned());
+                }
             }
             let _ = vault;
             return Ok(missing);
@@ -326,7 +340,8 @@ impl FolderLocations {
 }
 
 fn require_directory(path: &Path) -> Result<PathBuf, String> {
-    let info = fs::symlink_metadata(path).map_err(|_| "Der verknüpfte Ordner wurde nicht gefunden.".to_owned())?;
+    let info = fs::symlink_metadata(path)
+        .map_err(|_| "Der verknüpfte Ordner wurde nicht gefunden.".to_owned())?;
     if info.file_type().is_symlink() || !info.is_dir() {
         return Err("Der verknüpfte Ordner wurde nicht gefunden.".to_owned());
     }
@@ -347,14 +362,16 @@ pub fn validate_location(
     if !path.is_absolute() {
         return Err("Ein Ordnerpfad muss ein absoluter Ordner sein.".to_owned());
     }
-    let info = fs::symlink_metadata(path).map_err(|_| "Der Ordnerpfad wurde nicht gefunden.".to_owned())?;
+    let info = fs::symlink_metadata(path)
+        .map_err(|_| "Der Ordnerpfad wurde nicht gefunden.".to_owned())?;
     if info.file_type().is_symlink() {
         return Err("Symbolische Links sind als Ordnerpfad nicht erlaubt.".to_owned());
     }
     if !info.is_dir() {
         return Err("Der Ordnerpfad ist kein Ordner.".to_owned());
     }
-    let real = fs::canonicalize(path).map_err(|_| "Der Ordnerpfad wurde nicht gefunden.".to_owned())?;
+    let real =
+        fs::canonicalize(path).map_err(|_| "Der Ordnerpfad wurde nicht gefunden.".to_owned())?;
     let vault_real = fs::canonicalize(vault).unwrap_or_else(|_| vault.to_path_buf());
     if real == vault_real || vault::is_inside_root(&vault_real, &real) {
         return Err("Der Ordnerpfad darf nicht im Vault liegen.".to_owned());
@@ -409,7 +426,14 @@ pub fn move_contents(from: &Path, to: &Path) -> Result<(u64, Vec<String>), Strin
     }
     let mut moved = 0_u64;
     let mut conflicts = Vec::new();
-    walk_move(&from_real, &from_real, &to_real, 0, &mut moved, &mut conflicts)?;
+    walk_move(
+        &from_real,
+        &from_real,
+        &to_real,
+        0,
+        &mut moved,
+        &mut conflicts,
+    )?;
     Ok((moved, conflicts))
 }
 

@@ -60,7 +60,8 @@ fn an_unreadable_drawing_library_is_not_an_empty_list() {
         expected
     );
     assert_eq!(
-        host.dispatch("fanotes:search", &[json!("Skizze")]).unwrap_err(),
+        host.dispatch("fanotes:search", &[json!("Skizze")])
+            .unwrap_err(),
         expected
     );
     fs::set_permissions(&assets, fs::Permissions::from_mode(0o700)).unwrap();
@@ -85,25 +86,20 @@ fn an_unsearchable_asset_parent_uses_the_desktop_lstat_and_mkdir_errors() {
         }
     }
     let _restore = Restore(internal.clone());
-    let mkdir_error = format!(
-        "EACCES: permission denied, mkdir '{}'",
-        assets.display()
-    );
+    let mkdir_error = format!("EACCES: permission denied, mkdir '{}'", assets.display());
     assert_eq!(
         host.dispatch("fanotes:list-drawings", &[]).unwrap_err(),
         mkdir_error
     );
     fs::set_permissions(&internal, fs::Permissions::from_mode(0o666)).unwrap();
-    let lstat_error = format!(
-        "EACCES: permission denied, lstat '{}'",
-        assets.display()
-    );
+    let lstat_error = format!("EACCES: permission denied, lstat '{}'", assets.display());
     assert_eq!(
         host.dispatch("fanotes:list-drawings", &[]).unwrap_err(),
         lstat_error
     );
     assert_eq!(
-        host.dispatch("fanotes:search", &[json!("Skizze")]).unwrap_err(),
+        host.dispatch("fanotes:search", &[json!("Skizze")])
+            .unwrap_err(),
         lstat_error
     );
 }
@@ -136,7 +132,10 @@ fn a_numeric_drawing_id_is_rejected() {
         .unwrap();
     let id = saved["id"].as_str().unwrap();
     assert!(!id.is_empty());
-    assert!(dir.join("vault/.fanotes/assets").join(format!("{id}.json")).is_file());
+    assert!(dir
+        .join("vault/.fanotes/assets")
+        .join(format!("{id}.json"))
+        .is_file());
 }
 
 #[test]
@@ -465,6 +464,7 @@ fn a_drawing_with_a_bad_byte_still_opens() {
     assert_eq!(hits[0]["title"], "Ski\u{FFFD}ze");
 }
 
+#[cfg(unix)]
 #[test]
 fn handwriting_is_not_saved_through_a_symlink_folder() {
     let (dir, mut host) = host();
@@ -677,11 +677,8 @@ fn handwriting_uses_the_settings_paper_when_the_note_has_none() {
     let (dir, mut host) = host();
     let vault = dir.join("vault");
     fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
-    host.dispatch(
-        "fanotes:save-settings",
-        &[json!({ "paperStyle": "grid" })],
-    )
-    .unwrap();
+    host.dispatch("fanotes:save-settings", &[json!({ "paperStyle": "grid" })])
+        .unwrap();
     host.dispatch(
         "fanotes:save-drawing",
         &[json!({
@@ -799,9 +796,7 @@ fn an_unwritable_drawing_library_reports_the_desktop_open_error() {
         }
     }
     let _restore = Restore(assets.clone());
-    let error = host
-        .dispatch("fanotes:save-drawing", &[saved])
-        .unwrap_err();
+    let error = host.dispatch("fanotes:save-drawing", &[saved]).unwrap_err();
     let prefix = format!(
         "EACCES: permission denied, open '{}/.skizze.json.{}.",
         assets.display(),
@@ -811,7 +806,9 @@ fn an_unwritable_drawing_library_reports_the_desktop_open_error() {
     let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
     assert_eq!(suffix.len(), 20, "{error}");
     assert!(
-        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        suffix
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()),
         "{error}"
     );
     assert!(error.ends_with(".tmp'"), "{error}");

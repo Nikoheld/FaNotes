@@ -671,7 +671,9 @@ mod tests {
         unsafe extern "C" {
             fn tzset();
         }
-        let _lock = crate::TRASH_CLOCK.lock().unwrap_or_else(|error| error.into_inner());
+        let _lock = crate::TRASH_CLOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let previous = std::env::var("TZ").ok();
         unsafe { std::env::set_var("TZ", tz) };
         unsafe { tzset() };

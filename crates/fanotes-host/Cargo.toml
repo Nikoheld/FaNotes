@@ -27,5 +27,14 @@ url = "2.5"
 icu_collator = "2.3"
 icu_locale_core = "2.3"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [dev-dependencies]
 filetime = "0.2"
