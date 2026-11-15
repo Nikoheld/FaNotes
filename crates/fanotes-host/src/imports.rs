@@ -528,6 +528,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_pdf_dialog_checks_the_extension_before_the_file() {
         let dir = std::env::temp_dir().join(format!(

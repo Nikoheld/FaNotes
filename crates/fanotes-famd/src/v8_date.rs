@@ -861,7 +861,7 @@ fn local_civil_to_utc(year: i32, month: i32, day: i32, hour: i32, minute: i32, s
 }
 
 fn mktime_local(year: i32, month: i32, day: i32, hour: i32, minute: i32, second: i32, isdst: i32) -> Option<i64> {
-    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
+    let mut tm = unsafe { std::mem::zeroed::<local_time::tm>() };
     tm.tm_year = year - 1900;
     tm.tm_mon = month - 1;
     tm.tm_mday = day;
@@ -870,18 +870,17 @@ fn mktime_local(year: i32, month: i32, day: i32, hour: i32, minute: i32, second:
     tm.tm_sec = second;
     tm.tm_isdst = isdst;
     let previous = std::io::Error::last_os_error();
-    unsafe { *libc::__errno_location() = 0 };
-    let result = unsafe { libc::mktime(&mut tm) };
-    let failed = result == -1 && std::io::Error::last_os_error().raw_os_error().unwrap_or(0) != 0;
-    unsafe { *libc::__errno_location() = previous.raw_os_error().unwrap_or(0) };
+    unsafe { *local_time::errno() = 0 };
+    let result = unsafe { local_time::mktime(&mut tm) };
+    let failed = result == -1 && unsafe { *local_time::errno() } != 0;
+    unsafe { *local_time::errno() = previous.raw_os_error().unwrap_or(0) };
     if failed { None } else { Some(result as i64) }
 }
 
 fn local_civil_is(utc: i64, year: i32, month: i32, day: i32, hour: i32, minute: i32, second: i32) -> bool {
-    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
-    let seconds = utc as libc::time_t;
+    let mut tm = unsafe { std::mem::zeroed::<local_time::tm>() };
     unsafe {
-        if libc::localtime_r(&seconds, &mut tm).is_null() {
+        if !local_time::localtime(utc, &mut tm) {
             return false;
         }
     }
@@ -891,4 +890,59 @@ fn local_civil_is(utc: i64, year: i32, month: i32, day: i32, hour: i32, minute: 
         && tm.tm_hour == hour
         && tm.tm_min == minute
         && tm.tm_sec == second
+}
+
+/// The C library's local time zone: glibc on Linux, the UCRT on Windows.
+#[cfg(unix)]
+mod local_time {
+    pub use libc::tm;
+
+    pub unsafe fn errno() -> *mut i32 {
+        unsafe { libc::__errno_location() }
+    }
+
+    pub unsafe fn mktime(tm: &mut tm) -> i64 {
+        unsafe { libc::mktime(tm) as i64 }
+    }
+
+    pub unsafe fn localtime(utc: i64, tm: &mut tm) -> bool {
+        let seconds = utc as libc::time_t;
+        unsafe { !libc::localtime_r(&seconds, tm).is_null() }
+    }
+}
+
+#[cfg(windows)]
+mod local_time {
+    /// `struct tm` of the UCRT: nine `int` fields in the C order.
+    #[allow(non_camel_case_types)]
+    #[repr(C)]
+    pub struct tm {
+        pub tm_sec: i32,
+        pub tm_min: i32,
+        pub tm_hour: i32,
+        pub tm_mday: i32,
+        pub tm_mon: i32,
+        pub tm_year: i32,
+        pub tm_wday: i32,
+        pub tm_yday: i32,
+        pub tm_isdst: i32,
+    }
+
+    unsafe extern "C" {
+        fn _errno() -> *mut i32;
+        fn _mktime64(tm: *mut tm) -> i64;
+        fn _localtime64_s(tm: *mut tm, time: *const i64) -> i32;
+    }
+
+    pub unsafe fn errno() -> *mut i32 {
+        unsafe { _errno() }
+    }
+
+    pub unsafe fn mktime(tm: &mut tm) -> i64 {
+        unsafe { _mktime64(tm) }
+    }
+
+    pub unsafe fn localtime(utc: i64, tm: &mut tm) -> bool {
+        unsafe { _localtime64_s(tm, &utc) == 0 }
+    }
 }

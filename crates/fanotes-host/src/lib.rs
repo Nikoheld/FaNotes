@@ -22,6 +22,8 @@ mod secrets;
 mod settings;
 mod vault;
 mod worksheets;
+#[cfg(windows)]
+mod windows_desktop;
 
 mod ai;
 
@@ -1630,6 +1632,9 @@ impl Host {
         }
         match kind {
             "reveal" => reveal_on_desktop(Path::new(target)),
+            #[cfg(windows)]
+            _ => windows_desktop::open_external(target),
+            #[cfg(not(windows))]
             _ => spawn_detached("xdg-open", &[target.to_owned()]),
         }
         .map(|()| Value::Null)
@@ -2788,6 +2793,14 @@ fn reveal_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 
 fn reveal_on_desktop(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    return windows_desktop::reveal(path);
+    #[cfg(not(windows))]
+    reveal_on_freedesktop(path)
+}
+
+#[cfg(not(windows))]
+fn reveal_on_freedesktop(path: &Path) -> Result<(), String> {
     let uri = file_uri(path);
     if spawn_detached(
         "dbus-send",
@@ -3043,6 +3056,9 @@ fn send_to_trash(host: &Host, path: &Path) -> Result<(), String> {
     if let Some(dir) = &host.trash_dir {
         return place_in_trash(dir, path);
     }
+    #[cfg(windows)]
+    return windows_desktop::trash(path);
+    #[cfg(not(windows))]
     if gio_trash(path).is_ok() {
         return Ok(());
     }
@@ -3317,6 +3333,10 @@ fn note_byte_limit(relative: &str) -> u64 {
 /// A missing or unquoted documents entry is the home directory. `$HOME/Documents`
 /// is used only when the config file says so. The last matching line wins.
 fn default_documents_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(documents) = windows_desktop::documents_dir() {
+        return documents;
+    }
     documents_directory(
         std::env::var_os("HOME").as_deref(),
         std::env::var_os("XDG_CONFIG_HOME").as_deref(),
@@ -3466,6 +3486,9 @@ fn language_list_choice(language: &str) -> Option<&str> {
 }
 
 fn current_system_ui_language() -> &'static str {
+    #[cfg(windows)]
+    return system_ui_language(&windows_desktop::ui_language(), "", "", "");
+    #[cfg(not(windows))]
     system_ui_language(
         &std::env::var("LANGUAGE").unwrap_or_default(),
         &std::env::var("LC_ALL").unwrap_or_default(),

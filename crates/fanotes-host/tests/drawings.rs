@@ -465,6 +465,7 @@ fn a_drawing_with_a_bad_byte_still_opens() {
     assert_eq!(hits[0]["title"], "Ski\u{FFFD}ze");
 }
 
+#[cfg(unix)]
 #[test]
 fn handwriting_is_not_saved_through_a_symlink_folder() {
     let (dir, mut host) = host();

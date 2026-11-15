@@ -39,6 +39,7 @@ fn every_preload_channel_dispatches() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn vault_paths_reject_traversal_and_internal_files() {
     let (dir, mut host) = host();

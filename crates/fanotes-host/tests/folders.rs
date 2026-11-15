@@ -260,6 +260,7 @@ fn the_tree_shows_pdf_notes_and_hides_their_famd_companion() {
         .any(|entry| entry["extension"] == "pdf"));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_legacy_lernwerk_directory_becomes_fanotes() {
     let dir = std::env::temp_dir().join(format!("fanotes-legacy-internal-{}", std::process::id()));

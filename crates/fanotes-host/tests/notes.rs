@@ -1245,6 +1245,7 @@ fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
         .is_err());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_symlinked_note_cannot_leave_the_vault() {
     let dir = std::env::temp_dir().join(format!("fanotes-notes-link-{}", std::process::id()));

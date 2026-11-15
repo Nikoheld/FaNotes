@@ -130,6 +130,7 @@ fn a_missing_child_is_reported_before_a_move_into_itself() {
     assert!(vault.join("Ordner/Seite.md").is_file());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_symlinked_folder_cannot_rename_move_or_receive_a_note() {
     let dir = std::env::temp_dir().join(format!("fanotes-rename-link-{}", std::process::id()));

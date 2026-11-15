@@ -10,16 +10,30 @@ fn fresh_local_date() -> (i32, u32, u32) {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_secs() as libc::time_t;
+        .as_secs() as i64;
+    let (year, month, day) = local_year_month_day(seconds);
+    (year + 1900, month as u32 + 1, day as u32)
+}
+
+#[cfg(unix)]
+fn local_year_month_day(seconds: i64) -> (i32, i32, i32) {
+    let seconds = seconds as libc::time_t;
     let mut time = unsafe { std::mem::zeroed::<libc::tm>() };
     unsafe {
         libc::localtime_r(&seconds, &mut time);
     }
-    (
-        (time.tm_year + 1900) as i32,
-        (time.tm_mon + 1) as u32,
-        time.tm_mday as u32,
-    )
+    (time.tm_year, time.tm_mon, time.tm_mday)
+}
+
+#[cfg(windows)]
+fn local_year_month_day(seconds: i64) -> (i32, i32, i32) {
+    // UCRT `struct tm`: sec, min, hour, mday, mon, year, wday, yday, isdst.
+    unsafe extern "C" {
+        fn _localtime64_s(tm: *mut [i32; 9], time: *const i64) -> i32;
+    }
+    let mut time = [0i32; 9];
+    assert_eq!(unsafe { _localtime64_s(&mut time, &seconds) }, 0);
+    (time[5], time[4], time[3])
 }
 
 /// The first day of next month stays inside `Date.parse`'s future, so a
@@ -981,6 +995,7 @@ fn a_reset_marker_with_an_expanded_year_wipes_the_profile() {
     assert!(!marker.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_symlinked_reset_marker_is_discarded() {
     let (app, mut host) = host();

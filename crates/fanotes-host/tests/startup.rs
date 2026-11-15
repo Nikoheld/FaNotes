@@ -374,6 +374,7 @@ fn an_oversized_note_is_rejected() {
     assert!(!vault.join("klein.md").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_untouched_welcome_note_is_refreshed() {
     let dir = scratch();
@@ -591,6 +592,7 @@ fn a_reset_profile_does_not_import_the_electron_config_again() {
     assert!(!app.join(".fanotes-reset-complete").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_imported_vault_symlink_opens_the_real_folder() {
     let dir = scratch();
@@ -626,6 +628,7 @@ fn an_imported_vault_symlink_opens_the_real_folder() {
         .any(|entry| entry["name"] == "Mathe"));
 }
 
+#[cfg(unix)]
 #[test]
 fn reopening_a_linked_vault_uses_the_real_folder_and_refreshes_the_welcome_note() {
     let dir = scratch();

@@ -18,6 +18,7 @@ fn host() -> (std::path::PathBuf, std::path::PathBuf, Host) {
     (vault, app, host)
 }
 
+#[cfg(unix)]
 #[test]
 fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
     let (vault, app, mut host) = host();

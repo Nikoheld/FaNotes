@@ -297,6 +297,7 @@ fn drawing_search_uses_the_library_title_and_skips_invalid_files() {
     assert!(newline.as_array().unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn search_skips_companions_links_and_notes_buried_too_deep() {
     let mut host = host();

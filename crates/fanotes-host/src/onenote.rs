@@ -1643,6 +1643,7 @@ fn create_onenote_temp_dir(parent: &Path) -> Result<PathBuf, String> {
     }
 }
 
+#[cfg(unix)]
 fn unix_mkdtemp(template: &str) -> Result<PathBuf, std::io::Error> {
     let mut bytes = template.as_bytes().to_vec();
     bytes.push(0);
@@ -1652,6 +1653,31 @@ fn unix_mkdtemp(template: &str) -> Result<PathBuf, std::io::Error> {
     }
     let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
     Ok(PathBuf::from(String::from_utf8_lossy(&bytes[..end]).into_owned()))
+}
+
+/// libuv `uv_fs_mkdtemp` on Windows: the trailing `XXXXXX` becomes six random
+/// letters or digits, and the directory is created exclusively.
+#[cfg(not(unix))]
+fn unix_mkdtemp(template: &str) -> Result<PathBuf, std::io::Error> {
+    const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let prefix = template
+        .strip_suffix("XXXXXX")
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    for _ in 0..100 {
+        let mut random = [0u8; 6];
+        getrandom::getrandom(&mut random).map_err(|_| std::io::Error::other("getrandom"))?;
+        let suffix: String = random
+            .iter()
+            .map(|byte| CHARS[*byte as usize % CHARS.len()] as char)
+            .collect();
+        let path = PathBuf::from(format!("{prefix}{suffix}"));
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
 }
 
 fn ensure_note_directory(note_root: &Path, directory: &Path) -> Result<(), String> {
