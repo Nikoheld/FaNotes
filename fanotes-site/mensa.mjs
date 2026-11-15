@@ -51,6 +51,11 @@ const readLimitedText = async (response, max) => {
     if (bytes) body += decoder.decode(value, { stream: true })
   }
 }
+// An error page is not parsed. Cancel it so the rest is not kept.
+const releaseUnread = async (response) => {
+  const reader = response?.body?.getReader?.()
+  if (reader && typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+}
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', auml: 'ä', ouml: 'ö', uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß', eacute: 'é', egrave: 'è', agrave: 'à' }
 const decode = (value) => value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/giu, (whole, name) => {
@@ -262,6 +267,7 @@ export const createMensa = (options = {}) => {
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         })
         if (!response.ok) {
+          await releaseUnread(response)
           last = Object.assign(new Error(`HTTP ${response.status}`), { status: response.status })
           events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!RETRY_STATUS.has(response.status) || attempt === UPSTREAM_ATTEMPTS) throw last
