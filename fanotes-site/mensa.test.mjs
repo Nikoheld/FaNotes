@@ -234,3 +234,38 @@ test('endpoints answer with the body shape and only GET', async () => {
   assert.equal((await run('POST', '/api/v1/kanti-web/mensa')).status, 405)
   assert.equal((await run('GET', '/api/v1/other')).handled, false)
 })
+
+test('a 503 or a timeout is tried once more; the stored menu stays when the source stays down', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-'))
+  const calls = []
+  const fetchImpl = async (url) => {
+    const target = String(url)
+    calls.push(target)
+    if (target.includes('/api/_Combine/')) {
+      const status = calls.filter((item) => item.includes('/Unit/')).length === 1 ? 503 : 200
+      const kind = target.split('/api/_Combine/')[1].split('/')[0].toLowerCase()
+      return { ok: status === 200, status, text: async () => JSON.stringify(apiFixture[kind]) }
+    }
+    return { ok: true, status: 200, text: async () => fixture }
+  }
+  const mensa = createMensa({ fetch: fetchImpl, sleep: async () => {}, now: () => new Date('2026-11-10T07:00:00Z'), root, log: () => {} })
+  const body = await mensa.get()
+  assert.equal(body.days.length, 10)
+  assert.equal(body.stale, false)
+  assert.equal(calls.filter((item) => item.includes('/Unit/')).length, 2)
+
+  let clock = new Date('2026-11-10T12:00:00Z')
+  let timedOut = false
+  const later = createMensa({
+    fetch: async () => { timedOut = true; throw Object.assign(new Error('timeout'), { name: 'TimeoutError' }) },
+    sleep: async () => {},
+    now: () => clock,
+    root,
+    log: () => {},
+  })
+  const kept = await later.get()
+  await later.idle()
+  assert.equal(timedOut, true)
+  assert.equal(kept.days.length, 10)
+  assert.equal(kept.stale, true)
+})
