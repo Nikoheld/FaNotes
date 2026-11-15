@@ -577,3 +577,32 @@ test('a hung FCM call is abandoned and tried again', async () => {
   assert.equal(lines.join('\n').includes('ya29'), false)
   assert.equal(lines.join('\n').includes('PRIVATE'), false)
 })
+
+test('an unreadable push ledger is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fcm-ledger-'))
+  const file = join(root, 'pushed-notices.json')
+  const kept = grade('grade:keep:5')
+  const extra = grade('grade:new:4')
+  try {
+    assert.equal((await claimPushKeys(file, [kept])).length, 1)
+    const before = await readFile(file)
+    await chmod(file, 0o000)
+    try {
+      const during = await claimPushKeys(file, [kept, extra])
+      assert.deepEqual(during.map((change) => change.id), ['grade:keep:5', 'grade:new:4'])
+    } finally {
+      await chmod(file, 0o600)
+    }
+    assert.deepEqual(await readFile(file), before)
+    assert.equal((await claimPushKeys(file, [kept])).length, 0)
+    await writeFile(file, '{', { mode: 0o600 })
+    assert.equal((await claimPushKeys(file, [extra])).length, 1)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(parsed.version, 1)
+    assert.equal(parsed.keys.length, 1)
+    assert.equal(JSON.stringify(parsed).includes('grade:new'), false)
+  } finally {
+    await chmod(file, 0o600).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})
