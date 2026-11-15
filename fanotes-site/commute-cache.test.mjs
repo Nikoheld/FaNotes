@@ -269,6 +269,23 @@ test('an unreadable commute file keeps its previous contents', async () => {
   }
 })
 
+test('a commute timetable file that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-shape-'))
+  const routeFile = join(root, 'commute-routes.json')
+  const routeText = '{"version":2,"entries":[{"key":"route:keep","at":1,"value":{"trips":[{"id":"kept"}]}}]}\n'
+  await writeFile(routeFile, routeText, { mode: 0o600 })
+  const fetchImpl = async () => ok(fixture)
+  try {
+    const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, routeFile, log: () => {} })
+    const answer = await provider.trips(query)
+    assert.ok(answer.trips.length > 0)
+    assert.equal(await readFile(routeFile, 'utf8'), routeText)
+    assert.equal((await readdir(root)).some((name) => name.endsWith('.tmp')), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('timetable requests are logged as JSON without the query, a token, or a cookie', async () => {
   assert.equal(requestIdFrom('req-1234.ok'), 'req-1234.ok')
   const generated = requestIdFrom('short')
