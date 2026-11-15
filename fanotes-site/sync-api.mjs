@@ -234,9 +234,14 @@ const atomicWrite = async (target, data) => {
   try {
     await handle.writeFile(data)
     await handle.sync()
-  } finally {
-    await handle.close()
+  } catch (error) {
+    await handle.close().catch(() => {})
+    await fs.rm(temporary, { force: true })
+    // A failed write must not leave its temporary name beside the real file.
+    await syncDirectory(dirname(target))
+    throw error
   }
+  await handle.close()
   await fs.rename(temporary, target)
   // The new directory entry has to be durable. A crash after the rename and
   // before this sync can lose the file the caller just replaced.
@@ -257,7 +262,13 @@ const syncDirectory = async (directory) => {
 const copyDurable = async (source, destination) => {
   const temporary = `${destination}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
   const input = await fs.open(source, 'r')
-  const output = await fs.open(temporary, 'wx', 0o600)
+  let output
+  try {
+    output = await fs.open(temporary, 'wx', 0o600)
+  } catch (error) {
+    await input.close().catch(() => {})
+    throw error
+  }
   const buffer = Buffer.alloc(64 * 1024)
   try {
     let position = 0
@@ -277,6 +288,8 @@ const copyDurable = async (source, destination) => {
     await output.close().catch(() => {})
     await input.close().catch(() => {})
     await fs.rm(temporary, { force: true })
+    // A failed copy must not leave its temporary name beside the live note.
+    await syncDirectory(dirname(destination))
     throw error
   }
   await output.close()

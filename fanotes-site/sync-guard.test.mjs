@@ -1030,6 +1030,34 @@ test('a deleted note is not copied back from its archive', async () => {
   assert.equal(live.headers['x-fanotes-deleted'], '1')
 })
 
+test('a restored note does not leave a temporary file beside it', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = revisionOf(created)
+  const accountDir = join(dataDirectory, 'accounts', accountId)
+  const blobPath = join(accountDir, 'blobs', id)
+  const archiveDir = join(accountDir, 'revisions', id)
+  mkdirSync(archiveDir, { recursive: true })
+  writeFileSync(join(archiveDir, String(revision)), original)
+  rmSync(blobPath)
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, original)
+  const temps = []
+  const walk = (directory) => {
+    for (const name of readdirSync(directory)) {
+      const path = join(directory, name)
+      if (lstatSync(path).isDirectory()) walk(path)
+      else if (name.includes('.tmp')) temps.push(name)
+    }
+  }
+  walk(accountDir)
+  assert.deepEqual(temps, [])
+  assert.deepEqual(readFileSync(blobPath), original)
+})
+
 test('putting the same bytes keeps the live inode and stores the new metadata', async () => {
   const id = randomBytes(32).toString('hex')
   const original = randomBytes(5000)
