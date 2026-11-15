@@ -106,7 +106,7 @@ const probe = `<!doctype html>
 <script type="module">
   const post = (name, value) => fetch('/__probe', { method: 'POST', body: JSON.stringify({ name, value }) })
   const frame = () => new Promise((resolve) => requestAnimationFrame(resolve))
-  const fail = (error) => post('error', String(error && error.stack || error))
+  const fail = (error) => post('error', String(error && error.message ? error.message + ' @ ' + error.stack : error))
   window.addEventListener('error', (event) => fail(event.error || event.message))
   window.addEventListener('unhandledrejection', (event) => fail(event.reason))
   try {
