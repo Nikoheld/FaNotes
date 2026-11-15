@@ -1,10 +1,12 @@
 // Commute provider: short-lived cache, in-flight coalescing, upstream retries, and a recorded
 // search.ch answer for Brugg → Aarau via Aarau, Lenzburg (a via equal to the destination).
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hasViaLoop, parseLocal, parseSearchChRoute, passesVias } from './commute-logic.mjs'
-import { UPSTREAM_ATTEMPTS, UPSTREAM_TIMEOUT_MS, createCommuteProvider, upstreamRetryable } from './commute.mjs'
+import { ROUTE_DISK_MS, UPSTREAM_ATTEMPTS, UPSTREAM_TIMEOUT_MS, createCommuteProvider, upstreamRetryable } from './commute.mjs'
 import { createServiceLog, requestIdFrom } from './service-log.mjs'
 
 const fixture = JSON.parse(await readFile(new URL('./test-fixtures/commute-searchch-brugg-aarau-loop.json', import.meta.url), 'utf8'))
@@ -127,6 +129,47 @@ test('timeouts and 5xx are retried; a 400 is not', async () => {
   assert.deepEqual(empty.trips, [])
   assert.deepEqual(client, ['timetable.search.ch', 'transport.opendata.ch'])
   assert.equal(UPSTREAM_TIMEOUT_MS, 12_000)
+})
+
+test('a restart serves the last stored timetable when the source is down', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-disk-'))
+  const routeFile = join(root, 'commute-routes.json')
+  let up = true
+  const fetchImpl = async () => {
+    if (!up) throw Object.assign(new Error('down'), { name: 'TimeoutError' })
+    return ok(fixture)
+  }
+  try {
+    const first = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, routeFile, log: () => {} })
+    const answer = await first.trips(query)
+    assert.equal(answer.stale, undefined)
+    assert.equal(answer.trips[0].legs[0].line, 'IR 16')
+    const stored = JSON.parse(await readFile(routeFile, 'utf8'))
+    assert.equal(stored.version, 1)
+    assert.equal(stored.entries.length, 1)
+    assert.equal(stored.entries[0].key.startsWith('route:'), true)
+    assert.equal(JSON.stringify(stored).includes('?'), false)
+    const mode = (await stat(routeFile)).mode & 0o777
+    assert.equal(mode, 0o600)
+
+    up = false
+    const restarted = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT + 60_000), sleep: async () => {}, routeFile, log: () => {} })
+    const stale = await restarted.trips(query)
+    assert.equal(stale.stale, true)
+    assert.equal(stale.trips[0].legs[0].line, 'IR 16')
+    assert.equal(stale.trips.length, answer.trips.length)
+
+    const expired = createCommuteProvider({
+      fetchImpl,
+      now: () => new Date(ASK_AT + ROUTE_DISK_MS + 60_000),
+      sleep: async () => {},
+      routeFile,
+      log: () => {},
+    })
+    await assert.rejects(() => expired.trips(query))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('timetable requests are logged as JSON without the query, a token, or a cookie', async () => {
