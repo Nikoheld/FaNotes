@@ -138,6 +138,7 @@ fn arm_close_warning(handle: tauri::AppHandle) {
 }
 
 mod capture;
+mod native;
 mod export;
 
 pub use capture::capture_html;
@@ -380,7 +381,8 @@ macro_rules! fanotes_commands {
                 request_close,
                 confirm_close,
                 cancel_close,
-                reset_app_data
+                reset_app_data,
+                native::pdf::pdf_open, native::pdf::pdf_page_sizes, native::pdf::pdf_render, native::pdf::pdf_cancel, native::pdf::pdf_close
             ]
         }
     };

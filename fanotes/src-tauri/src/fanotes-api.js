@@ -172,6 +172,15 @@ if (typeof window !== 'undefined') {
     onSheetZoom: (callback) => listen('fanotes:sheet-zoom', (direction) => callback(direction)),
     captureWindow: () => invoke('fanotes:capture-window'),
     renderPdfPage: (request) => invoke('fanotes:render-pdf-page', request),
+    // WP8: PDFium rasters in the host (`native/pdf.rs`). Not a preload channel;
+    // the renderer uses it only behind the native-PDF desktop flag.
+    pdfNative: Object.freeze({
+      open: (request) => internals.invoke('fanotes-native:pdf-open', { request }),
+      pageSizes: (doc) => internals.invoke('fanotes-native:pdf-page-sizes', { request: { doc } }),
+      render: (request) => internals.invoke('fanotes-native:pdf-render', { request }),
+      cancel: (request) => internals.invoke('fanotes-native:pdf-cancel', { request }),
+      close: (doc) => internals.invoke('fanotes-native:pdf-close', { request: { doc } }),
+    }),
     addons: {
       fetchText: (url) => invoke('fanotes:addons-fetch', url),
       list: () => invoke('fanotes:addons-list'),
