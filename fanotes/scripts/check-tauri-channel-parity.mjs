@@ -8,19 +8,31 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(appRoot, '..')
 const read = (relative) => fs.readFileSync(path.join(appRoot, relative), 'utf8')
 
-const names = (source, pattern) => [...source.matchAll(pattern)].map((match) => match[1])
-const preload = names(read('electron/preload.cjs').slice(0, read('electron/preload.cjs').indexOf('const invoke')), /'(fanotes:[^']+)'/g)
-const host = [...new Set(names(fs.readFileSync(path.join(repoRoot, 'crates/fanotes-host/src/channels.rs'), 'utf8'), /"(fanotes:[^"]+)"/g))]
+// Desktop-only engine commands are named `fanotes-native:<area>-<verb>`
+// (docs/RUST_DESKTOP.md, section 3). They are not preload channels, so they are
+// left out of the comparison. Any other `fanotes-…:` prefix still counts and fails.
+const NATIVE_PREFIX = 'fanotes-native:'
+const names = (source, pattern) => [...source.matchAll(pattern)]
+  .map((match) => match[1])
+  .filter((name) => !name.startsWith(NATIVE_PREFIX))
+const CHANNEL = String.raw`fanotes(?:-[a-z]+)?:[^'"]+`
+const preload = names(read('electron/preload.cjs').slice(0, read('electron/preload.cjs').indexOf('const invoke')), new RegExp(`'(${CHANNEL})'`, 'g'))
+const host = [...new Set(names(fs.readFileSync(path.join(repoRoot, 'crates/fanotes-host/src/channels.rs'), 'utf8'), new RegExp(`"(${CHANNEL})"`, 'g')))]
 // The generated list is `name => "fanotes:..."`. Window commands are handwritten
 // as `#[tauri::command(rename = "fanotes:...")]` and are not in that list.
 const commands = [...new Set([
-  ...names(read('src-tauri/src/lib.rs'), /=> "(fanotes:[^"]+)"/g),
-  ...names(read('src-tauri/src/lib.rs'), /rename = "(fanotes:[^"]+)"/g),
+  ...names(read('src-tauri/src/lib.rs'), new RegExp(`=> "(${CHANNEL})"`, 'g')),
+  ...names(read('src-tauri/src/lib.rs'), new RegExp(`rename = "(${CHANNEL})"`, 'g')),
 ])]
 const bridge = [...new Set([
-  ...names(read('src-tauri/src/fanotes-api.js'), /invoke\('(fanotes:[^']+)'/g),
-  ...names(read('src-tauri/src/fanotes-api.js'), /listen\('(fanotes:[^']+)'/g),
+  ...names(read('src-tauri/src/fanotes-api.js'), new RegExp(`invoke\\('(${CHANNEL})'`, 'g')),
+  ...names(read('src-tauri/src/fanotes-api.js'), new RegExp(`listen\\('(${CHANNEL})'`, 'g')),
 ])]
+assert.deepEqual(
+  names(`invoke('fanotes-native:sync-run') invoke('fanotes:read-file') invoke('fanotes-extra:x')`, new RegExp(`invoke\\('(${CHANNEL})'`, 'g')),
+  ['fanotes:read-file', 'fanotes-extra:x'],
+  'Nur fanotes-native:* darf aus dem Vergleich fallen.',
+)
 const same = (left, right, label) => {
   const missing = left.filter((name) => !right.includes(name))
   const extra = right.filter((name) => !left.includes(name))

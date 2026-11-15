@@ -1629,10 +1629,24 @@ fn history_uses_the_desktop_trim_for_a_blank_note() {
         &[json!("Mathe/Seite.md"), json!("Hallo\n")],
     )
     .unwrap();
+    // The blank first save is not a snapshot on its own. The second save keeps
+    // it because the note now has a `.famd` companion, which the desktop
+    // stores beside the text (note-history.cjs, 9ae6a783).
     let history = host
         .dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
         .unwrap();
-    assert!(history.as_array().unwrap().is_empty());
+    assert_eq!(history.as_array().unwrap().len(), 1);
+    let snapshot = host
+        .dispatch(
+            "fanotes:read-note-history",
+            &[json!("Mathe/Seite.md"), history[0]["id"].clone()],
+        )
+        .unwrap();
+    // Desktop strips the BOM-only body and writes an empty file (abab53a8).
+    assert_eq!(snapshot["content"], "");
+    assert!(snapshot["companion"]
+        .as_str()
+        .is_some_and(|famd| famd.contains("fanotes-famd")));
 
     host.dispatch(
         "fanotes:write-file",
@@ -1715,7 +1729,10 @@ fn a_history_index_uses_the_desktop_indentation() {
     );
     assert!(text.contains("\n      \"id\": \""), "{text}");
     assert!(text.contains("\n      \"createdAt\": \""), "{text}");
-    assert!(text.contains("\n      \"bytes\": 6\n"), "{text}");
+    assert!(
+        text.contains("\n      \"bytes\": 6,\n      \"tier\": \"week\",\n      \"ext\": \".md\"\n"),
+        "{text}"
+    );
     assert!(
         text.contains("\n  \"path\": \"Mathe/Seite.md\"\n}\n"),
         "{text}"

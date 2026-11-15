@@ -478,7 +478,9 @@ fn handwriting_is_not_saved_through_a_symlink_folder() {
             &[json!({
                 "id": "skizze-2",
                 "title": "Skizze",
-                "drawingJson": drawing("Skizze"),
+                // A page with strokes: an empty one over an unreadable companion
+                // is refused before any write, like the desktop guard.
+                "drawingJson": r#"{"schemaVersion":1,"title":"Skizze","strokes":[{"points":[{"x":0.1,"y":0.2}]}],"updatedAt":"2026-01-02T03:04:05.000Z"}"#,
                 "noteRelativePath": "weg/Notiz.md",
             })],
         )
@@ -603,6 +605,16 @@ fn pdf_and_markdown_notes_reopen_their_handwriting() {
 fn handwriting_with_a_bad_byte_still_opens() {
     let (dir, mut host) = host();
     fs::write(dir.join("vault").join("Notiz.md"), "Hallo\n").unwrap();
+    // A v1 companion stays v1. A v2 companion carries a CRC, so a bad byte
+    // there is a damaged note, as in the desktop codec.
+    fs::write(
+        dir.join("vault").join("Notiz.famd"),
+        fanotes_famd::serialize_famd(
+            "Hallo",
+            &fanotes_famd::empty_famd_payload("2026-10-01T00:00:00.000Z"),
+        ),
+    )
+    .unwrap();
     host.dispatch(
         "fanotes:save-drawing",
         &[json!({
