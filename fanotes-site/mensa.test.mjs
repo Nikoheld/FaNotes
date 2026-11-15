@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { createMensa, mensaQuery, parseMensaApi, parseMensaHtml, pickMensaDay } from './mensa.mjs'
+import { createServiceLog } from './service-log.mjs'
 
 const apiFixture = JSON.parse(await fs.readFile(new URL('./test-fixtures/mensa-api-week.json', import.meta.url), 'utf8'))
 const fixture = await fs.readFile(new URL('./test-fixtures/mensa-alte-kanti.html', import.meta.url), 'utf8')
@@ -268,4 +269,50 @@ test('a 503 or a timeout is tried once more; the stored menu stays when the sour
   assert.equal(timedOut, true)
   assert.equal(kept.days.length, 10)
   assert.equal(kept.stale, true)
+})
+
+test('menu fetches are logged as JSON without the query or the menu text', async () => {
+  const lines = []
+  const jsonLog = createServiceLog('mensa', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const root = await mkdtemp(join(tmpdir(), 'mensa-log-'))
+  let unitHits = 0
+  const fetchImpl = async (url) => {
+    const target = String(url)
+    assert.equal(target.includes('schulnetz'), false)
+    if (!target.includes('/api/_Combine/')) return { ok: true, status: 200, text: async () => fixture }
+    const kind = target.split('/api/_Combine/')[1].split('/')[0].toLowerCase()
+    if (kind === 'unit') {
+      unitHits += 1
+      if (unitHits === 1) return { ok: false, status: 503, text: async () => 'Pouletgeschnetzeltes secret-menu' }
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify(apiFixture[kind]) }
+  }
+  const mensa = createMensa({
+    fetch: fetchImpl,
+    sleep: async () => {},
+    now: () => new Date('2026-11-10T07:00:00.000Z'),
+    root,
+    log: () => {},
+    jsonLog,
+  })
+  const body = await mensa.get()
+  assert.equal(body.days.length, 10)
+  assert.equal(body.stale, false)
+  const rows = lines.map((line) => JSON.parse(line))
+  const unit = rows.filter((row) => row.route === 'https://clients.compass-group.ch/api/_Combine/Unit')
+  assert.equal(unit.length, 2)
+  assert.equal(unit[0].requestId, unit[1].requestId)
+  assert.equal(unit[0].level, 'warn')
+  assert.equal(unit[0].status, 503)
+  assert.equal(unit[0].attempt, 1)
+  assert.equal(unit[1].level, 'info')
+  assert.equal(unit[1].status, 200)
+  assert.equal(unit[1].method, 'GET')
+  assert.ok(rows.length > 2)
+  for (const line of lines) {
+    assert.equal(line.includes('?'), false)
+    assert.equal(line.includes('Poulet'), false)
+    assert.equal(line.includes('secret-menu'), false)
+    assert.equal(line.includes('='), false)
+  }
 })

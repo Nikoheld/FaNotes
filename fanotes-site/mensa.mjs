@@ -6,6 +6,7 @@
 // good result and served from a cache.
 import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { createServiceLog, routeOf } from './service-log.mjs'
 
 export const MENSA_HOST = 'clients.compass-group.ch'
 export const MENSA_URL = `https://${MENSA_HOST}/altekanti/de/Mensa%20Alte%20Kanti`
@@ -175,6 +176,10 @@ export const createMensa = (options = {}) => {
   const sleep = options.sleep || ((ms) => new Promise((done) => setTimeout(done, ms)))
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz')
   const log = options.log || ((level, message) => console.log(`${now().toISOString()} mensa ${level} ${message}`))
+  // Production emits one JSON line per upstream call. Tests pass jsonLog when they want the lines.
+  const events = options.jsonLog || createServiceLog('mensa', (line) => {
+    if (process.env.NODE_ENV === 'production') console.log(line)
+  }, now)
   const file = join(root, 'mensa.json')
   let cache = null // { fetchedAt, days }
   let loaded = false
@@ -203,10 +208,16 @@ export const createMensa = (options = {}) => {
   }
 
   const retryableThrow = (error) => error?.name === 'TimeoutError' || error?.name === 'AbortError' || error instanceof TypeError
+  // The menu API puts its filter in the path. Keep the table name and drop that blob.
+  const mensaRoute = (url) => routeOf(url).replace(/(\/api\/_Combine\/[^/]+)\/.+$/u, '$1')
   const getText = async (url) => {
     if (url.protocol !== 'https:' || url.hostname !== MENSA_HOST) throw new Error('unexpected host')
+    const route = mensaRoute(url)
+    const requestId = events.requestId()
     let last = null
     for (let attempt = 1; attempt <= UPSTREAM_ATTEMPTS; attempt += 1) {
+      const started = now().getTime()
+      const elapsed = () => Math.max(0, now().getTime() - started)
       try {
         const response = await fetchImpl(url, {
           method: 'GET',
@@ -215,15 +226,19 @@ export const createMensa = (options = {}) => {
         })
         if (!response.ok) {
           last = Object.assign(new Error(`HTTP ${response.status}`), { status: response.status })
+          events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!RETRY_STATUS.has(response.status) || attempt === UPSTREAM_ATTEMPTS) throw last
         } else {
           const body = await response.text()
           if (body.length > MAX_HTML_BYTES) throw new Error('page too large')
+          events.info({ requestId, method: 'GET', route, status: response.status || 200, attempt, ms: elapsed() })
           return body
         }
       } catch (error) {
-        if (!retryableThrow(error) || attempt === UPSTREAM_ATTEMPTS) throw error
+        if (error === last) throw error
         last = error
+        events.warn({ requestId, method: 'GET', route, status: Number(error?.status) || 0, attempt, error: String(error?.name || 'error'), ms: elapsed() })
+        if (!retryableThrow(error) || attempt === UPSTREAM_ATTEMPTS) throw error
       }
       await sleep(UPSTREAM_RETRY_MS)
     }

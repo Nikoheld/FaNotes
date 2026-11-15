@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { claimPushKeys, deliverFcm, FCM_ATTEMPTS, fcmDropToken, pushDedupKey } from './fcm.mjs'
+import { createServiceLog } from './service-log.mjs'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
 
 const grade = (id, mark = '5.5') => ({ id, category: 'grade', title: 'Neue Note', body: `Mathematik · Probe · ${mark}`, targetId: 'course-1', date: '2026-11-10' })
@@ -27,18 +28,32 @@ test('5xx is retried with backoff; 400 and an unregistered token are not', async
     const status = calls.length < 3 ? 503 : 200
     return { status, text: async () => (status === 200 ? '{}' : 'unavailable') }
   }
+  const lines = []
+  const jsonLog = createServiceLog('fcm', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
   const result = await deliverFcm({
     fetchImpl,
     url: 'https://fcm.googleapis.com/v1/projects/demo/messages:send',
     message: { message: { token: 'phone:APA91b-example-token-value', data: { event: 'sync' } } },
     headers: { Authorization: 'Bearer secret-token' },
     sleep: async (ms) => { waits.push(ms) },
+    jsonLog,
   })
   assert.equal(result.status, 200)
   assert.equal(result.drop, false)
   assert.equal(result.attempts, 3)
   assert.deepEqual(waits, [200, 800])
   assert.equal(JSON.stringify(result).includes('secret-token'), false)
+  const rows = lines.map((line) => JSON.parse(line))
+  assert.deepEqual(rows.map((row) => row.status), [503, 503, 200])
+  assert.equal(new Set(rows.map((row) => row.requestId)).size, 1)
+  assert.equal(rows[0].service, 'fcm')
+  assert.equal(rows[0].route, 'https://fcm.googleapis.com/v1/projects/demo/messages:send')
+  assert.equal(rows.every((row) => row.method === 'POST' && row.drop === false), true)
+  assert.equal(rows[2].level, 'info')
+  const joined = lines.join('\n')
+  assert.equal(joined.includes('secret-token'), false)
+  assert.equal(joined.includes('APA91b'), false)
+  assert.equal(joined.includes('?'), false)
 
   const once = []
   const rejected = await deliverFcm({

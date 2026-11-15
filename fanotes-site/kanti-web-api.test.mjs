@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import test from 'node:test'
+import { createServiceLog } from './service-log.mjs'
 
 const syncDir = await mkdtemp(join(tmpdir(), 'kanti-web-sync-'))
 process.env.FANOTES_SYNC_DIR = syncDir
@@ -46,7 +47,7 @@ const snapshotWith = (grades, extra = {}) => ({
   ...extra,
 })
 
-const start = async ({ clock, timetables } = {}) => {
+const start = async ({ clock, timetables, jsonLog } = {}) => {
   const root = await mkdtemp(join(tmpdir(), 'kanti-web-'))
   const now = clock || (() => new Date())
   const pushes = []
@@ -62,7 +63,7 @@ const start = async ({ clock, timetables } = {}) => {
     web: createKantiWebAppRoutes(store, { now }),
     timetables,
   })
-  const web = createKantiWebApi({ store, access: schulnetz.webAccess, now, hosts: [WEB], log: () => {} })
+  const web = createKantiWebApi({ store, access: schulnetz.webAccess, now, hosts: [WEB], log: () => {}, jsonLog })
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost')
     if (await handleSyncRequest(request, response, url)) return
@@ -679,6 +680,56 @@ test('list queries reject garbage, and limit pages a long list without changing 
     const tooMany = Array.from({ length: 201 }, (_, index) => `g${index}`)
     assert.equal((await client.call('POST', `/connections/${id}/reveal`, { ids: tooMany })).status, 400)
     assert.equal((await client.call('GET', `/connections/${id}/nope`)).body.error, 'Diesen Endpunkt gibt es nicht.')
+  } finally {
+    await env.close()
+  }
+})
+
+test('a request is logged as JSON with a request id and without cookies or the query', async () => {
+  const lines = []
+  const jsonLog = createServiceLog('kanti-web', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const env = await start({ jsonLog })
+  try {
+    const health = await fetch(`${env.base}/api/v1/kanti-web/health`, {
+      headers: {
+        'X-Forwarded-Host': WEB,
+        'X-Request-Id': 'req-1234.ok',
+        Cookie: 'session=secret-cookie',
+        Authorization: 'Bearer secret-token',
+      },
+    })
+    assert.equal(health.status, 200)
+    assert.equal(health.headers.get('x-request-id'), 'req-1234.ok')
+    assert.equal(lines.length, 1)
+    const row = JSON.parse(lines[0])
+    assert.equal(row.service, 'kanti-web')
+    assert.equal(row.level, 'info')
+    assert.equal(row.requestId, 'req-1234.ok')
+    assert.equal(row.method, 'GET')
+    assert.equal(row.route, '/api/v1/kanti-web/health')
+    assert.equal(row.status, 200)
+    assert.equal(typeof row.ms, 'number')
+    assert.equal(lines[0].includes('secret'), false)
+
+    lines.length = 0
+    const changes = await fetch(`${env.base}/api/v1/kanti-web/connections/abcdefabcdef/changes?since=foo&token=secret-token`, {
+      headers: {
+        'X-Forwarded-Host': WEB,
+        Cookie: 'session=secret-cookie',
+        Authorization: 'Bearer secret-token',
+      },
+    })
+    assert.equal(changes.status, 401)
+    assert.equal(lines.length, 1)
+    const denied = JSON.parse(lines[0])
+    assert.equal(denied.route, '/api/v1/kanti-web/connections/:id/changes')
+    assert.equal(denied.status, 401)
+    assert.equal(denied.level, 'info')
+    assert.match(denied.requestId, /^[a-f0-9]{16}$/u)
+    assert.equal(lines[0].includes('?'), false)
+    assert.equal(lines[0].includes('secret'), false)
+    assert.equal(lines[0].includes('abcdef'), false)
+    assert.equal(changes.headers.get('x-request-id'), denied.requestId)
   } finally {
     await env.close()
   }
