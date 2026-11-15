@@ -56,12 +56,16 @@ const COLLAPSE_NEW_BYTES = 1024
 const EMPTY_CIPHERTEXT_BYTES = 28
 const MAX_REVISIONS_KEPT = 8
 
-/** Newest revisions, plus an older blob that is still the largest. The highest revision is always kept. */
+/** Newest revisions, plus an older blob that is still the largest. The highest revision is always kept.
+ * One name per revision: the file a restore would publish. A short sibling must not take that slot.
+ */
 export const revisionNamesToKeep = (files, keep = MAX_REVISIONS_KEPT, nextSize = 0) => {
-  const ranked = [...(files || [])].filter((file) => file && Number.isFinite(file.revision)).sort((left, right) => left.revision - right.revision || String(left.name).localeCompare(String(right.name)))
-  const names = new Set(ranked.slice(-Math.max(1, keep)).map((file) => file.name))
-  if (!ranked.length) return names
-  const largest = ranked.reduce((best, file) => (file.size > best.size ? file : best), ranked[0])
+  const list = [...(files || [])].filter((file) => file && Number.isFinite(file.revision) && typeof file.name === 'string')
+  const revisions = [...new Set(list.map((file) => file.revision))].sort((left, right) => left - right)
+  const chosen = revisions.map((revision) => archivedRevisionFile(list, revision)).filter(Boolean)
+  const names = new Set(chosen.slice(-Math.max(1, keep)).map((file) => file.name))
+  if (!chosen.length) return names
+  const largest = chosen.reduce((best, file) => (file.size > best.size ? file : best), chosen[0])
   if (largest.size > nextSize) names.add(largest.name)
   return names
 }

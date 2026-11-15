@@ -16,6 +16,20 @@ test('revision retention keeps the newest names and a larger older blob', () => 
   assert.equal(keep.size, 9)
 })
 
+test('revision retention does not keep a short sibling in place of the archived copy', () => {
+  const files = [
+    { name: '1', revision: 1, size: 5000 },
+    { name: 'c-1', revision: 1, size: 64 },
+    ...Array.from({ length: 7 }, (_, index) => ({ name: String(index + 2), revision: index + 2, size: 100 })),
+  ]
+  const keep = revisionNamesToKeep(files, 8, 6000)
+  assert.equal(keep.has('1'), true)
+  assert.equal(keep.has('c-1'), false)
+  assert.equal(keep.has('2'), true)
+  assert.equal(keep.has('8'), true)
+  assert.equal(keep.size, 8)
+})
+
 test('a backup copies ciphertext, rotates old copies, and restore can dry-run', async () => {
   const root = await mkdtemp(join(tmpdir(), 'sync-backup-'))
   const source = join(root, 'sync')
