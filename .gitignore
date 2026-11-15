@@ -19,6 +19,8 @@ fanotes-site/public/notes/
 __pycache__/
 *.py[cod]
 *.log
+# LevelDB write-ahead logs are part of the Electron profile fixtures.
+!crates/fanotes-host/src/migrate/fixtures/**/*.log
 .cache/
 .vite/
 coverage/

@@ -3,10 +3,9 @@
 //!
 //! Mirrors the `story-read`, `story-write`, `story-list` and `story-create`
 //! handlers and the `.story` tree entries of `electron/main.cjs` on
-//! `feature/writing-mode`. Those channels are not in `preload.cjs` on this
-//! branch, so nothing here is registered yet: [`dispatch`] is the one call the
-//! channel switch needs once the writing mode merges, and [`is_story_folder`] /
-//! [`tree_entry`] are what the tree readers need.
+//! `main`. `Host::dispatch` routes the four channels through [`dispatch`], and
+//! `read_tree` lists `Name.story/` folders with [`is_story_folder`] /
+//! [`tree_entry`].
 //!
 //! Path arguments are taken as raw IPC values so the vault check runs before
 //! the argument checks, as `ensureBootstrap` does in the desktop handlers.

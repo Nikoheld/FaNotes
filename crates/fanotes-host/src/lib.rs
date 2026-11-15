@@ -191,6 +191,9 @@ impl Host {
         {
             return Err("Bitte schließe zuerst die FaNotes-Ersteinrichtung ab.".to_owned());
         }
+        if let Some(result) = story::dispatch(self, channel, args) {
+            return result;
+        }
         match channel {
             "fanotes:bootstrap" => self.bootstrap(),
             "fanotes:complete-onboarding" => self.complete_onboarding(args),
@@ -2828,7 +2831,13 @@ fn available_entry_name(
 ) -> Result<String, String> {
     let mut occupied = std::collections::HashSet::new();
     for directory in std::iter::once(parent).chain(extra_roots.iter().map(PathBuf::as_path)) {
-        if let Ok(entries) = read_sibling_dir(directory) {
+        // Desktop `siblingNames` reads one folder with `fs.readdir`, which
+        // throws on an unreadable folder; only mapped folders skip such roots.
+        let listed = read_sibling_dir(directory);
+        if extra_roots.is_empty() {
+            listed.as_ref().map_err(Clone::clone)?;
+        }
+        if let Ok(entries) = listed {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
                     occupied.insert(vault::entry_name_key(name));
@@ -3908,7 +3917,7 @@ fn clean_cached_entries(
             }
             Some("file") => {
                 let extension = extension_label(name);
-                if extension.is_empty() || !tree_extension(&extension) {
+                if extension.is_empty() || (!tree_extension(&extension) && extension != "story") {
                     return Err(());
                 }
                 let mut file = json!({
@@ -4001,6 +4010,12 @@ fn read_tree(
                 continue;
             };
             if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() && story::is_story_folder(&name) {
+                // A writing-mode project is one document in the tree.
+                children.push(story::tree_entry(&name, &relative, &meta, stats));
+                seen.insert(name);
                 continue;
             }
             if meta.is_dir() {
