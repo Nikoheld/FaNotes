@@ -232,12 +232,29 @@ try {
     const output = sanitize.sanitizeManifest(input)
     sanitizeCases.push({ kind: 'manifest', input: JSON.stringify(input), output: output ? `${JSON.stringify(output, null, 1)}\n` : null })
   }
-  // TypeScript bugs (prototype-chain lookups): recorded, not compared.
-  const tsBugs = [
-    { format: 'fanotes-story-v1', id: 'abcdef', styles: { constructor: {} } },
+  // Names of Object.prototype members are refused as style ids and page sizes (4944bb44).
+  const prototypeManifests = [
+    { format: 'fanotes-story-v1', id: 'abcdef', styles: { constructor: {}, toString: { size: 30 }, hasOwnProperty: {}, body: { next: 'valueOf' } } },
     { format: 'fanotes-story-v1', id: 'abcdef', page: { size: 'toString' } },
+    { format: 'fanotes-story-v1', id: 'abcdef', page: { size: '__proto__' } },
     { format: 'fanotes-story-v1', id: 'abcdef', page: { size: ['A5'] } },
-  ].map((input) => ({ input: JSON.stringify(input), output: JSON.stringify(sanitize.sanitizeManifest(input)) }))
+    // Clipping keeps surrogate pairs whole; lone surrogates become U+FFFD.
+    { format: 'fanotes-story-v1', id: 'abcdef', title: `${'t'.repeat(299)}😀`, subtitle: `a\uD800b\uDC00c`, author: `${'x'.repeat(198)}😀😀`, page: { sceneBreak: `${'*'.repeat(39)}😀`, header: { left: `\uDBFF${'h'.repeat(198)}😀` } } },
+  ]
+  for (const input of prototypeManifests) {
+    const output = sanitize.sanitizeManifest(input)
+    sanitizeCases.push({ kind: 'manifest', input: JSON.stringify(input), output: output ? `${JSON.stringify(output, null, 1)}\n` : null })
+  }
+  const prototypeScenes = [
+    { format: 'fanotes-story-scene-v1', id: 'scene000008', paragraphs: [{ id: 'para000001', key: 'a0', v: {}, style: 'constructor', runs: [{ text: 'a' }] }, { id: 'para000002', key: 'a1', v: {}, style: '__proto__', runs: [{ text: 'b' }] }, { id: 'para000003', key: 'a2', v: {}, style: 'quote', runs: [{ text: 'Herz \uD83D und \uDE00 allein, 😀 ganz' }] }] },
+    { format: 'fanotes-story-scene-v1', id: 'scene000009', paragraphs: [{ id: 'para000001', key: 'a0', v: {}, style: 'body', runs: [{ text: `${'y'.repeat(199_999)}😀z` }] }], comments: { comment001: { author: `${'b'.repeat(79)}😀`, at: 'x', text: '\uDFFFok' } } },
+  ]
+  prototypeScenes.forEach((input, index) => {
+    seed(2000 + index)
+    const output = sanitize.sanitizeScene(input)
+    sanitizeCases.push({ kind: 'scene', seed: 2000 + index, input: JSON.stringify(input), expectedId: null, output: output ? JSON.stringify(output) : null })
+  })
+  const tsBugs = []
   write('sanitize.json', { cases: sanitizeCases, tsBugs, newStories: stories.map((entry, index) => ({ seed: index + 1, manifest: `${JSON.stringify(entry.manifest, null, 1)}\n`, scenes: entry.scenes.map((scene) => `${JSON.stringify(scene)}\n`) })) })
 
   // ── merge ────────────────────────────────────────────────────────────────
@@ -498,13 +515,24 @@ try {
       const random = (limit) => { rngState = (rngState * 1103515245 + 12345) % 2147483648; return rngState % limit }
       for (let step = 0; step < 120; step += 1) {
         const sceneIds = [...s.keys()]
-        const scene = s.get(sceneIds[random(sceneIds.length)])
+        const withNotes = sceneIds.filter((id) => Object.keys(s.get(id).footnotes ?? {}).length)
+        const noteEdit = step % 10 === 9 && withNotes.length > 0
+        let scene = s.get(sceneIds[random(sceneIds.length)])
+        if (noteEdit) scene = s.get(withNotes[(step - 9) / 10 % withNotes.length])
         const paragraphs = scene.paragraphs.slice()
         const index = random(paragraphs.length)
         const target = paragraphs[index]
         const kind = random(6)
         let edit
-        if (kind <= 2) {
+        if (noteEdit) {
+          // A footnote body edit: its page has to be laid out again (4944bb44).
+          const noteIds = Object.keys(scene.footnotes)
+          const id = noteIds[step % noteIds.length]
+          const note = scene.footnotes[id]
+          const appended = ' Eine längere Anmerkung mit mehr Worten.'.repeat(1 + (step % 4))
+          edit = { op: 'footnote', id, text: appended }
+          s.set(scene.id, { ...scene, footnotes: { ...scene.footnotes, [id]: { ...note, runs: runs.insertText(note.runs, runs.runsText(note.runs).length, appended) } } })
+        } else if (kind <= 2) {
           const textValue = runs.runsText(target.runs)
           const at = random(textValue.length + 1)
           const inserted = ' neue Worte'.repeat(1 + random(kind === 2 ? 12 : 2))
@@ -524,7 +552,7 @@ try {
           edit = { op: 'cut', to }
           paragraphs[index] = { ...target, runs: runs.deleteRange(target.runs, 0, to) }
         }
-        s.set(scene.id, { ...scene, paragraphs })
+        if (edit.op !== 'footnote') s.set(scene.id, { ...scene, paragraphs })
         const blocks = flow.buildFlow(m, s)
         const next = paginate.layoutManuscript(m, blocks, cache, options(s), previous)
         const full = paginate.layoutManuscript(m, blocks, new paginate.LayoutCache(), options(s))

@@ -27,17 +27,24 @@ fn is_color(value: &str) -> bool {
     bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(u8::is_ascii_hexdigit)
 }
 
-/// `/^[a-z0-9-]{1,40}$/u` (style ids).
-fn is_style_id(value: &str) -> bool {
+/// `/^[a-z0-9-]{1,40}$/u`.
+fn is_id_text(value: &str) -> bool {
     (1..=40).contains(&value.len())
         && value
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
+/// `styleId`: the id pattern, minus names of `Object.prototype` members (style
+/// ids are object keys in TypeScript). `constructor` is the only such member
+/// the pattern lets through.
+fn is_style_id(value: &str) -> bool {
+    is_id_text(value) && value != "constructor"
+}
+
 /// `/^[0-9a-z-]{1,40}$/u` (device ids).
 fn is_device_id(value: &str) -> bool {
-    is_style_id(value)
+    is_id_text(value)
 }
 
 fn link_pattern() -> &'static regex::Regex {

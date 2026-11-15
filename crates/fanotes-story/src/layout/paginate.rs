@@ -184,6 +184,8 @@ pub struct ManuscriptLayout {
     pub content_width: f64,
     /// Footnote numbers in reading order.
     pub footnote_numbers: Vec<(String, String)>,
+    /// Footnote bodies this layout was made with (an edited footnote re-paginates its page).
+    pub footnote_bodies: HashMap<String, Option<Vec<Run>>>,
     /// The page setup this layout was made with (incremental reuse needs the same one).
     pub setup: PageSetup,
     /// Title, subtitle, author and page count the headers were filled with.
@@ -613,6 +615,10 @@ pub fn layout_manuscript(
             }
         }
     }
+    let footnote_bodies: HashMap<String, Option<Vec<Run>>> = footnote_numbers
+        .iter()
+        .map(|(id, _)| (id.clone(), options.footnote_runs.and_then(|runs| runs(id))))
+        .collect();
     let defaults;
     let fallback_style: &ParagraphStyle = match manifest.styles.get("body") {
         Some(style) => style,
@@ -726,6 +732,10 @@ pub fn layout_manuscript(
             || before.chapter_start != now.chapter_start
             || before.break_before != now.break_before
             || before.chapter_title != now.chapter_title
+            || now.runs.iter().any(|run| {
+                run.footnote()
+                    .is_some_and(|id| previous.footnote_bodies.get(id) != footnote_bodies.get(id))
+            })
     };
     let incremental = previous.is_some_and(|previous| {
         previous.setup == *setup
@@ -1041,6 +1051,7 @@ pub fn layout_manuscript(
         page_height: first.height,
         content_width,
         footnote_numbers,
+        footnote_bodies,
         setup: setup.clone(),
         header_key,
         stats: LayoutStats {

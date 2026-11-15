@@ -799,6 +799,15 @@ fn incremental_pagination_matches_step_by_step() {
             "remove" => {
                 scene.paragraphs.remove(index);
             }
+            "footnote" => {
+                let note = scene
+                    .footnotes
+                    .as_mut()
+                    .and_then(|notes| notes.get_mut(s(edit.get("id").unwrap())))
+                    .expect("footnote");
+                let at = len16(&runs_text(&note.runs));
+                note.runs = insert_text(&note.runs, at, s(edit.get("text").unwrap()), None);
+            }
             "add" => {
                 let paragraph = Paragraph {
                     id: s(edit.get("id").unwrap()).into(),
