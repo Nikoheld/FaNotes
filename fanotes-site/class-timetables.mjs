@@ -516,7 +516,13 @@ export const createClassTimetables = (options = {}) => {
     return join(root, version)
   }
   const readJson = async (file) => {
-    try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch { return null }
+    try {
+      return JSON.parse(await fs.readFile(file, 'utf8'))
+    } catch (error) {
+      // A missing or broken file is absent. Any other read error must not look the same, or the next read rebuilds and replaces the timetable.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
   }
   const currentVersion = async () => {
     const pointer = await readJson(join(root, 'current.json'))
