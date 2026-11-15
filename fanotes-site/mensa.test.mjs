@@ -509,3 +509,49 @@ test('an upstream error page is cancelled and the menu still falls back', async 
     await fs.rm(root, { recursive: true, force: true })
   }
 })
+
+test('an unreadable mensa cache is left unchanged and merged once it can be read', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-disk-'))
+  const file = join(root, 'mensa.json')
+  const stored = JSON.stringify({
+    fetchedAt: '2026-11-15T08:00:00.000Z',
+    days: [{ date: '2026-12-01', weekday: 'Di', closed: false, note: 'kept', menus: [] }],
+  })
+  await fs.writeFile(file, stored, { mode: 0o600 })
+  await fs.chmod(file, 0o000)
+  let clock = new Date('2026-11-15T10:00:00Z')
+  const calls = []
+  const mensa = createMensa({ fetch: makeFetch(calls, [], { api: true }), now: () => clock, root, log: () => {} })
+  try {
+    const live = await mensa.get()
+    await mensa.idle()
+    assert.equal(live.days.length, 10)
+    assert.equal((await fs.readdir(root)).some((name) => name.endsWith('.tmp')), false)
+    await fs.chmod(file, 0o600)
+    assert.equal(await fs.readFile(file, 'utf8'), stored)
+
+    clock = new Date('2026-11-16T10:00:00Z')
+    await mensa.get()
+    await mensa.idle()
+    const saved = JSON.parse(await fs.readFile(file, 'utf8'))
+    assert.equal(saved.days.some((day) => day.date === '2026-12-01' && day.note === 'kept'), true)
+    assert.ok(saved.days.length > 1)
+  } finally {
+    await fs.chmod(file, 0o600).catch(() => undefined)
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a broken mensa cache can be replaced by a fresh menu', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-broken-'))
+  const file = join(root, 'mensa.json')
+  await fs.writeFile(file, '{', { mode: 0o600 })
+  const mensa = createMensa({ fetch: makeFetch([], [fixture]), now: () => new Date('2026-11-10T07:00:00Z'), root, log: () => {} })
+  try {
+    const body = await mensa.get()
+    assert.equal(body.days.length, 1)
+    assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).days.length, 1)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
