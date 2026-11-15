@@ -1384,11 +1384,13 @@ const metaForRestore = async (accountId, fileId, current) => {
 const handleListRevisions = async (request, response, auth, fileId) => {
   const directory = revisionsDirectory(auth.account.id, fileId)
   const files = await listRevisionFiles(directory)
-  sendJson(request, response, 200, {
-    revisions: files
-      .sort((left, right) => left.revision - right.revision)
-      .map((file) => ({ revision: file.revision, size: file.size, collapse: file.name.startsWith('c-') })),
-  })
+  // One row per revision: the file a restore of that revision would publish.
+  const revisions = [...new Set(files.map((file) => file.revision))]
+    .sort((left, right) => left - right)
+    .map((revision) => archivedRevisionFile(files, revision))
+    .filter(Boolean)
+    .map((file) => ({ revision: file.revision, size: file.size, collapse: file.name.startsWith('c-') }))
+  sendJson(request, response, 200, { revisions })
 }
 
 const handleRestoreFile = async (request, response, auth, fileId) => {
