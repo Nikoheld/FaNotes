@@ -152,6 +152,11 @@ export type BinderNode = {
   exclude?: boolean
   /** Word goal of this chapter or scene. */
   goal?: number
+  /** Characters and places (bible entry ids) that appear in this scene. */
+  characters?: string[]
+  places?: string[]
+  /** Vault notes linked to this scene (vault-relative paths). */
+  links?: string[]
 }
 
 export type StoryGoals = {

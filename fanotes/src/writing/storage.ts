@@ -8,6 +8,9 @@ import { binderSceneIds, sanitizeManifest, sanitizeScene } from './model/sanitiz
 import { newId } from './model/ids'
 import { STORY_EXTENSION, type BinderNode, type Scene, type StoryManifest, type StoryProject } from './model/types'
 import { L } from './ui/i18n'
+import { bibleFileOf, biblePath, sanitizeBibleEntry, serializeBibleEntry, type BibleEntry } from './model/bible'
+import { isProgressFile, progressPath, sanitizeProgress, type ProgressFile } from './model/progress'
+import { sanitizeSnapshot, snapshotFileOf, snapshotPath, type Snapshot } from './model/snapshots'
 
 export type StoryHost = {
   read: (path: string) => Promise<string | null>
@@ -39,6 +42,8 @@ export type LoadedProject = StoryProject & {
   recovered: string[]
   /** The manifest was repaired or extended and should be saved. */
   manifestChanged: boolean
+  /** Every file in the story folder, relative to it (bible, snapshots, progress are loaded from this). */
+  files: string[]
 }
 
 export const loadProject = async (host: StoryHost, path: string, labels: { recovered: string }): Promise<LoadedProject> => {
@@ -82,8 +87,60 @@ export const loadProject = async (host: StoryHost, path: string, labels: { recov
     manifest = { ...manifest, binder: [...manifest.binder, folder] }
     manifestChanged = true
   }
-  return { path, manifest, scenes, missing, recovered, manifestChanged }
+  return { path, manifest, scenes, missing, recovered, manifestChanged, files }
 }
+
+const readJson = async (host: StoryHost, path: string): Promise<unknown> => {
+  const text = await host.read(path)
+  if (text === null) return null
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+/** Reads many files, a few at a time. */
+const readAll = async <T>(paths: string[], read: (path: string) => Promise<T | null>, concurrency = 8) => {
+  const out: T[] = []
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(concurrency, paths.length) }, async () => {
+    while (next < paths.length) {
+      const value = await read(paths[next++])
+      if (value !== null) out.push(value)
+    }
+  }))
+  return out
+}
+
+/** Characters, places and events by id (a damaged file is skipped, not overwritten). */
+export const loadBible = async (host: StoryHost, path: string, files: string[]) => {
+  const entries = await readAll(files.filter((file) => bibleFileOf(file)), async (file) => {
+    const entry = sanitizeBibleEntry(await readJson(host, `${path}/${file}`))
+    return entry && entry.id === bibleFileOf(file)!.id ? entry : null
+  })
+  return new Map(entries.map((entry) => [entry.id, entry]))
+}
+
+export const writeBibleEntry = (host: StoryHost, path: string, entry: BibleEntry) => host.write(biblePath(path, entry.kind, entry.id), serializeBibleEntry(entry))
+
+/** Snapshot stamps of a scene, newest first (the files are read when opened). */
+export const snapshotStamps = (files: string[], sceneId: string) => files.flatMap((file) => {
+  const found = snapshotFileOf(file)
+  return found && found.sceneId === sceneId ? [found.stamp] : []
+}).sort().reverse()
+
+export const readSnapshot = async (host: StoryHost, path: string, sceneId: string, stamp: string): Promise<Snapshot | null> => {
+  const snapshot = sanitizeSnapshot(await readJson(host, snapshotPath(path, sceneId, stamp)))
+  return snapshot && snapshot.sceneId === sceneId ? snapshot : null
+}
+
+export const writeSnapshot = (host: StoryHost, path: string, snapshot: Snapshot) => host.write(snapshotPath(path, snapshot.sceneId, snapshot.stamp), `${JSON.stringify(snapshot)}\n`)
+
+/** Every device's progress file. */
+export const loadProgress = (host: StoryHost, path: string, files: string[]) => readAll(files.filter(isProgressFile), async (file) => sanitizeProgress(await readJson(host, `${path}/${file}`)))
+
+export const writeProgress = (host: StoryHost, path: string, progress: ProgressFile) => host.write(progressPath(path, progress.writer), `${JSON.stringify(progress)}\n`)
 
 export const storageAdapter = (host: StoryHost, path: string): StorageAdapter => ({
   writeManifest: (manifest: StoryManifest) => host.write(manifestPath(path), `${JSON.stringify(manifest, null, 1)}\n`),

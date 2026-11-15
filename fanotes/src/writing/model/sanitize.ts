@@ -233,6 +233,14 @@ const sanitizeBinder = (value: unknown, depth = 0, seen = new Set<string>()): Bi
     if (isId(source.pov)) node.pov = source.pov
     if (source.exclude === true) node.exclude = true
     if (typeof source.goal === 'number' && source.goal > 0 && source.goal < 10_000_000) node.goal = Math.round(source.goal)
+    const ids = (value: unknown) => (Array.isArray(value) ? [...new Set(value.filter(isId))].slice(0, 500) : [])
+    const characters = ids(source.characters)
+    if (characters.length) node.characters = characters
+    const places = ids(source.places)
+    if (places.length) node.places = places
+    // Vault paths: relative, no parent references, no control characters.
+    const links = Array.isArray(source.links) ? [...new Set(source.links.filter((link): link is string => typeof link === 'string' && link.length > 0 && link.length <= 1000 && !link.startsWith('/') && !/(^|\/)\.\.(\/|$)|[\u0000-\u001f\\]/u.test(link)))].slice(0, 200) : []
+    if (links.length) node.links = links
     out.push(node)
   }
   return out
