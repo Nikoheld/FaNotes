@@ -11,6 +11,7 @@ mod drawings;
 mod imports;
 mod linux_runtime;
 mod locations;
+pub mod migrate;
 mod notes;
 mod ocr;
 mod onboarding;
