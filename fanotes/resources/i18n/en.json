@@ -4183,5 +4183,12 @@
   "Löscht alles, was zu deiner Installations-ID auf dem Server liegt, und erzeugt eine neue ID.": "Deletes everything stored for your install ID on the server and creates a new ID.",
   "ID erneuern": "Renew ID",
   "Diagnose": "Diagnostics",
-  "Aktivitätskalender": "Activity calendar"
+  "Aktivitätskalender": "Activity calendar",
+  "Prüfung": "Exam",
+  "Andere Dateien": "Other files",
+  "Gesendet. Danke!": "Sent. Thank you!",
+  "Senden nicht möglich. Es wurde nichts gespeichert.": "Could not send. Nothing was stored.",
+  "Deine Daten auf dem Server sind gelöscht. Es gibt eine neue Installations-ID.": "Your data on the server is deleted. A new install ID was created.",
+  "Der Server war nicht erreichbar. Lokale Zähler sind gelöscht; versuche das Löschen später noch einmal.": "The server was unreachable. Local counters are deleted; try deleting again later.",
+  "Neue Installations-ID erzeugt.": "New install ID created."
 }
