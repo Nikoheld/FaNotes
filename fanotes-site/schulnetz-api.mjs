@@ -1016,7 +1016,12 @@ export const createSchulnetzRuntime = (options = {}) => {
   const agendaDiff = async (accountId, previous, snapshot, settings) => {
     const path = resolve(accountDir(accountId), 'notification-baseline.json')
     const stored = await readJson(path)
-    const read = prepareAgendaRead(stored?.version === 1 ? stored.weeks || {} : {}, snapshot)
+    // A missing or broken file can start again. A file that is there but not this baseline must not look empty, or the next read replaces the weeks and can announce them again.
+    const weeks = stored?.weeks
+    if (stored && (stored.version !== 1 || !weeks || typeof weeks !== 'object' || Array.isArray(weeks))) {
+      throw Object.assign(new Error('agenda baseline'), { code: 'EBADMSG' })
+    }
+    const read = prepareAgendaRead(stored ? weeks : {}, snapshot)
     // Durable before any diff/push; a crash cannot turn an imported week into a second first read.
     await writeJson(path, { version: 1, weeks: read.weeks })
     // The runtime's own clock decides what is past (tests run it at a fixed time; production passes the real one).

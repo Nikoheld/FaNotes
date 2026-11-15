@@ -507,3 +507,41 @@ test('a grade ledger that is not the known shape is left in place', async () => 
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('an agenda baseline that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-agenda-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  const baseline = '{"version":2,"weeks":{"2026-11-16":{"keep":true}}}\n'
+  try {
+    const guest = await runtime.createGuest('203.0.113.82')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const dir = join(root, 'accounts', guest.accountId)
+    const file = join(dir, 'notification-baseline.json')
+    const linkFile = join(dir, 'link.json')
+    await writeFile(file, baseline, { mode: 0o600 })
+    const linkBefore = await readFile(linkFile)
+    const request = {
+      method: 'PUT',
+      headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+      socket: { remoteAddress: '203.0.113.82' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+    }
+    let status = 0
+    await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+    assert.equal(status, 500)
+    assert.equal(await readFile(file, 'utf8'), baseline)
+    assert.deepEqual(await readFile(linkFile), linkBefore)
+    await assert.rejects(readFile(join(dir, 'snapshot.json')), (error) => error?.code === 'ENOENT')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
