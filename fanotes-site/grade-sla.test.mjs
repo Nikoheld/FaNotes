@@ -468,3 +468,42 @@ test('an unreadable poller lock and change log are left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a grade ledger that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-ledger-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+    syncAccountExists: async () => true,
+  })
+  const fa = 'd'.repeat(32)
+  const ledger = '{"version":2,"keys":["c:keep"]}\n'
+  try {
+    await runtime.linkAccount(fa, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const guest = await runtime.createGuest('203.0.113.81')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const file = join(root, 'accounts', fa, 'notified-grades.json')
+    const guestLedger = join(root, 'accounts', guest.accountId, 'notified-grades.json')
+    await writeFile(file, ledger, { mode: 0o600 })
+    await writeFile(guestLedger, '{"version":1,"keys":["c:other"]}\n', { mode: 0o600 })
+    await assert.rejects(
+      () => runtime.adoptGuest(fa, { guestAccountId: guest.accountId, guestToken: guest.token }),
+      (error) => error?.code === 'EBADMSG',
+    )
+    assert.equal(await readFile(file, 'utf8'), ledger)
+    assert.equal(await readFile(guestLedger, 'utf8'), '{"version":1,"keys":["c:other"]}\n')
+    assert.equal((await readdir(join(root, 'accounts'))).includes(guest.accountId), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
