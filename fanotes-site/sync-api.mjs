@@ -110,7 +110,8 @@ const rateLimit = (key, maximum, windowMs) => {
     rateWindows.set(key, { count: 1, until: now + windowMs })
     return
   }
-  if (current.count >= maximum) fail(429, 'Zu viele Anfragen. Bitte später erneut versuchen.')
+  // retryAfter (seconds) tells a syncing client when the window opens again, so it can wait instead of failing.
+  if (current.count >= maximum) fail(429, 'Zu viele Anfragen. Bitte später erneut versuchen.', { retryAfter: Math.max(1, Math.ceil((current.until - now) / 1000)) })
   current.count += 1
 }
 
@@ -1979,7 +1980,7 @@ export const handleSyncRequest = async (request, response, url) => {
     fail(404, 'Diesen Sync-Endpunkt gibt es nicht.')
   } catch (error) {
     if (error instanceof SyncApiError) {
-      sendJson(request, response, error.status, { error: error.publicMessage, ...error.extra })
+      sendJson(request, response, error.status, { error: error.publicMessage, ...error.extra }, error.status === 429 && error.extra?.retryAfter ? { 'Retry-After': String(error.extra.retryAfter) } : {})
     } else {
       failureCode = syncFailureCode(error)
       sendJson(request, response, 500, { error: 'Der Sync-Server hat einen internen Fehler.' })

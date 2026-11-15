@@ -38,7 +38,7 @@ export type SyncAccountInfo = {
 export type SyncRejectReason = 'stale' | 'guard'
 
 export class SyncApiError extends Error {
-  constructor(public status: number, message: string, public entry: SyncRemoteEntry | null = null, public reason: SyncRejectReason | null = null) {
+  constructor(public status: number, message: string, public entry: SyncRemoteEntry | null = null, public reason: SyncRejectReason | null = null, public retryAfterMs: number | null = null) {
     super(message)
     this.name = 'SyncApiError'
   }
@@ -47,6 +47,8 @@ export class SyncApiError extends Error {
   get offline() { return this.status === 0 }
   /** The server kept its copy because this body looked empty or collapsed. Sending it again cannot succeed. */
   get guarded() { return this.status === 409 && this.reason === 'guard' }
+  /** The server's request budget for this account is used up for now (a large first sync). Not a failure: wait and go on. */
+  get throttled() { return this.status === 429 }
 }
 
 /** The web build talks to its own origin (nginx proxies /api/v1/sync); the desktop renderer talks to the public host. */
@@ -60,13 +62,15 @@ const parseError = async (response: Response): Promise<SyncApiError> => {
   let message = `Der Sync-Server antwortete mit ${response.status}.`
   let entry: SyncRemoteEntry | null = null
   let reason: SyncRejectReason | null = response.headers.get('X-FaNotes-Rejected') === 'guard' ? 'guard' : null
+  let retryAfterMs: number | null = null
   try {
-    const body = await response.json() as { error?: unknown; entry?: SyncRemoteEntry; reason?: unknown }
+    const body = await response.json() as { error?: unknown; entry?: SyncRemoteEntry; reason?: unknown; retryAfter?: unknown }
     if (typeof body.error === 'string') message = body.error
+    if (typeof body.retryAfter === 'number' && Number.isFinite(body.retryAfter) && body.retryAfter > 0) retryAfterMs = body.retryAfter * 1000
     if (body.entry && typeof body.entry === 'object') entry = body.entry
     if (body.reason === 'guard' || body.reason === 'stale') reason = body.reason
   } catch { /* not JSON */ }
-  return new SyncApiError(response.status, message, entry, reason)
+  return new SyncApiError(response.status, message, entry, reason, retryAfterMs)
 }
 
 export class SyncApi {
