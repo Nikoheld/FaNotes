@@ -271,6 +271,8 @@ export function createBrowserApi(): FaNotesApi {
   const STORY_FILE = /^(.+\.story)\/((?:[A-Za-z0-9_-]{1,64}\/){0,3}[A-Za-z0-9_.-]{1,96}\.(?:json|md))$/iu
   /** Note and PDF colours in the tree, by path (synced as `.fanotes/file-colors.json`). */
   const fileColors = new Map<string, string>()
+  /** When the writing mode last saved each story file. Assets carry no time of their own, and sync must see an edit of the same length. */
+  const storyTimes = new Map<string, number>()
   let subjectBooks: SubjectBookRecord[] = []
   let folderLocations: FolderLocationMap = {}
   const noteHistory = new Map<string, Array<{ id: string; createdAt: string; content: string; bytes: number; tier?: 'week' | 'short'; ext?: string; companion?: string }>>()
@@ -435,6 +437,12 @@ export function createBrowserApi(): FaNotesApi {
       })
     }
     subjectBooks = parseSubjectBooks(meta.get('subjectBooks'))
+    const storedStoryTimes = meta.get('storyAssetTimes')
+    if (isRecord(storedStoryTimes)) {
+      Object.entries(storedStoryTimes).forEach(([path, time]) => {
+        if (typeof time === 'number' && Number.isFinite(time) && time > 0) storyTimes.set(path, time)
+      })
+    }
     folderLocations = sanitizeFolderLocationMap(meta.get('folderLocations'))
     fileRows.forEach((row) => files.set(row.path, row))
     folderRows.forEach((row) => folders.set(row.path, row))
@@ -1100,6 +1108,8 @@ export function createBrowserApi(): FaNotesApi {
       const previous = assetUrls.get(path)
       if (previous) { URL.revokeObjectURL(previous); assetUrls.delete(path) }
       assets.set(path, blob)
+      storyTimes.set(path, Math.max(Date.now(), (storyTimes.get(path) ?? 0) + 1))
+      await setMeta('storyAssetTimes', Object.fromEntries(storyTimes), false)
       cachedTree = null
     },
     storyList: async (rawPath) => {
@@ -1944,6 +1954,7 @@ export function createBrowserApi(): FaNotesApi {
     addons: createBrowserAddonsApi(),
     sync: createBrowserSyncHost({
       files, folders, assets, drawings, worksheets,
+      storyTimes,
       getSubjectBooks: () => subjectBooks,
       setSubjectBooks: async (books) => { subjectBooks = books; await setMeta('subjectBooks', books) },
       putFile: async (record) => { await write('files', (store) => { store.put(record) }); files.set(record.path, record) },

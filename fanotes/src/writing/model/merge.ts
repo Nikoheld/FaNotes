@@ -9,7 +9,7 @@
 //   - present on one side only → kept (a new paragraph or a tombstone).
 // The result is the same whichever side is "local", so two devices that merge
 // each other's versions converge, and no text is ever dropped.
-import { SCENE_FORMAT, type Paragraph, type Scene } from './types'
+import { SCENE_FORMAT, type Paragraph, type Scene, type StoryManifest } from './types'
 
 type Order = 'equal' | 'left' | 'right' | 'concurrent'
 
@@ -140,4 +140,106 @@ export const stampEdits = (current: Scene, saved: Scene | null, writer: string):
   if (!changed) return current
   paragraphs.sort((x, y) => (x.key < y.key ? -1 : x.key > y.key ? 1 : x.id.localeCompare(y.id)))
   return { ...current, paragraphs }
+}
+
+// ── Manifest merge ─────────────────────────────────────────────────────────
+
+type BinderRecord = { id: string; children?: BinderRecord[] } & Record<string, unknown>
+
+const binderIds = (nodes: readonly BinderRecord[], into = new Set<string>()) => {
+  for (const node of nodes) {
+    into.add(node.id)
+    if (Array.isArray(node.children)) binderIds(node.children, into)
+  }
+  return into
+}
+
+/**
+ * The newer binder decides structure, titles and attributes; every node only
+ * the older one has is kept, at its place among its older siblings. Nothing
+ * is dropped, so a node deleted on one side and edited on the other stays.
+ */
+const mergeBinders = (newer: readonly BinderRecord[], older: readonly BinderRecord[]): BinderRecord[] => {
+  const inNewer = binderIds(newer)
+  const placed = new Set<string>()
+  // Older-only nodes with their older-only descendants.
+  const olderOnly = (node: BinderRecord): BinderRecord => {
+    placed.add(node.id)
+    const out: BinderRecord = { ...node }
+    if (Array.isArray(node.children)) out.children = node.children.filter((child) => !inNewer.has(child.id) && !placed.has(child.id)).map(olderOnly)
+    return out
+  }
+  const olderChildren = new Map<string | null, BinderRecord[]>()
+  const indexOlder = (nodes: readonly BinderRecord[], parent: string | null) => {
+    olderChildren.set(parent, [...nodes])
+    for (const node of nodes) if (Array.isArray(node.children)) indexOlder(node.children, node.id)
+  }
+  indexOlder(older, null)
+  /** Inserts a parent's older-only children after their nearest older sibling that is already in the list. */
+  const weave = (list: BinderRecord[], parent: string | null): BinderRecord[] => {
+    const extra = olderChildren.get(parent) ?? []
+    const out = [...list]
+    let anchor: string | null = null
+    for (const node of extra) {
+      if (inNewer.has(node.id)) { anchor = node.id; continue }
+      if (placed.has(node.id)) continue
+      const kept = olderOnly(node)
+      const at = anchor === null ? -1 : out.findIndex((entry) => entry.id === anchor)
+      out.splice(at + 1, 0, kept)
+      anchor = node.id
+    }
+    return out
+  }
+  const walk = (nodes: readonly BinderRecord[], parent: string | null): BinderRecord[] => {
+    const own: BinderRecord[] = []
+    for (const node of nodes) {
+      if (placed.has(node.id)) continue
+      placed.add(node.id)
+      const out: BinderRecord = { ...node }
+      const children = walk(Array.isArray(node.children) ? node.children : [], node.id)
+      if (Array.isArray(node.children) || children.length) out.children = children
+      own.push(out)
+    }
+    return weave(own, parent)
+  }
+  return walk(newer, null)
+}
+
+const unionList = (first: unknown, second: unknown): string[] | undefined => {
+  const lists = [first, second].filter((value): value is unknown[] => Array.isArray(value))
+  if (!lists.length) return undefined
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const list of lists) for (const value of list) if (typeof value === 'string' && !seen.has(value)) { seen.add(value); out.push(value) }
+  return out
+}
+
+export type ManifestMerge = { manifest: StoryManifest; changedFromLeft: boolean; changedFromRight: boolean }
+
+/**
+ * Merges two versions of `story.json`. The version with the newer `updatedAt`
+ * (ties: the larger JSON, so both devices pick the same) gives titles,
+ * attributes, page setup, goals and styles; styles only the older one has are
+ * kept. The binder is merged by node id (see `mergeBinders`), the story
+ * dictionary and ignored findings are unioned. Fields this version of the app
+ * does not know are carried over. The result is the same whichever side is
+ * "left", so two devices converge.
+ */
+export const mergeManifests = (left: StoryManifest, right: StoryManifest): ManifestMerge => {
+  const leftJson = JSON.stringify(left)
+  const rightJson = JSON.stringify(right)
+  const leftNewer = left.updatedAt !== right.updatedAt ? left.updatedAt > right.updatedAt : leftJson >= rightJson
+  const newer = leftNewer ? left : right
+  const older = leftNewer ? right : left
+  const merged = { ...older, ...newer } as StoryManifest & Record<string, unknown>
+  merged.createdAt = older.createdAt && older.createdAt < newer.createdAt ? older.createdAt : newer.createdAt
+  merged.updatedAt = newer.updatedAt
+  if (newer.styles || older.styles) merged.styles = { ...(older.styles ?? {}), ...(newer.styles ?? {}) }
+  merged.binder = mergeBinders((newer.binder ?? []) as unknown as BinderRecord[], (older.binder ?? []) as unknown as BinderRecord[]) as unknown as StoryManifest['binder']
+  const dictionary = unionList(newer.dictionary, older.dictionary)
+  if (dictionary) merged.dictionary = dictionary
+  const ignored = unionList(newer.ignored, older.ignored)
+  if (ignored) merged.ignored = ignored
+  const json = JSON.stringify(merged)
+  return { manifest: merged, changedFromLeft: json !== leftJson, changedFromRight: json !== rightJson }
 }

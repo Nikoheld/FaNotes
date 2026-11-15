@@ -16,7 +16,7 @@ export const OCR_PAGES_PER_PASS = 8
 export type DocSource = {
   path: string
   title: string
-  kind: 'note' | 'pdf'
+  kind: 'note' | 'pdf' | 'story'
   /** Changes whenever the document or anything indexed with it changes. */
   fingerprint: string
   modifiedAt?: number

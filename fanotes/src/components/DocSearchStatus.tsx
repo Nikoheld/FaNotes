@@ -14,7 +14,9 @@ export const hitLabel = (hit: Pick<SearchHit, 'unit' | 'page' | 'source' | 'conf
     : hit.unit === 'worksheet' ? `${L('Arbeitsblatt', 'Worksheet')} ${hit.page ?? ''}`.trim()
       : hit.unit === 'ink' ? L('Handschrift-Abschrift', 'Handwriting transcript')
         : hit.unit === 'annotations' ? L('Anmerkungen', 'Annotations')
-          : L('Notiz', 'Note')
+          : hit.unit === 'scene' ? L('Geschichte · Szene', 'Story · scene')
+            : hit.unit === 'bible' ? L('Geschichte · Figuren und Orte', 'Story · characters and places')
+              : L('Notiz', 'Note')
   if (hit.source === 'ocr') return `${where} · ${L('Texterkennung', 'Text recognition')}${typeof hit.confidence === 'number' ? ` ~${Math.round(hit.confidence * 100)} %` : ''}`
   return where
 }
@@ -30,6 +32,7 @@ const toHit = (result: SearchResult, query: string): SearchHit => {
     unit: result.kind,
     source: result.source,
     ...(result.page !== undefined ? { page: result.page } : {}),
+    ...(result.sceneId ? { sceneId: result.sceneId } : {}),
     ...(result.confidence !== undefined ? { confidence: result.confidence } : {}),
     ...(result.snippet.highlights.length ? { highlights: result.snippet.highlights } : {}),
     ...(result.alsoIn ? { alsoIn: result.alsoIn } : {}),
