@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { claimPushKeys, deliverFcm, FCM_ATTEMPTS, fcmDropToken, pushDedupKey } from './fcm.mjs'
+import { claimPushKeys, deliverFcm, exchangeServiceAccount, FCM_ATTEMPTS, FCM_AUTH_ATTEMPTS, fcmDropToken, pushDedupKey } from './fcm.mjs'
 import { createServiceLog } from './service-log.mjs'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
 
@@ -159,4 +159,71 @@ test('a live grade push is not repeated when the same change is offered again', 
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('FCM sign-in retries a 503 and never logs the signed assertion or the access token', async () => {
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const account = {
+    client_email: 'push@kanti-test.iam.gserviceaccount.com',
+    private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    project_id: 'kanti-test',
+  }
+  const lines = []
+  const jsonLog = createServiceLog('fcm', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const waits = []
+  let calls = 0
+  const fetchImpl = async (url, init) => {
+    calls += 1
+    assert.equal(init.method, 'POST')
+    assert.equal(String(url), 'https://oauth2.googleapis.com/token')
+    assert.equal(String(init.body).includes('assertion='), true)
+    if (calls < 3) return { ok: false, status: 503, text: async () => 'ya29.secret-access-token' }
+    return { ok: true, status: 200, text: async () => JSON.stringify({ access_token: 'ya29.secret-access-token', expires_in: 3600 }) }
+  }
+  const result = await exchangeServiceAccount(account, fetchImpl, Date.parse('2026-11-15T11:00:00Z'), {
+    sleep: async (ms) => { waits.push(ms) },
+    jsonLog,
+  })
+  assert.equal(result.projectId, 'kanti-test')
+  assert.equal(result.token, 'ya29.secret-access-token')
+  assert.equal(calls, 3)
+  assert.equal(FCM_AUTH_ATTEMPTS, 3)
+  assert.deepEqual(waits, [200, 800])
+  const rows = lines.map((line) => JSON.parse(line))
+  assert.deepEqual(rows.map((row) => row.status), [503, 503, 200])
+  assert.equal(new Set(rows.map((row) => row.requestId)).size, 1)
+  assert.equal(rows[0].route, 'https://oauth2.googleapis.com/token')
+  assert.equal(rows[2].level, 'info')
+  const joined = lines.join('\n')
+  assert.equal(joined.includes('ya29'), false)
+  assert.equal(joined.includes('PRIVATE'), false)
+  assert.equal(joined.includes('assertion'), false)
+
+  lines.length = 0
+  let once = 0
+  await assert.rejects(
+    () => exchangeServiceAccount(account, async () => {
+      once += 1
+      return { ok: false, status: 400, text: async () => '{"error":"invalid_grant","assertion":"secret-jwt"}' }
+    }, Date.parse('2026-11-15T11:00:00Z'), {
+      sleep: async () => { throw new Error('should not retry') },
+      jsonLog,
+    }),
+    (error) => error.message === 'fcm-auth' && error.status === 400 && !String(error.message).includes('secret-jwt'),
+  )
+  assert.equal(once, 1)
+  assert.equal(lines.join('\n').includes('secret-jwt'), false)
+
+  let timeouts = 0
+  await assert.rejects(
+    () => exchangeServiceAccount(account, async () => {
+      timeouts += 1
+      throw Object.assign(new Error('timed out'), { name: 'TimeoutError' })
+    }, Date.parse('2026-11-15T11:00:00Z'), {
+      sleep: async () => {},
+      jsonLog: createServiceLog('fcm', () => {}, () => new Date('2026-11-15T11:00:00.000Z')),
+    }),
+    (error) => error.message === 'fcm-auth' && error.name === 'TimeoutError',
+  )
+  assert.equal(timeouts, FCM_AUTH_ATTEMPTS)
 })
