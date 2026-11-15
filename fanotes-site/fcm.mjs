@@ -294,16 +294,21 @@ const withPushLock = (file, task) => {
  * Drops grades and cancellations this account was already asked to push. Other changes pass through.
  * The ledger stores only those keys, never names, marks or tokens. A failed write still returns the
  * filtered list so a known duplicate is not sent; a brand-new key may be sent once more after a restart.
+ * A read error other than a missing or broken file returns the changes and leaves the ledger in place.
  */
 export const claimPushKeys = (file, changes) => withPushLock(String(file), async () => {
   const list = Array.isArray(changes) ? changes : []
   let stored = []
+  let replaceLedger = true
   try {
     const parsed = JSON.parse(await fs.readFile(file, 'utf8'))
     if (parsed?.version === 1 && Array.isArray(parsed.keys)) {
       stored = parsed.keys.filter((key) => typeof key === 'string' && key.length > 0 && key.length <= 200)
     }
-  } catch { /* no ledger yet */ }
+  } catch (error) {
+    // A missing or broken ledger can start again. Any other read error must not replace the file.
+    if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) replaceLedger = false
+  }
   const known = new Set(stored)
   const fresh = []
   let added = false
@@ -315,7 +320,7 @@ export const claimPushKeys = (file, changes) => withPushLock(String(file), async
     added = true
     fresh.push(change)
   }
-  if (!added) return fresh
+  if (!added || !replaceLedger) return fresh
   const keys = [...known].slice(-PUSH_DEDUP_LIMIT)
   const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
   try {
