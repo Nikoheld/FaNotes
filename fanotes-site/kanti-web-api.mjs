@@ -18,6 +18,7 @@ import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, MAX_PDF_BYTES, ROOM_NAME } from './class-timetables.mjs'
 import { accountAcceptsAuthKey, loadSyncAccountByEmail, syncAuthStamp, syncPreloginKdf } from './sync-api.mjs'
 import { prepareGradeNotifications, unrevealedGradeIds, webGradeView } from './schulnetz-logic.mjs'
+import { createServiceLog } from './service-log.mjs'
 
 export const KANTI_WEB_PREFIX = '/api/v1/kanti-web'
 export const SESSION_COOKIE = '__Host-kanti'
@@ -573,6 +574,13 @@ export const createKantiWebApi = (options = {}) => {
     .map((host) => host.trim().toLowerCase()).filter(Boolean)
   const origins = options.origins || hosts.map((host) => `https://${host}`)
   const log = options.log || ((level, message) => console.log(`${now().toISOString()} kanti-web ${level} ${message}`))
+  // Production emits one JSON line per request. Tests pass jsonLog when they want the lines.
+  const events = options.jsonLog || createServiceLog('kanti-web', (line) => {
+    if (process.env.NODE_ENV === 'production') console.log(line)
+  }, now)
+  const webLogRoute = (pathname) => String(pathname || '').split('?')[0]
+    .replace(/\/connections\/[^/]+/gu, '/connections/:id')
+    .replace(/\/timetables\/(class|room)\/[^/]+/gu, '/timetables/$1/:name')
   const authStamp = options.syncAuthStamp || syncAuthStamp
   const findAccount = options.loadSyncAccountByEmail || loadSyncAccountByEmail
   const acceptsKey = options.accountAcceptsAuthKey || accountAcceptsAuthKey
@@ -1016,6 +1024,27 @@ export const createKantiWebApi = (options = {}) => {
   const handle = async (request, response, url) => {
     if (url.pathname !== KANTI_WEB_PREFIX && !url.pathname.startsWith(`${KANTI_WEB_PREFIX}/`)) return false
     if (!hosts.includes(requestHost(request))) return false
+    const requestId = events.requestId(request.headers['x-request-id'])
+    const started = now().getTime()
+    let logged = false
+    response.setHeader('X-Request-Id', requestId)
+    const writeHead = response.writeHead
+    response.writeHead = (status, ...args) => {
+      if (!logged) {
+        logged = true
+        const code = Number(status) || 0
+        const fields = {
+          requestId,
+          method: request.method || 'GET',
+          route: webLogRoute(url.pathname),
+          status: code,
+          ms: Math.max(0, now().getTime() - started),
+        }
+        if (code >= 500) events.warn(fields)
+        else events.info(fields)
+      }
+      return writeHead.call(response, status, ...args)
+    }
     const route = url.pathname.slice(KANTI_WEB_PREFIX.length).replace(/\/+$/u, '') || '/'
     const method = request.method || 'GET'
     const address = clientAddress(request)

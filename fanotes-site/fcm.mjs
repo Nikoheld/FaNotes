@@ -5,6 +5,7 @@ import { createCipheriv, createHash, createSign, randomBytes } from 'node:crypto
 import { promises as fs } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { credentialOr } from './credentials.mjs'
+import { createServiceLog, routeOf } from './service-log.mjs'
 
 export const FCM_ACCOUNT_FILE = credentialOr('fcm-service-account', '/etc/fanotes/fcm-service-account.json')
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -178,15 +179,27 @@ const fcmNetworkRetryable = (error) => {
  * POST one FCM message. 5xx, 408, 429 and a dropped connection are retried with backoff.
  * The response body stays here: callers only see the status, whether to drop the token, and how many tries.
  */
-export const deliverFcm = async ({ fetchImpl, url, message, headers, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), attempts = FCM_ATTEMPTS } = {}) => {
+export const deliverFcm = async ({ fetchImpl, url, message, headers, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), attempts = FCM_ATTEMPTS, jsonLog, now = () => new Date() } = {}) => {
+  // Production emits one JSON line per attempt. Tests pass jsonLog when they want the lines.
+  const events = jsonLog || createServiceLog('fcm', (line) => {
+    if (process.env.NODE_ENV === 'production') console.log(line)
+  }, now)
+  const requestId = events.requestId()
+  const route = routeOf(url)
   let last = { status: 0, drop: false, attempts: 0 }
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const started = now().getTime()
+    const elapsed = () => Math.max(0, now().getTime() - started)
     try {
       const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(message) })
       const body = await response.text()
       last = { status: response.status, drop: fcmDropToken(response.status, body), attempts: attempt }
+      const fields = { requestId, method: 'POST', route, status: response.status, attempt, drop: last.drop, ms: elapsed() }
+      if (last.drop || response.status >= 400) events.warn(fields)
+      else events.info(fields)
       if (last.drop || !fcmRetryableStatus(response.status) || attempt === attempts) return last
     } catch (error) {
+      events.warn({ requestId, method: 'POST', route, status: 0, attempt, drop: false, error: String(error?.name || 'error'), ms: elapsed() })
       if (!fcmNetworkRetryable(error) || attempt === attempts) throw error
       last = { status: 0, drop: false, attempts: attempt }
     }
