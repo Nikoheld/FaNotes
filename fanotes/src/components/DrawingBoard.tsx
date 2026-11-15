@@ -150,7 +150,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, decideCommittedEraseHole, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkBudgetSliceClearsBitmap, inkStrokeIsTranslucent, inkStrokePaintMargin, noteBudgetSliceCleared, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, decideCommittedEraseHole, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkBudgetSliceClearsBitmap, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
 import { paperNoteTextOf } from '../lib/noteTextStay'
 import { liveTranslucentCanGrow, paintGrowingTranslucentStroke, type LiveTranslucentSession } from '../lib/liveTranslucentInk'
 import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
@@ -1328,6 +1328,17 @@ const paintInkBudgetSlice = (
   return { next: index, coverage: active }
 }
 
+/** Replaces the visible bitmap with a finished page in one drawImage, never a clear then a refill. */
+const swapInkBuffer = (target: HTMLCanvasElement, buffer: HTMLCanvasElement) => {
+  const context = target.getContext('2d')
+  if (!context) return
+  context.save()
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.globalCompositeOperation = 'copy'
+  context.drawImage(buffer, 0, 0)
+  context.restore()
+}
+
 /**
  * Move the painted slice by whole rows: copy what is still on the sheet,
  * then paint only the exposed band from the model. `copy` compositing
@@ -1547,7 +1558,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     frame: number
     /** True after the first slice clearRect'd the bitmap. The job has not sealed it. */
     cleared: boolean
+    /** Offscreen page the slices paint into; the visible bitmap is swapped once, when it is full. */
+    buffer: HTMLCanvasElement
   } | null>(null)
+  const inkPaintBufferRef = useRef<HTMLCanvasElement | null>(null)
   /** False while a packed page is still becoming strokes, and until its first paint finishes. */
   const inkReadyRef = useRef(true)
   const inkHydratingRef = useRef(false)
@@ -2667,15 +2681,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         squareMm: settings.paperSquareMm,
         includePaper: !inline,
       }
-      const job = { key: contentKey, strokes, frame: 0, cleared: false }
+      // Slices paint into an offscreen page; the visible bitmap keeps showing
+      // the last full page and is replaced in one step when the job is done.
+      const buffer = inkPaintBufferRef.current ?? document.createElement('canvas')
+      inkPaintBufferRef.current = buffer
+      if (buffer.width !== committedCanvas.width) buffer.width = committedCanvas.width
+      if (buffer.height !== committedCanvas.height) buffer.height = committedCanvas.height
+      // The visible bitmap is stale until the swap: never trust its seal.
+      committedBitmapRef.current = null
+      const job = { key: contentKey, strokes, frame: 0, cleared: true, buffer }
       inkPaintJobRef.current = job
       const step = (from: number) => {
         if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
-        job.cleared = noteBudgetSliceCleared(job.cleared, from)
-        const painted = paintInkBudgetSlice(committedCanvas, slice, markerCoverageRef.current, from)
+        const painted = paintInkBudgetSlice(job.buffer, slice, from === 0 ? null : jobCoverage, from)
         if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
-        markerCoverageRef.current = painted.coverage
+        jobCoverage = painted.coverage
         if (painted.next >= strokes.length) {
+          swapInkBuffer(committedCanvas, job.buffer)
+          markerCoverageRef.current = painted.coverage
           committedBitmapRef.current = { key: contentKey, topPx }
           inkPaintJobRef.current = null
           markInkPainted()
@@ -2685,6 +2708,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         }
         job.frame = requestAnimationFrame(() => step(painted.next))
       }
+      let jobCoverage: MarkerCoverage | null = null
       step(0)
     } else {
       cancelInkPaint()

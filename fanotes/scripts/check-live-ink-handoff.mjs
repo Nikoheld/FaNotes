@@ -32,6 +32,25 @@ try {
   const board = readFileSync('src/components/DrawingBoard.tsx', 'utf8')
   assert.match(board, /mayWipeLiveInk\(\{ committedHasStroke/, 'pen-up only wipes once the committed layer has the stroke')
   assert.match(board, /if \(inkPaintJobRef\.current && liveCanvasHasInkRef\.current\) return/, 'a running chunked repaint keeps the live stroke')
+  // Heavy-page repaint is double-buffered: slices go to an offscreen page and
+  // the visible committed canvas is replaced in one copy.
+  assert.match(board, /paintInkBudgetSlice\(job\.buffer,/, 'slices paint into the offscreen buffer')
+  assert.doesNotMatch(board, /paintInkBudgetSlice\(committedCanvas/, 'no slice paints on the visible canvas')
+  const jobStart = board.indexOf('const buffer = inkPaintBufferRef.current')
+  const jobEnd = board.indexOf('step(0)', jobStart)
+  const jobBody = board.slice(jobStart, jobEnd)
+  assert.doesNotMatch(jobBody, /clearRect/, 'the repaint job never clears the visible canvas')
+  assert.match(jobBody, /swapInkBuffer\(committedCanvas, job\.buffer\)/, 'the page is swapped in once, when finished')
+  const swap = board.slice(board.indexOf('const swapInkBuffer'), board.indexOf('const shiftInkWindowBitmap'))
+  assert.match(swap, /globalCompositeOperation = 'copy'/)
+  assert.match(jobBody, /committedBitmapRef\.current = null/, 'the stale visible bitmap is unsealed while the job runs')
+
+  // An erase during a running job must not punch into the stale bitmap.
+  const { decideCommittedEraseHole } = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
+  const base = { patchMatchesStrokes: true, held: true, keyMatches: true, topMatches: true, resized: false, activeStroke: false }
+  assert.deepEqual(decideCommittedEraseHole({ ...base, budgetCleared: true }), { punch: false, seal: false })
+  assert.deepEqual(decideCommittedEraseHole({ ...base, held: false, budgetCleared: false }), { punch: false, seal: false }, 'an unsealed bitmap is never punched')
+  assert.equal(decideCommittedEraseHole({ ...base, budgetCleared: false }).punch, true)
   console.log('live-ink-handoff ok')
 } finally {
   await server.close()
