@@ -258,7 +258,13 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const readJson = async (file) => {
-    try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch { return null }
+    try {
+      return JSON.parse(await fs.readFile(file, 'utf8'))
+    } catch (error) {
+      // A missing or broken file is absent. Any other read error must not look the same, or a later write replaces the account file.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
   }
 
   const writeJson = async (file, value) => {
@@ -1056,12 +1062,14 @@ export const createSchulnetzRuntime = (options = {}) => {
     let maxAge = 0
     const latencies = []
     for (const accountId of await listAccounts()) {
-      const link = await readLink(accountId)
+      let link
+      try { link = await readLink(accountId) } catch { continue }
       // A device link (TAM) is read on the phone; the server has nothing to check.
       if (!link || link.mode === 'device') continue
       if (link.needsReauth) { needsReauth += 1; continue }
       accounts += 1
-      const monitor = await readMonitor(accountId)
+      let monitor
+      try { monitor = await readMonitor(accountId) } catch { continue }
       const okAt = Date.parse(monitor.gradeCheckOkAt || '')
       const age = Number.isFinite(okAt) ? Math.max(0, nowMs - okAt) : Number.POSITIVE_INFINITY
       maxAge = Math.max(maxAge, age)
