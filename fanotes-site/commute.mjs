@@ -58,6 +58,11 @@ const readUpstreamJson = async (response) => {
   if (!hasReader && typeof response.text !== 'function' && typeof response.json === 'function') return response.json()
   return JSON.parse(await readLimitedText(response, UPSTREAM_BODY_MAX))
 }
+// An error page is not parsed. Cancel it so the rest is not kept.
+const releaseUnread = async (response) => {
+  const reader = response?.body?.getReader?.()
+  if (reader && typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+}
 const USER_AGENT = 'KantiPlus/1.0 (+https://fanotes.fasrv.ch; commute)'
 const PROVIDERS = {
   'search.ch': { name: 'search.ch', occupancy: 'train-class', formation: false },
@@ -193,6 +198,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
       try {
         const response = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': USER_AGENT }, redirect: 'error', signal: AbortSignal.timeout?.(UPSTREAM_TIMEOUT_MS) })
         if (!response.ok && response.status !== 200) {
+          await releaseUnread(response)
           last = Object.assign(new Error('provider'), { status: response.status })
           events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!upstreamRetryable(last) || attempt === UPSTREAM_ATTEMPTS) throw last

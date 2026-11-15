@@ -339,3 +339,36 @@ test('a streamed stop list is parsed, and an oversized body is not retried', asy
   assert.equal(searchRows[0].error, 'Error')
   assert.equal(lines.some((line) => line.includes('page too large')), false)
 })
+
+test('an upstream error page is cancelled and is not parsed', async () => {
+  const hosts = []
+  const errors = { text: 0, json: 0, reads: 0, cancelled: 0 }
+  const lines = []
+  const log = createServiceLog('commute', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const fetchImpl = async (url) => {
+    const host = new URL(String(url)).hostname
+    hosts.push(host)
+    if (host !== 'timetable.search.ch') return ok({ stations: [{ id: '8500309', name: 'Brugg AG' }] })
+    return {
+      ok: false,
+      status: 503,
+      text: async () => { errors.text += 1; return 'secret-error-page' },
+      json: async () => { errors.json += 1; return {} },
+      body: {
+        getReader: () => ({
+          read: async () => { errors.reads += 1; return { done: false, value: new Uint8Array(32) } },
+          cancel: async () => { errors.cancelled += 1 },
+        }),
+      },
+    }
+  }
+  const provider = createCommuteProvider({ fetchImpl, jsonLog: log, now: () => new Date(ASK_AT), sleep: async () => {} })
+  const answer = await provider.stops('Brugg')
+  assert.equal(answer.stops[0].name, 'Brugg AG')
+  assert.equal(hosts.filter((host) => host === 'timetable.search.ch').length, UPSTREAM_ATTEMPTS)
+  assert.equal(errors.cancelled, UPSTREAM_ATTEMPTS)
+  assert.equal(errors.reads, 0)
+  assert.equal(errors.text, 0)
+  assert.equal(errors.json, 0)
+  assert.equal(lines.some((line) => line.includes('secret-error-page')), false)
+})

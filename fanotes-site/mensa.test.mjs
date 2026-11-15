@@ -463,3 +463,49 @@ test('an oversized menu body is dropped after one read and is not retried', asyn
     await fs.rm(root, { recursive: true, force: true })
   }
 })
+
+test('an upstream error page is cancelled and the menu still falls back', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-release-'))
+  let apiCalls = 0
+  let textCalls = 0
+  let reads = 0
+  let cancelled = 0
+  const lines = []
+  const fetchImpl = async (url) => {
+    if (String(url).includes('/api/_Combine/')) {
+      apiCalls += 1
+      return {
+        ok: false,
+        status: 503,
+        text: async () => { textCalls += 1; return 'secret-error-page' },
+        body: {
+          getReader: () => ({
+            read: async () => { reads += 1; return { done: false, value: new Uint8Array(32) } },
+            cancel: async () => { cancelled += 1 },
+          }),
+        },
+      }
+    }
+    return { ok: true, status: 200, text: async () => fixture }
+  }
+  const mensa = createMensa({
+    fetch: fetchImpl,
+    sleep: async () => {},
+    now: () => new Date('2026-11-10T07:00:00.000Z'),
+    root,
+    log: () => {},
+    jsonLog: createServiceLog('mensa', (line) => lines.push(line), () => new Date('2026-11-10T07:00:00.000Z')),
+  })
+  try {
+    const body = await mensa.get()
+    assert.equal(body.days.length, 1)
+    assert.equal(body.day.date, '2026-11-10')
+    assert.equal(apiCalls, 2)
+    assert.equal(cancelled, 2)
+    assert.equal(reads, 0)
+    assert.equal(textCalls, 0)
+    assert.equal(lines.some((line) => line.includes('secret-error-page')), false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
