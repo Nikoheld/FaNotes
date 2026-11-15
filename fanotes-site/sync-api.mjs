@@ -1353,7 +1353,14 @@ const readPartial = async (accountId, uploadId) => readJsonFile(safeJoin(partial
 
 const writePartial = async (accountId, uploadId, meta) => {
   const directory = partialDirectory(accountId, uploadId)
+  const existing = await fs.lstat(directory).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
   await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+  if (!existing) {
+    // Link the new upload directory before its metadata is written. A crash
+    // must not drop a resumable upload the client will retry by id.
+    await syncDirectory(dirname(dirname(directory)))
+    await syncDirectory(dirname(directory))
+  }
   await atomicWrite(safeJoin(directory, 'meta.json'), `${JSON.stringify(meta)}\n`)
 }
 
@@ -1385,11 +1392,13 @@ const copyOnto = async (destination, source, start) => {
   // opened with 'wx' so the next patch can still resume. Append mode would
   // ignore the write position.
   let output
+  let created = false
   try {
     output = await fs.open(destination, 'r+')
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error
     output = await fs.open(destination, 'wx', 0o600)
+    created = true
   }
   const input = await fs.open(source, 'r')
   const buffer = Buffer.alloc(64 * 1024)
@@ -1410,6 +1419,9 @@ const copyOnto = async (destination, source, start) => {
       readAt += bytesRead
     }
     await output.sync()
+    // A recreated body.bin has to be linked before the client is told the
+    // bytes were stored. The original create already synced this directory.
+    if (created) await syncDirectory(dirname(destination))
   } finally {
     await input.close()
     await output.close()
@@ -1476,6 +1488,9 @@ const handleUploadAbort = async (request, response, auth, fileId, uploadId) => {
     const meta = await readPartial(auth.account.id, uploadId)
     if (!meta || meta.fileId !== fileId) fail(404, 'Dieser Upload ist nicht bekannt.')
     await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+    // The removal has to be durable. A crash must not bring the partial back
+    // and reserve its bytes again.
+    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'partials'))
     sendEmpty(request, response, 204)
   })
 }
