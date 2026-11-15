@@ -3222,6 +3222,10 @@ export const tagErrorStage = (stage, error) => {
 export const GRADE_SLA_MS = 10 * 60_000
 export const GRADE_CHECK_MS = 210_000
 export const GRADE_CHECK_JITTER = 0.125
+/** Restart stagger. Empty account directories sort first; the cap keeps a grade check inside the promise. */
+export const INITIAL_POLL_STAGGER_MS = 10_000
+export const INITIAL_POLL_STAGGER_CAP_MS = 60_000
+export const INITIAL_GRADE_STAGGER_CAP_MS = 30_000
 export const gradeCheckDelayMs = (random = Math.random) => Math.round(GRADE_CHECK_MS * (1 + (random() * 2 - 1) * GRADE_CHECK_JITTER))
 
 /** Nearest-rank percentile of an ascending list. An empty list has no value. */
@@ -3245,8 +3249,8 @@ export const createPollScheduler = ({ listAccounts, pollAccount, readSnapshot, n
     const accounts = await listAccounts()
     const started = now().getTime()
     accounts.forEach((accountId, index) => {
-      if (!due.has(accountId)) due.set(accountId, started + index * 10_000)
-      if (!gradeDue.has(accountId)) gradeDue.set(accountId, started + index * 10_000)
+      if (!due.has(accountId)) due.set(accountId, started + Math.min(index * INITIAL_POLL_STAGGER_MS, INITIAL_POLL_STAGGER_CAP_MS))
+      if (!gradeDue.has(accountId)) gradeDue.set(accountId, started + Math.min(index * INITIAL_POLL_STAGGER_MS, INITIAL_GRADE_STAGGER_CAP_MS))
     })
     for (const accountId of [...due.keys()]) if (!accounts.includes(accountId)) { due.delete(accountId); gradeDue.delete(accountId); failures.delete(accountId) }
     let polled = 0
