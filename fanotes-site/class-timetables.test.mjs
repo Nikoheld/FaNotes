@@ -659,3 +659,31 @@ test('an unreadable timetable file is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('an unreadable timetable page is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-page-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const pdfFile = join(dir, 'G26A.pdf')
+  const pdf = Buffer.from('%PDF-1.4 keep')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(dir, 'index.json'), JSON.stringify({
+    uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+    classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: [], warnings: [],
+  }), { mode: 0o600 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  await writeFile(pdfFile, pdf, { mode: 0o600 })
+  try {
+    assert.deepEqual(await store.classPdf('G26A'), pdf)
+    await chmod(pdfFile, 0o000)
+    await assert.rejects(() => store.classPdf('G26A'), (error) => error?.code === 'EACCES')
+    await chmod(pdfFile, 0o600)
+    assert.deepEqual(await readFile(pdfFile), pdf)
+    await rm(pdfFile)
+    assert.equal(await store.classPdf('G26A'), null)
+  } finally {
+    await chmod(pdfFile, 0o600).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -558,14 +558,18 @@ export const createClassTimetables = (options = {}) => {
     const file = join(versionDir(index.version), `${code}.${extension}`)
     return file
   }
-  const classPdf = async (code) => {
-    const file = await classFile(code, 'pdf')
-    return file ? fs.readFile(file).catch(() => null) : null
+  const readBytes = async (file) => {
+    if (!file) return null
+    try {
+      return await fs.readFile(file)
+    } catch (error) {
+      // A missing page is absent. Any other read error must not look the same, or the timetable page looks deleted.
+      if (error?.code === 'ENOENT') return null
+      throw error
+    }
   }
-  const classPng = async (code) => {
-    const file = await classFile(code, 'png')
-    return file ? fs.readFile(file).catch(() => null) : null
-  }
+  const classPdf = async (code) => readBytes(await classFile(code, 'pdf'))
+  const classPng = async (code) => readBytes(await classFile(code, 'png'))
   const room = async (name) => {
     if (!ROOM_NAME.test(String(name))) return null
     const version = await currentVersion()
