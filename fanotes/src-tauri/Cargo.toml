@@ -14,15 +14,42 @@ fanotes-host = { path = "../../crates/fanotes-host" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
+base64 = "0.22"
+rfd = { version = "0.15", default-features = false }
+tauri-plugin-single-instance = "2.5.3"
+
+# WebKitGTK window: print to PDF and the window snapshot go through GTK.
+[target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
 gdk = "0.18.2"
 gdk-pixbuf = "0.18.5"
-base64 = "0.22"
 cairo-rs = "0.18.5"
 gio = "0.18.4"
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 webkit2gtk = "2.0.2"
-tauri-plugin-single-instance = "2.5.3"
+
+# WebView2 window. `webview2-com` and `windows` must stay on the versions wry
+# links, so the controller Tauri hands out is the same COM type.
+[target.'cfg(windows)'.dependencies]
+# Custom button labels in the close warning need the task dialog. Without this
+# feature rfd falls back to an OK/Cancel message box.
+rfd = { version = "0.15", default-features = false, features = ["common-controls-v6"] }
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+png = "0.17"
+jpeg-encoder = "0.7"
+
+[dev-dependencies]
+# The window-image budget is plain Rust, so Linux tests cover the code Windows runs.
+png = "0.17"
+jpeg-encoder = "0.7"
 
 [features]
 default = ["custom-protocol"]

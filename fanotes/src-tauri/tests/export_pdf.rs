@@ -1,8 +1,6 @@
-use std::path::PathBuf;
-
 #[test]
 fn webkit_writes_an_a4_pdf() {
-    let path = PathBuf::from(format!("/tmp/fanotes-export-{}.pdf", std::process::id()));
+    let path = std::env::temp_dir().join(format!("fanotes-export-{}.pdf", std::process::id()));
     let _ = std::fs::remove_file(&path);
     fanotes_tauri::print_html_to_pdf(
         "<html><body><h1>FaNotes</h1><p>Notiz</p></body></html>",

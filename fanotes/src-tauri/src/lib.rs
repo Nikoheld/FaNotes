@@ -9,6 +9,7 @@ use std::time::Duration;
 use fanotes_host::{find_channel, Host, CHANNELS};
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager, State};
+#[cfg(target_os = "linux")]
 use webkit2gtk::{URIRequestExt, WebContextExt, WebViewExt};
 
 struct HostState(Mutex<Host>);
@@ -137,14 +138,35 @@ fn arm_close_warning(handle: tauri::AppHandle) {
     });
 }
 
+#[cfg(not(any(target_os = "linux", windows)))]
+compile_error!("The FaNotes Tauri shell supports Linux (WebKitGTK) and Windows (WebView2).");
+
+// The window image and the PDF export have one API and one file per webview.
+#[cfg(target_os = "linux")]
 mod capture;
+#[cfg(target_os = "linux")]
 mod export;
+#[cfg(windows)]
+#[path = "capture_webview2.rs"]
+mod capture;
+#[cfg(windows)]
+#[path = "export_webview2.rs"]
+mod export;
+mod smoke;
+#[cfg(windows)]
+mod webview2;
+#[cfg(any(windows, test))]
+mod window_capture;
 
 pub use capture::capture_html;
 pub use export::print_html_to_pdf;
+#[cfg(windows)]
+use webview2::{install_main_window_reveal, install_webview_guards};
 
+// Async: WebView2 delivers the print completion through the UI thread, which a
+// synchronous command would block (see `webview2.rs`).
 #[tauri::command(rename = "fanotes:export-note-pdf")]
-fn export_note_pdf(
+async fn export_note_pdf(
     window: tauri::WebviewWindow,
     state: State<'_, HostState>,
     args: Vec<Value>,
@@ -169,36 +191,13 @@ fn export_note_pdf(
         path
     };
     let file_path = destination.display().to_string();
-    let (started, started_rx) = std::sync::mpsc::channel();
-    window
-        .with_webview(move |webview| {
-            let view = webview.inner();
-            let result = (|| {
-                // The class has to be on the document before WebKit snapshots it.
-                // `evaluate_javascript` returns before that script runs.
-                export::finish_script(
-                    &view,
-                    "document.documentElement.classList.add('is-printing')",
-                )?;
-                let printed = export::print_view(&view, &destination);
-                let _ = export::finish_script(
-                    &view,
-                    "document.documentElement.classList.remove('is-printing')",
-                );
-                printed
-            })();
-            let _ = started.send(result);
-        })
-        .map_err(|_| "Das Fenster ist nicht bereit für den PDF-Export.".to_owned())?;
-    let printed = started_rx
-        .recv_timeout(std::time::Duration::from_secs(25))
-        .map_err(|_| "PDF-Export fehlgeschlagen.".to_owned())?;
-    printed?;
+    export::print_window(&window, &destination)?;
     Ok(json!({ "filePath": file_path }))
 }
 
+// Async: building a window inside a synchronous command deadlocks WebView2.
 #[tauri::command(rename = "fanotes:open-subject-book-popout")]
-fn open_subject_book_popout(
+async fn open_subject_book_popout(
     app: tauri::AppHandle,
     state: State<'_, HostState>,
     args: Vec<Value>,
@@ -317,19 +316,10 @@ fn cancel_close(state: State<'_, HostState>) -> Result<Value, String> {
     host.dispatch("fanotes:cancel-close", &[])
 }
 
+// Async for the same reason as `export_note_pdf`.
 #[tauri::command(rename = "fanotes:capture-window")]
-fn capture_window(window: tauri::WebviewWindow) -> Result<Value, String> {
-    let (captured, captured_rx) = std::sync::mpsc::channel();
-    window
-        .with_webview(move |webview| {
-            let result = capture::capture_view(&webview.inner());
-            let _ = captured.send(result);
-        })
-        .map_err(|_| "Das Fensterbild ist ungültig.".to_owned())?;
-    let image = captured_rx
-        .recv_timeout(std::time::Duration::from_secs(20))
-        .map_err(|_| "Das Fensterbild ist ungültig.".to_owned())??;
-    Ok(Value::String(image))
+async fn capture_window(window: tauri::WebviewWindow) -> Result<Value, String> {
+    capture::capture_window(&window).map(Value::String)
 }
 
 /// JavaScript that points an open book window at `book`.
@@ -573,6 +563,7 @@ pub(crate) fn main_window_should_reveal(
     load_failed || load_finished || load_progress >= 1.0
 }
 
+#[cfg(target_os = "linux")]
 fn install_main_window_reveal(window: &tauri::WebviewWindow) {
     let reveal = window.clone();
     let installed = window.with_webview(move |webview| {
@@ -602,6 +593,7 @@ fn install_main_window_reveal(window: &tauri::WebviewWindow) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn install_webview_guards(window: &tauri::WebviewWindow, emit_sheet_zoom: bool) {
     let emit_window = window.clone();
     let _ = window.with_webview(move |webview| {
@@ -839,6 +831,7 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("fanotes"));
             app.manage(HostState(Mutex::new(Host::open(app_data))));
+            smoke::arm();
             if let Some(window) = app.get_webview_window("main") {
                 install_webview_guards(&window, true);
                 install_main_window_reveal(&window);
@@ -872,7 +865,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(register())
+        .invoke_handler(smoke::observe(register()))
         .append_invoke_initialization_script(system_language_script(
             fanotes_host::desktop_navigator_language(),
         ))

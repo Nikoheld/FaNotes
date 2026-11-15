@@ -27,6 +27,36 @@ pub fn print_html_to_pdf(html: &str, destination: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Print the app page of `window` to `destination`, as Electron
+/// `executeJavaScript` + `printToPDF` + `executeJavaScript`.
+pub fn print_window(window: &tauri::WebviewWindow, destination: &Path) -> Result<(), String> {
+    let destination = destination.to_path_buf();
+    let (started, started_rx) = mpsc::channel();
+    window
+        .with_webview(move |webview| {
+            let view = webview.inner();
+            let result = (|| {
+                // The class has to be on the document before WebKit snapshots it.
+                // `evaluate_javascript` returns before that script runs.
+                finish_script(
+                    &view,
+                    "document.documentElement.classList.add('is-printing')",
+                )?;
+                let printed = print_view(&view, &destination);
+                let _ = finish_script(
+                    &view,
+                    "document.documentElement.classList.remove('is-printing')",
+                );
+                printed
+            })();
+            let _ = started.send(result);
+        })
+        .map_err(|_| "Das Fenster ist nicht bereit für den PDF-Export.".to_owned())?;
+    started_rx
+        .recv_timeout(Duration::from_secs(25))
+        .map_err(|_| "PDF-Export fehlgeschlagen.".to_owned())?
+}
+
 pub fn print_view(view: &webkit2gtk::WebView, destination: &Path) -> Result<(), String> {
     if let Some(parent) = destination.parent() {
         if !parent.as_os_str().is_empty() {
