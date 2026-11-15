@@ -16,10 +16,13 @@
 //   accounts/<id>/revisions/<fileId>/ -> the last 8 blobs, and the largest
 //     older blob, so a shrink or a bad overwrite can be restored
 //   accounts/<id>/quarantine/<fileId>/ -> rejected empty or truncated uploads
+//   accounts/<id>/partials/<uploadId>/ -> a resumable upload (meta.json, body.bin)
+//     that is not a live note until its size and checksum match
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { createReadStream, promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { languageForRequest, localizeText } from './i18n.mjs'
+import { hashFile, inspectSyncAccount } from './sync-integrity.mjs'
 
 const syncRoot = () => resolve(process.env.FANOTES_SYNC_DIR || '/var/lib/fanotes-sync')
 let onAccountDeleted = async () => {}
@@ -450,9 +453,9 @@ const corsHeaders = (request) => {
   const allowed = origin === 'null' || origin === PUBLIC_ORIGIN
   return {
     ...(allowed ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256, X-FaNotes-Blank, X-FaNotes-Clear, X-FaNotes-Delete',
-    'Access-Control-Expose-Headers': 'ETag, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted, X-FaNotes-Rejected',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, Upload-Offset, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256, X-FaNotes-Blank, X-FaNotes-Clear, X-FaNotes-Delete',
+    'Access-Control-Expose-Headers': 'ETag, Upload-Offset, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted, X-FaNotes-Rejected',
     'Access-Control-Max-Age': '600',
   }
 }
@@ -978,6 +981,217 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
   })
 }
 
+const UPLOAD_ID_PATTERN = /^[a-f0-9]{32}$/u
+const MAX_PARTIALS = 32
+
+const partialDirectory = (accountId, uploadId) => safeJoin(accountDirectory(accountId), 'partials', uploadId)
+
+const readPartial = async (accountId, uploadId) => readJsonFile(safeJoin(partialDirectory(accountId, uploadId), 'meta.json'))
+
+const writePartial = async (accountId, uploadId, meta) => {
+  const directory = partialDirectory(accountId, uploadId)
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+  await atomicWrite(safeJoin(directory, 'meta.json'), `${JSON.stringify(meta)}\n`)
+}
+
+const listPartialMetas = async (accountId) => {
+  const root = safeJoin(accountDirectory(accountId), 'partials')
+  let names
+  try {
+    names = await fs.readdir(root)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
+  const metas = []
+  for (const uploadId of names) {
+    if (!UPLOAD_ID_PATTERN.test(uploadId)) continue
+    const meta = await readPartial(accountId, uploadId)
+    if (meta && meta.fileId) metas.push({ uploadId, ...meta })
+  }
+  return metas
+}
+
+const reservedPartialBytes = async (accountId, exceptUploadId = '') => {
+  const metas = await listPartialMetas(accountId)
+  return metas.reduce((sum, meta) => sum + (meta.uploadId === exceptUploadId ? 0 : (Number(meta.size) || 0)), 0)
+}
+
+const copyOnto = async (destination, source, start) => {
+  // 'r+' does not create the file. A missing body.bin (a crashed create) is
+  // opened with 'wx' so the next patch can still resume. Append mode would
+  // ignore the write position.
+  let output
+  try {
+    output = await fs.open(destination, 'r+')
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    output = await fs.open(destination, 'wx', 0o600)
+  }
+  const input = await fs.open(source, 'r')
+  const buffer = Buffer.alloc(64 * 1024)
+  try {
+    await output.truncate(start)
+    let position = start
+    let readAt = 0
+    while (true) {
+      const { bytesRead } = await input.read(buffer, 0, buffer.length, readAt)
+      if (!bytesRead) break
+      let written = 0
+      while (written < bytesRead) {
+        const result = await output.write(buffer, written, bytesRead - written, position + written)
+        if (!result.bytesWritten) fail(400, 'Die Datei kam unvollständig an.')
+        written += result.bytesWritten
+      }
+      position += bytesRead
+      readAt += bytesRead
+    }
+    await output.sync()
+  } finally {
+    await input.close()
+    await output.close()
+  }
+}
+
+const publicUpload = (uploadId, meta) => ({
+  uploadId,
+  fileId: meta.fileId,
+  offset: Number(meta.received) || 0,
+  size: Number(meta.size) || 0,
+})
+
+const handleIntegrity = async (request, response, auth) => {
+  const report = await inspectSyncAccount(syncRoot(), auth.account.id)
+  sendJson(request, response, 200, report)
+}
+
+const handleCreateUpload = async (request, response, auth, fileId) => {
+  const base = parseIfMatch(request)
+  const metaHeader = parseMeta(request)
+  const declaredSha = request.headers['x-fanotes-sha256']
+  if (typeof declaredSha !== 'string' || !FILE_ID_PATTERN.test(declaredSha)) fail(400, 'Die Prüfsumme der Datei fehlt.')
+  const payload = await readJsonBody(request)
+  const size = Number(payload.size)
+  if (!Number.isInteger(size) || size < 28) fail(400, 'Der verschlüsselte Inhalt ist zu kurz.')
+  if (size > MAX_BLOB_BYTES) fail(413, 'Die Datei ist zu groß für den Sync.')
+  const blank = headerFlag(request.headers['x-fanotes-blank'])
+  const clear = request.headers['x-fanotes-clear'] === '1'
+  await withAccountLock(auth.account.id, async () => {
+    const table = await loadTable(auth.account.id)
+    const existing = await listPartialMetas(auth.account.id)
+    if (existing.length >= MAX_PARTIALS) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+    const reserved = existing.reduce((sum, meta) => sum + (Number(meta.size) || 0), 0)
+    if (table.bytes + (table.historyBytes || 0) + reserved + size > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+    const uploadId = randomBytes(16).toString('hex')
+    const meta = {
+      fileId,
+      size,
+      sha256: declaredSha,
+      base,
+      blank,
+      clear,
+      meta: metaHeader,
+      received: 0,
+      deviceId: auth.deviceId,
+      createdAt: nowIso(),
+    }
+    await writePartial(auth.account.id, uploadId, meta)
+    await atomicWrite(safeJoin(partialDirectory(auth.account.id, uploadId), 'body.bin'), Buffer.alloc(0))
+    sendJson(request, response, 201, publicUpload(uploadId, meta))
+  })
+}
+
+const handleUploadStatus = async (request, response, auth, fileId, uploadId) => {
+  const meta = await readPartial(auth.account.id, uploadId)
+  if (!meta || meta.fileId !== fileId) fail(404, 'Dieser Upload ist nicht bekannt.')
+  sendJson(request, response, 200, publicUpload(uploadId, meta))
+}
+
+// Drops only the partial. The live note and the revision archive stay.
+const handleUploadAbort = async (request, response, auth, fileId, uploadId) => {
+  await withAccountLock(auth.account.id, async () => {
+    const meta = await readPartial(auth.account.id, uploadId)
+    if (!meta || meta.fileId !== fileId) fail(404, 'Dieser Upload ist nicht bekannt.')
+    await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+    sendEmpty(request, response, 204)
+  })
+}
+
+const handleUploadPatch = async (request, response, auth, fileId, uploadId) => {
+  const offsetHeader = request.headers['upload-offset']
+  const offset = Number(offsetHeader)
+  if (!Number.isInteger(offset) || offset < 0) fail(400, 'Der Upload setzt an der falschen Stelle fort.')
+  const patch = await spoolUpload(safeJoin(accountDirectory(auth.account.id), 'incoming'), request, MAX_BLOB_BYTES)
+  try {
+    await withAccountLock(auth.account.id, async () => {
+      const meta = await readPartial(auth.account.id, uploadId)
+      if (!meta || meta.fileId !== fileId) fail(404, 'Dieser Upload ist nicht bekannt.')
+      if (offset !== meta.received) {
+        fail(409, 'Der Upload setzt an der falschen Stelle fort.', { offset: meta.received, size: meta.size, reason: 'offset' })
+      }
+      if (meta.received + patch.size > meta.size) fail(400, 'Die Datei ist zu groß für den Sync.')
+      const bodyPath = safeJoin(partialDirectory(auth.account.id, uploadId), 'body.bin')
+      await copyOnto(bodyPath, patch.path, meta.received)
+      meta.received += patch.size
+      await writePartial(auth.account.id, uploadId, meta)
+      sendJson(request, response, 200, publicUpload(uploadId, meta), { 'Upload-Offset': String(meta.received) })
+    })
+  } finally {
+    await fs.rm(patch.path, { force: true })
+  }
+}
+
+const handleUploadComplete = async (request, response, auth, fileId, uploadId) => {
+  const base = parseIfMatch(request)
+  const metaHeader = parseMeta(request)
+  const declaredSha = request.headers['x-fanotes-sha256']
+  if (typeof declaredSha !== 'string' || !FILE_ID_PATTERN.test(declaredSha)) fail(400, 'Die Prüfsumme der Datei fehlt.')
+  const blank = headerFlag(request.headers['x-fanotes-blank'])
+  const clear = request.headers['x-fanotes-clear'] === '1'
+  await withAccountLock(auth.account.id, async () => {
+    const meta = await readPartial(auth.account.id, uploadId)
+    if (!meta || meta.fileId !== fileId) fail(404, 'Dieser Upload ist nicht bekannt.')
+    if (meta.received !== meta.size) fail(409, 'Der Upload ist noch nicht vollständig.', { offset: meta.received, size: meta.size, reason: 'incomplete' })
+    if (declaredSha !== meta.sha256) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
+    const bodyPath = safeJoin(partialDirectory(auth.account.id, uploadId), 'body.bin')
+    const actual = await hashFile(bodyPath)
+    if (actual !== declaredSha) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
+    const table = await loadTable(auth.account.id)
+    const current = table.entries.get(fileId)
+    const archivedSize = current?.deleted
+      ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
+      : 0
+    const decision = evaluateSyncWrite({ current: current ?? null, base, nextSize: meta.size, blank, clear, archivedSize })
+    if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
+    if (decision === 'guard') {
+      // The live blob stays. Drop the partial only after the rejected body is
+      // in quarantine, so a failed move can be retried.
+      const kept = await moveToQuarantine(auth.account.id, fileId, base, bodyPath)
+      if (kept) await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+      return guardRejected(request, response, current)
+    }
+    const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
+    const historyDelta = current && !current.deleted && current.sha256 !== declaredSha ? (Number(current.size) || 0) : 0
+    const reserved = await reservedPartialBytes(auth.account.id, uploadId)
+    if (table.bytes - previousBytes + meta.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+    const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
+    if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+    if (current && !current.deleted && current.sha256 !== declaredSha) {
+      table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, meta.size, false)
+    }
+    const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
+    await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
+    await fs.rename(bodyPath, blobPath)
+    await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
+    table.revision = entry.revision
+    table.entries.set(fileId, entry)
+    table.bytes += meta.size - previousBytes
+    await appendChange(auth.account.id, table, entry)
+    sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
+  })
+}
+
 // ── Router ──────────────────────────────────────────────────────────────────
 
 export const authenticateSyncRequest = (request) => authenticate(request)
@@ -1052,6 +1266,7 @@ export const handleSyncRequest = async (request, response, url) => {
     if (route === '/logout' && method === 'POST') { await handleLogout(request, response, auth); return true }
     if (route === '/password' && method === 'POST') { await handlePassword(request, response, auth); return true }
     if (route === '/changes' && method === 'GET') { await handleChanges(request, response, auth, url); return true }
+    if (route === '/integrity' && method === 'GET') { await handleIntegrity(request, response, auth); return true }
     const deviceMatch = /^\/devices\/([a-f0-9]{24})$/u.exec(route)
     if (deviceMatch && method === 'DELETE') { await handleRemoveDevice(request, response, auth, deviceMatch[1]); return true }
     const revisionsMatch = /^\/files\/([a-f0-9]{64})\/revisions$/u.exec(route)
@@ -1062,6 +1277,29 @@ export const handleSyncRequest = async (request, response, url) => {
     const restoreMatch = /^\/files\/([a-f0-9]{64})\/restore$/u.exec(route)
     if (restoreMatch && method === 'POST') {
       await handleRestoreFile(request, response, auth, parseFileId(restoreMatch[1]))
+      return true
+    }
+    const uploadComplete = /^\/files\/([a-f0-9]{64})\/uploads\/([a-f0-9]{32})\/complete$/u.exec(route)
+    if (uploadComplete && method === 'POST') {
+      await handleUploadComplete(request, response, auth, parseFileId(uploadComplete[1]), uploadComplete[2])
+      return true
+    }
+    const uploadOne = /^\/files\/([a-f0-9]{64})\/uploads\/([a-f0-9]{32})$/u.exec(route)
+    if (uploadOne && method === 'GET') {
+      await handleUploadStatus(request, response, auth, parseFileId(uploadOne[1]), uploadOne[2])
+      return true
+    }
+    if (uploadOne && method === 'PATCH') {
+      await handleUploadPatch(request, response, auth, parseFileId(uploadOne[1]), uploadOne[2])
+      return true
+    }
+    if (uploadOne && method === 'DELETE') {
+      await handleUploadAbort(request, response, auth, parseFileId(uploadOne[1]), uploadOne[2])
+      return true
+    }
+    const uploadCreate = /^\/files\/([a-f0-9]{64})\/uploads$/u.exec(route)
+    if (uploadCreate && method === 'POST') {
+      await handleCreateUpload(request, response, auth, parseFileId(uploadCreate[1]))
       return true
     }
     const fileMatch = /^\/files\/([a-f0-9]{64})$/u.exec(route)
