@@ -1,6 +1,6 @@
 // Commute provider: short-lived cache, in-flight coalescing, upstream retries, and a recorded
 // search.ch answer for Brugg → Aarau via Aarau, Lenzburg (a via equal to the destination).
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -204,6 +204,33 @@ test('two timetables saved together both stay on disk', async () => {
     assert.equal(again[1].stale, true)
     assert.equal(again[0].trips[0].legs[0].line, 'IR 16')
     assert.equal(again[1].trips[0].legs[0].line, 'IR 16')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('parallel route queries add up in the daily budget', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-budget-'))
+  const budgetFile = join(root, 'commute-budget.json')
+  await writeFile(budgetFile, JSON.stringify({ day: '2026-11-16', route: 10, completion: 0, fallback: 0, detail: 0 }))
+  let waiting = 0
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const fetchImpl = async () => {
+    waiting += 1
+    if (waiting >= 2) release()
+    await gate
+    return ok(fixture)
+  }
+  try {
+    const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, budgetFile, log: () => {} })
+    const second = { from: BRUGG, to: LENZBURG, vias: [], at: ASK_AT, timeType: 'depart' }
+    await Promise.all([provider.trips(query), provider.trips(second)])
+    assert.equal(provider.budget().route, 12)
+    const stored = JSON.parse(await readFile(budgetFile, 'utf8'))
+    assert.equal(stored.day, '2026-11-16')
+    assert.equal(stored.route, 12)
+    assert.equal((await stat(budgetFile)).mode & 0o777, 0o600)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

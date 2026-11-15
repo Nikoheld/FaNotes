@@ -64,23 +64,47 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   const inflight = new Map()
   let budget = { day: '', route: 0, completion: 0, fallback: 0, detail: 0 }
   let budgetLoaded = false
+  let budgetQueue = Promise.resolve()
+  const withBudget = (task) => {
+    const run = budgetQueue.then(task, task)
+    budgetQueue = run.then(() => undefined, () => undefined)
+    return run
+  }
   const loadBudget = async () => {
     if (budgetLoaded || !budgetFile) return
     budgetLoaded = true
     try { budget = { ...budget, ...JSON.parse(await fs.readFile(budgetFile, 'utf8')) } } catch { /* first run */ }
   }
-  const spend = async (kind) => {
-    await loadBudget()
+  const rollBudget = () => {
     const day = zurichWall(now().getTime()).day
     if (budget.day !== day) budget = { day, route: 0, completion: 0, fallback: 0, detail: 0 }
-    budget[kind] += 1
-    if (budgetFile) await fs.writeFile(budgetFile, JSON.stringify(budget), { mode: 0o600 }).catch(() => undefined)
   }
-  const left = async (kind, limit) => {
+  const writeBudget = async () => {
+    if (!budgetFile) return
+    const temporary = `${budgetFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+    try {
+      await fs.mkdir(dirname(budgetFile), { recursive: true })
+      await fs.writeFile(temporary, JSON.stringify(budget), { mode: 0o600 })
+      await fs.rename(temporary, budgetFile)
+    } catch {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+    }
+  }
+  // Check and increment under one lock. Two requests must not both pass the daily cap.
+  const reserve = (kind, limit) => withBudget(async () => {
     await loadBudget()
-    const day = zurichWall(now().getTime()).day
-    return budget.day !== day || budget[kind] < limit
-  }
+    rollBudget()
+    if (budget[kind] >= limit) return false
+    budget[kind] += 1
+    await writeBudget()
+    return true
+  })
+  const spend = (kind) => withBudget(async () => {
+    await loadBudget()
+    rollBudget()
+    budget[kind] += 1
+    await writeBudget()
+  })
   const DISK_LIMIT = 40
   let disk = { entries: [] }
   let diskLoading = null
@@ -188,9 +212,8 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     const term = String(query || '').trim().slice(0, 60)
     if (term.length < 2) return Promise.resolve({ stops: [] })
     return cached(`stops:${term.toLowerCase()}`, STOP_CACHE_MS, async () => {
-      if (await left('completion', COMPLETION_BUDGET)) {
+      if (await reserve('completion', COMPLETION_BUDGET)) {
         try {
-          await spend('completion')
           return { stops: parseCompletion(await getJson(`${SEARCH_CH}/completion.json?term=${encodeURIComponent(term)}&show_ids=1&nofavorites=1`)) }
         } catch (error) { log('warn', `Haltestellensuche search.ch fehlgeschlagen (${error?.status || error?.name || 'error'})`) }
       }
@@ -212,9 +235,8 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   /** One timetable query (search.ch, then transport.opendata.ch) for from → to through [vias] in order; no guard, no cache. */
   const fetchTrips = async ({ from, to, vias, at, timeType, num }) => {
     const when = searchDate(at)
-    if (await left('route', ROUTE_BUDGET)) {
+    if (await reserve('route', ROUTE_BUDGET)) {
       try {
-        await spend('route')
         // search.ch reads an arrival time as the earliest arrival; `pre` adds the trips that arrive in time.
         const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.date, time: when.time, time_type: timeType === 'arrive' ? 'arrival' : 'depart', num: String(num || (timeType === 'arrive' ? 2 : 5)), pre: timeType === 'arrive' ? '4' : '1', show_delays: '1', show_trackchanges: '1' })
         // search.ch reads repeated via[] in order (a plain repeated via keeps only the last one).
@@ -324,8 +346,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     const key = `detail:${leg.from.stopId || leg.from.name}>${leg.to.stopId || leg.to.name}@${when.isoDay}T${when.time}:${leg.trainNo || leg.line}`
     try {
       const answer = await cached(key, ROUTE_CACHE_MS, async () => {
-        if (!(await left('detail', DETAIL_BUDGET))) throw Object.assign(new Error('budget'), { status: 429 })
-        await spend('detail')
+        if (!(await reserve('detail', DETAIL_BUDGET))) throw Object.assign(new Error('budget'), { status: 429 })
         const params = new URLSearchParams({ from: leg.from.stopId || leg.from.name, to: leg.to.stopId || leg.to.name, date: when.isoDay, time: when.time, limit: '3' })
         return { trips: parseTransportRoute(await getJson(`${TRANSPORT}/connections?${params}`)) }
       })
