@@ -1,5 +1,12 @@
 'use strict'
 
+// `FaNotes --mcp` is the stdio MCP server for AI clients. It must run before
+// any app startup (windows, single-instance lock, profile migration).
+if (process.argv.slice(1).includes('--mcp')) {
+  require('./fanotes-mcp.cjs').runCli(process.argv.slice(1)).then(() => process.exit(0), () => process.exit(1))
+  return
+}
+
 const {
   applyLinuxOzoneLaunchEnvironment,
   cleanupStaleSingletonLocks,
@@ -253,6 +260,7 @@ const IPC = Object.freeze({
   aiListModels: 'fanotes:ai-list-models',
   aiTransform: 'fanotes:ai-transform',
   grokBuild: 'fanotes:grok-build',
+  mcpLocal: 'fanotes:mcp-local',
   loadSecureSettings: 'fanotes:load-secure-settings',
   saveSettings: 'fanotes:save-settings',
   resetAppData: 'fanotes:reset-app-data',
@@ -301,6 +309,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   syncAutomatic: true,
   syncDeviceName: '',
   syncExcludedFolders: '',
+  mcpEnabled: false,
+  mcpWriteAccess: false,
+  mcpHttpEnabled: false,
+  mcpExcludedFolders: '',
   syncHandwritingModel: false,
   syncNoteHistory: false,
   profileOwnerId: '',
@@ -934,6 +946,19 @@ async function loadSecureSettings() {
     throw error
   })
   return protectedSettingsLoadPromise
+}
+
+let localMcpHostInstance = null
+/** Local MCP server (loopback HTTP transport + settings info). See local-mcp-host.cjs. */
+function localMcpHost() {
+  localMcpHostInstance ??= require('./local-mcp-host.cjs').createLocalMcpHost({
+    userData: app.getPath('userData'),
+    getState: () => ({ settings: currentSettings, vaultPath: currentVaultPath }),
+    packaged: app.isPackaged,
+    execPath: process.execPath,
+    appImage: process.env.APPIMAGE || '',
+  })
+  return localMcpHostInstance
 }
 
 function configPath() {
@@ -5392,6 +5417,12 @@ function registerIpcHandlers() {
     throw new Error('Unbekannte Grok-Build-Aktion.')
   })
 
+  handle(IPC.mcpLocal, async (_event, request) => {
+    const host = localMcpHost()
+    if (request?.action === 'regenerate') return host.regenerate()
+    return host.info()
+  })
+
   handle(IPC.loadSecureSettings, async () => loadSecureSettings())
 
   handle(IPC.saveSettings, async (_event, settings, options) => {
@@ -5407,6 +5438,7 @@ function registerIpcHandlers() {
           preserveProtectedSecrets: !clearProtectedSecrets,
         })
         currentSettings = nextSettings
+        void localMcpHost().apply(currentSettings).catch(() => {})
         if (clearProtectedSecrets) {
           protectedSettingsOnDisk.clear()
           protectedSettingsLoaded = true
@@ -5809,6 +5841,7 @@ if (!app.requestSingleInstanceLock()) {
     installSecurityPolicy()
     registerIpcHandlers()
     await createWindow()
+    void readConfig().then(() => localMcpHost().apply(currentSettings)).catch(() => {})
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) void createWindow()
@@ -5828,6 +5861,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  void localMcpHostInstance?.stop()
   stopNativeOcr(new Error('FaNotes wird beendet.'))
   inkOcr?.stop()
   updateManager?.stop()
