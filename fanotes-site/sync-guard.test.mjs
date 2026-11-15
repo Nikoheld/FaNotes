@@ -508,3 +508,26 @@ test('an empty, blank, or truncated upload does not resurrect a deleted note', a
   assert.equal(back.status, 200, back.body.toString('utf8'))
   assert.deepEqual((await readFile(id)).body, kept)
 })
+
+test('a second registration does not replace the account that already owns the address', async () => {
+  const email = `twice-${randomBytes(4).toString('hex')}@example.com`
+  const authKey = b64(32)
+  const payload = {
+    email,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Check', platform: 'linux' },
+  }
+  const first = await jsonCall('POST', '/api/v1/sync/register', payload)
+  assert.equal(first.status, 201)
+  const second = await jsonCall('POST', '/api/v1/sync/register', payload)
+  assert.equal(second.status, 401)
+  const login = await jsonCall('POST', '/api/v1/sync/login', {
+    email,
+    authKey,
+    device: { name: 'Other', platform: 'linux' },
+  })
+  assert.equal(login.status, 200)
+  assert.equal(login.json.accountId, first.json.accountId)
+})
