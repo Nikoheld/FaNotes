@@ -45,6 +45,37 @@ class InkSessionTest {
     }
 
     @Test
+    fun eraserOnlyRemovesInkInsideItsRadius() {
+        val session = InkSession(newInkDocument("Page", "dots", isoNow(0)))
+        // Two far-apart vertices: a sparse 99 px segment with an end vertex under the eraser.
+        session.beginStroke()
+        session.addSample(point(0.30, 0.50))
+        session.addSample(point(0.36, 0.50))
+        session.addSample(point(0.41, 0.50))
+        session.endStroke(StrokeStyle(), isoNow(1))
+        val original = session.document.strokes.single().points
+        val w = session.document.sourceWidth
+        val endX = original.last().x * w
+        assertTrue(session.erase(listOf(original.last()), radiusPagePx = 20.0, now = isoNow(2)))
+        val kept = session.document.strokes.flatMap { it.points }
+        assertTrue(kept.isNotEmpty(), "the 99 px segment keeps its far part")
+        assertTrue(kept.any { it.x == original.first().x }, "start stays: orig=")
+        val right = kept.maxOf { it.x * w }
+        assertTrue(right > endX - 30.0, "ink right up to the eraser stays, got gap " + (endX - right))
+        // A sweep across the middle of the segment cuts only the crossed span.
+        val s2 = InkSession(newInkDocument("Page", "dots", isoNow(0)))
+        s2.beginStroke()
+        s2.addSample(point(0.30, 0.50))
+        s2.addSample(point(0.36, 0.50))
+        s2.addSample(point(0.41, 0.50))
+        s2.endStroke(StrokeStyle(), isoNow(1))
+        assertTrue(s2.erase(listOf(point(0.355, 0.40), point(0.355, 0.60)), radiusPagePx = 10.0, now = isoNow(2)))
+        assertEquals(2, s2.document.strokes.size)
+        val gap = s2.document.strokes[1].points.first().x * w - s2.document.strokes[0].points.last().x * w
+        assertTrue(gap < 60.0, "cut gap is about the eraser width, got " + gap)
+    }
+
+    @Test
     fun undoAfterACancelledGrowKeepsTheEarlierStrokeOnTheSamePixels() {
         val session = InkSession(newInkDocument("Page", "dots", isoNow(0)))
         session.beginStroke()

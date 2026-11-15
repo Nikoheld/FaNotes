@@ -117,7 +117,8 @@ try {
   const pair = [leftLetter, rightLetter]
   const erasedLeft = applyToolErase(pair, [{ x: px(130), y: py(260) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
   assert.equal(erasedLeft.includes(rightLetter), true, 'the letter that was not touched stays the same object')
-  assert.equal(erasedLeft.some((stroke) => stroke.id === 'left'), false, 'the touched letter is removed whole')
+  assert.equal(erasedLeft.some((stroke) => stroke.id === 'left' && hasPointNear(stroke, 130, 260, 2)), false, 'the touched spot of the letter is gone')
+  assert.equal(erasedLeft.some((stroke) => stroke.id === 'left' && hasPointNear(stroke, 100, 220, 2)), true, 'the far end of the letter stays (erasing is local)')
 
   const nearMiss = applyToolErase(pair, [{ x: px(100), y: py(220 - 30) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
   assert.equal(nearMiss, pair, 'passing beside the ink does not delete the letter')
@@ -137,7 +138,7 @@ try {
   assert.equal(erasedWord.includes(rightLetter), true, 'a separate neighbour is untouched')
   const wordParts = erasedWord.filter((stroke) => stroke.id === 'word')
   assert.ok(wordParts.length >= 1, 'the rest of the connected word stays')
-  assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 140, 260, 18)), false, 'the touched letter of the word is gone')
+  assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 140, 260, 4)), false, 'the touched spot of the word is gone')
   assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 320, 250, 30)), true, 'the connected letter that was not touched stays')
 
   const stem = polyline([[px(100), py(230)], [px(100), py(310)]], { id: 'stem' })
@@ -145,10 +146,12 @@ try {
   const other = polyline([[px(220), py(230)], [px(220), py(310)]], { id: 'other' })
   const eyed = [stem, dot, other]
   const erasedStem = applyToolErase(eyed, [{ x: px(100), y: py(270) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
-  assert.deepEqual(idsOf(erasedStem), ['other'], 'touching the stem removes the whole i, including the dot')
-  assert.equal(erasedStem[0], other)
+  assert.equal(erasedStem.includes(dot), true, 'touching the stem leaves the dot (local erase)')
+  assert.equal(erasedStem.includes(other), true)
+  assert.equal(erasedStem.some((stroke) => stroke.id === 'stem' && hasPointNear(stroke, 100, 270, 2)), false)
   const erasedDot = applyToolErase(eyed, [{ x: px(100), y: py(198) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
-  assert.deepEqual(idsOf(erasedDot), ['other'], 'touching the dot removes the whole i')
+  assert.equal(erasedDot.includes(stem), true, 'touching the dot leaves the stem')
+  assert.equal(erasedDot.some((stroke) => stroke.id === 'dot'), false, 'the touched dot is gone')
 
   const wideM = polyline([
     [px(100), py(300)],
@@ -158,8 +161,9 @@ try {
     [px(250), py(300)],
   ], { id: 'em' })
   const afterM = applyToolErase([wideM, rightLetter], [{ x: px(100), y: py(260) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
-  assert.equal(afterM.some((stroke) => stroke.id === 'em'), false, 'a single wide letter is removed whole when touched')
-  assert.equal(afterM[0], rightLetter)
+  assert.equal(afterM.some((stroke) => stroke.id === 'em' && hasPointNear(stroke, 100, 260, 2)), false, 'the touched part of a wide letter is gone')
+  assert.equal(afterM.some((stroke) => stroke.id === 'em' && hasPointNear(stroke, 250, 300, 2)), true, 'the far end of a wide letter stays')
+  assert.equal(afterM.includes(rightLetter), true)
 
   const underline = polyline([
     [px(40), py(420)],
@@ -204,13 +208,13 @@ try {
   assert.equal(coverage.mask[16 + 5], 1, 'the column after the hole stays claimed')
   assert.equal(coverage.mask[24], 1, 'rows below the hole stay claimed')
 
-  assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 120, 220, 8)), false, 'the stem of the touched letter goes with the letter')
+  assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 120, 220, 8)), true, 'the stem end outside the eraser stays')
 
   const fineStem = polyline([[px(100), py(230)], [px(100), py(310)]], { id: 'fine' })
   const fineNeighbor = polyline([[px(130), py(230)], [px(130), py(310)]], { id: 'fine-neighbor' })
   const finePair = [fineStem, fineNeighbor]
   const fineHit = applyToolErase(finePair, [{ x: px(100), y: py(270) }], 1, SOURCE_WIDTH, SOURCE_HEIGHT)
-  assert.equal(fineHit.some((stroke) => stroke.id === 'fine'), false, 'a 1 px eraser on the ink removes that stroke')
+  assert.equal(fineHit.some((stroke) => stroke.id === 'fine' && hasPointNear(stroke, 100, 270, 1)), false, 'a 1 px eraser on the ink cuts that spot')
   assert.equal(fineHit.includes(fineNeighbor), true, 'a 1 px eraser leaves the stroke a few pixels away')
   const fineMiss = applyToolErase(finePair, [{ x: px(108), y: py(270) }], 1, SOURCE_WIDTH, SOURCE_HEIGHT)
   assert.equal(fineMiss, finePair, 'a 1 px eraser that only passes near the ink deletes nothing')
@@ -225,7 +229,7 @@ try {
     SOURCE_WIDTH,
     SOURCE_HEIGHT,
   )
-  assert.equal(separated.some((stroke) => stroke.id === 'tall'), false, 'the touched stem is removed')
+  assert.equal(separated.some((stroke) => stroke.id === 'tall' && hasPointNear(stroke, 120, 300, 2)), false, 'the touched part of the stem is removed')
   assert.equal(separated.includes(stray), true, 'a short line well below the letter stays')
   assert.equal(separated.includes(farLine), true, 'a line elsewhere on the page stays')
 
@@ -330,7 +334,7 @@ try {
 
   const stalePage = scaleOpened(adopted.scaleX, adopted.scaleY)
   const staleHit = applyToolErase(stalePage, [letterTouch], RADIUS, drawing.sourceWidth, drawing.sourceHeight)
-  assert.equal(staleHit.some((stroke) => stroke.id === 'below'), false, 'the saved page after the layout scale deletes the neighbour the disk does not meet')
+  assert.equal(staleHit.some((stroke) => stroke.id === 'below' && stroke.points.some((e) => e.x === stalePage[1].points[0].x && e.y === stalePage[1].points[0].y)), false, 'the saved page after the layout scale deletes the neighbour the disk does not meet')
   const staleGap = Math.hypot(
     (stalePage[1].points[0].x - letterTouch.x) * drawing.sourceWidth,
     (stalePage[1].points[0].y - letterTouch.y) * drawing.sourceHeight,
@@ -342,7 +346,7 @@ try {
   const keptFar = erasedReopen.find((stroke) => stroke.id === 'far')
   assert.equal(keptBelow, reopened[1], 'the mark outside the disk stays, and it is the same stroke')
   assert.equal(keptFar, reopened[2], 'a mark far from the touch stays the same stroke')
-  assert.equal(erasedReopen.some((stroke) => stroke.id === 'letter'), false, 'the mark under the eraser is removed')
+  assert.equal(erasedReopen.some((stroke) => stroke.id === 'letter' && onAdopted(stroke, 135, 270, 2)), false, 'the ink under the eraser is removed')
   assert.equal(onAdopted(keptBelow, 135, 380), true, 'the neighbour keeps the ink that was saved')
 
   const lineTouch = { x: 200 / adopted.pageWidth, y: 720 / adopted.pageHeight }
@@ -560,6 +564,33 @@ try {
       missUnchanged: afterReopenMiss === missed,
     },
   }))
+  {
+    // Regression: "erasing also erases text I was not near". The eraser used
+    // to take the whole letter plus any dot or bar grouped to it, and to
+    // widen cuts by a letter width. Everything beyond the disk must stay.
+    const R = 10
+    const tall = polyline([[px(300), py(1000)], [px(300), py(1120)]], { id: 'tallStem' })
+    const dotAbove = polyline([[px(296), py(976)], [px(304), py(976)]], { id: 'dotAbove' })
+    const scribble = polyline([
+      [px(300), py(1000)], [px(330), py(1060)], [px(300), py(1120)], [px(270), py(1060)], [px(300), py(1000)],
+    ], { id: 'loop' })
+    const longWord = polyline(Array.from({ length: 41 }, (_, i) => [px(100 + i * 10), py(1300 + (i % 2) * 40)]), { id: 'cursive' })
+    const strokes = [tall, dotAbove, scribble, longWord]
+    const out = applyToolErase(strokes, [{ x: px(300), y: py(1115) }], R, SOURCE_WIDTH, SOURCE_HEIGHT)
+    assert.equal(out.includes(dotAbove), true, 'a dot 140 px from the eraser stays')
+    assert.equal(out.includes(longWord), true, 'a word on another line stays untouched')
+    const reach = (stroke) => stroke.points.every((entry) => Math.hypot(entry.x * SOURCE_WIDTH - 300, entry.y * SOURCE_HEIGHT - 1115) > R - 0.5)
+    for (const stroke of out) assert.equal(reach(stroke), true, `no kept ink of ${stroke.id} lies inside the eraser disk`)
+    assert.equal(out.some((stroke) => stroke.id === 'tallStem' && hasPointNear(stroke, 300, 1000, 2)), true, 'the top of the stem stays')
+    assert.equal(out.some((stroke) => stroke.id === 'loop' && hasPointNear(stroke, 330, 1060, 2)), true, 'the rest of the loop stays')
+    // Every removed vertex lies within the disk plus half a stroke width.
+    const before = strokes.flatMap((stroke) => stroke.points).length
+    const after = out.flatMap((stroke) => stroke.points).length
+    assert.ok(after >= before - 4, 'only a few vertices near the disk are dropped')
+    const longCut = applyToolErase([longWord], [{ x: px(300), y: py(1300) }], R, SOURCE_WIDTH, SOURCE_HEIGHT)
+    assert.equal(longCut.some((stroke) => hasPointNear(stroke, 140, 1300, 2)), true, 'a long word keeps ink 160 px from the eraser')
+    assert.equal(longCut.some((stroke) => hasPointNear(stroke, 460, 1300, 2)), true, 'a long word keeps ink 160 px away on the other side')
+  }
   console.log('tool-erase ok')
 } finally {
   await server.close()
