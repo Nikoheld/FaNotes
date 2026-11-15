@@ -22,6 +22,7 @@ import { createKantiWebApi, createKantiWebAppRoutes, createKantiWebStore } from 
 import { languageForRequest, localizeExactText, localizeResponse } from './i18n.mjs'
 import { createAnalyticsService } from './analytics.mjs'
 import { loadGithubReleases, pickGithubPackage } from './github-release.mjs'
+import { startSystemdWatchdog } from './systemd-notify.mjs'
 import {
   DELTA_ROUTE_PATTERN,
   DOWNLOAD_ROUTE_PATTERN,
@@ -728,6 +729,8 @@ const server = createServer(async (request, response) => {
 server.keepAliveTimeout = 65_000
 server.headersTimeout = 70_000
 server.requestTimeout = 30_000
+
+startSystemdWatchdog()
 
 const backupService = await initializeBackupService()
 
