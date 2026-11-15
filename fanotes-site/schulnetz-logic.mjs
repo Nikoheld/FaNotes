@@ -2268,7 +2268,13 @@ export const parseIcs = (text) => {
   if (!calendar.includes('BEGIN:VEVENT')) return []
   return calendar.split('BEGIN:VEVENT').slice(1).map((block) => {
     const body = block.split('END:VEVENT')[0]
-    const value = (name) => new RegExp(`^${name}(?:;[^:]*)?:(.+)$`, 'm').exec(body)?.[1]?.trim()?.replace(/\\n/g, '\n')?.replace(/\\,/g, ',') || ''
+    const icsText = (raw) => String(raw || '')
+      .replace(/\\\\/g, '\u0000')
+      .replace(/\\n/giu, '\n')
+      .replace(/\\,/g, ',')
+      .replace(/\\;/g, ';')
+      .replace(/\u0000/g, '\\')
+    const value = (name) => icsText(new RegExp(`^${name}(?:;[^:]*)?:(.+)$`, 'm').exec(body)?.[1]?.trim() || '')
     const summary = value('SUMMARY')
     const start = value('DTSTART')
     if (!summary || !start) return null
