@@ -1026,7 +1026,8 @@ const newestArchivedIdentity = async (accountId, fileId) => {
  * name of the old revision, or replacing it, would drop the only copy.
  * The bytes are already on disk, so this records them and does not copy them.
  * Returns null when the live file matches the table entry. A tombstone whose
- * live file still matches the archived delete is that leftover, not a new note.
+ * live file still matches the archived delete is a duplicate of that delete,
+ * not a new note. Only the idempotent delete removes the duplicate.
  * A full ciphertext with no logged row is recorded only when this request's
  * bytes and metadata are that file; anything else is left in place.
  */
@@ -1041,7 +1042,9 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
     const liveSha = await hashFile(blobPath)
     if (current?.deleted) {
       const archived = await newestArchivedIdentity(accountId, fileId)
-      if (archived && archived.size === stat.size && archived.sha256 === liveSha) return null
+      // Same bytes as the archived delete. Callers must not publish them, and
+      // only the idempotent delete may remove this copy.
+      if (archived && archived.size === stat.size && archived.sha256 === liveSha) return { duplicate: true }
     }
     const matchesRequest = Boolean(incoming)
       && incoming.size === stat.size
@@ -1280,6 +1283,16 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
           reason: 'guard',
         }, { 'X-FaNotes-Rejected': 'guard' })
         return
+      }
+      // The archive was synced before the tombstone. Removing this duplicate
+      // finishes that delete. A different body is left in place above.
+      if (settled?.duplicate) {
+        const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
+        const info = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+        if (info?.isFile()) {
+          await fs.rm(blobPath)
+          await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
+        }
       }
       sendJson(request, response, 200, { revision: currentRevision, tableRevision: table.revision })
       return
