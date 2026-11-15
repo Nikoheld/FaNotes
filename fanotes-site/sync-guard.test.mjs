@@ -291,6 +291,56 @@ test('a replaced note is flushed to the archive before the live blob changes', a
   assert.deepEqual((await readFile(id)).body, next)
 })
 
+test('a retry keeps the archived revision when the live blob was already replaced', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const next = randomBytes(5000)
+  const directory = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, String(revision)), original)
+  writeFileSync(join(dataDirectory, 'accounts', accountId, 'blobs', id), next)
+  const replaced = await putFile(id, next, revision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  assert.deepEqual(readFileSync(join(directory, String(revision))), original)
+  assert.deepEqual((await readFile(id)).body, next)
+})
+
+test('a retry keeps a collapsed archive when the live blob was already replaced', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const next = randomBytes(200)
+  const directory = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, `c-${revision}`), original)
+  writeFileSync(join(dataDirectory, 'accounts', accountId, 'blobs', id), next)
+  const replaced = await putFile(id, next, revision, { 'X-FaNotes-Blank': '1', 'X-FaNotes-Clear': '1' })
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  assert.deepEqual(readFileSync(join(directory, `c-${revision}`)), original)
+  assert.deepEqual((await readFile(id)).body, next)
+})
+
+test('a truncated archive copy is repaired from the live note before it changes', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const directory = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  mkdirSync(directory, { recursive: true })
+  writeFileSync(join(directory, String(revision)), original.subarray(0, 64))
+  const next = randomBytes(5000)
+  const replaced = await putFile(id, next, revision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  assert.deepEqual(readFileSync(join(directory, String(revision))), original)
+  assert.deepEqual((await readFile(id)).body, next)
+})
+
 test('a symlink in the revision archive does not count as stored notes', async () => {
   const authKey = b64(32)
   const registered = await jsonCall('POST', '/api/v1/sync/register', {
