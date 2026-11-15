@@ -864,6 +864,14 @@ const conflict = (request, response, entry) => {
   sendJson(request, response, 409, { error: 'Die Datei wurde inzwischen von einem anderen Gerät geändert.', entry: publicEntry(entry), reason: 'stale' })
 }
 
+// The live blob stays, and the caller must not replace it. A missing row is
+// reported as a tombstone so the client keeps its copy and retries.
+const preservedConflict = (request, response, fileId, current) => conflict(
+  request,
+  response,
+  current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null },
+)
+
 const guardRejected = (request, response, entry) => {
   sendJson(request, response, 409, { error: 'Die leere oder stark gekürzte Fassung wurde nicht über die vorhandene Notiz gelegt.', entry: publicEntry(entry), reason: 'guard' }, { 'X-FaNotes-Rejected': 'guard' })
 }
@@ -1000,18 +1008,65 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   return after - before
 }
 
+/** Hash of the newest archived blob for this note, or null when the archive is empty. */
+const newestArchivedIdentity = async (accountId, fileId) => {
+  const directory = revisionsDirectory(accountId, fileId)
+  const files = await listRevisionFiles(directory)
+  if (!files.length) return null
+  const newestRevision = files.reduce((max, file) => Math.max(max, file.revision), 0)
+  const exact = files.find((file) => file.revision === newestRevision && !file.name.startsWith('c-'))
+    ?? files.find((file) => file.revision === newestRevision)
+  if (!exact) return null
+  return { size: exact.size, sha256: await hashFile(safeJoin(directory, exact.name)) }
+}
+
 /**
  * A crash after the live blob is replaced, and before the change log records
  * it, leaves a newer body in the live slot. Copying that slot onto the archive
  * name of the old revision, or replacing it, would drop the only copy.
  * The bytes are already on disk, so this records them and does not copy them.
- * Returns null when the live file matches the table entry.
+ * Returns null when the live file matches the table entry. A tombstone whose
+ * live file still matches the archived delete is that leftover, not a new note.
+ * A full ciphertext with no logged row is recorded only when this request's
+ * bytes and metadata are that file; anything else is left in place.
  */
 const settleDivergentLiveBlob = async (accountId, table, fileId, current, incoming) => {
-  if (!current || current.deleted) return null
   const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
   const stat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
   if (!stat?.isFile()) return null
+  if (!current || current.deleted) {
+    // A short remnant is not a ciphertext. A logged delete can also leave the
+    // archived body in the live slot; publishing that would undo the delete.
+    if (stat.size < EMPTY_CIPHERTEXT_BYTES) return null
+    const liveSha = await hashFile(blobPath)
+    if (current?.deleted) {
+      const archived = await newestArchivedIdentity(accountId, fileId)
+      if (archived && archived.size === stat.size && archived.sha256 === liveSha) return null
+    }
+    const matchesRequest = Boolean(incoming)
+      && incoming.size === stat.size
+      && incoming.sha256 === liveSha
+      && typeof incoming.meta === 'string'
+      && incoming.meta
+    // The previous meta describes the deleted note, not these bytes. Keep the
+    // file until a request that actually wrote it arrives with its own meta.
+    if (!matchesRequest) return { preserved: true }
+    const entry = {
+      id: fileId,
+      revision: table.revision + 1,
+      deleted: false,
+      size: stat.size,
+      sha256: liveSha,
+      meta: incoming.meta,
+      updatedAt: nowIso(),
+      deviceId: incoming.deviceId,
+    }
+    table.revision = entry.revision
+    table.entries.set(fileId, entry)
+    table.bytes += stat.size
+    await appendChange(accountId, table, entry)
+    return { matchesRequest: true, entry }
+  }
   const currentSize = Number(current.size) || 0
   const liveSha = await hashFile(blobPath)
   if (stat.size === currentSize && liveSha === current.sha256) return null
@@ -1058,7 +1113,8 @@ const handlePutFile = async (request, response, auth, fileId) => {
       sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision }, { ETag: `"${settled.entry.revision}"` })
       return
     }
-    if (settled) return conflict(request, response, settled.entry)
+    if (settled?.entry) return conflict(request, response, settled.entry)
+    if (settled?.preserved) return preservedConflict(request, response, fileId, current)
     // A tombstone's live size is zero. The blob that was deleted is the newest
     // file in the revision archive; a short or empty upload must not become the
     // live note in its place. A device that still has the note puts that copy
@@ -1181,7 +1237,8 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
       sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision, size: info.size }, { ETag: `"${settled.entry.revision}"` })
       return
     }
-    if (settled) return conflict(request, response, settled.entry)
+    if (settled?.entry) return conflict(request, response, settled.entry)
+    if (settled?.preserved) return preservedConflict(request, response, fileId, current)
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
     const replaces = Boolean(current && !current.deleted && current.sha256 !== digest)
     const historyDelta = replaces ? previousBytes : 0
@@ -1212,6 +1269,18 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
     const currentRevision = current ? current.revision : 0
     if (currentRevision !== base) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
     if (!current || current.deleted) {
+      // A resurrection can be renamed into place before its log line. Leave
+      // that body where it is, and do not report the delete as already done.
+      const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current ?? null, null)
+      if (settled?.entry) return conflict(request, response, settled.entry)
+      if (settled?.preserved) {
+        sendJson(request, response, 409, {
+          error: 'Die gespeicherte Datei gehört zu einer neueren Fassung und wurde nicht gelöscht.',
+          entry: publicEntry(current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null }),
+          reason: 'guard',
+        }, { 'X-FaNotes-Rejected': 'guard' })
+        return
+      }
       sendJson(request, response, 200, { revision: currentRevision, tableRevision: table.revision })
       return
     }
@@ -1482,7 +1551,8 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${settled.entry.revision}"` })
       return
     }
-    if (settled) return conflict(request, response, settled.entry)
+    if (settled?.entry) return conflict(request, response, settled.entry)
+    if (settled?.preserved) return preservedConflict(request, response, fileId, current)
     const archivedSize = current?.deleted
       ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
       : 0
