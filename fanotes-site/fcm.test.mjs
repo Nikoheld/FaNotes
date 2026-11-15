@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -430,6 +431,44 @@ test('a failed account write removes its temporary file and keeps the link', asy
     assert.equal(before.includes('super-secret-refresh-token-value'), false)
   } finally {
     await chmod(dir, 0o700).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an oversized Schulnetz request is refused and the connection is closed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fcm-large-'))
+  const runtime = createSchulnetzRuntime({ root, key: randomBytes(32), autostart: false, log: () => {} })
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url, 'http://127.0.0.1')
+    if (await runtime.handle(request, response, url)) return
+    response.writeHead(404).end()
+  })
+  await new Promise((done) => server.listen(0, '127.0.0.1', done))
+  try {
+    const result = await new Promise((resolve) => {
+      let settled = false
+      const done = (value) => { if (!settled) { settled = true; resolve(value) } }
+      const req = httpRequest({
+        hostname: '127.0.0.1',
+        port: server.address().port,
+        path: '/api/v1/schulnetz/guest',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': String(1024 * 1024) },
+      }, (res) => {
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('end', () => setTimeout(() => done({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8'), destroyed: req.destroyed }), 50))
+      })
+      req.on('error', () => done({ status: 0, body: '', destroyed: req.destroyed }))
+      req.write('{}')
+      setTimeout(() => done({ status: 0, body: '', destroyed: req.destroyed }), 2000)
+    })
+    assert.equal(result.status, 413)
+    assert.equal(JSON.parse(result.body).error, 'Die Anfrage ist zu gross.')
+    assert.equal(result.destroyed, true)
+    assert.deepEqual(await readdir(join(root, 'accounts')).catch(() => []), [])
+  } finally {
+    await new Promise((done) => server.close(done))
     await rm(root, { recursive: true, force: true })
   }
 })
