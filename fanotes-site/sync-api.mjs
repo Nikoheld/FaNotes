@@ -454,8 +454,8 @@ const corsHeaders = (request) => {
   return {
     ...(allowed ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, Upload-Offset, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256, X-FaNotes-Blank, X-FaNotes-Clear, X-FaNotes-Delete',
-    'Access-Control-Expose-Headers': 'ETag, Upload-Offset, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted, X-FaNotes-Rejected',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, Upload-Offset, X-Request-Id, X-FaNotes-Account, X-Kanti-Guest, X-FaNotes-Meta, X-FaNotes-Sha256, X-FaNotes-Blank, X-FaNotes-Clear, X-FaNotes-Delete',
+    'Access-Control-Expose-Headers': 'ETag, Upload-Offset, X-Request-Id, X-FaNotes-Meta, X-FaNotes-Revision, X-FaNotes-Deleted, X-FaNotes-Rejected',
     'Access-Control-Max-Age': '600',
   }
 }
@@ -464,6 +464,7 @@ const baseHeaders = (request) => ({
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
+  ...(request.syncRequestId ? { 'X-Request-Id': request.syncRequestId } : {}),
   ...corsHeaders(request),
 })
 
@@ -1244,10 +1245,71 @@ export const accountAcceptsAuthKey = async (account, authKey) => {
   }
 }
 
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{8,64}$/u
+const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{0,40}$/u
+const SAFE_METHOD = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'])
+
+/** Path only, with file, upload, and device ids replaced. No query string. */
+export const syncRouteTemplate = (route) => {
+  const path = String(route || '/').split('?')[0].split('#')[0]
+  const templated = path
+    .replace(/[a-f0-9]{64}/giu, ':id')
+    .replace(/[a-f0-9]{32}/giu, ':uploadId')
+    .replace(/[a-f0-9]{24}/giu, ':deviceId')
+  const safe = templated.replace(/[^A-Za-z0-9._:/-]/gu, '_').slice(0, 160)
+  return safe.startsWith('/') ? safe : `/${safe}`
+}
+
+/** A client id is kept only when it cannot be a token, cookie, or metadata value. */
+export const syncRequestId = (request) => {
+  const incoming = request.headers['x-request-id']
+  const hidden = [
+    request.headers.authorization,
+    request.headers.cookie,
+    request.headers['x-fanotes-meta'],
+    request.headers['x-fanotes-account'],
+  ].filter((value) => typeof value === 'string').join('\n')
+  if (typeof incoming === 'string' && REQUEST_ID_PATTERN.test(incoming) && !hidden.includes(incoming)) return incoming
+  return randomBytes(16).toString('hex')
+}
+
+export const syncFailureCode = (error) => (SAFE_ERROR_CODE.test(error?.code) ? error.code : 'INTERNAL')
+
 export const handleSyncRequest = async (request, response, url) => {
   if (url.pathname !== API_PREFIX && !url.pathname.startsWith(`${API_PREFIX}/`)) return false
   const route = url.pathname.slice(API_PREFIX.length).replace(/\/+$/u, '') || '/'
   const method = request.method || 'GET'
+  const requestId = syncRequestId(request)
+  request.syncRequestId = requestId
+  const started = process.hrtime.bigint()
+  let logged = false
+  let accountId = ''
+  let failureCode = ''
+  // One JSON line per sync request. The object is built from fixed fields so a
+  // note, token, cookie, email, or metadata value cannot fall into the log.
+  const logRequest = () => {
+    if (logged) return
+    logged = true
+    const status = Number(response.statusCode) || 0
+    const durationMs = Math.max(0, Math.round(Number(process.hrtime.bigint() - started) / 1e5) / 10)
+    const entry = {
+      time: new Date().toISOString(),
+      level: status >= 500 ? 'error' : 'info',
+      msg: 'sync',
+      requestId,
+      method: SAFE_METHOD.has(method) ? method : 'OTHER',
+      route: syncRouteTemplate(route),
+      status,
+      durationMs,
+    }
+    if (/^[a-f0-9]{32}$/u.test(accountId)) entry.account = accountId
+    if (failureCode) entry.code = failureCode
+    const line = JSON.stringify(entry)
+    if (entry.level === 'error') console.error(line)
+    else console.log(line)
+  }
+  // 'close' can run before writeHead, while statusCode is still the default 200.
+  response.on('finish', logRequest)
   try {
     if (method === 'OPTIONS') {
       sendEmpty(request, response, 204)
@@ -1258,6 +1320,7 @@ export const handleSyncRequest = async (request, response, url) => {
     if (route === '/login' && method === 'POST') { await handleLogin(request, response); return true }
 
     const auth = await authenticate(request)
+    accountId = auth.account.id
     rateLimit(`sync:account:${auth.account.id}`, 1200, 60 * 1000)
     await touchSession(auth.account, auth.tokenHash)
 
@@ -1314,7 +1377,7 @@ export const handleSyncRequest = async (request, response, url) => {
     if (error instanceof SyncApiError) {
       sendJson(request, response, error.status, { error: error.publicMessage, ...error.extra })
     } else {
-      console.error(new Date().toISOString(), 'sync', method, route, error?.code || error?.message)
+      failureCode = syncFailureCode(error)
       sendJson(request, response, 500, { error: 'Der Sync-Server hat einen internen Fehler.' })
     }
   }
