@@ -6,6 +6,7 @@ import {
   Check,
   ChevronRight,
   Cloud,
+  Bot,
   GitCompareArrows,
   Code2,
   Copy,
@@ -63,6 +64,7 @@ import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, Qw
 import type { McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
+import { McpSettingsSection } from './McpSettingsSection'
 import { StatisticsPage } from './StatisticsPage'
 import { SyncConflictsPage } from './SyncConflictsPage'
 import { ShareSettingsPage, type ShareTarget } from './ShareSettingsPage'
@@ -99,7 +101,7 @@ const UPDATE_CHANNEL_COPY = {
 
 const updateChannelCopy = (channel: AppSettings['updateChannel']) => UPDATE_CHANNEL_COPY[channel] ?? UPDATE_CHANNEL_COPY.stable
 
-export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'conflicts' | 'statistics' | 'profile' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
+export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'conflicts' | 'mcp' | 'statistics' | 'profile' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
 
 export type SettingsModalProps = {
   platform?: string
@@ -137,6 +139,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 18 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 5 },
   { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 1 },
+  { id: 'mcp', label: 'KI-Zugriff (MCP)', description: 'Claude, Cursor und andere KI-Programme', icon: Bot, count: 3 },
   { id: 'conflicts', label: 'Konflikte', description: 'Zwei Fassungen vergleichen und eine behalten', icon: GitCompareArrows, count: 0 },
   { id: 'statistics', label: 'Statistik', description: 'Vault, Aktivität, Schule und Diagnose', icon: BarChart3, count: 0 },
   { id: 'profile', label: 'Profil', description: 'Öffentliche Aktivitätsübersicht', icon: User, count: 3 },
@@ -153,6 +156,7 @@ const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Stift & Arbeitsbereich', sections: ['drawing'] },
   { label: 'Dateien & Vault', sections: ['files'] },
   { label: 'Sync', sections: ['sync', 'conflicts'] },
+  { label: 'KI-Zugriff', sections: ['mcp'] },
   { label: 'Statistik', sections: ['statistics'] },
   { label: 'Profil', sections: ['profile'] },
   { label: 'Teilen', sections: ['share'] },
@@ -185,6 +189,7 @@ const settingsOptionCount = (
       if (!input.syncSignedIn) return 0
       return 5 + 3 + input.syncGrantRows + input.syncDeviceRows + input.syncConflictRows + 1
     case 'conflicts': return input.syncOpenConflicts
+    case 'mcp': return input.isWeb ? 0 : 6
     case 'statistics': return 2
     case 'profile': return 3
     case 'share': return 3
@@ -206,6 +211,7 @@ type SettingsSearchItem = {
 }
 
 const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
+  { label: 'KI-Zugriff (MCP)', detail: 'KI-Zugriff', section: 'mcp', target: 'settings-mcp-local', keywords: 'mcp ki ai claude cursor chatgpt grok server stdio http token lokal notizen aufgaben schreibzugriff' },
   { label: 'Statistik', detail: 'Statistik', section: 'statistics', target: 'settings-stat-activity', keywords: 'statistik aktivität kalender heatmap serie streak wörter notizen grösse fächer lernzeit hausaufgaben karteikarten sync' },
   { label: 'Diagnose & Verbesserung', detail: 'Statistik', section: 'statistics', target: 'settings-diagnostics', keywords: 'diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz' },
   { label: 'Grok-Connector', detail: 'Sync', section: 'sync', target: 'settings-grok-connector', keywords: 'grok mcp connector server url notizen prüfung klausur hausaufgaben oauth' },
@@ -1263,6 +1269,8 @@ export function SettingsModal({
                 ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} grants={visibleMcpGrants} onGrants={replaceMcpGrants} onOpenConflicts={() => setActive('conflicts')} />
                 : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>
             )}
+
+            {active === 'mcp' && <McpSettingsSection settings={settings} update={update} />}
 
             {active === 'conflicts' && (
               <div id="settings-conflicts">

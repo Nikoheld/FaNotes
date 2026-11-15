@@ -2128,6 +2128,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val scale = ink.cameraScale().coerceAtLeast(0.2f)
         val font = ((field?.fontSize ?: 16) * scale).coerceAtLeast(12f)
         noteField.setTextSize(TypedValue.COMPLEX_UNIT_PX, font)
+        noteField.setTextColor(field?.color?.let { android.graphics.Color.parseColor(it) } ?: 0xFF20222B.toInt())
+        noteField.setTypeface(null, if (field?.bold == true) Typeface.BOLD else Typeface.NORMAL)
         val left = rect.left.toInt()
         val top = rect.top.toInt()
         val right = (rect.left + rect.width).toInt().coerceAtLeast(left + 1)

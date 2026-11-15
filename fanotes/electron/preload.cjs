@@ -11,6 +11,7 @@ const CHANNELS = Object.freeze({
   getFastTree: 'fanotes:get-fast-tree',
   selectVault: 'fanotes:select-vault',
   getTree: 'fanotes:get-tree',
+  vaultChanged: 'fanotes:vault-changed',
   readFile: 'fanotes:read-file',
   writeFile: 'fanotes:write-file',
   readRecognitionModel: 'fanotes:read-recognition-model',
@@ -83,6 +84,7 @@ const CHANNELS = Object.freeze({
   aiListModels: 'fanotes:ai-list-models',
   aiTransform: 'fanotes:ai-transform',
   grokBuild: 'fanotes:grok-build',
+  mcpLocal: 'fanotes:mcp-local',
   loadSecureSettings: 'fanotes:load-secure-settings',
   saveSettings: 'fanotes:save-settings',
   resetAppData: 'fanotes:reset-app-data',
@@ -209,6 +211,7 @@ const api = Object.freeze({
   aiListModels: (connection) => invoke(CHANNELS.aiListModels, connection),
   aiTransform: (payload) => invoke(CHANNELS.aiTransform, payload),
   grokBuild: (request) => invoke(CHANNELS.grokBuild, request),
+  mcpLocal: (request) => invoke(CHANNELS.mcpLocal, request),
   loadSecureSettings: () => invoke(CHANNELS.loadSecureSettings),
   saveSettings: (settings, options) => invoke(CHANNELS.saveSettings, settings, options),
   resetAppData: () => invoke(CHANNELS.resetAppData),
@@ -229,6 +232,12 @@ const api = Object.freeze({
     const listener = (_event, id) => callback(id)
     ipcRenderer.on(CHANNELS.shareOpen, listener)
     return () => ipcRenderer.removeListener(CHANNELS.shareOpen, listener)
+  },
+  onVaultChanged: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, change) => callback(change)
+    ipcRenderer.on(CHANNELS.vaultChanged, listener)
+    return () => ipcRenderer.removeListener(CHANNELS.vaultChanged, listener)
   },
   onBeforeClose: (callback) => {
     if (typeof callback !== 'function') return () => {}

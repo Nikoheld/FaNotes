@@ -144,4 +144,46 @@ class NoteTextFieldTest {
         assertEquals(tap.fields, idle.fields)
         assertFalse(idle.stillPlacing)
     }
+
+    @Test
+    fun desktopColourAndBoldSurviveParseMoveAndWrite() {
+        val legacy = ch.fasrv.fanotes.json.JsonValue.Arr(mutableListOf(jsonObject(
+            "id" to jsonString("tf-old"),
+            "page" to ch.fasrv.fanotes.json.jsonNumber(1.0),
+            "x" to ch.fasrv.fanotes.json.jsonNumber(0.2),
+            "y" to ch.fasrv.fanotes.json.jsonNumber(0.3),
+            "width" to ch.fasrv.fanotes.json.jsonNumber(0.3),
+            "fontSize" to ch.fasrv.fanotes.json.jsonNumber(16.0),
+            "text" to jsonString("alt"),
+        )))
+        val old = parseNoteTextFields(legacy)
+        assertNull(old.single().color)
+        assertFalse(old.single().bold)
+        val written = noteTextFieldsJson(old).stringify()
+        assertFalse(written.contains("color") || written.contains("bold"), "old files stay free of the new keys")
+
+        val styled = ch.fasrv.fanotes.json.JsonValue.Arr(mutableListOf(jsonObject(
+            "id" to jsonString("tf-new"),
+            "page" to ch.fasrv.fanotes.json.jsonNumber(2.0),
+            "x" to ch.fasrv.fanotes.json.jsonNumber(0.2),
+            "y" to ch.fasrv.fanotes.json.jsonNumber(0.3),
+            "width" to ch.fasrv.fanotes.json.jsonNumber(0.3),
+            "fontSize" to ch.fasrv.fanotes.json.jsonNumber(18.0),
+            "text" to jsonString("blau"),
+            "color" to jsonString("#2563C9"),
+            "bold" to ch.fasrv.fanotes.json.JsonValue.Bool(true),
+        )))
+        val fields = parseNoteTextFields(styled)
+        assertEquals("#2563c9", fields.single().color)
+        assertTrue(fields.single().bold)
+        val moved = patchNoteTextField(fields, "tf-new", x = 0.4, text = "blau!")
+        assertEquals("#2563c9", moved.single().color)
+        assertTrue(moved.single().bold)
+        val reparsed = parseNoteTextFields(noteTextFieldsJson(moved))
+        assertEquals(moved, reparsed)
+        val junk = parseNoteTextFields(ch.fasrv.fanotes.json.JsonValue.Arr(mutableListOf(jsonObject(
+            "id" to jsonString("tf-x"), "color" to jsonString("red"),
+        ))))
+        assertNull(junk.single().color)
+    }
 }

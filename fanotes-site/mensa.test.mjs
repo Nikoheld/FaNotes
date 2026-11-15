@@ -542,6 +542,22 @@ test('an unreadable mensa cache is left unchanged and merged once it can be read
   }
 })
 
+test('a mensa cache that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-shape-'))
+  const file = join(root, 'mensa.json')
+  const stored = '{"version":2,"days":[{"date":"2026-12-01","note":"kept"}]}\n'
+  await fs.writeFile(file, stored, { mode: 0o600 })
+  const mensa = createMensa({ fetch: makeFetch([], [], { api: true }), now: () => new Date('2026-11-15T10:00:00Z'), root, log: () => {} })
+  try {
+    const live = await mensa.get()
+    await mensa.idle()
+    assert.ok(live.days.length > 0)
+    assert.equal(await fs.readFile(file, 'utf8'), stored)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a broken mensa cache can be replaced by a fresh menu', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mensa-broken-'))
   const file = join(root, 'mensa.json')
