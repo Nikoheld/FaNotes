@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomBytes } from 'node:crypto'
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -250,6 +250,56 @@ test('overlapping change-log updates keep both new lines', async () => {
     assert.equal((await readdir(root)).some((name) => name.endsWith('.tmp')), false)
     await updateChangeLog(file, () => [])
     await assert.rejects(stat(file))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a failed change log does not mark the new grade as already announced', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fcm-ledger-'))
+  let polls = 0
+  const fetch = async (url) => {
+    const target = String(url)
+    const json = (value) => ({ status: 200, text: async () => JSON.stringify(value) })
+    if (target.endsWith('/token.php')) return json({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 })
+    if (target.includes('/me/grades')) {
+      polls += 1
+      const grades = [{ id: 'g1', course: 'Mathematik', title: 'Probe', date: '2026-10-20', mark: '5.5', weight: '1' }]
+      if (polls > 1) grades.push({ id: 'g2', course: 'Englisch', title: 'Essay', date: '2026-11-01', mark: '4.5', weight: '1' })
+      return json(grades)
+    }
+    return json([])
+  }
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch,
+    autostart: false,
+    fcmSend: async () => ({ status: 200 }),
+  })
+  const accountId = 'b'.repeat(32)
+  const ledgerFile = join(root, 'accounts', accountId, 'notified-grades.json')
+  const changeFile = join(root, 'accounts', accountId, 'changes.jsonl')
+  const snapshotFile = join(root, 'accounts', accountId, 'snapshot.json')
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'super-secret-refresh-token-value',
+    })
+    await runtime.pollAccount(accountId)
+    const before = await readFile(ledgerFile, 'utf8')
+    await rm(changeFile, { force: true })
+    await mkdir(changeFile)
+    await assert.rejects(() => runtime.pollAccount(accountId))
+    assert.equal(await readFile(ledgerFile, 'utf8'), before)
+    assert.equal((await readFile(snapshotFile, 'utf8')).includes('Englisch'), false)
+    await rm(changeFile, { recursive: true, force: true })
+    await runtime.pollAccount(accountId)
+    const lines = (await readFile(changeFile, 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    assert.equal(lines.some((row) => row.category === 'grade' && String(row.body).includes('Englisch')), true)
+    assert.equal((await readFile(snapshotFile, 'utf8')).includes('Englisch'), true)
+    assert.notEqual(await readFile(ledgerFile, 'utf8'), before)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

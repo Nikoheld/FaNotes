@@ -906,13 +906,29 @@ export const createSchulnetzRuntime = (options = {}) => {
     await writeJson(resolve(accountDir(accountId), 'notified-grades.json'), { version: 1, keys: unique })
   }
 
+  // A missing ledger is "not migrated". Putting that file back means deleting it.
+  const restoreGradeLedger = async (accountId, ledger) => {
+    const file = resolve(accountDir(accountId), 'notified-grades.json')
+    if (ledger == null) {
+      await fs.rm(file, { force: true })
+      return
+    }
+    await writeGradeLedger(accountId, ledger)
+  }
+
   const publishChanges = async (accountId, link, changes, revision, grades = [], { push = true, detectedAt = 0 } = {}) => {
     // No allowed school alert means no row and no push. Callers still save the snapshot.
     const ledger = await readGradeLedger(accountId)
     const settled = settleGradeNotifications(changes, grades, ledger)
     await writeGradeLedger(accountId, settled.keys)
     const unseen = unseenChanges(settled.changes, await knownChangeIds(accountId))
-    await appendChanges(accountId, unseen, revision)
+    try {
+      await appendChanges(accountId, unseen, revision)
+    } catch (error) {
+      // The row was not stored. Leave the ledger as it was, or the grade stays marked as announced.
+      try { await restoreGradeLedger(accountId, ledger) } catch { /* the change-log error is the one to report */ }
+      throw error
+    }
     // Hidden grades: a grade that arrives while they are on stays hidden in every browser until revealed.
     if (link.settings?.guessGrades === true) {
       try { await addHiddenGrades(accountId, newGradeTargetIds(unseen)) } catch (error) { log('warn', `Verdeckte Noten nicht gespeichert (${error?.name || 'error'})`) }
