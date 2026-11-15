@@ -1,0 +1,1640 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "FaNotes Sync API",
+    "version": "1",
+    "description": "End-to-end encrypted file sync. Bodies and X-FaNotes-Meta are ciphertext. The server stores a scrypt hash of the auth key and never sees a password, a note, a file name, or the vault key. File ids are 64 hex characters. A write that would replace a newer note with an empty or collapsed body is refused."
+  },
+  "servers": [
+    {
+      "url": "https://fanotes.fasrv.ch/api/v1/sync"
+    }
+  ],
+  "tags": [
+    {
+      "name": "sync"
+    }
+  ],
+  "paths": {
+    "/account": {
+      "get": {
+        "operationId": "getAccount",
+        "summary": "Return the account, its devices, and its usage.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "deleteAccount",
+        "summary": "Delete the account after the auth key is checked.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No body."
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthKeyBody"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/changes": {
+      "get": {
+        "operationId": "getChanges",
+        "summary": "List file-table entries newer than a revision.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          },
+          {
+            "$ref": "#/components/parameters/since"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of file-table entries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changes"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      }
+    },
+    "/devices/{deviceId}": {
+      "delete": {
+        "operationId": "deleteDevicesDeviceId",
+        "summary": "Remove one device and its sessions.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/deviceId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No body."
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      }
+    },
+    "/files/{fileId}": {
+      "get": {
+        "operationId": "getFilesFileId",
+        "summary": "Download one ciphertext blob.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The ciphertext.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      },
+      "head": {
+        "operationId": "headFilesFileId",
+        "summary": "Return the blob headers without the body.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "No body."
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "putFilesFileId",
+        "summary": "Store one ciphertext blob when the base revision and the merge guard accept it.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          },
+          {
+            "$ref": "#/components/parameters/ifMatch"
+          },
+          {
+            "$ref": "#/components/parameters/meta"
+          },
+          {
+            "$ref": "#/components/parameters/sha256"
+          },
+          {
+            "$ref": "#/components/parameters/blank"
+          },
+          {
+            "$ref": "#/components/parameters/clear"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new file revision. The body is stored only after the guard accepts it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "stale: the base revision is not current. guard: the body would replace a note with an empty or collapsed one. The live blob is unchanged.",
+            "headers": {
+              "X-FaNotes-Rejected": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "guard"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conflict"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "Ciphertext. The server does not interpret it."
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteFilesFileId",
+        "summary": "Tombstone one file. The previous blob is archived first.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          },
+          {
+            "$ref": "#/components/parameters/ifMatch"
+          },
+          {
+            "$ref": "#/components/parameters/confirmDelete"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No body."
+          },
+          "409": {
+            "description": "stale: the base revision is not current. guard: the body would replace a note with an empty or collapsed one. The live blob is unchanged.",
+            "headers": {
+              "X-FaNotes-Rejected": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "guard"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conflict"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      }
+    },
+    "/files/{fileId}/restore": {
+      "post": {
+        "operationId": "postFilesFileIdRestore",
+        "summary": "Put an archived revision back as the live blob.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          },
+          {
+            "$ref": "#/components/parameters/ifMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new file revision. The body is stored only after the guard accepts it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "stale: the base revision is not current. guard: the body would replace a note with an empty or collapsed one. The live blob is unchanged.",
+            "headers": {
+              "X-FaNotes-Rejected": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "guard"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conflict"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/{fileId}/revisions": {
+      "get": {
+        "operationId": "getFilesFileIdRevisions",
+        "summary": "List archived revisions of one file.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Archived revisions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevisionList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      }
+    },
+    "/files/{fileId}/uploads": {
+      "post": {
+        "operationId": "postFilesFileIdUploads",
+        "summary": "Start a resumable upload. The live note is unchanged.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          },
+          {
+            "$ref": "#/components/parameters/meta"
+          },
+          {
+            "$ref": "#/components/parameters/sha256"
+          },
+          {
+            "$ref": "#/components/parameters/blank"
+          },
+          {
+            "$ref": "#/components/parameters/clear"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The upload id and a zero offset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Upload"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadCreate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/files/{fileId}/uploads/{uploadId}": {
+      "get": {
+        "operationId": "getFilesFileIdUploadsUploadId",
+        "summary": "Return how many bytes a partial upload has stored.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/uploadId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The partial upload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Upload"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "patchFilesFileIdUploadsUploadId",
+        "summary": "Append one chunk at the current offset.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/uploadId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          },
+          {
+            "$ref": "#/components/parameters/uploadOffset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The partial upload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Upload"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "stale: the base revision is not current. guard: the body would replace a note with an empty or collapsed one. The live blob is unchanged.",
+            "headers": {
+              "X-FaNotes-Rejected": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "guard"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conflict"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary",
+                "description": "Ciphertext. The server does not interpret it."
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteFilesFileIdUploadsUploadId",
+        "summary": "Drop a partial upload. The live note stays.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/uploadId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No body."
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      }
+    },
+    "/files/{fileId}/uploads/{uploadId}/complete": {
+      "post": {
+        "operationId": "postFilesFileIdUploadsUploadIdComplete",
+        "summary": "Store the partial only when its size, checksum, and merge guard accept it.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/fileId"
+          },
+          {
+            "$ref": "#/components/parameters/uploadId"
+          },
+          {
+            "$ref": "#/components/parameters/requestId"
+          },
+          {
+            "$ref": "#/components/parameters/ifMatch"
+          },
+          {
+            "$ref": "#/components/parameters/meta"
+          },
+          {
+            "$ref": "#/components/parameters/sha256"
+          },
+          {
+            "$ref": "#/components/parameters/blank"
+          },
+          {
+            "$ref": "#/components/parameters/clear"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The new file revision. The body is stored only after the guard accepts it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "stale: the base revision is not current. guard: the body would replace a note with an empty or collapsed one. The live blob is unchanged.",
+            "headers": {
+              "X-FaNotes-Rejected": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "guard"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conflict"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      }
+    },
+    "/integrity": {
+      "get": {
+        "operationId": "getIntegrity",
+        "summary": "Report ciphertext hashes and orphans. Reads only.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A read-only integrity report. It contains hashes and ids, not note bytes or metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrityReport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      }
+    },
+    "/login": {
+      "post": {
+        "operationId": "postLogin",
+        "summary": "Open a device session.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The device session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/logout": {
+      "post": {
+        "operationId": "postLogout",
+        "summary": "End this session.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No body."
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ]
+      }
+    },
+    "/password": {
+      "post": {
+        "operationId": "postPassword",
+        "summary": "Replace the auth key and sign out every other session.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No body."
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/prelogin": {
+      "post": {
+        "operationId": "postPrelogin",
+        "summary": "Return the KDF parameters for an email.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "KDF parameters. Unknown emails receive a stable fake salt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Prelogin"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreloginRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/register": {
+      "post": {
+        "operationId": "postRegister",
+        "summary": "Create an account and a device session.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The new session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "accountHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-FaNotes-Account"
+      }
+    },
+    "parameters": {
+      "fileId": {
+        "name": "fileId",
+        "in": "path",
+        "required": true,
+        "description": "HMAC of the file path, as 64 hex characters.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "uploadId": {
+        "name": "uploadId",
+        "in": "path",
+        "required": true,
+        "description": "Id of one partial upload.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{32}$"
+        }
+      },
+      "deviceId": {
+        "name": "deviceId",
+        "in": "path",
+        "required": true,
+        "description": "Id of one device.",
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{24}$"
+        }
+      },
+      "requestId": {
+        "name": "X-Request-Id",
+        "in": "header",
+        "required": false,
+        "description": "Optional client id, 8 to 64 characters of letters, digits, dot, underscore, or hyphen. A value that repeats the token or metadata is ignored.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "since": {
+        "name": "since",
+        "in": "query",
+        "required": false,
+        "description": "Return entries with a higher revision.",
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "ifMatch": {
+        "name": "If-Match",
+        "in": "header",
+        "required": true,
+        "description": "The file revision this write is based on.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "meta": {
+        "name": "X-FaNotes-Meta",
+        "in": "header",
+        "required": true,
+        "description": "Encrypted file metadata, base64. The server does not read it.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "sha256": {
+        "name": "X-FaNotes-Sha256",
+        "in": "header",
+        "required": true,
+        "description": "Hex SHA-256 of the ciphertext.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "blank": {
+        "name": "X-FaNotes-Blank",
+        "in": "header",
+        "required": false,
+        "description": "1 when the client says the note is empty, 0 when it still has content.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "clear": {
+        "name": "X-FaNotes-Clear",
+        "in": "header",
+        "required": false,
+        "description": "1 is the only header that may store an empty or collapsed body over a note.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "confirmDelete": {
+        "name": "X-FaNotes-Delete",
+        "in": "header",
+        "required": true,
+        "description": "Must be 1. A delete without it does not tombstone the file.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "uploadOffset": {
+        "name": "Upload-Offset",
+        "in": "header",
+        "required": true,
+        "description": "Must equal the number of bytes already stored for this upload.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "AuthKeyBody": {
+        "type": "object",
+        "required": [
+          "authKey"
+        ],
+        "properties": {
+          "authKey": {
+            "type": "string",
+            "description": "Base64 auth key derived by the client. Not a password."
+          }
+        }
+      },
+      "Kdf": {
+        "type": "object",
+        "required": [
+          "algorithm",
+          "iterations",
+          "salt"
+        ],
+        "properties": {
+          "algorithm": {
+            "type": "string",
+            "enum": [
+              "pbkdf2-sha256"
+            ]
+          },
+          "iterations": {
+            "type": "integer",
+            "minimum": 300000
+          },
+          "salt": {
+            "type": "string"
+          }
+        }
+      },
+      "KeyWrap": {
+        "type": "object",
+        "required": [
+          "iv",
+          "data"
+        ],
+        "properties": {
+          "iv": {
+            "type": "string"
+          },
+          "data": {
+            "type": "string"
+          }
+        }
+      },
+      "PreloginRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "Prelogin": {
+        "type": "object",
+        "properties": {
+          "kdf": {
+            "$ref": "#/components/schemas/Kdf"
+          }
+        }
+      },
+      "SessionRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "authKey"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "authKey": {
+            "type": "string"
+          },
+          "device": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "authKey",
+          "kdf",
+          "vaultKeyWrap",
+          "device"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "authKey": {
+            "type": "string"
+          },
+          "kdf": {
+            "$ref": "#/components/schemas/Kdf"
+          },
+          "vaultKeyWrap": {
+            "$ref": "#/components/schemas/KeyWrap"
+          },
+          "device": {
+            "type": "object",
+            "required": [
+              "name",
+              "platform"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "platform": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "PasswordRequest": {
+        "type": "object",
+        "required": [
+          "authKey",
+          "newAuthKey",
+          "kdf",
+          "vaultKeyWrap"
+        ],
+        "properties": {
+          "authKey": {
+            "type": "string"
+          },
+          "newAuthKey": {
+            "type": "string"
+          },
+          "kdf": {
+            "$ref": "#/components/schemas/Kdf"
+          },
+          "vaultKeyWrap": {
+            "$ref": "#/components/schemas/KeyWrap"
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "deviceId": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "kdf": {
+            "$ref": "#/components/schemas/Kdf"
+          },
+          "vaultKeyWrap": {
+            "$ref": "#/components/schemas/KeyWrap"
+          }
+        }
+      },
+      "WriteResult": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "tableRevision": {
+            "type": "integer"
+          },
+          "uploadId": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer"
+          }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "usage": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "FileEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "size": {
+            "type": "integer"
+          },
+          "sha256": {
+            "type": "string",
+            "nullable": true
+          },
+          "meta": {
+            "type": "string",
+            "nullable": true,
+            "description": "Encrypted metadata."
+          },
+          "updatedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "deviceId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "Changes": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileEntry"
+            }
+          },
+          "more": {
+            "type": "boolean"
+          },
+          "nextSince": {
+            "type": "integer"
+          }
+        }
+      },
+      "Conflict": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "stale",
+              "guard",
+              "offset",
+              "incomplete"
+            ]
+          },
+          "entry": {
+            "$ref": "#/components/schemas/FileEntry"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "size": {
+            "type": "integer"
+          }
+        }
+      },
+      "UploadCreate": {
+        "type": "object",
+        "required": [
+          "size"
+        ],
+        "properties": {
+          "size": {
+            "type": "integer",
+            "minimum": 28
+          }
+        }
+      },
+      "Upload": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string"
+          },
+          "fileId": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "size": {
+            "type": "integer"
+          }
+        }
+      },
+      "RestoreRequest": {
+        "type": "object",
+        "required": [
+          "revision"
+        ],
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "RevisionList": {
+        "type": "object",
+        "properties": {
+          "revisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "revision": {
+                  "type": "integer"
+                },
+                "size": {
+                  "type": "integer"
+                },
+                "collapse": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "IntegrityReport": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "filesChecked": {
+            "type": "integer"
+          },
+          "blobsMissing": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "hashMismatch": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "blobsOrphan": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "revisionsOrphan": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "incoming": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "uploads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "quarantine": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    }
+  }
+}
