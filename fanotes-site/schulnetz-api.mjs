@@ -1777,7 +1777,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (status >= 500) log('warn', `Anfrage fehlgeschlagen (${error?.name || 'error'})`)
       send(response, status, { error: error?.publicMessage || 'Der Schulnetz-Dienst ist vorübergehend nicht erreichbar.' })
       const release = error?.releaseRequest
-      if (release && typeof release.destroy === 'function') response.on('finish', () => release.destroy())
+      // Test doubles have no socket. A real response closes the upload only after the 413 is sent.
+      if (release && typeof release.destroy === 'function' && typeof response.on === 'function') response.on('finish', () => release.destroy())
     }
     return true
   }
