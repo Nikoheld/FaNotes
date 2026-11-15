@@ -508,6 +508,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       for (const name of SCHOOL_FILES) await fs.rm(resolve(accountDir(accountId), name), { force: true })
       return
     }
+    // A broken guest file reads like "not a guest". The directory still belongs to that account.
+    if (await guestFilePresent(accountId)) throw refuseGuestFile()
     await fs.rm(accountDir(accountId), { recursive: true, force: true })
   })
 
@@ -538,9 +540,20 @@ export const createSchulnetzRuntime = (options = {}) => {
     return a.length === b.length && timingSafeEqual(a, b)
   }
 
+  const guestFile = (accountId) => resolve(accountDir(accountId), 'guest.json')
+  const guestFilePresent = async (accountId) => {
+    try {
+      await fs.stat(guestFile(accountId))
+      return true
+    } catch (error) {
+      if (error?.code === 'ENOENT') return false
+      throw error
+    }
+  }
+  const refuseGuestFile = () => Object.assign(new Error('guest file'), { code: 'EBADMSG' })
   const readGuestRecord = async (accountId) => {
     if (!/^[a-f0-9]{32}$/u.test(String(accountId || ''))) return null
-    const parsed = await readJson(resolve(accountDir(accountId), 'guest.json'))
+    const parsed = await readJson(guestFile(accountId))
     if (!parsed || parsed.v !== 1 || typeof parsed.tokenHash !== 'string') return null
     return parsed
   }
@@ -1013,6 +1026,8 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   const ownerStillExists = async (accountId) => {
     if (await readGuestRecord(accountId)) return true
+    // Missing means this is not a guest. A file that is there but unreadable must not look the same, or the next poll deletes the account.
+    if (await guestFilePresent(accountId)) throw refuseGuestFile()
     return accountStillExists(accountId)
   }
 
