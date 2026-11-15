@@ -340,3 +340,44 @@ test('a redirect is not followed and is not retried', async () => {
   assert.equal(calls.filter((url) => url.includes('/api/_Combine/')).length, 1)
   assert.equal(calls.some((url) => url.includes('example.test')), false)
 })
+
+test('a slow cache read is shared and is not replaced by an older copy', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-load-'))
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  let reads = 0
+  const stored = { fetchedAt: '2026-11-16T08:00:00.000Z', days: [{ date: '2026-11-16', weekday: 'Mo', closed: false, menus: [] }] }
+  const readFile = async () => {
+    reads += 1
+    await gate
+    return JSON.stringify(stored)
+  }
+  let fetches = 0
+  const lines = []
+  const mensa = createMensa({
+    readFile,
+    fetch: async () => {
+      fetches += 1
+      throw new Error('https://clients.compass-group.ch/secret-menu')
+    },
+    now: () => new Date('2026-11-16T08:00:00.000Z'),
+    root,
+    log: (_level, message) => lines.push(String(message)),
+  })
+  try {
+    const first = mensa.get()
+    for (let i = 0; i < 20 && reads < 1; i += 1) await new Promise((resolve) => setImmediate(resolve))
+    const second = mensa.get()
+    release()
+    const [left, right] = await Promise.all([first, second])
+    assert.equal(reads, 1)
+    assert.equal(fetches, 0)
+    assert.equal(left.day.date, '2026-11-16')
+    assert.equal(right.day.date, '2026-11-16')
+    assert.equal(left.stale, false)
+    assert.equal(right.stale, false)
+    assert.equal(lines.some((line) => line.includes('secret-menu')), false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
