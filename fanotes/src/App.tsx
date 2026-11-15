@@ -9,6 +9,7 @@ import {
   BookOpen,
   CalendarDays,
   CheckCircle2,
+  GraduationCap,
   CircleAlert,
   Clock,
   Cloud,
@@ -71,6 +72,7 @@ import { EditorExportControls } from './components/EditorExportControls'
 import { FormattingToolbar } from './components/FormattingToolbar'
 import { NoteLinkLayer } from './components/NoteLinkLayer'
 import { NoteTextFieldLayer } from './components/NoteTextFieldLayer'
+import { StudyAnnotationLayer } from './components/StudyAnnotationLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
@@ -828,6 +830,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteTextFields, setNoteTextFields] = useState<NoteTextField[]>([])
   const [noteLinkPlacing, setNoteLinkPlacing] = useState(false)
   const [textFieldPlacing, setTextFieldPlacing] = useState(false)
+  const [studyToolsOpen, setStudyToolsOpen] = useState(false)
   const [textFieldFocusId, setTextFieldFocusId] = useState<string | null>(null)
   const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
   const [selectedNoteLinkId, setSelectedNoteLinkId] = useState<string | null>(null)
@@ -6039,6 +6042,17 @@ export default function App({ startupBootstrap }: AppProps) {
               >
                 <Type size={14} /><span>Textfeld</span>
               </button>
+              <button
+                type="button"
+                className={`toolbar-button ${studyToolsOpen ? 'active' : ''}`}
+                title="Lernwerkzeuge: Beschriften, Zeichen, Bilder, Messen"
+                aria-label="Lernwerkzeuge"
+                aria-pressed={studyToolsOpen}
+                disabled={!activeTab}
+                onClick={() => setStudyToolsOpen((open) => !open)}
+              >
+                <GraduationCap size={14} /><span>Lernen</span>
+              </button>
               {!isPdfActive && <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>}
               {hasConnectedAiProvider(settings) && (
                 <button type="button" className={`toolbar-button ai ${lmStudioOpen ? 'active' : ''}`} title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /><span>AI</span></button>
@@ -6225,6 +6239,12 @@ export default function App({ startupBootstrap }: AppProps) {
                     onGeometry={changeTextFieldGeometry}
                     onRemove={removePlacedTextField}
                     onFocusHandled={clearTextFieldFocus}
+                  />
+                  <StudyAnnotationLayer
+                    path={activeTab.path}
+                    pdf={isPdfActive}
+                    open={studyToolsOpen}
+                    onClose={() => setStudyToolsOpen(false)}
                   />
                 </article>
               </PaperView>
