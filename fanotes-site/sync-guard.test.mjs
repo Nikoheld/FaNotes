@@ -1573,3 +1573,30 @@ test('a missing blobs directory is linked before the note is stored', async () =
   assert.deepEqual(readFileSync(join(blobDir, id)), direct)
   assert.deepEqual((await asAccount('GET', `/api/v1/sync/files/${id}`)).body, direct)
 })
+
+test('a restore publishes the larger archive when a revision has two names', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const archivedRevision = revisionOf(created)
+  const next = randomBytes(4500)
+  const replaced = await putFile(id, next, archivedRevision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  const directory = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  writeFileSync(join(directory, String(archivedRevision)), original.subarray(0, 64))
+  writeFileSync(join(directory, `c-${archivedRevision}`), original)
+  const body = Buffer.from(JSON.stringify({ revision: archivedRevision }))
+  const restored = await call('POST', `/api/v1/sync/files/${id}/restore`, {
+    token,
+    body,
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': body.length,
+      'If-Match': String(revisionOf(replaced)),
+    },
+  })
+  assert.equal(restored.status, 200, restored.body.toString('utf8'))
+  assert.deepEqual((await readFile(id)).body, original)
+  assert.equal(readFileSync(join(directory, String(archivedRevision))).length, 64)
+})

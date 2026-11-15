@@ -1020,6 +1020,14 @@ const listRevisionFiles = async (directory) => {
   return files
 }
 
+// A revision can have a plain name and a collapse name. A short torn copy
+// must not be published while a larger sibling of that revision is still there.
+const archivedRevisionFile = (files, revision) => {
+  const matches = (files || []).filter((file) => file.revision === revision)
+  matches.sort((left, right) => right.size - left.size || Number(left.name.startsWith('c-')) - Number(right.name.startsWith('c-')))
+  return matches[0] ?? null
+}
+
 // Register creates this directory. A later write can still find it gone.
 const ensureBlobDirectory = async (accountId) => {
   const blobDirectory = safeJoin(accountDirectory(accountId), 'blobs')
@@ -1394,7 +1402,7 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     const currentRevision = current ? current.revision : 0
     if (currentRevision !== base) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
     const directory = revisionsDirectory(auth.account.id, fileId)
-    const archived = (await listRevisionFiles(directory)).find((file) => file.revision === archivedRevision)
+    const archived = archivedRevisionFile(await listRevisionFiles(directory), archivedRevision)
     if (!archived) fail(404, 'Diese Fassung liegt nicht im Archiv.')
     const source = safeJoin(directory, archived.name)
     const info = await fs.lstat(source).catch(() => null)
