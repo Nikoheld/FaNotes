@@ -632,6 +632,35 @@ try {
     const final = runs.runsText(JSON.parse(disk.get(sceneId)).paragraphs.filter((p) => !p.deleted).flatMap((p) => p.runs))
     for (const part of ['Laptop', 'Tablet schreibt auch', 'Zweiter Absatz', 'Dritter vom Tablet', 'Noch mehr', 'Während des Speicherns']) assert.match(final, new RegExp(part, 'u'), part)
 
+    // Undo after another device's text was merged in must not take that text out again.
+    a.apply(type(a.state, ' Letzter Satz.'), 'typing', '.')
+    await a.save(storageFor())
+    const fourth = otherDevice('Vierter vom Tablet.')
+    disk.set(sceneId, JSON.stringify(syncMerge.mergeSceneVersions(JSON.parse(disk.get(sceneId)), fourth).scene))
+    a.absorb([syncMerge.mergeableScene(JSON.parse(disk.get(sceneId)), sceneId)], null)
+    assert.equal(a.canUndo(), false, 'the history ends at a merge')
+    assert.equal(a.undo(), false)
+    assert.match(text(a), /Vierter vom Tablet/u)
+
+    // Sync wrote over a save that finished during its download: our text is not on disk.
+    a.apply(type(a.state, ' Nur hier.'), 'typing', '.')
+    await a.save(storageFor())
+    const before = JSON.parse(disk.get(sceneId))
+    const lost = { ...before, paragraphs: before.paragraphs.map((p) => ({ ...p, runs: p.runs.map((run) => ({ ...run, text: run.text.replace(' Nur hier.', '') })) })) }
+    disk.set(sceneId, JSON.stringify(lost))
+    a.absorb([syncMerge.mergeableScene(JSON.parse(disk.get(sceneId)), sceneId)], null)
+    assert.match(text(a), /Nur hier/u, 'the editor keeps the text')
+    assert.equal(a.isDirty(), true, 'and saves it again, since it is not on disk')
+    await a.save(storageFor())
+    assert.match(runs.runsText(JSON.parse(disk.get(sceneId)).paragraphs.filter((p) => !p.deleted).flatMap((p) => p.runs)), /Nur hier/u)
+
+    // A clean editor absorbing the same content written with another key order stays clean (no save ping-pong).
+    const same = JSON.parse(disk.get(sceneId))
+    const reordered = { paragraphs: same.paragraphs.map((p) => Object.fromEntries(Object.entries(p).reverse())), id: same.id, format: same.format }
+    disk.set(sceneId, JSON.stringify(reordered))
+    a.absorb([syncMerge.mergeableScene(JSON.parse(disk.get(sceneId)), sceneId)], null)
+    assert.equal(a.isDirty(), false, 'same content, other key order: nothing to save')
+
     // The gate: scenes and manifest of the open story may be written only while the editor is clean.
     let dirty = false
     const changed = []

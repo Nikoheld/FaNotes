@@ -25,6 +25,17 @@ export type StorageAdapter = {
 }
 
 const sameJson = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
+/** JSON with object keys sorted at every level, so key order (which device wrote it) does not matter. */
+const canonical = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).filter((key) => (value as Record<string, unknown>)[key] !== undefined).sort().map((key) => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+/** Same content, whatever the key or paragraph order (a merge with itself sorts the paragraphs). */
+const sameScene = (left: Scene, right: Scene) => canonical(mergeSceneVersions(left, left).scene) === canonical(mergeSceneVersions(right, right).scene)
+const sameManifest = (left: StoryManifest, right: StoryManifest) => canonical(mergeManifests(left, left).manifest) === canonical(mergeManifests(right, right).manifest)
 
 const HISTORY_LIMIT = 500
 const GROUP_MS = 1500
@@ -167,14 +178,14 @@ export class WritingController {
         for (const [id, scene] of stamped) {
           const disk = storage.readScene ? await storage.readScene(id) : null
           const saved = this.savedScenes.get(id)
-          if (disk && saved && !sameJson(disk, saved)) {
+          if (disk && saved && !sameScene(disk, saved)) {
             stamped.set(id, mergeSceneVersions(scene, disk).scene)
             merged = true
           }
         }
         if (manifest && storage.readManifest) {
           const disk = await storage.readManifest()
-          if (disk && disk.id === manifest.id && !sameJson(disk, this.savedManifest)) {
+          if (disk && disk.id === manifest.id && !sameManifest(disk, this.savedManifest)) {
             manifest = { ...mergeManifests(manifest, disk).manifest, updatedAt: manifest.updatedAt }
             merged = true
           }
@@ -194,10 +205,17 @@ export class WritingController {
           for (const scene of stamped.values()) this.savedScenes.set(scene.id, nextDoc.scenes.get(scene.id)!)
           this.savedManifest = nextDoc.manifest
           this.rebaseHistory(doc, nextDoc)
-          if (merged) this.version += 1
+          if (merged) {
+            // As in `absorb`: undoing past a merge would delete the other device's text.
+            this.undoStack = []
+            this.redoStack = []
+            this.version += 1
+          }
         } else if (merged) {
           // The writer went on typing during the save: what was merged in still has to reach the editor.
           this.mergeIn([...stamped.values()], manifest, false, own)
+          this.undoStack = []
+          this.redoStack = []
         }
       } catch (error) {
         ok = false
@@ -224,6 +242,9 @@ export class WritingController {
   absorb(scenes: Scene[], manifest: StoryManifest | null) {
     const changed = this.mergeIn(scenes, manifest, true)
     if (changed) {
+      // Undo would put back a document without the other device's text, and the next save would
+      // record that as deleting it. The history ends here.
+      this.undoStack = []
       this.redoStack = []
       this.emit()
     }
@@ -246,13 +267,24 @@ export class WritingController {
       const base = bases?.get(disk.id) ?? saved ?? null
       const ours = current && !clean ? stampEdits(current, base, this.writer) : current
       const next = ours ? mergeSceneVersions(ours, disk).scene : disk
-      if (current && sameJson(next, current)) {
-        if (markSaved && clean) this.savedScenes.set(disk.id, current)
-        continue
+      const nextIsCurrent = current !== undefined && sameJson(next, current)
+      if (!nextIsCurrent) {
+        nextScenes.set(disk.id, next)
+        changed = true
       }
-      nextScenes.set(disk.id, next)
-      if (markSaved && (clean || !current)) this.savedScenes.set(disk.id, next)
-      changed = true
+      if (markSaved) {
+        // What is on disk is now the saved base. The scene counts as saved only when it is
+        // exactly that; otherwise (unsaved typing, or our text missing on disk because sync
+        // wrote over a save that finished during its download) it stays dirty and is saved
+        // again, stamped against the disk version so the other device's paragraphs are not
+        // taken for our edits.
+        const shown = nextIsCurrent ? current! : next
+        const target = sameScene(shown, disk) ? shown : disk
+        if (this.savedScenes.get(disk.id) !== target) {
+          this.savedScenes.set(disk.id, target)
+          if (target !== shown) changed = true
+        }
+      }
     }
     let nextManifest = doc.manifest
     if (manifest && manifest.id === doc.manifest.id) {
@@ -260,10 +292,18 @@ export class WritingController {
       // Unsaved manifest edits are the newest: they get today's stamp before the merge.
       const ours = clean ? doc.manifest : { ...doc.manifest, updatedAt: new Date().toISOString() }
       const merged = mergeManifests(ours, manifest).manifest
-      if (!sameJson(merged, doc.manifest)) {
+      const mergedIsCurrent = sameJson(merged, doc.manifest)
+      if (!mergedIsCurrent) {
         nextManifest = merged
-        if (markSaved && clean) this.savedManifest = merged
         changed = true
+      }
+      if (markSaved) {
+        const shown = mergedIsCurrent ? doc.manifest : merged
+        const target = sameManifest(shown, manifest) ? shown : manifest
+        if (this.savedManifest !== target) {
+          this.savedManifest = target
+          if (target !== shown) changed = true
+        }
       }
     }
     if (!changed) return false

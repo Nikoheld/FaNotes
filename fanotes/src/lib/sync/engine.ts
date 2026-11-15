@@ -827,6 +827,8 @@ export class SyncEngine {
       // Task-by-task merge instead of a conflict copy. The base stays the remote revision, so the next push uploads the merge.
       const merged = mergeHomeworkMarkdownBytes(local.bytes, plain)
       if (merged) {
+        // The download took a while: an editor may have started on this file meanwhile (writing mode).
+        if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
         await this.host.write(path, merged, Date.now())
         // Size and mtime of the remote copy, so the push scan sees the merged file as changed.
         this.state.files[path] = {
@@ -853,6 +855,8 @@ export class SyncEngine {
         // Everything this device had is in the remote version already.
         storyAdopt = true
       } else if (outcome?.kind === 'merged') {
+        // The download took a while: an editor may have started on this file meanwhile (writing mode).
+        if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
         if (!outcome.sameAsLocal) await this.host.write(path, outcome.bytes, Date.now())
         this.state.files[path] = remoteBase()
         idIndex.set(entry.id, path)
@@ -893,6 +897,8 @@ export class SyncEngine {
       const spliced = withLocalPageStats(syncText(plain), syncText(local.bytes))
       body = new TextEncoder().encode(spliced)
     }
+    // The download took a while: an editor may have started on this file meanwhile (writing mode).
+    if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
     const stat = await this.host.write(path, body, meta.mtimeMs || Date.now())
     this.rememberStoryBase(path, download.revision, plain)
     const storedKind = noteSyncKind(path, body)

@@ -31,6 +31,7 @@ import { ExportDialog } from '../export/ExportDialog'
 import { androidBridge } from '../androidHost'
 import { registerStoryGate } from '../liveSync'
 import { paragraphForQuery, subscribeStoryReveal } from '../reveal'
+import { sanitizeManifest, sanitizeScene } from '../model/sanitize'
 import { mergeableManifest, mergeableScene } from '../syncMerge'
 import { useStoryTools } from './storyTools'
 import { canDrop, findIn, moveNode, moveToTrash, trashedIds, updateNode, TRASH_ID, type DropPosition } from '../model/binder'
@@ -204,9 +205,11 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
             if (!alive || text === null) continue
             let value: unknown = null
             try { value = JSON.parse(text) } catch { continue }
-            if (relative === 'story.json') manifest = mergeableManifest(value)
+            // Checked like a loaded story, not only shaped for merging.
+            if (relative === 'story.json') manifest = mergeableManifest(value) ? sanitizeManifest(value) : null
             else {
-              const scene = mergeableScene(value, relative.slice('scenes/'.length, -'.json'.length))
+              const id = relative.slice('scenes/'.length, -'.json'.length)
+              const scene = mergeableScene(value, id) ? sanitizeScene(value, id) : null
               if (scene) scenes.push(scene)
             }
           }
