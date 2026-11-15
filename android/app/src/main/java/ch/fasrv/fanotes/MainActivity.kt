@@ -3129,6 +3129,13 @@ private fun PageSurface(
     val worksheetTextRequest by model.worksheetTextRequest.collectAsStateWithLifecycle()
     val noteFields by model.noteTextFields.collectAsStateWithLifecycle()
     val noteFieldFocus by model.noteTextFieldFocus.collectAsStateWithLifecycle()
+    val studyItems by model.studyAnnotations.collectAsStateWithLifecycle()
+    val studyHistory by model.studyHistory.collectAsStateWithLifecycle()
+    val studyPageRef = remember { arrayOfNulls<NotePageView>(1) }
+    val pickStudyImage = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val target = studyPageRef[0]
+        if (uri != null && target != null) model.importStudyImage(uri, target.ink.study.visiblePage())
+    }
     val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
     val sheetReset by model.sheetReset.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
@@ -3278,6 +3285,14 @@ private fun PageSurface(
                 page.ink.invalidate()
             }
             page.ink.onPlaceLink = { linkPage, x, y -> model.placeNoteLink(linkPage, x, y, page.ink.noteLinkStyle) }
+            studyPageRef[0] = page
+            if (page.ink.study.items != studyItems) page.ink.study.items = studyItems
+            page.ink.study.onChange = { before, next -> model.commitStudy(before, next) }
+            page.studyCanUndo = studyHistory.canUndo
+            page.studyCanRedo = studyHistory.canRedo
+            page.onStudyUndo = { model.undoStudy() }
+            page.onStudyRedo = { model.redoStudy() }
+            page.onStudyImage = { pickStudyImage.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
             page.ink.noteTextFields = noteFields
             page.ink.onPlaceTextField = { model.storePlacedTextField(it) }
             page.ink.onTextFieldMessage = { model.message.value = it }
