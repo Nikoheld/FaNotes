@@ -784,6 +784,12 @@ const handleGetFile = async (request, response, auth, fileId) => {
     try {
       const info = await handle.stat()
       if (!info.isFile()) fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
+      // The headers would name this revision's checksum. A different size is a
+      // newer or truncated body, so it is not sent under that checksum.
+      if (info.size !== (Number(entry.size) || 0)) {
+        await handle.close()
+        return { entry, handle: null, size: info.size, mismatch: true }
+      }
       return { entry, handle, size: info.size }
     } catch (error) {
       await handle.close()
@@ -792,6 +798,14 @@ const handleGetFile = async (request, response, auth, fileId) => {
   })
   if (opened.entry.deleted) {
     sendEmpty(request, response, 204, { 'X-FaNotes-Revision': String(opened.entry.revision), 'X-FaNotes-Deleted': '1', ETag: `"${opened.entry.revision}"` })
+    return
+  }
+  if (opened.mismatch) {
+    sendJson(request, response, 409, {
+      error: 'Die gespeicherte Datei stimmt nicht mit dieser Fassung überein.',
+      entry: publicEntry(opened.entry),
+      reason: 'guard',
+    }, { 'X-FaNotes-Rejected': 'guard' })
     return
   }
   const { entry, handle, size } = opened

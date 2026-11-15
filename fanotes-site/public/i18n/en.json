@@ -2866,5 +2866,6 @@
   "Eine Löschung braucht eine ausdrückliche Bestätigung.": "A deletion needs an explicit confirmation.",
   "Diese Fassung liegt nicht im Archiv.": "This revision is not in the archive.",
   "Die leere oder stark gekürzte Fassung wurde nicht über die vorhandene Notiz gelegt.": "The empty or heavily shortened version was not saved over the existing note.",
-  "Die gespeicherte Datei gehört zu einer neueren Fassung und wurde nicht gelöscht.": "The stored file belongs to a newer revision and was not deleted."
+  "Die gespeicherte Datei gehört zu einer neueren Fassung und wurde nicht gelöscht.": "The stored file belongs to a newer revision and was not deleted.",
+  "Die gespeicherte Datei stimmt nicht mit dieser Fassung überein.": "The stored file does not match this revision."
 }
