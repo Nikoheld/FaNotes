@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { revisionNamesToKeep } from './sync-api.mjs'
@@ -44,6 +44,30 @@ test('a backup copies ciphertext, rotates old copies, and restore can dry-run', 
     assert.equal(await readFile(join(restored, 'accounts', 'a'.repeat(32), 'blobs', 'note'), 'utf8'), 'ciphertext-not-plaintext')
     await assert.rejects(restoreBackup({ archive: join(dest, third.stamp), dest: source }))
   } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable blob fails the backup without naming the file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sync-backup-'))
+  const source = join(root, 'sync')
+  const dest = join(root, 'backups')
+  const hidden = join(source, 'accounts', 'secretblob', 'note')
+  try {
+    await mkdir(join(source, 'accounts', 'secretblob'), { recursive: true })
+    await writeFile(hidden, Buffer.from('ciphertext'))
+    await chmod(hidden, 0)
+    await assert.rejects(
+      runBackup({ source, dest, keep: 2, now: new Date('2026-11-15T01:00:00Z') }),
+      (error) => {
+        assert.match(error.message, /^Sicherung unvollständig \(EACCES\)\.$/u)
+        assert.equal(error.message.includes('secretblob'), false)
+        assert.equal(error.message.includes(root), false)
+        return true
+      },
+    )
+  } finally {
+    await chmod(hidden, 0o600).catch(() => {})
     await rm(root, { recursive: true, force: true })
   }
 })
