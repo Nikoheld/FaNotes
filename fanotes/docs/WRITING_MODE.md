@@ -144,3 +144,15 @@ Tests: `node scripts/check-writing-export.mjs` (11). 639-page novel (132 000 wor
 - **Conflict page**: scenes, `story.json` and bible sheets preview as text (`storyPreview`), titled "Story · scene/outline/…".
 
 Tests: `node scripts/check-writing-sync.mjs` (13 groups; `--write` regenerates the fixtures).
+
+### Milestone 6 (Android tablet) — 2026-11-15
+
+The Android app opens `Name.story` folders (shown as one document with a book icon) in `WritingActivity`: a WebView that loads the same writing mode as desktop and web from the APK's assets (`writing.html`, built by `scripts/build-android-writing.mjs`; the release job builds it before Gradle). Story files go through `window.FaNotesAndroid` (`StoryBridge`) with the desktop's path rules (`StoryFiles` in `android/core`: JSON/Markdown only, inside `.story`, three folders deep, 16 MiB, no absolute paths, unit tested). Exports are written next to the story in the vault. Touch: a swipe scrolls, a tap places the caret and opens the on-screen keyboard; the Android back button saves before closing. While a story is open its folder is held busy for sync (merged on the next open); closing triggers a sync.
+
+Verified: Kotlin `StoryFilesTest`, `StorySync*` and census tests, `:app:compileDebugKotlin`; the stand-alone page in Chromium at tablet size with touch input and a fake bridge (8 checks: create, tap → keyboard focus, typing, autosave through the bridge, swipe scrolls without selecting, back saves then closes, reopen). Not yet run on a physical tablet or emulator.
+
+### Milestone 7 (verification and shipping) — 2026-11-15
+
+- Performance: 608-page A5 novel (184 000 words) opens in about 3.5 s on the loaded shared server; typing p95 24–48 ms at start and end with checking on; full layout in Node 0.3–1.1 s, one keystroke re-paginates one page; PDF export of a 639-page novel 1.1–1.6 s.
+- CI: `.github/workflows/writing-mode.yml` runs the type check, all writing checks (unit, assistance, story tools, export/import, sync), sync and document search, and the Kotlin story/sync tests on pull requests.
+- Fixes found by the Rust port (PR #1141): stale footnote layout after an incremental edit, Object.prototype names as style ids, text cut inside an emoji.
