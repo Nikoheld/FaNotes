@@ -132,6 +132,7 @@ export const sortToMarkdown = (data: SortData, style: 'table' | 'list' = data.mo
   if (data.mode === 'sequence' || style === 'list') {
     const lines: string[] = []
     for (const group of data.groups) {
+      if (data.mode !== 'sequence' && !group.cards.length) continue
       if (data.mode !== 'sequence') lines.push(`**${group.title || 'Gruppe'}**`)
       group.cards.forEach((id, index) => lines.push(data.mode === 'sequence' ? `${index + 1}. ${text.get(id) ?? ''}` : `- ${text.get(id) ?? ''}`))
       if (data.mode !== 'sequence') lines.push('')
