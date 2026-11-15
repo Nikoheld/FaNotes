@@ -156,9 +156,9 @@ test('chained fallback (arrive) works backward from the last segment', async () 
 test('the provider failing on a loop route still chains; without a loop it throws', async () => {
   const failing = (url) => { if (url.searchParams.getAll('via[]').length) throw Object.assign(new Error('provider'), { status: 500 }); return stubborn(url) }
   const { fetchImpl } = fake((url) => failing(url))
-  const provider = createCommuteProvider({ fetchImpl, now: clockAt('06:00') })
+  const provider = createCommuteProvider({ fetchImpl, now: clockAt('06:00'), sleep: async () => {} })
   assert.equal((await provider.trips({ from: BRUGG, to: AARAU, vias: loopVias, at: parseLocal(at('06:55')) })).trips.length, 2)
-  const broken = createCommuteProvider({ fetchImpl: async () => { throw new Error('down') }, now: clockAt('06:00') })
+  const broken = createCommuteProvider({ fetchImpl: async () => { throw new Error('down') }, now: clockAt('06:00'), sleep: async () => {} })
   await assert.rejects(() => broken.trips({ from: BRUGG, to: AARAU, vias: [LENZBURG], at: parseLocal(at('06:55')) }))
 })
 
