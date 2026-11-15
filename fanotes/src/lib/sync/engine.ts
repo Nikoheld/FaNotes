@@ -707,6 +707,7 @@ export class SyncEngine {
       if (!base || entry.revision <= base.revision) return { result: 'noop', path: knownPath }
       if (this.options?.isPathBusy?.(knownPath)) return { result: 'deferred', path: knownPath }
       const local = await this.localSnapshot(knownPath)
+      if (!local && (await this.presentHere(knownPath))) return this.unreadableHere(knownPath)
       if (!local) {
         delete this.state.files[knownPath]
         idIndex.delete(entry.id)
@@ -739,6 +740,9 @@ export class SyncEngine {
     if (base && base.id === entry.id && entry.revision <= base.revision) return { result: 'noop', path }
     if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
     const local = await this.localSnapshot(path)
+    // A file that is here but cannot be read (permissions, locked, too large) is not
+    // "missing": writing the server's version would replace it without a copy.
+    if (!local && (await this.presentHere(path))) return this.unreadableHere(path)
     // Match the server hash only. The stored identity says the local file still
     // matches the previous revision, which is exactly when a newer remote edit must be applied.
     if (local && local.kind !== 'unreadable' && (local.sha256 === meta.sha256 || local.rawSha256 === meta.sha256)) {
@@ -844,6 +848,17 @@ export class SyncEngine {
   }
 
   private scanCache: Map<string, SyncScanEntry> | null = null
+
+  /** The file is listed here (the scan needs no read access), even if reading it fails. */
+  private async presentHere(path: string) {
+    return (await this.statOf(path)) !== null || (await this.exists(path))
+  }
+
+  /** Leaves a file this device cannot read alone (retried next cycle, like a busy file). */
+  private unreadableHere(path: string): { result: 'deferred'; path: string } {
+    this.log('warn', `„${path}“ ist auf diesem Gerät vorhanden, lässt sich aber nicht lesen. Die Fassung vom Server wird nicht darübergeschrieben; der Abgleich versucht es später erneut.`)
+    return { result: 'deferred', path }
+  }
 
   private async statOf(path: string) {
     if (!this.host) return null

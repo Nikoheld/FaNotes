@@ -366,6 +366,22 @@ try {
   await C.engine.syncNow()
   assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.', 'applied once the note is idle')
 
+  // A file that is here but cannot be read (permissions, locked) is not "missing":
+  // the server's version is not written over it; it arrives once it can be read.
+  const readable = hostB.read
+  hostB.read = async (path) => { if (path === 'Mathe/Algebra.md') throw new Error('EACCES'); return readable(path) }
+  hostA.put('Mathe/Algebra.md', '# Algebra\n\nVierte Fassung.')
+  await A.engine.syncNow()
+  await C.engine.syncNow()
+  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.', 'unreadable local note left alone')
+  hostB.read = readable
+  await C.engine.syncNow()
+  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nVierte Fassung.', 'applied once it can be read')
+  hostA.put('Mathe/Algebra.md', '# Algebra\n\nDritte Fassung.')
+  await A.engine.syncNow()
+  await C.engine.syncNow()
+  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.')
+
   // Password change re-wraps the same vault secret; other sessions are signed out.
   await A.engine.changePassword('korrektes pferd batterie', 'neues sicheres passwort 42')
   await assert.rejects(A.engine.changePassword('korrektes pferd batterie', 'irgendwas anderes 99'), /aktuelle Passwort/u)
