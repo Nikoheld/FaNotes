@@ -9,9 +9,11 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fanotes_famd::{
-    companion_note_path, empty_famd_payload, is_paper_style, parse_famd, parse_note_backups,
-    parse_note_links, parse_note_text_fields, serialize_famd, strip_famd_payload,
-    worksheet_ids_from_markdown, FamdPayload, NoteBackup, NoteLink, NoteTextField,
+    companion_note_path, compose_famd_companion, empty_famd_payload, famd_encoding_for_save,
+    famd_looks_stored, ink_has_marks, is_paper_style, parse_famd, parse_note_backups,
+    parse_note_links, parse_note_text_fields, serialize_famd_with, strip_famd_payload,
+    try_parse_famd, try_parse_famd_packed, worksheet_ids_from_markdown, FamdEncoding,
+    FamdPayload, NoteBackup, NoteLink, NoteTextField,
 };
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
@@ -22,8 +24,7 @@ use crate::Host;
 const MAX_SUBJECT_BOOK_BYTES: usize = 512 * 1024;
 const MAX_BOOKS: usize = 200;
 const MAX_PATH: usize = 500;
-const HISTORY_LIMIT: usize = 30;
-const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_SNAPSHOT_BYTES: usize = 16 * 1024 * 1024;
 
 /// Node `Buffer.toString('utf8')`: invalid bytes become U+FFFD and the rest stays.
 pub(crate) fn read_lossy_string(path: &Path) -> Option<String> {
@@ -90,6 +91,7 @@ pub fn is_note_text(relative: &str) -> bool {
     )
 }
 
+#[allow(dead_code)]
 pub fn write_note_file(
     root: &Path,
     relative: &str,
@@ -114,11 +116,6 @@ pub fn write_note_file_with(
 ) -> Result<String, String> {
     let is_famd = crate::vault::posix_extname_en_us(relative) == ".famd";
     let body = strip_famd_payload(content);
-    let markdown = if body.ends_with('\n') {
-        body
-    } else {
-        format!("{body}\n")
-    };
     let written = if is_famd {
         let path = locations.resolve_note(root, relative, true)?;
         // Desktop `realpath` of the parent runs before a new `.famd` is created.
@@ -129,11 +126,71 @@ pub fn write_note_file_with(
         // A missing markdown note is not created here; that is `create-note`.
         // `allowMissing` is false, so the first missing segment is `lstat`.
         let path = locations.resolve_note(root, relative, false)?;
+        let existing = read_optional_text(&path, optional_note_limit(&path))?;
+        let markdown = markdown_file_text(existing.as_deref(), content, &body)?;
         atomic_write(&path, markdown.as_bytes(), 0o600)?;
         path
     };
     attach_sidecar_with(root, relative, content, settings_paper, locations)?;
     Ok(file_mtime_iso(&written))
+}
+
+/// The bytes a markdown save writes (`write-file` in main.cjs, abab53a8).
+///
+/// A markdown note that still embeds a famd payload with handwriting keeps
+/// that payload when the incoming text has none, so a text-only save cannot
+/// drop the ink. An unreadable embedded payload refuses the save. Otherwise
+/// the body is written with one trailing newline; an empty body stays empty.
+fn markdown_file_text(existing: Option<&str>, content: &str, body: &str) -> Result<String, String> {
+    if let Some(existing) = existing.filter(|text| famd_looks_stored(text)) {
+        let parsed = try_parse_famd(existing).map_err(|error| error.to_string())?;
+        let stored_marks = parsed
+            .payload
+            .as_ref()
+            .is_some_and(|payload| ink_has_marks(&payload.to_json()));
+        if stored_marks {
+            let incoming = try_parse_famd(content).map_err(|error| error.to_string())?;
+            let incoming_marks = incoming
+                .payload
+                .as_ref()
+                .is_some_and(|payload| ink_has_marks(&payload.to_json()));
+            if !incoming_marks {
+                let Some(mut payload) = parsed.payload else {
+                    return Err(UNREADABLE_NOTE.to_owned());
+                };
+                let text_changed = body != strip_famd_payload(&parsed.markdown);
+                if text_changed || payload.updated_at.is_empty() {
+                    payload.updated_at = now_iso();
+                }
+                payload.worksheets = worksheet_ids_from_markdown(body);
+                return Ok(serialize_famd_with(
+                    body,
+                    &payload,
+                    famd_encoding_for_save(Some(existing)),
+                ));
+            }
+        }
+    }
+    Ok(if body.ends_with('\n') || body.is_empty() {
+        body.to_owned()
+    } else {
+        format!("{body}\n")
+    })
+}
+
+const UNREADABLE_NOTE: &str = "Die Notiz konnte nicht gelesen werden und wurde nicht überschrieben.";
+
+/// `composeFamdCompanion` over the stored companion: the stored ink stays
+/// (packed v2 ink is not unpacked) unless `ink` replaces it, a v2 note stays
+/// v2, a new note is v2, and a stored note that cannot be read is refused.
+pub(crate) fn compose_companion(
+    existing: Option<&str>,
+    markdown: &str,
+    ink: Option<&Value>,
+    settings_paper: Option<&str>,
+) -> Result<String, String> {
+    compose_famd_companion(existing, markdown, ink, settings_paper, &now_iso())
+        .map_err(|error| error.to_string())
 }
 
 fn file_mtime_iso(path: &Path) -> String {
@@ -171,6 +228,7 @@ pub(crate) fn require_parent_directory(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn attach_sidecar(
     root: &Path,
     relative: &str,
@@ -195,66 +253,28 @@ pub fn attach_sidecar_with(
 ) -> Result<(), String> {
     let famd_relative = companion_note_path(relative, ".famd");
     let famd_path = locations.resolve_note(root, &famd_relative, true)?;
-    let existing = match read_optional_text(&famd_path, optional_note_limit(&famd_path))? {
-        Some(source) => parse_famd(&source),
-        None => parse_famd(""),
-    };
-    let incoming = parse_famd(content);
-    let body = if incoming.markdown.is_empty() {
-        strip_famd_payload(content)
-    } else {
-        incoming.markdown
-    };
-    let mut payload = existing
+    // Desktop `writeFamdCompanionNow` snapshots the note before the companion write.
+    let note_is_famd = vault::posix_extname_en_us(relative) == ".famd";
+    if !note_is_famd {
+        crate::history::snapshot_note(root, locations, &companion_note_path(relative, ".md"));
+    }
+    let existing = read_optional_text(&famd_path, optional_note_limit(&famd_path))?;
+    // A page-stats save carries `ink: null` and leaves the stored handwriting
+    // alone. A real ink object (the note-standard upgrade) replaces it.
+    let incoming = try_parse_famd(content).map_err(|error| error.to_string())?;
+    let ink = incoming
         .payload
-        .unwrap_or_else(|| empty_famd_payload(now_iso()));
-    if let Some(incoming_payload) = incoming.payload {
-        if incoming_payload.ink.as_ref().is_some_and(Value::is_object) {
-            payload.ink = incoming_payload.ink;
-        }
-        if payload.paper_style.is_none() {
-            payload.paper_style = incoming_payload.paper_style;
-        }
-        // A saved trailer replaces links and backups when it actually has them.
-        // An empty list is omitted by the parser, so the sidecar copy stays.
-        if !incoming_payload.note_links.is_empty() {
-            payload.note_links = incoming_payload.note_links;
-        }
-        if !incoming_payload.note_backups.is_empty() {
-            payload.note_backups = incoming_payload.note_backups;
-        }
-        if !incoming_payload.text_fields.is_empty() {
-            payload.text_fields = incoming_payload.text_fields;
-        }
-        if incoming_payload.page_stats.is_some() {
-            payload.page_stats = incoming_payload.page_stats;
-        }
-    }
-    if payload.paper_style.is_none() {
-        if let Some(style) = payload
-            .ink
-            .as_ref()
-            .and_then(|ink| ink.get("paperStyle"))
-            .and_then(Value::as_str)
-            .filter(|style| is_paper_style(style))
-        {
-            payload.paper_style = Some(style.to_owned());
-        }
-    }
-    if payload.paper_style.is_none() {
-        if let Some(style) = settings_paper.filter(|style| is_paper_style(style)) {
-            payload.paper_style = Some(style.to_owned());
-        }
-    }
-    payload.updated_at = now_iso();
-    payload.worksheets = worksheet_ids_from_markdown(&body);
+        .and_then(|payload| payload.ink)
+        .filter(|ink| ink.is_object() || ink.is_array());
+    let text = compose_companion(existing.as_deref(), content, ink.as_ref(), settings_paper)?;
+    let body = strip_famd_payload(&text);
     // The desktop `realpath` of the companion's parent fails before the write.
     require_parent_directory(&famd_path)?;
-    atomic_write(
-        &famd_path,
-        serialize_famd(&body, &payload).as_bytes(),
-        0o600,
-    )?;
+    atomic_write(&famd_path, text.as_bytes(), 0o600)?;
+    // A `.famd` note is on disk now, as after the desktop's first write.
+    if note_is_famd {
+        crate::history::snapshot_note(root, locations, &famd_relative);
+    }
     if relative.to_lowercase().ends_with(".famd") {
         let markdown_relative = companion_note_path(relative, ".md");
         if let Ok(markdown_path) = locations.resolve_note(root, &markdown_relative, true) {
@@ -459,15 +479,7 @@ pub fn write_subject_books(host: &Host, raw: &Value) -> Result<Value, String> {
 }
 
 pub fn list_history(host: &Host, relative: &str) -> Result<Value, String> {
-    let note = markdown_path(relative)?;
-    let directory = history_dir(vault_root(host)?, &note)?;
-    let index = read_history_index(&directory)?;
-    let snapshots = index
-        .get("snapshots")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    Ok(Value::Array(snapshots.into_iter().rev().collect()))
+    crate::history::list(host, relative)
 }
 
 pub fn read_history(
@@ -475,125 +487,16 @@ pub fn read_history(
     relative: &str,
     snapshot: Option<&Value>,
 ) -> Result<Value, String> {
-    let note = markdown_path(relative)?;
-    let pattern = match snapshot {
-        Some(value) => js_regexp_string(value),
-        None => "undefined".to_owned(),
-    };
-    if !is_snapshot_id(&pattern) {
-        return Err("Ungültiger Verlaufseintrag.".to_owned());
-    }
-    let directory = history_dir(vault_root(host)?, &note)?;
-    let index = read_history_index(&directory)?;
-    let entry = index
-        .get("snapshots")
-        .and_then(Value::as_array)
-        .and_then(|items| {
-            items
-                .iter()
-                .find(|item| {
-                    snapshot.is_some_and(|query| {
-                        item.get("id").is_some_and(|id| snapshot_same(id, query))
-                    })
-                })
-                .cloned()
-        })
-        .ok_or_else(|| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
-    let snapshot_id = entry
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|id| is_snapshot_id(id))
-        .ok_or_else(|| "Dieser Verlaufseintrag existiert nicht mehr.".to_owned())?;
-    // Desktop `readFile` throws. A missing or unreadable snapshot is that
-    // open error, not the message used when the id is absent from the index.
-    let snapshot_path = directory.join(format!("{snapshot_id}.md"));
-    let content = fs::read(&snapshot_path)
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .map_err(|error| node_open_error(&snapshot_path, &error))?;
-    Ok(json!({
-        "id": snapshot_id,
-        "createdAt": entry.get("createdAt").and_then(Value::as_str).unwrap_or(""),
-        "content": content,
-    }))
+    crate::history::read(host, relative, snapshot)
 }
 
+/// A snapshot of `content` now, without a `.famd` companion.
+#[allow(dead_code)]
 pub fn record_history(vault_root: &Path, relative: &str, content: &str) -> Result<(), String> {
-    if vault::js_trim(content).is_empty() {
-        return Ok(());
-    }
-    let bytes = content.len();
-    if bytes == 0 || bytes > MAX_SNAPSHOT_BYTES {
-        return Ok(());
-    }
-    let directory = history_dir(vault_root, relative)?;
-    ensure_private_history_dir(&directory)?;
-    let mut index = read_history_index(&directory)?;
-    if let Some(last) = index
-        .get("snapshots")
-        .and_then(Value::as_array)
-        .and_then(|items| items.last())
-        .and_then(|item| item.get("id"))
-        .and_then(Value::as_str)
-    {
-        if read_lossy_string(&directory.join(format!("{last}.md"))).as_deref() == Some(content) {
-            return Ok(());
-        }
-    }
-    let created_at = now_iso();
-    let id = format!(
-        "{}-{}",
-        created_at.replace([':', '.'], "-"),
-        random_suffix()?
-    );
-    let snapshot_path = directory.join(format!("{id}.md"));
-    // Desktop `writeFile` uses the final snapshot name and rethrows that error.
-    write_history_snapshot(&snapshot_path, content)?;
-    index["path"] = Value::String(relative.to_owned());
-    index["format"] = Value::String("fanotes-history-v1".to_owned());
-    index
-        .as_object_mut()
-        .ok_or_else(|| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?
-        .entry("snapshots")
-        .or_insert_with(|| json!([]));
-    index["snapshots"]
-        .as_array_mut()
-        .ok_or_else(|| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?
-        .push(json!({ "id": id, "createdAt": created_at, "bytes": bytes }));
-    if let Err(error) = write_history_index(&directory, &history_index_bytes(&index)?) {
-        let _ = fs::remove_file(&snapshot_path);
-        return Err(error);
-    }
-    trim_history(&directory, &mut index)?;
-    Ok(())
+    crate::history::record(vault_root, relative, content, None, crate::history::now_ms())
 }
 
-fn trim_history(directory: &Path, index: &mut Value) -> Result<(), String> {
-    let Some(snapshots) = index.get_mut("snapshots").and_then(Value::as_array_mut) else {
-        return Ok(());
-    };
-    if snapshots.len() <= HISTORY_LIMIT {
-        return Ok(());
-    }
-    let removed: Vec<Value> = snapshots
-        .drain(0..snapshots.len() - HISTORY_LIMIT)
-        .collect();
-    let Ok(bytes) = history_index_bytes(index) else {
-        return Ok(());
-    };
-    if write_history_index(directory, &bytes).is_err() {
-        return Ok(());
-    }
-    for entry in removed {
-        if let Some(id) = entry.get("id").and_then(Value::as_str) {
-            if is_snapshot_id(id) {
-                let _ = fs::remove_file(directory.join(format!("{id}.md")));
-            }
-        }
-    }
-    Ok(())
-}
-
-const MAX_COMPANION_BYTES: u64 = 40 * 1024 * 1024;
+pub(crate) const MAX_COMPANION_BYTES: u64 = 40 * 1024 * 1024;
 
 /// Reads of page stats, paper, links, and backups look only at the companion.
 ///
@@ -622,19 +525,53 @@ fn read_companion(host: &Host, relative: &str) -> Result<Option<FamdPayload>, St
     }
 }
 
-fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayload), String> {
+/// The companion a paper, link, backup or text-field update rewrites, with
+/// what is needed to write it back like `mutateFamdCompanion`.
+pub(crate) struct LoadedCompanion {
+    path: PathBuf,
+    encoding: FamdEncoding,
+    stored_body: String,
+    stored_ink: Value,
+    stored_updated_at: Option<String>,
+}
+
+fn load_note(host: &Host, relative: &str) -> Result<(LoadedCompanion, String, FamdPayload), String> {
     let root = vault_root(host)?;
     let note = note_path(relative)?;
     let famd_relative = companion_note_path(&note, ".famd");
     let famd_path = host
         .folder_locations
         .resolve_note(root, &famd_relative, true)?;
+    // Desktop `mutateFamdCompanion` snapshots `noteMarkdownSourcePath` first.
+    let history_source = if vault::posix_extname_en_us(&note) == ".pdf" {
+        famd_relative.clone()
+    } else {
+        note.clone()
+    };
+    crate::history::snapshot_note(root, &host.folder_locations, &history_source);
     let source = read_optional_text(&famd_path, optional_note_limit(&famd_path))?.unwrap_or_default();
+    // Read without unpacking, so v2 ink is written back packed as it was.
+    // A stored note that cannot be read is refused instead of replaced.
     let parsed = if source.is_empty() {
         parse_famd("")
     } else {
-        parse_famd(&source)
+        try_parse_famd_packed(&source).map_err(|error| error.to_string())?
     };
+    if !source.is_empty() && famd_looks_stored(&source) && parsed.payload.is_none() {
+        return Err(UNREADABLE_NOTE.to_owned());
+    }
+    let encoding = famd_encoding_for_save(if source.is_empty() { None } else { Some(&source) });
+    let stored_body = strip_famd_payload(&parsed.markdown);
+    let stored_ink = parsed
+        .payload
+        .as_ref()
+        .and_then(|payload| payload.ink.clone())
+        .unwrap_or(Value::Null);
+    let stored_updated_at = parsed
+        .payload
+        .as_ref()
+        .map(|payload| payload.updated_at.clone())
+        .filter(|updated| !updated.is_empty());
     let markdown = if note.to_lowercase().ends_with(".pdf") {
         parsed.markdown.clone()
     } else {
@@ -650,12 +587,34 @@ fn load_note(host: &Host, relative: &str) -> Result<(PathBuf, String, FamdPayloa
         .unwrap_or_else(|| empty_famd_payload(now_iso()));
     payload.updated_at = now_iso();
     payload.worksheets = worksheet_ids_from_markdown(&body);
-    Ok((famd_path, body, payload))
+    let loaded = LoadedCompanion {
+        path: famd_path,
+        encoding,
+        stored_body,
+        stored_ink,
+        stored_updated_at,
+    };
+    Ok((loaded, body, payload))
 }
 
-fn store_note(path: &Path, body: &str, payload: &FamdPayload) -> Result<(), String> {
+fn store_note(loaded: &LoadedCompanion, body: &str, payload: &FamdPayload) -> Result<(), String> {
+    // The update time stays when neither the ink nor the text changed.
+    let same_ink = fanotes_famd::js_stringify(payload.ink.as_ref().unwrap_or(&Value::Null))
+        == fanotes_famd::js_stringify(&loaded.stored_ink);
+    let same_text = body == loaded.stored_body;
+    let mut payload = payload.clone();
+    payload.worksheets = worksheet_ids_from_markdown(body);
+    if same_ink && same_text {
+        if let Some(updated) = &loaded.stored_updated_at {
+            payload.updated_at = updated.clone();
+        }
+    }
     // Paper, links, and backups reach `atomicWrite` without creating the folder.
-    atomic_write_existing_parent(path, serialize_famd(body, payload).as_bytes(), 0o600)
+    atomic_write_existing_parent(
+        &loaded.path,
+        serialize_famd_with(body, &payload, loaded.encoding).as_bytes(),
+        0o600,
+    )
 }
 
 fn note_path(relative: &str) -> Result<String, String> {
@@ -667,7 +626,7 @@ fn note_path(relative: &str) -> Result<String, String> {
     }
 }
 
-fn markdown_path(relative: &str) -> Result<String, String> {
+pub(crate) fn markdown_path(relative: &str) -> Result<String, String> {
     let path = vault::normalize_relative_path(relative, false, false)?;
     if is_note_text(&path) {
         Ok(path)
@@ -780,7 +739,7 @@ fn history_mkdir_code(path: &Path, code: i32) -> String {
     crate::vault::node_mkdir_error(path, &std::io::Error::from_raw_os_error(code))
 }
 
-fn write_history_index(directory: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_history_index(directory: &Path, bytes: &[u8]) -> Result<(), String> {
     let temporary = directory.join(format!(".index-{}.tmp", std::process::id()));
     let index = directory.join("index.json");
     let mut options = fs::OpenOptions::new();
@@ -809,7 +768,7 @@ fn write_history_index(directory: &Path, bytes: &[u8]) -> Result<(), String> {
         .map_err(|error| crate::vault::node_rename_error(&temporary, &index, &error))
 }
 
-fn write_history_snapshot(path: &Path, content: &str) -> Result<(), String> {
+pub(crate) fn write_history_snapshot(path: &Path, content: &str) -> Result<(), String> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]
@@ -827,7 +786,7 @@ fn write_history_snapshot(path: &Path, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
+pub(crate) fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
     if let Some(parent) = directory.parent() {
         if fs::symlink_metadata(parent).is_err() {
             ensure_private_history_dir(parent)?;
@@ -861,13 +820,13 @@ fn ensure_private_history_dir(directory: &Path) -> Result<(), String> {
 }
 
 /// `JSON.stringify(index, null, 2)` plus a trailing newline.
-fn history_index_bytes(index: &Value) -> Result<Vec<u8>, String> {
+pub(crate) fn history_index_bytes(index: &Value) -> Result<Vec<u8>, String> {
     let text = serde_json::to_string_pretty(index)
         .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
     Ok(format!("{text}\n").into_bytes())
 }
 
-fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
+pub(crate) fn history_dir(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let mut hasher = Sha1::new();
     hasher.update(relative.replace('\\', "/").as_bytes());
     let digest = hasher.finalize();
@@ -935,7 +894,7 @@ pub(crate) fn node_open_error(path: &Path, error: &std::io::Error) -> String {
     format!("EACCES: permission denied, open '{}'", path.display())
 }
 
-fn read_history_index(directory: &Path) -> Result<Value, String> {
+pub(crate) fn read_history_index(directory: &Path) -> Result<Value, String> {
     let path = directory.join("index.json");
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
@@ -958,7 +917,7 @@ fn read_history_index(directory: &Path) -> Result<Value, String> {
     }
 }
 
-fn is_snapshot_id(value: &str) -> bool {
+pub(crate) fn is_snapshot_id(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()
@@ -971,7 +930,7 @@ pub(crate) fn js_regexp_string(value: &Value) -> String {
 }
 
 /// `===` for the JSON values a history id can be. Objects and arrays compare by identity in JavaScript.
-fn snapshot_same(stored: &Value, query: &Value) -> bool {
+pub(crate) fn snapshot_same(stored: &Value, query: &Value) -> bool {
     match (stored, query) {
         (Value::Null, Value::Null) => true,
         (Value::Bool(left), Value::Bool(right)) => left == right,
@@ -981,7 +940,7 @@ fn snapshot_same(stored: &Value, query: &Value) -> bool {
     }
 }
 
-fn random_suffix() -> Result<String, String> {
+pub(crate) fn random_suffix() -> Result<String, String> {
     let mut bytes = [0u8; 3];
     getrandom::getrandom(&mut bytes)
         .map_err(|_| "Der Verlauf konnte nicht gespeichert werden.".to_owned())?;
@@ -1194,7 +1153,7 @@ fn set_private_mode(path: &Path, mode: u32) {
     }
 }
 
-fn vault_root(host: &Host) -> Result<&Path, String> {
+pub(crate) fn vault_root(host: &Host) -> Result<&Path, String> {
     host.vault
         .as_deref()
         .ok_or_else(|| "Der Vault ist noch nicht initialisiert.".to_owned())
@@ -1252,7 +1211,7 @@ fn unix_millis(time: SystemTime, round: bool) -> i64 {
     }
 }
 
-fn iso_from_unix_millis(millis: i64) -> String {
+pub(crate) fn iso_from_unix_millis(millis: i64) -> String {
     let secs = millis.div_euclid(1000);
     let millis = millis.rem_euclid(1000) as u32;
     let days = secs.div_euclid(86_400);

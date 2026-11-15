@@ -111,7 +111,7 @@ impl FolderLocations {
         self.folders.len()
     }
 
-    fn longest<'a>(&'a self, logical: &str) -> Option<(&'a str, &'a [PathBuf])> {
+    pub(crate) fn longest<'a>(&'a self, logical: &str) -> Option<(&'a str, &'a [PathBuf])> {
         let mut best: Option<(&str, &[PathBuf])> = None;
         for (folder, paths) in &self.folders {
             if logical == folder || logical.starts_with(&format!("{folder}/")) {

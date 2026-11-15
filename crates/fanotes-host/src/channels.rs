@@ -13,6 +13,7 @@ pub struct Channel {
 }
 
 pub const CHANNELS: &[Channel] = &[
+    channel("fanotes:handwriting-learning", ChannelKind::Command),
     channel("fanotes:bootstrap", ChannelKind::Command),
     channel("fanotes:renderer-ready", ChannelKind::Message),
     channel("fanotes:complete-onboarding", ChannelKind::Command),
@@ -24,9 +25,15 @@ pub const CHANNELS: &[Channel] = &[
     channel("fanotes:write-file", ChannelKind::Command),
     channel("fanotes:read-recognition-model", ChannelKind::Command),
     channel("fanotes:write-recognition-model", ChannelKind::Command),
+    channel("fanotes:read-pdf-ocr", ChannelKind::Command),
+    channel("fanotes:write-pdf-ocr", ChannelKind::Command),
+    channel("fanotes:read-page-text", ChannelKind::Command),
+    channel("fanotes:write-page-text", ChannelKind::Command),
     channel("fanotes:create-note", ChannelKind::Command),
+    channel("fanotes:convert-famd-notes", ChannelKind::Command),
     channel("fanotes:create-folder", ChannelKind::Command),
     channel("fanotes:set-folder-color", ChannelKind::Command),
+    channel("fanotes:set-file-color", ChannelKind::Command),
     channel("fanotes:get-folder-locations", ChannelKind::Command),
     channel("fanotes:pick-folder-location", ChannelKind::Command),
     channel("fanotes:set-folder-locations", ChannelKind::Command),
@@ -120,6 +127,7 @@ pub const CHANNELS: &[Channel] = &[
     channel("fanotes:sync-read-secrets", ChannelKind::Command),
     channel("fanotes:sync-write-secrets", ChannelKind::Command),
     channel("fanotes:before-close", ChannelKind::Event),
+    channel("fanotes:share-open", ChannelKind::Event),
     channel("fanotes:confirm-close", ChannelKind::Message),
     channel("fanotes:cancel-close", ChannelKind::Message),
     channel("fanotes:request-close", ChannelKind::Message),

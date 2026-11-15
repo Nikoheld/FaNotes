@@ -307,6 +307,36 @@ fn reset_app_data(app: tauri::AppHandle, state: State<'_, HostState>) -> Result<
     Ok(result)
 }
 
+/// Electron `rendererReady` also delivers a pending `fanotes://share/<id>` launch.
+#[tauri::command(rename = "fanotes:renderer-ready")]
+fn renderer_ready(app: tauri::AppHandle, state: State<'_, HostState>) -> Result<Value, String> {
+    let result = {
+        let mut host = state
+            .0
+            .lock()
+            .map_err(|_| "Der Host ist belegt.".to_owned())?;
+        host.dispatch("fanotes:renderer-ready", &[])?
+    };
+    deliver_share_open(&app);
+    Ok(result)
+}
+
+/// `deliverShareOpen`: sends the pending share id to the main window once.
+fn deliver_share_open(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let id = app
+        .state::<HostState>()
+        .0
+        .lock()
+        .ok()
+        .and_then(|mut host| host.take_share_open());
+    if let Some(id) = id {
+        let _ = window.emit("fanotes:share-open", id);
+    }
+}
+
 #[tauri::command(rename = "fanotes:cancel-close")]
 fn cancel_close(state: State<'_, HostState>) -> Result<Value, String> {
     invalidate_close_warning();
@@ -374,6 +404,7 @@ macro_rules! fanotes_commands {
             tauri::generate_handler![
                 $($name),*,
                 export_note_pdf,
+                renderer_ready,
                 open_subject_book_popout,
                 close_subject_book_popout,
                 capture_window,
@@ -387,8 +418,8 @@ macro_rules! fanotes_commands {
 }
 
 fanotes_commands! {
+    handwriting_learning => "fanotes:handwriting-learning",
     bootstrap => "fanotes:bootstrap",
-    renderer_ready => "fanotes:renderer-ready",
     complete_onboarding => "fanotes:complete-onboarding",
     get_cached_tree => "fanotes:get-cached-tree",
     get_fast_tree => "fanotes:get-fast-tree",
@@ -398,9 +429,15 @@ fanotes_commands! {
     write_file => "fanotes:write-file",
     read_recognition_model => "fanotes:read-recognition-model",
     write_recognition_model => "fanotes:write-recognition-model",
+    read_pdf_ocr => "fanotes:read-pdf-ocr",
+    write_pdf_ocr => "fanotes:write-pdf-ocr",
+    read_page_text => "fanotes:read-page-text",
+    write_page_text => "fanotes:write-page-text",
     create_note => "fanotes:create-note",
+    convert_famd_notes => "fanotes:convert-famd-notes",
     create_folder => "fanotes:create-folder",
     set_folder_color => "fanotes:set-folder-color",
+    set_file_color => "fanotes:set-file-color",
     get_folder_locations => "fanotes:get-folder-locations",
     pick_folder_location => "fanotes:pick-folder-location",
     set_folder_locations => "fanotes:set-folder-locations",
@@ -481,6 +518,7 @@ fanotes_commands! {
     sync_read_secrets => "fanotes:sync-read-secrets",
     sync_write_secrets => "fanotes:sync-write-secrets",
     before_close => "fanotes:before-close",
+    share_open => "fanotes:share-open",
     sheet_zoom => "fanotes:sheet-zoom",
     render_pdf_page => "fanotes:render-pdf-page",
 }
@@ -827,9 +865,14 @@ mod tests {
 pub fn run() {
     let _ = (find_channel, CHANNELS);
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // Electron `second-instance`: remember a share link, focus, deliver.
+            if let Ok(mut host) = app.state::<HostState>().0.lock() {
+                host.queue_share_open(&args);
+            }
             if let Some(window) = app.get_webview_window("main") {
                 focus_running_window(&window);
+                deliver_share_open(app);
             }
         }))
         .plugin(navigation_plugin())
@@ -838,7 +881,10 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("fanotes"));
-            app.manage(HostState(Mutex::new(Host::open(app_data))));
+            let mut host = Host::open(app_data);
+            // A share link the app was started with waits for `renderer-ready`.
+            host.queue_share_open(&std::env::args().collect::<Vec<_>>());
+            app.manage(HostState(Mutex::new(host)));
             if let Some(window) = app.get_webview_window("main") {
                 install_webview_guards(&window, true);
                 install_main_window_reveal(&window);

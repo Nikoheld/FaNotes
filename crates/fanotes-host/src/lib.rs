@@ -8,18 +8,24 @@ mod addons;
 mod channels;
 mod dialogs;
 mod drawings;
+mod history;
 mod imports;
+mod ink_guard;
 mod linux_runtime;
 mod locations;
 mod notes;
 mod ocr;
 mod onboarding;
 mod onenote;
+mod pdf_text;
 mod policy;
 mod profile;
 mod resources;
 mod secrets;
 mod settings;
+// Registered once the writing mode merges (see story.rs).
+#[allow(dead_code)]
+mod story;
 mod vault;
 mod worksheets;
 
@@ -82,6 +88,8 @@ pub struct Host {
     pub secret_store: SecretStore,
     /// True after this session has shown the stored API keys to the page.
     secrets_loaded: bool,
+    /// A `fanotes://share/<id>` launch the page has not been told about yet.
+    pending_share_open: String,
 }
 
 impl Host {
@@ -107,6 +115,7 @@ impl Host {
             trash_dir: None,
             secret_store: SecretStore::Keyring,
             secrets_loaded: false,
+            pending_share_open: String::new(),
         };
         host.load_persisted();
         host
@@ -120,8 +129,32 @@ impl Host {
         self.refresh_onboarding();
         if let Some(root) = self.vault.clone() {
             onboarding::upgrade_welcome_notes(&root);
+            // Desktop `pruneHistoryOnce` once per opened vault.
+            let _ = history::prune_vault_history(&root, history::now_ms());
         }
         Ok(())
+    }
+
+    /// Remembers the share id of a `fanotes://share/<id>` launch argument
+    /// (`shareOpenIdFromArgv`). Returns true when the arguments named one.
+    pub fn queue_share_open(&mut self, argv: &[String]) -> bool {
+        match share_open_id(argv) {
+            Some(id) => {
+                self.pending_share_open = id;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// `deliverShareOpen`: the pending share id, once. The caller sends it as
+    /// `fanotes:share-open` to the main window.
+    pub fn take_share_open(&mut self) -> Option<String> {
+        if self.pending_share_open.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.pending_share_open))
+        }
     }
 
     fn require_vault(&self) -> Result<&Path, String> {
@@ -177,9 +210,15 @@ impl Host {
                 0,
                 "Das Handschriftmodell ist ungültig oder zu groß.",
             )?),
+            "fanotes:read-pdf-ocr" => Ok(pdf_text::read_pdf_ocr(self, args.first())),
+            "fanotes:write-pdf-ocr" => pdf_text::write_pdf_ocr(self, args.first()),
+            "fanotes:read-page-text" => Ok(pdf_text::read_page_text(self, args.first())),
+            "fanotes:write-page-text" => pdf_text::write_page_text(self, args.first()),
+            "fanotes:handwriting-learning" => self.handwriting_learning(args),
             "fanotes:create-note" => {
                 self.create_entry(&loose_string(args, 0), loose_string_opt(args, 1), true)
             }
+            "fanotes:convert-famd-notes" => self.convert_famd_notes(),
             "fanotes:create-folder" => {
                 self.create_entry(&folder_parent(args)?, loose_string_opt(args, 1), false)
             }
@@ -187,6 +226,7 @@ impl Host {
                 &arg_text(args, 0, "Ungültiger Vault-Pfad.")?,
                 args.get(1),
             ),
+            "fanotes:set-file-color" => self.set_file_color(args.first(), args.get(1)),
             "fanotes:get-folder-locations" => {
                 self.get_folder_locations(&arg_text(args, 0, "Ungültiger Vault-Pfad.")?)
             }
@@ -809,7 +849,8 @@ impl Host {
     fn tree(&self, stats: bool) -> Result<Value, String> {
         let root = self.require_vault()?;
         let colors = read_folder_colors(root)?;
-        let entries = read_tree(root, "", &self.folder_locations, &colors, 0, stats)?;
+        let mut entries = read_tree(root, "", &self.folder_locations, &colors, 0, stats)?;
+        apply_file_colors(&mut entries, &read_file_colors_for_tree(root));
         write_tree_cache(&self.app_data, root, &entries);
         Ok(entries)
     }
@@ -930,9 +971,14 @@ impl Host {
         let root = self.require_vault()?.to_path_buf();
         let path = self.folder_locations.resolve_note(&root, &normalized, true)?;
         if notes::records_history(&normalized) {
-            if let Some(text) = notes::read_lossy_string(&path) {
-                let _ = notes::record_history(&root, &normalized, &text);
-            }
+            // Desktop `recordNoteHistorySnapshot` with the `.famd` companion of a markdown note.
+            history::record_before_write(
+                &root,
+                &self.folder_locations,
+                &normalized,
+                &path,
+                note_byte_limit(&normalized),
+            );
         }
         let paper = self
             .settings
@@ -1213,6 +1259,89 @@ impl Host {
         Ok(json!({ "color": stored }))
     }
 
+    /// `fanotes:convert-famd-notes`: see `convert_famd_directory`.
+    fn convert_famd_notes(&self) -> Result<Value, String> {
+        let root = self.require_vault()?.to_path_buf();
+        Ok(convert_famd_directory(&root))
+    }
+
+    /// `fanotes:set-file-color`: the colour of a note or PDF in the tree.
+    fn set_file_color(
+        &mut self,
+        relative: Option<&Value>,
+        color: Option<&Value>,
+    ) -> Result<Value, String> {
+        let root = self.require_vault()?.to_path_buf();
+        let relative = relative
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Ungültiger Vault-Pfad.".to_owned())?;
+        let normalized = vault::normalize_relative_path(relative, false, false)?;
+        // Desktop checks the colour after the path shape and before the file exists.
+        let stored = match color {
+            Some(Value::Null) => None,
+            Some(Value::String(value)) if folder_color_hex(value) => {
+                Some(value.to_ascii_lowercase())
+            }
+            _ => return Err("Ungültige Dokumentfarbe.".to_owned()),
+        };
+        // `resolveVaultPath(…, { expected: 'file' })`, through linked folders.
+        self.folder_locations.resolve_note(&root, &normalized, false)?;
+        let mut colors = read_color_file(&root, FILE_COLORS_FILE)?;
+        // Clearing a colour that is not set leaves the file alone.
+        let changed = match &stored {
+            None => colors.remove(&normalized).is_some(),
+            Some(color) => {
+                colors.insert(normalized.clone(), color.clone());
+                true
+            }
+        };
+        if changed {
+            write_color_file(&root, &colors, FILE_COLORS_FILE)?;
+        }
+        Ok(json!({ "color": stored }))
+    }
+
+    /// `fanotes:handwriting-learning` with the desktop's argument checks.
+    ///
+    /// The Electron host runs the personal-handwriting learner in a Node
+    /// worker. That learner is not ported, so a valid request answers `null`,
+    /// which is what the desktop answers where no learner runs (macOS) and
+    /// what the renderer already treats as "no local learning".
+    fn handwriting_learning(&self, args: &[Value]) -> Result<Value, String> {
+        if !cfg!(any(target_os = "linux", target_os = "windows")) {
+            return Ok(Value::Null);
+        }
+        // `op = 'snapshot'` applies to a missing argument only; `null` is invalid.
+        let op = match args.first() {
+            None => "snapshot",
+            Some(Value::String(op)) => op.as_str(),
+            Some(_) => "",
+        };
+        if !matches!(op, "snapshot" | "scan" | "enabled" | "templates" | "retrieve") {
+            return Err("Invalid learning operation".to_owned());
+        }
+        let value = args.get(1);
+        if op == "retrieve" {
+            let text = value.and_then(|value| value.get("text")).and_then(Value::as_str);
+            if text.is_none_or(|text| vault::utf16_len(text) > 8000) {
+                return Err("Invalid handwriting text query".to_owned());
+            }
+        }
+        if op == "templates" {
+            let too_large = match value {
+                Some(Value::Array(_)) => serde_json::to_string(value.unwrap_or(&Value::Null))
+                    .map(|text| vault::utf16_len(&text) > 12 * 1024 * 1024)
+                    .unwrap_or(true),
+                _ => true,
+            };
+            if too_large {
+                return Err("Training library is too large".to_owned());
+            }
+        }
+        self.require_vault()?;
+        Ok(Value::Null)
+    }
+
     fn open_subject_book(&self, relative: &str) -> Result<Value, String> {
         // The desktop opens the popout after the path shape and extension.
         // The window reads the file later, so a missing book still opens.
@@ -1286,6 +1415,8 @@ impl Host {
         // Desktop rename always rewrites folder colors. That read creates
         // `.fanotes` or renames a leftover `.lernwerk` folder into place.
         let _ = retarget_folder_colors(&root, &normalized, &next);
+        let _ = retarget_file_colors(&root, &normalized, Some(&next));
+        pdf_text::follow_entry(self, &root, &normalized, Some(&next));
         Ok(Value::String(next))
     }
 
@@ -1363,6 +1494,8 @@ impl Host {
             let _ = self.folder_locations.save(&self.app_data, &root);
         }
         let _ = retarget_folder_colors(&root, &normalized, &next);
+        let _ = retarget_file_colors(&root, &normalized, Some(&next));
+        pdf_text::follow_entry(self, &root, &normalized, Some(&next));
         Ok(Value::String(next))
     }
 
@@ -1388,6 +1521,8 @@ impl Host {
             }
         }
         let _ = forget_folder_colors(&root, &normalized);
+        let _ = retarget_file_colors(&root, &normalized, None);
+        pdf_text::follow_entry(self, &root, &normalized, None);
         Ok(Value::Null)
     }
 
@@ -1467,6 +1602,18 @@ impl Host {
                 }
             }
             remember_drawing_owner(&mut owners, &relative, &content, ink.as_ref());
+            if lower.ends_with(".pdf") {
+                // The local OCR transcript of a scanned PDF, while it still
+                // matches the file's size and mtime.
+                let ocr = pdf_text::search_transcript(root, &relative, &file.meta);
+                if !ocr.is_empty() {
+                    content = if content.is_empty() {
+                        ocr
+                    } else {
+                        format!("{content}\n{ocr}")
+                    };
+                }
+            }
             let readable = readable_transcript(&transcript);
             let haystack = vault::search_text(&format!("{relative}\n{content}\n{readable}"));
             if !haystack.contains(&needle) {
@@ -1881,6 +2028,26 @@ fn valid_reset_marker(marker_path: &Path, app_data: &Path) -> bool {
 ///
 /// The path is not opened, so a missing directory and a symlink stay as written
 /// after the lexical cleanup. A trailing slash is not part of the result.
+/// `/fanotes:\/\/share\/([a-f0-9]{32})/iu` over the joined arguments, lower-cased.
+pub fn share_open_id(argv: &[String]) -> Option<String> {
+    let joined = argv.join(" ");
+    let lower = joined.to_ascii_lowercase();
+    let marker = "fanotes://share/";
+    let mut from = 0;
+    while let Some(found) = lower[from..].find(marker) {
+        let start = from + found + marker.len();
+        let candidate = lower.get(start..start + 32);
+        if let Some(id) = candidate.filter(|id| {
+            id.bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        }) {
+            return Some(id.to_owned());
+        }
+        from = from + found + 1;
+    }
+    None
+}
+
 pub(crate) fn node_resolve(path: &Path) -> PathBuf {
     let absolute = if path.as_os_str().is_empty() {
         std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
@@ -3259,6 +3426,8 @@ fn onboarding_open(channel: &str) -> bool {
     matches!(
         channel,
         "fanotes:bootstrap"
+            // `handwriting-learning` checks the vault root without `ensureBootstrap`.
+            | "fanotes:handwriting-learning"
             | "fanotes:complete-onboarding"
             | "fanotes:select-vault"
             | "fanotes:get-cached-tree"
@@ -3646,25 +3815,44 @@ fn clean_cached_entries(
                 }) {
                     return Err(());
                 }
+                // `entry.locations !== undefined` must be a short list of paths.
+                let locations = match entry.get("locations") {
+                    None => None,
+                    Some(Value::Array(list))
+                        if list.len() <= locations::MAX_PATHS
+                            && list.iter().all(|item| {
+                                item.as_str().is_some_and(|text| {
+                                    !text.is_empty() && vault::utf16_len(text) <= 4096
+                                })
+                            }) =>
+                    {
+                        Some(Value::Array(list.clone()))
+                    }
+                    Some(_) => return Err(()),
+                };
                 let empty_children = Value::Array(Vec::new());
                 let children_source = match entry.get("children") {
                     Some(Value::Null) | None => &empty_children,
                     Some(value) => value,
                 };
                 let children = clean_cached_entries(children_source, &expected, depth + 1, count)?;
+                // Desktop key order: name, relativePath, kind, color, locations, children.
                 let mut folder = json!({
                     "name": name,
                     "relativePath": expected,
                     "kind": "folder",
-                    "children": children,
                 });
                 if let Some(color) = entry
                     .get("color")
                     .and_then(Value::as_str)
-                    .filter(|value| folder_color_hex(value))
+                    .filter(|value| folder_color_hex(value) && !value.is_empty())
                 {
                     folder["color"] = json!(color.to_ascii_lowercase());
                 }
+                if let Some(locations) = locations {
+                    folder["locations"] = locations;
+                }
+                folder["children"] = Value::Array(children);
                 cleaned.push(folder);
             }
             Some("file") => {
@@ -3678,6 +3866,14 @@ fn clean_cached_entries(
                     "kind": "file",
                     "extension": extension,
                 });
+                // A document colour that is not a hex colour is dropped, not an error.
+                if let Some(color) = entry
+                    .get("color")
+                    .and_then(Value::as_str)
+                    .filter(|value| folder_color_hex(value))
+                {
+                    file["color"] = json!(color.to_ascii_lowercase());
+                }
                 if let Some(modified) = entry.get("modifiedAt") {
                     let text = modified
                         .as_str()
@@ -3827,6 +4023,115 @@ fn read_tree(
     Ok(Value::Array(children))
 }
 
+/// `convertFamdDirectory`: rewrites v1 `.famd`/markdown notes in the compact
+/// v2 encoding. A note is replaced only after the new bytes, read back from
+/// the temporary file, give the same markdown and payload; a note that fails
+/// stays byte-identical. Symlinks, `.fanotes`, `.git` and `node_modules` are
+/// skipped. Folder locations outside the vault are not walked (as on desktop).
+fn convert_famd_directory(root: &Path) -> Value {
+    let mut counts = (0u64, 0u64, 0u64);
+    convert_famd_walk(root, &mut counts);
+    json!({ "converted": counts.0, "skipped": counts.1, "failed": counts.2 })
+}
+
+fn convert_famd_walk(directory: &Path, counts: &mut (u64, u64, u64)) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        counts.2 += 1;
+        return;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_symlink() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let full = entry.path();
+        if kind.is_dir() {
+            if matches!(name.as_str(), ".fanotes" | ".git" | "node_modules") {
+                continue;
+            }
+            convert_famd_walk(&full, counts);
+            continue;
+        }
+        if !kind.is_file() {
+            continue;
+        }
+        let extension = vault::posix_extname_en_us(&name);
+        if !matches!(extension.as_str(), ".famd" | ".md" | ".markdown") {
+            continue;
+        }
+        let Ok(bytes) = fs::read(&full) else {
+            counts.2 += 1;
+            continue;
+        };
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        let result = fanotes_famd::convert_famd_source(&text);
+        match result.status {
+            fanotes_famd::ConvertStatus::Skipped => counts.1 += 1,
+            fanotes_famd::ConvertStatus::Failed => counts.2 += 1,
+            fanotes_famd::ConvertStatus::Converted => {
+                if replace_converted_note(&full, &text, &result.source) {
+                    counts.0 += 1;
+                } else {
+                    counts.2 += 1;
+                }
+            }
+        }
+    }
+}
+
+/// Writes `next` beside `full` (exclusive create, no symlink, fsync), reads it
+/// back, and renames it over the note only when the read-back gives the same
+/// markdown and payload as `original`. On any failure the note is untouched
+/// and the temporary file is removed.
+fn replace_converted_note(full: &Path, original: &str, next: &str) -> bool {
+    let mut nonce = [0u8; 6];
+    if getrandom::getrandom(&mut nonce).is_err() {
+        return false;
+    }
+    let suffix: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+    let mut name = full.as_os_str().to_owned();
+    name.push(format!(".{suffix}.famd-new"));
+    let temp = PathBuf::from(name);
+    let written = (|| -> std::io::Result<()> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        }
+        let mut file = options.open(&temp)?;
+        std::io::Write::write_all(&mut file, next.as_bytes())?;
+        file.sync_all()
+    })();
+    let verified = written.is_ok()
+        && fs::read(&temp).is_ok_and(|bytes| {
+            let again = fanotes_famd::parse_famd(&String::from_utf8_lossy(&bytes));
+            let before = fanotes_famd::parse_famd(original);
+            again.markdown == before.markdown
+                && match (&before.payload, &again.payload) {
+                    (Some(left), Some(right)) => fanotes_famd::same_famd_payload(left, right),
+                    _ => false,
+                }
+        });
+    if verified && fs::rename(&temp, full).is_ok() {
+        if let Some(parent) = full.parent() {
+            if let Ok(directory) = fs::File::open(parent) {
+                let _ = directory.sync_all();
+            }
+        }
+        return true;
+    }
+    let _ = fs::remove_file(&temp);
+    false
+}
+
 fn tree_extension(extension: &str) -> bool {
     matches!(
         extension,
@@ -3879,7 +4184,81 @@ fn folder_color_hex(value: &str) -> bool {
 }
 
 fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
-    let path = internal_directory(root)?.join("folder-colors.json");
+    read_color_file(root, FOLDER_COLORS_FILE)
+}
+
+fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result<(), String> {
+    write_color_file(root, colors, FOLDER_COLORS_FILE)
+}
+
+const FOLDER_COLORS_FILE: &str = "folder-colors.json";
+/// Note and PDF colours: the folder format in its own file, so a client that
+/// only knows folder colours never reads a document as a folder.
+const FILE_COLORS_FILE: &str = "file-colors.json";
+
+/// `readFileColorsForTree`: the tree still loads when only this list is unreadable.
+fn read_file_colors_for_tree(root: &Path) -> BTreeMap<String, String> {
+    read_color_file(root, FILE_COLORS_FILE).unwrap_or_default()
+}
+
+/// `applyFileColors`: `color` on the note and PDF entries that have one.
+fn apply_file_colors(entries: &mut Value, colors: &BTreeMap<String, String>) {
+    if colors.is_empty() {
+        return;
+    }
+    let Some(list) = entries.as_array_mut() else {
+        return;
+    };
+    for entry in list {
+        if entry["kind"].as_str() == Some("folder") {
+            if let Some(children) = entry.get_mut("children") {
+                apply_file_colors(children, colors);
+            }
+            continue;
+        }
+        let color = entry["relativePath"]
+            .as_str()
+            .and_then(|relative| colors.get(relative))
+            .cloned();
+        if let Some(color) = color {
+            entry["color"] = Value::String(color);
+        }
+    }
+}
+
+/// `retargetColorEntries`: moves (or with `to = None` drops) the colour of a
+/// path and everything below it. Desktop ignores a failed colour update.
+fn retarget_file_colors(root: &Path, from: &str, to: Option<&str>) -> Result<(), String> {
+    let mut colors = read_color_file(root, FILE_COLORS_FILE)?;
+    let keys: Vec<String> = colors
+        .keys()
+        .filter(|key| *key == from || key.starts_with(&format!("{from}/")))
+        .cloned()
+        .collect();
+    if keys.is_empty() {
+        return Ok(());
+    }
+    // `Map` iteration in the desktop follows insertion order; the moved keys
+    // are re-added after the others, and the file is written sorted.
+    let moved: Vec<(String, String)> = keys
+        .iter()
+        .filter_map(|key| colors.remove(key).map(|color| (key.clone(), color)))
+        .collect();
+    if let Some(to) = to {
+        for (key, color) in moved {
+            let next = if key == from {
+                to.to_owned()
+            } else {
+                format!("{to}{}", &key[from.len()..])
+            };
+            colors.insert(next, color);
+        }
+    }
+    write_color_file(root, &colors, FILE_COLORS_FILE)
+}
+
+fn read_color_file(root: &Path, file_name: &str) -> Result<BTreeMap<String, String>, String> {
+    let path = internal_directory(root)?.join(file_name);
     // Desktop reads this file with Buffer.toString('utf8') and checks the byte size.
     let text = match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
@@ -3922,7 +4301,11 @@ fn read_folder_colors(root: &Path) -> Result<BTreeMap<String, String>, String> {
     Ok(colors)
 }
 
-fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result<(), String> {
+fn write_color_file(
+    root: &Path,
+    colors: &BTreeMap<String, String>,
+    file_name: &str,
+) -> Result<(), String> {
     let internal = internal_directory(root)?;
     let mut entries: Vec<_> = colors.iter().take(5000).collect();
     entries.sort_by(|left, right| dictionary_order(left.0, right.0));
@@ -3945,11 +4328,7 @@ fn write_folder_colors(root: &Path, colors: &BTreeMap<String, String>) -> Result
     if snapshot.len() > 512 * 1024 {
         return Err("Zu viele Ordnerfarben für diesen Vault.".to_owned());
     }
-    notes::atomic_write(
-        &internal.join("folder-colors.json"),
-        snapshot.as_bytes(),
-        0o600,
-    )?;
+    notes::atomic_write(&internal.join(file_name), snapshot.as_bytes(), 0o600)?;
     Ok(())
 }
 
@@ -4134,6 +4513,7 @@ fn search_drawings(
 struct SearchFile {
     relative: String,
     path: PathBuf,
+    meta: fs::Metadata,
 }
 
 /// `splitName(path.basename(file)).stem` from the desktop search hit.
@@ -4223,7 +4603,11 @@ fn collect_search_files(
                 continue;
             }
             seen.insert(name);
-            files.push(SearchFile { relative, path });
+            files.push(SearchFile {
+                relative,
+                path,
+                meta,
+            });
         }
     }
     Ok(())

@@ -6,11 +6,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use fanotes_famd::{
-    companion_note_path, empty_famd_payload, is_js_whitespace, is_paper_style, parse_famd,
-    serialize_famd, strip_famd_payload, worksheet_ids_from_markdown,
+    companion_note_path, is_js_whitespace, parse_famd,
+    strip_famd_payload,
 };
 use serde_json::{json, Value};
 
+use crate::ink_guard;
 use crate::vault;
 use crate::Host;
 
@@ -112,14 +113,24 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
         return Err("Der Zeichnungstitel stimmt nicht mit den Zeichnungsdaten überein.".to_owned());
     }
     let assets = assets_dir(vault_root(host)?)?;
+    let data_path = assets.join(format!("{id}.json"));
+    // An empty page with no undo step is what a board sends when the stored
+    // page never loaded into it. Over a record or companion that still has
+    // strokes, nothing is written; the renderer gets the usual result. A large
+    // drawing is never a skeleton (the desktop parses only its top level).
+    let large = vault::utf16_len(drawing_json) >= FAMD_ASYNC_CHARS;
+    if !large && ink_guard::is_unexplained_empty_page(&document) {
+        let (record, companion) =
+            stored_ink_texts(host, &data_path, object.get("noteRelativePath"));
+        if ink_guard::refuses_empty_ink_save(&document, large, &record, &companion) {
+            eprintln!("FaNotes: an empty handwriting page was not written over stored strokes.");
+            return Ok(item);
+        }
+    }
     if let Some(png) = png {
         crate::notes::atomic_write(&assets.join(format!("{id}.png")), &png, 0o600)?;
     }
-    crate::notes::atomic_write(
-        assets.join(format!("{id}.json")).as_path(),
-        drawing_json.as_bytes(),
-        0o600,
-    )?;
+    crate::notes::atomic_write(data_path.as_path(), drawing_json.as_bytes(), 0o600)?;
     if let Some(note) = object.get("noteRelativePath").and_then(Value::as_str) {
         if !vault::js_trim(note).is_empty() {
             embed_in_note(host, note, &document).map_err(|error| {
@@ -132,6 +143,99 @@ pub fn save_drawing(host: &Host, payload: &Value) -> Result<Value, String> {
 
 const FAMD_INK_ID: &str = "famd-ink";
 const MAX_FAMD_BYTES: usize = 40 * 1024 * 1024;
+/// famdPack.mjs `FAMD_ASYNC_CHARS`: the desktop parses a drawing this long on a worker.
+const FAMD_ASYNC_CHARS: usize = 256 * 1024;
+
+/// `storedInkTexts`: the drawing record and the note's `.famd` as they are on
+/// disk, for the empty-page guard. A missing file is `Missing`; a file that
+/// cannot be read is `Unreadable`, and the guard keeps it.
+fn stored_ink_texts(
+    host: &Host,
+    data_path: &Path,
+    note: Option<&Value>,
+) -> (ink_guard::StoredText, ink_guard::StoredText) {
+    use ink_guard::StoredText;
+    let record = match crate::notes::read_nofollow_limited(data_path, MAX_DRAWING_JSON_BYTES as u64)
+    {
+        Ok(bytes) => StoredText::Text(lossy_utf8(bytes)),
+        Err(error) if error.starts_with("ENOENT:") => StoredText::Missing,
+        Err(_) => StoredText::Unreadable,
+    };
+    let famd_relative = note
+        .and_then(Value::as_str)
+        .filter(|note| !vault::js_trim(note).is_empty())
+        .and_then(|note| vault::normalize_relative_path(note, false, false).ok())
+        // An invalid note path fails the companion write later, as before.
+        .filter(|note| is_note_path(note))
+        .map(|note| companion_note_path(&note, ".famd"));
+    let companion = match (famd_relative, host.vault.as_deref()) {
+        (None, _) => StoredText::Missing,
+        (Some(_), None) => StoredText::Unreadable,
+        (Some(relative), Some(root)) => match host.folder_locations.resolve_note(root, &relative, true)
+        {
+            Err(_) => StoredText::Unreadable,
+            Ok(path) => match crate::notes::read_optional_text(&path, MAX_FAMD_BYTES as u64) {
+                Ok(Some(text)) => StoredText::Text(text),
+                Ok(None) => StoredText::Missing,
+                Err(_) => StoredText::Unreadable,
+            },
+        },
+    };
+    (record, companion)
+}
+
+/// `readExistingDrawingRecord`: `.fanotes/assets/<id>.json` read without
+/// creating anything. `None` when it is missing, unsafe, or unreadable.
+fn read_existing_drawing_record(root: &Path, id: &str) -> Option<(String, String)> {
+    let internal = root.join(".fanotes");
+    let assets = internal.join("assets");
+    for cursor in [&internal, &assets] {
+        let meta = fs::symlink_metadata(cursor).ok()?;
+        if meta.file_type().is_symlink() || !meta.is_dir() {
+            return None;
+        }
+    }
+    let root_real = fs::canonicalize(root).ok()?;
+    let assets_real = fs::canonicalize(&assets).ok()?;
+    if !vault::is_inside_root(&root_real, &assets_real) {
+        return None;
+    }
+    let data_path = assets.join(format!("{id}.json"));
+    let meta = fs::symlink_metadata(&data_path).ok()?;
+    if meta.file_type().is_symlink()
+        || !meta.is_file()
+        || meta.len() > MAX_DRAWING_JSON_BYTES as u64
+    {
+        return None;
+    }
+    let modified = crate::notes::iso_from_system_time(meta.modified().ok()?);
+    let bytes =
+        crate::notes::read_nofollow_limited(&data_path, MAX_DRAWING_JSON_BYTES as u64).ok()?;
+    Some((lossy_utf8(bytes), modified))
+}
+
+/// `recordInkForEmptyCompanion`: a `.famd` whose ink is an empty page with no
+/// undo step, while the drawing record under the note's ink id still has
+/// strokes, opens that record. Nothing is written; the next real save heals
+/// the companion. `None` in every other case, so those notes open as before.
+///
+/// The desktop packs a heavy record into columns for the window; the Tauri
+/// bridge carries JSON only, so the record text is returned as it is.
+fn record_ink_for_empty_companion(root: &Path, ink: &Value, marker: Option<&str>) -> Option<Value> {
+    let marker = marker?;
+    if !ink_guard::companion_ink_needs_record(Some(ink)) {
+        return None;
+    }
+    let id = drawing_id(marker).ok()?;
+    let (drawing_json, modified) = read_existing_drawing_record(root, &id)?;
+    let document = ink_guard::record_document_for_empty_companion(Some(ink), Some(&drawing_json))?;
+    let mut item = library_metadata(&document, &id, Some(&modified)).ok()?;
+    eprintln!(
+        "FaNotes: a note companion held an empty handwriting page; opened its drawing record instead."
+    );
+    item["drawingJson"] = Value::String(drawing_json);
+    Some(item)
+}
 
 /// Handwriting stored in the note's `.famd` companion.
 ///
@@ -144,7 +248,9 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
         return Err("Es dürfen nur Markdown-Dateien, PDF-Notizen und FaNotes-Handschriftdateien (.famd) bearbeitet werden.".to_owned());
     }
     let famd_relative = companion_note_path(&note, ".famd");
-    let path = vault::resolve_note_file(vault_root(host)?, &famd_relative)?;
+    let root = vault_root(host)?;
+    // Desktop `loadFamdCompanion` resolves the companion through the folder's linked paths.
+    let path = host.folder_locations.resolve_note(root, &famd_relative, true)?;
     let source = match fs::symlink_metadata(&path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
         Err(error) => return Err(vault::node_lstat_error(&path, &error)),
@@ -167,9 +273,13 @@ pub fn read_famd_ink(host: &Host, relative: &str) -> Result<Value, String> {
     let Some(ink) = payload.ink.as_ref().filter(|ink| ink.is_object()) else {
         return Ok(Value::Null);
     };
+    let marker = note_ink_marker_id(&parsed.markdown);
+    // An empty page left by an earlier empty save opens the inked record under the marker id.
+    if let Some(item) = record_ink_for_empty_companion(root, ink, marker.as_deref()) {
+        return Ok(item);
+    }
     let drawing_json = ink.to_string();
     let document = validate_drawing_json(&drawing_json)?;
-    let marker = note_ink_marker_id(&parsed.markdown);
     let raw_id = document.get("id").and_then(Value::as_str);
     let metadata_id = if let Some(marker) = marker.clone() {
         Ok(marker)
@@ -271,43 +381,18 @@ fn embed_in_note(host: &Host, note_path: &str, drawing: &Value) -> Result<(), St
     )?
     .unwrap_or_default();
     let body = strip_famd_payload(&markdown);
-    let mut payload = match crate::notes::read_optional_text(
+    let existing = crate::notes::read_optional_text(
         &famd_path,
         crate::notes::optional_note_limit(&famd_path),
-    )? {
-        Some(source) => parse_famd(&source)
-            .payload
-            .unwrap_or_else(|| empty_famd_payload(now_iso())),
-        None => empty_famd_payload(now_iso()),
-    };
-    payload.ink = Some(drawing.clone());
-    payload.updated_at = now_iso();
-    payload.worksheets = worksheet_ids_from_markdown(&body);
-    if payload.paper_style.is_none() {
-        if let Some(style) = drawing.get("paperStyle").and_then(Value::as_str) {
-            if is_paper_style(style) {
-                payload.paper_style = Some(style.to_owned());
-            }
-        }
-    }
-    // The desktop uses the settings paper after the drawing's own style.
-    if payload.paper_style.is_none() {
-        if let Some(style) = host
-            .settings
-            .get("paperStyle")
-            .and_then(Value::as_str)
-            .filter(|style| is_paper_style(style))
-        {
-            payload.paper_style = Some(style.to_owned());
-        }
-    }
+    )?;
+    let paper = host.settings.get("paperStyle").and_then(Value::as_str);
+    // `writeFamdCompanion(note, markdown, drawing)`: the new ink replaces the
+    // stored ink (packed again for a v2 note); everything else is kept, and a
+    // stored note that cannot be read is refused.
+    let text = crate::notes::compose_companion(existing.as_deref(), &body, Some(drawing), paper)?;
     // Desktop `atomicWrite` opens the temporary companion. A missing folder
     // stays missing and the open error is wrapped for the drawing save.
-    crate::notes::atomic_write_existing_parent(
-        &famd_path,
-        serialize_famd(&body, &payload).as_bytes(),
-        0o600,
-    )?;
+    crate::notes::atomic_write_existing_parent(&famd_path, text.as_bytes(), 0o600)?;
     Ok(())
 }
 

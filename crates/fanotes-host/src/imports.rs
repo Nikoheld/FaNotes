@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fanotes_famd::{companion_note_path, empty_famd_payload, serialize_famd};
+use fanotes_famd::companion_note_path;
 use serde_json::{json, Value};
 
 use crate::vault;
@@ -178,11 +178,18 @@ fn import_pdf_file(
     };
     let famd_relative = companion_note_path(&relative, ".famd");
     if let Ok(famd_path) = vault::resolve_inside(&root, &famd_relative) {
-        let _ = crate::notes::atomic_write(
+        // `writeFamdCompanion(path, '')`: a new compact companion with the
+        // settings paper. An existing companion is composed, never replaced.
+        let existing = crate::notes::read_optional_text(
             &famd_path,
-            serialize_famd("", &empty_famd_payload(now_iso())).as_bytes(),
-            0o600,
-        );
+            crate::notes::optional_note_limit(&famd_path),
+        )
+        .ok()
+        .flatten();
+        let paper = host.settings.get("paperStyle").and_then(Value::as_str);
+        if let Ok(text) = crate::notes::compose_companion(existing.as_deref(), "", None, paper) {
+            let _ = crate::notes::atomic_write(&famd_path, text.as_bytes(), 0o600);
+        }
     }
     let meta = fs::symlink_metadata(&absolute)
         .map_err(|_| "Die PDF-Datei konnte nicht gespeichert werden.".to_owned())?;
