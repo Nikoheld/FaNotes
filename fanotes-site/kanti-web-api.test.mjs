@@ -876,3 +876,40 @@ test('an unreadable account keeps the browser session', async () => {
     await env.close()
   }
 })
+
+test('a browser session that is not the known shape is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const created = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: 'b'.repeat(32),
+      provider: 'schulnetz',
+      label: 'Bleibt',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const file = join(env.store.root, 'sessions', `${created.hash}.json`)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    parsed.v = 2
+    const stored = `${JSON.stringify(parsed)}\n`
+    await writeFile(file, stored)
+    const client = browser(env.base)
+    client.jar[SESSION_COOKIE] = created.token
+    const result = await client.call('GET', '/session')
+    assert.equal(result.status, 500)
+    assert.equal(client.jar[SESSION_COOKIE], created.token)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    await env.store.sweep(true)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    const expired = await env.store.createSession('Browser', [])
+    const expiredFile = join(env.store.root, 'sessions', `${expired.hash}.json`)
+    const old = JSON.parse(await readFile(expiredFile, 'utf8'))
+    old.expiresAt = '2020-01-01T00:00:00.000Z'
+    old.maxUntil = '2020-01-01T00:00:00.000Z'
+    await writeFile(expiredFile, JSON.stringify(old))
+    await env.store.sweep(true)
+    await assert.rejects(readFile(expiredFile), (error) => error?.code === 'ENOENT')
+    assert.equal(await readFile(file, 'utf8'), stored)
+  } finally {
+    await env.close()
+  }
+})

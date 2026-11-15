@@ -241,6 +241,8 @@ export const createKantiWebStore = (options = {}) => {
 
   const readSession = async (hash) => {
     const session = await readJson(sessionPath(hash))
+    // A missing, broken, or expired session can go. A file of another version must not look dead, or the next request deletes it.
+    if (session && typeof session.v === 'number' && session.v !== 1) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
     return alive(session) ? session : null
   }
   const saveSession = async (hash, session) => {
@@ -511,6 +513,8 @@ export const createKantiWebStore = (options = {}) => {
       } catch {
         continue
       }
+      // A session of another version stays. Sweep only removes a missing, broken, or expired version 1 file.
+      if (session && typeof session.v === 'number' && session.v !== 1) continue
       if (!alive(session)) await locked(`session:${hash}`, () => deleteSession(hash))
     }
   }
