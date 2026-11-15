@@ -32,9 +32,10 @@ packaging/tauri/cargo-in-container.sh . platforms-ci \
 
 # Build the React bundle and the deb + AppImage, then launch the AppImage once.
 FANOTES_TAURI_IMAGE=fanotes-tauri-build:2 packaging/tauri/cargo-in-container.sh . platforms-ci bash -c '
+  export APPIMAGE_EXTRACT_AND_RUN=1  # linuxdeploy is an AppImage; there is no FUSE here
   cd fanotes && npm ci --no-audit --no-fund && npm run build:web &&
   npx --yes @tauri-apps/cli@2.12.4 build --ci --config "{\"bundle\":{\"active\":true}}" --bundles deb,appimage &&
-  APPIMAGE_EXTRACT_AND_RUN=1 FANOTES_SMOKE_TEST=1 xvfb-run -a /target/release/bundle/appimage/*.AppImage'
+  FANOTES_SMOKE_TEST=1 xvfb-run -a /target/release/bundle/appimage/*.AppImage'
 ```
 
 ## Packages
@@ -51,6 +52,7 @@ The preview installs next to the shipping Electron app:
 | Identifier | `ch.fanotes.app` | `ch.fasrv.fanotes.preview` |
 | Product name | FaNotes | FaNotes Preview |
 | Executable | `fanotes` / `FaNotes.exe` | `fanotes-preview` / `fanotes-preview.exe` |
+| Linux package | AppImage only | deb `fa-notes-preview` (Tauri derives it from the product name) + AppImage |
 | Profile (Linux) | `~/.config/FaNotes` | `~/.local/share/ch.fasrv.fanotes.preview` |
 | Profile (Windows) | `%APPDATA%\FaNotes` | `%APPDATA%\ch.fasrv.fanotes.preview` (WebView2 data in `%LOCALAPPDATA%\ch.fasrv.fanotes.preview`) |
 | Windows install | `%LOCALAPPDATA%\Programs\…` (electron-builder) | `%LOCALAPPDATA%\FaNotes Preview` (NSIS, per user) |
