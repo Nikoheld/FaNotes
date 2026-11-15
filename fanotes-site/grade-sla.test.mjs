@@ -1,7 +1,7 @@
 // The grade promise: a new grade reaches the phone within 10 minutes of appearing in Schulnetz, 24/7.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -392,6 +392,40 @@ test('an unreadable account file is left in place', async () => {
     await chmod(snapshot, 0o600).catch(() => undefined)
     await chmod(linkFile, 0o600).catch(() => undefined)
     if (guestFile) await chmod(guestFile, 0o600).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a broken guest file does not remove the account', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-guest-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+    pruneOrphans: true,
+    syncAccountExists: async () => false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.80')
+    const dir = join(root, 'accounts', guest.accountId)
+    const guestFile = join(dir, 'guest.json')
+    const snapshot = join(dir, 'snapshot.json')
+    const marker = '{"keep":true}\n'
+    await writeFile(snapshot, marker, { mode: 0o600 })
+    await writeFile(guestFile, '{', { mode: 0o600 })
+    await assert.rejects(() => runtime.pollAccount(guest.accountId), (error) => error?.code === 'EBADMSG')
+    await assert.rejects(() => runtime.unlink(guest.accountId), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(guestFile, 'utf8'), '{')
+    assert.equal(await readFile(snapshot, 'utf8'), marker)
+    const accountId = 'a'.repeat(32)
+    await mkdir(join(root, 'accounts', accountId), { recursive: true, mode: 0o700 })
+    await writeFile(join(root, 'accounts', accountId, 'link.json'), '{"mode":"rest"}\n', { mode: 0o600 })
+    const removed = await runtime.pollAccount(accountId)
+    assert.equal(removed.skipped, true)
+    assert.equal((await readdir(join(root, 'accounts'))).includes(accountId), false)
+    assert.equal((await readdir(join(root, 'accounts'))).includes(guest.accountId), true)
+  } finally {
     await rm(root, { recursive: true, force: true })
   }
 })
