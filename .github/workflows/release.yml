@@ -236,6 +236,18 @@ jobs:
             done
           }
           SH
+      - name: Build the writing mode for the APK
+        # The Android writing screen loads the shared web editor from assets/writing/
+        # (git-ignored); without this step the APK would ship without it.
+        working-directory: fanotes
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/retry-network.sh"
+          retry_network npm ci --no-audit --no-fund
+          npm run build:spelling
+          node scripts/build-android-writing.mjs
+          test -f ../android/app/src/main/assets/writing/writing.html
       - name: Test and build the Android app
         working-directory: android
         env:
