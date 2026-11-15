@@ -102,9 +102,10 @@ export const factsFromNote = (content: string, now: Date, pageStats?: PageStats 
  * then again as note contents arrive, so the page fills in while it works.
  * Aborting stops all further reads. Nothing is sent anywhere.
  */
-export const loadVaultStats = async (host: StatsHost, signal: AbortSignal, onUpdate: (stats: VaultStats, progress: StatsProgress) => void, options: { force?: boolean } = {}) => {
+export const loadVaultStats = async (host: StatsHost, signal: AbortSignal, onUpdate: (stats: VaultStats, progress: StatsProgress) => void, options: { force?: boolean; now?: Date } = {}) => {
   if (options.force) { factCache.clear(); statsCache.clear(); historyCache.clear(); storyCache.clear() }
-  const now = new Date()
+  // Injectable so checks do not depend on the day they run.
+  const now = options.now ?? new Date()
   const tree = await host.getTree()
   if (signal.aborted) return
   const { files } = flattenVault(tree) as unknown as { files: Array<{ path: string; size: number; mtime: number; extension?: string }> }

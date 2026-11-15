@@ -179,9 +179,10 @@ class VaultStatsTest {
         try {
             val io = DirectoryVault(root)
             var clockMs = now
-            val reads = mutableMapOf<String, Int>()
+            // The loader reads on several worker threads: count with a thread-safe map.
+            val reads = java.util.concurrent.ConcurrentHashMap<String, Int>()
             val counting = object : ch.fasrv.fanotes.vault.VaultIo by io {
-                override fun read(path: String): ByteArray? { reads[path] = (reads[path] ?: 0) + 1; return io.read(path) }
+                override fun read(path: String): ByteArray? { reads.merge(path, 1, Int::plus); return io.read(path) }
             }
             val loader = VaultStatsLoader(counting, zone) { clockMs }
             val first = loader.load { _, _ -> }

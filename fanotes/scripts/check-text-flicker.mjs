@@ -168,7 +168,9 @@ try {
   assert.doesNotMatch(cameraSource, /willChange = 'transform'/)
   assert.match(boardSource, /eraseInkKeepingNoteText\(/)
   assert.match(boardSource, /decideCommittedEraseHole\(/)
-  assert.match(boardSource, /job\.cleared = noteBudgetSliceCleared\(job\.cleared, from\)/)
+  // Since the double-buffered repaint (#1195) a job counts as cleared from its start: the visible
+  // bitmap is unsealed until the buffer is swapped in, so an erase never punches into it.
+  assert.match(boardSource, /cleared: true/)
   assert.match(boardSource, /budgetCleared: Boolean\(painting\?\.cleared\)/)
   assert.equal(
     boardSource.match(/if \(eraseHole\.seal\) committedBitmapRef\.current = \{ key: contentKey, topPx \}/g)?.length,
