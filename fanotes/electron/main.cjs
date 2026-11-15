@@ -66,6 +66,7 @@ const {
   parseNoteBackups,
   parseNoteLinks,
   parseNoteTextFields,
+  parseAnnotations: parseNoteAnnotations,
   serializeFamd,
   stripFamdPayload,
   worksheetIdsFromMarkdown,
@@ -226,6 +227,7 @@ const IPC = Object.freeze({
   readNoteBackups: 'fanotes:read-note-backups',
   writeNoteBackups: 'fanotes:write-note-backups',
   writeNoteTextFields: 'fanotes:write-note-text-fields',
+  writeNoteAnnotations: 'fanotes:write-note-annotations',
   readNoteCompanion: 'fanotes:read-note-companion',
   readSubjectBooks: 'fanotes:read-subject-books',
   writeSubjectBooks: 'fanotes:write-subject-books',
@@ -4796,6 +4798,7 @@ function registerIpcHandlers() {
       noteLinks: loaded.noteLinks ?? [],
       noteBackups: loaded.noteBackups ?? [],
       textFields: loaded.textFields ?? [],
+      annotations: loaded.annotations ?? [],
     }
   })
 
@@ -4815,6 +4818,15 @@ function registerIpcHandlers() {
     assertNotePath(notePath)
     const fields = parseNoteTextFields(rawFields)
     return mutateFamdCompanion(notePath, () => ({ payload: { textFields: fields }, result: fields }))
+  })
+
+  handle(IPC.writeNoteAnnotations, async (_event, relativePath, rawList) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const list = parseNoteAnnotations(rawList)
+    return mutateFamdCompanion(notePath, () => ({ payload: { annotations: list }, result: list }))
   })
 
   handle(IPC.readSubjectBooks, async () => {

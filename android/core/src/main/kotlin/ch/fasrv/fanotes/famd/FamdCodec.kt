@@ -184,6 +184,8 @@ fun serializeFamd(markdown: String, payload: JsonValue.Obj, encoding: String = "
         if (stats is JsonValue.Obj) next.put("pageStats", stats)
     }
     copyIfArray(payload, next, "textFields")
+    // Desktop study annotations (callouts, stamps, images, measures): carried through untouched.
+    copyIfArray(payload, next, "annotations")
     if (encoding == "v2") return encodeV2Document(body, next)
     val json = next.stringify()
     val marker = "<!-- fanotes-famd:v1 chars=${json.length} -->\n$json\n"

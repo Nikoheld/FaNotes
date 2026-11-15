@@ -2,6 +2,7 @@ import type { NoteBackupSnapshot } from './lib/noteBackup'
 import type { SendDataLinuxRuntime } from './lib/sendData'
 import type { NoteLinkRecord } from './lib/noteLink'
 import type { NoteTextField } from './lib/noteTextField'
+import type { NoteAnnotation } from '../electron/noteAnnotation.mjs'
 import type { SubjectBookRecord } from './lib/subjectBook'
 
 export type VaultEntry = {
@@ -660,6 +661,7 @@ export type FaNotesApi = {
   readNoteBackups?: (relativePath: string) => Promise<NoteBackupSnapshot[]>
   writeNoteBackups?: (relativePath: string, backups: NoteBackupSnapshot[]) => Promise<NoteBackupSnapshot[]>
   writeNoteTextFields?: (relativePath: string, fields: NoteTextField[]) => Promise<NoteTextField[]>
+  writeNoteAnnotations?: (relativePath: string, list: NoteAnnotation[]) => Promise<NoteAnnotation[]>
   /** Ink, page stats, links, paper style, backups, and text fields from one companion parse. */
   readNoteCompanion?: (relativePath: string) => Promise<{
     ink: DrawingLibraryDocument | null
@@ -668,6 +670,7 @@ export type FaNotesApi = {
     noteLinks: NoteLinkRecord[]
     noteBackups: NoteBackupSnapshot[]
     textFields?: NoteTextField[]
+    annotations?: NoteAnnotation[]
   } | null>
   readSubjectBooks?: () => Promise<SubjectBookRecord[]>
   writeSubjectBooks?: (books: SubjectBookRecord[]) => Promise<SubjectBookRecord[]>
