@@ -19,7 +19,7 @@
 //   accounts/<id>/partials/<uploadId>/ -> a resumable upload (meta.json, body.bin)
 //     that is not a live note until its size and checksum match
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
-import { createReadStream, promises as fs } from 'node:fs'
+import { constants as fsConstants, promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
 import { languageForRequest, localizeText } from './i18n.mjs'
 import { hashFile, inspectSyncAccount } from './sync-integrity.mjs'
@@ -721,32 +721,64 @@ const parseMeta = (request) => {
 }
 
 const handleGetFile = async (request, response, auth, fileId) => {
-  const table = await loadTable(auth.account.id)
-  const entry = table.entries.get(fileId)
-  if (!entry) fail(404, 'Diese Datei gibt es im Sync nicht.')
-  if (entry.deleted) {
-    sendEmpty(request, response, 204, { 'X-FaNotes-Revision': String(entry.revision), 'X-FaNotes-Deleted': '1', ETag: `"${entry.revision}"` })
-    return
-  }
   const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
-  const stat = await fs.stat(blobPath).catch(() => null)
-  if (!stat) fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
-  response.writeHead(200, {
-    ...baseHeaders(request),
-    'Content-Type': 'application/octet-stream',
-    'Content-Length': stat.size,
-    ETag: `"${entry.revision}"`,
-    'X-FaNotes-Revision': String(entry.revision),
-    'X-FaNotes-Meta': entry.meta,
-    'X-FaNotes-Sha256': entry.sha256,
+  // Open the inode while the account lock is held, then stream it after the
+  // lock is released. A replace renames a new inode into place, so this
+  // descriptor keeps the revision named in the headers, and Content-Length
+  // is the size of that same inode. O_NOFOLLOW refuses a symlink.
+  const opened = await withAccountLock(auth.account.id, async () => {
+    const table = await loadTable(auth.account.id)
+    const entry = table.entries.get(fileId)
+    if (!entry) fail(404, 'Diese Datei gibt es im Sync nicht.')
+    if (entry.deleted) return { entry, handle: null, size: 0 }
+    let handle
+    try {
+      handle = await fs.open(blobPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error?.code === 'ELOOP') fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
+      throw error
+    }
+    try {
+      const info = await handle.stat()
+      if (!info.isFile()) fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
+      return { entry, handle, size: info.size }
+    } catch (error) {
+      await handle.close()
+      throw error
+    }
   })
-  if (request.method === 'HEAD') {
-    response.end()
+  if (opened.entry.deleted) {
+    sendEmpty(request, response, 204, { 'X-FaNotes-Revision': String(opened.entry.revision), 'X-FaNotes-Deleted': '1', ETag: `"${opened.entry.revision}"` })
     return
   }
-  const stream = createReadStream(blobPath)
-  stream.on('error', () => { if (!response.destroyed) response.destroy() })
-  stream.pipe(response)
+  const { entry, handle, size } = opened
+  let handedOff = false
+  const closeHandle = () => {
+    if (handedOff) return
+    handedOff = true
+    handle.close().catch(() => {})
+  }
+  try {
+    response.writeHead(200, {
+      ...baseHeaders(request),
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': size,
+      ETag: `"${entry.revision}"`,
+      'X-FaNotes-Revision': String(entry.revision),
+      'X-FaNotes-Meta': entry.meta,
+      'X-FaNotes-Sha256': entry.sha256,
+    })
+    if (request.method === 'HEAD' || size === 0) {
+      response.end()
+      return
+    }
+    const stream = handle.createReadStream({ start: 0, end: size - 1 })
+    handedOff = true
+    stream.on('error', () => { if (!response.destroyed) response.destroy() })
+    stream.pipe(response)
+  } finally {
+    closeHandle()
+  }
 }
 
 // `reason` tells a client which 409 this is. "stale": the base is not the current
