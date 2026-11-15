@@ -197,7 +197,7 @@ export const writePdf = async (input: PdfInput): Promise<Uint8Array> => {
       link = null
     }
     for (const piece of box.pieces) {
-      if (piece.kind === 'newline') continue
+      if (piece.kind === 'newline' || piece.hang) continue
       const x = x0 + piece.x
       const marks = piece.marks
       const font = fontFor(piece.font)

@@ -2,7 +2,7 @@ import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowLeft, Bold, BookOpen, ChevronDown, ChevronRight, Columns2, Eye, FilePlus2, FileText,
   CalendarRange, Download, Focus, Italic, LayoutGrid, ListTree, LoaderCircle, MapPin, MessageSquarePlus, Minus, MoreHorizontal, PanelRight, Plus, Redo2, Replace, Search, SlidersHorizontal, SpellCheck, Strikethrough, Subscript, Superscript, Target, TextCursor, Trash2, Underline, Undo2, Users, X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as commands from '../editor/commands'
 import { WritingController, type EditKind } from '../editor/controller'
 import { blockAt, blockLength, caret, clampPos, isCollapsed, makeDoc, ordered, updateBinder, withScene, type Pos } from '../editor/doc'
@@ -34,7 +34,7 @@ import { useStoryTools } from './storyTools'
 import { canDrop, findIn, moveNode, moveToTrash, trashedIds, updateNode, TRASH_ID, type DropPosition } from '../model/binder'
 import { diffScene, restoreSnapshot, type DiffRow, type Snapshot } from '../model/snapshots'
 import { entryNames } from '../model/bible'
-import { PageView, caretPageRect, type Highlight, type PagePointer, type PageTheme, type ViewMode } from './PageView'
+import { PageView, caretPageRect, type Highlight, type PagePointer, type PageTheme, type ViewMode, GAP as GAP_PX } from './PageView'
 import { countBlocks, countRuns, countText, htmlToParagraphs, runsToHtml, textToParagraphs } from './text'
 import './writing.css'
 
@@ -110,6 +110,12 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const [focused, setFocused] = useState(false)
   const scroller = useRef<HTMLDivElement | null>(null)
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  // Stable, so React does not detach and re-attach it on every render (that flipped
+  // `scrollElement` to null and back and rendered the manuscript three times per keystroke).
+  const scrollerRef = useCallback((element: HTMLDivElement | null) => {
+    scroller.current = element
+    if (element) setScrollElement(element)
+  }, [])
   const input = useRef<HTMLTextAreaElement>(null)
   const measurer = useMemo(() => (typeof document !== 'undefined' ? new CanvasMeasurer() : null), [])
   const cache = useMemo(() => new LayoutCache(), [])
@@ -265,18 +271,106 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
 
   const caretGeometry = useMemo(() => (layout && state && measurer ? caretBox(layout, state.selection.head, measurer, state.doc.index) : null), [layout, state, measurer])
 
+  // The scroller's size and position, kept up to date by events. Reading them from the element
+  // after every keystroke would force the browser to lay out the page synchronously.
+  const scrollBox = useRef({ top: 0, width: 0, height: 0 })
+  useEffect(() => {
+    const element = scrollElement
+    if (!element) return
+    const measure = () => { scrollBox.current = { top: element.scrollTop, width: element.clientWidth, height: element.clientHeight } }
+    measure()
+    const onScroll = () => { scrollBox.current.top = element.scrollTop }
+    element.addEventListener('scroll', onScroll, { passive: true })
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null
+    observer?.observe(element)
+    return () => { element.removeEventListener('scroll', onScroll); observer?.disconnect() }
+  }, [scrollElement])
+  // ── Zoom by pinching (touch, trackpad) and Ctrl + wheel ────────────────
+  // The spot under the fingers or the pointer stays where it is.
+  const zoomRef = useRef(zoom)
+  zoomRef.current = zoom
+  const zoomAnchor = useRef<{ x: number; y: number; contentX: number; contentY: number; from: number } | null>(null)
+  const zoomAround = useCallback((next: number, clientX: number, clientY: number) => {
+    const element = scroller.current
+    const from = zoomRef.current
+    const target = Math.min(ZOOMS[ZOOMS.length - 1], Math.max(ZOOMS[0], Math.round(next * 100) / 100))
+    if (!element || Math.abs(target - from) < 0.005) return
+    const bounds = element.getBoundingClientRect()
+    const x = clientX - bounds.left
+    const y = clientY - bounds.top
+    zoomAnchor.current = { x, y, contentX: element.scrollLeft + x, contentY: element.scrollTop + y, from }
+    zoomRef.current = target
+    setZoom(target)
+  }, [])
+  useLayoutEffect(() => {
+    const anchor = zoomAnchor.current
+    const element = scroller.current
+    if (!anchor || !element) return
+    zoomAnchor.current = null
+    const ratio = zoom / anchor.from
+    element.scrollTop = Math.max(0, (anchor.contentY - GAP_PX) * ratio + GAP_PX - anchor.y)
+    element.scrollLeft = Math.max(0, (anchor.contentX - GAP_PX) * ratio + GAP_PX - anchor.x)
+    scrollBox.current.top = element.scrollTop
+  }, [zoom])
+  useEffect(() => {
+    const element = scrollElement
+    if (!element) return
+    // Ctrl + wheel, and a trackpad pinch (the browser reports it as Ctrl + wheel).
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return
+      event.preventDefault()
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
+      zoomAround(zoomRef.current * Math.exp(-Math.max(-60, Math.min(60, delta)) * 0.006), event.clientX, event.clientY)
+    }
+    let pinch: { distance: number; zoom: number } | null = null
+    let frame = 0
+    const spread = (touches: TouchList) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY)
+    const onTouchStart = (event: TouchEvent) => {
+      if (event.touches.length !== 2) return
+      pinch = { distance: Math.max(1, spread(event.touches)), zoom: zoomRef.current }
+      touchStart.current = null
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      if (!pinch || event.touches.length !== 2) return
+      event.preventDefault()
+      const touches = event.touches
+      const next = pinch.zoom * (spread(touches) / pinch.distance)
+      const x = (touches[0].clientX + touches[1].clientX) / 2
+      const y = (touches[0].clientY + touches[1].clientY) / 2
+      if (frame) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => { frame = 0; zoomAround(next, x, y) })
+    }
+    const onTouchEnd = (event: TouchEvent) => { if (event.touches.length < 2) pinch = null }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    element.addEventListener('touchstart', onTouchStart, { passive: true })
+    element.addEventListener('touchmove', onTouchMove, { passive: false })
+    element.addEventListener('touchend', onTouchEnd, { passive: true })
+    element.addEventListener('touchcancel', onTouchEnd, { passive: true })
+    return () => {
+      element.removeEventListener('wheel', onWheel)
+      element.removeEventListener('touchstart', onTouchStart)
+      element.removeEventListener('touchmove', onTouchMove)
+      element.removeEventListener('touchend', onTouchEnd)
+      element.removeEventListener('touchcancel', onTouchEnd)
+      if (frame) cancelAnimationFrame(frame)
+    }
+  }, [scrollElement, zoomAround])
+
   const scrollCaretIntoView = useCallback(() => {
     const element = scroller.current
     if (!element || !layout || !caretGeometry) return
-    const rect = caretPageRect(layout, caretGeometry.page, zoom, view, element.clientWidth)
+    const box = scrollBox.current
+    if (!box.width) scrollBox.current = { top: element.scrollTop, width: element.clientWidth, height: element.clientHeight }
+    const rect = caretPageRect(layout, caretGeometry.page, zoom, view, box.width)
     if (!rect) return
     const top = rect.top + caretGeometry.y * zoom
     const bottom = top + caretGeometry.height * zoom
     const margin = 60
+    const scrollTo = (value: number) => { element.scrollTop = value; box.top = value }
     // Typewriter: the line being written stays at the same height (a bit above the middle).
-    if (typewriter) element.scrollTop = Math.max(0, top - element.clientHeight * 0.42)
-    else if (top < element.scrollTop + margin) element.scrollTop = Math.max(0, top - margin)
-    else if (bottom > element.scrollTop + element.clientHeight - margin) element.scrollTop = bottom - element.clientHeight + margin
+    if (typewriter) { const target = Math.max(0, top - box.height * 0.42); if (Math.abs(target - box.top) > 0.5) scrollTo(target) }
+    else if (top < box.top + margin) scrollTo(Math.max(0, top - margin))
+    else if (bottom > box.top + box.height - margin) scrollTo(bottom - box.height + margin)
     // Keep the hidden input at the caret so the IME window opens next to it.
     if (input.current) {
       input.current.style.left = `${rect.left + caretGeometry.x * zoom}px`
@@ -956,7 +1050,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
         <button type="button" className={`wm-icon${focusMode ? ' is-on' : ''}`} title={L('Fokusmodus (F11)', 'Focus mode (F11)')} onClick={() => { setFocusMode((value) => !value); refocus() }}><Focus size={16} /></button>
         <div className="wm-zoom">
           <button type="button" className="wm-icon" title={L('Verkleinern', 'Zoom out')} onClick={() => setZoom((value) => ZOOMS.filter((step) => step < value - 0.001).at(-1) ?? value)}><Minus size={14} /></button>
-          <span>{Math.round(zoom * 100)} %</span>
+          <button type="button" className="wm-zoom-value" title={L('Auf 100 % (auch: Ctrl + Mausrad, zwei Finger)', 'Reset to 100 % (also: Ctrl + wheel, pinch)')} onClick={() => { setZoom(1); refocus() }}>{Math.round(zoom * 100)} %</button>
           <button type="button" className="wm-icon" title={L('Vergrössern', 'Zoom in')} onClick={() => setZoom((value) => ZOOMS.find((step) => step > value + 0.001) ?? value)}><Plus size={14} /></button>
         </div>
       </header>
@@ -1014,7 +1108,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
             {area === 'goals' && <GoalsView goals={doc.manifest.goals ?? {}} total={counts.words} today={tools.todayWords} session={tools.sessionWords} days={tools.days} onGoals={(goals) => controller.replaceDoc(makeDoc({ ...controller.state.doc.manifest, goals }, controller.state.doc.scenes))} />}
           </div>
         )}
-        <div className={`wm-scroll theme-${theme}${area !== 'manuscript' ? ' is-hidden' : ''}`} ref={(element) => { scroller.current = element; if (element !== scrollElement) setScrollElement(element) }} onMouseDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); input.current?.focus({ preventScroll: true }) } }}>
+        <div className={`wm-scroll theme-${theme}${area !== 'manuscript' ? ' is-hidden' : ''}`} ref={scrollerRef} onMouseDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); input.current?.focus({ preventScroll: true }) } }}>
           <PageView
             layout={layout}
             doc={doc}
