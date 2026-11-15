@@ -388,7 +388,7 @@ const measureHistory = async (accountId) => {
     }
     for (const name of names) {
       if (!/^(?:c-)?\d+$/u.test(name)) continue
-      const stat = await fs.stat(safeJoin(revisionsDirectory(accountId, fileId), name)).catch(() => null)
+      const stat = await fs.lstat(safeJoin(revisionsDirectory(accountId, fileId), name)).catch(() => null)
       if (stat?.isFile()) total += stat.size
     }
   }
@@ -858,7 +858,7 @@ const listRevisionFiles = async (directory) => {
   const files = []
   for (const name of names) {
     if (!/^(?:c-)?\d+$/u.test(name)) continue
-    const stat = await fs.stat(safeJoin(directory, name)).catch(() => null)
+    const stat = await fs.lstat(safeJoin(directory, name)).catch(() => null)
     if (!stat?.isFile()) continue
     files.push({ name, size: stat.size, revision: Number(name.slice(name.startsWith('c-') ? 2 : 0)) })
   }
