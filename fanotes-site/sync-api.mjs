@@ -238,6 +238,9 @@ const atomicWrite = async (target, data) => {
     await handle.close()
   }
   await fs.rename(temporary, target)
+  // The new directory entry has to be durable. A crash after the rename and
+  // before this sync can lose the file the caller just replaced.
+  await syncDirectory(dirname(target))
 }
 
 const syncDirectory = async (directory) => {
@@ -415,6 +418,9 @@ const appendChange = async (accountId, table, entry) => {
   } finally {
     await handle.close()
   }
+  // The first append creates the log. The file sync does not make that new
+  // name durable, and the response is sent only after this returns.
+  await syncDirectory(directory)
   table.logBytes += Buffer.byteLength(line)
   if (table.logBytes > COMPACT_LOG_BYTES) await compactTable(accountId, table)
 }
