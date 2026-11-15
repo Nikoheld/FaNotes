@@ -4183,5 +4183,10 @@
   "Löscht alles, was zu deiner Installations-ID auf dem Server liegt, und erzeugt eine neue ID.": "Deletes everything stored for your install ID on the server and creates a new ID.",
   "ID erneuern": "Renew ID",
   "Diagnose": "Diagnostics",
-  "Aktivitätskalender": "Activity calendar"
+  "Aktivitätskalender": "Activity calendar",
+  "Wählen": "Select",
+  "Nummeriert": "Numbered",
+  "Bild einfügen": "Insert image",
+  "Lernwerkzeuge schließen": "Close study tools",
+  "Auswählen und verschieben": "Select and move"
 }

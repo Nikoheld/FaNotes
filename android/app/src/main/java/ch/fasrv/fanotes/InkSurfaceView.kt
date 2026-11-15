@@ -195,6 +195,28 @@ class InkSurfaceView @JvmOverloads constructor(
             field = value
             reportedPdfPage = 0
         }
+    /** Study annotations ("Lernen" tools): drawing, hit testing and editing live in [StudyController]. */
+    private val studyImages = StudyImageCache { postInvalidate() }
+    val study = StudyController(
+        object : StudyController.Host {
+            override fun studyBox(page: Int) = ch.fasrv.fanotes.study.studyPageBox(
+                page, pageFrames, pageLeft.toDouble(), pageTop.toDouble(), pixelsPerPageUnit().toDouble(), sessionWidth(), sessionHeight(),
+            )
+            override fun studyPages(): List<Pair<Int, ch.fasrv.fanotes.study.PageBox>> =
+                (if (pageFrames.isEmpty()) listOf(1) else pageFrames.map { it.page }).mapNotNull { page -> studyBox(page)?.let { page to it } }
+            override fun studyDensity() = resources.displayMetrics.density
+            override fun studyRedraw() = invalidate()
+            override fun studyChrome() = onStudyChrome()
+            override fun studyVisiblePage(): Int = studyPages().maxByOrNull { (_, box) ->
+                minOf(box.top + box.height, height.toDouble()) - maxOf(box.top, 0.0)
+            }?.first ?: 1
+        },
+        studyImages,
+    ) { accentColor }
+    var onStudyChrome: () -> Unit = {}
+    private var studyLastX = 0.0
+    private var studyLastY = 0.0
+
     var placingHighlight = false
     var placingText = false
 
@@ -931,6 +953,15 @@ class InkSurfaceView @JvmOverloads constructor(
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
             }
+            study.active && !eraser -> {
+                val (ux, uy) = unrotate(event.getX(index), event.getY(index))
+                studyLastX = ux.toDouble()
+                studyLastY = uy.toDouble()
+                if (!study.down(studyLastX, studyLastY)) {
+                    onPenActive(false)
+                    inkPointer = MotionEvent.INVALID_POINTER_ID
+                }
+            }
             sectionHit != null && !eraser -> {
                 onToggleSection(sectionHit.id)
                 refresh()
@@ -1054,6 +1085,13 @@ class InkSurfaceView @JvmOverloads constructor(
         val current = session ?: return
         trackNib(event, index)
         predictor?.record(event)
+        if (study.dragging) {
+            val (ux, uy) = unrotate(event.getX(index), event.getY(index))
+            studyLastX = ux.toDouble()
+            studyLastY = uy.toDouble()
+            study.move(studyLastX, studyLastY)
+            return
+        }
         val history = event.historySize
         if (highlighting) {
             val (x, y) = screenToNorm(event.getX(index), event.getY(index))
@@ -1105,6 +1143,10 @@ class InkSurfaceView @JvmOverloads constructor(
         predicted = emptyList()
         snapLock = null
         onPenActive(false)
+        if (study.dragging) {
+            study.up(studyLastX, studyLastY, cancel)
+            return
+        }
         if (highlighting) {
             highlighting = false
             if (!cancel) commitHighlight()
@@ -1540,6 +1582,7 @@ class InkSurfaceView @JvmOverloads constructor(
             }
             textPaint.color = Color.parseColor("#252630")
         }
+        study.draw(canvas)
         if (lassoPoints.size > 1) {
             val path = Path()
             val first = lassoPoints.first()
@@ -2558,6 +2601,7 @@ class InkSurfaceView @JvmOverloads constructor(
         fieldShadow.clear()
         removeShadow.clear()
         clearShapeWatch()
+        studyImages.clear()
         super.onDetachedFromWindow()
     }
 

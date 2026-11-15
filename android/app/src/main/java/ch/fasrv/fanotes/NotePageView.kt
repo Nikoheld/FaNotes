@@ -794,6 +794,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onSearchCommand: (String, String, Int) -> Unit = { _, _, _ -> }
     var onDeskShortcut: (String) -> Unit = {}
     var onToolbarAction: (String) -> Unit = {}
+    /** "Lernen" menu: annotation undo/redo availability and the image picker, wired by the activity. */
+    var studyCanUndo = false
+    var studyCanRedo = false
+    var onStudyUndo: () -> Unit = {}
+    var onStudyRedo: () -> Unit = {}
+    var onStudyImage: () -> Unit = {}
+    private var studyOpen = false
     private var pendingCursor: Int? = null
     var onPdfPage: (Int) -> Unit = {}
     var onSymbolSize: (Double) -> Unit = {}
@@ -807,6 +814,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onPdfKey: (String) -> Unit = {}
 
     init {
+        ink.study.onEditLabel = { promptCallout(it) }
+        ink.study.onEditLegendRow = { legend, key -> promptLegendRow(legend, key) }
         isFocusable = true
         isFocusableInTouchMode = true
         ink.onPageFocus = { requestFocus() }
@@ -1483,7 +1492,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val inset = ch.fasrv.fanotes.desk.editorSideInsetDp(metricsPx.widthPixels, metricsPx.heightPixels, metricsPx.densityDpi)
         val toolbarPad = ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP + inset
         toolbar.setPadding(dp(toolbarPad), 0, dp(toolbarPad), 0)
-        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$pdfNote|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen"
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$pdfNote|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen|$studyOpen|${ink.study.tool}|${ink.study.selected.hashCode()}|${ink.study.stampId}|${ink.study.numbered}|${ink.study.labelColor}|${ink.study.branchColor}|${ink.study.branchWidth}|$studyCanUndo|$studyCanRedo"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
@@ -1673,8 +1682,17 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 }
             }
         }
+        ink.onStudyChrome = { post { rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo) } }
         tools.removeAllViews()
         tools.addView(modeSwitch())
+        if (studyOpen && textMode) {
+            studyOpen = false
+            ink.study.tool = null
+        }
+        if (studyOpen) {
+            addStudyTools()
+            return
+        }
         when {
             pdfNote -> addPdfTools()
             textMode -> addTextTools(canUndo, canRedo)
@@ -1715,6 +1733,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("↶", enabled = canUndo) { onUndo() })
         tools.addView(chip("↷", enabled = canRedo) { onRedo() })
         tools.addView(chip("Lasso") { onTool(InkTool.LASSO) })
+        tools.addView(chip("Lernen", description = "Lernwerkzeuge") { setStudyOpen(true) })
         if (tool == InkTool.LASSO && ink.session?.selection?.isNotEmpty() == true) {
             listOf("move" to "Verschieben", "copy" to "Kopieren", "recolor" to "Färben", "delete" to "Löschen").forEach { (action, label) ->
                 tools.addView(chip(label) {
@@ -1754,6 +1773,178 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("Im PDF suchen") { onToolbarAction("pdf-search") })
         tools.addView(chip("Seiten") { onToolbarAction("pdf-thumbs") })
         tools.addView(chip("Passwort") { onToolbarAction("pdf-password") })
+        tools.addView(chip("Lernen", description = "Lernwerkzeuge") { setStudyOpen(true) })
+    }
+
+    // ---- "Lernen" menu: study annotations -------------------------------------------------
+
+    private fun setStudyOpen(open: Boolean) {
+        studyOpen = open
+        ink.study.tool = if (open) ch.fasrv.fanotes.study.StudyTool.SELECT else null
+        if (!open) ink.study.selectedId = null
+        rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo)
+    }
+
+    private fun studyChip(label: String, active: Boolean = false, enabled: Boolean = true, description: String = label, click: () -> Unit): TextView {
+        val view = chip(label, enabled, description, click)
+        if (active) {
+            view.background = rounded(ch.fasrv.fanotes.desk.modeSwitchTrackColor(themeId, systemDark), dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_RADIUS_DP))
+            view.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 650, false)
+        }
+        return view
+    }
+
+    private fun studyToolChip(label: String, tool: ch.fasrv.fanotes.study.StudyTool, description: String = label): TextView =
+        studyChip(label, ink.study.tool == tool, description = description) {
+            ink.study.cancelPending()
+            ink.study.tool = if (ink.study.tool == tool && tool != ch.fasrv.fanotes.study.StudyTool.SELECT) ch.fasrv.fanotes.study.StudyTool.SELECT else tool
+        }
+
+    private fun addStudyTools() {
+        val study = ink.study
+        val select = ch.fasrv.fanotes.study.StudyTool.SELECT
+        tools.addView(studyChip("Fertig", description = "Lernwerkzeuge schließen") { setStudyOpen(false) })
+        tools.addView(studyToolChip("Wählen", select, "Auswählen und verschieben"))
+        tools.addView(studyToolChip("Beschriftung setzen", ch.fasrv.fanotes.study.StudyTool.CALLOUT))
+        tools.addView(studyChip("Nummeriert", study.numbered, description = "Nummeriert (1, 2, 3 + Legende)") {
+            study.numbered = !study.numbered
+            rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo)
+        })
+        if (study.numbered) tools.addView(studyChip("Neu nummerieren") { study.renumber() })
+        listOf("#1d4ed8", "#dc2626", "#16a34a", "#111827").forEach { color ->
+            tools.addView(swatch(color, study.labelColor == color) { study.labelColor = color })
+        }
+        ch.fasrv.fanotes.study.STUDY_STAMPS.forEach { def ->
+            val active = study.tool == ch.fasrv.fanotes.study.StudyTool.STAMP && study.stampId == def.id
+            val view = studyChip(def.glyph, active, description = def.label) {
+                study.stampId = def.id
+                study.tool = ch.fasrv.fanotes.study.StudyTool.STAMP
+                rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo)
+            }
+            view.setTextColor(android.graphics.Color.parseColor(def.color))
+            view.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            tools.addView(view)
+        }
+        tools.addView(studyToolChip("Legende platzieren", ch.fasrv.fanotes.study.StudyTool.LEGEND))
+        tools.addView(studyToolChip("Ast markieren", ch.fasrv.fanotes.study.StudyTool.BRANCH))
+        listOf("#facc15", "#f97316", "#22c55e", "#38bdf8", "#e879f9").forEach { color ->
+            tools.addView(swatch(color, study.branchColor == color) {
+                study.branchColor = color
+                study.tool = ch.fasrv.fanotes.study.StudyTool.BRANCH
+            })
+        }
+        tools.addView(studyChip("Dicke ${study.branchWidth.toInt()}", description = "Dicke") {
+            val steps = listOf(10.0, 18.0, 28.0, 40.0)
+            study.branchWidth = steps.firstOrNull { it > study.branchWidth } ?: steps.first()
+            study.tool = ch.fasrv.fanotes.study.StudyTool.BRANCH
+            rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo)
+        })
+        tools.addView(studyToolChip("Winkel (3 Punkte)", ch.fasrv.fanotes.study.StudyTool.ANGLE))
+        tools.addView(studyToolChip("Winkel zw. 2 Linien", ch.fasrv.fanotes.study.StudyTool.ANGLE_LINES))
+        tools.addView(studyToolChip("Strecke", ch.fasrv.fanotes.study.StudyTool.DISTANCE))
+        tools.addView(studyChip("Bild einfügen") { onStudyImage() })
+        tools.addView(studyChip("Begriffe") { promptTerms() })
+        tools.addView(studyChip("↶", enabled = studyCanUndo, description = "Rückgängig") { onStudyUndo() })
+        tools.addView(studyChip("↷", enabled = studyCanRedo, description = "Wiederholen") { onStudyRedo() })
+        val selected = study.selected
+        if (selected != null && selected !is ch.fasrv.fanotes.study.StudyTerms) {
+            if (selected is ch.fasrv.fanotes.study.StudyImage) {
+                tools.addView(studyChip("Deckkraft ${Math.round(selected.opacity * 100)} %", description = "Deckkraft") {
+                    val steps = listOf(1.0, 0.7, 0.5, 0.35, 0.2)
+                    val next = steps.firstOrNull { it < selected.opacity - 0.001 } ?: steps.first()
+                    study.replace(selected.copy(opacity = next))
+                })
+                tools.addView(studyChip(if (selected.locked) "Entsperren" else "Sperren", description = if (selected.locked) "Entsperren" else "Sperren (nicht mehr verschiebbar)") {
+                    study.replace(selected.copy(locked = !selected.locked))
+                })
+            }
+            tools.addView(studyChip("Löschen") { study.deleteSelected() })
+        }
+    }
+
+    private fun promptTerms() {
+        val terms = ch.fasrv.fanotes.study.termsOf(ink.study.items)
+        textDialog(
+            title = "Begriffe",
+            hint = "Begriffe, mit Komma getrennt",
+            initial = terms.joinToString(", "),
+            max = 4000,
+            multiline = true,
+        ) { raw -> ink.study.setTerms(ch.fasrv.fanotes.study.termsFromText(raw)) }
+    }
+
+    private fun promptCallout(callout: ch.fasrv.fanotes.study.StudyCallout) {
+        val terms = ch.fasrv.fanotes.study.termsOf(ink.study.items)
+        textDialog(
+            title = if (callout.num != null) "Bedeutung" else "Beschriftung",
+            hint = if (callout.num != null) "Bedeutung" else "Beschriftung",
+            initial = callout.text,
+            max = 120,
+            multiline = false,
+            terms = terms,
+            onDelete = { ink.study.selectedId = callout.id; ink.study.deleteSelected() },
+        ) { value ->
+            val current = ink.study.items.firstOrNull { it.id == callout.id } as? ch.fasrv.fanotes.study.StudyCallout ?: return@textDialog
+            if (current.text != value) ink.study.replace(current.copy(text = value))
+        }
+    }
+
+    private fun promptLegendRow(legend: ch.fasrv.fanotes.study.StudyLegend, key: String) {
+        val def = ch.fasrv.fanotes.study.stampById(key) ?: return
+        textDialog("${def.glyph} ${ch.fasrv.fanotes.desk.ChromeText.ui("Legende")}", def.label, legend.names[key].orEmpty().ifEmpty { def.label }, 60, false) { value ->
+            val current = ink.study.items.firstOrNull { it.id == legend.id } as? ch.fasrv.fanotes.study.StudyLegend ?: return@textDialog
+            val names = LinkedHashMap(current.names)
+            if (value.isBlank() || value == def.label) names.remove(key) else names[key] = value.take(60)
+            ink.study.replace(current.copy(names = names))
+        }
+    }
+
+    /** Small on-screen-keyboard dialog; [terms] show as one-tap chips for the word bank. */
+    private fun textDialog(
+        title: String,
+        hint: String,
+        initial: String,
+        max: Int,
+        multiline: Boolean,
+        terms: List<String> = emptyList(),
+        onDelete: (() -> Unit)? = null,
+        onOk: (String) -> Unit,
+    ) {
+        val ui = ch.fasrv.fanotes.desk.ChromeText::ui
+        val field = android.widget.EditText(context)
+        field.setText(initial)
+        field.setSelection(initial.length)
+        field.hint = ui(hint)
+        field.filters = arrayOf(android.text.InputFilter.LengthFilter(max))
+        field.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+            (if (multiline) android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE else android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
+        val column = LinearLayout(context)
+        column.orientation = LinearLayout.VERTICAL
+        column.setPadding(dp(20), dp(8), dp(20), 0)
+        column.addView(field)
+        if (terms.isNotEmpty()) {
+            val scroll = android.widget.HorizontalScrollView(context)
+            val row = LinearLayout(context)
+            terms.forEach { term ->
+                val chipView = TextView(context)
+                chipView.text = term
+                chipView.setPadding(dp(10), dp(6), dp(10), dp(6))
+                chipView.setOnClickListener { field.setText(term); field.setSelection(term.length.coerceAtMost(max)) }
+                row.addView(chipView)
+            }
+            scroll.addView(row)
+            column.addView(scroll)
+        }
+        val builder = android.app.AlertDialog.Builder(context)
+            .setTitle(ui(title))
+            .setView(column)
+            .setPositiveButton(ui("OK")) { _, _ -> onOk(field.text.toString()) }
+            .setNegativeButton(ui("Abbrechen"), null)
+        if (onDelete != null) builder.setNeutralButton(ui("Löschen")) { _, _ -> onDelete() }
+        val dialog = builder.create()
+        dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.show()
+        field.requestFocus()
     }
 
     private fun addLinkTools() {

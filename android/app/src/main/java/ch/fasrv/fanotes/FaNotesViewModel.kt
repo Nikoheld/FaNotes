@@ -547,6 +547,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 open.value = source.copy(payload = payload)
             }
+            if (source != null && studyAnnotations.value.isNotEmpty()) {
+                val moved = ch.fasrv.fanotes.study.studyAfterSheetGrow(studyAnnotations.value, prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
+                if (moved !== studyAnnotations.value) {
+                    val current = open.value ?: source
+                    open.value = current.copy(payload = ch.fasrv.fanotes.study.writeStudyAnnotations(current.payload, moved))
+                    studyAnnotations.value = moved
+                }
+            }
         }
         noteChanged()
     }
@@ -1862,6 +1870,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val noteLinks = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteLinkMark>>(emptyList())
     val noteTextFields = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteTextField>>(emptyList())
     val noteTextFieldFocus = MutableStateFlow<String?>(null)
+
+    /** Study annotations ("Lernen" tools) of the open note, in the payload's `annotations` array. */
+    val studyAnnotations = MutableStateFlow<List<ch.fasrv.fanotes.study.StudyAnnotation>>(emptyList())
+    val studyHistory = MutableStateFlow(ch.fasrv.fanotes.study.AnnotationHistory())
+    private var studyHistoryPath: String? = null
     val worksheetBoxes = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredBox>>(emptyList())
     val worksheetHighlights = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredHighlight>>(emptyList())
     val bookPane = MutableStateFlow<BookPaneState?>(null)
@@ -1883,6 +1896,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             noteLinks.value = links
             noteTextFields.value = ch.fasrv.fanotes.desk.parseNoteTextFields(note?.payload?.array("textFields"))
+            loadStudyAnnotations(note)
             worksheetBoxes.value = overlay.first
             worksheetHighlights.value = overlay.second
         }
@@ -2816,6 +2830,82 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteTextFields.value = next
         if (noteTextFieldFocus.value == id) noteTextFieldFocus.value = null
         noteChanged()
+    }
+
+    private fun loadStudyAnnotations(note: ch.fasrv.fanotes.vault.OpenNote?) {
+        val list = ch.fasrv.fanotes.study.readStudyAnnotations(note?.payload)
+        if (studyHistoryPath != note?.path) {
+            studyHistoryPath = note?.path
+            studyHistory.value = ch.fasrv.fanotes.study.AnnotationHistory()
+        }
+        if (list != studyAnnotations.value) studyAnnotations.value = list
+    }
+
+    private fun storeStudy(next: List<ch.fasrv.fanotes.study.StudyAnnotation>) {
+        val source = open.value ?: return
+        open.value = source.copy(payload = ch.fasrv.fanotes.study.writeStudyAnnotations(source.payload, next))
+        studyAnnotations.value = next
+        noteChanged()
+    }
+
+    /** One annotation edit = one undo step on the annotation stack (ink keeps its own). */
+    fun commitStudy(before: List<ch.fasrv.fanotes.study.StudyAnnotation>, next: List<ch.fasrv.fanotes.study.StudyAnnotation>) {
+        if (open.value == null || next == before) return
+        studyHistory.value = studyHistory.value.push(before)
+        storeStudy(next)
+    }
+
+    fun undoStudy() {
+        val result = studyHistory.value.undo(studyAnnotations.value) ?: return
+        studyHistory.value = result.first
+        storeStudy(result.second)
+    }
+
+    fun redoStudy() {
+        val result = studyHistory.value.redo(studyAnnotations.value) ?: return
+        studyHistory.value = result.first
+        storeStudy(result.second)
+    }
+
+    /** Adds a reference image (already downscaled to a data URL) on [page]; false when a cap stops it. */
+    fun addStudyImage(page: Int, dataUrl: String, aspect: Double, title: String): Boolean {
+        val before = studyAnnotations.value
+        if (before.count { it is ch.fasrv.fanotes.study.StudyImage } >= ch.fasrv.fanotes.study.ANNOTATION_IMAGE_LIMIT) {
+            message.value = "Maximal 12 Bilder pro Notiz."
+            return false
+        }
+        val image = ch.fasrv.fanotes.study.StudyImage(
+            ch.fasrv.fanotes.study.newAnnotationId(), page, 0.06, 0.06, 0.4, aspect, 1.0, false, dataUrl, title.take(80),
+        )
+        val next = ch.fasrv.fanotes.study.addItem(before, image)
+        if (next == before) {
+            message.value = "Das Bild konnte nicht gespeichert werden."
+            return false
+        }
+        commitStudy(before, next)
+        message.value = "Bild eingefügt. Zum Nachzeichnen die Deckkraft senken und sperren."
+        return true
+    }
+
+    /** Reads a picked image off the main thread, shrinks it to the note's budget and adds it to [page]. */
+    fun importStudyImage(uri: Uri, page: Int) {
+        val resolver = getApplication<Application>().contentResolver
+        viewModelScope.launch {
+            val payload = withContext(Dispatchers.IO) {
+                try {
+                    val bytes = readUri(uri) ?: return@withContext null
+                    StudyImageImport.encode(bytes, resolver.getType(uri).orEmpty())
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (payload == null) {
+                message.value = "Das Bild konnte nicht gelesen werden."
+                return@launch
+            }
+            val title = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.').orEmpty()
+            addStudyImage(page, payload.dataUrl, payload.aspect, title)
+        }
     }
 
     fun cancelTextFieldPlacement() {
