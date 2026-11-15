@@ -15,7 +15,7 @@
 //      pdfPagePainter in a `.unified-note-view` scroller.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer as createViteServer } from 'vite'
@@ -88,7 +88,9 @@ mkdirSync(join(vault, 'Bench'), { recursive: true })
 writeFileSync(join(vault, 'Bench', 'Worksheet.pdf'), pdfFrom(300, 200, [worksheet(1)]))
 writeFileSync(join(vault, 'Bench', `Book-${pageTotal}.pdf`), pdfFrom(595, 842, Array.from({ length: pageTotal }, (_, i) => bookPage(i + 1))))
 const dataHome = join(work, 'data')
-const appData = join(dataHome, 'de.fanotes.app')
+// Tauri's app data dir is `$XDG_DATA_HOME/<identifier>`.
+const identifier = JSON.parse(readFileSync(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8')).identifier
+const appData = join(dataHome, identifier)
 mkdirSync(appData, { recursive: true, mode: 0o700 })
 writeFileSync(join(appData, 'vault-path'), `${vault}\n`)
 
