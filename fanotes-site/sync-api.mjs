@@ -1349,6 +1349,14 @@ const MAX_PARTIALS = 32
 
 const partialDirectory = (accountId, uploadId) => safeJoin(accountDirectory(accountId), 'partials', uploadId)
 
+// Drop a resumable upload and make that removal durable before the caller
+// logs a revision or answers the client. A crash must not bring the partial
+// back and reserve its bytes again.
+const removePartial = async (accountId, uploadId) => {
+  await fs.rm(partialDirectory(accountId, uploadId), { recursive: true, force: true })
+  await syncDirectory(safeJoin(accountDirectory(accountId), 'partials'))
+}
+
 const readPartial = async (accountId, uploadId) => readJsonFile(safeJoin(partialDirectory(accountId, uploadId), 'meta.json'))
 
 const writePartial = async (accountId, uploadId, meta) => {
@@ -1487,10 +1495,7 @@ const handleUploadAbort = async (request, response, auth, fileId, uploadId) => {
   await withAccountLock(auth.account.id, async () => {
     const meta = await readPartial(auth.account.id, uploadId)
     if (!meta || meta.fileId !== fileId) fail(404, 'Dieser Upload ist nicht bekannt.')
-    await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
-    // The removal has to be durable. A crash must not bring the partial back
-    // and reserve its bytes again.
-    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'partials'))
+    await removePartial(auth.account.id, uploadId)
     sendEmpty(request, response, 204)
   })
 }
@@ -1574,7 +1579,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       // The body was already renamed onto the live blob. Drop the partial
       // before the response so a retry cannot reserve its bytes again, then
       // record the revision from the live file.
-      await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+      await removePartial(auth.account.id, uploadId)
       await finishRenamedUpload(request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear)
       return
     }
@@ -1589,7 +1594,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       deviceId: auth.deviceId,
     })
     if (settled?.matchesRequest) {
-      await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+      await removePartial(auth.account.id, uploadId)
       sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${settled.entry.revision}"` })
       return
     }
@@ -1604,7 +1609,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       // The live blob stays. Drop the partial only after the rejected body is
       // in quarantine, so a failed move can be retried.
       const kept = await moveToQuarantine(auth.account.id, fileId, base, bodyPath)
-      if (kept) await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+      if (kept) await removePartial(auth.account.id, uploadId)
       return guardRejected(request, response, current)
     }
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
@@ -1620,7 +1625,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
     await fs.rename(bodyPath, blobPath)
     await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
-    await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+    await removePartial(auth.account.id, uploadId)
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
     table.entries.set(fileId, entry)
