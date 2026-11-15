@@ -144,6 +144,7 @@
     "check:zoom-500-sharp": "node scripts/check-zoom-500-sharp.mjs",
     "check:viewport-raster": "node scripts/check-viewport-raster.mjs && cross-env VITE_FANOTES_VIEWPORT_RASTER=1 node scripts/check-ink-stroke.mjs && cross-env VITE_FANOTES_VIEWPORT_RASTER=1 node scripts/check-ink-visible.mjs && cross-env VITE_FANOTES_VIEWPORT_RASTER=1 node scripts/check-zoom-500-sharp.mjs && cross-env VITE_FANOTES_VIEWPORT_RASTER=1 node scripts/check-paper-canvas.mjs",
     "check:viewport-raster-browser": "node scripts/check-viewport-raster-browser.mjs",
+    "check:native-pdf": "node scripts/check-native-pdf.mjs && cross-env VITE_FANOTES_NATIVE_PDF=1 node scripts/check-native-pdf.mjs && cross-env VITE_FANOTES_NATIVE_PDF=1 node scripts/check-pdf-camera.mjs && cross-env VITE_FANOTES_NATIVE_PDF=1 node scripts/check-pdf-paint-sharp.mjs && cross-env VITE_FANOTES_NATIVE_PDF=1 node scripts/check-pdf-write-stay.mjs && cross-env VITE_FANOTES_NATIVE_PDF=1 node scripts/check-pdf-text-while-write.mjs && cross-env VITE_FANOTES_NATIVE_PDF=1 node scripts/check-pdf-write.mjs",
     "build:rust-wasm": "node scripts/build-rust-wasm.mjs",
     "build:native-ocr": "node scripts/build-native-ocr.mjs",
     "check:pdf-write-stay": "node scripts/check-pdf-write-stay.mjs",
