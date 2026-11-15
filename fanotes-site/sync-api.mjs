@@ -1128,9 +1128,21 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
       sendJson(request, response, 200, { revision: currentRevision, tableRevision: table.revision })
       return
     }
+    // A crash can leave a newer body in the live slot before the change log
+    // records it. Deleting that file would drop the only copy of the newer note.
+    const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
+    const liveStat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+    const currentSize = Number(current.size) || 0
+    if (liveStat?.isFile() && (liveStat.size !== currentSize || await hashFile(blobPath) !== current.sha256)) {
+      sendJson(request, response, 409, {
+        error: 'Die gespeicherte Datei gehört zu einer neueren Fassung und wurde nicht gelöscht.',
+        entry: publicEntry(current),
+        reason: 'guard',
+      }, { 'X-FaNotes-Rejected': 'guard' })
+      return
+    }
     // Copy first. The live blob is removed only after the tombstone is durable,
     // so a crash leaves the note in the archive and still in the live slot.
-    const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
     table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, 0, false)
     const entry = { id: fileId, revision: table.revision + 1, deleted: true, size: 0, sha256: null, meta: null, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
@@ -1138,6 +1150,7 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
     table.bytes -= Number(current.size) || 0
     await appendChange(auth.account.id, table, entry)
     await fs.rm(blobPath, { force: true })
+    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision })
   })
 }
