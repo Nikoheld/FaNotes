@@ -386,13 +386,29 @@ export const createCommute = (options = {}) => {
   const file = (accountId) => resolve(accountDir(accountId), 'commute.json')
   const stateFile = (accountId) => resolve(accountDir(accountId), 'commute-state.json')
   const due = new Map()
+  // Saves and removals for one account run one at a time. Two clients otherwise both read the
+  // old pins, and the slower write puts those pins back over the newer ones.
+  const accountQueues = new Map()
+  const withAccount = (accountId, task) => {
+    const previous = accountQueues.get(accountId) || Promise.resolve()
+    const run = previous.then(task, task)
+    const tail = run.then(() => undefined, () => undefined)
+    accountQueues.set(accountId, tail)
+    tail.then(() => { if (accountQueues.get(accountId) === tail) accountQueues.delete(accountId) })
+    return run
+  }
 
   const readJson = async (path) => { try { return JSON.parse(await fs.readFile(path, 'utf8')) } catch { return null } }
   const writeJson = async (path, value) => {
-    const temp = `${path}.${randomBytes(4).toString('hex')}.tmp`
+    const temp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
     await fs.mkdir(resolve(path, '..'), { recursive: true, mode: 0o700 })
-    await fs.writeFile(temp, JSON.stringify(value), { mode: 0o600 })
-    await fs.rename(temp, path)
+    try {
+      await fs.writeFile(temp, JSON.stringify(value), { mode: 0o600 })
+      await fs.rename(temp, path)
+    } catch (error) {
+      await fs.rm(temp, { force: true }).catch(() => undefined)
+      throw error
+    }
   }
 
   const read = async (accountId) => {
@@ -404,7 +420,7 @@ export const createCommute = (options = {}) => {
     return { routes: sanitizeRoutes(stored?.routes), settings }
   }
   const view = async (accountId) => ({ ...(await read(accountId)), provider: PROVIDERS['search.ch'] })
-  const save = async (accountId, body) => {
+  const save = (accountId, body) => withAccount(accountId, async () => {
     // A client older than pins/two vias sends routes without those keys: keep what is stored.
     const known = new Map((await read(accountId)).routes.map((route) => [route.id, route]))
     const incoming = (Array.isArray(body?.routes) ? body.routes : []).map((raw) => {
@@ -422,7 +438,7 @@ export const createCommute = (options = {}) => {
     await writeJson(file(accountId), { version: 2, routes, settings, updatedAt: now().toISOString() })
     due.delete(accountId)
     return { routes, settings, provider: PROVIDERS['search.ch'] }
-  }
+  })
 
   /**
    * The live board of one route: target, ranked trips, alternatives when the first is unusable. A
@@ -611,7 +627,16 @@ export const createCommute = (options = {}) => {
       next = Math.min(next, nextCheckAt(target, tracked || (live.pinned ? { departure: target.at, arrival: target.at } : null), at))
     }
     for (const id of Object.keys(state.routes)) if (!routes.some((route) => route.id === id)) delete state.routes[id]
-    await writeJson(stateFile(accountId), state)
+    // A removal that finished during this check must not bring the state file back.
+    const kept = await withAccount(accountId, async () => {
+      try { await fs.stat(file(accountId)) } catch { return false }
+      await writeJson(stateFile(accountId), state)
+      return true
+    })
+    if (!kept) {
+      due.delete(accountId)
+      return { checked, alerts: 0 }
+    }
     if (alerts.length) await publish(accountId, alerts)
     // The widget and the open app follow the tracked trip; a silent push when it changed.
     else if (moved) await ping(accountId)
@@ -637,11 +662,11 @@ export const createCommute = (options = {}) => {
     return checked
   }
 
-  const remove = async (accountId) => {
+  const remove = (accountId) => withAccount(accountId, async () => {
     await fs.rm(file(accountId), { force: true })
     await fs.rm(stateFile(accountId), { force: true })
     due.delete(accountId)
-  }
+  })
 
   /**
    * The connection detail: one trip of a route with every leg, every intermediate stop, real times,
