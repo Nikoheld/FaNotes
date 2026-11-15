@@ -1,6 +1,7 @@
 /** Spaced repetition for the Lernfragen an AI preview already produces. */
 
 import { locateEmbeddedJsonComment } from './embeddedJsonComment'
+import { studyCardSources } from './study/cardsModels'
 
 export type FlashCard = {
   id: string
@@ -11,6 +12,8 @@ export type FlashCard = {
   due: string
   reps: number
   lapses: number
+  /** Picture on the front (identification sheets). Derived from the note's study block, never stored with the schedule. */
+  frontImage?: string
 }
 
 export type FlashGrade = 'again' | 'hard' | 'good' | 'easy'
@@ -98,7 +101,7 @@ export const cardsFromMarkdown = (markdown: string, now = new Date()): FlashCard
   const byFront = new Map(stored.map((card) => [card.front, card]))
   const used = new Set(stored.map((card) => card.id))
   const due = dayKey(now)
-  return questionBlocks(markdown).map((question) => {
+  const questions = questionBlocks(markdown).map((question): FlashCard => {
     const existing = byFront.get(question.front)
     if (existing) return { ...existing, back: question.back || existing.back }
     return {
@@ -112,6 +115,20 @@ export const cardsFromMarkdown = (markdown: string, now = new Date()): FlashCard
       lapses: 0,
     }
   })
+  // Definition cards and identification sheets feed the same schedule; their ids come from the block.
+  const byId = new Map(stored.map((card) => [card.id, card]))
+  const study = studyCardSources(markdown).map((source): FlashCard => {
+    const existing = byId.get(source.id)
+    return {
+      ease: 2.5, intervalDays: 0, due, reps: 0, lapses: 0,
+      ...existing,
+      id: source.id,
+      front: source.front,
+      back: source.back,
+      ...(source.frontImage ? { frontImage: source.frontImage } : {}),
+    }
+  })
+  return [...questions, ...study]
 }
 
 export const dueCards = (cards: readonly FlashCard[], now = new Date()) => {
@@ -158,7 +175,9 @@ export const embedCards = (markdown: string, cards: readonly FlashCard[]) => {
   const without = existing
     ? `${markdown.slice(0, existing.start)}${markdown.slice(existing.end)}`
     : markdown
-  const block = `\n${MARKER_START}\n${JSON.stringify({ cards }, null, 2)}\n${MARKER_END}\n`
+  // Images stay in their study block; the schedule only keeps ids and timings.
+  const slim = cards.map(({ frontImage: _image, ...card }) => card)
+  const block = `\n${MARKER_START}\n${JSON.stringify({ cards: slim }, null, 2)}\n${MARKER_END}\n`
   return `${without.replace(/\s*$/u, '')}${block}`
 }
 
