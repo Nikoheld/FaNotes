@@ -633,6 +633,8 @@ export const createClassTimetables = (options = {}) => {
     const version = `${at.toISOString().replace(/[-:]/gu, '').replace(/\.\d+Z$/u, 'Z')}-${randomBytes(3).toString('hex')}`
     const dir = join(root, version)
     await fs.mkdir(dir, { recursive: true, mode: 0o700 })
+    let published = false
+    let pointer = null
     try {
       const source = join(dir, 'source.pdf')
       await fs.writeFile(source, pdf, { mode: 0o600 })
@@ -662,16 +664,25 @@ export const createClassTimetables = (options = {}) => {
       await fs.writeFile(join(dir, 'rooms.json'), JSON.stringify(parsed.rooms), { mode: 0o600 })
       await fs.writeFile(join(dir, 'index.json'), JSON.stringify(index), { mode: 0o600 })
       // The new version is complete: switch the pointer in one rename.
-      const pointer = join(root, `current.json.${randomBytes(4).toString('hex')}.tmp`)
+      pointer = join(root, `current.json.${randomBytes(4).toString('hex')}.tmp`)
       await fs.writeFile(pointer, JSON.stringify({ version, switchedAt: at.toISOString() }), { mode: 0o600 })
       await fs.rename(pointer, join(root, 'current.json'))
+      pointer = null
+      published = true
       indexGeneration += 1
       indexCache = null
-      await prune(version)
+      try {
+        await prune(version)
+      } catch (error) {
+        log('warn', `alte Stundenpläne nicht entfernt (${error?.name || 'error'})`)
+      }
       log('info', `Stundenplan-PDF übernommen (${index.classes.length} Klassen, ${roomNames.length} Räume, ${index.warnings.length} Hinweise)`)
       report('info', 200, { classes: index.classes.length, rooms: roomNames.length, warnings: index.warnings.length })
       return { uploadedAt: index.uploadedAt, classes: index.classes.length, rooms: roomNames.length, warnings: index.warnings }
     } catch (error) {
+      if (pointer) await fs.rm(pointer, { force: true }).catch(() => undefined)
+      // The pointer already names this directory. Deleting it would drop the timetable that is current.
+      if (published) throw error
       await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined)
       const status = Number(error?.status) || 422
       report('warn', status, { error: String(error?.name || 'error') })
