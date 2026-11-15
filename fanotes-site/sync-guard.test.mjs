@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { connect as connectTcp } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -812,11 +812,70 @@ test('a delete leftover that matches the archive is not turned back into the not
     headers: { 'If-Match': String(tombstone), 'X-FaNotes-Delete': '1' },
   })
   assert.equal(again.status, 200, again.body.toString('utf8'))
-  assert.deepEqual(readFileSync(blobPath), original)
+  assert.equal(revisionOf(again), tombstone)
+  assert.equal(existsSync(blobPath), false)
+  const archive = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  const archived = readdirSync(archive).map((name) => readFileSync(join(archive, name)))
+  assert.ok(archived.some((bytes) => bytes.equals(original)))
+  const repeated = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(tombstone), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(repeated.status, 200, repeated.body.toString('utf8'))
+  assert.equal(revisionOf(repeated), tombstone)
+  assert.equal(existsSync(blobPath), false)
   const changes = await call('GET', '/api/v1/sync/changes?since=0', { token })
   const entry = JSON.parse(changes.body.toString('utf8')).entries.find((item) => item.id === id)
   assert.equal(entry.deleted, true)
   assert.equal(entry.revision, tombstone)
+  assert.equal((await readFile(id)).status, 204)
+  const report = jsonOf(await call('GET', '/api/v1/sync/integrity', { token }))
+  assert.equal(report.blobsOrphan.some((item) => item.id === id), false)
+})
+
+test('an idempotent delete leaves a short remnant on a tombstone', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(revisionOf(created)), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 200, removed.body.toString('utf8'))
+  const tombstone = revisionOf(removed)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const remnant = randomBytes(10)
+  writeFileSync(blobPath, remnant)
+  const again = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(tombstone), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(again.status, 200, again.body.toString('utf8'))
+  assert.equal(revisionOf(again), tombstone)
+  assert.deepEqual(readFileSync(blobPath), remnant)
+  assert.equal((await readFile(id)).status, 204)
+})
+
+test('a matching delete leftover does not block putting the note back', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(revisionOf(created)), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 200, removed.body.toString('utf8'))
+  const tombstone = revisionOf(removed)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  writeFileSync(blobPath, original)
+  const kept = randomBytes(4200)
+  const back = await putFile(id, kept, tombstone, { 'X-FaNotes-Blank': '0' })
+  assert.equal(back.status, 200, back.body.toString('utf8'))
+  assert.ok(revisionOf(back) > tombstone)
+  assert.deepEqual(readFileSync(blobPath), kept)
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, kept)
 })
 
 test('a first upload that reached the live slot is not replaced by a different body', async () => {
