@@ -17,6 +17,8 @@ const ERROR_CODE = /^[A-Z][A-Z0-9_]{1,39}$/u
 const ERROR_HASH = /^[0-9a-f]{12}$/u
 const ERROR_KEY = /^[A-Za-z]{2,24}\|[A-Z0-9_]{0,40}\|[0-9a-f]{12}$/u
 const BUNDLE_FILE = /^[A-Za-z0-9_]{1,40}-[A-Za-z0-9_-]{6,12}\.m?js$/u
+// Android frames: a class of the app itself (ch.fasrv.fanotes...), never a framework or library.
+const APP_FRAME = /^ch\.fasrv\.fanotes(?:\.[A-Za-z_][A-Za-z0-9_]{0,60}){1,6}$/u
 const COUNTER_NAME = /^[a-z0-9][a-z0-9._-]{0,39}$/u
 const DAY_FILE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/u
 
@@ -107,7 +109,7 @@ export const validateDiagnosticsPayload = (body) => {
         at: int(entry.at, 4e12),
         class: entry.class,
         code: typeof entry.code === 'string' && ERROR_CODE.test(entry.code) ? entry.code : '',
-        frames: (Array.isArray(entry.frames) ? entry.frames : []).filter((frame) => BUNDLE_FILE.test(frame?.file ?? '') && Number.isInteger(frame.line)).slice(0, 3).map((frame) => ({ file: frame.file, line: frame.line })),
+        frames: (Array.isArray(entry.frames) ? entry.frames : []).filter((frame) => (BUNDLE_FILE.test(frame?.file ?? '') || APP_FRAME.test(frame?.file ?? '')) && Number.isInteger(frame.line)).slice(0, 3).map((frame) => ({ file: frame.file, line: frame.line })),
         hash: entry.hash,
       }]
     })
