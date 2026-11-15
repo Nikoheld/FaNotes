@@ -46,7 +46,11 @@ export type ManuscriptLayout = {
   pageHeight: number
   contentWidth: number
   footnoteNumbers: Map<string, string>
-  stats: { lines: number; layoutMs: number; paginateMs: number; measured: number }
+  /** The page setup this layout was made with (incremental reuse needs the same one). */
+  setup: PageSetup
+  /** Title, subtitle, author and page count the headers were filled with. */
+  headerKey: string
+  stats: { lines: number; layoutMs: number; paginateMs: number; measured: number; repaginatedPages: number }
 }
 
 export type LayoutOptions = {
@@ -101,7 +105,7 @@ const pageGeometry = (page: PageSetup, index: number, firstNumber: number) => {
   }
 }
 
-export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], cache: LayoutCache, options: LayoutOptions): ManuscriptLayout => {
+export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], cache: LayoutCache, options: LayoutOptions, previous?: ManuscriptLayout | null): ManuscriptLayout => {
   const started = performance.now()
   const measuredBefore = cache.measured
   const setup = manifest.page
@@ -143,13 +147,54 @@ export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], c
   }
   const footnoteSeparator = 10
 
+  // Incremental: pages before the first changed paragraph are kept, and as soon
+  // as a new page starts where the previous layout had one (same paragraph and
+  // line, nothing changed after it) the rest of the old pages are reused. Typing
+  // in a paragraph usually re-paginates one page.
+  const changedAt = (index: number) => {
+    const before = previous?.blocks[index]
+    const now = blocks[index]
+    return !before || before.key !== now.key || previous!.layouts[index] !== layouts[index] || before.chapterStart !== now.chapterStart || before.breakBefore !== now.breakBefore || before.chapterTitle !== now.chapterTitle
+  }
+  const incremental = Boolean(previous && previous.setup === setup && previous.pages.length && previous.blockPages.length === previous.blocks.length)
+  const delta = blocks.length - (previous?.blocks.length ?? 0)
+  let firstChanged = 0
+  if (incremental) {
+    const limit = Math.min(blocks.length, previous!.blocks.length)
+    while (firstChanged < limit && !changedAt(firstChanged)) firstChanged += 1
+  }
+  let lastChanged = blocks.length - 1
+  if (incremental && delta === 0) while (lastChanged >= firstChanged && !changedAt(lastChanged)) lastChanged -= 1
+
   const pages: Page[] = []
   const blockPages: number[] = []
   let page!: Page
   let y = 0
   let footnoteHeight = 0
   let chapterTitle = ''
-  let chapterStartPage = -1
+  let resumeBlock = 0
+  let resumeLine = 0
+  let rebuiltFrom = 0
+  let reusedFrom = -1
+  const unchanged = incremental && delta === 0 && firstChanged === blocks.length
+
+  if (incremental && !unchanged) {
+    // Restart at the page holding the paragraph before the change (a heading kept with it may move).
+    const anchor = Math.max(0, Math.min(firstChanged, previous!.blocks.length) - 1)
+    let startPage = Math.min(previous!.blockPages[anchor] ?? 0, previous!.blockPages[Math.min(firstChanged, previous!.blockPages.length - 1)] ?? 0)
+    while (startPage > 0 && (previous!.pages[startPage].blank || !previous!.pages[startPage].lines.length)) startPage -= 1
+    const firstLine = previous!.pages[startPage]?.lines[0]
+    if (firstLine && firstLine.blockIndex <= firstChanged) {
+      pages.push(...previous!.pages.slice(0, startPage))
+      // A paragraph resumed in the middle started on an earlier (kept) page.
+      const kept = firstLine.blockIndex + (firstLine.lineIndex > 0 ? 1 : 0)
+      for (let index = 0; index < kept; index += 1) blockPages[index] = previous!.blockPages[index]
+      resumeBlock = firstLine.blockIndex
+      resumeLine = firstLine.lineIndex
+      chapterTitle = previous!.pages[startPage].chapterTitle
+      rebuiltFrom = startPage
+    }
+  }
 
   const openPage = (blank = false) => {
     const geometry = pageGeometry(setup, pages.length, setup.pageNumberStart)
@@ -158,7 +203,6 @@ export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], c
     y = 0
     footnoteHeight = 0
   }
-  openPage()
   const room = () => page.content.height - y - (footnoteHeight ? footnoteHeight + footnoteSeparator : 0)
   const pageEmpty = () => page.lines.length === 0
 
@@ -193,71 +237,110 @@ export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], c
     const extraSeparator = notes && !footnoteHeight ? footnoteSeparator : 0
     return height + notes + extraSeparator <= room() + 0.5
   }
+  /** After opening a page for (block, line): the old layout from here on is still right. */
+  const aligned = (blockIndex: number, line: number) => {
+    if (!incremental || delta !== 0 || blockIndex <= lastChanged || page.blank) return false
+    const old = previous!.pages[page.index]
+    const first = old?.lines[0]
+    if (!old || old.blank || !first || first.blockIndex !== blockIndex || first.lineIndex !== line || old.chapterTitle !== page.chapterTitle) return false
+    pages.pop()
+    reusedFrom = pages.length
+    pages.push(...previous!.pages.slice(page.index))
+    for (let index = line === 0 ? blockIndex : blockIndex + 1; index < blocks.length; index += 1) blockPages[index] = previous!.blockPages[index]
+    return true
+  }
 
-  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
-    const block = blocks[blockIndex]
-    const layout = layouts[blockIndex]
-    const style = layout.style
-    if (block.chapterStart) chapterTitle = block.chapterTitle
-    const breakBefore = block.breakBefore === 'page' || style.pageBreakBefore || block.chapterStart
-    if (breakBefore && !(pages.length === 1 && pageEmpty())) {
-      if (!pageEmpty() || y > 0) openPage()
-      if (block.chapterStart && setup.chapterStartsRight && page.side !== 'right') {
-        page.blank = true
+  if (unchanged) {
+    pages.push(...previous!.pages)
+    blockPages.push(...previous!.blockPages)
+    reusedFrom = 0
+  } else {
+    openPage()
+    let first = true
+    outer: for (let blockIndex = resumeBlock; blockIndex < blocks.length; blockIndex += 1) {
+      const block = blocks[blockIndex]
+      const layout = layouts[blockIndex]
+      const style = layout.style
+      if (block.chapterStart) chapterTitle = block.chapterTitle
+      const resuming = first && resumeLine > 0
+      first = false
+      if (!resuming) {
+        const breakBefore = block.breakBefore === 'page' || style.pageBreakBefore || block.chapterStart
+        if (breakBefore && !(pages.length === 1 && pageEmpty())) {
+          if (!pageEmpty() || y > 0) {
+            openPage()
+            if (aligned(blockIndex, 0)) break outer
+          }
+          if (block.chapterStart && setup.chapterStartsRight && page.side !== 'right') {
+            page.blank = true
+            openPage()
+            if (aligned(blockIndex, 0)) break outer
+          }
+        }
+        if (block.chapterStart) page.chapterTitle = chapterTitle
+        // Space before collapses at the top of a page, except for a chapter title.
+        const before = pageEmpty() && !block.chapterStart ? 0 : style.spaceBefore
+        if (before) {
+          if (before >= room()) {
+            openPage()
+            if (aligned(blockIndex, 0)) break outer
+          } else y += before
+        }
+        // Keep with next: the heading moves with the first two lines of what follows.
+        if (style.keepWithNext && blockIndex + 1 < blocks.length && !pageEmpty()) {
+          const next = layouts[blockIndex + 1]
+          const needed = linesHeight(blockIndex, 0, layout.lines.length).height + style.spaceAfter + next.style.spaceBefore + linesHeight(blockIndex + 1, 0, Math.min(2, next.lines.length)).height
+          if (needed > room()) {
+            openPage()
+            if (aligned(blockIndex, 0)) break outer
+          }
+        }
+        blockPages[blockIndex] = page.index
+      }
+      let line = resuming ? resumeLine : 0
+      const total = layout.lines.length
+      while (line < total) {
+        let count = 0
+        while (line + count < total && fits(blockIndex, line, line + count + 1)) count += 1
+        if (line + count >= total) {
+          placeLines(blockIndex, line, total)
+          line = total
+          break
+        }
+        if (setup.widowsOrphans && total >= 2) {
+          // No single first line at the bottom (orphan), no single last line at the top (widow).
+          if (line === 0 && count === 1 && !pageEmpty()) count = 0
+          if (total - (line + count) === 1 && count >= 2 && total >= 3) count -= 1
+        }
+        if (count === 0 && pageEmpty()) count = 1
+        if (count > 0) placeLines(blockIndex, line, line + count)
+        line += count
         openPage()
+        if (line === 0) blockPages[blockIndex] = page.index
+        if (aligned(blockIndex, line)) break outer
       }
+      y += style.spaceAfter
     }
-    if (block.chapterStart) {
-      chapterStartPage = page.index
-      page.chapterTitle = chapterTitle
-    }
-    // Space before collapses at the top of a page, except for a chapter title.
-    const before = pageEmpty() && !block.chapterStart ? 0 : style.spaceBefore
-    if (before) {
-      if (before >= room()) openPage()
-      else y += before
-    }
-    // Keep with next: the heading moves with the first two lines of what follows.
-    if (style.keepWithNext && blockIndex + 1 < blocks.length && !pageEmpty()) {
-      const next = layouts[blockIndex + 1]
-      const needed = linesHeight(blockIndex, 0, layout.lines.length).height + style.spaceAfter + next.style.spaceBefore + linesHeight(blockIndex + 1, 0, Math.min(2, next.lines.length)).height
-      if (needed > room()) openPage()
-    }
-    blockPages[blockIndex] = page.index
-    let line = 0
-    const total = layout.lines.length
-    while (line < total) {
-      let count = 0
-      while (line + count < total && fits(blockIndex, line, line + count + 1)) count += 1
-      if (line + count >= total) {
-        placeLines(blockIndex, line, total)
-        line = total
-        break
-      }
-      if (setup.widowsOrphans && total >= 2) {
-        // No single first line at the bottom (orphan), no single last line at the top (widow).
-        if (line === 0 && count === 1 && !pageEmpty()) count = 0
-        if (total - (line + count) === 1 && count >= 2 && total >= 3) count -= 1
-      }
-      if (count === 0 && pageEmpty()) count = 1
-      if (count > 0) placeLines(blockIndex, line, line + count)
-      line += count
-      openPage()
-      if (line === 0) blockPages[blockIndex] = page.index
-    }
-    y += style.spaceAfter
   }
 
   // Footnotes sit at the bottom of their page; headers and footers get their fields.
   const totalPages = String(pages.length + setup.pageNumberStart - 1)
-  for (const current of pages) {
-    let bottom = current.content.y + current.content.height
-    for (let index = current.footnotes.length - 1; index >= 0; index -= 1) {
-      const note = current.footnotes[index]
-      bottom -= note.layout.height + note.layout.style.spaceAfter
-      note.y = bottom
+  const headerKey = `${manifest.title}\u0000${manifest.subtitle ?? ''}\u0000${manifest.author ?? ''}\u0000${totalPages}`
+  const refillAll = !incremental || previous!.headerKey !== headerKey
+  const rebuiltTo = reusedFrom >= 0 ? reusedFrom : pages.length
+  for (let index = 0; index < pages.length; index += 1) {
+    const rebuilt = index >= (unchanged ? pages.length : rebuiltFrom) && index < rebuiltTo
+    if (!rebuilt && !refillAll) continue
+    const current = rebuilt ? pages[index] : { ...pages[index] }
+    if (rebuilt) {
+      let bottom = current.content.y + current.content.height
+      for (let note = current.footnotes.length - 1; note >= 0; note -= 1) {
+        const placed = current.footnotes[note]
+        bottom -= placed.layout.height + placed.layout.style.spaceAfter
+        placed.y = bottom
+      }
     }
-    const chapterStart = pages.some((candidate) => candidate === current) && current.lines[0] && blocks[current.lines[0].blockIndex]?.chapterStart && current.lines[0].lineIndex === 0
+    const chapterStart = Boolean(current.lines[0] && blocks[current.lines[0].blockIndex]?.chapterStart && current.lines[0].lineIndex === 0)
     const hide = current.blank || (setup.hideOnChapterStart && chapterStart)
     const values = { title: manifest.title, subtitle: manifest.subtitle ?? '', author: manifest.author ?? '', chapter: current.chapterTitle, page: current.number, pages: totalPages }
     const mirror = setup.mirror && current.side === 'left'
@@ -267,8 +350,8 @@ export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], c
     }
     current.header = hide ? null : fill(setup.header)
     current.footer = current.blank ? null : (setup.hideOnChapterStart && chapterStart ? { left: '', center: fillTemplate(setup.footer.center, values), right: '' } : fill(setup.footer))
+    pages[index] = current
   }
-  void chapterStartPage
   const done = performance.now()
   return {
     pages,
@@ -279,6 +362,14 @@ export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], c
     pageHeight: first.height,
     contentWidth,
     footnoteNumbers,
-    stats: { lines: layouts.reduce((sum, layout) => sum + layout.lines.length, 0), layoutMs: layoutDone - started, paginateMs: done - layoutDone, measured: cache.measured - measuredBefore },
+    setup,
+    headerKey,
+    stats: {
+      lines: layouts.reduce((sum, layout) => sum + layout.lines.length, 0),
+      layoutMs: layoutDone - started,
+      paginateMs: done - layoutDone,
+      measured: cache.measured - measuredBefore,
+      repaginatedPages: unchanged ? 0 : rebuiltTo - rebuiltFrom,
+    },
   }
 }

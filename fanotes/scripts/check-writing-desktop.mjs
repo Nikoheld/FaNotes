@@ -32,6 +32,8 @@ const port = 19_300 + Math.floor(Math.random() * 400)
 const child = spawn('xvfb-run', ['-a', '-s', '-screen 0 1440x900x24', executable, root, `--remote-debugging-port=${port}`, '--no-sandbox'], {
   env: { ...process.env, HOME: home, XDG_CONFIG_HOME: configHome, XDG_RUNTIME_DIR: runtime },
   stdio: ['ignore', 'pipe', 'pipe'],
+  // Its own process group, so Xvfb and Electron end together with the test.
+  detached: true,
 })
 let output = ''
 child.stdout.on('data', (chunk) => { output += chunk })
@@ -86,6 +88,16 @@ try {
   await page.keyboard.type('Auf dem Desktop geschrieben.')
   await page.keyboard.press('Enter')
   await page.keyboard.type('Zweiter Absatz mit Umlauten: äöü ß.')
+  // A footnote and a comment through the in-app dialog (Electron has no window.prompt).
+  await page.keyboard.press('Control+Alt+f')
+  await page.locator('.wm-dialog textarea').fill('Quelle: eigenes Tagebuch.')
+  await page.keyboard.press('Control+Enter')
+  await page.waitForTimeout(400)
+  ok('a footnote number appears in the text', await page.evaluate(() => [...document.querySelectorAll('.wm-fn-ref')].some((span) => span.textContent === '1')))
+  await page.keyboard.press('Shift+Home')
+  await page.keyboard.press('Control+Alt+m')
+  await page.locator('.wm-dialog textarea').fill('Klingt zu brav.')
+  await page.locator('.wm-dialog button[type="submit"]').click()
   await page.waitForTimeout(1500)
   const storyDir = path.join(vault, 'Deutsch', 'Neue Geschichte.story')
   ok('the story folder exists on disk', fs.existsSync(path.join(storyDir, 'story.json')))
@@ -95,6 +107,7 @@ try {
   const manifest = JSON.parse(fs.readFileSync(path.join(storyDir, 'story.json'), 'utf8'))
   ok('story.json is a valid manifest', manifest.format === 'fanotes-story-v1' && manifest.binder.length === 1)
   const savedScene = JSON.parse(sceneText.split('\n')[0])
+  ok('the footnote and the comment are saved', Object.values(savedScene.footnotes ?? {}).some((note) => note.runs[0]?.text === 'Quelle: eigenes Tagebuch.') && Object.values(savedScene.comments ?? {}).some((comment) => comment.text === 'Klingt zu brav.'))
   ok('edited paragraphs carry a version vector', savedScene.paragraphs.every((paragraph) => Object.values(paragraph.v).every((count) => count >= 1)))
 
   // Close: the tree shows the story as one document; reopen keeps the text.
@@ -115,9 +128,10 @@ try {
   ok('run finished', false, `${error.stack}\n${output.slice(-800)}`)
 } finally {
   await browser?.close().catch(() => undefined)
-  child.kill('SIGTERM')
-  await new Promise((resolve) => setTimeout(resolve, 500))
+  try { process.kill(-child.pid, 'SIGTERM') } catch { child.kill('SIGTERM') }
+  await new Promise((resolve) => setTimeout(resolve, 800))
+  try { process.kill(-child.pid, 'SIGKILL') } catch { /* already gone */ }
   fs.rmSync(temporary, { recursive: true, force: true })
 }
 console.log(`${results.filter(Boolean).length}/${results.length} passed`)
-if (results.some((pass) => !pass)) process.exit(1)
+process.exit(results.some((pass) => !pass) ? 1 : 0)

@@ -15,9 +15,9 @@ import { marksAt, runsText } from '../model/runs'
 import type { Align, BinderNode, FontFamilyId, Marks, StoryLanguage } from '../model/types'
 import { loadProject, recoverJournal, storageAdapter, storyHost, storyTitleFromPath, writeJournal } from '../storage'
 import { L, formatNumber, styleName } from './i18n'
-import { caretBox, hitTest, lineIndex, move, type Motion } from './navigation'
+import { caretBox, hitTest, move, type Motion } from './navigation'
 import { Inspector } from './Inspector'
-import { PageView, pageRects, type Highlight, type PagePointer, type PageTheme, type ViewMode } from './PageView'
+import { PageView, caretPageRect, type Highlight, type PagePointer, type PageTheme, type ViewMode } from './PageView'
 import { countBlocks, countRuns, countText, htmlToParagraphs, runsToHtml, textToParagraphs } from './text'
 import './writing.css'
 
@@ -39,10 +39,10 @@ const ZOOMS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
 const COLORS = ['#1f2937', '#7f1d1d', '#9a3412', '#166534', '#1e3a8a', '#6b21a8', '#6b7280']
 const HIGHLIGHTS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa']
 const LANGUAGES: Array<{ id: StoryLanguage; label: string }> = [
-  { id: 'de', label: 'Deutsch' },
-  { id: 'de-CH', label: 'Deutsch (Schweiz)' },
-  { id: 'en-US', label: 'English (US)' },
-  { id: 'en-GB', label: 'English (UK)' },
+  { id: 'de', label: 'DE' },
+  { id: 'de-CH', label: 'DE-CH' },
+  { id: 'en-US', label: 'EN-US' },
+  { id: 'en-GB', label: 'EN-GB' },
 ]
 
 type FindState = { open: boolean; replace: boolean; query: string; replacement: string; caseSensitive: boolean; wholeWord: boolean; regex: boolean; current: number }
@@ -62,6 +62,8 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const [focusMode, setFocusMode] = useState(false)
   const [binderOpen, setBinderOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(false)
+  /** The small in-app dialog for footnote and comment text (window.prompt does not exist in Electron). */
+  const [noteDialog, setNoteDialog] = useState<{ kind: 'footnote' | 'comment'; text: string; selection: commands.EditorState['selection'] } | null>(null)
   const [find, setFind] = useState<FindState>({ open: false, replace: false, query: '', replacement: '', caseSensitive: false, wholeWord: false, regex: false, current: 0 })
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'error'>('saved')
   const [caretOn, setCaretOn] = useState(true)
@@ -109,13 +111,16 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const doc = state?.doc ?? null
 
   // ── Layout ─────────────────────────────────────────────────────────────
+  // The previous layout lets pagination restart at the changed page (see paginate.ts).
+  const previousLayout = useRef<ReturnType<typeof layoutManuscript> | null>(null)
   const layout = useMemo(() => {
     if (!doc || !measurer || !fontsReady) return null
     const footnotes = new Map<string, { runs: import('../model/types').Run[] }>()
     for (const scene of doc.scenes.values()) for (const [id, note] of Object.entries(scene.footnotes ?? {})) footnotes.set(id, note)
-    return layoutManuscript(doc.manifest, doc.flow, cache, { measurer, hyphenators, footnoteRuns: (id) => footnotes.get(id)?.runs ?? null })
+    const next = layoutManuscript(doc.manifest, doc.flow, cache, { measurer, hyphenators, footnoteRuns: (id) => footnotes.get(id)?.runs ?? null }, previousLayout.current)
+    previousLayout.current = next
+    return next
   }, [doc, measurer, fontsReady, cache, hyphenators])
-  const lines = useMemo(() => (layout ? lineIndex(layout) : null), [layout])
   useEffect(() => {
     if (layout) (window as unknown as { __fanotesWriting?: unknown }).__fanotesWriting = { stats: layout.stats, pages: layout.pages.length }
   }, [layout])
@@ -174,12 +179,12 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     return () => window.clearInterval(timer)
   }, [state?.selection])
 
-  const caretGeometry = useMemo(() => (layout && lines && state && measurer ? caretBox(layout, lines, state.selection.head, measurer) : null), [layout, lines, state, measurer])
+  const caretGeometry = useMemo(() => (layout && state && measurer ? caretBox(layout, state.selection.head, measurer, state.doc.index) : null), [layout, state, measurer])
 
   const scrollCaretIntoView = useCallback(() => {
     const element = scroller.current
     if (!element || !layout || !caretGeometry) return
-    const rect = pageRects(layout, zoom, view, element.clientWidth).rects[caretGeometry.page]
+    const rect = caretPageRect(layout, caretGeometry.page, zoom, view, element.clientWidth)
     if (!rect) return
     const top = rect.top + caretGeometry.y * zoom
     const bottom = top + caretGeometry.height * zoom
@@ -412,20 +417,27 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   // ── Footnotes and comments ─────────────────────────────────────────────
   const addFootnote = () => {
     if (!controller) return
-    const text = window.prompt(L('Text der Fussnote', 'Footnote text'), '')
-    if (text === null) return
-    const result = commands.insertFootnote(controller.state, text)
-    if (result) run(result.state, 'structure')
+    setNoteDialog({ kind: 'footnote', text: '', selection: controller.state.selection })
   }
   const addComment = () => {
     if (!controller || isCollapsed(controller.state.selection)) {
       setNotice(L('Markiere zuerst den Text, zu dem der Kommentar gehört.', 'Select the text the comment is about first.'))
       return
     }
-    const text = window.prompt(L('Kommentar', 'Comment'), '')
-    if (!text) return
-    const result = commands.addComment(controller.state, L('Ich', 'Me'), text)
-    if (result) run(result.state, 'format')
+    setNoteDialog({ kind: 'comment', text: '', selection: controller.state.selection })
+  }
+  const confirmNote = () => {
+    if (!controller || !noteDialog) return
+    const st = { ...controller.state, selection: noteDialog.selection }
+    if (noteDialog.kind === 'footnote') {
+      const result = commands.insertFootnote(st, noteDialog.text.trim())
+      if (result) run(result.state, 'structure')
+    } else if (noteDialog.text.trim()) {
+      const result = commands.addComment(st, L('Ich', 'Me'), noteDialog.text.trim())
+      if (result) run(result.state, 'format')
+    }
+    setNoteDialog(null)
+    refocus()
   }
 
   // ── Find & replace ─────────────────────────────────────────────────────
@@ -708,6 +720,19 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
         </div>
         {inspectorOpen && !focusMode && <Inspector controller={controller} manifest={doc.manifest} footnoteNumbers={layout.footnoteNumbers} onClose={() => setInspectorOpen(false)} />}
       </div>
+
+      {noteDialog && (
+        <div className="wm-dialog-backdrop" onMouseDown={() => { setNoteDialog(null); refocus() }}>
+          <form className="wm-dialog" role="dialog" aria-label={noteDialog.kind === 'footnote' ? L('Fussnote einfügen', 'Insert footnote') : L('Kommentar hinzufügen', 'Add comment')} onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); confirmNote() }}>
+            <strong>{noteDialog.kind === 'footnote' ? L('Fussnote', 'Footnote') : L('Kommentar', 'Comment')}</strong>
+            <textarea autoFocus rows={4} value={noteDialog.text} data-i18n-ignore placeholder={noteDialog.kind === 'footnote' ? L('Text der Fussnote', 'Footnote text') : L('Was ist dir hier aufgefallen?', 'What did you notice here?')} onChange={(event) => setNoteDialog((value) => (value ? { ...value, text: event.target.value } : value))} onKeyDown={(event) => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); confirmNote() } if (event.key === 'Escape') { setNoteDialog(null); refocus() } }} />
+            <div>
+              <button type="button" className="secondary-button" onClick={() => { setNoteDialog(null); refocus() }}>{L('Abbrechen', 'Cancel')}</button>
+              <button type="submit" className="primary-button" disabled={noteDialog.kind === 'comment' && !noteDialog.text.trim()}>{noteDialog.kind === 'footnote' ? L('Einfügen', 'Insert') : L('Hinzufügen', 'Add')}</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <footer className="wm-status" data-i18n-ignore>
         <span>{L('Seite', 'Page')} {pageNumber} / {layout.pages.length}</span>

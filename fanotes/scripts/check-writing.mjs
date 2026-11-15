@@ -329,6 +329,56 @@ try {
     assert.equal(second.stats.measured, 1)
   })
 
+  await test('incremental pagination gives exactly the pages of a full pass (120 random edits)', () => {
+    const { manifest, scenes } = novel(6, 25)
+    manifest.page = { ...manifest.page, chapterStartsRight: true, header: { left: '{title}', center: '{pages}', right: '{chapter}' } }
+    const signature = (result) => JSON.stringify({
+      pages: result.pages.map((page) => [page.number, page.side, page.blank ? 1 : 0, page.chapterTitle, page.header, page.footer, page.lines.map((line) => [line.blockKey, line.lineIndex, Math.round(line.x * 100), Math.round(line.y * 100)]), page.footnotes.map((note) => [note.id, Math.round(note.y)])]),
+      blockPages: result.blockPages,
+    })
+    const incrementalCache = new paginate.LayoutCache()
+    let previous = paginate.layoutManuscript(manifest, flow.buildFlow(manifest, scenes), incrementalCache, { measurer })
+    let seed = 7
+    const random = (limit) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % limit }
+    let reusedSome = false
+    for (let step = 0; step < 120; step += 1) {
+      const sceneIds = [...scenes.keys()]
+      const scene = scenes.get(sceneIds[random(sceneIds.length)])
+      const paragraphs = scene.paragraphs.slice()
+      const index = random(paragraphs.length)
+      const target = paragraphs[index]
+      const kind = random(6)
+      if (kind <= 2) {
+        // Type a few words (sometimes enough to add a line).
+        const text = runs.runsText(target.runs)
+        const at = random(text.length + 1)
+        paragraphs[index] = { ...target, runs: runs.insertText(target.runs, at, ' neue Worte'.repeat(1 + random(kind === 2 ? 12 : 2))) }
+      } else if (kind === 3 && paragraphs.length > 3) {
+        paragraphs.splice(index, 1)
+      } else if (kind === 4) {
+        const next = paragraphs[index + 1]?.key ?? null
+        paragraphs.splice(index + 1, 0, { id: `new${step}x${random(99999)}`, key: keys.keyBetween(target.key, next), v: {}, style: 'body', runs: [{ text: 'Ein eingefügter Absatz.' }] })
+      } else {
+        const text = runs.runsText(target.runs)
+        paragraphs[index] = { ...target, runs: runs.deleteRange(target.runs, 0, Math.min(text.length, 1 + random(120))) }
+      }
+      scenes.set(scene.id, { ...scene, paragraphs })
+      const blocks = flow.buildFlow(manifest, scenes)
+      const incremental = paginate.layoutManuscript(manifest, blocks, incrementalCache, { measurer }, previous)
+      const full = paginate.layoutManuscript(manifest, blocks, new paginate.LayoutCache(), { measurer })
+      if (signature(incremental) !== signature(full)) {
+        const a = JSON.parse(signature(incremental))
+        const b = JSON.parse(signature(full))
+        const page = a.pages.findIndex((value, index) => JSON.stringify(value) !== JSON.stringify(b.pages[index]))
+        const blockIndex = a.blockPages.findIndex((value, index) => value !== b.blockPages[index])
+        assert.fail(`step ${step} (edit kind ${kind}): pages ${a.pages.length}/${b.pages.length}, first differing page ${page}: ${JSON.stringify(a.pages[page])?.slice(0, 300)} vs ${JSON.stringify(b.pages[page])?.slice(0, 300)}; blockPages differ at ${blockIndex}: ${a.blockPages[blockIndex]} vs ${b.blockPages[blockIndex]} (lengths ${a.blockPages.length}/${b.blockPages.length})`)
+      }
+      if (incremental.stats.repaginatedPages < incremental.pages.length / 2) reusedSome = true
+      previous = incremental
+    }
+    assert.ok(reusedSome, 'most edits re-paginate only part of the manuscript')
+  })
+
   await test('a 320-page novel lays out quickly (fixed-width measurer)', () => {
     const { manifest, scenes } = novel(32, 120)
     const cache = new paginate.LayoutCache()
@@ -338,7 +388,14 @@ try {
     const again = performance.now()
     paginate.layoutManuscript(manifest, flow.buildFlow(manifest, scenes), cache, { measurer })
     const repaginate = performance.now() - again
-    console.log(`  ${result.pages.length} pages, ${result.stats.lines} lines: full layout ${full.toFixed(0)} ms, re-pagination ${repaginate.toFixed(1)} ms`)
+    // One keystroke in the middle of the book, incrementally.
+    const middle = scenes.get('scene000016')
+    scenes.set(middle.id, { ...middle, paragraphs: middle.paragraphs.map((paragraph, index) => (index === 50 ? { ...paragraph, runs: runs.insertText(paragraph.runs, 10, 'x') } : paragraph)) })
+    const typed = performance.now()
+    const incremental = paginate.layoutManuscript(manifest, flow.buildFlow(manifest, scenes), cache, { measurer }, result)
+    const keystroke = performance.now() - typed
+    console.log(`  ${result.pages.length} pages, ${result.stats.lines} lines: full layout ${full.toFixed(0)} ms, full re-pagination ${repaginate.toFixed(1)} ms, one keystroke ${keystroke.toFixed(2)} ms (${incremental.stats.repaginatedPages} page(s) re-paginated)`)
+    assert.ok(incremental.stats.repaginatedPages <= 3, `${incremental.stats.repaginatedPages} pages re-paginated for one character`)
     assert.ok(result.pages.length >= 300, `${result.pages.length} pages`)
     assert.ok(repaginate < 120, `re-pagination ${repaginate} ms`)
   })
@@ -353,6 +410,19 @@ try {
     return { doc, selection: docMod.caret({ block: first.key, offset: 0 }), storedMarks: null }
   }
   const type = (state, text) => commands.insertText(state, text)
+
+  await test('a patched flow (typing, formatting) equals a rebuilt one', () => {
+    let state = type(freshState(), 'Erster Absatz.')
+    state = commands.splitParagraph(state)
+    state = type(state, 'Zweiter Absatz.')
+    const patched = commands.toggleMark({ ...state, selection: { anchor: { block: state.doc.flow[2].key, offset: 0 }, head: { block: state.doc.flow[2].key, offset: 7 } } }, 'b').doc
+    const typed = type({ ...state, selection: docMod.caret({ block: state.doc.flow[1].key, offset: 5 }) }, 'xyz').doc
+    for (const doc of [patched, typed, commands.setAlign(state, 'center').doc]) {
+      const rebuilt = docMod.makeDoc(doc.manifest, doc.scenes)
+      assert.deepEqual(doc.flow.map((block) => ({ ...block, paragraph: undefined })), rebuilt.flow.map((block) => ({ ...block, paragraph: undefined })))
+      assert.deepEqual([...doc.index], [...rebuilt.index])
+    }
+  })
 
   await test('typing, Enter, Backspace across paragraphs, Delete', () => {
     let state = type(freshState(), 'Hallo Welt')

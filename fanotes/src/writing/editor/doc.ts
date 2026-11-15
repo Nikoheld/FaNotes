@@ -64,11 +64,40 @@ export const clampPos = (doc: Doc, pos: Pos, fallbackIndex = 0): Pos => {
 
 export const sceneParagraphIndex = (scene: Scene, paragraphId: string) => scene.paragraphs.findIndex((paragraph) => paragraph.id === paragraphId)
 
-/** Replaces one scene; the flow is rebuilt. */
+/**
+ * Replaces one scene. When only paragraph contents changed (same paragraphs in
+ * the same order, as with typing or formatting) the affected blocks are
+ * patched into a copy of the flow; otherwise the flow is rebuilt.
+ */
 export const withScene = (doc: Doc, scene: Scene, manifest = doc.manifest): Doc => {
   const scenes = new Map(doc.scenes)
   scenes.set(scene.id, scene)
-  return makeDoc(manifest, scenes)
+  const before = doc.scenes.get(scene.id)
+  if (manifest !== doc.manifest || !before || before.paragraphs.length !== scene.paragraphs.length) return makeDoc(manifest, scenes)
+  let flow: FlowBlock[] | null = null
+  for (let index = 0; index < scene.paragraphs.length; index += 1) {
+    const next = scene.paragraphs[index]
+    const previous = before.paragraphs[index]
+    if (next === previous) continue
+    if (next.id !== previous.id || Boolean(next.deleted) !== Boolean(previous.deleted)) return makeDoc(manifest, scenes)
+    if (next.deleted) continue
+    const position = doc.index.get(paragraphKey(next.id))
+    if (position === undefined) return makeDoc(manifest, scenes)
+    flow ??= doc.flow.slice()
+    const block = flow[position]
+    const { align: _align, lang: _lang, breakBefore: _break, conflictOf: _conflict, ...rest } = block
+    flow[position] = {
+      ...rest,
+      style: next.style,
+      runs: next.runs,
+      ...(next.align ? { align: next.align } : {}),
+      ...(next.lang ? { lang: next.lang } : {}),
+      ...(next.breakBefore ? { breakBefore: next.breakBefore } : {}),
+      ...(next.conflictOf ? { conflictOf: next.conflictOf } : {}),
+      paragraph: next,
+    }
+  }
+  return { manifest, scenes, flow: flow ?? doc.flow, index: doc.index }
 }
 
 export const updateParagraph = (doc: Doc, sceneId: string, paragraphId: string, update: (paragraph: Paragraph) => Paragraph): Doc => {

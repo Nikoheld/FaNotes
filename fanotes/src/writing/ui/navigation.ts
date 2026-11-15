@@ -8,19 +8,35 @@ import { runsText } from '../model/runs'
 
 export type CaretBox = { page: number; x: number; y: number; height: number }
 
-/** Where each (block, line) sits: page index and placement. */
-export const lineIndex = (layout: ManuscriptLayout) => {
-  const map = new Map<string, { page: Page; placed: PlacedLine }>()
-  for (const page of layout.pages) for (const placed of page.lines) map.set(`${placed.blockIndex}:${placed.lineIndex}`, { page, placed })
-  return map
+const blockIndexes = new WeakMap<ManuscriptLayout, Map<string, number>>()
+export const blockIndexOf = (layout: ManuscriptLayout, key: string) => {
+  let map = blockIndexes.get(layout)
+  if (!map) {
+    map = new Map(layout.blocks.map((block, index) => [block.key, index]))
+    blockIndexes.set(layout, map)
+  }
+  return map.get(key) ?? -1
 }
 
-export const caretBox = (layout: ManuscriptLayout, lines: ReturnType<typeof lineIndex>, pos: Pos, measurer: TextMeasurer): CaretBox | null => {
-  const blockIndex = layout.blocks.findIndex((block) => block.key === pos.block)
+/** Where a paragraph's line sits: found from the page the paragraph starts on. */
+export const placedLine = (layout: ManuscriptLayout, blockIndex: number, line: number): { page: Page; placed: PlacedLine } | null => {
+  for (let index = Math.max(0, layout.blockPages[blockIndex] ?? 0); index < layout.pages.length; index += 1) {
+    const page = layout.pages[index]
+    for (const placed of page.lines) {
+      if (placed.blockIndex === blockIndex && placed.lineIndex === line) return { page, placed }
+      if (placed.blockIndex > blockIndex) return null
+    }
+  }
+  return null
+}
+
+/** `index` is the document's block index (the layout's blocks are the document's flow). */
+export const caretBox = (layout: ManuscriptLayout, pos: Pos, measurer: TextMeasurer, index?: Map<string, number>): CaretBox | null => {
+  const blockIndex = index?.get(pos.block) ?? blockIndexOf(layout, pos.block)
   if (blockIndex < 0) return null
   const paragraph = layout.layouts[blockIndex]
   const line = lineAt(paragraph, pos.offset, true)
-  const where = lines.get(`${blockIndex}:${line}`)
+  const where = placedLine(layout, blockIndex, line)
   if (!where) return null
   const box = paragraph.lines[line]
   return { page: where.page.index, x: where.placed.x + caretX(paragraph, line, pos.offset, measurer), y: where.placed.y, height: box.height }

@@ -62,6 +62,16 @@ export const pageRects = (layout: ManuscriptLayout, zoom: number, view: ViewMode
   return { rects, width: Math.max(containerWidth, width + GAP * 2), height: GAP * 2 + layout.pages.length * (height + gap) }
 }
 
+/** The rect of one page, without building all of them (used per keystroke for the caret). */
+export const caretPageRect = (layout: ManuscriptLayout, index: number, zoom: number, view: ViewMode, containerWidth: number): PageRect | null => {
+  if (!layout.pages[index]) return null
+  if (view === 'spread') return pageRects(layout, zoom, view, containerWidth).rects[index] ?? null
+  const width = layout.pageWidth * zoom
+  const height = layout.pageHeight * zoom
+  const gap = view === 'draft' ? 0 : GAP
+  return { left: Math.max(GAP, (containerWidth - width) / 2), top: GAP + index * (height + gap), width, height }
+}
+
 const pieceStyle = (measurer: TextMeasurer, box: LineBox, piece: LineBox['pieces'][number]) => {
   const metrics = measurer.metrics(piece.font)
   const ownBaseline = (box.height - (metrics.ascent + metrics.descent)) / 2 + metrics.ascent

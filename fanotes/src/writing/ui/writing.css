@@ -1,9 +1,9 @@
 /* Writing mode ("Schreiben"): page editor for stories. Uses the app's tokens for the chrome. */
-.wm-root { position: fixed; inset: 0; z-index: 260; display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; color: var(--text); background: var(--bg); font-family: var(--ui-font); }
+.wm-root { position: fixed; inset: 0; z-index: 260; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr) auto; color: var(--text); background: var(--bg); font-family: var(--ui-font); }
 .wm-loading, .wm-error { display: grid; place-items: center; gap: 12px; height: 100%; color: var(--text-muted); font-size: 14px; grid-row: 1 / -1; }
 .wm-error p { max-width: 520px; margin: 0; color: var(--text); text-align: center; }
 
-.wm-toolbar { grid-row: 1; display: flex; align-items: center; gap: 3px; min-height: 46px; padding: 5px 10px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--panel); scrollbar-width: thin; }
+.wm-toolbar { grid-row: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 3px; min-height: 46px; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--panel); scrollbar-width: thin; }
 .wm-title { max-width: 220px; margin: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 650; }
 .wm-sep { flex: none; width: 1px; height: 22px; margin: 0 5px; background: var(--border-strong); }
 .wm-grow { flex: 1; min-width: 8px; }
@@ -134,3 +134,7 @@
 .wm-note-actions { display: flex; align-items: center; gap: 2px; }
 .wm-note-actions small { flex: 1; color: var(--text-muted); font-size: 11px; }
 @media (max-width: 1000px) { .wm-inspector { position: absolute; z-index: 6; top: 0; right: 0; bottom: 0; box-shadow: var(--shadow); } }
+.wm-dialog-backdrop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(0, 0, 0, .28); }
+.wm-dialog { display: grid; gap: 10px; width: min(440px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel-strong); box-shadow: var(--shadow); }
+.wm-dialog textarea { min-height: 90px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-elevated); font: inherit; resize: vertical; }
+.wm-dialog > div { display: flex; justify-content: flex-end; gap: 8px; }

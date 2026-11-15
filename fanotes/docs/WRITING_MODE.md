@@ -85,3 +85,17 @@ A `.story` folder shows as one document in the tree, library and recent list, op
 5. Sync and integration: scene merge in both engines, deliberate cuts, tree/library/search/conflict preview.
 6. Android: WebView host, vault/sync bridge, touch/stylus/keyboard.
 7. Performance proof, full test pass, beta for testers (desktop GitHub pre-release; Android APK/AAB for Play internal testing).
+
+## 10. Status
+
+### Milestone 1 (core) — 2026-11-15
+Done: model and storage (`src/writing/model`, `storage.ts`), layout engine (`layout/`), editing commands, undo and saving (`editor/`), page editor UI (`ui/`), desktop channels `fanotes:story-read|write|list|create` (only inside `.story` folders), browser-vault storage, tree entry and "Neue Geschichte", crash journal.
+Features: page/spread/draft views, zoom 50–300 %, paper/sepia/night, focus mode, paragraph styles (12 built in, editable), fonts, sizes, B/I/U/S, super/subscript, small caps, colour, highlight, alignment, first-line indent, drop caps, bullet lists, hyphenation (de, en-US, en-GB), widows/orphans, keep-with-next, chapter starts (optionally right-hand), manual page breaks, new scene/chapter at the caret, headers/footers with fields, footnotes at the page bottom, comments, find & replace (case, whole word, regex), word/character counts and reading time, binder with rename, page setup.
+Not yet: endnotes (planned as an export option), numbered lists, table of contents, style editor for new styles (only the built-in ones), binder drag and drop (milestone 3).
+
+Measured (web build in headless Chromium on the shared server; real fonts):
+- 608-page A5 novel (184 000 words, 32 chapters): opens in 1.0–1.2 s.
+- Typing in it (event timing, key to next paint, after warm-up): p50 16–40 ms, p95 40–56 ms at the start, middle and end, on a shared server (load 5–12) in headless Chromium with software rendering. Per keystroke the engine re-lays out one paragraph (about 1 ms) and, incrementally, one page (0.1 ms); the rest is the browser painting.
+- Node, fixed-width measurer: 674 pages laid out from scratch in about 260 ms; one keystroke 1.9 ms including flow and layout (1 page re-paginated). 120 random edits re-paginated incrementally give exactly the pages of a full pass.
+
+Tests: `node scripts/check-writing.mjs` (24: keys, runs, repair, merge convergence, tombstones, flow, line breaking, hyphenation, lists, drop caps, caret geometry, pagination rules, footnotes, cache, editing commands, undo grouping, saving); `node scripts/check-writing-desktop.mjs` (real Electron under Xvfb: channels refuse paths outside `.story`, files on disk, tree entry, reopen, footnote and comment); browser end-to-end on the web build (15 checks incl. the 608-page latency run).
