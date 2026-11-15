@@ -34,11 +34,11 @@ test('server stores JSONL, enforces size and rate limits, deletes by install id,
   let clock = Date.parse('2026-11-15T10:00:00Z')
   const s = await start(() => clock)
   try {
-    let r = await fetch(`${s.base}/api/v1/diagnostics`, { method: 'POST', body: JSON.stringify(payload({ kind: 'report', logs: [{ at: 1, class: 'TypeError', code: '', frames: [{ file: 'index-AbCd1234.js', line: 4 }, { file: '/home/u/secret.js', line: 1 }], hash: '0123456789ab', message: 'fail for me@example.com in /home/u/Notes/a.md' }], comment: 'mail me@example.com about /home/u/Notes/a.md and "Scheidung Anwalt"' })) })
+    let r = await fetch(`${s.base}/api/v1/diagnostics`, { method: 'POST', body: JSON.stringify(payload({ kind: 'report', logs: [{ at: 1, class: 'TypeError', code: '', frames: [{ file: 'index-AbCd1234.js', line: 4 }, { file: '/home/u/secret.js', line: 1 }, { file: 'ch.fasrv.fanotes.vault.NoteStore', line: 9 }, { file: 'okhttp3.internal.Foo', line: 2 }], hash: '0123456789ab', message: 'fail for me@example.com in /home/u/Notes/a.md' }], comment: 'mail me@example.com about /home/u/Notes/a.md and "Scheidung Anwalt"' })) })
     assert.equal(r.status, 202)
     const text = await readFile(join(s.dir, '2026-11-15.jsonl'), 'utf8')
     assert.ok(!/me@example|\/home\/u|Scheidung|secret\.js|fail for/u.test(text), 'free text, paths and quoted titles never reach the disk')
-    assert.deepEqual(JSON.parse(text.trim()).logs[0].frames, [{ file: 'index-AbCd1234.js', line: 4 }])
+    assert.deepEqual(JSON.parse(text.trim()).logs[0].frames, [{ file: 'index-AbCd1234.js', line: 4 }, { file: 'ch.fasrv.fanotes.vault.NoteStore', line: 9 }])
     r = await fetch(`${s.base}/api/v1/diagnostics`, { method: 'POST', body: 'x'.repeat(70_000) })
     assert.equal(r.status, 413)
     r = await fetch(`${s.base}/api/v1/diagnostics`, { method: 'POST', body: '{nope' })

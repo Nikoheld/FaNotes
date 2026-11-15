@@ -46,6 +46,8 @@ val SETTINGS_SEARCH_ITEMS: List<SettingsSearchItem> = listOf(
     SettingsSearchItem("Update-Kanal", "Updates", "updates", "settings-updates", "stable beta nightly kanal vorab version apk"),
     SettingsSearchItem("Bewegung reduzieren", "Bedienung", "accessibility", "settings-comfort", "animation transition barrierefrei fokus bewegung"),
     SettingsSearchItem("Seitenleisten-Breite", "Bedienung", "accessibility", "settings-comfort", "sidebar informationsleiste panel breite layout"),
+    SettingsSearchItem("Statistik", "Statistik", "statistics", "settings-stat-activity", "statistik aktivität kalender heatmap serie streak wörter notizen grösse fächer lernzeit hausaufgaben karteikarten sync"),
+    SettingsSearchItem("Diagnose & Verbesserung", "Statistik", "statistics", "settings-diagnostics", "diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz"),
     SettingsSearchItem("Eigenes CSS", "Erweitert", "advanced", "settings-css", "custom style design code variablen css"),
 )
 
@@ -77,6 +79,7 @@ val SETTINGS_NAV: List<SettingsNavItem> = listOf(
     SettingsNavItem("drawing", "Stift & Erkennung", "Tablet, Papier und Handschrift", "Stift & Arbeitsbereich", 16),
     SettingsNavItem("files", "Dateien & Vault", "Import, Ordner und Speichern", "Stift & Arbeitsbereich", 7),
     SettingsNavItem("sync", "Sync", "Konto, Geräte und Verschlüsselung", "FaNotes & System", 6),
+    SettingsNavItem("statistics", "Statistik", "Vault, Aktivität, Schule und Diagnose", "FaNotes & System", 0),
     SettingsNavItem("addons", "Add-ons", "Store, Quelle und Updates", "FaNotes & System", 3),
     SettingsNavItem("updates", "Updates", "Stable, Beta und Sicherheit", "FaNotes & System", 4),
     SettingsNavItem("accessibility", "Bedienung", "Bewegung und Lesbarkeit", "FaNotes & System", 3),
@@ -92,6 +95,9 @@ fun settingsSectionToOpen(requested: String?): String {
 
 /** Eyebrow above the section title: „Anpassung · 12 Optionen“. */
 fun settingsEyebrow(count: Int) = "Anpassung · $count Optionen"
+
+/** The Statistik page has no options to count; it says where the numbers come from. */
+const val SETTINGS_STATISTICS_EYEBROW = "Nur auf diesem Gerät berechnet"
 
 /** Groups in desktop order, each with its rows. */
 fun settingsNavGroups(items: List<SettingsNavItem> = SETTINGS_NAV): List<Pair<String, List<SettingsNavItem>>> {

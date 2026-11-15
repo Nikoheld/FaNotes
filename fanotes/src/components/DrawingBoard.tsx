@@ -125,6 +125,7 @@ import { MarginTranscript } from './MarginTranscript'
 import { addPersonalWord } from '../lib/spellingSuggest'
 import { replaceTranscriptWord } from '../lib/marginTranscript'
 import { detectScribbleErase } from '../lib/scribbleErase'
+import { mayWipeLiveInk } from '../lib/liveInkHandoff'
 import {
   applyInkNoticeOp,
   inkNoticeAutoClearDelayMs,
@@ -149,7 +150,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, decideCommittedEraseHole, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkBudgetSliceClearsBitmap, inkStrokeIsTranslucent, inkStrokePaintMargin, noteBudgetSliceCleared, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, decideCommittedEraseHole, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkBudgetSliceClearsBitmap, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
 import { paperNoteTextOf } from '../lib/noteTextStay'
 import { liveTranslucentCanGrow, paintGrowingTranslucentStroke, type LiveTranslucentSession } from '../lib/liveTranslucentInk'
 import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
@@ -1327,6 +1328,17 @@ const paintInkBudgetSlice = (
   return { next: index, coverage: active }
 }
 
+/** Replaces the visible bitmap with a finished page in one drawImage, never a clear then a refill. */
+const swapInkBuffer = (target: HTMLCanvasElement, buffer: HTMLCanvasElement) => {
+  const context = target.getContext('2d')
+  if (!context) return
+  context.save()
+  context.setTransform(1, 0, 0, 1, 0, 0)
+  context.globalCompositeOperation = 'copy'
+  context.drawImage(buffer, 0, 0)
+  context.restore()
+}
+
 /**
  * Move the painted slice by whole rows: copy what is still on the sheet,
  * then paint only the exposed band from the model. `copy` compositing
@@ -1546,7 +1558,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     frame: number
     /** True after the first slice clearRect'd the bitmap. The job has not sealed it. */
     cleared: boolean
+    /** Offscreen page the slices paint into; the visible bitmap is swapped once, when it is full. */
+    buffer: HTMLCanvasElement
   } | null>(null)
+  const inkPaintBufferRef = useRef<HTMLCanvasElement | null>(null)
   /** False while a packed page is still becoming strokes, and until its first paint finishes. */
   const inkReadyRef = useRef(true)
   const inkHydratingRef = useRef(false)
@@ -2380,6 +2395,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.imageSmoothingQuality = activeStrokeRef.current ? 'low' : 'high'
     const activeStroke = activeStrokeRef.current
     if (!activeStroke) {
+      if (inkPaintJobRef.current && liveCanvasHasInkRef.current) return
       if (liveCanvasHasInkRef.current) {
         context.setTransform(1, 0, 0, 1, 0, 0)
         context.clearRect(0, 0, canvas.width, canvas.height)
@@ -2665,23 +2681,34 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         squareMm: settings.paperSquareMm,
         includePaper: !inline,
       }
-      const job = { key: contentKey, strokes, frame: 0, cleared: false }
+      // Slices paint into an offscreen page; the visible bitmap keeps showing
+      // the last full page and is replaced in one step when the job is done.
+      const buffer = inkPaintBufferRef.current ?? document.createElement('canvas')
+      inkPaintBufferRef.current = buffer
+      if (buffer.width !== committedCanvas.width) buffer.width = committedCanvas.width
+      if (buffer.height !== committedCanvas.height) buffer.height = committedCanvas.height
+      // The visible bitmap is stale until the swap: never trust its seal.
+      committedBitmapRef.current = null
+      const job = { key: contentKey, strokes, frame: 0, cleared: true, buffer }
       inkPaintJobRef.current = job
       const step = (from: number) => {
         if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
-        job.cleared = noteBudgetSliceCleared(job.cleared, from)
-        const painted = paintInkBudgetSlice(committedCanvas, slice, markerCoverageRef.current, from)
+        const painted = paintInkBudgetSlice(job.buffer, slice, from === 0 ? null : jobCoverage, from)
         if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
-        markerCoverageRef.current = painted.coverage
+        jobCoverage = painted.coverage
         if (painted.next >= strokes.length) {
+          swapInkBuffer(committedCanvas, job.buffer)
+          markerCoverageRef.current = painted.coverage
           committedBitmapRef.current = { key: contentKey, topPx }
           inkPaintJobRef.current = null
           markInkPainted()
+          if (!activeStrokeRef.current && liveCanvasHasInkRef.current) wipeLiveInk()
           if (canvasPixelSizeRef.current.topPx !== topPx) requestAnimationFrame(() => redraw())
           return
         }
         job.frame = requestAnimationFrame(() => step(painted.next))
       }
+      let jobCoverage: MarkerCoverage | null = null
       step(0)
     } else {
       cancelInkPaint()
@@ -2724,7 +2751,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     paintLiveInk(context, activeStroke, [])
-  }, [inline, paintLiveInk, paperStyle, redrawViewportRaster, settings.paperSquareMm, settings.smoothing, sourceHeight, sourceWidth])
+  }, [inline, paintLiveInk, paperStyle, redrawViewportRaster, settings.paperSquareMm, settings.smoothing, sourceHeight, sourceWidth, wipeLiveInk])
 
   const onInkActivityRef = useRef(onInkActivity)
   onInkActivityRef.current = onInkActivity
@@ -2760,25 +2787,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (removed > 0) onInkActivityRef.current?.({ kind: 'erase', removed })
   }, [])
 
-  const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
+  const commitStrokeToCanvas = useCallback((stroke: InkStroke): boolean => {
     noteStrokeDrawn(stroke)
     if (viewportRasterRef.current) {
       // The stroke is already in strokesRef: the scene diff sees one appended
       // stroke and paints only its region, in this same event.
       committedCanvasDirtyRef.current = true
       const placement = viewportPlacementRef.current
-      if (!placement) return
+      if (!placement) return false
       syncViewportScene(canvasPixelSizeRef.current.layoutWidth, canvasPixelSizeRef.current.layoutHeight)
       paintViewportCommitted(placement)
-      return
+      return true
     }
     const canvas = committedCanvasRef.current
     const { width, height, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
-    if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return
+    if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return false
     const inkWindow = inkWindowRef.current
-    if (!strokeIntersectsWindow(stroke, inkWindow)) return
+    if (!strokeIntersectsWindow(stroke, inkWindow)) return true
     const context = canvas.getContext('2d')
-    if (!context) return
+    if (!context) return false
     context.save()
     context.beginPath()
     context.rect(0, 0, width, height)
@@ -2798,6 +2825,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       coverage && coverage.width === canvas.width && coverage.height === canvas.height ? { coverage, stamp: true } : undefined,
     )
     context.restore()
+    return true
   }, [noteStrokeDrawn, paintViewportCommitted, settings.smoothing, sourceWidth, syncViewportScene])
 
   useEffect(() => {
@@ -5785,6 +5813,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     let scribbleDeleted = 0
+    let committedHasStroke = true
     if (gestureToolRef.current === 'pen' && activeStroke?.points.length) {
       const handwritingEntries = beforeGestureRef.current
         .map((stroke, index) => ({ stroke, index }))
@@ -5806,12 +5835,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         gestureChangedRef.current = scribbleDeleted > 0
       } else {
         strokesRef.current.push(activeStroke)
-        commitStrokeToCanvas(activeStroke)
+        committedHasStroke = commitStrokeToCanvas(activeStroke)
         gestureChangedRef.current = true
       }
     }
     activeStrokeRef.current = null
-    wipeLiveInk()
+    // Keep the live stroke on screen until the committed bitmap shows it.
+    // The redraw below clears the live layer once that has happened.
+    if (mayWipeLiveInk({ committedHasStroke, committedPaintRunning: Boolean(inkPaintJobRef.current) })) wipeLiveInk()
     activeRenderedPointCountRef.current = 0
     shapeSnappedRef.current = false
     endInteraction()
