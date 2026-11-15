@@ -717,6 +717,9 @@ class SyncEngine(
                 }
                 val remoteKind = noteSyncKind(path, plain)
                 if (remoteKind == NoteSyncKind.UNREADABLE) throw RemoteEntryUnusable("unreadable", path)
+                // The download took a while: an editor may have started on this file meanwhile (writing mode).
+                // Nothing below writes before this point.
+                if (options.isPathBusy(path)) return ApplyResult("deferred", path)
                 val body = if (local != null && isFamdSyncPath(path)) withLocalPageStats(plain, local.bytes, path) else plain
                 // Finish all fallible document transforms before replacing the last good file.
                 val storedIdentity = if (body === plain) plainIdentity else remoteIdentity(path, body, "stored")
@@ -1119,6 +1122,7 @@ class SyncEngine(
             table.files[entry.path] = base.copy(size = entry.size, mtimeMs = entry.mtimeMs, contentSha256 = identity, blank = true)
             return "skipped"
         }
+        if (options.isPathBusy(entry.path)) return "skipped"
         val at = java.time.Instant.ofEpochMilli(options.now())
         val copyPath = freeConflictCopyPath(entry.path, at, currentHost)
         currentHost.write(copyPath, localBytes, at.toEpochMilli())
@@ -1187,6 +1191,7 @@ class SyncEngine(
                 is DownloadResult.Blob -> {
                     if (sha256Hex(download.bytes) != download.sha256) return
                     val plain = decryptBytes(syncKeys, base.id, download.bytes)
+                    if (options.isPathBusy(path)) return
                     val stat = currentHost.write(path, plain, options.now())
                     val identity = identitySyncBytes(path, plain)?.let { sha256Hex(it) }.orEmpty()
                     table.files[path] = base.copy(

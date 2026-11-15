@@ -16,6 +16,7 @@ import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import ch.fasrv.fanotes.sync.OpenStoryGate
 import ch.fasrv.fanotes.vault.StoryFiles
 import ch.fasrv.fanotes.vault.VaultIo
 import ch.fasrv.fanotes.vault.normalize
@@ -30,7 +31,6 @@ import java.util.Locale
  */
 class WritingActivity : ComponentActivity() {
     private lateinit var web: WebView
-    private var story: String? = null
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     /** The import dialog's file input (DOCX, Markdown, text). */
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -38,12 +38,37 @@ class WritingActivity : ComponentActivity() {
         fileCallback = null
     }
 
-    /** Sync leaves an open story alone (the editor merges on its next open); released on close. */
+    private var gate: OpenStoryGate? = null
+    private val storyListener: (List<String>, List<String>) -> Unit = { written, _ -> notifyWritten(written) }
+
+    /**
+     * The open story: sync leaves everything in it alone except the scenes and story.json while the
+     * editor reports that it has nothing unsaved (OpenStoryGate); released on close.
+     */
     private fun holdStory(path: String) {
         val graph = (application as FaNotesApplication).graph
-        story?.let { graph.busyFolders = graph.busyFolders - it }
-        story = path
-        graph.busyFolders = graph.busyFolders + path
+        releaseStory()
+        val next = OpenStoryGate(path)
+        gate = next
+        graph.openStories = graph.openStories + next
+        synchronized(graph.remoteListeners) { graph.remoteListeners += storyListener }
+    }
+
+    private fun releaseStory() {
+        val graph = (application as FaNotesApplication).graph
+        gate?.let { graph.openStories = graph.openStories - it }
+        synchronized(graph.remoteListeners) { graph.remoteListeners -= storyListener }
+        gate = null
+    }
+
+    /** Sync wrote files: the editor reads and merges the ones of the open story (on the main thread). */
+    private fun notifyWritten(written: List<String>) {
+        val files = gate?.liveFiles(written).orEmpty()
+        if (files.isEmpty()) return
+        val json = JSONObject.quote(JSONArray(files).toString())
+        runOnUiThread {
+            if (!isDestroyed) web.evaluateJavascript("window.fanotesStoryWritten && window.fanotesStoryWritten($json)", null)
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -56,7 +81,7 @@ class WritingActivity : ComponentActivity() {
         web.settings.allowFileAccess = false
         web.settings.allowContentAccess = false
         web.settings.mediaPlaybackRequiresUserGesture = true
-        web.webViewClient = AssetClient(this)
+        web.webViewClient = AssetClient(this) { gate?.reset() }
         web.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
                 fileCallback?.onReceiveValue(emptyArray())
@@ -66,7 +91,7 @@ class WritingActivity : ComponentActivity() {
             }
         }
         intent.getStringExtra(EXTRA_PATH)?.let { holdStory(it) }
-        web.addJavascriptInterface(StoryBridge(graph.vault, onSaved = { graph.engine.notifyLocalChange() }, onClose = { runOnUiThread { finish() } }, onCreated = { path -> runOnUiThread { holdStory(path) } }), "FaNotesAndroid")
+        web.addJavascriptInterface(StoryBridge(graph.vault, onSaved = { graph.engine.notifyLocalChange() }, onClose = { runOnUiThread { finish() } }, onCreated = { path -> runOnUiThread { holdStory(path) } }, onBusy = { busy -> gate?.report(busy) }), "FaNotesAndroid")
         setContentView(web)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             // The editor saves and then calls close(); a second press while it saves is ignored.
@@ -93,7 +118,7 @@ class WritingActivity : ComponentActivity() {
 
     override fun onDestroy() {
         val graph = (application as FaNotesApplication).graph
-        story?.let { graph.busyFolders = graph.busyFolders - it }
+        releaseStory()
         graph.engine.notifyLocalChange()
         web.destroy()
         super.onDestroy()
@@ -109,7 +134,10 @@ class WritingActivity : ComponentActivity() {
     }
 
     /** Serves `https://writing.fanotes.local/…` from `assets/writing/`; nothing else is loaded. */
-    private class AssetClient(private val context: Context) : WebViewClient() {
+    private class AssetClient(private val context: Context, private val onPageLoading: () -> Unit) : WebViewClient() {
+        /** A (re)loading page has not reported its editor state: everything waits again. */
+        override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) { onPageLoading() }
+
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             val url = request.url
             if (url.scheme != "https" || url.host != HOST) return WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", emptyMap(), null)
@@ -159,7 +187,7 @@ class WritingActivity : ComponentActivity() {
  * [StoryFiles] (story files only), except [readFile] and [listNotes], which
  * only read Markdown notes for linking.
  */
-class StoryBridge(private val vault: VaultIo, private val onSaved: () -> Unit, private val onClose: () -> Unit, private val onCreated: (String) -> Unit = {}) {
+class StoryBridge(private val vault: VaultIo, private val onSaved: () -> Unit, private val onClose: () -> Unit, private val onCreated: (String) -> Unit = {}, private val onBusy: (Boolean) -> Unit = {}) {
     private fun ok(value: Any?) = JSONObject().put("ok", true).put("value", value ?: JSONObject.NULL).toString()
     private fun fail(error: Throwable) = JSONObject().put("ok", false).put("error", error.message ?: error.javaClass.simpleName).toString()
     private inline fun guard(block: () -> Any?): String = try { ok(block()) } catch (error: Throwable) { fail(error) }
@@ -202,5 +230,7 @@ class StoryBridge(private val vault: VaultIo, private val onSaved: () -> Unit, p
     }
 
     @JavascriptInterface fun saved(@Suppress("UNUSED_PARAMETER") pathsJson: String) = onSaved()
+    /** The editor holds unsaved text or is saving (true), or is clean (false). A page that never reports counts as busy. */
+    @JavascriptInterface fun storyBusy(busy: Boolean) = onBusy(busy)
     @JavascriptInterface fun close() = onClose()
 }
