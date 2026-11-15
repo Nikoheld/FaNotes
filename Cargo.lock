@@ -1387,6 +1387,7 @@ dependencies = [
 name = "fanotes-host"
 version = "0.1.0"
 dependencies = [
+ "aes",
  "base64 0.22.1",
  "fanotes-famd",
  "fanotes-ort",
@@ -1399,6 +1400,7 @@ dependencies = [
  "libc",
  "regex",
  "rfd",
+ "secret-service",
  "serde",
  "serde_json",
  "sha1",
@@ -1407,6 +1409,7 @@ dependencies = [
  "ureq",
  "url",
  "windows-sys 0.61.2",
+ "zbus",
 ]
 
 [[package]]

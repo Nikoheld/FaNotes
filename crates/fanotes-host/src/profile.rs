@@ -2,52 +2,50 @@
 //!
 //! The Tauri profile stores `settings.json` and `vault-path`. Electron stores
 //! both in `config.json`. A completed app-data reset must not copy that file back.
+//! The full migration (backup, secrets, IndexedDB, sync) lives in `migrate/`;
+//! this file finds the Electron profile and imports its settings.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
-use crate::secrets::{self, SecretStore};
+use crate::secrets::SecretStore;
 use crate::{notes, settings, SECRET_KEYS};
 
-const MIGRATION_MARKER: &str = ".fanotes-legacy-migration-v1-complete";
-const RESET_COMPLETE: &str = ".fanotes-reset-complete";
+pub(crate) const MIGRATION_MARKER: &str = ".fanotes-legacy-migration-v1-complete";
+pub(crate) const RESET_COMPLETE: &str = ".fanotes-reset-complete";
 const MAX_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
-const SECRET_PREFIX: &str = "fanotes-secret-v1:";
+/// `identifier` in `tauri.conf.json`: the last segment of Tauri's app data directory.
+const TAURI_PROFILE_NAME: &str = "de.fanotes.app";
 
 pub(crate) fn import_electron_profile(app_data: &Path, secret_store: SecretStore) {
-    let marker = app_data.join(MIGRATION_MARKER);
-    let reset = app_data.join(RESET_COMPLETE);
-    if regular_file(&reset) {
-        let _ = fs::remove_file(&reset);
-        let _ = write_marker(&marker);
-        return;
-    }
-    if regular_file(&marker) {
-        return;
-    }
-    if !regular_file(&app_data.join("settings.json")) && !regular_file(&app_data.join("vault-path"))
-    {
-        if let Some(config) = first_config(app_data) {
-            apply_config(app_data, secret_store, &config);
-        }
-    }
-    let _ = write_marker(&marker);
+    crate::migrate::run_at_startup(app_data, secret_store);
 }
 
-fn first_config(app_data: &Path) -> Option<Value> {
-    for path in config_candidates(app_data) {
-        if let Some(parent) = path.parent() {
-            if !real_directory(parent) {
-                continue;
-            }
-        }
-        if let Some(parsed) = read_config(&path) {
-            return Some(parsed);
-        }
+/// Electron profile directories to look at, best first. Tests never look at the home directory.
+pub(crate) fn electron_profile_dirs(app_data: &Path) -> Vec<PathBuf> {
+    if let Some(explicit) =
+        std::env::var_os("FANOTES_ELECTRON_PROFILE").filter(|value| !value.is_empty())
+    {
+        return vec![PathBuf::from(explicit)];
     }
-    None
+    config_candidates(app_data)
+        .into_iter()
+        .filter_map(|path| path.parent().map(Path::to_path_buf))
+        .filter(|directory| real_directory(directory))
+        .collect()
+}
+
+/// The first profile directory with a readable `config.json` or web storage.
+pub(crate) fn find_electron_profile(app_data: &Path) -> Option<PathBuf> {
+    electron_profile_dirs(app_data)
+        .into_iter()
+        .find(|directory| {
+            read_config(&directory.join("config.json")).is_some()
+                || real_directory(&directory.join("IndexedDB"))
+                || real_directory(&directory.join("Local Storage"))
+        })
 }
 
 fn config_candidates(app_data: &Path) -> Vec<PathBuf> {
@@ -56,7 +54,15 @@ fn config_candidates(app_data: &Path) -> Vec<PathBuf> {
     if let Some(parent) = app_data.parent() {
         roots.push(parent.to_path_buf());
     }
-    roots.push(electron_config_home());
+    // Only the real Tauri profile (`<data dir>/de.fanotes.app`) looks in the user's home.
+    // Unit and integration tests open hosts in temp directories and must never read a real profile.
+    if !cfg!(test)
+        && app_data
+            .file_name()
+            .is_some_and(|name| name == TAURI_PROFILE_NAME)
+    {
+        roots.push(electron_config_home());
+    }
     for root in roots {
         for name in ["FaNotes", "Lernwerk Notes", "lernwerk-notes"] {
             let directory = root.join(name);
@@ -85,7 +91,8 @@ fn electron_config_home() -> PathBuf {
         .unwrap_or_default()
 }
 
-fn apply_config(app_data: &Path, secret_store: SecretStore, config: &Value) {
+/// Writes `settings.json` (secrets blank) and `vault-path` from an Electron `config.json`.
+pub(crate) fn apply_config(app_data: &Path, config: &Value) {
     let Some(object) = config.as_object() else {
         return;
     };
@@ -102,7 +109,6 @@ fn apply_config(app_data: &Path, secret_store: SecretStore, config: &Value) {
             settings.insert("lastRecognitionMode".to_owned(), json!(last));
         }
     }
-    let imported_secrets = take_plaintext_secrets(&mut settings_value);
     let sanitized = settings::sanitize(&settings_value, &crate::default_settings());
     let mut stored = serde_json::Map::from_iter(sanitized);
     for key in SECRET_KEYS {
@@ -110,12 +116,6 @@ fn apply_config(app_data: &Path, secret_store: SecretStore, config: &Value) {
     }
     if let Ok(text) = serde_json::to_string_pretty(&stored) {
         let _ = notes::atomic_write(&app_data.join("settings.json"), text.as_bytes(), 0o600);
-    }
-    for (key, value) in imported_secrets {
-        let Some(secret) = value.as_str() else {
-            continue;
-        };
-        let _ = secrets::set(secret_store, &secrets::account(app_data, &key), secret);
     }
     if let Some(path) = object.get("vaultPath").and_then(Value::as_str) {
         if let Some(vault) = remembered_vault(path) {
@@ -128,35 +128,16 @@ fn apply_config(app_data: &Path, secret_store: SecretStore, config: &Value) {
     }
 }
 
-fn take_plaintext_secrets(settings: &mut Value) -> Map<String, Value> {
-    let mut secrets = Map::new();
-    let Some(object) = settings.as_object_mut() else {
-        return secrets;
-    };
-    for key in SECRET_KEYS {
-        let Some(value) = object.get(*key).and_then(Value::as_str) else {
-            continue;
-        };
-        let value = value.to_owned();
-        object.insert((*key).to_owned(), Value::String(String::new()));
-        let limit = match *key {
-            "homeworkApiSecret" => 256,
-            "grokBuildAccessToken" | "grokBuildRefreshToken" => 8192,
-            _ => 4096,
-        };
-        if value.is_empty()
-            || value.starts_with(SECRET_PREFIX)
-            || value.contains('\0')
-            || crate::vault::utf16_len(&value) > limit
-        {
-            continue;
-        }
-        secrets.insert((*key).to_owned(), Value::String(value));
+/// The byte limit `main.cjs` applies to each secret setting, in UTF-16 units.
+pub(crate) fn secret_limit(key: &str) -> usize {
+    match key {
+        "homeworkApiSecret" => 256,
+        "grokBuildAccessToken" | "grokBuildRefreshToken" => 8192,
+        _ => 4096,
     }
-    secrets
 }
 
-fn remembered_vault(path: &str) -> Option<PathBuf> {
+pub(crate) fn remembered_vault(path: &str) -> Option<PathBuf> {
     if path.is_empty() || crate::vault::utf16_len(path) > 4096 || !Path::new(path).is_absolute() {
         return None;
     }
@@ -169,7 +150,7 @@ fn remembered_vault(path: &str) -> Option<PathBuf> {
     }
 }
 
-fn read_config(path: &Path) -> Option<Value> {
+pub(crate) fn read_config(path: &Path) -> Option<Value> {
     if !regular_file(path) {
         return None;
     }
@@ -182,11 +163,11 @@ fn read_config(path: &Path) -> Option<Value> {
     serde_json::from_str(&text).ok()
 }
 
-fn regular_file(path: &Path) -> bool {
+pub(crate) fn regular_file(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && !meta.file_type().is_symlink())
 }
 
-fn real_directory(path: &Path) -> bool {
+pub(crate) fn real_directory(path: &Path) -> bool {
     fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
 }
 
@@ -198,7 +179,6 @@ fn same_directory(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::apply_config;
-    use crate::secrets::SecretStore;
     use serde_json::Value;
     use std::fs;
 
@@ -214,7 +194,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let parsed: Value = serde_json::from_str(config).unwrap();
-        apply_config(&dir, SecretStore::Memory, &parsed);
+        apply_config(&dir, &parsed);
         let settings: Value =
             serde_json::from_str(&fs::read_to_string(dir.join("settings.json")).unwrap()).unwrap();
         let _ = fs::remove_dir_all(&dir);
@@ -245,7 +225,6 @@ mod tests {
     }
 }
 
-fn write_marker(path: &Path) -> Result<(), String> {
-    let stamp = format!("{}\n", notes::iso_now());
-    notes::atomic_write(path, stamp.as_bytes(), 0o600)
+pub(crate) fn write_marker(path: &Path) -> Result<(), String> {
+    notes::atomic_write(path, format!("{}\n", notes::iso_now()).as_bytes(), 0o600)
 }

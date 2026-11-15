@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "vaultPath": "/home/fixture-user/Documents/FaNotes",
+  "settings": {
+    "uiLanguage": "en",
+    "theme": "dark",
+    "accent": "#aa3366",
+    "editorFontSize": 18,
+    "lineHeight": 1.6,
+    "spellcheck": false,
+    "syncDeviceName": "Fixture laptop",
+    "syncExcludedFolders": "Private",
+    "recognitionMode": "math",
+    "customCss": ".fixture { color: red; }",
+    "lmStudioApiToken": "",
+    "ollamaApiToken": "",
+    "openAiApiKey": "",
+    "geminiApiKey": "fanotes-secret-v1:djEwCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+    "anthropicApiKey": "",
+    "grokApiKey": "",
+    "grokBuildAccessToken": "",
+    "grokBuildRefreshToken": "",
+    "openCodePassword": "",
+    "homeworkApiSecret": ""
+  },
+  "resourceLimits": {
+    "heapMb": 4096
+  }
+}

@@ -13,6 +13,7 @@ mod imports;
 mod ink_guard;
 mod linux_runtime;
 mod locations;
+pub mod migrate;
 mod notes;
 mod ocr;
 mod onboarding;

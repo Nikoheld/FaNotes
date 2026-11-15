@@ -26,11 +26,22 @@ libc = "0.2"
 url = "2.5"
 icu_collator = "2.3"
 icu_locale_core = "2.3"
+# Electron profile migration (src/migrate): AES for safeStorage values.
+aes = "0.9"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+# Electron profile migration: the v11 safeStorage password in the Secret Service or KWallet.
+secret-service = { version = "5.2", default-features = false, features = ["crypto-rust"] }
+zbus = { version = "5", default-features = false, features = ["blocking-api", "async-io"] }
 
 [target.'cfg(windows)'.dependencies]
+# Win32_Security_Cryptography and Win32_System_Memory: the DPAPI-protected
+# safeStorage key for the Electron profile migration.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
     "Win32_System_Com",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
