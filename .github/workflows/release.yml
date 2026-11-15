@@ -244,6 +244,8 @@ jobs:
         run: |
           set -euo pipefail
           source "$RUNNER_TEMP/retry-network.sh"
+          # The editor imports shared handwriting code from the repository root (e.g. hershey).
+          (cd .. && retry_network npm ci --no-audit --no-fund)
           retry_network npm ci --no-audit --no-fund
           npm run build:spelling
           node scripts/build-android-writing.mjs
