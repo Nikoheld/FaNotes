@@ -2091,6 +2091,8 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   align-items: center;
   gap: 6px;
 }
+.pdf-note-zoom button { flex: none; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pdf-note-zoom button[title="Zoom zurücksetzen"] { min-width: 52px; }
 .pdf-note-identity { flex: 1 1 160px; }
 .pdf-note-identity svg { flex: none; color: var(--paper-accent-readable); }
 .pdf-note-identity strong { overflow: hidden; max-width: 220px; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
