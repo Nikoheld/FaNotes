@@ -638,6 +638,14 @@ export const createClassTimetables = (options = {}) => {
     try {
       const source = join(dir, 'source.pdf')
       await fs.writeFile(source, pdf, { mode: 0o600 })
+      // Page count from the trailer is cheap. A huge file is refused before bbox text is extracted.
+      try {
+        const info = await run('pdfinfo', [source])
+        const declared = Number(/^Pages:\s+(\d+)/mu.exec(String(info?.stdout || ''))?.[1] || 0)
+        if (declared > MAX_PDF_PAGES) throw problem(413, 'Die PDF-Datei hat zu viele Seiten (höchstens 200).')
+      } catch (error) {
+        if (error?.status) throw error
+      }
       let text
       try {
         text = (await run('pdftotext', ['-bbox-layout', source, '-'])).stdout
