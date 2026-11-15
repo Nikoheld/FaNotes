@@ -3996,5 +3996,16 @@
   "Schreibmodus mit Seiten, Kapiteln und Szenen": "Writing mode with pages, chapters and scenes",
   "Geschichte importieren …": "Import story …",
   "Word (.docx), Markdown oder Text als Geschichte öffnen": "Open Word (.docx), Markdown or text as a story",
-  "Der Import ist abgestürzt": "The import crashed"
+  "Der Import ist abgestürzt": "The import crashed",
+  "Textfeld-Werkzeuge": "Text box tools",
+  "Schrift kleiner": "Smaller text",
+  "Schrift größer": "Larger text",
+  "Fett": "Bold",
+  "Fett (Strg+B)": "Bold (Ctrl+B)",
+  "Schwarz": "Black",
+  "Rot": "Red",
+  "Orange": "Orange",
+  "Grün": "Green",
+  "Blau": "Blue",
+  "Violett": "Purple"
 }

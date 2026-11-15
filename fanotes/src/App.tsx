@@ -3086,7 +3086,9 @@ export default function App({ startupBootstrap }: AppProps) {
       return
     }
     const field = placeNoteTextField(point)
-    rememberNoteTextFields(path, [...noteTextFieldsRef.current, field], true)
+    // Not committed yet: an empty box that is never typed into is dropped again
+    // by the layer and must not reach the disk.
+    rememberNoteTextFields(path, [...noteTextFieldsRef.current, field], false)
     setTextFieldPlacing(false)
     setTextFieldFocusId(field.id)
   }, [rememberNoteTextFields, toast])
@@ -3102,6 +3104,14 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!path) return
     rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), commit)
   }, [rememberNoteTextFields])
+
+  const changeTextFieldStyle = useCallback((id: string, patch: { fontSize?: number; color?: string | undefined; bold?: boolean | undefined }) => {
+    const path = activePathRef.current
+    if (!path) return
+    rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), true)
+  }, [rememberNoteTextFields])
+
+  const finishTextFieldEdit = useCallback(() => { void flushNoteTextFieldsRef.current() }, [])
 
   const clearTextFieldFocus = useCallback(() => setTextFieldFocusId(null), [])
 
@@ -6223,6 +6233,8 @@ export default function App({ startupBootstrap }: AppProps) {
                     onPlace={placeTextFieldAt}
                     onText={changeTextFieldText}
                     onGeometry={changeTextFieldGeometry}
+                    onStyle={changeTextFieldStyle}
+                    onFinish={finishTextFieldEdit}
                     onRemove={removePlacedTextField}
                     onFocusHandled={clearTextFieldFocus}
                   />
