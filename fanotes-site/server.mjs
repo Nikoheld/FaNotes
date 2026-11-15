@@ -11,6 +11,7 @@ import { handleProfileRequest } from './profile-api.mjs'
 import { handleRemoteSupportRequest } from './remote-support-api.mjs'
 import { handleBugReportRequest } from './bug-report-api.mjs'
 import { handleSendDataRequest } from './send-data-api.mjs'
+import { handleDiagnosticsRequest } from './diagnostics-api.mjs'
 import { handleSyncRequest, setAccountDeletedHook } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { handleMcpRequest } from './mcp-api.mjs'
@@ -649,6 +650,7 @@ const server = createServer(async (request, response) => {
     if (await handleRemoteSupportRequest(request, response, url)) return
     if (await handleBugReportRequest(request, response, url)) return
     if (await handleSendDataRequest(request, response, url)) return
+    if (await handleDiagnosticsRequest(request, response, url)) return
     if (await handleAiProxyRequest(request, response, url)) return
     if (url.pathname === '/api/v1/analytics/event') {
       if (request.method !== 'POST') {

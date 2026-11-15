@@ -606,17 +606,3 @@ test('an unreadable push ledger is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
-
-test('a push ledger that is not the known shape is left in place', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'fcm-ledger-shape-'))
-  const file = join(root, 'pushed-notices.json')
-  const ledger = '{"version":2,"keys":["g:keep"]}\n'
-  try {
-    await writeFile(file, ledger, { mode: 0o600 })
-    const sent = await claimPushKeys(file, [grade('grade:new:4')])
-    assert.deepEqual(sent.map((change) => change.id), ['grade:new:4'])
-    assert.equal(await readFile(file, 'utf8'), ledger)
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})

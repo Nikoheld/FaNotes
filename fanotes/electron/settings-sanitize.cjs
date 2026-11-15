@@ -80,6 +80,8 @@ const SETTINGS_SCHEMA = Object.freeze({
   experimentalRemoteSupport: { type: 'boolean' },
   experimentalNoteBackup: { type: 'boolean' },
   experimentalSendData: { type: 'boolean' },
+  diagnosticsUsage: { type: 'boolean' },
+  diagnosticsLogs: { type: 'boolean' },
   lastOpenNotePath: { type: 'string', max: 1024 },
   dashboardLayout: { type: 'string', max: 100000 },
   homeworkApiChannelId: { type: 'string', max: 32 },

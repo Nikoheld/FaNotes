@@ -184,6 +184,10 @@ export type AppSettings = {
   experimentalNoteBackup: boolean
   /** Experimental: ongoing batched diagnostics to fasrv. Off by default. */
   experimentalSendData: boolean
+  /** Opt-in: anonymous usage statistics, at most once a day. Off by default. */
+  diagnosticsUsage: boolean
+  /** Opt-in: scrubbed error logs with the daily report. Off by default. */
+  diagnosticsLogs: boolean
   /** Last opened note path. Restored on launch when the file still exists. */
   lastOpenNotePath: string
   /** Persisted start-dashboard cards. Empty means the default clock, date, note, and subject. */
@@ -735,8 +739,6 @@ export type FaNotesApi = {
   addons?: AddonsHostApi
   sync?: SyncHostApi
   /** An editable share opened from fanotes://share/<id>. Missing until the desktop build that registers the protocol. */
-  /** Files added, changed or removed outside FaNotes. Desktop only. */
-  onVaultChanged?: (callback: (change: { added: string[]; removed: string[]; changed: string[] }) => void) => () => void
   onShareOpen?: (callback: (id: string) => void) => () => void
   platform: string
 }

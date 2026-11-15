@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -95,7 +95,6 @@ test('compacting the change log keeps the notes that were in it', async () => {
   assert.equal(again.status, 200, again.body.toString('utf8'))
   const log = readFileSync(join(dataDirectory, 'accounts', accountId, 'changes.jsonl'))
   assert.equal(log.length, 0)
-  assert.equal(readdirSync(join(dataDirectory, 'accounts', accountId)).some((name) => name.endsWith('.tmp')), false)
   const index = JSON.parse(readFileSync(join(dataDirectory, 'accounts', accountId, 'index.json'), 'utf8'))
   assert.equal(index.entries[firstId].deleted, false)
   assert.equal(index.entries[secondId].deleted, false)
@@ -121,7 +120,6 @@ test('a deleted note can be restored after the change log is compacted', async (
   const deletedRevision = JSON.parse(removed.body.toString('utf8')).revision
   const log = readFileSync(join(dataDirectory, 'accounts', accountId, 'changes.jsonl'))
   assert.equal(log.length, 0)
-  assert.equal(readdirSync(join(dataDirectory, 'accounts', accountId)).some((name) => name.endsWith('.tmp')), false)
   const index = JSON.parse(readFileSync(join(dataDirectory, 'accounts', accountId, 'index.json'), 'utf8'))
   assert.equal(index.entries[id].deleted, true)
   assert.equal(index.entries[id].meta, meta)

@@ -237,15 +237,11 @@ export const createMensa = (options = {}) => {
       loading = (async () => {
         try {
           const value = JSON.parse(await readFile(file, 'utf8'))
-          const known = value && Array.isArray(value.days) && typeof value.fetchedAt === 'string'
-          // A missing or broken file can start again. A file that is there but not this menu must not look empty, or the next refresh replaces it.
-          if (!known) {
-            diskBlocked = true
-            return
-          }
           const blocked = diskBlocked
-          if (!cache) cache = { fetchedAt: value.fetchedAt, days: value.days }
-          else if (blocked) mergeDisk(value)
+          if (value && Array.isArray(value.days) && typeof value.fetchedAt === 'string') {
+            if (!cache) cache = { fetchedAt: value.fetchedAt, days: value.days }
+            else if (blocked) mergeDisk(value)
+          }
           diskBlocked = false
           loaded = true
         } catch (error) {

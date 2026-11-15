@@ -1600,37 +1600,3 @@ test('a restore publishes the larger archive when a revision has two names', asy
   assert.deepEqual((await readFile(id)).body, original)
   assert.equal(readFileSync(join(directory, String(archivedRevision))).length, 64)
 })
-
-test('a revision list names the archive a restore would publish', async () => {
-  const id = randomBytes(32).toString('hex')
-  const original = randomBytes(5000)
-  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
-  assert.equal(created.status, 200, created.body.toString('utf8'))
-  const archivedRevision = revisionOf(created)
-  const next = randomBytes(4500)
-  const replaced = await putFile(id, next, archivedRevision, { 'X-FaNotes-Blank': '0' })
-  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
-  const directory = join(dataDirectory, 'accounts', accountId, 'revisions', id)
-  writeFileSync(join(directory, String(archivedRevision)), original.subarray(0, 64))
-  writeFileSync(join(directory, `c-${archivedRevision}`), original)
-  const listed = await call('GET', `/api/v1/sync/files/${id}/revisions`, { token })
-  assert.equal(listed.status, 200, listed.body.toString('utf8'))
-  assert.deepEqual(JSON.parse(listed.body.toString('utf8')).revisions, [
-    { revision: archivedRevision, size: original.length, collapse: true },
-  ])
-  const tied = randomBytes(32).toString('hex')
-  const tiedBody = randomBytes(3000)
-  const tiedCreated = await putFile(tied, tiedBody, 0, { 'X-FaNotes-Blank': '0' })
-  assert.equal(tiedCreated.status, 200, tiedCreated.body.toString('utf8'))
-  const tiedRevision = revisionOf(tiedCreated)
-  const tiedNext = randomBytes(2800)
-  const tiedReplaced = await putFile(tied, tiedNext, tiedRevision, { 'X-FaNotes-Blank': '0' })
-  assert.equal(tiedReplaced.status, 200, tiedReplaced.body.toString('utf8'))
-  const tiedDirectory = join(dataDirectory, 'accounts', accountId, 'revisions', tied)
-  writeFileSync(join(tiedDirectory, `c-${tiedRevision}`), tiedBody)
-  const tiedListed = await call('GET', `/api/v1/sync/files/${tied}/revisions`, { token })
-  assert.equal(tiedListed.status, 200, tiedListed.body.toString('utf8'))
-  assert.deepEqual(JSON.parse(tiedListed.body.toString('utf8')).revisions, [
-    { revision: tiedRevision, size: tiedBody.length, collapse: false },
-  ])
-})

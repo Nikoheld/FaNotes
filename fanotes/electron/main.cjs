@@ -21,7 +21,6 @@ const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const folderLocations = require('./folder-locations.cjs')
-const vaultWatch = require('./vault-watch.cjs')
 const { coerceWorksheetBytes } = require('./worksheet-bytes.cjs')
 const { encodeWindowCapture } = require('./window-capture.cjs')
 const { publishNewFile } = require('./exclusive-publish.cjs')
@@ -265,7 +264,6 @@ const IPC = Object.freeze({
   openExternal: 'fanotes:open-external',
   beforeClose: 'fanotes:before-close',
   shareOpen: 'fanotes:share-open',
-  vaultChanged: 'fanotes:vault-changed',
   confirmClose: 'fanotes:confirm-close',
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
@@ -346,6 +344,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   experimentalRemoteSupport: false,
   experimentalNoteBackup: false,
   experimentalSendData: false,
+  diagnosticsUsage: false,
+  diagnosticsLogs: false,
   lastOpenNotePath: '',
   dashboardLayout: '',
   homeworkApiChannelId: '',
@@ -1579,40 +1579,6 @@ let folderLocationStore = null
 function folderLocationStoreNow() {
   if (!folderLocationStore) folderLocationStore = folderLocations.loadStore(app.getPath('userData'))
   return folderLocationStore
-}
-
-// Notices files added, changed or removed from outside FaNotes (Explorer, other
-// programs, other sync tools) in the vault and its linked folder locations.
-let vaultWatcher = null
-let vaultWatcherRoot = null
-function ensureVaultWatch(root) {
-  if (vaultWatcher && vaultWatcherRoot === root) return
-  vaultWatcher?.stop()
-  vaultWatcherRoot = root
-  const scanRoot = async () => {
-    if (currentVaultPath !== root) throw new Error('vault changed')
-    return readTreeDirectory(root, root, 0, new Map())
-  }
-  const getRoots = () => {
-    const roots = [root]
-    const map = folderLocationMap(root)
-    for (const list of Object.values(map || {})) {
-      if (Array.isArray(list)) for (const location of list) if (typeof location === 'string') roots.push(location)
-    }
-    return roots
-  }
-  vaultWatcher = vaultWatch.createVaultWatcher({
-    getRoots,
-    scan: scanRoot,
-    watch: fs.watch,
-    onChange: (diff) => {
-      const visible = (list) => list.filter((entry) => !vaultWatch.isIgnoredWatchPath(entry)).slice(0, 500)
-      const payload = { added: visible(diff.added), removed: visible(diff.removed), changed: visible(diff.changed) }
-      if (!payload.added.length && !payload.removed.length && !payload.changed.length) return
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.vaultChanged, payload)
-    },
-  })
-  vaultWatcher.start()
 }
 
 function folderLocationMap(vault) {
@@ -3674,7 +3640,6 @@ function registerIpcHandlers() {
     const folderColors = await readFolderColors(root)
     const entries = applyFileColors(await readFastTreeDirectory(root, root, 0, folderColors), await readFileColorsForTree(root))
     setImmediate(() => { void writeTreeCache(root, entries) })
-    ensureVaultWatch(root)
     return entries
   })
 
@@ -3687,7 +3652,6 @@ function registerIpcHandlers() {
     // The verified local cache makes subsequent starts independent of a full
     // NAS/disk traversal. Refreshing it must never delay the live tree result.
     setImmediate(() => { void writeTreeCache(root, entries) })
-    ensureVaultWatch(root)
     return entries
   })
 
@@ -5734,7 +5698,6 @@ async function createWindow() {
     mainWindow.show()
   }
   mainWindow.once('ready-to-show', revealWindow)
-  mainWindow.on('focus', () => vaultWatcher?.nudge())
   mainWindow.webContents.on('did-fail-load', revealWindow)
 
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())

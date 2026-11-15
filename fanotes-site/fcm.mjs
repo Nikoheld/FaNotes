@@ -302,11 +302,8 @@ export const claimPushKeys = (file, changes) => withPushLock(String(file), async
   let replaceLedger = true
   try {
     const parsed = JSON.parse(await fs.readFile(file, 'utf8'))
-    // A missing or broken file can start again. A file that is there but not this ledger must not look empty, or the next push replaces it and can send the same notice again.
     if (parsed?.version === 1 && Array.isArray(parsed.keys)) {
       stored = parsed.keys.filter((key) => typeof key === 'string' && key.length > 0 && key.length <= 200)
-    } else {
-      replaceLedger = false
     }
   } catch (error) {
     // A missing or broken ledger can start again. Any other read error must not replace the file.

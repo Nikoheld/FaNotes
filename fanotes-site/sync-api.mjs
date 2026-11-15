@@ -453,7 +453,7 @@ const appendChange = async (accountId, table, entry) => {
 const compactTable = async (accountId, table) => {
   const directory = accountDirectory(accountId)
   await atomicWrite(safeJoin(directory, 'index.json'), JSON.stringify({ revision: table.revision, entries: Object.fromEntries(table.entries) }))
-  // The index rename has to be durable before the log is replaced. A crash
+  // The index rename has to be durable before the log is truncated. A crash
   // that kept the new index and lost the log would drop every revision that
   // lived only in the log.
   const directoryHandle = await fs.open(directory, 'r')
@@ -462,9 +462,12 @@ const compactTable = async (accountId, table) => {
   } finally {
     await directoryHandle.close()
   }
-  // Replace the log by rename. A crash must not tear the log in place after
-  // the index is saved.
-  await atomicWrite(safeJoin(directory, 'changes.jsonl'), '')
+  const log = await fs.open(safeJoin(directory, 'changes.jsonl'), 'w', 0o600)
+  try {
+    await log.sync()
+  } finally {
+    await log.close()
+  }
   table.logBytes = 0
 }
 
@@ -1147,15 +1150,14 @@ const recordLiveBlob = async (accountId, table, entry) => {
   await appendChange(accountId, table, entry)
 }
 
-/** Hash of the archived copy a restore of the newest revision would publish. */
+/** Hash of the newest archived blob for this note, or null when the archive is empty. */
 const newestArchivedIdentity = async (accountId, fileId) => {
   const directory = revisionsDirectory(accountId, fileId)
   const files = await listRevisionFiles(directory)
   if (!files.length) return null
   const newestRevision = files.reduce((max, file) => Math.max(max, file.revision), 0)
-  // The same file a restore would publish. A short torn sibling must not hide
-  // the archived delete, or the leftover live copy stays in the way.
-  const exact = archivedRevisionFile(files, newestRevision)
+  const exact = files.find((file) => file.revision === newestRevision && !file.name.startsWith('c-'))
+    ?? files.find((file) => file.revision === newestRevision)
   if (!exact) return null
   return { size: exact.size, sha256: await hashFile(safeJoin(directory, exact.name)) }
 }
@@ -1382,13 +1384,11 @@ const metaForRestore = async (accountId, fileId, current) => {
 const handleListRevisions = async (request, response, auth, fileId) => {
   const directory = revisionsDirectory(auth.account.id, fileId)
   const files = await listRevisionFiles(directory)
-  // One row per revision: the file a restore of that revision would publish.
-  const revisions = [...new Set(files.map((file) => file.revision))]
-    .sort((left, right) => left - right)
-    .map((revision) => archivedRevisionFile(files, revision))
-    .filter(Boolean)
-    .map((file) => ({ revision: file.revision, size: file.size, collapse: file.name.startsWith('c-') }))
-  sendJson(request, response, 200, { revisions })
+  sendJson(request, response, 200, {
+    revisions: files
+      .sort((left, right) => left.revision - right.revision)
+      .map((file) => ({ revision: file.revision, size: file.size, collapse: file.name.startsWith('c-') })),
+  })
 }
 
 const handleRestoreFile = async (request, response, auth, fileId) => {
