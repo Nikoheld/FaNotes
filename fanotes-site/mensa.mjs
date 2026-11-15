@@ -19,7 +19,7 @@ export const MENSA_PATHS = ['/api/v1/schulnetz/mensa', '/api/v1/kanti-web/mensa'
 const TIME_ZONE = 'Europe/Zurich'
 const WEEKDAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
 const FETCH_TIMEOUT_MS = 15_000
-const MAX_HTML_BYTES = 2 * 1024 * 1024
+export const MAX_HTML_BYTES = 2 * 1024 * 1024
 const HOUR_MS = 3_600_000
 const RETRY_AFTER_FAILURE_MS = 10 * 60_000
 const KEEP_DAYS_MS = 7 * 24 * HOUR_MS
@@ -27,6 +27,30 @@ const KEEP_DAYS_MS = 7 * 24 * HOUR_MS
 const UPSTREAM_ATTEMPTS = 2
 const UPSTREAM_RETRY_MS = 250
 const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504])
+
+// Stop once the cap is passed. The rest of the body is never stored.
+const readLimitedText = async (response, max) => {
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const body = typeof response.text === 'function' ? await response.text() : ''
+    if (body.length > max) throw new Error('page too large')
+    return body
+  }
+  const decoder = new TextDecoder('utf-8')
+  let size = 0
+  let body = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return body + decoder.decode()
+    const bytes = value?.byteLength || 0
+    size += bytes
+    if (size > max) {
+      if (typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+      throw new Error('page too large')
+    }
+    if (bytes) body += decoder.decode(value, { stream: true })
+  }
+}
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', auml: 'ä', ouml: 'ö', uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß', eacute: 'é', egrave: 'è', agrave: 'à' }
 const decode = (value) => value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/giu, (whole, name) => {
@@ -242,8 +266,7 @@ export const createMensa = (options = {}) => {
           events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!RETRY_STATUS.has(response.status) || attempt === UPSTREAM_ATTEMPTS) throw last
         } else {
-          const body = await response.text()
-          if (body.length > MAX_HTML_BYTES) throw new Error('page too large')
+          const body = await readLimitedText(response, MAX_HTML_BYTES)
           events.info({ requestId, method: 'GET', route, status: response.status || 200, attempt, ms: elapsed() })
           return body
         }

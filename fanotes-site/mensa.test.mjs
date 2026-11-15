@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createMensa, mensaQuery, parseMensaApi, parseMensaHtml, pickMensaDay } from './mensa.mjs'
+import { MAX_HTML_BYTES, createMensa, mensaQuery, parseMensaApi, parseMensaHtml, pickMensaDay } from './mensa.mjs'
 import { createServiceLog } from './service-log.mjs'
 
 const apiFixture = JSON.parse(await fs.readFile(new URL('./test-fixtures/mensa-api-week.json', import.meta.url), 'utf8'))
@@ -377,6 +377,88 @@ test('a slow cache read is shared and is not replaced by an older copy', async (
     assert.equal(left.stale, false)
     assert.equal(right.stale, false)
     assert.equal(lines.some((line) => line.includes('secret-menu')), false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+const byteStream = (payload, { onText, onCancel, reads } = {}) => {
+  const parts = Array.isArray(payload) ? payload : [payload]
+  let index = 0
+  return {
+    ok: true,
+    status: 200,
+    text: async () => {
+      if (onText) onText()
+      return ''
+    },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (index >= parts.length) return { done: true }
+          const value = parts[index]
+          index += 1
+          if (reads) reads.count += 1
+          return { done: false, value }
+        },
+        cancel: async () => { if (onCancel) onCancel() },
+      }),
+    },
+  }
+}
+
+test('a streamed menu answer is assembled without buffering through text()', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-stream-'))
+  let textCalls = 0
+  const fetchImpl = async (url) => {
+    const kind = String(url).split('/api/_Combine/')[1].split('/')[0].toLowerCase()
+    const bytes = Buffer.from(JSON.stringify(apiFixture[kind]))
+    const mid = Math.max(1, Math.floor(bytes.length / 2))
+    return byteStream([bytes.subarray(0, mid), bytes.subarray(mid)], { onText: () => { textCalls += 1 } })
+  }
+  const mensa = createMensa({ fetch: fetchImpl, now: () => new Date('2026-11-13T14:00:00Z'), root, log: () => {} })
+  try {
+    const body = await mensa.get()
+    assert.equal(textCalls, 0)
+    assert.equal(body.days.length, 10)
+    assert.equal(body.day.date, '2026-11-16')
+    assert.equal(body.stale, false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an oversized menu body is dropped after one read and is not retried', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-cap-'))
+  let calls = 0
+  let textCalls = 0
+  let cancelled = 0
+  const reads = { count: 0 }
+  const lines = []
+  const fetchImpl = async () => {
+    calls += 1
+    return byteStream([new Uint8Array(MAX_HTML_BYTES + 1)], {
+      onText: () => { textCalls += 1 },
+      onCancel: () => { cancelled += 1 },
+      reads,
+    })
+  }
+  const mensa = createMensa({
+    fetch: fetchImpl,
+    sleep: async () => {},
+    now: () => new Date('2026-11-10T07:00:00Z'),
+    root,
+    log: (_level, message) => lines.push(String(message)),
+  })
+  try {
+    const body = await mensa.get()
+    assert.equal(body.days.length, 0)
+    assert.equal(body.stale, true)
+    assert.equal(calls, 2)
+    assert.equal(textCalls, 0)
+    assert.equal(reads.count, 2)
+    assert.equal(cancelled, 2)
+    assert.equal(lines.some((line) => line.includes('page too large')), false)
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }
