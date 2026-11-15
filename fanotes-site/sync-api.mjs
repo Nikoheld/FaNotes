@@ -199,7 +199,13 @@ const spoolUpload = async (directory, request, limit) => {
   const declared = Number(request.headers['content-length'])
   if (!Number.isInteger(declared) || declared < 0) fail(400, 'Die Datei kam unvollständig an.')
   if (declared > limit) fail(413, 'Die Datei ist zu groß für den Sync.')
+  const existing = await fs.lstat(directory).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
   await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+  if (!existing) {
+    // Link the new incoming directory before a spool is created in it. A crash
+    // must not drop the directory that holds this upload.
+    await syncDirectory(dirname(directory))
+  }
   const target = safeJoin(directory, `${process.pid}.${randomBytes(6).toString('hex')}.part`)
   const handle = await fs.open(target, 'wx', 0o600)
   const hash = createHash('sha256')
@@ -221,10 +227,15 @@ const spoolUpload = async (directory, request, limit) => {
   } catch (error) {
     await handle.close().catch(() => {})
     await fs.rm(target, { force: true })
+    // A rejected spool name has to be durable. A crash must not bring that
+    // file back beside the notes.
+    await syncDirectory(directory)
     if (error instanceof SyncApiError) throw error
     fail(400, 'Die Datei kam unvollständig an.')
   }
   await handle.close()
+  // The spool name has to be durable before the caller renames it onto a note.
+  await syncDirectory(directory)
   return { path: target, size, sha256: hash.digest('hex') }
 }
 
@@ -1237,6 +1248,9 @@ const handlePutFile = async (request, response, auth, fileId) => {
       await fs.rename(incoming.path, blobPath)
       // The new name has to be durable before the change log records it.
       await syncDirectory(blobDirectory)
+      // The old spool name has to be gone too. A crash must not bring it back
+      // as a second link to this note.
+      await syncDirectory(dirname(incoming.path))
     }
     committed = true
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: incoming.size, sha256: declaredSha, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
@@ -1247,7 +1261,12 @@ const handlePutFile = async (request, response, auth, fileId) => {
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision }, { ETag: `"${entry.revision}"` })
   })
   } finally {
-    if (!committed) await fs.rm(incoming.path, { force: true })
+    if (!committed) {
+      await fs.rm(incoming.path, { force: true })
+      // The spool was not stored as the note. Dropping the name has to be
+      // durable, or a crash brings that file back.
+      await syncDirectory(dirname(incoming.path))
+    }
   }
 }
 
@@ -1610,6 +1629,9 @@ const handleUploadPatch = async (request, response, auth, fileId, uploadId) => {
     })
   } finally {
     await fs.rm(patch.path, { force: true })
+    // The patch spool was copied onto the partial. Dropping its name has to
+    // be durable, or a crash brings that file back.
+    await syncDirectory(dirname(patch.path))
   }
 }
 
@@ -1716,6 +1738,9 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       await fs.mkdir(blobDirectory, { recursive: true, mode: 0o700 })
       await fs.rename(bodyPath, blobPath)
       await syncDirectory(blobDirectory)
+      // The partial name has to be gone too. A crash must not bring that file
+      // back as a second link to this note.
+      await syncDirectory(dirname(bodyPath))
     }
     await removePartial(auth.account.id, uploadId)
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }

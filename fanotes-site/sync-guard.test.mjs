@@ -1145,3 +1145,52 @@ test('completing an upload of the same bytes keeps the live inode', async () => 
   assert.equal(live.headers['x-fanotes-meta'], nextMeta)
   assert.equal((await call('GET', `/api/v1/sync/files/${id}/uploads/${uploadId}`, { token })).status, 404)
 })
+
+test('a rejected spool is removed and a stored note leaves no spool name', async () => {
+  const id = randomBytes(32).toString('hex')
+  const incomingDir = join(dataDirectory, 'accounts', accountId, 'incoming')
+  const partNames = () => (existsSync(incomingDir) ? readdirSync(incomingDir).filter((name) => name.endsWith('.part')) : [])
+  const before = partNames()
+  const tiny = randomBytes(10)
+  const rejected = await putFile(id, tiny, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(rejected.status, 400)
+  assert.deepEqual(partNames().sort(), before.sort())
+  const original = randomBytes(80)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  assert.deepEqual(partNames().sort(), before.sort())
+  assert.deepEqual((await readFile(id)).body, original)
+  const revision = revisionOf(created)
+  const openBody = Buffer.from(JSON.stringify({ size: original.length }))
+  const opened = await call('POST', `/api/v1/sync/files/${id}/uploads`, {
+    token,
+    body: openBody,
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': String(openBody.length),
+      'If-Match': String(revision),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(original),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(opened.status, 201, opened.body.toString('utf8'))
+  const uploadId = jsonOf(opened).uploadId
+  const patched = await call('PATCH', `/api/v1/sync/files/${id}/uploads/${uploadId}`, {
+    token,
+    body: original,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(original.length),
+      'Upload-Offset': '5',
+    },
+  })
+  assert.equal(patched.status, 409)
+  assert.deepEqual(partNames().sort(), before.sort())
+  assert.deepEqual((await readFile(id)).body, original)
+  const next = randomBytes(90)
+  const replaced = await putFile(id, next, revision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  assert.deepEqual(partNames().sort(), before.sort())
+  assert.deepEqual((await readFile(id)).body, next)
+})
