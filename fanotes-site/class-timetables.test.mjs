@@ -515,3 +515,28 @@ test('an upload is logged as JSON with counts and without class codes or names',
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a timetable read is logged without the class code or the room name', async () => {
+  const lines = []
+  const jsonLog = createServiceLog('class-timetables', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const root = await mkdtemp(join(tmpdir(), 'timetables-read-'))
+  try {
+    const store = createClassTimetables({ root, log: () => {}, jsonLog, now: () => new Date('2026-11-15T11:00:00.000Z') })
+    assert.deepEqual(await store.summary(), { available: false })
+    assert.equal(await store.classWeek('G26D'), null)
+    assert.equal(await store.room('Telli'), null)
+    assert.equal(lines.length, 3)
+    const rows = lines.map((line) => JSON.parse(line))
+    assert.deepEqual(rows.map((row) => [row.method, row.route, row.status, row.level]), [
+      ['GET', '/timetables', 200, 'info'],
+      ['GET', '/timetables/class', 404, 'warn'],
+      ['GET', '/timetables/room', 404, 'warn'],
+    ])
+    assert.equal(rows.every((row) => row.service === 'class-timetables' && typeof row.ms === 'number' && row.requestId), true)
+    const text = lines.join('\n')
+    assert.equal(text.includes('G26'), false)
+    assert.equal(text.includes('Telli'), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
