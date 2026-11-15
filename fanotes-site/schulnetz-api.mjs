@@ -50,21 +50,22 @@ import {
 } from './schulnetz-logic.mjs'
 import { establishWebSession, scrapeWithSession } from './schulnetz-web.mjs'
 import {
+  claimPushKeys,
   connectionRouteKey,
+  deliverFcm,
   FCM_ACCOUNT_FILE,
   exchangeServiceAccount,
   fcmDataMessage,
   fcmPriorityForChanges,
   pushKeyBytes,
   sealPushChanges,
-  fcmDropToken,
   isValidFcmToken,
   readServiceAccount,
 } from './fcm.mjs'
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
-const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json', 'monitor.json']
+const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json', 'monitor.json', 'pushed-notices.json']
 // Pendelstrecken move with the identity (guest → account) like the school files.
 const COMMUTE_FILES = ['commute.json', 'commute-state.json']
 const GUEST_LIMIT = 30
@@ -715,23 +716,27 @@ export const createSchulnetzRuntime = (options = {}) => {
   const sendFcm = async (token, event, priority = 'HIGH', extra = {}) => {
     const message = fcmDataMessage(token, event, { priority, ...extra })
     if (typeof options.fcmSend === 'function') return options.fcmSend(message)
-    const nowMs = now().getTime()
-    if (!fcmCache || fcmCache.exp - 60 <= Math.floor(nowMs / 1000)) {
-      const account = options.fcmAccount || await readServiceAccount(options.fcmAccountFile || process.env.FANOTES_FCM_SERVICE_ACCOUNT || FCM_ACCOUNT_FILE)
-      if (!account) return { skipped: true }
-      fcmCache = await exchangeServiceAccount(account, fetchImpl, nowMs)
+    const sleep = options.fcmSleep || ((ms) => new Promise((done) => setTimeout(done, ms)))
+    const post = async () => {
+      const nowMs = now().getTime()
+      if (!fcmCache || fcmCache.exp - 60 <= Math.floor(nowMs / 1000)) {
+        const account = options.fcmAccount || await readServiceAccount(options.fcmAccountFile || process.env.FANOTES_FCM_SERVICE_ACCOUNT || FCM_ACCOUNT_FILE)
+        if (!account) return { skipped: true }
+        fcmCache = await exchangeServiceAccount(account, fetchImpl, nowMs)
+      }
+      const result = await deliverFcm({
+        fetchImpl,
+        url: `https://fcm.googleapis.com/v1/projects/${fcmCache.projectId}/messages:send`,
+        message,
+        headers: { Authorization: `Bearer ${fcmCache.token}`, 'Content-Type': 'application/json' },
+        sleep,
+      })
+      if (result.status === 401) fcmCache = null
+      return result
     }
-    const response = await fetchImpl(`https://fcm.googleapis.com/v1/projects/${fcmCache.projectId}/messages:send`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${fcmCache.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    })
-    const body = await response.text()
-    if (response.status === 401) fcmCache = null
-    return { status: response.status, drop: fcmDropToken(response.status, body) }
+    let result = await post()
+    if (result?.status === 401) result = await post()
+    return result?.skipped ? result : { status: result.status, drop: result.drop, attempts: result.attempts }
   }
 
   const ping = async (accountId, link, event, priority = 'HIGH', changes = []) => {
@@ -884,11 +889,14 @@ export const createSchulnetzRuntime = (options = {}) => {
       try { await addHiddenGrades(accountId, newGradeTargetIds(unseen)) } catch (error) { log('warn', `Verdeckte Noten nicht gespeichert (${error?.name || 'error'})`) }
     }
     const fresh = prepareGradeNotifications(unseen, link.settings?.guessGrades === true)
-    const priority = fcmPriorityForChanges(fresh, now())
+    // A grade or cancellation already handed to FCM is not handed over again, even when a second
+    // read builds a new change id for the same lesson.
+    const outbound = await claimPushKeys(resolve(accountDir(accountId), 'pushed-notices.json'), fresh)
+    const priority = fcmPriorityForChanges(outbound, now())
     if (priority && push) {
-      const fcm = await ping(accountId, link, 'sync', priority, fresh)
+      const fcm = await ping(accountId, link, 'sync', priority, outbound)
       // First sight of the change (the read that parsed it) to the FCM HTTP response.
-      if (detectedAt > 0) await recordPush(accountId, detectedAt, fcm, fresh.filter((change) => change.category === 'grade').length)
+      if (detectedAt > 0) await recordPush(accountId, detectedAt, fcm, outbound.filter((change) => change.category === 'grade').length)
     }
     return fresh
   }
