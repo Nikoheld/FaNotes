@@ -1,7 +1,7 @@
 // The grade promise: a new grade reaches the phone within 10 minutes of appearing in Schulnetz, 24/7.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -330,6 +330,68 @@ test('a transient grade read is retried, a maintenance page keeps the book, and 
     const names = await readdir(join(root, 'accounts', accountId))
     assert.equal(names.some((name) => name.endsWith('.tmp') || name.includes('.tmp')), false)
   } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable account file is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'schulnetz-read-'))
+  const accountId = 'e'.repeat(32)
+  const calls = []
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    autostart: false,
+    pruneOrphans: true,
+    now: () => new Date('2026-11-15T12:00:00.000Z'),
+    fetch: async (url) => {
+      const target = String(url)
+      calls.push(target.endsWith('/token.php') ? 'token' : 'school')
+      if (target.endsWith('/token.php')) {
+        return { status: 200, text: async () => JSON.stringify({ access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 }) }
+      }
+      throw new Error('school read')
+    },
+    syncAccountExists: async () => true,
+    fcmSend: async () => ({ status: 200 }),
+  })
+  const snapshot = join(root, 'accounts', accountId, 'snapshot.json')
+  const linkFile = join(root, 'accounts', accountId, 'link.json')
+  let guestFile
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const stored = JSON.stringify({ revision: 3, grades: [{ id: 'kept-grade' }], fetchedAt: '2026-11-15T08:00:00.000Z' })
+    await writeFile(snapshot, stored, { mode: 0o600 })
+    await chmod(snapshot, 0o000)
+    await assert.rejects(() => runtime.pollAccount(accountId), { code: 'EACCES' })
+    assert.deepEqual(calls, ['token'])
+    await chmod(snapshot, 0o600)
+    assert.equal(await readFile(snapshot, 'utf8'), stored)
+    const linkBefore = await readFile(linkFile)
+    await chmod(linkFile, 0o000)
+    const health = await runtime.health()
+    assert.equal(typeof health.status, 'string')
+    assert.equal(typeof health.gradeChecks.overdue, 'number')
+    await assert.rejects(() => runtime.pollAccount(accountId), { code: 'EACCES' })
+    await chmod(linkFile, 0o600)
+    assert.deepEqual(await readFile(linkFile), linkBefore)
+
+    const guest = await runtime.createGuest('203.0.113.72')
+    guestFile = join(root, 'accounts', guest.accountId, 'guest.json')
+    const guestBefore = await readFile(guestFile)
+    await chmod(guestFile, 0o000)
+    await assert.rejects(() => runtime.pollAccount(guest.accountId), { code: 'EACCES' })
+    await chmod(guestFile, 0o600)
+    assert.deepEqual(await readFile(guestFile), guestBefore)
+    assert.equal((await readdir(join(root, 'accounts'))).includes(guest.accountId), true)
+  } finally {
+    await chmod(snapshot, 0o600).catch(() => undefined)
+    await chmod(linkFile, 0o600).catch(() => undefined)
+    if (guestFile) await chmod(guestFile, 0o600).catch(() => undefined)
     await rm(root, { recursive: true, force: true })
   }
 })
