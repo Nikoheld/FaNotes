@@ -20,7 +20,7 @@
 //     that is not a live note until its size and checksum match
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { constants as fsConstants, promises as fs } from 'node:fs'
-import { resolve, sep } from 'node:path'
+import { dirname, resolve, sep } from 'node:path'
 import { languageForRequest, localizeText } from './i18n.mjs'
 import { hashFile, inspectSyncAccount } from './sync-integrity.mjs'
 
@@ -240,6 +240,15 @@ const atomicWrite = async (target, data) => {
   await fs.rename(temporary, target)
 }
 
+const syncDirectory = async (directory) => {
+  const handle = await fs.open(directory, 'r')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
 // Copy a durable archive onto a blob without holding the ciphertext in the heap.
 // The temporary file is renamed only after fsync, so a crash keeps the live note.
 const copyDurable = async (source, destination) => {
@@ -270,6 +279,7 @@ const copyDurable = async (source, destination) => {
   await output.close()
   await input.close()
   await fs.rename(temporary, destination)
+  await syncDirectory(dirname(destination))
 }
 
 const readJsonFile = async (target, fallback = null) => {
@@ -958,6 +968,8 @@ const handlePutFile = async (request, response, auth, fileId) => {
     const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
     await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
     await fs.rename(incoming.path, blobPath)
+    // The new name has to be durable before the change log records it.
+    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
     committed = true
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: incoming.size, sha256: declaredSha, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
@@ -1289,6 +1301,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
     await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
     await fs.rename(bodyPath, blobPath)
+    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
     await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
