@@ -473,27 +473,75 @@ fun splitStroke(
     sourceWidth: Double,
     sourceHeight: Double,
 ): List<InkStroke>? {
-    val hit = stroke.points.map { point ->
-        val px = point.x * sourceWidth
-        val py = point.y * sourceHeight
-        samples.any { sample ->
-            hypot(px - sample.x * sourceWidth, py - sample.y * sourceHeight) <= radiusPagePx
+    if (stroke.points.isEmpty() || samples.isEmpty()) return null
+    val reach = radiusPagePx + stroke.baseWidth / 2.0
+    val path = samples.map { it.x * sourceWidth to it.y * sourceHeight }
+    fun near(x: Double, y: Double): Boolean {
+        if (path.size == 1) return hypot(x - path[0].first, y - path[0].second) <= reach
+        for (i in 1 until path.size) {
+            if (pointToSegment(x, y, path[i - 1].first, path[i - 1].second, path[i].first, path[i].second) <= reach) return true
         }
+        return false
+    }
+    // Dense walk along the stroke: original vertices plus interpolated probes
+    // so a long segment is cut where the eraser crosses it, not at its far vertices.
+    val dense = ArrayList<StrokePoint>()
+    val original = ArrayList<Boolean>()
+    val hit = ArrayList<Boolean>()
+    val step = (radiusPagePx / 3.0).coerceAtLeast(1.0)
+    stroke.points.forEachIndexed { index, point ->
+        if (index > 0) {
+            val previous = stroke.points[index - 1]
+            val length = hypot((point.x - previous.x) * sourceWidth, (point.y - previous.y) * sourceHeight)
+            val parts = kotlin.math.ceil(length / step).toInt().coerceAtMost(512)
+            for (k in 1 until parts) {
+                val t = k.toDouble() / parts
+                val probe = lerpPoint(previous, point, t)
+                dense += probe
+                original += false
+                hit += near(probe.x * sourceWidth, probe.y * sourceHeight)
+            }
+        }
+        dense += point
+        original += true
+        hit += near(point.x * sourceWidth, point.y * sourceHeight)
     }
     if (hit.none { it }) return null
     val pieces = mutableListOf<InkStroke>()
-    val current = mutableListOf<StrokePoint>()
-    stroke.points.forEachIndexed { index, point ->
-        if (hit[index]) {
-            if (current.size >= 1) pieces += stroke.copy(points = current.toList())
-            current.clear()
-        } else {
-            current += point
-        }
+    var current = mutableListOf<StrokePoint>()
+    fun flush() {
+        if (current.isNotEmpty()) pieces += stroke.copy(points = current.toList())
+        current = mutableListOf()
     }
-    if (current.isNotEmpty()) pieces += stroke.copy(points = current.toList())
+    for (index in dense.indices) {
+        if (hit[index]) {
+            flush()
+            continue
+        }
+        val boundary = (index > 0 && hit[index - 1]) || (index < dense.lastIndex && hit[index + 1])
+        if (original[index] || boundary) current += dense[index]
+    }
+    flush()
     return pieces
 }
+
+private fun pointToSegment(px: Double, py: Double, ax: Double, ay: Double, bx: Double, by: Double): Double {
+    val dx = bx - ax
+    val dy = by - ay
+    val lengthSq = dx * dx + dy * dy
+    if (lengthSq <= 1e-12) return hypot(px - ax, py - ay)
+    val t = (((px - ax) * dx + (py - ay) * dy) / lengthSq).coerceIn(0.0, 1.0)
+    return hypot(px - (ax + dx * t), py - (ay + dy * t))
+}
+
+private fun lerpPoint(a: StrokePoint, b: StrokePoint, t: Double) = a.copy(
+    x = a.x + (b.x - a.x) * t,
+    y = a.y + (b.y - a.y) * t,
+    t = a.t + (b.t - a.t) * t,
+    pressure = a.pressure + (b.pressure - a.pressure) * t,
+    tiltX = a.tiltX + (b.tiltX - a.tiltX) * t,
+    tiltY = a.tiltY + (b.tiltY - a.tiltY) * t,
+)
 
 /**
  * Closed outline of a pressure-sensitive ribbon, in page pixels.
