@@ -1014,6 +1014,19 @@ const listRevisionFiles = async (directory) => {
   return files
 }
 
+// Register creates this directory. A later write can still find it gone.
+const ensureBlobDirectory = async (accountId) => {
+  const blobDirectory = safeJoin(accountDirectory(accountId), 'blobs')
+  const existing = await fs.lstat(blobDirectory).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  await fs.mkdir(blobDirectory, { recursive: true, mode: 0o700 })
+  if (!existing) {
+    // Link the blobs directory before a note is written into it. A crash must
+    // not drop the directory that holds the live note.
+    await syncDirectory(accountDirectory(accountId))
+  }
+  return blobDirectory
+}
+
 // The live name can disappear after this revision was copied into the archive.
 // Copy that body back when its size and checksum match the table. The archive
 // stays, a tombstone is not revived, and the change log is not rewritten.
@@ -1041,12 +1054,8 @@ const restoreLiveBlob = async (accountId, fileId, entry) => {
     }
   }
   if (!source) return false
-  const blobsExisted = await fs.lstat(blobDirectory).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
-  await fs.mkdir(blobDirectory, { recursive: true, mode: 0o700 })
-  if (!blobsExisted) {
-    // Link the blobs directory before the archived note is copied back into it.
-    await syncDirectory(accountDirectory(accountId))
-  }
+  // Link the blobs directory before the archived note is copied back into it.
+  await ensureBlobDirectory(accountId)
   await copyDurable(source, blobPath)
   return true
 }
@@ -1277,7 +1286,7 @@ const handlePutFile = async (request, response, auth, fileId) => {
       await fs.rm(incoming.path, { force: true })
       await syncDirectory(dirname(incoming.path))
     } else {
-      await fs.mkdir(blobDirectory, { recursive: true, mode: 0o700 })
+      await ensureBlobDirectory(auth.account.id)
       await fs.rename(incoming.path, blobPath)
       // The new name has to be durable before the change log records it.
       await syncDirectory(blobDirectory)
@@ -1407,7 +1416,7 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     if (replaces) {
       table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, info.size, false)
     }
-    await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
+    await ensureBlobDirectory(auth.account.id)
     await copyDurable(source, safeJoin(accountDirectory(auth.account.id), 'blobs', fileId))
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: info.size, sha256: digest, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
@@ -1781,7 +1790,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     const blobDirectory = safeJoin(accountDirectory(auth.account.id), 'blobs')
     const blobPath = safeJoin(blobDirectory, fileId)
     if (!await liveBlobMatches(auth.account.id, fileId, current, Number(meta.size) || 0, declaredSha)) {
-      await fs.mkdir(blobDirectory, { recursive: true, mode: 0o700 })
+      await ensureBlobDirectory(auth.account.id)
       await fs.rename(bodyPath, blobPath)
       await syncDirectory(blobDirectory)
       // The partial name has to be gone too. A crash must not bring that file

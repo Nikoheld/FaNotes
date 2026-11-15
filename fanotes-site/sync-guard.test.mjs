@@ -1467,3 +1467,106 @@ test('a login does not accept a key the account no longer has', async () => {
   assert.deepEqual(live.body, original)
   assert.deepEqual(readFileSync(blobPath), original)
 })
+
+test('a missing blobs directory is linked before the note is stored', async () => {
+  const email = `blobs-${randomBytes(4).toString('hex')}@example.com`
+  const registered = await jsonCall('POST', '/api/v1/sync/register', {
+    email,
+    authKey: b64(32),
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Check', platform: 'linux' },
+  })
+  assert.equal(registered.status, 201, JSON.stringify(registered.json))
+  const localToken = registered.json.token
+  const localAccount = registered.json.accountId
+  const asAccount = (method, path, { headers = {}, body } = {}) => call(method, path, {
+    token: localToken,
+    body,
+    headers: { ...headers, 'X-FaNotes-Account': localAccount },
+  })
+  const put = (id, bytes, base) => asAccount('PUT', `/api/v1/sync/files/${id}`, {
+    body: bytes,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes.length),
+      'If-Match': String(base),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(bytes),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await put(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const firstRevision = revisionOf(created)
+  const next = randomBytes(4800)
+  const replaced = await put(id, next, firstRevision)
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  const blobDir = join(dataDirectory, 'accounts', localAccount, 'blobs')
+  const archiveName = join(dataDirectory, 'accounts', localAccount, 'revisions', id, String(firstRevision))
+  assert.deepEqual(readFileSync(archiveName), original)
+  rmSync(blobDir, { recursive: true })
+  const restored = await asAccount('POST', `/api/v1/sync/files/${id}/restore`, {
+    body: Buffer.from(JSON.stringify({ revision: firstRevision })),
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': String(Buffer.from(JSON.stringify({ revision: firstRevision })).length),
+      'If-Match': String(revisionOf(replaced)),
+    },
+  })
+  assert.equal(restored.status, 200, restored.body.toString('utf8'))
+  assert.equal(lstatSync(blobDir).isDirectory(), true)
+  assert.deepEqual(readFileSync(join(blobDir, id)), original)
+  const live = await asAccount('GET', `/api/v1/sync/files/${id}`)
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, original)
+  const third = randomBytes(4600)
+  const openBody = Buffer.from(JSON.stringify({ size: third.length }))
+  const opened = await asAccount('POST', `/api/v1/sync/files/${id}/uploads`, {
+    body: openBody,
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': String(openBody.length),
+      'If-Match': String(revisionOf(restored)),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(third),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(opened.status, 201, opened.body.toString('utf8'))
+  const uploadId = jsonOf(opened).uploadId
+  const patched = await asAccount('PATCH', `/api/v1/sync/files/${id}/uploads/${uploadId}`, {
+    body: third,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(third.length),
+      'Upload-Offset': '0',
+    },
+  })
+  assert.equal(patched.status, 200, patched.body.toString('utf8'))
+  rmSync(blobDir, { recursive: true })
+  const finished = await asAccount('POST', `/api/v1/sync/files/${id}/uploads/${uploadId}/complete`, {
+    headers: {
+      'Content-Length': '0',
+      'If-Match': String(revisionOf(restored)),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(third),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(finished.status, 200, finished.body.toString('utf8'))
+  assert.equal(lstatSync(blobDir).isDirectory(), true)
+  assert.deepEqual(readFileSync(join(blobDir, id)), third)
+  const uploaded = await asAccount('GET', `/api/v1/sync/files/${id}`)
+  assert.equal(uploaded.status, 200)
+  assert.deepEqual(uploaded.body, third)
+  rmSync(blobDir, { recursive: true })
+  const direct = randomBytes(4400)
+  const written = await put(id, direct, revisionOf(finished))
+  assert.equal(written.status, 200, written.body.toString('utf8'))
+  assert.equal(lstatSync(blobDir).isDirectory(), true)
+  assert.deepEqual(readFileSync(join(blobDir, id)), direct)
+  assert.deepEqual((await asAccount('GET', `/api/v1/sync/files/${id}`)).body, direct)
+})
