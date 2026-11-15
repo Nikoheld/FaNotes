@@ -21,6 +21,17 @@ export const listBackups = async (dest) => {
   return names.filter((name) => STAMP.test(name)).sort()
 }
 
+/** Filesystem errors include absolute paths. Callers log the message, so the path stays out of it. */
+const hidePath = async (action, label) => {
+  try {
+    return await action()
+  } catch (error) {
+    if (typeof error?.code !== 'string') throw error
+    const code = /^[A-Z][A-Z0-9_]{0,23}$/u.test(error.code) ? error.code : 'failed'
+    throw new Error(`${label} (${code}).`)
+  }
+}
+
 const measure = async (root) => {
   let files = 0
   let bytes = 0
@@ -47,15 +58,17 @@ export const runBackup = async ({ source, dest, keep = 7, dryRun = false, now = 
   }
   const sourceStat = await stat(from)
   if (!sourceStat.isDirectory()) throw new Error('Die Sync-Daten sind kein Verzeichnis.')
-  const measured = await measure(from)
+  const measured = await hidePath(() => measure(from), 'Sicherung unvollständig')
   const stamp = backupStamp(now)
   const existing = await listBackups(into)
   const names = existing.includes(stamp) ? existing : [...existing, stamp]
   const remove = names.slice(0, Math.max(0, names.length - keep)).filter((name) => name !== names.at(-1))
   if (!dryRun) {
-    await mkdir(into, { recursive: true, mode: 0o700 })
-    await cp(from, resolve(into, stamp), { recursive: true, verbatimSymlinks: false })
-    for (const name of remove) await rm(resolve(into, name), { recursive: true, force: true })
+    await hidePath(async () => {
+      await mkdir(into, { recursive: true, mode: 0o700 })
+      await cp(from, resolve(into, stamp), { recursive: true, verbatimSymlinks: false })
+      for (const name of remove) await rm(resolve(into, name), { recursive: true, force: true })
+    }, 'Sicherung unvollständig')
   }
   return { stamp, ...measured, kept: names.length - remove.length, remove, dryRun }
 }
@@ -69,7 +82,7 @@ export const restoreBackup = async ({ archive, dest, dryRun = false } = {}) => {
   }
   const archiveStat = await stat(from)
   if (!archiveStat.isDirectory()) throw new Error('Die Sicherung ist kein Verzeichnis.')
-  const measured = await measure(from)
+  const measured = await hidePath(() => measure(from), 'Wiederherstellung unvollständig')
   let occupied = false
   try {
     occupied = (await readdir(into)).length > 0
@@ -78,8 +91,10 @@ export const restoreBackup = async ({ archive, dest, dryRun = false } = {}) => {
   }
   if (occupied) throw new Error('Das Ziel ist nicht leer.')
   if (!dryRun) {
-    await mkdir(into, { recursive: true, mode: 0o700 })
-    await cp(from, into, { recursive: true, verbatimSymlinks: false })
+    await hidePath(async () => {
+      await mkdir(into, { recursive: true, mode: 0o700 })
+      await cp(from, into, { recursive: true, verbatimSymlinks: false })
+    }, 'Wiederherstellung unvollständig')
   }
   return { ...measured, dryRun }
 }
