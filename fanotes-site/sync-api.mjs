@@ -690,6 +690,12 @@ const handleLogin = async (request, response) => {
   if (!await verify(account)) fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
   await withAccountLock(account.id, async () => {
     const fresh = await loadAccountById(account.id)
+    // The key was checked on the account from before this lock. A password
+    // change can save a new hash in between. Signing that stale check in
+    // would open a session for the old key.
+    if (!fresh?.auth?.hash || !fresh?.auth?.salt) fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
+    const unchanged = fresh.auth.salt === account.auth.salt && fresh.auth.hash === account.auth.hash
+    if (!unchanged && !await verify(fresh)) fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
     const deviceId = registerDevice(fresh, device)
     const session = issueSession(fresh, deviceId)
     await saveAccount(fresh)
