@@ -12,7 +12,7 @@ import { LANGUAGE_TYPOGRAPHY } from '../model/defaults'
 import { paragraphKey, titleKey } from '../model/flow'
 import { writerId } from '../model/ids'
 import { marksAt, runsText } from '../model/runs'
-import type { Align, BinderNode, FontFamilyId, Marks, StoryLanguage } from '../model/types'
+import type { Align, BinderNode, FontFamilyId, Marks, Scene, StoryLanguage, StoryManifest } from '../model/types'
 import { loadProject, recoverJournal, storageAdapter, storyHost, storyTitleFromPath, writeJournal } from '../storage'
 import { L, formatNumber, styleName } from './i18n'
 import { caretBox, hitTest, move, type Motion } from './navigation'
@@ -29,7 +29,9 @@ import { ReferencePane, type Reference } from './ReferencePane'
 import { ScenePanel, SnapshotCompare } from './ScenePanel'
 import { ExportDialog } from '../export/ExportDialog'
 import { androidBridge } from '../androidHost'
+import { registerStoryGate } from '../liveSync'
 import { paragraphForQuery, subscribeStoryReveal } from '../reveal'
+import { mergeableManifest, mergeableScene } from '../syncMerge'
 import { useStoryTools } from './storyTools'
 import { canDrop, findIn, moveNode, moveToTrash, trashedIds, updateNode, TRASH_ID, type DropPosition } from '../model/binder'
 import { diffScene, restoreSnapshot, type DiffRow, type Snapshot } from '../model/snapshots'
@@ -185,6 +187,35 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     }
     return ok
   }, [controller, host, path, onSaved])
+  // Another device's edits arrive while the story is open: sync writes scenes and the manifest only
+  // while nothing is unsaved here, and the editor merges what it wrote (see liveSync.ts).
+  useEffect(() => {
+    if (!controller || !host) return
+    let alive = true
+    const off = registerStoryGate({
+      path,
+      isBusy: () => controller.isDirty() || controller.isSaving(),
+      changed: (relatives) => {
+        void (async () => {
+          const scenes: Scene[] = []
+          let manifest: StoryManifest | null = null
+          for (const relative of relatives) {
+            const text = await host.read(`${path}/${relative}`).catch(() => null)
+            if (!alive || text === null) continue
+            let value: unknown = null
+            try { value = JSON.parse(text) } catch { continue }
+            if (relative === 'story.json') manifest = mergeableManifest(value)
+            else {
+              const scene = mergeableScene(value, relative.slice('scenes/'.length, -'.json'.length))
+              if (scene) scenes.push(scene)
+            }
+          }
+          if (alive && controller.absorb(scenes, manifest)) setNotice(L('Änderungen von einem anderen Gerät wurden übernommen.', 'Changes from another device were merged in.'))
+        })()
+      },
+    })
+    return () => { alive = false; off() }
+  }, [controller, host, path])
   const version = controller?.version ?? 0
   useEffect(() => {
     if (!controller || !controller.isDirty()) return
