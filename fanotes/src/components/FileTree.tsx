@@ -12,6 +12,7 @@ import {
   useState,
 } from 'react'
 import {
+  BookOpen,
   Check,
   ChevronRight,
   ChevronsDownUp,
@@ -53,6 +54,10 @@ export type FileTreeProps = {
   onCreateNote: (parentPath?: string) => MaybePromise
   onCreateFolder: (parentPath?: string) => MaybePromise
   onImportPdf?: (parentPath?: string) => MaybePromise
+  /** Creates a writing-mode story in this folder. */
+  onCreateStory?: (parentPath?: string) => MaybePromise
+  /** Imports a DOCX, Markdown or text file as a new story in the folder. */
+  onImportStory?: (parentPath?: string) => MaybePromise
   onAttachBook?: (parentPath: string) => MaybePromise
   onDetachBook?: (parentPath: string) => MaybePromise
   bookFolderPaths?: string[]
@@ -126,9 +131,14 @@ function revealTreeRow(row: HTMLElement | null | undefined) {
 }
 
 function displayName(entry: VaultEntry) {
-  return entry.kind === 'file' && /\.(md|markdown|famd|pdf)$/i.test(entry.name)
-    ? entry.name.replace(/\.(md|markdown|famd|pdf)$/i, '')
+  return entry.kind === 'file' && /\.(md|markdown|famd|pdf|story)$/i.test(entry.name)
+    ? entry.name.replace(/\.(md|markdown|famd|pdf|story)$/i, '')
     : entry.name
+}
+
+/** A writing-mode project (`Name.story`), shown as one document. */
+function isStoryEntry(entry: VaultEntry) {
+  return entry.kind === 'file' && /\.story$/i.test(entry.name)
 }
 
 function isPdfEntry(entry: VaultEntry) {
@@ -207,6 +217,8 @@ export const FileTree = memo(function FileTree({
   onCreateNote,
   onCreateFolder,
   onImportPdf,
+  onCreateStory,
+  onImportStory,
   onAttachBook,
   onDetachBook,
   bookFolderPaths = [],
@@ -485,7 +497,7 @@ export const FileTree = memo(function FileTree({
 
   const createInFolder = (
     entry: VaultEntry,
-    kind: 'note' | 'folder' | 'pdf' | 'book',
+    kind: 'note' | 'folder' | 'pdf' | 'book' | 'story',
     event?: MouseEvent,
   ) => {
     event?.stopPropagation()
@@ -493,6 +505,7 @@ export const FileTree = memo(function FileTree({
     toggleFolder(entry.relativePath, true)
     const action = kind === 'note' ? onCreateNote
       : kind === 'pdf' ? onImportPdf
+        : kind === 'story' ? onCreateStory
         : kind === 'book' ? onAttachBook
           : onCreateFolder
     if (!action) return
@@ -735,6 +748,8 @@ export const FileTree = memo(function FileTree({
                     )
                   ) : isPdfEntry(entry) ? (
                     <File size={16} />
+                  ) : isStoryEntry(entry) ? (
+                    <BookOpen size={16} />
                   ) : (
                     <FileText size={16} />
                   )}
@@ -910,8 +925,8 @@ export const FileTree = memo(function FileTree({
             : { left: contextMenu.x, top: contextMenu.y, visibility: 'hidden' }}
         >
           <div className="file-tree__menu-head">
-            <span style={contextMenu.entry.color ? { '--folder-color': contextMenu.entry.color } as CSSProperties : undefined}>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : isPdfEntry(contextMenu.entry) ? <File size={16} /> : <FileText size={16} />}</span>
-            <div><small>{contextMenu.entry.kind === 'folder' ? 'Ordner' : isPdfEntry(contextMenu.entry) ? 'PDF-Notiz' : 'Notiz'}</small><strong>{displayName(contextMenu.entry)}</strong></div>
+            <span style={contextMenu.entry.color ? { '--folder-color': contextMenu.entry.color } as CSSProperties : undefined}>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : isPdfEntry(contextMenu.entry) ? <File size={16} /> : isStoryEntry(contextMenu.entry) ? <BookOpen size={16} /> : <FileText size={16} />}</span>
+            <div><small>{contextMenu.entry.kind === 'folder' ? 'Ordner' : isPdfEntry(contextMenu.entry) ? 'PDF-Notiz' : isStoryEntry(contextMenu.entry) ? 'Geschichte' : 'Notiz'}</small><strong>{displayName(contextMenu.entry)}</strong></div>
           </div>
           {contextMenu.entry.kind === 'folder' && (
             <>
@@ -932,6 +947,26 @@ export const FileTree = memo(function FileTree({
               >
                 <File aria-hidden="true" size={15} />
                 PDF importieren
+              </button>
+              )}
+              {onCreateStory && (
+              <button
+                onClick={() => createInFolder(contextMenu.entry, 'story')}
+                role="menuitem"
+                type="button"
+              >
+                <BookOpen aria-hidden="true" size={15} />
+                Neue Geschichte
+              </button>
+              )}
+              {onImportStory && (
+              <button
+                onClick={() => { setContextMenu(null); void Promise.resolve(onImportStory(contextMenu.entry.relativePath)) }}
+                role="menuitem"
+                type="button"
+              >
+                <BookOpen aria-hidden="true" size={15} />
+                Geschichte importieren …
               </button>
               )}
               {onAttachBook && (
@@ -1032,7 +1067,7 @@ export const FileTree = memo(function FileTree({
           {(onDuplicate || onCopyWikiLink || onCopyPath) && (
             <>
               <span className="file-tree__menu-label">Kopieren</span>
-              {contextMenu.entry.kind === 'file' && onDuplicate && !isPdfEntry(contextMenu.entry) && (
+              {contextMenu.entry.kind === 'file' && onDuplicate && !isPdfEntry(contextMenu.entry) && !isStoryEntry(contextMenu.entry) && (
                 <button
                   onClick={() => {
                     const path = contextMenu.entry.relativePath
@@ -1077,7 +1112,7 @@ export const FileTree = memo(function FileTree({
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}
-          {onShare && (contextMenu.entry.kind === 'folder' || !isPdfEntry(contextMenu.entry)) && (
+          {onShare && (contextMenu.entry.kind === 'folder' || (!isPdfEntry(contextMenu.entry) && !isStoryEntry(contextMenu.entry))) && (
             <>
               <span className="file-tree__menu-label">Teilen</span>
               <button

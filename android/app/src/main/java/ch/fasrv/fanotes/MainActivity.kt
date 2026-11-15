@@ -54,6 +54,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -2047,6 +2048,7 @@ private fun NoteRow(
             Icon(
                 when (node.kind) {
                     NoteKind.PDF -> Icons.Filled.PictureAsPdf
+                    NoteKind.STORY -> Icons.AutoMirrored.Filled.MenuBook
                     else -> Icons.Filled.Description
                 },
                 contentDescription = null,

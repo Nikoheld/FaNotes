@@ -17,6 +17,8 @@ export type BrowserSyncVault = {
   files: Map<string, { path: string; content: string; modifiedAt: string }>
   folders: Map<string, { path: string; color?: string }>
   assets: Map<string, Blob>
+  /** Story files (`*.story/…`) saved by the writing mode, with the time of the save. Optional for older callers. */
+  storyTimes?: Map<string, number>
   drawings: Map<string, DrawingLibraryDocument>
   worksheets: Map<string, WorksheetDocument>
   getSubjectBooks: () => SubjectBookRecord[]
@@ -62,6 +64,8 @@ const mimeForPath = (path: string) => {
 }
 
 const isTextNotePath = (path: string) => /\.(?:md|markdown|famd)$/iu.test(path)
+/** Files of a writing-mode project are assets, Markdown included: the writing mode reads them there. */
+const isStoryFilePath = (path: string) => /\.story\//iu.test(path)
 
 const stableJson = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
 
@@ -117,7 +121,8 @@ export const createBrowserSyncHost = (vault: BrowserSyncVault): SyncHostApi => {
         times[path] = Date.now()
         stamped = true
       }
-      out.push({ path, size: blob.size, mtimeMs: times[path] })
+      // A story file the writing mode saved after the last stamp counts as changed even at the same size.
+      out.push({ path, size: blob.size, mtimeMs: Math.max(times[path], vault.storyTimes?.get(path) ?? 0) })
     }
     if (stamped) await vault.writeMeta('syncAssetTimes', times)
     for (const document of vault.drawings.values()) {
@@ -208,7 +213,7 @@ export const createBrowserSyncHost = (vault: BrowserSyncVault): SyncHostApi => {
       await vault.putWorksheet({ ...parsed, updatedAt: when })
       return { path, size: bytes.byteLength, mtimeMs: Math.round(Date.parse(when)) }
     }
-    if (path === RECOGNITION_MODEL_PATH || isTextNotePath(path)) {
+    if (path === RECOGNITION_MODEL_PATH || (isTextNotePath(path) && !isStoryFilePath(path))) {
       const record = { path, content: decoder.decode(bytes), modifiedAt: when }
       await vault.putFile(record)
       vault.invalidateTree()
@@ -216,7 +221,8 @@ export const createBrowserSyncHost = (vault: BrowserSyncVault): SyncHostApi => {
     }
     const blob = new Blob([bytes as BlobPart], { type: mimeForPath(path) })
     await vault.putAsset(path, blob)
-    const stamp = mtimeMs > 0 ? Math.round(mtimeMs) : Date.now()
+    // Above any earlier save time of a story file, so the scan reports exactly this stamp.
+    const stamp = Math.max(mtimeMs > 0 ? Math.round(mtimeMs) : Date.now(), (vault.storyTimes?.get(path) ?? 0) + 1)
     await stampAsset(path, stamp)
     vault.invalidateTree()
     return { path, size: blob.size, mtimeMs: stamp }

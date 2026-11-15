@@ -7,7 +7,7 @@ import { foldPlain, foldSearch, makeSnippet, matchRanges, parseDocQuery, tokeniz
 
 export const DOC_INDEX_FORMAT = 'fanotes-doc-index-v1'
 
-export type UnitKind = 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations'
+export type UnitKind = 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations' | 'scene' | 'bible'
 export type UnitSource = 'text' | 'text-layer' | 'ocr' | 'transcript'
 
 export type IndexUnit = {
@@ -19,6 +19,8 @@ export type IndexUnit = {
   page?: number
   /** Worksheet id when the unit is (part of) a worksheet. */
   worksheetId?: string
+  /** Story scene the unit is (part of). */
+  sceneId?: string
   source: UnitSource
   /** 0–1, OCR only. */
   confidence?: number
@@ -37,7 +39,7 @@ export type UnitIssue = {
 export type DocRecord = {
   path: string
   title: string
-  kind: 'note' | 'pdf'
+  kind: 'note' | 'pdf' | 'story'
   fingerprint: string
   extractor: number
   status: DocStatus
@@ -60,6 +62,7 @@ export type SearchResult = {
   kind: UnitKind
   page?: number
   worksheetId?: string
+  sceneId?: string
   source: UnitSource
   confidence?: number
   score: number
@@ -268,6 +271,7 @@ export class DocIndex {
         kind: unit.kind,
         ...(unit.page !== undefined ? { page: unit.page } : {}),
         ...(unit.worksheetId ? { worksheetId: unit.worksheetId } : {}),
+        ...(unit.sceneId ? { sceneId: unit.sceneId } : {}),
         source: unit.source,
         ...(unit.confidence !== undefined ? { confidence: unit.confidence } : {}),
         score,

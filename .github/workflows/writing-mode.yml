@@ -1,0 +1,60 @@
+name: Writing mode checks
+
+# Unit, assistance, story-tools, export/import and sync checks of the writing
+# mode, the Kotlin story tests, and a type check. Runs on pull requests that
+# touch the writing mode; never builds or publishes a release.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/src/writing/**'
+      - 'fanotes/src/lib/sync/**'
+      - 'fanotes/src/lib/docSearch/**'
+      - 'fanotes/scripts/check-writing*.mjs'
+      - 'fanotes/scripts/fixtures/writing-sync/**'
+      - 'android/core/src/**/vault/StoryFiles*.kt'
+      - 'android/core/src/**/sync/**'
+      - '.github/workflows/writing-mode.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:spelling
+      - run: node scripts/stage-main-i18n.cjs
+      - run: npx tsc -b
+      - run: node scripts/check-writing.mjs
+      - run: node scripts/check-writing-assist.mjs
+      - run: node scripts/check-writing-tools.mjs
+      - run: node scripts/check-writing-export.mjs
+      - run: node scripts/check-writing-sync.mjs
+      - run: node scripts/check-sync.mjs
+      - run: node scripts/check-doc-search.mjs
+
+  kotlin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Story and sync tests (JVM core)
+        working-directory: android
+        run: ./gradlew :core:test --tests '*StoryFilesTest' --tests '*StorySync*' --tests 'ch.fasrv.fanotes.sync.*' --no-daemon

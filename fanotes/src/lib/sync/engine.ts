@@ -19,6 +19,7 @@ const syncText = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
 /** Sign-in, network, rate-limit and server errors concern every entry, so they end the cycle instead of skipping one file. */
 const cycleWide = (error: unknown) => error instanceof SyncApiError && (error.unauthorized || error.offline || error.status === 429 || error.status >= 500)
 import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
+import { judgeStoryShrink, mergeStoryFile, storyRoleOf } from '../../writing/syncMerge'
 import { conflictFingerprint, groupConflicts, keptVersionPath, numberedVariant, type ConflictGroup, type ConflictKeep } from './conflicts'
 import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncRemoteEntry, type SyncSession } from './api'
 import { mcpReaderRequest, newReaderKey, type McpGrantInfo } from '../mcp/client'
@@ -206,6 +207,14 @@ export class SyncEngine {
   private timer: number | null = null
   private debounce: number | null = null
   private readonly cleared = new Set<string>()
+  /** Server copies of story scenes this session saw (revision and plain bytes), to check uploads against without a download. */
+  private readonly storyBases = new Map<string, { revision: number; bytes: Uint8Array }>()
+  private rememberStoryBase(path: string, revision: number, bytes: Uint8Array) {
+    if (storyRoleOf(path) !== 'scene') return
+    this.storyBases.delete(path)
+    this.storyBases.set(path, { revision, bytes })
+    if (this.storyBases.size > 400) this.storyBases.delete(this.storyBases.keys().next().value!)
+  }
   private disposed = false
   private windowListeners: Array<() => void> = []
 
@@ -816,7 +825,43 @@ export class SyncEngine {
         return { result: 'written', path }
       }
     }
-    if (local && (localChanged || (remoteKind === 'blank' && local.kind !== 'blank'))) {
+    let storyAdopt = false
+    if (storyRoleOf(path) && local && localChanged && local.kind === 'present') {
+      // Story files merge instead of becoming whole-file conflict copies (see src/writing/syncMerge.ts).
+      const localStat = await this.statOf(path)
+      const outcome = mergeStoryFile(path, local.bytes, plain, { localMtimeMs: localStat?.mtimeMs ?? 0, remoteMtimeMs: meta.mtimeMs || 0 })
+      // The base becomes the remote revision with the remote size and no mtime, so the push uploads what stays here.
+      const remoteBase = (): LocalBase => ({ id: entry.id, revision: download.revision, sha256: meta.sha256, size: plain.byteLength, mtimeMs: 0, ...(plainIdentity ? { contentSha256: plainIdentity } : {}) })
+      if (outcome?.kind === 'merged' && outcome.sameAsRemote) {
+        // Everything this device had is in the remote version already.
+        storyAdopt = true
+      } else if (outcome?.kind === 'merged') {
+        if (!outcome.sameAsLocal) await this.host.write(path, outcome.bytes, Date.now())
+        this.state.files[path] = remoteBase()
+        idIndex.set(entry.id, path)
+        this.log('info', outcome.conflicts
+          ? `„${path}“ wurde Absatz für Absatz zusammengeführt; ${outcome.conflicts} Absatz/Absätze waren auf beiden Geräten geändert und stehen jetzt doppelt da.`
+          : `„${path}“ wurde Absatz für Absatz zusammengeführt.`)
+        return { result: 'written', path }
+      } else if (outcome?.kind === 'keep-local' || (outcome?.kind === 'pick' && outcome.keep === 'local')) {
+        // The local version keeps the path; the remote one is kept beside it (when it holds anything).
+        let result: 'written' | 'conflict' = 'written'
+        if (remoteKind === 'present') {
+          const at = new Date(this.options?.now?.() ?? Date.now())
+          const copyPath = await this.freeConflictCopyPath(path, at)
+          await this.host.write(copyPath, plain, meta.mtimeMs || at.getTime())
+          const conflict = { path, copyPath, at: at.toISOString() }
+          this.state.conflicts = [...this.state.conflicts, conflict].slice(-50)
+          this.log('warn', `Konflikt bei „${path}“: die neuere Fassung dieses Geräts bleibt, die andere liegt unter „${copyPath}“.`)
+          this.options?.onConflict?.(conflict)
+          result = 'conflict'
+        }
+        this.state.files[path] = remoteBase()
+        idIndex.set(entry.id, path)
+        return { result, path }
+      }
+    }
+    if (local && !storyAdopt && (localChanged || (remoteKind === 'blank' && local.kind !== 'blank'))) {
       const at = new Date(this.options?.now?.() ?? Date.now())
       const copyPath = await this.freeConflictCopyPath(path, at)
       await this.host.write(copyPath, local.bytes, at.getTime())
@@ -832,6 +877,7 @@ export class SyncEngine {
       body = new TextEncoder().encode(spliced)
     }
     const stat = await this.host.write(path, body, meta.mtimeMs || Date.now())
+    this.rememberStoryBase(path, download.revision, plain)
     const storedKind = noteSyncKind(path, body)
     const storedIdentity = identitySyncBytes(path, body)
     this.state.files[path] = {
@@ -919,7 +965,7 @@ export class SyncEngine {
     return { uploads, deletes, conflicts }
   }
 
-  private async uploadPath(entry: SyncScanEntry): Promise<'uploaded' | 'unchanged' | 'conflict' | 'skipped'> {
+  private async uploadPath(entry: SyncScanEntry, depth = 0): Promise<'uploaded' | 'unchanged' | 'conflict' | 'skipped'> {
     if (!this.session || !this.host || !this.state || !this.keys) return 'skipped'
     const raw = await this.host.read(entry.path).catch(() => null)
     if (!raw) return 'skipped'
@@ -957,7 +1003,25 @@ export class SyncEngine {
     const clearing = this.cleared.has(entry.path)
     const severeShrink = Boolean(base) && !base?.blank && base!.size >= 4096 && (raw.byteLength <= 1024 || raw.byteLength * 4 < base!.size)
     const baseHoldsContent = Boolean(base) && !base?.blank && (base!.size > raw.byteLength + 64 || kind === 'blank' || severeShrink)
-    if ((kind === 'blank' || severeShrink) && baseHoldsContent && !clearing) {
+    // A scene or manifest that shrank a lot is checked against the server's version:
+    // a cut the writer made (every paragraph still there, deleted ones as tombstones)
+    // is uploaded; one that lost paragraphs is merged with the server's version first.
+    const storyRole = storyRoleOf(entry.path)
+    const storyShrinkable = kind === 'present' && (storyRole === 'scene' || storyRole === 'manifest')
+    let storyClear = false
+    if (storyRole === 'scene' && kind === 'present' && base && !base.blank && !clearing && !(severeShrink && baseHoldsContent)) {
+      // Every scene upload keeps every paragraph of the server's version (deleted ones as
+      // tombstones). A file that lost paragraphs without a trace is merged back first.
+      const verdict = await this.judgeStoryShrink(entry, base, raw)
+      if (verdict.kind === 'merge') return this.rewriteStory(entry, verdict.bytes, depth)
+    }
+    if (severeShrink && baseHoldsContent && !clearing && storyShrinkable && base) {
+      const verdict = await this.judgeStoryShrink(entry, base, raw)
+      if (verdict.kind === 'merge') return this.rewriteStory(entry, verdict.bytes, depth)
+      if (verdict.kind === 'guard') return this.restoreInstead(entry, base, raw)
+      // 'cut' uploads with the clear flag; 'stale' (a newer version exists) is refused as stale and merged below.
+      storyClear = verdict.kind === 'cut'
+    } else if ((kind === 'blank' || severeShrink) && baseHoldsContent && !clearing) {
       this.log('warn', `„${entry.path}“ ist leer und wird nicht über die vorhandene Fassung hochgeladen.`)
       return this.restoreInstead(entry, base!, raw)
     }
@@ -972,8 +1036,9 @@ export class SyncEngine {
     // upload would be refused on every cycle and the note would never sync.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const revision = await this.api.upload(this.session, id, baseRevision, meta, blobSha256, blob, { blank: kind === 'blank', clear: clearing && kind === 'blank' })
+        const revision = await this.api.upload(this.session, id, baseRevision, meta, blobSha256, blob, { blank: kind === 'blank', clear: (clearing && kind === 'blank') || storyClear })
         this.cleared.delete(entry.path)
+        this.rememberStoryBase(entry.path, revision, bytes)
         this.state.files[entry.path] = {
           id,
           revision,
@@ -997,6 +1062,15 @@ export class SyncEngine {
         // collapsed (older servers send no reason). Sending it again cannot help:
         // keep this file beside the note and put the server copy back.
         if (error.guarded || (current && !current.deleted && current.revision === baseRevision)) {
+          if (storyShrinkable && base && !storyClear && attempt === 0) {
+            // The server's guard counts encrypted bytes; check the story file the same way as above.
+            const verdict = await this.judgeStoryShrink(entry, { ...base, revision: current?.revision ?? base.revision }, raw)
+            if (verdict.kind === 'merge') return this.rewriteStory(entry, verdict.bytes, depth)
+            if (verdict.kind === 'cut') {
+              storyClear = true
+              continue
+            }
+          }
           if (base) return this.restoreInstead(entry, { ...base, revision: current?.revision ?? base.revision }, raw, 'guard')
           return 'skipped'
         }
@@ -1021,6 +1095,14 @@ export class SyncEngine {
           try {
             const applied = await this.applyRemote(current, idIndex)
             if ((applied.result === 'written' || applied.result === 'conflict') && applied.path) this.options?.onApplied?.({ written: [applied.path], removed: [] })
+            if (applied.result === 'written' && applied.path === entry.path && storyRole && depth === 0) {
+              // A story file was merged with the newer version: upload the merge in this cycle.
+              const fresh = (await this.host.scan()).find((item) => item.path === entry.path)
+              if (fresh) {
+                const again = await this.uploadPath(fresh, depth + 1)
+                return again === 'uploaded' ? 'uploaded' : 'conflict'
+              }
+            }
           } catch (applyError) {
             if (cycleWide(applyError)) throw applyError
             this.log('warn', `„${entry.path}“ konnte nicht abgeglichen werden und wird später erneut versucht (${applyError instanceof Error ? applyError.message : 'unbekannt'}).`)
@@ -1032,6 +1114,36 @@ export class SyncEngine {
       }
     }
     return 'conflict'
+  }
+
+  /** What the server's version says about a much smaller story file (see `judgeStoryShrink`). */
+  private async judgeStoryShrink(entry: SyncScanEntry, base: LocalBase, raw: Uint8Array): Promise<{ kind: 'cut' } | { kind: 'merge'; bytes: Uint8Array } | { kind: 'guard' } | { kind: 'stale' }> {
+    if (!this.session || !this.keys) return { kind: 'guard' }
+    const cached = this.storyBases.get(entry.path)
+    if (cached && cached.revision === base.revision) {
+      const verdict = judgeStoryShrink(entry.path, raw, cached.bytes)
+      if (verdict.kind === 'merge') this.log('warn', `„${entry.path}“ fehlten Absätze der Fassung auf dem Server; sie wurden wieder eingefügt.`)
+      return verdict
+    }
+    const download = await this.api.download(this.session, base.id)
+    if ('deleted' in download) return { kind: 'stale' }
+    if (download.revision !== base.revision) return { kind: 'stale' }
+    if (await sha256Hex(download.blob) !== download.sha256) return { kind: 'guard' }
+    const plain = await decryptBytes(this.keys, base.id, download.blob)
+    this.rememberStoryBase(entry.path, download.revision, plain)
+    const verdict = judgeStoryShrink(entry.path, raw, plain)
+    if (verdict.kind === 'cut') this.log('info', `„${entry.path}“ wurde stark gekürzt; alle Absätze sind als gelöscht vermerkt, die Kürzung wird hochgeladen.`)
+    if (verdict.kind === 'merge') this.log('warn', `„${entry.path}“ fehlten Absätze der Fassung auf dem Server; sie wurden wieder eingefügt.`)
+    return verdict
+  }
+
+  /** Writes a merged story file here and uploads it (once per push). The editor still holding the file waits for the next cycle. */
+  private async rewriteStory(entry: SyncScanEntry, bytes: Uint8Array, depth: number): Promise<'uploaded' | 'conflict' | 'skipped' | 'unchanged'> {
+    if (!this.host || this.options?.isPathBusy?.(entry.path)) return 'skipped'
+    const stat = await this.host.write(entry.path, bytes, Date.now())
+    this.options?.onApplied?.({ written: [entry.path], removed: [] })
+    if (depth > 0) return 'conflict'
+    return this.uploadPath(stat, depth + 1)
   }
 
   /** The blank (or, after a guard rejection, collapsed) local file is kept beside the note. The server copy is written back. */

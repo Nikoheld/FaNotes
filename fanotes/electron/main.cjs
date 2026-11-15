@@ -194,6 +194,10 @@ const IPC = Object.freeze({
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
   setFolderColor: 'fanotes:set-folder-color',
+  storyRead: 'fanotes:story-read',
+  storyWrite: 'fanotes:story-write',
+  storyList: 'fanotes:story-list',
+  storyCreate: 'fanotes:story-create',
   setFileColor: 'fanotes:set-file-color',
   getFolderLocations: 'fanotes:get-folder-locations',
   pickFolderLocation: 'fanotes:pick-folder-location',
@@ -425,6 +429,10 @@ const TREE_ASSET_EXTENSIONS = new Set([
   '.webm',
 ])
 const TREE_EXTENSIONS = new Set([...MARKDOWN_EXTENSIONS, ...TREE_ASSET_EXTENSIONS])
+// Writing-mode projects: `Name.story/` folders with JSON files inside.
+const STORY_FOLDER = /\.story$/iu
+const STORY_FILE = /^(.+\.story)\/((?:[A-Za-z0-9_-]{1,64}\/){0,3}[A-Za-z0-9_.-]{1,96}\.(?:json|md))$/iu
+const MAX_STORY_FILE_BYTES = 16 * 1024 * 1024
 const MAX_TEXT_BYTES = 16 * 1024 * 1024
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024
 const MAX_DRAWING_JSON_BYTES = 24 * 1024 * 1024
@@ -2272,6 +2280,12 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
       }
       if (info.isSymbolicLink()) continue
       const logicalChild = logicalDir ? `${logicalDir}/${directoryEntry.name}` : directoryEntry.name
+      if (info.isDirectory() && STORY_FOLDER.test(directoryEntry.name)) {
+        // A writing-mode project is one document in the tree.
+        seen.add(directoryEntry.name)
+        result.push({ name: directoryEntry.name, relativePath: logicalChild, kind: 'file', extension: 'story', modifiedAt: info.mtime.toISOString() })
+        continue
+      }
       if (info.isDirectory()) {
         const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
         if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
@@ -2319,6 +2333,11 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
       const absolutePath = path.join(scan, directoryEntry.name)
       const logicalChild = logicalDir ? `${logicalDir}/${directoryEntry.name}` : directoryEntry.name
       const extensionWithDot = path.extname(directoryEntry.name).toLocaleLowerCase('en-US')
+      if (directoryEntry.isDirectory() && STORY_FOLDER.test(directoryEntry.name)) {
+        seen.add(directoryEntry.name)
+        result.push({ name: directoryEntry.name, relativePath: logicalChild, kind: 'file', extension: 'story' })
+        continue
+      }
       if (directoryEntry.isDirectory()) {
         const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
         if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
@@ -2418,7 +2437,7 @@ function cleanCachedTreeEntries(candidate, parentPath = '', depth = 0, state = {
       cleaned.children = cleanCachedTreeEntries(entry.children ?? [], expectedPath, depth + 1, state)
     } else {
       const extension = path.extname(entry.name).slice(1).toLocaleLowerCase('en-US')
-      if (!extension || !TREE_EXTENSIONS.has(`.${extension}`)) throw new Error('Der Dateibaum-Cache enthält einen unbekannten Dateityp.')
+      if (!extension || (!TREE_EXTENSIONS.has(`.${extension}`) && extension !== 'story')) throw new Error('Der Dateibaum-Cache enthält einen unbekannten Dateityp.')
       cleaned.extension = extension
       if (typeof entry.color === 'string' && /^#[\da-f]{6}$/i.test(entry.color)) cleaned.color = entry.color.toLowerCase()
       if (entry.modifiedAt !== undefined) {
@@ -3870,6 +3889,69 @@ function registerIpcHandlers() {
       return true
     })
     return { color: color?.toLowerCase() ?? null }
+  })
+
+  const storyFile = (relativePath) => {
+    const logical = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    const match = STORY_FILE.exec(logical)
+    if (!match) throw new Error('Nur Dateien in einem .story-Ordner können so gelesen oder geschrieben werden.')
+    return { logical, storyRoot: match[1] }
+  }
+
+  handle(IPC.storyRead, async (_event, relativePath) => {
+    await ensureBootstrap()
+    const { logical } = storyFile(relativePath)
+    let resolved
+    try {
+      resolved = await resolveVaultPath(logical, { expected: 'file' })
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null
+      throw error
+    }
+    return (await readRegularFileNoFollow(resolved.target, MAX_STORY_FILE_BYTES)).toString('utf8')
+  })
+
+  handle(IPC.storyWrite, async (_event, relativePath, content) => {
+    await ensureBootstrap()
+    const { logical, storyRoot } = storyFile(relativePath)
+    if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > MAX_STORY_FILE_BYTES) throw new Error('Der Inhalt ist ungültig oder zu gross.')
+    if (logical.toLowerCase().endsWith('.json')) JSON.parse(content)
+    await resolveVaultPath(storyRoot, { expected: 'directory' })
+    const { target } = await resolveVaultPath(logical, { allowMissing: true })
+    await fsp.mkdir(path.dirname(target), { recursive: true })
+    // The folders just created are checked again: no link may lead out of the vault.
+    await resolveVaultPath(logical, { allowMissing: true })
+    await atomicWrite(target, content, { encoding: 'utf8' })
+  })
+
+  handle(IPC.storyList, async (_event, storyPath) => {
+    await ensureBootstrap()
+    const logical = normalizeRelativePath(storyPath).split(path.sep).join('/')
+    if (!STORY_FOLDER.test(logical)) throw new Error('Kein .story-Ordner.')
+    const { target } = await resolveVaultPath(logical, { expected: 'directory' })
+    const out = []
+    const walk = async (directory, prefix, depth) => {
+      if (depth > 4 || out.length > 20000) return
+      for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
+        if (entry.isSymbolicLink() || entry.name.startsWith('.')) continue
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+        if (entry.isDirectory()) await walk(path.join(directory, entry.name), relative, depth + 1)
+        else if (entry.isFile() && /\.(?:json|md)$/iu.test(entry.name)) out.push(relative)
+      }
+    }
+    await walk(target, '', 0)
+    return out
+  })
+
+  handle(IPC.storyCreate, async (_event, rawParent, rawName) => {
+    await ensureBootstrap()
+    const parent = typeof rawParent === 'string' && rawParent ? normalizeRelativePath(rawParent, { allowRoot: true }).split(path.sep).join('/') : ''
+    const name = safeEntryName(typeof rawName === 'string' ? rawName : '', 'Geschichte.story')
+    if (!STORY_FOLDER.test(name)) throw new Error('Ein Geschichten-Ordner endet auf .story.')
+    const { target: parentTarget } = await resolveVaultPath(parent, { allowRoot: true, expected: 'directory', asContent: true })
+    const candidate = await availableName(parentTarget, name)
+    await fsp.mkdir(path.join(parentTarget, candidate))
+    return parent ? `${parent}/${candidate}` : candidate
   })
 
   handle(IPC.getFolderLocations, async (_event, relativePath) => {
