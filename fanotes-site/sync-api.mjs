@@ -57,7 +57,7 @@ const EMPTY_CIPHERTEXT_BYTES = 28
 const MAX_REVISIONS_KEPT = 8
 
 /** Newest revisions, plus an older blob that is still the largest. The highest revision is always kept.
- * One name per revision: the file a restore would publish. A short sibling must not take that slot.
+ * A revision earns its slot with the file a restore would publish. A short sibling must not take that slot.
  */
 export const revisionNamesToKeep = (files, keep = MAX_REVISIONS_KEPT, nextSize = 0) => {
   const list = [...(files || [])].filter((file) => file && Number.isFinite(file.revision) && typeof file.name === 'string')
@@ -67,6 +67,10 @@ export const revisionNamesToKeep = (files, keep = MAX_REVISIONS_KEPT, nextSize =
   if (!chosen.length) return names
   const largest = chosen.reduce((best, file) => (file.size > best.size ? file : best), chosen[0])
   if (largest.size > nextSize) names.add(largest.name)
+  const keptRevisions = new Set(chosen.filter((file) => names.has(file.name)).map((file) => file.revision))
+  for (const file of list) {
+    if (keptRevisions.has(file.revision)) names.add(file.name)
+  }
   return names
 }
 const MAX_FILES = Number(process.env.FANOTES_SYNC_MAX_FILES || 50_000)

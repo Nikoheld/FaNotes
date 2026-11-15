@@ -16,7 +16,7 @@ test('revision retention keeps the newest names and a larger older blob', () => 
   assert.equal(keep.size, 9)
 })
 
-test('revision retention does not keep a short sibling in place of the archived copy', () => {
+test('revision retention keeps the archived copy when a short sibling sorts later', () => {
   const files = [
     { name: '1', revision: 1, size: 5000 },
     { name: 'c-1', revision: 1, size: 64 },
@@ -24,10 +24,22 @@ test('revision retention does not keep a short sibling in place of the archived 
   ]
   const keep = revisionNamesToKeep(files, 8, 6000)
   assert.equal(keep.has('1'), true)
-  assert.equal(keep.has('c-1'), false)
+  assert.equal(keep.has('c-1'), true)
   assert.equal(keep.has('2'), true)
   assert.equal(keep.has('8'), true)
-  assert.equal(keep.size, 8)
+  assert.equal(keep.size, 9)
+})
+
+test('revision retention does not let a short sibling push out an older archive', () => {
+  const files = [
+    ...Array.from({ length: 9 }, (_, index) => ({ name: String(index + 1), revision: index + 1, size: 100 })),
+    { name: 'c-9', revision: 9, size: 64 },
+  ]
+  const keep = revisionNamesToKeep(files, 8, 1000)
+  assert.equal(keep.has('1'), false)
+  assert.equal(keep.has('2'), true)
+  assert.equal(keep.has('9'), true)
+  assert.equal(keep.has('c-9'), true)
 })
 
 test('a backup copies ciphertext, rotates old copies, and restore can dry-run', async () => {
