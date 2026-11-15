@@ -118,6 +118,7 @@ test('origin gzip covers sitemap and svg and varies on the encoding', () => {
     if (!block.includes('add_header X-Content-Type-Options')) continue
     assert.match(block, /add_header X-Frame-Options "DENY" always;/)
     assert.match(block, /add_header Permissions-Policy "camera=\(\), microphone=\(\), geolocation=\(\), payment=\(\), usb=\(\), serial=\(\), bluetooth=\(\)" always;/)
+    assert.match(block, /add_header Cross-Origin-Opener-Policy "same-origin" always;/)
   }
 })
 
