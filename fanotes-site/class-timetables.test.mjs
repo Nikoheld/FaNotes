@@ -251,22 +251,28 @@ test('classes.json is written at ingest and built lazily from source.pdf for an 
     assert.equal(calls.filter((c) => c[0] === 'pdftotext').length, 0)
 
     // A fresh process, as with a version uploaded before classes.json existed: one shared rebuild.
+    // Wait until pdftotext is actually entered. A fixed number of event-loop turns finishes first
+    // when the missing classes.json read is still in flight (seen on CI).
     let release
     const gate = new Promise((resolve) => { release = resolve })
     let textRuns = 0
+    let started
+    const startedPromise = new Promise((resolve) => { started = resolve })
     const fresh = createClassTimetables({
       root,
       log: () => {},
       run: async (command, args) => {
         if (command === 'pdftotext') {
           textRuns += 1
+          started()
           await gate
         }
         return fakeRun(BBOX, calls)(command, args)
       },
     })
     const both = Promise.all([fresh.classWeek('G26D'), fresh.classWeek('I26B')])
-    for (let step = 0; step < 20 && textRuns < 1; step += 1) await new Promise((resolve) => setImmediate(resolve))
+    const giveUp = new Promise((_, reject) => { setTimeout(() => reject(new Error('pdftotext did not start')), 3000) })
+    await Promise.race([startedPromise, giveUp])
     assert.equal(textRuns, 1, 'parallel lookups share one pdftotext')
     release()
     const [first, second] = await both
