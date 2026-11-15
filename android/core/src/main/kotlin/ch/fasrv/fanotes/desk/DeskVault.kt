@@ -1200,7 +1200,7 @@ private fun questionBlocks(markdown: String): List<Pair<String, String>> {
     return Regex("""(?m)^(?:\d+\.\s+)(.+)$""").findAll(body).map { clean(it.groupValues[1]) to "" }.filter { it.first.isNotEmpty() }.toList()
 }
 
-private fun parseStoredCards(markdown: String): List<FlashCard> {
+internal fun parseStoredCards(markdown: String): List<FlashCard> {
     val start = markdown.indexOf(CARDS_START)
     val end = if (start >= 0) markdown.indexOf(MARKER_END, start + CARDS_START.length) else -1
     if (start < 0 || end < 0) return emptyList()
