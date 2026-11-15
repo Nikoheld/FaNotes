@@ -7,7 +7,7 @@ import { blockLength } from '../editor/doc'
 import type { CaretBox } from './navigation'
 
 export type ViewMode = 'page' | 'spread' | 'draft'
-export type PageTheme = 'paper' | 'sepia' | 'night'
+export type PageTheme = 'paper' | 'sepia' | 'night' | 'contrast'
 export type Highlight = { block: string; from: number; to: number; current?: boolean }
 export type Underline = { block: string; from: number; to: number; kind: 'spelling' | 'grammar' | 'style' }
 

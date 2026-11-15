@@ -1,11 +1,11 @@
 import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowLeft, Bold, BookOpen, ChevronDown, ChevronRight, Columns2, Eye, FilePlus2, FileText,
-  Focus, Italic, LoaderCircle, MessageSquarePlus, Minus, Plus, Redo2, Replace, Search, SlidersHorizontal, SpellCheck, Strikethrough, Subscript, Superscript, Underline, Undo2, X,
+  CalendarRange, Focus, Italic, LayoutGrid, ListTree, LoaderCircle, MapPin, MessageSquarePlus, Minus, MoreHorizontal, PanelRight, Plus, Redo2, Replace, Search, SlidersHorizontal, SpellCheck, Strikethrough, Subscript, Superscript, Target, TextCursor, Trash2, Underline, Undo2, Users, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as commands from '../editor/commands'
 import { WritingController, type EditKind } from '../editor/controller'
-import { blockAt, blockLength, caret, clampPos, isCollapsed, makeDoc, ordered, updateBinder, type Pos } from '../editor/doc'
+import { blockAt, blockLength, caret, clampPos, isCollapsed, makeDoc, ordered, updateBinder, withScene, type Pos } from '../editor/doc'
 import { CanvasMeasurer, loadHyphenator, loadWritingFonts, hyphenatorFor, type Hyphenator } from '../layout/measure'
 import { LayoutCache, layoutManuscript } from '../layout/paginate'
 import { LANGUAGE_TYPOGRAPHY } from '../model/defaults'
@@ -22,6 +22,15 @@ import { autocorrectAfterInput, startsSentence } from '../assist/typography'
 import { AssistPopover, type PopoverTarget } from './AssistPopover'
 import { defaultAutocorrectSettings, type AutocorrectSettings } from './CheckPanel'
 import { Inspector, type InspectorTab } from './Inspector'
+import { Corkboard, Outline, LABEL_COLORS, STATUS_LABEL } from './BoardViews'
+import { BibleSheets, Timeline } from './BibleViews'
+import { GoalsView } from './GoalsView'
+import { ReferencePane, type Reference } from './ReferencePane'
+import { ScenePanel, SnapshotCompare } from './ScenePanel'
+import { useStoryTools } from './storyTools'
+import { canDrop, findIn, moveNode, moveToTrash, trashedIds, updateNode, TRASH_ID, type DropPosition } from '../model/binder'
+import { diffScene, restoreSnapshot, type DiffRow, type Snapshot } from '../model/snapshots'
+import { entryNames } from '../model/bible'
 import { PageView, caretPageRect, type Highlight, type PagePointer, type PageTheme, type ViewMode } from './PageView'
 import { countBlocks, countRuns, countText, htmlToParagraphs, runsToHtml, textToParagraphs } from './text'
 import './writing.css'
@@ -68,6 +77,13 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const [binderOpen, setBinderOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('check')
+  type Area = 'manuscript' | 'board' | 'outline' | 'characters' | 'places' | 'timeline' | 'goals'
+  const [area, setArea] = useState<Area>(() => (localStorage.getItem('fanotes.writing.area') as Area | null) ?? 'manuscript')
+  const [reference, setReference] = useState<Reference | null>(null)
+  const [typewriter, setTypewriter] = useState(() => localStorage.getItem('fanotes.writing.typewriter') === '1')
+  const [compare, setCompare] = useState<{ snapshot: Snapshot; rows: DiffRow[] } | null>(null)
+  const [storyFiles, setStoryFiles] = useState<string[] | null>(null)
+  const writer = useMemo(() => writerId(), [])
   const [assistSettings, setAssistSettings] = useState<AssistSettings>(() => {
     try { return { ...defaultAssistSettings(), ...JSON.parse(localStorage.getItem('fanotes.writing.assist.v1') ?? '{}') } } catch { return defaultAssistSettings() }
   })
@@ -108,6 +124,7 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
           loadWritingFonts().then(() => { if (alive) { measurer && (measurer as CanvasMeasurer).reset(); setFontsReady(true) } }),
         ])
         if (!alive) return
+        setStoryFiles(project.files)
         const recovery = recoverJournal(path, project)
         const doc = makeDoc(recovery.manifest, recovery.scenes)
         const saved = (() => { try { return JSON.parse(localStorage.getItem(`fanotes.writing.caret:${path}`) ?? 'null') as Pos | null } catch { return null } })()
@@ -181,6 +198,7 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const close = useCallback(async () => {
     if (controller) {
       try { localStorage.setItem(`fanotes.writing.caret:${path}`, JSON.stringify(controller.state.selection.head)) } catch { /* ignore */ }
+      await tools.flush()
       if (!(await save())) {
         setNotice(L('Speichern fehlgeschlagen. Die Änderungen bleiben in diesem Fenster und im Notfallspeicher.', 'Saving failed. Your changes stay in this window and in the recovery journal.'))
         return
@@ -208,12 +226,9 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   useEffect(() => { try { localStorage.setItem('fanotes.writing.assist.v1', JSON.stringify(assistSettings)) } catch { /* ignore */ } }, [assistSettings])
   useEffect(() => { try { localStorage.setItem('fanotes.writing.autocorrect.v1', JSON.stringify(autocorrect)) } catch { /* ignore */ } }, [autocorrect])
   const manifestForLists = doc?.manifest
-  useEffect(() => {
-    if (manifestForLists) assistant.setProjectLists(manifestForLists.dictionary ?? [], manifestForLists.ignored ?? [])
-  }, [assistant, manifestForLists])
 
   // ── Persisted view settings ────────────────────────────────────────────
-  useEffect(() => { try { localStorage.setItem('fanotes.writing.zoom', String(zoom)); localStorage.setItem('fanotes.writing.view', view); localStorage.setItem('fanotes.writing.theme', theme) } catch { /* ignore */ } }, [zoom, view, theme])
+  useEffect(() => { try { localStorage.setItem('fanotes.writing.zoom', String(zoom)); localStorage.setItem('fanotes.writing.view', view); localStorage.setItem('fanotes.writing.theme', theme); localStorage.setItem('fanotes.writing.area', area); localStorage.setItem('fanotes.writing.typewriter', typewriter ? '1' : '0') } catch { /* ignore */ } }, [zoom, view, theme, area, typewriter])
 
   // ── Caret blink and visibility ─────────────────────────────────────────
   useEffect(() => {
@@ -232,14 +247,16 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     const top = rect.top + caretGeometry.y * zoom
     const bottom = top + caretGeometry.height * zoom
     const margin = 60
-    if (top < element.scrollTop + margin) element.scrollTop = Math.max(0, top - margin)
+    // Typewriter: the line being written stays at the same height (a bit above the middle).
+    if (typewriter) element.scrollTop = Math.max(0, top - element.clientHeight * 0.42)
+    else if (top < element.scrollTop + margin) element.scrollTop = Math.max(0, top - margin)
     else if (bottom > element.scrollTop + element.clientHeight - margin) element.scrollTop = bottom - element.clientHeight + margin
     // Keep the hidden input at the caret so the IME window opens next to it.
     if (input.current) {
       input.current.style.left = `${rect.left + caretGeometry.x * zoom}px`
       input.current.style.top = `${top}px`
     }
-  }, [layout, caretGeometry, zoom, view])
+  }, [layout, caretGeometry, zoom, view, typewriter])
   useEffect(() => { scrollCaretIntoView() }, [scrollCaretIntoView])
 
   // ── Applying commands ──────────────────────────────────────────────────
@@ -620,6 +637,12 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
   }
   const replaceAll = () => {
     if (!controller || !matches.length) return
+    // A version of every touched scene first, so a wrong pattern is one restore away.
+    const touched = new Set(matches.map((match) => blockAt(controller.state.doc, match.block)?.sceneId).filter((id): id is string => Boolean(id)))
+    for (const sceneId of touched) {
+      const scene = controller.state.doc.scenes.get(sceneId)
+      if (scene) void tools.takeSnapshot(scene, findIn(controller.state.doc.manifest.binder, sceneId)?.title ?? '', 'replace', L(`Vor „Alle ersetzen“: ${find.query}`, `Before “Replace all”: ${find.query}`)).catch(() => undefined)
+    }
     let st = controller.state
     // From the end, so earlier offsets stay valid.
     for (const match of [...matches].reverse()) {
@@ -644,6 +667,100 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
     for (const scene of doc.scenes.values()) out.set(scene.id, scene.paragraphs.reduce((sum, paragraph) => sum + (paragraph.deleted ? 0 : countRuns(paragraph.runs).words), 0))
     return out
   }, [doc])
+  const tools = useStoryTools({
+    host,
+    path,
+    files: storyFiles,
+    writer,
+    totalWords: doc ? counts.words : null,
+    onWritten: (paths) => onSaved?.(paths),
+    onError: (message) => setNotice(message),
+  })
+  const characters = useMemo(() => tools.entriesOf('character'), [tools])
+  const places = useMemo(() => tools.entriesOf('place'), [tools])
+  const events = useMemo(() => tools.entriesOf('event'), [tools])
+  // Names from the bible count as correctly spelled.
+  useEffect(() => {
+    if (!manifestForLists) return
+    const names = [...characters, ...places].flatMap((entry) => entryNames(entry).flatMap((name) => name.split(/\s+/u)))
+    assistant.setProjectLists([...(manifestForLists.dictionary ?? []), ...names], manifestForLists.ignored ?? [])
+  }, [assistant, manifestForLists, characters, places])
+
+  /** Binder edits; typing into one field of one node is a single undo step. */
+  const lastPatch = useRef<{ key: string; at: number } | null>(null)
+  const patchNode = (id: string, patch: Partial<BinderNode>) => {
+    if (!controller) return
+    const current = controller.state.doc
+    const binder = updateNode(current.manifest.binder, id, (node) => {
+      const next = { ...node, ...patch }
+      for (const key of Object.keys(patch) as Array<keyof BinderNode>) if (next[key] === undefined) delete next[key]
+      return next
+    })
+    if (binder === current.manifest.binder) return
+    const key = `${id}:${Object.keys(patch).join(',')}`
+    const now = Date.now()
+    const coalesce = lastPatch.current?.key === key && now - lastPatch.current.at < 1500
+    lastPatch.current = { key, at: now }
+    controller.replaceDoc(makeDoc({ ...current.manifest, binder }, current.scenes), !coalesce)
+  }
+  const moveBinderNode = (id: string, targetId: string, position: DropPosition) => {
+    if (!controller) return
+    const current = controller.state.doc
+    const binder = moveNode(current.manifest.binder, id, targetId, position)
+    if (binder !== current.manifest.binder) controller.replaceDoc(makeDoc({ ...current.manifest, binder }, current.scenes))
+  }
+  const trashNode = (id: string) => {
+    if (!controller) return
+    const current = controller.state.doc
+    controller.replaceDoc(makeDoc({ ...current.manifest, binder: moveToTrash(current.manifest.binder, id, L('Papierkorb', 'Trash')) }, current.scenes))
+    setNotice(L('In den Papierkorb gelegt. Die Szene bleibt erhalten und lässt sich zurückziehen.', 'Moved to the trash. The scene is kept and can be dragged back.'))
+  }
+  const openScene = (sceneId: string) => {
+    if (!doc) return
+    setArea('manuscript')
+    const node = findIn(doc.manifest.binder, sceneId)
+    if (node && (node.exclude || trashedIds(doc.manifest.binder).has(sceneId))) {
+      setNotice(trashedIds(doc.manifest.binder).has(sceneId)
+        ? L(`„${node.title}“ liegt im Papierkorb. Ziehe die Szene in ein Kapitel, um sie wieder im Manuskript zu haben.`, `“${node.title}” is in the trash. Drag it into a chapter to bring it back into the manuscript.`)
+        : L(`„${node.title}“ ist vom Manuskript ausgeschlossen. Im Tab „Szene“ kannst du sie wieder einschliessen.`, `“${node.title}” is excluded from the manuscript. Include it again in the “Scene” tab.`))
+      return
+    }
+    const block = doc.flow.find((entry) => entry.sceneId === sceneId && entry.ref.kind === 'para')
+    if (block) window.setTimeout(() => goToBlock(block.key), 0)
+  }
+  const openCompare = async (stamp: string) => {
+    const sceneId = headBlock?.sceneId
+    if (!sceneId || !controller) return
+    const snapshot = await tools.openSnapshot(sceneId, stamp)
+    const scene = controller.state.doc.scenes.get(sceneId)
+    if (!snapshot || !scene) { setNotice(L('Diese Version konnte nicht gelesen werden.', 'This version could not be read.')); return }
+    setCompare({ snapshot, rows: diffScene(snapshot.paragraphs, scene.paragraphs) })
+  }
+  const restoreCompare = async () => {
+    if (!compare || !controller) return
+    const scene = controller.state.doc.scenes.get(compare.snapshot.sceneId)
+    if (!scene) return
+    try {
+      await tools.takeSnapshot(scene, findIn(controller.state.doc.manifest.binder, scene.id)?.title ?? '', 'restore', L('Vor dem Wiederherstellen', 'Before restoring'))
+    } catch (error) {
+      setNotice(L(`Der jetzige Stand konnte nicht gesichert werden; nichts wurde geändert. (${error instanceof Error ? error.message : error})`, `The current state could not be saved; nothing was changed. (${error instanceof Error ? error.message : error})`))
+      return
+    }
+    const restored = restoreSnapshot(scene, compare.snapshot)
+    const nextDoc = withScene(controller.state.doc, restored)
+    const st = controller.state
+    controller.apply({ ...st, doc: nextDoc, selection: caret(clampPos(nextDoc, st.selection.head)) }, 'structure')
+    setCompare(null)
+    refocus()
+    setNotice(L('Version wiederhergestellt. Der vorherige Stand ist als Version gesichert.', 'Version restored. The previous state was saved as a version.'))
+  }
+  const linkedNotes = useMemo(() => {
+    const out = new Set<string>()
+    const walk = (nodes: BinderNode[]) => { for (const node of nodes) { for (const link of node.links ?? []) out.add(link); if (node.children) walk(node.children) } }
+    if (doc) walk(doc.manifest.binder)
+    return [...out]
+  }, [doc])
+
   const selectionCounts = useMemo(() => (state && range ? countText(commands.selectedText(state)) : null), [state, range])
   const language = doc?.manifest.language ?? 'de'
   const minutes = Math.max(1, Math.round(counts.words / LANGUAGE_TYPOGRAPHY[language].wpm))
@@ -703,7 +820,21 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
         <button type="button" className="wm-icon" title={L('Zurück zu den Notizen', 'Back to notes')} onClick={() => void close()}><ArrowLeft size={16} /></button>
         <button type="button" className={`wm-icon${binderOpen ? ' is-on' : ''}`} title={L('Gliederung', 'Binder')} onClick={() => setBinderOpen((value) => !value)}><BookOpen size={16} /></button>
         <strong className="wm-title" data-i18n-ignore>{doc.manifest.title || storyTitleFromPath(path)}</strong>
+        <div className="wm-segmented wm-areas" role="tablist" aria-label={L('Bereich', 'Area')}>
+          {([
+            ['manuscript', FileText, L('Manuskript', 'Manuscript')],
+            ['board', LayoutGrid, L('Pinnwand', 'Corkboard')],
+            ['outline', ListTree, L('Übersicht', 'Outline')],
+            ['characters', Users, L('Figuren', 'Characters')],
+            ['places', MapPin, L('Orte', 'Places')],
+            ['timeline', CalendarRange, L('Zeitleiste', 'Timeline')],
+            ['goals', Target, L('Ziele', 'Goals')],
+          ] as const).map(([id, Icon, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={area === id} className={area === id ? 'is-on' : ''} title={label} aria-label={label} onClick={() => { setArea(id); if (id === 'manuscript') refocus() }}><Icon size={15} /></button>
+          ))}
+        </div>
         <span className="wm-sep" />
+        {area === 'manuscript' && (<>
         <button type="button" className="wm-icon" title={L('Rückgängig (Strg+Z)', 'Undo (Ctrl+Z)')} disabled={!controller.canUndo()} onClick={() => { controller.undo(); refocus() }}><Undo2 size={16} /></button>
         <button type="button" className="wm-icon" title={L('Wiederholen (Strg+Y)', 'Redo (Ctrl+Y)')} disabled={!controller.canRedo()} onClick={() => { controller.redo(); refocus() }}><Redo2 size={16} /></button>
         <span className="wm-sep" />
@@ -746,6 +877,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
           </div>
         </details>
         <button type="button" className={`wm-icon${find.open ? ' is-on' : ''}`} title={L('Suchen und Ersetzen (Strg+F / Strg+H)', 'Find and replace (Ctrl+F / Ctrl+H)')} onClick={() => setFind((value) => ({ ...value, open: !value.open }))}><Search size={16} /></button>
+        </>)}
         <span className="wm-grow" />
         <select className="wm-select" value={language} title={L('Sprache der Geschichte', 'Story language')} onChange={(event) => {
           const next = event.target.value as StoryLanguage
@@ -763,7 +895,15 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
           <option value="paper">{L('Papier', 'Paper')}</option>
           <option value="sepia">{L('Sepia', 'Sepia')}</option>
           <option value="night">{L('Nacht', 'Night')}</option>
+          <option value="contrast">{L('Hoher Kontrast', 'High contrast')}</option>
         </select>
+        <button type="button" className={`wm-icon${typewriter ? ' is-on' : ''}`} title={L('Schreibmaschinen-Modus: die aktuelle Zeile bleibt auf gleicher Höhe', 'Typewriter mode: the current line stays at the same height')} aria-pressed={typewriter} onClick={() => { setTypewriter((value) => !value); refocus() }}><TextCursor size={16} /></button>
+        <button type="button" className={`wm-icon${reference ? ' is-on' : ''}`} title={L('Geteilte Ansicht: Szene, Figur oder Notiz daneben', 'Split view: a scene, character or note alongside')} aria-pressed={Boolean(reference)} onClick={() => {
+          if (reference) { setReference(null); return }
+          const node = headBlock?.sceneId ? findIn(doc.manifest.binder, headBlock.sceneId) : null
+          const first = node?.links?.[0]
+          setReference(first ? { kind: 'note', path: first } : characters[0] ? { kind: 'bible', id: characters[0].id } : { kind: 'scene', id: [...doc.scenes.keys()][0] })
+        }}><PanelRight size={16} /></button>
         <button type="button" className={`wm-icon${inspectorOpen && inspectorTab === 'check' ? ' is-on' : ''}`} title={L('Prüfen: Rechtschreibung, Grammatik, Stil (F7)', 'Check spelling, grammar and style (F7)')} onClick={() => { if (inspectorOpen && inspectorTab === 'check') setInspectorOpen(false); else { setInspectorOpen(true); setInspectorTab('check') } }}><SpellCheck size={16} /></button>
         <button type="button" className={`wm-icon${inspectorOpen && inspectorTab !== 'check' ? ' is-on' : ''}`} title={L('Seite, Formate und Notizen', 'Page, styles and notes')} onClick={() => { if (inspectorOpen && inspectorTab !== 'check') setInspectorOpen(false); else { setInspectorOpen(true); setInspectorTab('page') } }}><SlidersHorizontal size={16} /></button>
         <button type="button" className={`wm-icon${focusMode ? ' is-on' : ''}`} title={L('Fokusmodus (F11)', 'Focus mode (F11)')} onClick={() => { setFocusMode((value) => !value); refocus() }}><Focus size={16} /></button>
@@ -804,13 +944,30 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
             nodes={doc.manifest.binder}
             currentScene={headBlock?.sceneId ?? null}
             sceneWords={(id) => sceneWords.get(id) ?? null}
-            onOpen={(node) => goToBlock(node.kind === 'scene' ? doc.flow.find((block) => block.sceneId === node.id && block.ref.kind === 'para')?.key ?? '' : titleKey(node.id))}
+            onOpen={(node) => {
+              if (node.kind === 'scene') { openScene(node.id); return }
+              if (node.id === TRASH_ID || node.kind === 'folder') return
+              setArea('manuscript')
+              goToBlock(titleKey(node.id))
+            }}
             onRename={renameNode}
             onAddChapter={addChapter}
             onAddScene={addScene}
+            onMove={moveBinderNode}
+            onPatch={patchNode}
+            onTrash={trashNode}
           />
         )}
-        <div className={`wm-scroll theme-${theme}`} ref={(element) => { scroller.current = element; if (element !== scrollElement) setScrollElement(element) }} onMouseDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); input.current?.focus({ preventScroll: true }) } }}>
+        {area !== 'manuscript' && (
+          <div className="wm-area">
+            {area === 'board' && <Corkboard binder={doc.manifest.binder} sceneWords={(id) => sceneWords.get(id) ?? null} characters={characters} onPatch={patchNode} onMove={moveBinderNode} onOpen={openScene} />}
+            {area === 'outline' && <Outline binder={doc.manifest.binder} sceneWords={(id) => sceneWords.get(id) ?? null} characters={characters} onPatch={patchNode} onMove={moveBinderNode} onOpen={openScene} />}
+            {(area === 'characters' || area === 'places') && <BibleSheets key={area} kind={area === 'characters' ? 'character' : 'place'} entries={area === 'characters' ? characters : places} binder={doc.manifest.binder} scenes={doc.scenes} writer={writer} onSave={tools.saveEntry} onOpenScene={openScene} />}
+            {area === 'timeline' && <Timeline events={events} characters={characters} places={places} binder={doc.manifest.binder} writer={writer} onSave={tools.saveEntry} onOpenScene={openScene} />}
+            {area === 'goals' && <GoalsView goals={doc.manifest.goals ?? {}} total={counts.words} today={tools.todayWords} session={tools.sessionWords} days={tools.days} onGoals={(goals) => controller.replaceDoc(makeDoc({ ...controller.state.doc.manifest, goals }, controller.state.doc.scenes))} />}
+          </div>
+        )}
+        <div className={`wm-scroll theme-${theme}${area !== 'manuscript' ? ' is-hidden' : ''}`} ref={(element) => { scroller.current = element; if (element !== scrollElement) setScrollElement(element) }} onMouseDown={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); input.current?.focus({ preventScroll: true }) } }}>
           <PageView
             layout={layout}
             doc={doc}
@@ -866,6 +1023,9 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
             data-i18n-ignore
           />
         </div>
+        {reference && area === 'manuscript' && !focusMode && (
+          <ReferencePane reference={reference} binder={doc.manifest.binder} scenes={doc.scenes} bible={[...characters, ...places, ...events]} links={linkedNotes} onChange={setReference} onClose={() => setReference(null)} />
+        )}
         {inspectorOpen && !focusMode && (
           <Inspector
             controller={controller}
@@ -883,9 +1043,37 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
               sceneId: headBlock?.sceneId ?? null,
               onJump: (block, from, to) => { controller.select({ anchor: { block, offset: from }, head: { block, offset: to } }); refocus() },
             }}
+            scene={(() => {
+              const sceneId = headBlock?.sceneId ?? null
+              const node = sceneId ? findIn(doc.manifest.binder, sceneId) : null
+              return (
+                <ScenePanel
+                  key={sceneId ?? 'none'}
+                  node={node}
+                  words={sceneId ? sceneWords.get(sceneId) ?? 0 : 0}
+                  characters={characters}
+                  places={places}
+                  stamps={sceneId ? tools.stampsFor(sceneId) : []}
+                  onPatch={(patch) => { if (sceneId) patchNode(sceneId, patch) }}
+                  onOpenNote={(notePath) => setReference({ kind: 'note', path: notePath })}
+                  onTakeSnapshot={async (note) => {
+                    const scene = sceneId ? controller.state.doc.scenes.get(sceneId) : undefined
+                    if (!scene) return
+                    try {
+                      await tools.takeSnapshot(scene, node?.title ?? '', 'manual', note)
+                    } catch (error) {
+                      setNotice(error instanceof Error ? error.message : String(error))
+                    }
+                  }}
+                  onCompare={(stamp) => { void openCompare(stamp) }}
+                />
+              )
+            })()}
           />
         )}
       </div>
+
+      {compare && <SnapshotCompare snapshot={compare.snapshot} rows={compare.rows} onRestore={() => { void restoreCompare() }} onClose={() => { setCompare(null); refocus() }} />}
 
       {noteDialog && (
         <div className="wm-dialog-backdrop" onMouseDown={() => { setNoteDialog(null); refocus() }}>
@@ -905,6 +1093,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
         <span>{formatNumber(counts.words)} {L('Wörter', 'words')}{selectionCounts ? ` (${formatNumber(selectionCounts.words)} ${L('markiert', 'selected')})` : ''}</span>
         <span title={L(`${formatNumber(counts.chars)} Zeichen mit Leerzeichen`, `${formatNumber(counts.chars)} characters with spaces`)}>{formatNumber(counts.charsNoSpaces)} {L('Zeichen', 'characters')}</span>
         <span>{L(`${minutes} Min. Lesezeit`, `${minutes} min read`)}</span>
+        {doc.manifest.goals?.daily ? <button type="button" className="wm-status-goal" onClick={() => setArea('goals')}>{L('Heute', 'Today')} {formatNumber(tools.todayWords)} / {formatNumber(doc.manifest.goals.daily)}</button> : null}
         <span className="wm-grow" />
         <span>{styleName(doc.manifest.styles[currentStyle] ?? doc.manifest.styles.body)}</span>
         <span className={`wm-save is-${saveState}`}>{saveState === 'saved' ? L('Gespeichert', 'Saved') : saveState === 'saving' ? L('Speichert …', 'Saving …') : L('Nicht gespeichert', 'Not saved')}{saveState === 'error' && controller.lastSaveError ? `: ${controller.lastSaveError}` : ''}</span>
@@ -913,7 +1102,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
   )
 }
 
-function Binder({ nodes, currentScene, sceneWords, onOpen, onRename, onAddChapter, onAddScene }: {
+function Binder({ nodes, currentScene, sceneWords, onOpen, onRename, onAddChapter, onAddScene, onMove, onPatch, onTrash }: {
   nodes: BinderNode[]
   currentScene: string | null
   sceneWords: (id: string) => number | null
@@ -921,20 +1110,48 @@ function Binder({ nodes, currentScene, sceneWords, onOpen, onRename, onAddChapte
   onRename: (id: string, title: string) => void
   onAddChapter: () => void
   onAddScene: () => void
+  onMove: (id: string, targetId: string, position: DropPosition) => void
+  onPatch: (id: string, patch: Partial<BinderNode>) => void
+  onTrash: (id: string) => void
 }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [drag, setDrag] = useState<string | null>(null)
+  const [over, setOver] = useState<{ id: string; position: DropPosition } | null>(null)
+  const [menu, setMenu] = useState<string | null>(null)
+  const dropAt = (event: React.DragEvent<HTMLDivElement>, node: BinderNode) => {
+    if (!drag) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const y = (event.clientY - rect.top) / rect.height
+    const candidates: DropPosition[] = y < 0.3 ? ['before', 'inside'] : y > 0.7 ? ['after', 'inside'] : ['inside', y < 0.5 ? 'before' : 'after']
+    const position = candidates.find((candidate) => canDrop(nodes, drag, node.id, candidate))
+    if (!position) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    if (over?.id !== node.id || over.position !== position) setOver({ id: node.id, position })
+  }
   const render = (list: BinderNode[], depth: number): React.ReactNode => list.map((node) => {
     const words = node.kind === 'scene' ? sceneWords(node.id) : null
     const open = !collapsed.has(node.id)
+    const isTrash = node.id === TRASH_ID
     return (
       <li key={node.id}>
-        <div className={`wm-binder-row is-${node.kind}${node.id === currentScene ? ' is-current' : ''}${node.exclude ? ' is-excluded' : ''}`} style={{ paddingLeft: 8 + depth * 14 }}>
+        <div
+          className={`wm-binder-row is-${node.kind}${node.id === currentScene ? ' is-current' : ''}${node.exclude && !isTrash ? ' is-excluded' : ''}${isTrash ? ' is-trash' : ''}${drag === node.id ? ' is-dragging' : ''}${over?.id === node.id ? ` drop-${over.position}` : ''}`}
+          style={{ paddingLeft: 8 + depth * 14 }}
+          draggable={!isTrash && editing !== node.id}
+          onDragStart={(event) => { setDrag(node.id); setMenu(null); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', node.id) }}
+          onDragEnd={() => { setDrag(null); setOver(null) }}
+          onDragOver={(event) => dropAt(event, node)}
+          onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(null) }}
+          onDrop={(event) => { event.preventDefault(); if (drag && over) onMove(drag, over.id, over.position); setDrag(null); setOver(null) }}
+        >
           {node.children ? (
             <button type="button" className="wm-binder-toggle" aria-label={open ? L('Zuklappen', 'Collapse') : L('Aufklappen', 'Expand')} onClick={() => setCollapsed((value) => { const next = new Set(value); if (next.has(node.id)) next.delete(node.id); else next.add(node.id); return next })}>
               {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             </button>
           ) : <span className="wm-binder-toggle" />}
+          {isTrash ? <Trash2 size={12} className="wm-binder-icon" /> : node.label ? <span className="wm-label-dot" style={{ background: node.label }} /> : null}
           {editing === node.id ? (
             <input
               autoFocus
@@ -944,13 +1161,37 @@ function Binder({ nodes, currentScene, sceneWords, onOpen, onRename, onAddChapte
               onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur(); if (event.key === 'Escape') setEditing(null) }}
             />
           ) : (
-            <button type="button" className="wm-binder-title" title={node.synopsis ?? node.title} onClick={() => onOpen(node)} onDoubleClick={() => setEditing(node.id)} data-i18n-ignore>
-              {node.title || L('(ohne Titel)', '(untitled)')}
+            <button type="button" className="wm-binder-title" title={node.synopsis ?? node.title} onClick={() => onOpen(node)} onDoubleClick={() => { if (!isTrash) setEditing(node.id) }} data-i18n-ignore>
+              {isTrash ? L('Papierkorb', 'Trash') : node.title || L('(ohne Titel)', '(untitled)')}
             </button>
           )}
+          {node.status && node.kind === 'scene' && <span className={`wm-status-badge is-${node.status}`} title={L(...STATUS_LABEL[node.status])} />}
           {words !== null && <small>{formatNumber(words)}</small>}
           {words === null && node.kind === 'scene' && <small title={L('Noch nicht auf diesem Gerät', 'Not on this device yet')}>…</small>}
+          {!isTrash && (
+            <button type="button" className="wm-binder-more" aria-label={L('Mehr', 'More')} aria-expanded={menu === node.id} onClick={() => setMenu((value) => (value === node.id ? null : node.id))}><MoreHorizontal size={13} /></button>
+          )}
         </div>
+        {menu === node.id && (
+          <div className="wm-binder-menu" role="menu" onMouseLeave={() => setMenu(null)}>
+            <button type="button" role="menuitem" onClick={() => { setEditing(node.id); setMenu(null) }}>{L('Umbenennen', 'Rename')}</button>
+            {node.kind === 'scene' && (
+              <div className="wm-binder-menu-row" role="group" aria-label={L('Status', 'Status')}>
+                {(Object.keys(STATUS_LABEL) as Array<keyof typeof STATUS_LABEL>).map((status) => (
+                  <button key={status} type="button" className={node.status === status ? 'is-on' : ''} onClick={() => onPatch(node.id, { status: node.status === status ? undefined : status })}>{L(...STATUS_LABEL[status])}</button>
+                ))}
+              </div>
+            )}
+            <div className="wm-swatches" role="group" aria-label={L('Label-Farbe', 'Label colour')}>
+              {LABEL_COLORS.map((color) => <button key={color} type="button" className={node.label === color ? 'is-on' : ''} style={{ background: color }} aria-label={color} onClick={() => onPatch(node.id, { label: color })} />)}
+              <button type="button" className="wm-swatch-clear" aria-label={L('Keine Farbe', 'No colour')} onClick={() => onPatch(node.id, { label: undefined })}><X size={12} /></button>
+            </div>
+            <button type="button" role="menuitem" onClick={() => { onPatch(node.id, { exclude: node.exclude ? undefined : true }); setMenu(null) }}>
+              {node.exclude ? L('Wieder ins Manuskript', 'Include in the manuscript') : L('Vom Manuskript ausschliessen', 'Exclude from the manuscript')}
+            </button>
+            <button type="button" role="menuitem" className="is-danger" onClick={() => { onTrash(node.id); setMenu(null) }}><Trash2 size={12} /> {L('In den Papierkorb', 'Move to trash')}</button>
+          </div>
+        )}
         {node.children && open && node.children.length > 0 && <ul>{render(node.children, depth + 1)}</ul>}
       </li>
     )
@@ -963,6 +1204,7 @@ function Binder({ nodes, currentScene, sceneWords, onOpen, onRename, onAddChapte
         <button type="button" className="wm-icon" title={L('Neues Kapitel', 'New chapter')} onClick={onAddChapter}><Plus size={14} /></button>
       </div>
       <ul>{render(nodes, 0)}</ul>
+      <p className="wm-binder-hint">{L('Ziehen zum Umordnen', 'Drag to reorder')}</p>
     </nav>
   )
 }

@@ -33,8 +33,9 @@ story.json   { format: "fanotes-story-v1", id, title, author, language ("de" | "
 scenes/<id>.json { format: "fanotes-story-scene-v1", id, paragraphs: [
                    { id, key /* order */, v: {device: n}, style, lang?, align?, runs: [{ text, marks }],
                      footnotes?, comments?, deleted? }] }
-bible/characters/<id>.json, bible/places/<id>.json, bible/timeline.json, bible/notes/<id>.md
-snapshots/<sceneId>/<iso>.json   (synced, so a version taken on the laptop is on the tablet)
+bible/characters/<id>.json, bible/places/<id>.json, bible/events/<id>.json   (one file per entry: no sync conflicts between entries; archived, never deleted)
+progress/<writerId>.json          (per device; goals and streak sum over all devices)
+snapshots/<sceneId>/<UTCstamp>-<writer>.json   (immutable, synced, so a version taken on the laptop is on the tablet)
 ```
 
 Marks: bold, italic, underline, strike, small caps, superscript, subscript, font, size, colour, highlight, link, footnote ref, comment range, language. Paragraph styles are named and editable per project; direct formatting is allowed but styles come first.
@@ -110,3 +111,13 @@ Offline, German and English, per paragraph (a paragraph's own language wins; oth
 - **UI**: click an underlined word (or right-click, or Shift+F7 for any word) for a pop-up with the explanation, suggestions, "add to story dictionary", "ignore", "turn this rule off", and synonyms (OpenThesaurus, LGPL, 48 160 German groups; WordNet 3.1, 53 060 English groups; loaded on first use). F7 opens the "Prüfen" panel: switches per check and per autocorrect feature, paragraph language, all findings of the current scene with one-click fixes, the story dictionary and ignored findings (both stored in `story.json`, so they sync).
 
 Tests: `node scripts/check-writing-assist.mjs` (11 groups, ~150 assertions: every rule with sentences it must flag and sentences it must leave alone, autocorrect sequences typed character by character in four languages, checker cache/dictionary/ignore, thesaurus inflections); browser end-to-end on the web build (11 checks: autocorrect, Backspace undo, underlines, pop-up, dictionary, applying a comma, synonyms, panel, English paragraph); the M1 suites still pass (26 unit, 11 desktop, 15 browser; typing p95 in the 608-page novel 24–32 ms with the checker on).
+
+### Milestone 3 (story tools) — 2026-11-15
+
+- **Binder**: drag and drop (before/after/inside, with kind and cycle checks), a menu per node (rename, status, label colour, exclude from manuscript, move to trash). The trash is a binder folder: trashed scenes leave the manuscript and exports but their files stay and they can be dragged back. Excluded scenes stay out of the page view so the screen always equals the export; opening one explains how to include it again.
+- **Areas** (toolbar): Manuskript, Pinnwand (index cards per chapter: title, synopsis, status, POV, words; drag to reorder), Übersicht (outline table with synopsis, POV, status, words, chapter and scene goals with progress), Figuren and Orte (sheets with role, aliases, colour, free fields, notes, and "appears in": scenes that name the entry, have it as POV or link it), Zeitleiste (events in story time with "when", linked scenes, characters and places, reorder), Ziele (project goal and deadline with words per day needed, today on all devices, this session, streak and longest streak, 16-week calendar).
+- **Scene tab** in the inspector: title, synopsis, status, label, POV, characters and places, word goal, include in manuscript, linked FaNotes notes (search the vault), and versions.
+- **Versions (snapshots)**: saved by hand, and automatically before a restore and before "Replace all"; side-by-side comparison with word-level changes; restoring is an ordinary, undoable edit of the scene (paragraph ids kept, newer paragraphs become tombstones), so it merges with other devices.
+- **Split view**: a scene, a bible entry or a linked note next to the manuscript. **Typewriter mode** keeps the current line at a fixed height. **High-contrast** page theme. Bible names count as correctly spelled.
+
+Tests: `node scripts/check-writing-tools.mjs` (7: binder moves/refusals, trash survives reload, link sanitizing, bible round trip and hostile input, mentions as whole words, progress per device and day, streaks, deadline maths, calendar, snapshot stamps, paragraph/word diff, restore merged with a concurrent edit from another device); browser end-to-end (14: binder drag reorders the manuscript, corkboard ↔ outline, character sheet finds both scenes, timeline, goals, version → edit → compare → restore → undo, split view, trash, everything still there after reload). Earlier suites unchanged: 26 unit, 11 assistance, 11 desktop, 15 + 11 browser; typing p95 in the 608-page novel 32–40 ms.
