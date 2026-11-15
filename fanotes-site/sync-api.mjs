@@ -586,12 +586,18 @@ const handleRegister = async (request, response) => {
   const deviceId = registerDevice(account, device)
   const session = issueSession(account, deviceId)
   await fs.mkdir(safeJoin(accountDirectory(id), 'blobs'), { recursive: true, mode: 0o700 })
+  // Link the new account before the e-mail index points at it. A crash must
+  // not reserve the address with no account behind it.
+  await syncDirectory(syncRoot())
+  await syncDirectory(dirname(accountDirectory(id)))
+  await syncDirectory(accountDirectory(id))
   const emailPath = emailIndexPath(email)
   let emailCreated = false
   try {
     // 'wx' makes the e-mail index the uniqueness check; two racing registrations cannot both win.
-    // The name is flushed before the account record is saved, and a failed
-    // attempt removes only the index entry this attempt created.
+    // The account record is saved first. A failed attempt removes the index
+    // entry this attempt created, then its own account directory.
+    await saveAccount(account)
     const emailHandle = await fs.open(emailPath, 'wx', 0o600)
     emailCreated = true
     try {
@@ -601,10 +607,13 @@ const handleRegister = async (request, response) => {
       await emailHandle.close()
     }
     await syncDirectory(dirname(emailPath))
-    await saveAccount(account)
   } catch (error) {
-    if (emailCreated) await fs.rm(emailPath, { force: true })
+    if (emailCreated) {
+      await fs.rm(emailPath, { force: true })
+      await syncDirectory(dirname(emailPath))
+    }
     await fs.rm(accountDirectory(id), { recursive: true, force: true })
+    await syncDirectory(dirname(accountDirectory(id)))
     if (error?.code === 'EEXIST') {
       const existing = await loadAccountByEmail(email)
       if (existing?.auth?.hash && existing?.auth?.salt) {
