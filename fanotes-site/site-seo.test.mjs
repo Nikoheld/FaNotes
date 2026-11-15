@@ -111,6 +111,7 @@ test('origin gzip covers sitemap and svg and varies on the encoding', () => {
   for (const conf of [fanotes, schulnetz]) assert.match(conf, /^    gzip_vary on;$/mu)
   assert.match(fanotes, /gzip_types[^\n]*application\/xml[^\n]*image\/svg\+xml/)
   assert.doesNotMatch(fanotes, /gzip_types[^\n]*wasm/)
+  assert.match(schulnetz, /gzip_types[^\n]+\n\n    # HTML and script responses name UTF-8\. The pages already use that encoding\.\n    charset utf-8;/u)
   assert.match(schulnetz, /location = \/sitemap\.xml \{\n        expires 1h;\n        types \{ application\/xml xml; \}\n        default_type application\/xml;\n        charset utf-8;\n        charset_types text\/xml application\/xml;/u)
   assert.match(schulnetz, /location = \/robots\.txt \{\n        expires 1h;\n        charset utf-8;\n        charset_types text\/plain;/u)
   const blocks = fanotes.split(/\n    location /u).slice(1)
