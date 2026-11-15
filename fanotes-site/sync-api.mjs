@@ -787,8 +787,21 @@ const handleGetFile = async (request, response, auth, fileId) => {
     try {
       handle = await fs.open(blobPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
     } catch (error) {
-      if (error?.code === 'ENOENT' || error?.code === 'ELOOP') fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
-      throw error
+      // The live name can be lost after the note was archived and before the
+      // replacement was durable. Copy the matching archive back. A symlink
+      // stays where it is and is not followed.
+      if (error?.code === 'ENOENT' && await restoreLiveBlob(auth.account.id, fileId, entry)) {
+        try {
+          handle = await fs.open(blobPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+        } catch (openError) {
+          if (openError?.code === 'ENOENT' || openError?.code === 'ELOOP') fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
+          throw openError
+        }
+      } else if (error?.code === 'ENOENT' || error?.code === 'ELOOP') {
+        fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
+      } else {
+        throw error
+      }
     }
     try {
       const info = await handle.stat()
@@ -955,6 +968,43 @@ const listRevisionFiles = async (directory) => {
     files.push({ name, size: stat.size, revision: Number(name.slice(name.startsWith('c-') ? 2 : 0)) })
   }
   return files
+}
+
+// The live name can disappear after this revision was copied into the archive.
+// Copy that body back when its size and checksum match the table. The archive
+// stays, a tombstone is not revived, and the change log is not rewritten.
+const restoreLiveBlob = async (accountId, fileId, entry) => {
+  if (!entry || entry.deleted) return false
+  const expectedSize = Number(entry.size) || 0
+  const expectedSha = entry.sha256
+  if (typeof expectedSha !== 'string' || !expectedSha || expectedSize < EMPTY_CIPHERTEXT_BYTES) return false
+  const blobDirectory = safeJoin(accountDirectory(accountId), 'blobs')
+  const blobPath = safeJoin(blobDirectory, fileId)
+  const live = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (live) return false
+  const directory = revisionsDirectory(accountId, fileId)
+  const candidates = (await listRevisionFiles(directory)).filter((file) => file.size === expectedSize)
+  const revision = Number(entry.revision)
+  const preferred = candidates.find((file) => file.revision === revision && !file.name.startsWith('c-'))
+    ?? candidates.find((file) => file.revision === revision)
+  const ordered = preferred ? [preferred, ...candidates.filter((file) => file.name !== preferred.name)] : candidates
+  let source = null
+  for (const file of ordered) {
+    const path = safeJoin(directory, file.name)
+    if (await hashFile(path) === expectedSha) {
+      source = path
+      break
+    }
+  }
+  if (!source) return false
+  const blobsExisted = await fs.lstat(blobDirectory).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  await fs.mkdir(blobDirectory, { recursive: true, mode: 0o700 })
+  if (!blobsExisted) {
+    // Link the blobs directory before the archived note is copied back into it.
+    await syncDirectory(accountDirectory(accountId))
+  }
+  await copyDurable(source, blobPath)
+  return true
 }
 
 /** Copy the live blob aside before it is replaced. Returns the byte delta of the archive. */
