@@ -277,6 +277,7 @@ import type { AppSettings, BootstrapData, CreateResult, DrawingLibraryDocument, 
 const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module) => ({ default: module.DrawingBoard })))
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
 const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspace').then((module) => ({ default: module.GlyphenWerkWorkspace })))
+const WritingMode = lazy(() => import('./writing/ui/WritingMode').then((module) => ({ default: module.WritingMode })))
 const CommandPalette = lazy(() => import('./components/CommandPalette').then((module) => ({ default: module.CommandPalette })))
 const StudyOverview = lazy(() => import('./components/StudyOverview').then((module) => ({ default: module.StudyOverview })))
 const FlashcardReview = lazy(() => import('./components/FlashcardReview').then((module) => ({ default: module.FlashcardReview })))
@@ -777,6 +778,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [lmStudioOpen, setLmStudioOpen] = useState(false)
   const [glyphenWerkOpen, setGlyphenWerkOpen] = useState(false)
+  /** The `.story` project open in the writing mode (full screen). */
+  const [writingPath, setWritingPath] = useState<string | null>(null)
   const [glyphenWerkView, setGlyphenWerkView] = useState<GlyphenWerkView>('capture')
   const [glyphenWerkSampleCount, setGlyphenWerkSampleCount] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -1718,6 +1721,11 @@ export default function App({ startupBootstrap }: AppProps) {
       if (splitPathRef.current === path) splitEditorRef.current?.flushChanges()
       if (!await flushDocumentLayers()) return false
     }
+    if (/\.story$/iu.test(path)) {
+      // A story opens in the writing mode; the notes stay as they are underneath.
+      setWritingPath(path)
+      return true
+    }
     const session = vaultSessionGenerationRef.current
     const structureRevision = vaultStructureRevisionRef.current
     setOverviewOpen(false)
@@ -2559,6 +2567,25 @@ export default function App({ startupBootstrap }: AppProps) {
   const toggleSplitOrientation = useCallback(() => {
     setSplitLayout((current) => ({ ...current, orientation: current.orientation === 'columns' ? 'rows' : 'columns' }))
   }, [])
+
+  const createStory = useCallback(async (parent?: string) => {
+    const { storyHost, createProject } = await import('./writing/storage')
+    const { writerId } = await import('./writing/model/ids')
+    const host = storyHost()
+    if (!host) {
+      toast('Geschichten gibt es in dieser Version nicht.', 'error')
+      return
+    }
+    try {
+      const english = getUiLanguage() === 'en'
+      const path = await createProject(host, parent ?? '', { title: english ? 'New story' : 'Neue Geschichte', language: english ? 'en-US' : 'de', size: 'A5', deviceId: writerId() })
+      await refreshTree()
+      syncEngine.notifyLocalChange()
+      setWritingPath(path)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Die Geschichte konnte nicht angelegt werden.', 'error')
+    }
+  }, [refreshTree, toast])
 
   const createNote = useCallback(async (parent?: string) => {
     const session = vaultSessionGenerationRef.current
@@ -4755,6 +4782,10 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [attachImportedWorksheet, toast])
 
   const openInSplit = useCallback(async (path: string) => {
+    if (/\.story$/iu.test(path)) {
+      setWritingPath(path)
+      return
+    }
     if (activePathRef.current === path) {
       // Splitting the note you are on: keep it on the left and put the last
       // other note on the right, like duplicating a browser tab side by side.
@@ -4998,6 +5029,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'new-note', label: 'Neue Notiz', detail: 'Markdown-Datei im Standardordner', shortcut: 'Ctrl N', group: 'Dateien', icon: <FilePlus2 size={15} />, run: () => void createNote() },
     { id: 'import-pdf-note', label: 'PDF importieren', detail: 'PDF wird selbst zur Notiz — mit Handschrift und Viewer', group: 'Dateien', keywords: 'pdf import notiz viewer', icon: <FileText size={15} />, run: () => void importPdfNote() },
     { id: 'new-folder', label: 'Neuer Ordner', detail: 'Fach auf oberster Ebene anlegen', group: 'Dateien', icon: <FolderPlus size={15} />, run: () => void createFolder() },
+    { id: 'new-story', label: 'Neue Geschichte', detail: 'Schreibmodus mit Seiten, Kapiteln und Szenen', group: 'Dateien', keywords: 'geschichte roman buch schreiben story novel writing kapitel', icon: <BookOpen size={15} />, run: () => void createStory() },
     { id: 'new-subfolder', label: 'Unterordner anlegen', detail: activeTab ? `In ${parentPath(activeTab.path) || 'Vault-Wurzel'}` : 'Rechtsklick auf einen Ordner oder hier nach dem Öffnen einer Notiz', group: 'Dateien', keywords: 'unterordner ordner verschachteln fach', icon: <FolderPlus size={15} />, run: () => void createFolder(activeTab ? parentPath(activeTab.path) || undefined : undefined) },
     { id: 'save', label: 'Aktuelle Notiz speichern', detail: 'Text, Handschrift und Arbeitsblätter sichern', shortcut: 'Ctrl S', group: 'Dateien', icon: <Save size={15} />, run: () => { void saveCurrentWork(true) } },
     { id: 'search', label: 'Im Vault suchen', shortcut: 'Ctrl ⇧ F', group: 'Navigation', icon: <Search size={15} />, run: () => setSearchOpen(true) },
@@ -5675,6 +5707,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onCreateNote={createNote}
                 onCreateFolder={createFolder}
                 onImportPdf={importPdfNote}
+                onCreateStory={(parent) => void createStory(parent)}
                 onAttachBook={attachBookToSubject}
                 onDetachBook={detachBookFromSubject}
                 localOnlyPaths={syncPrefixesFromSetting(settings.syncExcludedFolders)}
@@ -6325,6 +6358,18 @@ export default function App({ startupBootstrap }: AppProps) {
       )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} mode={paletteMode} rankNotes={rankNotesForPalette} activePath={activePath} onOpenNote={(path) => void openNote(path)} onOpenNoteInSplit={(path) => void openInSplit(path)} onClose={closePalette} /></SafeBoundary></Suspense>}
       <ProfileOverviewPublisher settings={settings} />
+      {writingPath && (
+        <Suspense fallback={<div className="editor-module-loading"><LoaderCircle className="spin" size={20} /><span>Schreibmodus wird geladen …</span></div>}>
+          <SafeBoundary name="Schreiben" fallbackTitle="Der Schreibmodus ist abgestürzt">
+            <WritingMode
+              key={writingPath}
+              path={writingPath}
+              onClose={() => { setWritingPath(null); void refreshTree() }}
+              onSaved={() => syncEngine.notifyLocalChange()}
+            />
+          </SafeBoundary>
+        </Suspense>
+      )}
       {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} onConvertFamd={convertAllFamdNotes} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
       {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}

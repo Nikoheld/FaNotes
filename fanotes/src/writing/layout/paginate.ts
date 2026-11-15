@@ -145,7 +145,7 @@ export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], c
 
   const pages: Page[] = []
   const blockPages: number[] = []
-  let page: Page
+  let page!: Page
   let y = 0
   let footnoteHeight = 0
   let chapterTitle = ''

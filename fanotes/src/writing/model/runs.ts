@@ -14,7 +14,7 @@ const cleanMarks = (marks: Marks | undefined): Marks | undefined => {
   let any = false
   for (const key of MARK_KEYS) {
     const value = marks[key]
-    if (value === undefined || value === null || value === false || value === '') continue
+    if (value === undefined || value === null || value === '') continue
     ;(out as Record<string, unknown>)[key] = value
     any = true
   }

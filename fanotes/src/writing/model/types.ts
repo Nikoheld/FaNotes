@@ -102,6 +102,8 @@ export type ParagraphStyle = {
   noIndentAfterBreak?: boolean
   /** Shown in the outline/navigation (chapter and scene headings). */
   outlineLevel?: number
+  /** A list marker drawn in the hanging indent of the first line (e.g. "•", "–"). */
+  listMarker?: string
 }
 
 export type PageSizeId = 'A4' | 'A5' | 'Letter' | 'pocket' | 'trade' | 'manuscript' | 'custom'

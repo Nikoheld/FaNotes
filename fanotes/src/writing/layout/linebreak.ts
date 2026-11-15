@@ -23,6 +23,7 @@ export type ResolvedStyle = {
   keepWithNext: boolean
   pageBreakBefore: boolean
   dropCap: number
+  listMarker?: string
 }
 
 export const resolveStyle = (style: ParagraphStyle, overrides?: { align?: Align; afterBreak?: boolean }): ResolvedStyle => ({
@@ -43,9 +44,10 @@ export const resolveStyle = (style: ParagraphStyle, overrides?: { align?: Align;
   keepWithNext: Boolean(style.keepWithNext),
   pageBreakBefore: Boolean(style.pageBreakBefore),
   dropCap: overrides?.afterBreak ? style.dropCap ?? 0 : 0,
+  ...(style.listMarker ? { listMarker: style.listMarker } : {}),
 })
 
-export type PieceKind = 'word' | 'space' | 'newline' | 'anchor'
+export type PieceKind = 'word' | 'space' | 'newline' | 'anchor' | 'marker'
 
 /** A measured piece of a line. `display` is what is drawn (may differ in case or be a footnote number). */
 export type Piece = {
@@ -296,7 +298,8 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
 
   const contentWidth = Math.max(20, input.width - style.indentLeft - style.indentRight)
   const lineStart = (index: number) => {
-    let x = style.indentLeft + (index === 0 ? style.indentFirst : 0)
+    // A list's first-line indent is the hanging space for its marker; the text aligns with the rest.
+    let x = style.indentLeft + (index === 0 && !style.listMarker ? style.indentFirst : 0)
     if (dropCap && index < dropCap.lines) x = style.indentLeft + dropCap.width
     return Math.max(0, x)
   }
@@ -313,7 +316,8 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
     const index = lines.length
     const width = available(index)
     const pieces = lineTokens.flatMap((token) => token.pieces)
-    if (hyphen && pieces.length) pieces[pieces.length - 1] = { ...pieces[pieces.length - 1], hyphen: true }
+    // Set on the piece itself: the x positions below are written to these same objects.
+    if (hyphen && pieces.length) pieces[pieces.length - 1].hyphen = true
     const natural = lineTokens.reduce((sum, token) => sum + token.width, 0) + (hyphen ? hyphenWidth : 0)
     const last = forced || endsParagraph
     const spaces = lineTokens.filter((token) => token.kind === 'space').length
@@ -433,6 +437,12 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
   // Lines cover the whole text: each starts where the previous ended.
   for (let line = 1; line < lines.length; line += 1) lines[line].from = lines[line - 1].to
   lines[lines.length - 1].to = textLength
+  if (style.listMarker) {
+    // The marker hangs in the first-line indent, left of where the text starts.
+    const width = measurer.width(style.listMarker, baseFont)
+    const gap = style.size * 0.4
+    lines[0].pieces.unshift({ kind: 'marker', from: 0, to: 0, text: '', display: style.listMarker, font: baseFont, shift: 0, width, x: Math.min(-gap - width, style.indentFirst) })
+  }
   if (dropCap) {
     lines[0].from = 0
     dropCap.x = style.indentLeft
@@ -455,12 +465,13 @@ export const lineAt = (layout: ParagraphLayout, offset: number, forward = false)
 /** x of a caret at `offset` within its line, relative to the line start. */
 export const caretX = (layout: ParagraphLayout, lineIndex: number, offset: number, measurer: TextMeasurer) => {
   const line = layout.lines[lineIndex]
-  if (!line.pieces.length) {
+  if (!line.pieces.some((piece) => piece.kind !== 'marker')) {
     if (layout.style.align === 'center') return line.available / 2
     if (layout.style.align === 'right') return line.available
     return 0
   }
   for (const piece of line.pieces) {
+    if (piece.kind === 'marker') continue
     if (offset <= piece.from) return piece.x
     if (offset < piece.to || (offset === piece.to && piece === line.pieces[line.pieces.length - 1])) {
       if (piece.kind === 'space') return piece.x + piece.width * ((offset - piece.from) / Math.max(1, piece.to - piece.from))
@@ -478,7 +489,7 @@ export const offsetAtX = (layout: ParagraphLayout, lineIndex: number, x: number,
   let best = line.from
   let bestDistance = Number.POSITIVE_INFINITY
   for (const piece of line.pieces) {
-    if (piece.kind === 'newline' || piece.kind === 'anchor') continue
+    if (piece.kind === 'newline' || piece.kind === 'anchor' || piece.kind === 'marker') continue
     if (x < piece.x - 1 && best !== line.from) break
     for (let offset = piece.from; offset <= piece.to; offset += 1) {
       const position = piece.kind === 'space'

@@ -84,7 +84,7 @@ export const defaultStyles = (manuscript = false): Record<string, ParagraphStyle
     style('poem', 'Gedicht / Lied', 'Poem / song', { font, size, lineHeight: manuscript ? 2 : 1.35, indentLeft: 15, align: 'left', italic: !manuscript, next: 'poem' }),
     style('scenebreak', 'Szenenwechsel', 'Scene break', { font, size, lineHeight, spaceBefore: 8, spaceAfter: 8, align: 'center', keepWithNext: true, next: 'first' }),
     style('epigraph', 'Motto', 'Epigraph', { font, size: manuscript ? 12 : 10, lineHeight: 1.35, spaceBefore: 24, spaceAfter: 24, indentLeft: 30, align: 'right', italic: !manuscript, next: 'first' }),
-    style('list', 'Aufzählung', 'List', { font, size, lineHeight, indentLeft: 6, indentFirst: -4, align: 'left', next: 'list' }),
+    style('list', 'Aufzählung', 'List', { font, size, lineHeight, indentLeft: 6, indentFirst: -4, align: 'left', next: 'list', listMarker: '•' }),
   ]
   return Object.fromEntries(list.map((entry) => [entry.id, entry]))
 }

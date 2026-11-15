@@ -176,6 +176,8 @@ const sanitizeStyle = (id: string, value: unknown, fallback: ParagraphStyle | un
   if (dropCap) style.dropCap = Math.round(dropCap)
   if (typeof source.next === 'string' && /^[a-z0-9-]{1,40}$/u.test(source.next)) style.next = source.next
   else if (base.next) style.next = base.next
+  const marker = typeof source.listMarker === 'string' ? source.listMarker.slice(0, 4) : base.listMarker
+  if (marker) style.listMarker = marker
   const outline = number(source.outlineLevel, 0, 6, base.outlineLevel ?? 0)
   if (outline) style.outlineLevel = Math.round(outline)
   return style

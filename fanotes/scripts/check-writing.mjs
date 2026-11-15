@@ -189,6 +189,10 @@ try {
     const layout = linebreak.layoutParagraph({ runs: [{ text }], style: resolved({ indentFirst: 0 }), width: 260, measurer, hyphenator, hyphenate: true })
     const hyphenated = layout.lines.filter((line) => line.pieces.at(-1)?.hyphen)
     assert.ok(hyphenated.length >= 1, 'at least one line ends in a hyphen')
+    for (const line of layout.lines) {
+      // Pieces sit left to right without overlapping (the hyphenated piece included).
+      for (let index = 1; index < line.pieces.length; index += 1) assert.ok(line.pieces[index].x >= line.pieces[index - 1].x + line.pieces[index - 1].width - 0.01, `overlap in line ${line.from}`)
+    }
     for (const line of layout.lines) assert.ok(line.width <= line.available + 0.5)
     assert.equal(layout.lines.flatMap((line) => line.pieces.filter((piece) => piece.kind === 'word').map((piece) => piece.text)).join(''), text.replace(/ /gu, ''), 'the text is all there')
   })
@@ -203,6 +207,17 @@ try {
     const long = linebreak.layoutParagraph({ runs: [{ text: 'x'.repeat(200) }], style: resolved({ indentFirst: 0 }), width: 100, measurer })
     assert.ok(long.lines.length > 1)
     for (const line of long.lines) assert.ok(line.width <= line.available + 0.5)
+  })
+
+  await test('list paragraphs hang their marker left of the text', () => {
+    const style = linebreak.resolveStyle(story.manifest.styles.list)
+    const layout = linebreak.layoutParagraph({ runs: [{ text: lorem }], style, width: 300, measurer })
+    const marker = layout.lines[0].pieces[0]
+    assert.equal(marker.kind, 'marker')
+    assert.equal(marker.display, '•')
+    assert.ok(marker.x < 0, 'the marker sits in the hanging indent')
+    assert.equal(layout.lines[0].x, layout.lines[1].x, 'first and following lines align')
+    assert.equal(linebreak.caretX(layout, 0, 0, measurer), layout.lines[0].pieces[1].x, 'the caret starts at the text, not at the marker')
   })
 
   await test('a drop cap takes its lines and indents them', () => {
