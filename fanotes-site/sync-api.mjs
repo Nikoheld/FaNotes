@@ -71,7 +71,7 @@ const MAX_SESSIONS = 40
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const SESSION_TOUCH_MS = 6 * 60 * 60 * 1000
 const CHANGES_PAGE = 500
-const COMPACT_LOG_BYTES = 4 * 1024 * 1024
+const COMPACT_LOG_BYTES = Number(process.env.FANOTES_SYNC_COMPACT_BYTES || 4 * 1024 * 1024)
 const MIN_KDF_ITERATIONS = 300_000
 const MAX_KDF_ITERATIONS = 5_000_000
 const FILE_ID_PATTERN = /^[a-f0-9]{64}$/u
@@ -412,7 +412,21 @@ const appendChange = async (accountId, table, entry) => {
 const compactTable = async (accountId, table) => {
   const directory = accountDirectory(accountId)
   await atomicWrite(safeJoin(directory, 'index.json'), JSON.stringify({ revision: table.revision, entries: Object.fromEntries(table.entries) }))
-  await fs.writeFile(safeJoin(directory, 'changes.jsonl'), '', { mode: 0o600 })
+  // The index rename has to be durable before the log is truncated. A crash
+  // that kept the new index and lost the log would drop every revision that
+  // lived only in the log.
+  const directoryHandle = await fs.open(directory, 'r')
+  try {
+    await directoryHandle.sync()
+  } finally {
+    await directoryHandle.close()
+  }
+  const log = await fs.open(safeJoin(directory, 'changes.jsonl'), 'w', 0o600)
+  try {
+    await log.sync()
+  } finally {
+    await log.close()
+  }
   table.logBytes = 0
 }
 
