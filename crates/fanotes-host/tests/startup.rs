@@ -277,11 +277,7 @@ fn a_vault_path_keeps_a_trailing_space_in_the_folder_name() {
     fs::create_dir_all(&spaced).unwrap();
     fs::write(plain.join("Falsch.md"), b"# Falsch\n").unwrap();
     fs::write(spaced.join("Seite.md"), b"# Seite\n").unwrap();
-    fs::write(
-        app.join("vault-path"),
-        format!("{}\n", spaced.display()),
-    )
-    .unwrap();
+    fs::write(app.join("vault-path"), format!("{}\n", spaced.display())).unwrap();
     let mut host = Host::open(app);
     host.documents_dir = Some(dir.join("docs"));
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
@@ -313,11 +309,7 @@ fn a_missing_vault_path_resolves_before_the_cache_lookup() {
     drop(host);
     fs::remove_dir_all(&vault).unwrap();
     let spelled = dir.join("other").join("..").join("notes");
-    fs::write(
-        app.join("vault-path"),
-        format!("{}/\n", spelled.display()),
-    )
-    .unwrap();
+    fs::write(app.join("vault-path"), format!("{}/\n", spelled.display())).unwrap();
     let mut host = Host::open(app);
     host.documents_dir = Some(dir.join("docs"));
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();

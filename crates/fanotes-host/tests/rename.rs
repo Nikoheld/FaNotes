@@ -93,7 +93,9 @@ fn a_missing_child_is_reported_before_a_move_into_itself() {
     let (vault, mut host) = host();
     fs::create_dir_all(vault.join("Ordner/Innen")).unwrap();
     fs::write(vault.join("Ordner/Seite.md"), b"Hallo\n").unwrap();
-    let missing = fs::canonicalize(vault.join("Ordner")).unwrap().join("Fehlt");
+    let missing = fs::canonicalize(vault.join("Ordner"))
+        .unwrap()
+        .join("Fehlt");
     assert_eq!(
         host.dispatch(
             "fanotes:move-entry",
@@ -359,8 +361,11 @@ fn a_dot_slash_move_target_is_not_the_vault_root() {
     // `allowRoot`, so they are the vault itself and are refused.
     let message = "Der Vault selbst ist für diese Aktion nicht erlaubt.";
     assert_eq!(
-        host.dispatch("fanotes:move-entry", &[json!("Mathe/Seite.md"), json!("./")])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Seite.md"), json!("./")]
+        )
+        .unwrap_err(),
         message
     );
     assert_eq!(
@@ -382,7 +387,10 @@ fn a_dot_slash_move_target_is_not_the_vault_root() {
     assert!(vault.join("Mathe/Seite.md").is_file());
     assert!(!vault.join("Seite.md").exists());
     let moved = host
-        .dispatch("fanotes:move-entry", &[json!("Mathe/Seite.md"), json!("   ")])
+        .dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Seite.md"), json!("   ")],
+        )
         .unwrap();
     assert_eq!(moved, "Seite.md");
     assert!(vault.join("Seite.md").is_file());
@@ -462,8 +470,11 @@ fn an_unwritable_folder_reports_the_desktop_rename_error() {
     let _restore = Restore(folder.clone());
     let destination = folder.join("Andere.md");
     assert_eq!(
-        host.dispatch("fanotes:rename-entry", &[json!("Mathe/Seite.md"), json!("Andere")])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:rename-entry",
+            &[json!("Mathe/Seite.md"), json!("Andere")]
+        )
+        .unwrap_err(),
         format!(
             "EACCES: permission denied, rename '{}' -> '{}'",
             note.display(),
@@ -494,8 +505,11 @@ fn an_unwritable_destination_reports_the_desktop_move_error() {
     }
     let _restore = Restore(destination_dir);
     assert_eq!(
-        host.dispatch("fanotes:move-entry", &[json!("Mathe/Seite.md"), json!("Physik")])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Mathe/Seite.md"), json!("Physik")]
+        )
+        .unwrap_err(),
         format!(
             "EACCES: permission denied, rename '{}' -> '{}'",
             note.display(),

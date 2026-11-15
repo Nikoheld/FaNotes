@@ -37,9 +37,9 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{SHCreateMemStream, ShellExecuteW};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW,
-    RegisterClassW, ShowWindow, TranslateMessage, CW_USEDEFAULT, MSG, PM_REMOVE,
-    SW_SHOWNOACTIVATE, SW_SHOWNORMAL, WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, PeekMessageW, RegisterClassW,
+    ShowWindow, TranslateMessage, CW_USEDEFAULT, MSG, PM_REMOVE, SW_SHOWNOACTIVATE, SW_SHOWNORMAL,
+    WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
 };
 
 pub(crate) const PDF_NOT_READY: &str = "Das Fenster ist nicht bereit für den PDF-Export.";
@@ -165,8 +165,14 @@ pub(crate) fn start_capture(core: &ICoreWebView2, done: Done<Vec<u8>>) -> Result
         );
         Ok(())
     }));
-    unsafe { core.CapturePreview(COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, &stream, &handler) }
-        .map_err(|_| CAPTURE_INVALID.to_owned())
+    unsafe {
+        core.CapturePreview(
+            COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+            &stream,
+            &handler,
+        )
+    }
+    .map_err(|_| CAPTURE_INVALID.to_owned())
 }
 
 fn read_stream(stream: &IStream) -> Result<Vec<u8>, String> {

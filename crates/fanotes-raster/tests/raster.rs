@@ -438,9 +438,18 @@ fn a_turn_does_not_hook_along_the_previous_heading() {
         INK,
     );
     let pixmap = rasterize(vec![turn], 400, 400, 400.0, 1.0).unwrap();
-    assert!(alpha(&pixmap, 200, 200) >= 24, "the corner the pen reached stays covered");
-    assert!(alpha(&pixmap, 120, 200) >= 24, "the incoming leg stays covered");
-    assert!(alpha(&pixmap, 200, 280) >= 24, "the outgoing leg stays covered");
+    assert!(
+        alpha(&pixmap, 200, 200) >= 24,
+        "the corner the pen reached stays covered"
+    );
+    assert!(
+        alpha(&pixmap, 120, 200) >= 24,
+        "the incoming leg stays covered"
+    );
+    assert!(
+        alpha(&pixmap, 200, 280) >= 24,
+        "the outgoing leg stays covered"
+    );
     assert!(
         alpha(&pixmap, 216, 220) < 24,
         "the open tip must not flash onward in the previous direction"
@@ -455,7 +464,10 @@ fn a_turn_does_not_hook_along_the_previous_heading() {
         INK,
     );
     let pixmap = rasterize(vec![reverse], 400, 400, 400.0, 1.0).unwrap();
-    assert!(alpha(&pixmap, 220, 180) >= 24, "a reversal still covers the turn");
+    assert!(
+        alpha(&pixmap, 220, 180) >= 24,
+        "a reversal still covers the turn"
+    );
     assert!(
         alpha(&pixmap, 248, 180) < 24,
         "a reversal must not loop past the tip"

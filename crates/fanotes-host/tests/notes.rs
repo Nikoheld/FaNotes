@@ -96,7 +96,10 @@ fn an_oversized_companion_fails_the_note_save() {
         "Die Datei ist zu groß."
     );
     assert_eq!(std::fs::read(&note).unwrap(), b"Neu\n");
-    assert_eq!(std::fs::metadata(&famd).unwrap().len(), 40 * 1024 * 1024 + 1);
+    assert_eq!(
+        std::fs::metadata(&famd).unwrap().len(),
+        40 * 1024 * 1024 + 1
+    );
 }
 
 #[cfg(unix)]
@@ -141,10 +144,7 @@ fn an_unlistable_companion_uses_the_desktop_lstat_error() {
         }
     }
     let _restore_folder = Restore(folder.clone(), 0o700);
-    let lstat_error = format!(
-        "EACCES: permission denied, lstat '{}'",
-        canonical.display()
-    );
+    let lstat_error = format!("EACCES: permission denied, lstat '{}'", canonical.display());
     for channel in ["fanotes:read-note-paper-style", "fanotes:read-famd-ink"] {
         assert_eq!(
             host.dispatch(channel, &[json!("Mathe/Seite.md")])
@@ -160,10 +160,7 @@ fn an_unlistable_companion_uses_the_desktop_lstat_error() {
     drop(file);
     std::fs::set_permissions(&famd, std::fs::Permissions::from_mode(0o000)).unwrap();
     let _restore_file = Restore(famd.clone(), 0o600);
-    let open_error = format!(
-        "EACCES: permission denied, open '{}'",
-        canonical.display()
-    );
+    let open_error = format!("EACCES: permission denied, open '{}'", canonical.display());
     for channel in ["fanotes:read-note-paper-style", "fanotes:read-famd-ink"] {
         assert_eq!(
             host.dispatch(channel, &[json!("Mathe/Seite.md")])
@@ -201,10 +198,7 @@ fn an_unreadable_companion_does_not_look_missing() {
         }
     }
     let _restore = Restore(famd.clone());
-    let expected = format!(
-        "EACCES: permission denied, open '{}'",
-        canonical.display()
-    );
+    let expected = format!("EACCES: permission denied, open '{}'", canonical.display());
     assert_eq!(
         host.dispatch("fanotes:read-note-paper-style", &[json!("Mathe/Seite.md")])
             .unwrap_err(),
@@ -382,9 +376,7 @@ fn a_file_in_the_history_path_reports_the_desktop_open_error() {
     let (mut host, _) = host();
     let vault = host.vault.clone().unwrap();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
-    let index = vault.join(
-        ".fanotes/history/5798959f2b2256a0bff452f5e895b16e3a8401da/index.json",
-    );
+    let index = vault.join(".fanotes/history/5798959f2b2256a0bff452f5e895b16e3a8401da/index.json");
     let expected = format!("ENOTDIR: not a directory, open '{}'", index.display());
     std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
     std::fs::write(vault.join(".fanotes"), b"datei").unwrap();
@@ -410,9 +402,7 @@ fn a_file_named_history_reports_the_desktop_open_error() {
     let vault = host.vault.clone().unwrap();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     std::fs::write(vault.join(".fanotes/history"), b"datei").unwrap();
-    let index = vault.join(
-        ".fanotes/history/5798959f2b2256a0bff452f5e895b16e3a8401da/index.json",
-    );
+    let index = vault.join(".fanotes/history/5798959f2b2256a0bff452f5e895b16e3a8401da/index.json");
     assert_eq!(
         host.dispatch("fanotes:list-note-history", &[json!("Mathe/Seite.md")])
             .unwrap_err(),
@@ -549,20 +539,21 @@ fn a_read_checks_the_markdown_extension_before_the_path_shape() {
         "Nur relative Vault-Pfade sind erlaubt."
     );
     assert_eq!(
-        host.dispatch("fanotes:read-file", &[json!("Seite.md/")]).unwrap(),
+        host.dispatch("fanotes:read-file", &[json!("Seite.md/")])
+            .unwrap(),
         json!("Hallo")
     );
     assert_eq!(
-        host.dispatch("fanotes:write-file", &[json!("../secret.txt"), json!("Text")])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:write-file",
+            &[json!("../secret.txt"), json!("Text")]
+        )
+        .unwrap_err(),
         "Pfad-Traversal ist nicht erlaubt."
     );
     assert_eq!(
-        host.dispatch(
-            "fanotes:list-note-history",
-            &[json!("../secret.txt")],
-        )
-        .unwrap_err(),
+        host.dispatch("fanotes:list-note-history", &[json!("../secret.txt")],)
+            .unwrap_err(),
         "Pfad-Traversal ist nicht erlaubt."
     );
 }
@@ -1098,7 +1089,9 @@ fn a_directory_named_like_a_note_cannot_be_read() {
 #[test]
 fn a_missing_markdown_note_is_not_created_by_writing() {
     let (mut host, vault) = host();
-    let missing = std::fs::canonicalize(vault.join("Mathe")).unwrap().join("Neu.md");
+    let missing = std::fs::canonicalize(vault.join("Mathe"))
+        .unwrap()
+        .join("Neu.md");
     let missing_error = format!(
         "ENOENT: no such file or directory, lstat '{}'",
         missing.display()
@@ -1776,10 +1769,7 @@ fn an_unlistable_recognition_model_uses_the_desktop_lstat_error() {
     assert_eq!(
         host.dispatch("fanotes:read-recognition-model", &[])
             .unwrap_err(),
-        format!(
-            "EACCES: permission denied, lstat '{}'",
-            canonical.display()
-        )
+        format!("EACCES: permission denied, lstat '{}'", canonical.display())
     );
     std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), b"{\"version\":1}\n");
@@ -2191,7 +2181,9 @@ fn an_unwritable_note_folder_uses_a_twenty_hex_temporary_name() {
     let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
     assert_eq!(suffix.len(), 20, "{error}");
     assert!(
-        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        suffix
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()),
         "{error}"
     );
     assert!(error.ends_with(".tmp'"), "{error}");

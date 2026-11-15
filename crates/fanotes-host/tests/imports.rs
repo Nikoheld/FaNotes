@@ -47,7 +47,10 @@ fn an_unreadable_folder_does_not_receive_the_next_pdf_name() {
         .unwrap_err();
     assert_eq!(
         error,
-        format!("EACCES: permission denied, scandir '{}'", canonical.display())
+        format!(
+            "EACCES: permission denied, scandir '{}'",
+            canonical.display()
+        )
     );
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(
@@ -97,9 +100,7 @@ fn a_worksheet_byte_list_follows_buffer_from() {
     let id = document["id"].as_str().unwrap();
     assert_eq!(
         std::fs::read(vault.join(format!(".fanotes/worksheets/{id}.png"))).unwrap(),
-        vec![
-            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 0, 255, 10, 1, 0, 80, 0, 0, 1,
-        ]
+        vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 0, 255, 10, 1, 0, 80, 0, 0, 1,]
     );
     assert!(host
         .dispatch(
@@ -179,10 +180,7 @@ fn a_pdf_import_checks_the_file_before_the_folder() {
     assert_eq!(
         host.dispatch(
             "fanotes:import-pdf-note",
-            &[
-                json!("Fehlt"),
-                json!({ "name": "Skript.pdf", "bytes": [] }),
-            ],
+            &[json!("Fehlt"), json!({ "name": "Skript.pdf", "bytes": [] }),],
         )
         .unwrap_err(),
         "Die ausgewählte PDF-Datei ist leer."
@@ -234,10 +232,7 @@ fn a_pdf_import_checks_the_file_before_the_folder() {
     assert_eq!(
         host.dispatch(
             "fanotes:import-subject-book",
-            &[
-                json!("Fehlt"),
-                json!({ "name": "Skript.pdf", "bytes": [] }),
-            ],
+            &[json!("Fehlt"), json!({ "name": "Skript.pdf", "bytes": [] }),],
         )
         .unwrap_err(),
         "Die ausgewählte PDF-Datei ist leer."
@@ -628,7 +623,9 @@ fn an_unwritable_pdf_folder_reports_the_desktop_open_error() {
     let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
     assert_eq!(suffix.len(), 20, "{error}");
     assert!(
-        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        suffix
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()),
         "{error}"
     );
     assert!(error.ends_with(".tmp'"), "{error}");

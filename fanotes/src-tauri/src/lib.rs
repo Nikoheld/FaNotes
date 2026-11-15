@@ -144,11 +144,11 @@ compile_error!("The FaNotes Tauri shell supports Linux (WebKitGTK) and Windows (
 // The window image and the PDF export have one API and one file per webview.
 #[cfg(target_os = "linux")]
 mod capture;
-#[cfg(target_os = "linux")]
-mod export;
 #[cfg(windows)]
 #[path = "capture_webview2.rs"]
 mod capture;
+#[cfg(target_os = "linux")]
+mod export;
 #[cfg(windows)]
 #[path = "export_webview2.rs"]
 mod export;
@@ -686,10 +686,8 @@ mod tests {
 
     #[test]
     fn an_english_setting_selects_the_english_close_warning() {
-        let dir = std::env::temp_dir().join(format!(
-            "fanotes-close-warning-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("fanotes-close-warning-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut host = fanotes_host::Host::open(dir.join("app"));
         host.settings

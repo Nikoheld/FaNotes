@@ -81,10 +81,7 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
         .as_str()
         .unwrap()
         .starts_with("Dateiname"));
-    assert!(!ink_hits[0]["excerpt"]
-        .as_str()
-        .unwrap()
-        .contains("0.42"));
+    assert!(!ink_hits[0]["excerpt"].as_str().unwrap().contains("0.42"));
 
     std::fs::write(
         host.vault.as_ref().unwrap().join("Bio/Blatt.famd"),
@@ -359,10 +356,7 @@ fn search_keeps_a_case_pair_the_desktop_does_not_fold() {
     )
     .unwrap();
     let missed = host.dispatch("fanotes:search", &[json!(lower)]).unwrap();
-    assert!(
-        missed.as_array().unwrap().is_empty(),
-        "{missed}"
-    );
+    assert!(missed.as_array().unwrap().is_empty(), "{missed}");
     let found = host.dispatch("fanotes:search", &[json!(upper)]).unwrap();
     assert_eq!(found[0]["relativePath"], "Bio/Zeichen.md");
     let nearby = host.dispatch("fanotes:search", &[json!("nach")]).unwrap();

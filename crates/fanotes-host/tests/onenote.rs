@@ -174,8 +174,11 @@ fn a_missing_onenote_source_uses_the_desktop_lstat_error() {
     host.set_vault(vault).unwrap();
     let missing = dir.join("fehlt.one");
     assert_eq!(
-        host.dispatch("fanotes:import-onenote", &[json!(missing.display().to_string())])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:import-onenote",
+            &[json!(missing.display().to_string())]
+        )
+        .unwrap_err(),
         format!(
             "ENOENT: no such file or directory, lstat '{}'",
             missing.display()
@@ -184,8 +187,11 @@ fn a_missing_onenote_source_uses_the_desktop_lstat_error() {
     let empty = dir.join("leer.one");
     fs::write(&empty, b"").unwrap();
     assert_eq!(
-        host.dispatch("fanotes:import-onenote", &[json!(empty.display().to_string())])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:import-onenote",
+            &[json!(empty.display().to_string())]
+        )
+        .unwrap_err(),
         "Die OneNote-Quelldatei ist leer, unsicher oder größer als 4 GB."
     );
     let locked = dir.join("locked");
@@ -201,12 +207,12 @@ fn a_missing_onenote_source_uses_the_desktop_lstat_error() {
     }
     let _restore = Restore(locked);
     assert_eq!(
-        host.dispatch("fanotes:import-onenote", &[json!(source.display().to_string())])
-            .unwrap_err(),
-        format!(
-            "EACCES: permission denied, lstat '{}'",
-            source.display()
+        host.dispatch(
+            "fanotes:import-onenote",
+            &[json!(source.display().to_string())]
         )
+        .unwrap_err(),
+        format!("EACCES: permission denied, lstat '{}'", source.display())
     );
 }
 
@@ -297,10 +303,7 @@ fn an_unwritable_onenote_worksheet_folder_reports_the_desktop_open_error() {
             &[json!(fixture.to_string_lossy())],
         )
         .unwrap_err();
-    let prefix = format!(
-        "EACCES: permission denied, open '{}/",
-        worksheets.display()
-    );
+    let prefix = format!("EACCES: permission denied, open '{}/", worksheets.display());
     assert!(error.starts_with(&prefix), "{error}");
     let marker = format!(".html.tmp-{}-", std::process::id());
     assert!(error.contains(&marker), "{error}");

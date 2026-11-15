@@ -221,10 +221,7 @@ fn read_dialog_pdf(path: &Path, name: &str, not_pdf: &str) -> Result<Vec<u8>, St
 }
 
 fn pdf_payload_is_empty(payload: &Value) -> bool {
-    match payload
-        .get("bytesBase64")
-        .or_else(|| payload.get("bytes"))
-    {
+    match payload.get("bytesBase64").or_else(|| payload.get("bytes")) {
         Some(Value::Array(items)) => items.is_empty(),
         Some(Value::String(text)) => text.is_empty(),
         _ => false,
@@ -363,7 +360,10 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error,
-            format!("EACCES: permission denied, scandir '{}'", canonical.display())
+            format!(
+                "EACCES: permission denied, scandir '{}'",
+                canonical.display()
+            )
         );
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(
@@ -503,10 +503,8 @@ mod tests {
             struct Restore(std::path::PathBuf);
             impl Drop for Restore {
                 fn drop(&mut self) {
-                    let _ = std::fs::set_permissions(
-                        &self.0,
-                        std::fs::Permissions::from_mode(0o600),
-                    );
+                    let _ =
+                        std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
                 }
             }
             let _restore = Restore(locked.clone());
@@ -595,10 +593,8 @@ mod tests {
             struct Restore(std::path::PathBuf);
             impl Drop for Restore {
                 fn drop(&mut self) {
-                    let _ = std::fs::set_permissions(
-                        &self.0,
-                        std::fs::Permissions::from_mode(0o700),
-                    );
+                    let _ =
+                        std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
                 }
             }
             let _restore = Restore(locked.clone());

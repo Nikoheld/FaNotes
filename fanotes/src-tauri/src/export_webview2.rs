@@ -32,7 +32,8 @@ pub fn print_window(window: &tauri::WebviewWindow, destination: &Path) -> Result
         Duration::from_secs(25),
         PDF_FAILED,
         move |controller, environment, done| {
-            let core = unsafe { controller.CoreWebView2() }.map_err(|_| PDF_NOT_READY.to_owned())?;
+            let core =
+                unsafe { controller.CoreWebView2() }.map_err(|_| PDF_NOT_READY.to_owned())?;
             webview2::start_print(&core, environment, &destination, done)
         },
     );
@@ -46,7 +47,8 @@ fn run_script(window: &tauri::WebviewWindow, script: &'static str) -> Result<(),
         Duration::from_secs(5),
         PDF_NOT_READY,
         move |controller, _, done| {
-            let core = unsafe { controller.CoreWebView2() }.map_err(|_| PDF_NOT_READY.to_owned())?;
+            let core =
+                unsafe { controller.CoreWebView2() }.map_err(|_| PDF_NOT_READY.to_owned())?;
             webview2::start_script(
                 &core,
                 script,
@@ -85,10 +87,8 @@ mod tests {
             run("document.documentElement.classList.contains('is-printing')"),
             "true"
         );
-        let path = std::env::temp_dir().join(format!(
-            "fanotes-export-class-{}.pdf",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("fanotes-export-class-{}.pdf", std::process::id()));
         let _ = std::fs::remove_file(&path);
         view.finish(
             std::time::Duration::from_secs(20),

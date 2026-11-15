@@ -273,10 +273,7 @@ fn an_unreadable_preview_uses_the_desktop_open_error() {
         }
     }
     let _restore = Restore(file);
-    let expected = format!(
-        "EACCES: permission denied, open '{}'",
-        canonical.display()
-    );
+    let expected = format!("EACCES: permission denied, open '{}'", canonical.display());
     assert_eq!(
         host.dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf")])
             .unwrap_err(),
@@ -307,10 +304,7 @@ fn an_unreadable_oversized_preview_uses_the_open_error() {
         }
     }
     let _restore = Restore(file_path.clone());
-    let denied = format!(
-        "EACCES: permission denied, open '{}'",
-        canonical.display()
-    );
+    let denied = format!("EACCES: permission denied, open '{}'", canonical.display());
     assert_eq!(
         host.dispatch("fanotes:read-asset-bytes", &[json!("seite.pdf")])
             .unwrap_err(),
@@ -357,7 +351,9 @@ fn an_empty_asset_preview_returns_an_empty_payload() {
             .unwrap(),
         json!("data:application/pdf;base64,")
     );
-    let missing = fs::canonicalize(dir.0.join("vault")).unwrap().join("fehlt.pdf");
+    let missing = fs::canonicalize(dir.0.join("vault"))
+        .unwrap()
+        .join("fehlt.pdf");
     assert_eq!(
         host.dispatch("fanotes:read-asset-bytes", &[json!("fehlt.pdf")])
             .unwrap_err(),
