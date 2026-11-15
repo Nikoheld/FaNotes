@@ -65,6 +65,8 @@ import {
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
+/** One Schulnetz page. Larger than a semester list, small enough that a runaway reply cannot fill memory. */
+export const SCHOOL_BODY_MAX = 8 * 1024 * 1024
 const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json', 'monitor.json', 'pushed-notices.json']
 // Pendelstrecken move with the identity (guest → account) like the school files.
 const COMMUTE_FILES = ['commute.json', 'commute-state.json']
@@ -711,6 +713,32 @@ export const createSchulnetzRuntime = (options = {}) => {
     return run()
   }
 
+  const releaseUnread = async (response) => {
+    const reader = response?.body?.getReader?.()
+    if (reader && typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+  }
+  const readSchoolText = async (response) => {
+    const reader = response?.body?.getReader?.()
+    if (!reader) {
+      const text = typeof response.text === 'function' ? await response.text() : ''
+      if (text.length > SCHOOL_BODY_MAX) throw new Error('page too large')
+      return text
+    }
+    const decoder = new TextDecoder('utf-8')
+    let size = 0
+    let text = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) return text + decoder.decode()
+      const bytes = value?.byteLength || 0
+      size += bytes
+      if (size > SCHOOL_BODY_MAX) {
+        if (typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+        throw new Error('page too large')
+      }
+      if (bytes) text += decoder.decode(value, { stream: true })
+    }
+  }
   const schoolFetch = async (url, method, headers, body) => {
     if (!schulnetzCallAllowed(method, url, body || '')) fail(400, 'Diese Schulnetz-Anfrage ist nicht erlaubt.')
     const verb = String(method || 'GET').toUpperCase()
@@ -721,12 +749,17 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (attempt) await pause(retryBackoffMs(attempt - 1))
       try {
         const response = await fetchImpl(url, { method, headers, body, redirect: 'manual' })
-        const responseBody = await response.text()
-        if ((verb === 'GET' || verb === 'HEAD') && TRANSIENT_HTTP.has(response.status) && attempt < attempts - 1) continue
+        // An error page is not stored. Leave it unread so a retry does not buffer it.
+        if ((verb === 'GET' || verb === 'HEAD') && response.status >= 400) {
+          await releaseUnread(response)
+          if (TRANSIENT_HTTP.has(response.status) && attempt < attempts - 1) continue
+          return { status: response.status, body: '' }
+        }
+        const responseBody = await readSchoolText(response)
         return { status: response.status, body: responseBody }
       } catch (error) {
         lastError = error
-        if (attempt === attempts - 1) throw error
+        if (error?.message === 'page too large' || attempt === attempts - 1) throw error
       }
     }
     throw lastError || tagErrorStage('fetch', new Error('read failed'))
