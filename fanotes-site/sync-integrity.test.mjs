@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { connect as connectTcp } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -264,6 +264,54 @@ test('completing a removed upload records the blob already in the live slot', as
   const missing = await finishUpload(id, unknown, randomBytes(5000), recorded)
   assert.equal(missing.status, 404, missing.body.toString('utf8'))
   assert.deepEqual((await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })).body, next)
+})
+
+test('a complete does not replace a newer live blob the log has not recorded', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const newer = randomBytes(5000)
+  const other = randomBytes(4500)
+  const upload = await startUpload(id, other, revision)
+  assert.equal((await patchUpload(id, upload.uploadId, other, 0)).status, 200)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const archive = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  mkdirSync(archive, { recursive: true })
+  writeFileSync(join(archive, String(revision)), original)
+  writeFileSync(blobPath, newer)
+  const blocked = await finishUpload(id, upload.uploadId, other, revision)
+  assert.equal(blocked.status, 409, blocked.body.toString('utf8'))
+  assert.equal(JSON.parse(blocked.body.toString('utf8')).reason, 'stale')
+  assert.deepEqual(readFileSync(blobPath), newer)
+  assert.deepEqual(readFileSync(join(archive, String(revision))), original)
+  assert.deepEqual((await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })).body, newer)
+  assert.equal((await call('GET', `/api/v1/sync/files/${id}/uploads/${upload.uploadId}`, { token, accountId })).status, 200)
+})
+
+test('completing an upload whose body was already renamed records that live blob', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const newer = randomBytes(5200)
+  const upload = await startUpload(id, newer, revision)
+  assert.equal((await patchUpload(id, upload.uploadId, newer, 0)).status, 200)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const archive = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  const partialBody = join(dataDirectory, 'accounts', accountId, 'partials', upload.uploadId, 'body.bin')
+  mkdirSync(archive, { recursive: true })
+  writeFileSync(join(archive, String(revision)), original)
+  renameSync(partialBody, blobPath)
+  const finished = await finishUpload(id, upload.uploadId, newer, revision)
+  assert.equal(finished.status, 200, finished.body.toString('utf8'))
+  assert.ok(JSON.parse(finished.body.toString('utf8')).revision > revision)
+  assert.deepEqual(readFileSync(blobPath), newer)
+  assert.deepEqual(readFileSync(join(archive, String(revision))), original)
+  assert.equal(existsSync(join(dataDirectory, 'accounts', accountId, 'partials', upload.uploadId)), false)
+  assert.deepEqual((await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })).body, newer)
 })
 
 test('the integrity report names damaged and orphaned blobs and deletes nothing', async () => {
