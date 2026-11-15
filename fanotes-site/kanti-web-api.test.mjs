@@ -23,6 +23,7 @@ const {
   normalizePairingCode,
   parseCookies,
   PAIR_TTL_MS,
+  SESSION_COOKIE,
   SESSION_IDLE_MS,
 } = await import('./kanti-web-api.mjs')
 const { mergeRevealLedger, newGradeTargetIds, tamSchoolRoot, unrevealedGradeIds, webGradeView, gradeTargetId } = await import('./schulnetz-logic.mjs')
@@ -732,6 +733,85 @@ test('a request is logged as JSON with a request id and without cookies or the q
     assert.equal(lines[0].includes('abcdef'), false)
     assert.equal(changes.headers.get('x-request-id'), denied.requestId)
   } finally {
+    await env.close()
+  }
+})
+
+test('an unreadable session file is kept and the browser cookie stays', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'kanti-web-read-'))
+  const store = createKantiWebStore({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const sessions = join(store.root, 'sessions')
+  const pairings = join(store.root, 'pairings')
+  let sessionFile
+  let pairingFile
+  try {
+    const created = await store.createSession('Browser', [])
+    sessionFile = join(sessions, `${created.hash}.json`)
+    const before = await readFile(sessionFile)
+    const pairing = await store.createPairing('Browser')
+    assert.equal(typeof pairing.code, 'string')
+    const pairingNames = await readdir(pairings)
+    assert.equal(pairingNames.length, 1)
+    pairingFile = join(pairings, pairingNames[0])
+    const pairingBefore = await readFile(pairingFile)
+    const stale = await store.createSession('Old', [])
+    const staleFile = join(sessions, `${stale.hash}.json`)
+    const staleJson = JSON.parse(await readFile(staleFile, 'utf8'))
+    staleJson.expiresAt = '2020-01-01T00:00:00.000Z'
+    await writeFile(staleFile, JSON.stringify(staleJson))
+
+    await chmod(sessionFile, 0o000)
+    await chmod(pairingFile, 0o000)
+    await assert.rejects(() => store.sessionFromToken(created.token), { code: 'EACCES' })
+    await assert.rejects(() => store.updateSession(created.hash, (session) => ({ ...session, browser: 'Other' })), { code: 'EACCES' })
+    const reread = createKantiWebStore({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+    assert.deepEqual(await reread.sessionsFor('none'), [])
+    await store.sweep(true)
+    assert.equal((await readdir(sessions)).includes(`${stale.hash}.json`), false)
+    await chmod(sessionFile, 0o600)
+    await chmod(pairingFile, 0o600)
+    assert.deepEqual(await readFile(sessionFile), before)
+    assert.deepEqual(await readFile(pairingFile), pairingBefore)
+    assert.equal((await store.sessionFromToken(created.token)).session.browser, 'Browser')
+
+    await writeFile(staleFile, '{')
+    await store.sweep(true)
+    assert.equal((await readdir(sessions)).includes(`${stale.hash}.json`), false)
+  } finally {
+    if (sessionFile) await chmod(sessionFile, 0o600).catch(() => undefined)
+    if (pairingFile) await chmod(pairingFile, 0o600).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  let liveFile
+  try {
+    const app = await appIdentity(env.base)
+    const created = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: app.accountId,
+      provider: 'schulnetz',
+      label: 'Schule',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    liveFile = join(env.store.root, 'sessions', `${created.hash}.json`)
+    const before = await readFile(liveFile)
+    const client = browser(env.base)
+    client.jar[SESSION_COOKIE] = created.token
+    await chmod(liveFile, 0o000)
+    const during = await client.call('GET', '/session')
+    assert.equal(during.status, 500)
+    assert.equal(during.body.error, 'Kanti+ ist vorübergehend nicht erreichbar.')
+    assert.equal(client.jar[SESSION_COOKIE], created.token)
+    await env.store.sweep(true)
+    await chmod(liveFile, 0o600)
+    assert.deepEqual(await readFile(liveFile), before)
+    const after = await client.session()
+    assert.equal(after.status, 200)
+    assert.equal(after.body.signedIn, true)
+    assert.equal(after.body.browser, 'Browser')
+  } finally {
+    if (liveFile) await chmod(liveFile, 0o600).catch(() => undefined)
     await env.close()
   }
 })

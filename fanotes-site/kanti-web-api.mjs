@@ -179,7 +179,13 @@ export const createKantiWebStore = (options = {}) => {
   }
 
   const readJson = async (file) => {
-    try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch { return null }
+    try {
+      return JSON.parse(await fs.readFile(file, 'utf8'))
+    } catch (error) {
+      // A missing or broken file is absent. Any other read error must not look the same, or a live session is deleted.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
   }
   const writeJson = async (file, value, flag) => {
     await fs.mkdir(resolve(file, '..'), { recursive: true, mode: 0o700 })
@@ -220,7 +226,13 @@ export const createKantiWebStore = (options = {}) => {
     const built = new Map()
     const names = await fs.readdir(sessionsDir).catch(() => [])
     for (const name of names.filter((item) => /^[a-f0-9]{64}\.json$/u.test(item)).slice(0, MAX_SESSIONS)) {
-      const session = await readJson(resolve(sessionsDir, name))
+      let session
+      try {
+        session = await readJson(resolve(sessionsDir, name))
+      } catch {
+        // Leave an unreadable session out of this pass. The file stays, and a later start can read it.
+        continue
+      }
       if (alive(session)) built.set(name.slice(0, 64), indexEntry(session))
     }
     index ??= built
@@ -482,13 +494,23 @@ export const createKantiWebStore = (options = {}) => {
     lastSweep = nowMs()
     for (const name of await fs.readdir(pairingsDir).catch(() => [])) {
       if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue
-      const record = await readJson(resolve(pairingsDir, name))
+      let record
+      try {
+        record = await readJson(resolve(pairingsDir, name))
+      } catch {
+        continue
+      }
       if (!record || Date.parse(record.expiresAt) <= nowMs()) await fs.rm(resolve(pairingsDir, name), { force: true })
     }
     for (const name of await fs.readdir(sessionsDir).catch(() => [])) {
       if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue
       const hash = name.slice(0, 64)
-      const session = await readJson(resolve(sessionsDir, name))
+      let session
+      try {
+        session = await readJson(resolve(sessionsDir, name))
+      } catch {
+        continue
+      }
       if (!alive(session)) await locked(`session:${hash}`, () => deleteSession(hash))
     }
   }
@@ -895,7 +917,13 @@ export const createKantiWebApi = (options = {}) => {
   }
 
   const optionalSession = async (request) => {
-    try { return await authorize(request) } catch { return null }
+    try {
+      return await authorize(request)
+    } catch (error) {
+      // A refused sign-in is "no session". A read error must keep the cookie so the browser can try again.
+      if (error?.status) return null
+      throw error
+    }
   }
 
   const connectionOf = (session, id) => {
