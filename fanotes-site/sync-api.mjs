@@ -523,10 +523,23 @@ const touchSession = async (account, tokenHash) => {
   const session = account.sessions[tokenHash]
   const now = Date.now()
   if (!session || now - Date.parse(session.lastSeenAt) < SESSION_TOUCH_MS) return
-  session.lastSeenAt = new Date(now).toISOString()
-  session.expiresAt = new Date(now + SESSION_TTL_MS).toISOString()
-  account.devices[session.deviceId].lastSeenAt = session.lastSeenAt
-  await saveAccount(account)
+  // The object from authenticate can be older than a password change or a
+  // logout that already saved. Writing that object back would drop the new
+  // vault wrap or bring a signed-out session back. Reload under the lock and
+  // update only the current record.
+  await withAccountLock(account.id, async () => {
+    const fresh = await loadAccountById(account.id)
+    const current = fresh?.sessions?.[tokenHash]
+    if (!current || Date.parse(current.expiresAt) <= now) return
+    const device = fresh.devices?.[current.deviceId]
+    if (!device) return
+    if (now - Date.parse(current.lastSeenAt) < SESSION_TOUCH_MS) return
+    const seen = new Date(now).toISOString()
+    current.lastSeenAt = seen
+    current.expiresAt = new Date(now + SESSION_TTL_MS).toISOString()
+    device.lastSeenAt = seen
+    await saveAccount(fresh)
+  })
 }
 
 // ── Responses ───────────────────────────────────────────────────────────────
