@@ -1855,7 +1855,12 @@ export const createSchulnetzRuntime = (options = {}) => {
   /** What the browser API may read and change for a connection a session holds. */
   const webAccess = {
     ownerExists: async (accountId) => {
-      try { return await ownerStillExists(accountId) } catch { return false }
+      try {
+        return await ownerStillExists(accountId)
+      } catch {
+        // A read error is not proof the account is gone. Saying it is gone makes the browser delete the session.
+        return true
+      }
     },
     readStatus: async (accountId) => publicStatus(await readLink(accountId)),
     readSnapshot: async (accountId) => readJson(resolve(accountDir(accountId), 'snapshot.json')),
