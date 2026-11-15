@@ -79,7 +79,7 @@ const tsEngine = async () => {
   })
   const require = createRequire(path.join(appRoot, 'package.json'))
   const { createServer } = await import(require.resolve('vite'))
-  const vite = await createServer({ root: appRoot, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true } })
+  const vite = await createServer({ root: appRoot, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true, hmr: false } })
   const { SyncApi } = await vite.ssrLoadModule('/src/lib/sync/api.ts')
   const { SyncEngine } = await vite.ssrLoadModule('/src/lib/sync/engine.ts')
   const { createSyncHost } = require('./electron/sync.cjs')

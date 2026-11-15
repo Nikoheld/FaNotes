@@ -64,8 +64,8 @@ export const connectWebDriver = async ({ inspectorPort, timeoutMs = 60_000, aliv
   let driverLog = ''
   driver.stderr.on('data', (chunk) => { driverLog = (driverLog + chunk).slice(-4000) })
   const base = `http://127.0.0.1:${port}`
-  const request = async (method, path, body) => {
-    const response = await fetch(`${base}${path}`, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })
+  const request = async (method, path, body, timeoutMs = 180_000) => {
+    const response = await fetch(`${base}${path}`, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeoutMs) })
     const json = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(`webdriver ${method} ${path}: ${json.value?.error} ${json.value?.message ?? ''}`.trim())
     return json.value
@@ -76,7 +76,7 @@ export const connectWebDriver = async ({ inspectorPort, timeoutMs = 60_000, aliv
   while (Date.now() < deadline && !session) {
     if (!alive()) throw new Error('the Tauri app exited before WebDriver attached')
     try {
-      const value = await request('POST', '/session', { capabilities: { alwaysMatch: { 'webkitgtk:browserOptions': {} } } })
+      const value = await request('POST', '/session', { capabilities: { alwaysMatch: { 'webkitgtk:browserOptions': {} } } }, 15_000)
       session = value.sessionId
     } catch (error) {
       lastError = error
@@ -87,6 +87,8 @@ export const connectWebDriver = async ({ inspectorPort, timeoutMs = 60_000, aliv
     driver.kill('SIGKILL')
     throw new Error(`WebKitWebDriver did not attach: ${lastError?.message} ${driverLog.slice(-400)}`)
   }
+  // Scrolling a long document runs longer than the 30 s default script timeout.
+  await request('POST', `/session/${session}/timeouts`, { script: 900_000 })
   // Pick the main window (the app may open none other at start, but be explicit).
   try {
     const handles = await request('GET', `/session/${session}/window/handles`)

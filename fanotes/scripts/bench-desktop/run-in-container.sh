@@ -26,7 +26,7 @@ tmp="${TMPDIR:-/srv/agents/fanotes/.site-redesign-tools/tmp}"
 target="${FANOTES_BENCH_TARGET:-/srv/agents/fanotes/.cargo-target/container-benchmarks}"
 mkdir -p "$tmp"
 exec sudo docker run --rm --init -u "$(id -u):$(id -g)" \
-  --cpus="$cpus" --memory="$memory" --shm-size=1g \
+  --cpus="$cpus" --memory="$memory" --shm-size=2g \
   -e HOME=/tmp -e TMPDIR="$tmp" -e DISPLAY=:99 \
   -v "$repo:/work" -v "$target:/target:ro" -v "$tmp:$tmp" "${mounts[@]}" \
   -w /work/fanotes/scripts/bench-desktop \

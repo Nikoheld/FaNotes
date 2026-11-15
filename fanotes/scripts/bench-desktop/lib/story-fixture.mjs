@@ -12,7 +12,7 @@ const CHARS_PER_PAGE = 1_750
 export const buildStory = async ({ writingRoot, pages, seed, at }) => {
   const require = createRequire(path.join(path.dirname(new URL(import.meta.url).pathname), '..', '..', '..', 'package.json'))
   const { createServer } = await import(require.resolve('vite'))
-  const vite = await createServer({ root: writingRoot, configFile: false, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true } })
+  const vite = await createServer({ root: writingRoot, configFile: false, appType: 'custom', logLevel: 'error', optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true, hmr: false } })
   try {
     const defaults = await vite.ssrLoadModule('/src/writing/model/defaults.ts')
     const keys = await vite.ssrLoadModule('/src/writing/model/keys.ts')
