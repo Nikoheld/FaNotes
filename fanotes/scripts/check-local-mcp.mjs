@@ -31,6 +31,9 @@ await vite.close()
 const famd = require('../electron/famd.cjs')
 const { createLocalMcpServer } = require('../electron/local-mcp.cjs')
 const { contextFromConfigFile, createHttpTransport, loadTokenStore, regenerateToken } = require('../electron/local-mcp-transport.cjs')
+const { createVault } = require('../electron/local-mcp-vault.cjs')
+const { createLocalMcpHost } = require('../electron/local-mcp-host.cjs')
+const net = require('node:net')
 
 const put = (relative, content) => {
   const target = join(vault, relative)
@@ -162,7 +165,7 @@ const toolError = (reply) => {
 }
 
 const passed = []
-const check = async (name, run) => { await run(); passed.push(name) }
+const check = async (name, run) => { if (process.env.CHECK_VERBOSE) console.error('>', name); await run(); passed.push(name) }
 
 const client = new StdioClient()
 const call = (name, args = {}) => client.request('tools/call', { name, arguments: args })
@@ -482,10 +485,111 @@ try {
     assert.equal(JSON.parse(reply.json.result.content[0].text).created, true)
     assert.ok(existsSync(join(vault, 'Http/Neu.md')))
   })
+  await check('regression: search and read stay within memory/time budgets', async () => {
+    mkdirSync(join(vault, 'Big'), { recursive: true })
+    const big = `${'x'.repeat(3 * 1024 * 1024)} needlexyz`
+    for (let index = 0; index < 40; index += 1) writeFileSync(join(vault, 'Big', `b${index}.md`), big)
+    const rssBefore = process.memoryUsage().rss
+    const started = Date.now()
+    const found = JSON.parse((await server.handleOne(rpc('tools/call', { name: 'search_notes', arguments: { query: 'needlexyz' } }, 50))).result.content[0].text)
+    assert.equal(found.truncated, true, 'oversized files are flagged')
+    assert.ok(found.skippedLarge >= 40)
+    assert.equal(found.matches.length, 0)
+    assert.ok(Date.now() - started < 8000)
+    assert.ok(process.memoryUsage().rss - rssBefore < 300 * 1024 * 1024, 'search must not balloon memory')
+    rmSync(join(vault, 'Big'), { recursive: true })
+    mkdirSync(join(vault, 'Mid'), { recursive: true })
+    const mid = 'y'.repeat(900 * 1024)
+    for (let index = 0; index < 80; index += 1) writeFileSync(join(vault, 'Mid', `m${index}.md`), mid)
+    const budgeted = JSON.parse((await server.handleOne(rpc('tools/call', { name: 'search_notes', arguments: { query: 'nothinghere' } }, 51))).result.content[0].text)
+    assert.equal(budgeted.truncated, true, 'the byte budget stops the scan')
+    rmSync(join(vault, 'Mid'), { recursive: true })
+    mkdirSync(join(vault, 'Huge'), { recursive: true })
+    for (let index = 0; index < 10; index += 1) writeFileSync(join(vault, 'Huge', `h${index}.md`), `${'z'.repeat(7 * 1024 * 1024)}${index}`)
+    const direct = createVault({ root: vault })
+    for (let index = 0; index < 10; index += 1) await direct.noteContent(`Huge/h${index}.md`)
+    assert.ok(direct.cacheBytes() <= 32 * 1024 * 1024, `cache is bounded (${direct.cacheBytes()})`)
+    rmSync(join(vault, 'Huge'), { recursive: true })
+  })
+  await check('regression: batches are capped and concurrent calls are limited', async () => {
+    const tooBig = await httpPost(port, { body: Array.from({ length: 11 }, (_, index) => rpc('ping', {}, 100 + index)), headers: auth() })
+    assert.equal(tooBig.json.error.code, -32600)
+    const ok = await httpPost(port, { body: Array.from({ length: 10 }, (_, index) => rpc('ping', {}, 200 + index)), headers: auth() })
+    assert.equal(ok.json.length, 10)
+    const replies = await Promise.all(Array.from({ length: 10 }, (_, index) => server.handleOne(rpc('tools/call', { name: 'list_notes', arguments: {} }, 300 + index))))
+    assert.ok(replies.some((reply) => reply.error?.code === -32000), 'excess in-flight calls are refused')
+    assert.ok(replies.some((reply) => reply.result), 'and the rest still run')
+  })
+  await check('regression: Windows-style names cannot reach excluded folders', async () => {
+    for (const path of ['Privat::$I30:$INDEX_ALLOCATION/Tagebuch.md', 'Privat./Tagebuch.md', 'Privat /Tagebuch.md', 'PRIVAT~1/Tagebuch.md', 'CON.md', 'Mathe/nul', 'Mathe/aux.txt.md', 'Mathe/LPT1.md', 'Privat:x/y.md', 'Mathe/Analysis.md:stream']) {
+      const reply = await httpPost(port, { body: rpc('tools/call', { name: 'read_note', arguments: { path } }, 60), headers: auth() })
+      assert.equal(reply.json.result.isError, true, path)
+      assert.ok(!reply.text.includes('Zebrastreifen'), path)
+      const write = await httpPost(port, { body: rpc('tools/call', { name: 'create_note', arguments: { path: path.endsWith('.md') ? path : `${path}.md`, content: 'x' } }, 61), headers: auth() })
+      assert.equal(write.json.result.isError, true, `write ${path}`)
+    }
+  })
+  await check('regression: symlinks into excluded folders, .fanotes or elsewhere are not followed', async () => {
+    mkdirSync(join(vault, 'Pub'), { recursive: true })
+    symlinkSync(join(vault, 'Privat', 'Tagebuch.md'), join(vault, 'Pub', 'l.md'))
+    symlinkSync('../.fanotes/secret.json', join(vault, 'Pub', 'k.md'))
+    symlinkSync('../Privat', join(vault, 'Pub', 'dir'))
+    const before = readFileSync(join(vault, 'Privat', 'Tagebuch.md'), 'utf8')
+    for (const path of ['Pub/l.md', 'Pub/k.md', 'Pub/dir/Tagebuch.md']) {
+      const read = await httpPost(port, { body: rpc('tools/call', { name: 'read_note', arguments: { path } }, 70), headers: auth() })
+      assert.equal(read.json.result.isError, true, path)
+      assert.ok(!read.text.includes('Zebrastreifen') && !read.text.includes('internal-secret-value'), path)
+      const append = await httpPost(port, { body: rpc('tools/call', { name: 'append_to_note', arguments: { path, text: 'pwned' } }, 71), headers: auth() })
+      assert.equal(append.json.result.isError, true, `append ${path}`)
+    }
+    const create = await httpPost(port, { body: rpc('tools/call', { name: 'create_note', arguments: { path: 'Pub/dir/neu.md', content: 'x' } }, 72), headers: auth() })
+    assert.equal(create.json.result.isError, true)
+    assert.equal(readFileSync(join(vault, 'Privat', 'Tagebuch.md'), 'utf8'), before)
+    assert.ok(!existsSync(join(vault, 'Privat', 'neu.md')))
+    const listed = await httpPost(port, { body: rpc('tools/call', { name: 'list_notes', arguments: { folder: 'Pub' } }, 73), headers: auth() })
+    assert.equal(JSON.parse(listed.json.result.content[0].text).notes.length, 0)
+    const search = await httpPost(port, { body: rpc('tools/call', { name: 'search_notes', arguments: { query: 'Zebrastreifen' } }, 74), headers: auth() })
+    assert.equal(JSON.parse(search.json.result.content[0].text).matches.length, 0)
+  })
+  await check('regression: the HTTP host falls back to another port when the stored port is busy', async () => {
+    const hostData = join(base, 'hostData')
+    mkdirSync(hostData, { recursive: true })
+    const stored = loadTokenStore(hostData)
+    const blocker = net.createServer()
+    await new Promise((resolve, reject) => { blocker.once('error', reject); blocker.listen(stored.port, '127.0.0.1', resolve) })
+    const host = createLocalMcpHost({ userData: hostData, getState: () => ({ settings: { ...SETTINGS, mcpWriteAccess: false }, vaultPath: vault }) })
+    try {
+      await host.apply({ mcpEnabled: true, mcpHttpEnabled: true })
+      const info = host.info()
+      assert.equal(info.httpRunning, true, info.httpError)
+      const hostPort = Number(new URL(info.httpUrl).port)
+      assert.notEqual(hostPort, stored.port)
+      const reply = await httpPost(hostPort, { body: rpc('ping'), headers: { Authorization: `Bearer ${info.httpToken}` } })
+      assert.equal(reply.status, 200)
+      assert.equal(loadTokenStore(hostData).port, hostPort, 'the new port is remembered')
+    } finally {
+      await host.stop()
+      await new Promise((resolve) => blocker.close(resolve))
+    }
+  })
+  await check('regression: oversized stdio lines are capped and do not crash the server', async () => {
+    const stdio = new StdioClient()
+    try {
+      const reply = new Promise((resolve) => stdio.waiting.set(null, resolve))
+      stdio.raw(`${'a'.repeat(1_200_000)}\n${JSON.stringify(rpc('ping', {}, 5))}\n`)
+      assert.equal((await reply).error.code, -32600)
+      assert.deepEqual((await stdio.request('ping')).result, {})
+      stdio.raw(`${'b'.repeat(1_200_000)}\n`)
+      assert.deepEqual((await stdio.request('ping')).result, {})
+    } finally {
+      await stdio.close()
+    }
+  })
   await check('http: repeated bad tokens are throttled', async () => {
     let last = 0
     for (let index = 0; index < 25; index += 1) last = (await httpPost(port, { body: rpc('ping'), headers: { Authorization: 'Bearer nope' } })).status
     assert.equal(last, 429)
+    assert.equal((await httpPost(port, { body: rpc('ping'), headers: auth() })).status, 200, 'a valid token is never throttled')
   })
 } finally {
   await transport.close()

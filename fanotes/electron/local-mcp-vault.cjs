@@ -25,7 +25,13 @@ const MAX_FILE_BYTES = 8 * 1024 * 1024
 const MAX_WALK_ENTRIES = 30_000
 const MAX_WALK_DEPTH = 24
 const MAX_SEARCH_FILES = 6000
-const MAX_CACHE_ENTRIES = 600
+const MAX_CACHE_BYTES = 32 * 1024 * 1024
+const MAX_CACHED_FILE_BYTES = 1024 * 1024
+const MAX_SCAN_FILE_BYTES = 1024 * 1024
+const SCAN_BYTE_BUDGET = 64 * 1024 * 1024
+const SCAN_TIME_BUDGET_MS = 8000
+const CASE_INSENSITIVE_FS = process.platform === 'win32' || process.platform === 'darwin'
+const RESERVED_DEVICE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/iu
 const HOMEWORK_PATH = 'Hausaufgaben.md'
 const CALENDAR_PATH = 'Kalender.md'
 const MANAGED_PATHS = new Set([HOMEWORK_PATH.toLowerCase(), CALENDAR_PATH.toLowerCase()])
@@ -437,10 +443,25 @@ const normalizeExcluded = (value) => {
   return out
 }
 
+/** Names that Windows resolves to something else (streams, devices, 8.3 aliases, trailing dot/space). */
+const badSegment = (segment) => (
+  !segment || segment === '.' || segment === '..' || segment.startsWith('.')
+  || segment.includes(':') || /[. ]$/u.test(segment) || RESERVED_DEVICE.test(segment) || /~\d/u.test(segment)
+)
+
 const createVault = ({ root, excluded = [], now = () => new Date() }) => {
   if (typeof root !== 'string' || !path.isAbsolute(root)) throw new McpError('The vault path is not set.', 'unavailable')
   const excludedList = normalizeExcluded(excluded)
   const cache = new Map()
+  let cacheBytes = 0
+  const cacheDrop = (key) => { const hit = cache.get(key); if (hit) { cacheBytes -= hit.size; cache.delete(key) } }
+  const cachePut = (key, entry) => {
+    cacheDrop(key)
+    if (entry.size > MAX_CACHED_FILE_BYTES) return
+    cache.set(key, entry)
+    cacheBytes += entry.size
+    while (cacheBytes > MAX_CACHE_BYTES && cache.size) cacheDrop(cache.keys().next().value)
+  }
   let realRootPromise = null
 
   const realRoot = () => {
@@ -464,7 +485,7 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
     }
     if (/^[a-z]:/iu.test(trimmed)) throw new McpError('That path is not allowed.')
     const segments = trimmed.split('/')
-    if (segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.startsWith('.'))) {
+    if (segments.some(badSegment)) {
       throw new McpError('That path is not allowed.')
     }
     if (isExcluded(trimmed)) throw new McpError('That note was not found.', 'not_found')
@@ -479,7 +500,13 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
     } catch {
       throw new McpError('That note was not found.', 'not_found')
     }
-    if (real !== rootReal && !real.startsWith(rootReal + path.sep)) throw new McpError('That path is not allowed.')
+    // The real path must be the lexical path: any symlink on the way (even one that
+    // stays inside the vault) could lead into an excluded folder or .fanotes.
+    const fold = (value) => (CASE_INSENSITIVE_FS ? value.toLowerCase() : value)
+    const expected = path.join(rootReal, ...rel.split('/'))
+    if (fold(real) !== fold(expected)) throw new McpError('That note was not found.', 'not_found')
+    const back = path.relative(rootReal, real).split(path.sep).join('/')
+    if (!back || back.startsWith('..') || back.split('/').some(badSegment) || isExcluded(back)) throw new McpError('That note was not found.', 'not_found')
     return real
   }
 
@@ -496,8 +523,7 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
       const hit = cache.get(key)
       if (hit && hit.mtimeMs === info.mtimeMs && hit.size === info.size) return { text: hit.text, info }
       const text = (await handle.readFile({ encoding: 'utf8' }))
-      cache.set(key, { mtimeMs: info.mtimeMs, size: info.size, text })
-      if (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value)
+      cachePut(key, { mtimeMs: info.mtimeMs, size: info.size, text })
       return { text, info }
     } finally {
       await handle.close().catch(() => {})
@@ -527,7 +553,7 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
       }
       entries.sort((a, b) => a.name.localeCompare(b.name, 'de'))
       for (const entry of entries) {
-        if (entry.name.startsWith('.') || entry.isSymbolicLink() || entry.name.includes('\\')) continue
+        if (badSegment(entry.name) || entry.isSymbolicLink() || entry.name.includes('\\')) continue
         const rel = relDir ? `${relDir}/${entry.name}` : entry.name
         if (isExcluded(rel)) continue
         const kind = kindOfName(entry.name)
@@ -676,12 +702,29 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
     return (await noteContent(entry.path)).text
   }
 
+  /** Bytes and time one scan over many notes may spend; a scan stops (partial results) when spent. */
+  const scanBudget = () => {
+    const started = Date.now()
+    let bytes = 0
+    return {
+      exhausted: (next = 0) => {
+        bytes += next
+        return bytes > SCAN_BYTE_BUDGET || Date.now() - started > SCAN_TIME_BUDGET_MS
+      },
+    }
+  }
+
   const searchNotes = async ({ query, folder = '', kind = null, limit = 20 } = {}) => {
     const words = String(query ?? '').toLocaleLowerCase('de').split(/\s+/u).filter(Boolean).slice(0, 8)
     if (!words.length) throw new McpError('query must not be empty.')
     const candidates = (await listNotes({ folder, kind, limit: MAX_SEARCH_FILES, sort: 'modified' })).notes
     const hits = []
+    const budget = scanBudget()
+    let truncated = false
+    let skippedLarge = 0
     for (const candidate of candidates) {
+      if (candidate.kind !== 'story' && candidate.bytes > MAX_SCAN_FILE_BYTES) { skippedLarge += 1; continue }
+      if (budget.exhausted(candidate.bytes)) { truncated = true; break }
       let text
       try {
         text = await corpusOf(candidate)
@@ -712,7 +755,7 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
       })
     }
     hits.sort((a, b) => b.score - a.score || String(b.modifiedAt).localeCompare(String(a.modifiedAt)))
-    return { query: String(query), matches: hits.slice(0, limit).map(({ score, ...rest }) => rest), searched: candidates.length }
+    return { query: String(query), matches: hits.slice(0, limit).map(({ score, ...rest }) => rest), searched: candidates.length - skippedLarge, truncated: truncated || skippedLarge > 0, skippedLarge }
   }
 
   // ── tasks / calendar / exams / flashcards ──
@@ -796,8 +839,10 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
       .map((task) => ({ id: task.id, title: task.title, subject: task.subject, dueDate: task.dueDate, dueTime: task.dueTime, done: task.done }))
     const mentioned = []
     if (args.includeNotes !== false) {
+      const budget = scanBudget()
       for (const entry of (await walk()).filter((item) => item.kind === 'markdown' || item.kind === 'handwriting')) {
-        if (MANAGED_PATHS.has(entry.path.toLowerCase())) continue
+        if (MANAGED_PATHS.has(entry.path.toLowerCase()) || entry.size > MAX_SCAN_FILE_BYTES) continue
+        if (budget.exhausted(entry.size)) break
         let text
         try { text = (await noteContent(entry.path)).text } catch { continue }
         for (const line of text.split('\n')) {
@@ -815,8 +860,10 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
   const flashcardDecks = async () => {
     const decks = []
     const today = dateKey(now())
-    for (const entry of (await walk()).filter((item) => item.kind === 'markdown' && item.size <= MAX_FILE_BYTES)) {
+    const budget = scanBudget()
+    for (const entry of (await walk()).filter((item) => item.kind === 'markdown' && item.size <= MAX_SCAN_FILE_BYTES)) {
       if (MANAGED_PATHS.has(entry.path.toLowerCase())) continue
+      if (budget.exhausted(entry.size)) break
       let text
       try { text = (await readTextFile(entry.path)).text } catch { continue }
       if (!text.includes('fanotes-cards-v1') && !/^##\s+Lernfragen\s*$/imu.test(text)) continue
@@ -1000,7 +1047,7 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
       await fsp.rm(temp, { force: true }).catch(() => {})
       throw error
     }
-    cache.delete(rel)
+    cacheDrop(rel)
   }
 
   const writablePath = (value, { allowManaged = false } = {}) => {
@@ -1022,11 +1069,11 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
       cursor = path.join(cursor, segment)
       const info = await fsp.lstat(cursor).catch(() => null)
       if (!info) await fsp.mkdir(cursor, { mode: 0o755 }).catch((error) => { if (error?.code !== 'EEXIST') throw error })
-      const real = await fsp.realpath(cursor)
-      if (!(await fsp.lstat(real)).isDirectory() || (real !== rootReal && !real.startsWith(rootReal + path.sep))) throw new McpError('That path is not allowed.')
+      const stat = await fsp.lstat(cursor)
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new McpError('That path is not allowed.')
     }
     await publishNew(path.join(rootReal, ...segments), content.endsWith('\n') ? content : `${content}\n`)
-    cache.delete(rel)
+    cacheDrop(rel)
     return { path: rel, created: true }
   }
 
@@ -1058,7 +1105,7 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
       try {
         if (file) await replaceIfUnchanged(HOMEWORK_PATH, file.info, data)
         else await publishNew(path.join(await realRoot(), HOMEWORK_PATH), data)
-        cache.delete(HOMEWORK_PATH)
+        cacheDrop(HOMEWORK_PATH)
         return result
       } catch (error) {
         const retry = error instanceof McpError && (error.code === 'conflict' || error.code === 'exists')
@@ -1107,6 +1154,7 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
 
   return {
     cleanPath,
+    cacheBytes: () => cacheBytes,
     isExcluded,
     noteContent,
     listNotes,

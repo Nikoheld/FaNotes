@@ -16,6 +16,8 @@ const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-0
 const SERVER_INFO = { name: 'fanotes', title: 'FaNotes', version: '1.0.0' }
 const MAX_RESULT_CHARS = 120_000
 const TOOL_TIMEOUT_MS = 30_000
+const MAX_BATCH = 10
+const MAX_IN_FLIGHT = 4
 const NOTE_URI = 'fanotes://note/'
 
 const INSTRUCTIONS = [
@@ -213,6 +215,7 @@ const num = (value, fallback, min, max) => (Number.isFinite(value) ? Math.min(ma
  */
 const createLocalMcpServer = ({ context, log = () => {} }) => {
   const state = { vault: null, key: '' }
+  let inFlight = 0
 
   const current = async () => {
     const ctx = await context()
@@ -348,19 +351,29 @@ const createLocalMcpServer = ({ context, log = () => {} }) => {
     if (typeof message.method !== 'string') return null // a response from the client: nothing to do
     if (message.id === undefined || message.id === null) return null // notification
     if (typeof message.id !== 'string' && typeof message.id !== 'number') return rpcError(null, -32600, 'Invalid request id.')
+    if (message.method !== 'initialize' && message.method !== 'ping' && inFlight >= MAX_IN_FLIGHT) {
+      return rpcError(message.id, -32000, 'The server is busy. Try again in a moment.')
+    }
+    inFlight += 1
     try {
       return await handleRequest(message)
     } catch (error) {
       log(`request ${String(message.method).slice(0, 40)} failed`)
       return rpcError(message.id, -32603, error instanceof McpError ? error.message : 'Internal error.')
+    } finally {
+      inFlight -= 1
     }
   }
 
   /** A parsed JSON value (message or batch) in; a response value or null out. */
   const handle = async (payload) => {
     if (Array.isArray(payload)) {
-      if (!payload.length || payload.length > 50) return rpcError(null, -32600, 'Invalid batch.')
-      const replies = (await Promise.all(payload.map(handleOne))).filter(Boolean)
+      if (!payload.length || payload.length > MAX_BATCH) return rpcError(null, -32600, `Invalid batch (1 to ${MAX_BATCH} messages).`)
+      const replies = []
+      for (const item of payload) {
+        const reply = await handleOne(item)
+        if (reply) replies.push(reply)
+      }
       return replies.length ? replies : null
     }
     return handleOne(payload)

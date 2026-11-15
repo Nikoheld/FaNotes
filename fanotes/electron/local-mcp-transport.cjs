@@ -103,24 +103,29 @@ const runStdio = ({ server, input = process.stdin, output = process.stdout }) =>
       }
       const reply = await server.handle(payload)
       if (reply) send(reply)
+    } catch {
+      send(rpcError(null, -32603, 'Internal error.'))
     } finally {
       pending -= 1
       finish()
     }
   }
   input.setEncoding('utf8')
+  let discarding = false
   input.on('data', (chunk) => {
     buffer += chunk
-    let newline = buffer.indexOf('\n')
-    while (newline >= 0) {
+    for (let newline = buffer.indexOf('\n'); newline >= 0; newline = buffer.indexOf('\n')) {
       const line = buffer.slice(0, newline).trim()
       buffer = buffer.slice(newline + 1)
-      if (line) void process_(line)
-      newline = buffer.indexOf('\n')
+      if (discarding) { discarding = false; continue } // tail of an oversized line
+      if (line.length > MAX_LINE_CHARS) send(rpcError(null, -32600, 'Message too large.'))
+      else if (line) void process_(line)
     }
     if (buffer.length > MAX_LINE_CHARS) {
+      // An oversized line without its newline yet: drop it and everything up to the next newline.
       buffer = ''
-      send(rpcError(null, -32600, 'Message too large.'))
+      if (!discarding) send(rpcError(null, -32600, 'Message too large.'))
+      discarding = true
     }
   })
   input.on('end', () => {
@@ -187,10 +192,11 @@ const createHttpTransport = ({ server, getToken, port = 0, requestTimeoutMs = 30
     }
     const url = new URL(request.url ?? '/', `http://127.0.0.1:${boundPort}`)
     if (url.pathname !== '/mcp') { reply(response, 404, { error: 'Not found.' }); return }
-    if (tooManyFailures()) { reply(response, 429, { error: 'Too many failed attempts.' }, { 'Retry-After': '60' }); return }
     const header = String(request.headers.authorization ?? '')
     const supplied = /^Bearer (\S+)$/u.exec(header)?.[1]
     if (!supplied || !sameSecret(supplied, getToken())) {
+      // Only failed attempts are throttled; a valid token is never locked out by someone else's guesses.
+      if (tooManyFailures()) { reply(response, 429, { error: 'Too many failed attempts.' }, { 'Retry-After': '60' }); return }
       failures.push(Date.now())
       reply(response, 401, { error: 'Missing or wrong bearer token.' }, { 'WWW-Authenticate': 'Bearer realm="fanotes"' })
       return
@@ -252,4 +258,4 @@ const createHttpTransport = ({ server, getToken, port = 0, requestTimeoutMs = 30
   }
 }
 
-module.exports = { defaultUserDataDir, contextFromConfigFile, loadTokenStore, regenerateToken, runStdio, createHttpTransport, TOKEN_FILE }
+module.exports = { defaultUserDataDir, contextFromConfigFile, loadTokenStore, saveTokenStore, regenerateToken, runStdio, createHttpTransport, TOKEN_FILE }
