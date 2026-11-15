@@ -119,6 +119,7 @@ const probe = `<!doctype html>
       ua: navigator.userAgent, bridge: Boolean(api), pdfNative: Boolean(api && api.pdfNative),
       sharedArrayBuffer: typeof SharedArrayBuffer, crossOriginIsolated: self.crossOriginIsolated === true,
       webAssembly: typeof WebAssembly, dpr: devicePixelRatio,
+      internals: Object.getOwnPropertyNames(window.__TAURI_INTERNALS__ || {}).join(','), invokeType: typeof (window.__TAURI_INTERNALS__ || {}).invoke, tauriGlobal: typeof window.__TAURI__, lang: navigator.language,
     })
 
     // 1. wasm viewport raster in this webview
@@ -279,6 +280,7 @@ const finished = new Promise((resolve) => { finish = resolve })
 const vite = await createViteServer({
   appType: 'custom',
   logLevel: 'error',
+  optimizeDeps: { noDiscovery: true },
   server: { host: '127.0.0.1', port: 5174, strictPort: true, hmr: false },
   plugins: [{
     name: 'native-pdf-probe',
