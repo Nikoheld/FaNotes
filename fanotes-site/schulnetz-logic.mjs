@@ -2276,6 +2276,7 @@ export const parseIcs = (text) => {
       const day = /(\d{4})(\d{2})(\d{2})/.exec(raw)
       return day ? `${day[1]}-${day[2]}-${day[3]}` : raw
     }
+    const status = /^cancelled$/iu.test(value('STATUS')) ? 'cancelled' : ''
     return {
       id: value('UID') || `ics:${start}:${summary}`,
       start: icsTime(start),
@@ -2286,7 +2287,7 @@ export const parseIcs = (text) => {
       teachers: [],
       courseId: '',
       courseName: summary,
-      status: '',
+      status,
       eventType: examLead(summary) || examMarker(value('CATEGORIES')) ? 'exam' : 'lesson',
       color: '',
       timetableText: summary,
