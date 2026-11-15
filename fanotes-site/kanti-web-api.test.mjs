@@ -46,7 +46,7 @@ const snapshotWith = (grades, extra = {}) => ({
   ...extra,
 })
 
-const start = async ({ clock } = {}) => {
+const start = async ({ clock, timetables } = {}) => {
   const root = await mkdtemp(join(tmpdir(), 'kanti-web-'))
   const now = clock || (() => new Date())
   const pushes = []
@@ -60,6 +60,7 @@ const start = async ({ clock } = {}) => {
     fetch: async () => { throw new Error('no network in tests') },
     fcmSend: async (message) => { pushes.push(message); return { status: 200 } },
     web: createKantiWebAppRoutes(store, { now }),
+    timetables,
   })
   const web = createKantiWebApi({ store, access: schulnetz.webAccess, now, hosts: [WEB], log: () => {} })
   const server = createServer(async (request, response) => {
@@ -592,6 +593,92 @@ test('the phone’s own read errors stay with the phone when the server reads th
     assert.equal(snapshot.status, 200)
     assert.deepEqual(snapshot.body.readErrors, [])
     assert.equal(snapshot.body.deviceReadErrors.length, 10)
+  } finally {
+    await env.close()
+  }
+})
+
+test('list queries reject garbage, and limit pages a long list without changing the default', async () => {
+  const classes = Array.from({ length: 5 }, (_, index) => ({ code: `G26${String.fromCharCode(65 + index)}`, teacher: 'Probe' }))
+  const rooms = ['A1', 'A2', 'A3', 'B1', 'B2', 'B3']
+  const env = await start({
+    timetables: {
+      summary: async () => ({ available: true, uploadedAt: '2026-11-01T00:00:00.000Z', semester: '2026/27', classes, rooms }),
+    },
+  })
+  try {
+    const app = await appIdentity(env.base)
+    assert.equal((await linkSchulnetz(app)).status, 200)
+    const lines = Array.from({ length: 8 }, (_, index) => JSON.stringify({
+      id: `msg-${index}`,
+      revision: index + 1,
+      category: 'message',
+      title: `Hinweis ${index}`,
+      body: 'synthetic',
+      at: '2026-11-10T08:00:00.000Z',
+      target: 'messages',
+      targetId: `m${index}`,
+      courseId: '',
+    }))
+    await writeFile(join(env.root, 'accounts', app.accountId, 'changes.jsonl'), `${lines.join('\n')}\n`)
+    const { client, session } = await pairBrowser(env.base, [app])
+    const id = session.connections[0].id
+    const full = await client.call('GET', `/connections/${id}/changes?since=0`)
+    assert.equal(full.status, 200)
+    assert.ok(full.body.changes.length >= 5)
+    assert.deepEqual(Object.keys(full.body), ['changes'])
+
+    const badSince = await client.call('GET', `/connections/${id}/changes?since=foo`)
+    assert.equal(badSince.status, 400)
+    assert.deepEqual(Object.keys(badSince.body), ['error'])
+    assert.equal((await client.call('GET', `/connections/${id}/changes?since=-1`)).status, 400)
+    assert.equal((await client.call('GET', `/connections/${id}/changes?since=1.5`)).status, 400)
+    assert.equal((await client.call('GET', `/connections/${id}/changes?since=0&since=1`)).status, 400)
+    assert.equal((await client.call('GET', `/connections/${id}/changes?since=0&limit=0`)).status, 400)
+    assert.equal((await client.call('GET', `/connections/${id}/changes?since=0&limit=101`)).status, 400)
+    assert.equal((await client.call('GET', `/connections/${id}/changes?since=0&offset=1`)).status, 400)
+
+    const page = await client.call('GET', `/connections/${id}/changes?since=0&limit=2`)
+    assert.equal(page.status, 200)
+    assert.equal(page.body.changes.length, 2)
+    assert.equal(page.body.total, full.body.changes.length)
+    assert.equal(page.body.next, 2)
+    assert.deepEqual(page.body.changes, full.body.changes.slice(0, 2))
+    const last = await client.call('GET', `/connections/${id}/changes?since=0&limit=100&offset=${full.body.changes.length - 1}`)
+    assert.equal(last.body.changes.length, 1)
+    assert.equal(last.body.next, null)
+    const none = await client.call('GET', `/connections/${id}/changes?since=999999`)
+    assert.deepEqual(none.body, { changes: [] })
+
+    const summary = await client.call('GET', `/connections/${id}/timetables`)
+    assert.equal(summary.body.classes.length, 5)
+    assert.equal(summary.body.rooms.length, 6)
+    assert.equal(summary.body.classTotal, undefined)
+    const timetablePage = await client.call('GET', `/connections/${id}/timetables?limit=2&offset=2`)
+    assert.equal(timetablePage.body.classes.length, 2)
+    assert.equal(timetablePage.body.rooms.length, 2)
+    assert.equal(timetablePage.body.classTotal, 5)
+    assert.equal(timetablePage.body.roomTotal, 6)
+    assert.equal(timetablePage.body.next, 4)
+    assert.equal((await client.call('GET', `/connections/${id}/timetables?limit=2&offset=4`)).body.next, null)
+    assert.equal((await client.call('GET', `/connections/${id}/timetables?limit=no`)).status, 400)
+
+    const badType = await client.call('GET', `/connections/${id}/commute/connections?from=Brugg&to=Aarau&timeType=sideways`)
+    assert.equal(badType.status, 400)
+    assert.equal(typeof badType.body.error, 'string')
+    assert.equal((await client.call('GET', `/connections/${id}/commute/stops?q=${'a'.repeat(61)}`)).status, 400)
+    assert.equal((await client.call('GET', `/connections/${id}/commute/board?route=not-a-route`)).status, 400)
+    assert.equal((await client.call('GET', `/connections/${id}/commute/trips?route=abcdefabcdef&at=tomorrow&timeType=depart`)).status, 400)
+    assert.equal((await client.call('GET', `/connections/${id}/commute/connections?from=Brugg&to=Aarau&via=1&via=2&via=3`)).status, 400)
+
+    const reveals = await client.call('GET', `/connections/${id}/reveals`)
+    const badReveal = await client.call('POST', `/connections/${id}/reveal`, { ids: ['../secret'] })
+    assert.equal(badReveal.status, 400)
+    assert.deepEqual(Object.keys(badReveal.body), ['error'])
+    assert.deepEqual((await client.call('GET', `/connections/${id}/reveals`)).body, reveals.body)
+    const tooMany = Array.from({ length: 201 }, (_, index) => `g${index}`)
+    assert.equal((await client.call('POST', `/connections/${id}/reveal`, { ids: tooMany })).status, 400)
+    assert.equal((await client.call('GET', `/connections/${id}/nope`)).body.error, 'Diesen Endpunkt gibt es nicht.')
   } finally {
     await env.close()
   }
