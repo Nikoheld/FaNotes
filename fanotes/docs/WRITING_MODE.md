@@ -110,3 +110,14 @@ Offline, German and English, per paragraph (a paragraph's own language wins; oth
 - **UI**: click an underlined word (or right-click, or Shift+F7 for any word) for a pop-up with the explanation, suggestions, "add to story dictionary", "ignore", "turn this rule off", and synonyms (OpenThesaurus, LGPL, 48 160 German groups; WordNet 3.1, 53 060 English groups; loaded on first use). F7 opens the "Prüfen" panel: switches per check and per autocorrect feature, paragraph language, all findings of the current scene with one-click fixes, the story dictionary and ignored findings (both stored in `story.json`, so they sync).
 
 Tests: `node scripts/check-writing-assist.mjs` (11 groups, ~150 assertions: every rule with sentences it must flag and sentences it must leave alone, autocorrect sequences typed character by character in four languages, checker cache/dictionary/ignore, thesaurus inflections); browser end-to-end on the web build (11 checks: autocorrect, Backspace undo, underlines, pop-up, dictionary, applying a comma, synonyms, panel, English paragraph); the M1 suites still pass (26 unit, 11 desktop, 15 browser; typing p95 in the 608-page novel 24–32 ms with the checker on).
+
+### Milestone 4 (export and import) — 2026-11-15
+
+`src/writing/export/` and `src/writing/import/`; `exportStory(project, format, options)` and `importStory(bytes, fileName)`, plus `ExportDialog` / `ImportDialog` (not wired into the editor yet). Excluded nodes and the trash are left out of every export.
+
+- **PDF** drawn from `layoutManuscript` piece by piece (pdf-lib, subset-embedded bundled fonts, kerning as TJ adjustments): headers/footers, footnotes, drop caps, lists, marks, colours, highlights, links, blank pages for right-hand chapters, mirror margins, bookmarks for parts/chapters/scenes, page labels, metadata. Endnotes per chapter or per book through the new export-only layout option `LayoutOptions.endnotes` (`layout/endnotes.ts`); unset, the layout is unchanged.
+- **DOCX**: `FN<id>` paragraph styles, a section per chapter (odd page when chapters start right), PAGE/NUMPAGES/STYLEREF fields, even/first headers, footnotes or endnotes, comments, drop-cap frames, lists, `w:lang`, hyphenation.
+- **EPUB 3**: XHTML per part/chapter, nav + NCX, CSS from the styles, linked footnotes/endnotes, optional fonts. **Markdown/text** with front matter, headings, emphasis, `[^n]`.
+- **Import** DOCX (FaNotes styles round-trip; "Heading n"/"Überschrift n"/outline levels, footnotes, endnotes, comments, links, page breaks, scene markers), Markdown, text (chapter headings, hard-wrapped prose, Windows-1252).
+
+Tests: `node scripts/check-writing-export.mjs` (11). 639-page novel (132 000 words, Node, fontkit measurer): layout 0.3–0.5 s, PDF 1.1–1.6 s, 1.6 MB, peak RSS ~260–360 MB on the shared server.

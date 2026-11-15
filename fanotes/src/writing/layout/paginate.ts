@@ -4,6 +4,7 @@
 // novel has ~11 000 lines) and runs on every change.
 import type { FlowBlock } from '../model/flow'
 import type { PageSetup, ParagraphStyle, Run, StoryManifest } from '../model/types'
+import { insertEndnotes, numberFootnotes, type EndnoteOptions } from './endnotes'
 import { layoutParagraph, resolveStyle, type ParagraphLayout } from './linebreak'
 import { mmToPx, type Hyphenator, type TextMeasurer } from './measure'
 
@@ -58,6 +59,12 @@ export type LayoutOptions = {
   hyphenators?: Partial<Record<string, Hyphenator | null>>
   /** Footnote bodies by id (scene footnotes merged). */
   footnoteRuns?: (id: string) => Run[] | null
+  /**
+   * Export only: footnotes become endnotes after each chapter or at the end of
+   * the book (added to `blocks`, see endnotes.ts) instead of sitting at the
+   * bottom of their page. Unset (the editor): footnotes at the page bottom.
+   */
+  endnotes?: EndnoteOptions
 }
 
 type CacheEntry = { runs: Run[]; style: ParagraphStyle; width: number; afterBreak: boolean; align?: string; hyphenate: boolean; numbers: string; layout: ParagraphLayout }
@@ -105,18 +112,20 @@ const pageGeometry = (page: PageSetup, index: number, firstNumber: number) => {
   }
 }
 
-export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], cache: LayoutCache, options: LayoutOptions, previous?: ManuscriptLayout | null): ManuscriptLayout => {
+export const layoutManuscript = (manifest: StoryManifest, flow: FlowBlock[], cache: LayoutCache, options: LayoutOptions, previous?: ManuscriptLayout | null): ManuscriptLayout => {
   const started = performance.now()
   const measuredBefore = cache.measured
   const setup = manifest.page
   const first = pageGeometry(setup, 0, setup.pageNumberStart)
   const contentWidth = first.content.width
-  // Footnotes are numbered through the manuscript in reading order.
-  const footnoteNumbers = new Map<string, string>()
-  for (const block of blocks) for (const run of block.runs) if (run.m?.fn && !footnoteNumbers.has(run.m.fn)) footnoteNumbers.set(run.m.fn, String(footnoteNumbers.size + 1))
+  // Footnotes are numbered through the manuscript in reading order (endnotes per chapter restart).
+  const endnotes = options.endnotes ?? null
+  const footnoteNumbers = numberFootnotes(flow, endnotes?.placement === 'chapter')
+  const blocks = endnotes ? insertEndnotes(flow, footnoteNumbers, endnotes, (id) => options.footnoteRuns?.(id) ?? null) : flow
   const fallbackStyle = manifest.styles.body
+  const footnoteStyle = manifest.styles.footnote ?? { ...fallbackStyle, size: Math.max(7, fallbackStyle.size - 2), lineHeight: 1.3, indentFirst: 0, spaceBefore: 0, spaceAfter: 2, align: 'left' as const }
   const layouts = blocks.map((block) => {
-    const style = manifest.styles[block.style] ?? fallbackStyle
+    const style = manifest.styles[block.style] ?? (block.style === 'footnote' ? footnoteStyle : fallbackStyle)
     const language = block.lang ?? manifest.language
     const hyphenator = options.hyphenators?.[language] ?? null
     const hyphenate = setup.hyphenate && Boolean(hyphenator) && block.ref.kind === 'para'
@@ -134,7 +143,6 @@ export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], c
   cache.prune(new Set(blocks.map((block) => block.key)))
   const layoutDone = performance.now()
 
-  const footnoteStyle = manifest.styles.footnote ?? { ...fallbackStyle, size: Math.max(7, fallbackStyle.size - 2), lineHeight: 1.3, indentFirst: 0, spaceBefore: 0, spaceAfter: 2, align: 'left' as const }
   const footnoteLayouts = new Map<string, ParagraphLayout>()
   const footnoteLayout = (id: string) => {
     const cached = footnoteLayouts.get(id)
@@ -213,7 +221,7 @@ export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], c
       page.lines.push({ blockKey: blocks[blockIndex].key, blockIndex, lineIndex: line, x: page.content.x + box.x, y: page.content.y + y })
       if (line === 0 && layout.dropCap) page.dropCaps.push({ blockIndex, x: page.content.x + layout.dropCap.x, y: page.content.y + y })
       for (const note of layout.footnotes) {
-        if (note.line !== line) continue
+        if (note.line !== line || endnotes) continue
         const noteLayout = footnoteLayout(note.id)
         page.footnotes.push({ id: note.id, number: footnoteNumbers.get(note.id) ?? '*', layout: noteLayout, x: page.content.x, y: 0 })
         footnoteHeight += noteLayout.height + noteLayout.style.spaceAfter
@@ -228,7 +236,7 @@ export const layoutManuscript = (manifest: StoryManifest, blocks: FlowBlock[], c
     let notes = 0
     for (let line = from; line < to; line += 1) {
       height += layout.lines[line].height
-      for (const note of layout.footnotes) if (note.line === line) notes += footnoteLayout(note.id).height + 2
+      for (const note of layout.footnotes) if (note.line === line && !endnotes) notes += footnoteLayout(note.id).height + 2
     }
     return { height, notes }
   }
