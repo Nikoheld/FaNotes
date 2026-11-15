@@ -364,3 +364,33 @@ test('a device that still has a deleted note can put it back over the tombstone'
   assert.equal(stale.status, 409)
   assert.deepEqual((await readFile(id)).body, kept)
 })
+
+test('an empty, blank, or truncated upload does not resurrect a deleted note', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(revisionOf(created)), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 200, removed.body.toString('utf8'))
+  const tombstone = revisionOf(removed)
+  // The base matches the tombstone. A short body used to become the live note.
+  const truncated = await putFile(id, randomBytes(200), tombstone, { 'X-FaNotes-Blank': '0' })
+  assert.equal(truncated.status, 409, truncated.body.toString('utf8'))
+  assert.equal(jsonOf(truncated).reason, 'guard')
+  assert.equal((await readFile(id)).status, 204)
+  const empty = await putFile(id, randomBytes(28), tombstone, {})
+  assert.equal(empty.status, 409, empty.body.toString('utf8'))
+  assert.equal((await readFile(id)).status, 204)
+  const blank = await putFile(id, randomBytes(4500), tombstone, { 'X-FaNotes-Blank': '1' })
+  assert.equal(blank.status, 409, blank.body.toString('utf8'))
+  assert.equal((await readFile(id)).status, 204)
+  const archived = readdirSync(join(dataDirectory, 'accounts', accountId, 'revisions', id))
+    .map((name) => readFileSync(join(dataDirectory, 'accounts', accountId, 'revisions', id, name)))
+  assert.ok(archived.some((bytes) => bytes.equals(original)))
+  const kept = randomBytes(4800)
+  const back = await putFile(id, kept, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(back.status, 200, back.body.toString('utf8'))
+  assert.deepEqual((await readFile(id)).body, kept)
+})
