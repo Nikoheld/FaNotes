@@ -19,6 +19,11 @@ export const COMPLETION_BUDGET = 3000
 export const DETAIL_BUDGET = 900
 export const ROUTE_CACHE_MS = 30_000
 export const STOP_CACHE_MS = 24 * 60 * 60_000
+/** One timetable request gives up after this, then retries transient failures. */
+export const UPSTREAM_TIMEOUT_MS = 12_000
+export const UPSTREAM_ATTEMPTS = 3
+/** Wait before the second and third attempt. A 4xx is not retried. */
+export const UPSTREAM_RETRY_MS = [200, 800]
 const USER_AGENT = 'KantiPlus/1.0 (+https://fanotes.fasrv.ch; commute)'
 const PROVIDERS = {
   'search.ch': { name: 'search.ch', occupancy: 'train-class', formation: false },
@@ -31,11 +36,23 @@ const searchDate = (ms) => {
   return { date: `${month}/${day}/${year}`, time: wall.clock, isoDay: wall.day }
 }
 
+/** Transient upstream failures: timeouts, dropped connections, and 408/429/5xx. */
+export const upstreamRetryable = (error) => {
+  const status = Number(error?.status)
+  if (status === 408 || status === 429 || (status >= 500 && status <= 599)) return true
+  const name = String(error?.name || '')
+  if (name === 'TimeoutError' || name === 'AbortError') return true
+  const code = String(error?.code || error?.cause?.code || '')
+  if (['ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'UND_ERR_HEADERS_TIMEOUT'].includes(code)) return true
+  return error instanceof TypeError
+}
+
 /**
- * Timetable provider with a shared 30 s cache, in-flight sharing and a daily budget that falls
- * back to transport.opendata.ch, then to the last good answer (stale).
+ * Timetable provider with a shared 30 s cache, in-flight sharing for identical queries, retries on
+ * transient upstream failures, and a daily budget that falls back to transport.opendata.ch, then
+ * to the last good answer (stale).
  */
-export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(), log = () => {}, budgetFile = '' } = {}) => {
+export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(), log = () => {}, budgetFile = '', sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {}) => {
   const cache = new Map()
   const inflight = new Map()
   let budget = { day: '', route: 0, completion: 0, fallback: 0, detail: 0 }
@@ -58,9 +75,23 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     return budget.day !== day || budget[kind] < limit
   }
   const getJson = async (url) => {
-    const response = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': USER_AGENT }, redirect: 'error', signal: AbortSignal.timeout?.(12_000) })
-    if (!response.ok && response.status !== 200) throw Object.assign(new Error('provider'), { status: response.status })
-    return response.json()
+    let last = null
+    for (let attempt = 1; attempt <= UPSTREAM_ATTEMPTS; attempt += 1) {
+      try {
+        const response = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': USER_AGENT }, redirect: 'error', signal: AbortSignal.timeout?.(UPSTREAM_TIMEOUT_MS) })
+        if (!response.ok && response.status !== 200) {
+          last = Object.assign(new Error('provider'), { status: response.status })
+          if (!upstreamRetryable(last) || attempt === UPSTREAM_ATTEMPTS) throw last
+        } else {
+          return await response.json()
+        }
+      } catch (error) {
+        last = error
+        if (!upstreamRetryable(error) || attempt === UPSTREAM_ATTEMPTS) throw error
+      }
+      await sleep(UPSTREAM_RETRY_MS[attempt - 1] ?? UPSTREAM_RETRY_MS.at(-1))
+    }
+    throw last
   }
   const cached = async (key, ttl, load) => {
     const hit = cache.get(key)
@@ -257,7 +288,7 @@ export const createCommute = (options = {}) => {
   const root = options.root
   const now = options.now || (() => new Date())
   const log = options.log || (() => {})
-  const provider = options.provider || createCommuteProvider({ fetchImpl: options.fetch, now, log, budgetFile: root ? resolve(root, 'commute-budget.json') : '' })
+  const provider = options.provider || createCommuteProvider({ fetchImpl: options.fetch, now, log, sleep: options.sleep, budgetFile: root ? resolve(root, 'commute-budget.json') : '' })
   const lessonsFor = options.lessonsFor || (async () => [])
   const publish = options.publish || (async () => [])
   const ping = options.ping || (async () => {})
