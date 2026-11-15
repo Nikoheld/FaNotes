@@ -400,3 +400,18 @@ test('the integrity report names damaged and orphaned blobs and deletes nothing'
   assert.equal(tombstone.status, 204)
   assert.equal(tombstone.headers['x-fanotes-deleted'], '1')
 })
+
+test('a registration publishes the e-mail index only after the account id is stored', async () => {
+  const email = 'integrity@example.com'
+  const directory = join(dataDirectory, 'emails')
+  const indexPath = join(directory, sha256(email))
+  assert.equal(readFileSync(indexPath, 'utf8'), accountId)
+  assert.equal(readdirSync(directory).some((name) => name.endsWith('.tmp')), false)
+  const login = await jsonCall('POST', '/api/v1/sync/login', {
+    email,
+    authKey,
+    device: { name: 'Again', platform: 'linux' },
+  })
+  assert.equal(login.status, 200, JSON.stringify(login.json))
+  assert.equal(login.json.accountId, accountId)
+})
