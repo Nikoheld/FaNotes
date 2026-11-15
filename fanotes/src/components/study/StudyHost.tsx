@@ -12,7 +12,7 @@ import { sortToMarkdown } from '../../lib/study/sortBoard'
 import type { PlateData, TermData } from '../../lib/study/cardsModels'
 import { defaultStudyData, parseStudyData } from '../../lib/study/registry'
 import { EXPORT_PALETTE, renderKeyTreeSvg, renderMapSvg, type StudyAnyData } from '../../lib/study/render'
-import { downloadBlob, fileToSmallDataUrl, STUDY_EVENT, svgToPngBlob } from '../../lib/study/imageTools'
+import { downloadBlob, storeStudyImage, STUDY_EVENT, svgToPngBlob } from '../../lib/study/imageTools'
 import { KeyEditor } from './KeyEditor'
 import { SortEditor } from './SortEditor'
 import { MapEditor } from './MapEditor'
@@ -138,7 +138,7 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
       const current = sessionRef.current
       if (!files.length || !current) return
       if (current.kind === 'plate') { event.preventDefault(); void addPlateFiles(current.data as PlateData, files, setError).then((next) => update(next)) }
-      else if (current.kind === 'key') { event.preventDefault(); void fileToSmallDataUrl(files[0], 900).then((img) => update({ ...(current.data as KeyData), compareImage: img })).catch((reason) => setError(reason instanceof Error ? reason.message : 'Bild konnte nicht gelesen werden.')) }
+      else if (current.kind === 'key') { event.preventDefault(); void storeStudyImage(files[0]).then((img) => update({ ...(current.data as KeyData), compareImage: img })).catch((reason) => setError(reason instanceof Error ? reason.message : 'Bild konnte nicht gelesen werden.')) }
     }
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)

@@ -256,6 +256,40 @@ try {
   assert.equal(regraded.find((card) => card.id === 'plate:p1').frontImage, png)
   assert.equal(flash.cardsFromMarkdown('## Lernfragen\n\n<details><summary>Q?</summary>A</details>', now).length, 1, 'existing question cards still work')
 
+  // sort result as Markdown: separator row, padded columns, escaped pipes, list form
+  {
+    let uneven = sort.addCards(sort.normaliseSortData({ groups: [{ id: 'g1', title: 'hemi | holo' }, { id: 'g2', title: 'ametabol' }, { id: 'g3', title: '' }] }), ['A | B', 'C', 'D', 'E'])
+    const [a, c, d, e] = uneven.cards.map((card) => card.id)
+    uneven = sort.moveCard(sort.moveCard(sort.moveCard(sort.moveCard(uneven, a, 'g1'), c, 'g1'), d, 'g1'), e, 'g2')
+    const rows = sort.sortToMarkdown(uneven).split('\n')
+    assert.equal(rows.length, 5, 'header, separator and three rows')
+    assert.equal(rows[0], '| hemi \\| holo | ametabol | Gruppe 3 |')
+    assert.equal(rows[1], '| --- | --- | --- |')
+    assert.equal(rows[2], '| A \\| B | E |  |')
+    assert.equal(rows[4], '| D |  |  |')
+    assert.ok(rows.every((row) => row.split(/(?<!\\)\|/u).length === 5), 'every row has the same number of cells')
+    assert.equal(sort.sortToMarkdown(uneven, 'list'), '**hemi | holo**\n- A | B\n- C\n- D\n\n**ametabol**\n- E')
+    assert.equal(sort.sortToMarkdown(sort.normaliseSortData({ groups: [{ id: 'g1', title: 'x' }, { id: 'g2', title: 'y' }] })).split('\n').length, 3, 'empty board still yields a valid table')
+  }
+
+  // pictures: vault files are kept as paths, data URLs still read, hydration hook rendered
+  {
+    const ref = '.fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg'
+    assert.equal(blocks.asImage(ref), ref)
+    assert.equal(blocks.asImage('.fanotes/worksheets/../../secret.jpg'), '')
+    assert.equal(blocks.asImage('notes/x.png'), '')
+    assert.equal(blocks.asImage('data:image/jpeg;base64,AAAA'), 'data:image/jpeg;base64,AAAA', 'old data URLs still read')
+    const sheet = cards.normalisePlateData({ items: [{ id: 'p1', label: 'Admiral', img: ref }] })
+    assert.equal(sheet.items[0].img, ref)
+    const html = registry.renderStudyBlockHtml('plate', JSON.stringify(sheet))
+    assert.ok(html.includes(`data-vault-src="${ref}"`) && !html.includes('src="."'), 'vault pictures are resolved after rendering')
+    const note = `${blocks.serializeStudyBlock('plate', sheet)}\n`
+    assert.ok(!note.includes('base64'), 'the note holds only the path')
+    const deck = flash.cardsFromMarkdown(note, new Date(2026, 10, 15))
+    assert.equal(deck[0].frontImage, ref, 'flashcards reference the same file')
+    assert.ok(!flash.applyReview(note, 'plate:p1', 'good', new Date(2026, 10, 15)).includes('frontImage'))
+  }
+
   // -- rendering ----------------------------------------------------------------------
   const evil = '<img src=x onerror=alert(1)>"&'
   const html = registry.renderStudyBlockHtml('key', JSON.stringify({ title: evil, table: { features: [evil], items: [{ id: 'a', name: evil, values: [evil] }] }, tree: { root: 'a', nodes: [{ id: 'a', kind: 'leaf', text: evil, branches: [] }] } }))

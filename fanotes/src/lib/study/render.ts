@@ -3,7 +3,7 @@
  * result can be set as innerHTML in the editor widget and in the Markdown preview.
  */
 
-import { escapeHtml as esc, type StudyKind } from './blocks'
+import { escapeHtml as esc, isVaultImageRef, type StudyKind } from './blocks'
 import { layoutKeyTree, type KeyData } from './keyTree'
 import { layoutMap, type MapData } from './conceptMap'
 import { unsortedCards, type SortData } from './sortBoard'
@@ -23,6 +23,11 @@ export const THEME_PALETTE: Palette = {
 }
 /** Exported images are always light so they read on a worksheet. */
 export const EXPORT_PALETTE: Palette = { text: '#1b1d23', muted: '#4b5565', line: '#667085', fill: '#ffffff', accent: '#2f4bd0', leaf: '#e8edfb', bg: '#ffffff' }
+
+/** `<img>` for a stored picture: vault files are filled in later by hydrateVaultImages. */
+export const imgTag = (ref: string, alt: string, extra = '') => (
+  isVaultImageRef(ref) ? `<img data-vault-src="${esc(ref)}" alt="${esc(alt)}"${extra}/>` : `<img alt="${esc(alt)}" src="${esc(ref)}"${extra}/>`
+)
 
 const FONT = "font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif"
 
@@ -90,7 +95,7 @@ const tableHtml = (data: KeyData) => {
 
 const renderKeyHtml = (data: KeyData) => {
   const tree = renderKeyTreeSvg(data)
-  const compare = data.compareImage ? `<figure class="study-compare"><img alt="${esc(data.compareLabel || 'Vergleichsbaum')}" src="${data.compareImage}"/><figcaption>${esc(data.compareLabel || 'Vergleich')}</figcaption></figure>` : ''
+  const compare = data.compareImage ? `<figure class="study-compare">${imgTag(data.compareImage, data.compareLabel || 'Vergleichsbaum')}<figcaption>${esc(data.compareLabel || 'Vergleich')}</figcaption></figure>` : ''
   return `${data.title ? `<div class="study-title">${esc(data.title)}</div>` : ''}${tableHtml(data)}<div class="study-key-views${compare ? ' is-compare' : ''}"><div class="study-svg">${data.tree.nodes.length ? tree.svg : ''}</div>${compare}</div>`
 }
 
@@ -103,7 +108,7 @@ const renderSortHtml = (data: SortData) => {
 }
 
 const renderPlateHtml = (data: PlateData) => {
-  const cells = data.items.map((item) => `<figure class="study-plate-item">${item.img ? `<img alt="${esc(item.label)}" src="${item.img}"/>` : '<div class="study-plate-empty"></div>'}${data.showLabels ? `<figcaption>${esc(item.label)}</figcaption>` : ''}</figure>`).join('')
+  const cells = data.items.map((item) => `<figure class="study-plate-item">${item.img ? imgTag(item.img, item.label) : '<div class="study-plate-empty"></div>'}${data.showLabels ? `<figcaption>${esc(item.label)}</figcaption>` : ''}</figure>`).join('')
   return `${data.title ? `<div class="study-title">${esc(data.title)}</div>` : ''}<div class="study-plate" style="grid-template-columns:repeat(${data.cols},minmax(0,1fr))">${cells}</div>`
 }
 

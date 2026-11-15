@@ -84,7 +84,7 @@ import { minimalReplacement } from '../lib/textReplacement'
 import { primeSpellingCorrections, rerunSpellingCheck, spellingCorrections } from '../lib/spellingCorrections'
 import type { SpellingLanguage } from '../types'
 import { findStudyBlocks, STUDY_KIND_LABELS, type StudyBlockRef, type StudyKind } from '../lib/study/blocks'
-import { STUDY_EVENT } from '../lib/study/imageTools'
+import { hydrateVaultImages, STUDY_EVENT } from '../lib/study/imageTools'
 import { renderStudyBlockHtml } from '../lib/study/registry'
 
 const LazyStudyHost = lazy(() => import('./study/StudyHost'))
@@ -580,7 +580,7 @@ class StudyBlockWidget extends WidgetType {
     shell.className = `cm-study-shell study-block study-kind-${this.kind}`
     const content = document.createElement('div')
     content.className = 'study-block-content'
-    try { content.innerHTML = renderStudyBlockHtml(this.kind, this.body) } catch { content.textContent = 'Lernblock konnte nicht dargestellt werden.' }
+    try { content.innerHTML = renderStudyBlockHtml(this.kind, this.body); hydrateVaultImages(content) } catch { content.textContent = 'Lernblock konnte nicht dargestellt werden.' }
     const edit = document.createElement('button')
     edit.type = 'button'
     edit.className = 'cm-study-edit'

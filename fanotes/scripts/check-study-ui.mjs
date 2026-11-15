@@ -125,6 +125,7 @@ try {
   await page.getByRole('button', { name: 'Als Tabelle einfügen' }).click()
   await finish()
   assert.equal(await page.locator('.cm-study-shell.study-kind-sort').count(), 1)
+  assert.match((await page.locator('.cm-content').textContent()).replace(/\s+/gu, ' '), /\| hemimetabol \| holometabol \|\s*\| --- \| --- \|\s*\| Libellen \| Käfer \|/u, 'inserted Markdown table has its separator row')
   ok('sort board persists moves and inserts a table')
 
   // 3. concept map
@@ -146,6 +147,9 @@ try {
   await shot(page, 'picture-sheet')
   await finish()
   assert.equal(await page.locator('.cm-study-shell.study-kind-plate img').count(), 3)
+  const refs = await page.locator('.cm-study-shell.study-kind-plate img').evaluateAll((images) => images.map((image) => image.dataset.vaultSrc))
+  assert.ok(refs.every((ref) => /^\.fanotes\/worksheets\/[\w-]+\.jpg$/u.test(ref)), `pictures are vault files, not data URLs: ${refs}`)
+  await page.waitForFunction(() => [...document.querySelectorAll('.cm-study-shell.study-kind-plate img')].every((image) => image.naturalWidth > 0))
   ok('picture sheet with three images')
 
   // 5. definition cards
@@ -166,7 +170,7 @@ try {
   for (let step = 0; step < 4; step += 1) {
     const front = await page.locator('.history-dialog strong').first().textContent().catch(() => '')
     if (front) seen.add(front)
-    if (await page.locator('.study-card-image').count()) seen.add('image')
+    if (await page.locator('img.study-card-image').count()) { await page.waitForFunction(() => document.querySelector('img.study-card-image')?.naturalWidth > 0); seen.add('image') }
     await page.getByRole('button', { name: 'Antwort zeigen' }).click().catch(() => undefined)
     await page.getByRole('button', { name: 'Gut' }).click().catch(() => undefined)
   }
@@ -220,6 +224,39 @@ try {
   const spent = await page.locator('.study-clock').nth(1).innerText()
   assert.ok(!spent.startsWith('00:00'), `timer time persisted: ${spent}`)
   ok('task progress and timer survive a reload')
+
+
+  // 7. PDF toolbar stays tidy next to the panel at 1280 and 1024 px
+  const toolbarIssues = () => page.evaluate(() => {
+    const slot = document.querySelector('.toolbar-context .pdf-toolbar-slot')
+    const bar = document.querySelector('.toolbar-context .pdf-note-toolbar')
+    if (!slot || !bar) return ['toolbar missing']
+    const issues = []
+    const limit = slot.getBoundingClientRect().right + 0.5
+    const parts = [...bar.children].map((node) => ({ name: node.className, box: node.getBoundingClientRect() })).filter((part) => part.box.width > 0)
+    parts.forEach((part, index) => {
+      if (part.box.right > limit) issues.push(`${part.name} sticks out by ${Math.round(part.box.right - limit)}px`)
+      const next = parts[index + 1]
+      if (next && part.box.right > next.box.left + 0.5) issues.push(`${part.name} overlaps ${next.name}`)
+    })
+    for (const button of bar.querySelectorAll('button')) {
+      const box = button.getBoundingClientRect()
+      if (box.width > 0 && (box.height > 30 || box.right > limit)) issues.push(`button "${button.textContent || button.ariaLabel}" is clipped or wrapped (${Math.round(box.height)}px high)`)
+    }
+    if (issues.length) issues.push(`slot ${Math.round(slot.clientWidth)}px, content ${bar.scrollWidth}px`)
+    return issues
+  })
+  for (const width of [1280, 1024]) {
+    for (const wantOpen of [true, false]) {
+      await page.setViewportSize({ width, height: 900 })
+      const open = (await page.locator('.study-panel').count()) > 0
+      if (open !== wantOpen) await page.getByRole('button', { name: 'Lernwerkzeuge', exact: true }).click()
+      await page.waitForTimeout(700)
+      await shot(page, `pdf-toolbar-${width}-${wantOpen ? 'panel' : 'plain'}`)
+      assert.deepEqual(await toolbarIssues(), [], `PDF toolbar at ${width}px, panel ${wantOpen ? 'open' : 'closed'}`)
+    }
+  }
+  ok('PDF toolbar fits at 1280 and 1024 px with the panel open and closed')
 
   assert.deepEqual(errors, [], `page errors: ${errors.join(' | ')}`)
   console.log(`study ui checks passed (${steps.length} steps)`)

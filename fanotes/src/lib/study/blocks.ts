@@ -111,11 +111,15 @@ export const asRecord = (value: unknown): Record<string, unknown> => (value && t
 
 export const newId = (prefix: string) => `${prefix}${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
 
-/** A small image as data URL, capped so one note never carries a huge picture. */
+/** Pictures live as files in the vault; older notes may still carry a small data URL. */
 export const IMAGE_DATA_LIMIT = 220_000
-export const asImage = (value: unknown) => (
-  typeof value === 'string' && /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/u.test(value) && value.length <= IMAGE_DATA_LIMIT ? value : ''
-)
+export const VAULT_IMAGE_PATTERN = /^\.fanotes\/worksheets\/[A-Za-z0-9-]{8,64}\.(?:png|jpe?g|webp|gif)$/u
+export const isVaultImageRef = (value: string) => VAULT_IMAGE_PATTERN.test(value)
+export const asImage = (value: unknown) => {
+  if (typeof value !== 'string') return ''
+  if (isVaultImageRef(value)) return value
+  return /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/u.test(value) && value.length <= IMAGE_DATA_LIMIT ? value : ''
+}
 
 export const escapeHtml = (value: string) => value.replace(/[&<>"']/gu, (char) => (
   char === '&' ? '&amp;' : char === '<' ? '&lt;' : char === '>' ? '&gt;' : char === '"' ? '&quot;' : '&#39;'

@@ -1,6 +1,7 @@
 import { ImagePlus, Plus, Trash2, Wand2, X } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
-import { fileToSmallDataUrl } from '../../lib/study/imageTools'
+import { storeStudyImage } from '../../lib/study/imageTools'
+import { VaultImg } from './VaultImg'
 import {
   addChild, parseTablePaste, removeSubtree, skeletonFromTable, tableFromGrid,
   type KeyData, type KeyNode,
@@ -42,7 +43,7 @@ export function KeyEditor({ data, onChange, onError }: Props) {
 
   const pickImage = async (file: File | undefined) => {
     if (!file) return
-    try { onChange({ ...data, compareImage: await fileToSmallDataUrl(file, 900) }) } catch (error) { onError(error instanceof Error ? error.message : 'Bild konnte nicht gelesen werden.') }
+    try { onChange({ ...data, compareImage: await storeStudyImage(file) }) } catch (error) { onError(error instanceof Error ? error.message : 'Bild konnte nicht gelesen werden.') }
   }
 
   const renderNode = (id: string, depth: number, label: string | null, seen: Set<string>) => {
@@ -134,7 +135,7 @@ export function KeyEditor({ data, onChange, onError }: Props) {
           </div>
           <div className="study-compare-view">
             <div className="study-preview" dangerouslySetInnerHTML={{ __html: preview }} />
-            {data.compareImage ? <figure className="study-compare"><img src={data.compareImage} alt={data.compareLabel || 'Vergleichsbaum'} /><figcaption>{data.compareLabel}</figcaption></figure> : <div className="study-compare-empty">Kein Vergleichsbild</div>}
+            {data.compareImage ? <figure className="study-compare"><VaultImg src={data.compareImage} alt={data.compareLabel || 'Vergleichsbaum'} /><figcaption>{data.compareLabel}</figcaption></figure> : <div className="study-compare-empty">Kein Vergleichsbild</div>}
           </div>
         </div>
       )}

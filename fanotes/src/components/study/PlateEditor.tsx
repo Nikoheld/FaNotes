@@ -2,7 +2,8 @@ import { GraduationCap, ImagePlus, Trash2 } from 'lucide-react'
 import { useRef } from 'react'
 import { newId } from '../../lib/study/blocks'
 import type { PlateData } from '../../lib/study/cardsModels'
-import { fileToSmallDataUrl } from '../../lib/study/imageTools'
+import { storeStudyImage } from '../../lib/study/imageTools'
+import { VaultImg } from './VaultImg'
 
 type Props = { data: PlateData; onChange: (data: PlateData) => void; onError: (message: string) => void; onLearn: () => void }
 
@@ -11,7 +12,7 @@ export function addPlateFiles(data: PlateData, files: readonly File[], onError: 
     const current = await previous
     if (!file.type.startsWith('image/')) return current
     try {
-      const img = await fileToSmallDataUrl(file)
+      const img = await storeStudyImage(file)
       const label = file.name.replace(/\.[a-z0-9]+$/iu, '').replace(/[_-]+/gu, ' ').trim()
       return { ...current, items: [...current.items, { id: newId('p'), label: /^(?:image|bild|screenshot|img)\b/iu.test(label) ? '' : label.slice(0, 120), note: '', img }].slice(0, 40) }
     } catch (error) {
@@ -45,7 +46,7 @@ export function PlateEditor({ data, onChange, onError, onLearn }: Props) {
       <div className="study-plate" style={{ gridTemplateColumns: `repeat(${data.cols}, minmax(0, 1fr))` }}>
         {data.items.map((item, index) => (
           <figure key={item.id} className="study-plate-item">
-            {item.img ? <img src={item.img} alt={item.label} draggable={false} /> : <div className="study-plate-empty" />}
+            {item.img ? <VaultImg src={item.img} alt={item.label} draggable={false} /> : <div className="study-plate-empty" />}
             <input aria-label={`Name Bild ${index + 1}`} placeholder="Name der Art" value={item.label} onChange={(event) => onChange({ ...data, items: data.items.map((entry) => (entry.id === item.id ? { ...entry, label: event.target.value } : entry)) })} />
             <input aria-label={`Merkmal Bild ${index + 1}`} placeholder="Merkmal (optional)" value={item.note} onChange={(event) => onChange({ ...data, items: data.items.map((entry) => (entry.id === item.id ? { ...entry, note: event.target.value } : entry)) })} />
             <button type="button" className="study-icon-btn" aria-label={`Bild ${index + 1} entfernen`} title="Bild entfernen" onClick={() => onChange({ ...data, items: data.items.filter((entry) => entry.id !== item.id) })}><Trash2 size={14} /></button>

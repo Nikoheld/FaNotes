@@ -14,6 +14,7 @@ import { defaultSchema, type Schema } from 'hast-util-sanitize'
 import type { Nodes, Root } from 'hast'
 import { renderStudyBlockHtml } from '../lib/study/registry'
 import type { StudyKind } from '../lib/study/blocks'
+import { hydrateVaultImages } from '../lib/study/imageTools'
 
 export type MarkdownLinkHandler = (href: string) => void | Promise<void>
 
@@ -201,7 +202,7 @@ function createComponents(onOpenLink?: MarkdownLinkHandler, resolveImage?: (src:
       const language = isValidElement<{ className?: string; children?: ReactNode }>(child) ? /language-fanotes-(key|sort|map|plate|term)\b/u.exec(child.props.className ?? '')?.[1] : undefined
       if (language && isValidElement<{ children?: ReactNode }>(child)) {
         const body = Children.toArray(child.props.children).map((part) => (typeof part === 'string' ? part : '')).join('')
-        return <div className="study-block markdown-study" dangerouslySetInnerHTML={{ __html: renderStudyBlockHtml(language as StudyKind, body) }} />
+        return <div className="study-block markdown-study" ref={(node) => { if (node) hydrateVaultImages(node) }} dangerouslySetInnerHTML={{ __html: renderStudyBlockHtml(language as StudyKind, body) }} />
       }
       return <pre className="markdown-code-block" tabIndex={0} {...props} />
     },

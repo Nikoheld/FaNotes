@@ -15,12 +15,12 @@ Insert one from the toolbar button "Lernwerkzeuge" or from the command palette (
 | `fanotes-key` | Table and identification key | Auftrag 5, 6 | feature table, key tree (`root`, `nodes` with `question`/`leaf`, `branches`), optional comparison image |
 | `fanotes-sort` | Sorting board | Auftrag 11, any ordering | `cards`, `groups` (card ids), `mode` `groups` or `sequence` |
 | `fanotes-map` | Concept map | Auftrag 12, hierarchies | `nodes`, `edges` with labels, `dir` `TB` or `LR`; layout is automatic |
-| `fanotes-plate` | Picture sheet | Auftrag 13 | `items` with label, note and a small image (data URL, at most about 220 KB each) |
+| `fanotes-plate` | Picture sheet | Auftrag 13 | `items` with label, note and a picture stored as a file in the vault (`.fanotes/worksheets/<id>.jpg`, the folder the sheet import uses) and referenced by path; old notes with small data URLs still read |
 | `fanotes-term` | Definition cards | Auftrag 7 | `terms` with term, definition, example, source |
 
 Key and map diagrams export as PNG (copy, save, or place on the open sheet). Sort results insert as a Markdown table or list.
 Picture sheets and definition cards feed the existing flashcards (`## Lernfragen` cards keep working):
-cards get the ids `plate:<item id>` and `term:<term id>`, and the review schedule is kept per id in the note's `fanotes-cards-v1` comment (pictures are not copied there).
+cards get the ids `plate:<item id>` and `term:<term id>`, and the review schedule is kept per id in the note's `fanotes-cards-v1` comment (pictures are not copied there; cards point at the same vault file).
 
 ## PDFs: assignments and highlights
 

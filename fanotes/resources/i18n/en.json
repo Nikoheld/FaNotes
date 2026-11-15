@@ -4141,5 +4141,7 @@
   "Tabelle": "Table",
   "Art": "Species",
   "Text": "Text",
-  "Aufträge und Markierungen": "Assignments and highlights"
+  "Aufträge und Markierungen": "Assignments and highlights",
+  "Bild nicht gefunden": "Image not found",
+  "Bild konnte nicht gespeichert werden.": "The image could not be saved."
 }
