@@ -500,6 +500,21 @@ fn navigation_allowed(url: &tauri::Url) -> bool {
     }
 }
 
+/// `window.fanotes` and the language override, before the bundle runs.
+///
+/// Plugin scripts run after Tauri's core defines `__TAURI_INTERNALS__.invoke`.
+/// An invoke initialization script runs before that, so the bridge found no
+/// `invoke`, returned, and the bundle fell back to the web API.
+fn bridge_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("fanotes-bridge")
+        .js_init_script(format!(
+            "{}{}",
+            system_language_script(fanotes_host::desktop_navigator_language()),
+            include_str!("fanotes-api.js")
+        ))
+        .build()
+}
+
 fn navigation_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("fanotes-navigation")
         .on_navigation(|_webview, url| navigation_allowed(url))
@@ -823,6 +838,7 @@ pub fn run() {
             }
         }))
         .plugin(navigation_plugin())
+        .plugin(bridge_plugin())
         .setup(|app| {
             let app_data = app
                 .path()
@@ -864,10 +880,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(smoke::observe(register()))
-        .append_invoke_initialization_script(system_language_script(
-            fanotes_host::desktop_navigator_language(),
-        ))
-        .append_invoke_initialization_script(include_str!("fanotes-api.js"))
         .run(tauri::generate_context!())
         .expect("FaNotes Tauri host failed");
 }
