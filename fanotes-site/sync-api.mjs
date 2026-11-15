@@ -732,6 +732,38 @@ export const rejectsBlankOverwrite = (current, nextSize, blank, clear) => {
   return collapse
 }
 
+/** Byte size of the newest archived blob. A tombstone's live size is 0, so this is the content a resurrection must not shrink away. */
+export const newestArchivedBytes = (files) => {
+  const list = (files || []).filter((file) => file && Number.isFinite(file.revision) && Number.isFinite(file.size))
+  if (!list.length) return 0
+  const newestRevision = list.reduce((max, file) => Math.max(max, file.revision), 0)
+  return list.filter((file) => file.revision === newestRevision).reduce((max, file) => Math.max(max, file.size), 0)
+}
+
+/**
+ * Whether a PUT may become the live blob.
+ * `stale`: the base revision is not current, and this body is not a real note
+ * being put back over a tombstone. `guard`: the body is empty, blank, or a
+ * collapse of the live note — or of the archived note a tombstone still points
+ * at. Client clocks never enter this decision; only the revision and the sizes do.
+ * `archivedSize` is the newest archived blob and is consulted only for a tombstone.
+ */
+export const evaluateSyncWrite = ({ current, base, nextSize, blank, clear, archivedSize = 0 }) => {
+  const currentRevision = current ? Number(current.revision) || 0 : 0
+  if (current?.deleted) {
+    const protectedSize = Number(archivedSize) || 0
+    // An empty or blank body must not turn a deletion back into a live note.
+    if (!clear && (blank === true || nextSize <= EMPTY_CIPHERTEXT_BYTES)) return 'guard'
+    if (rejectsBlankOverwrite({ deleted: false, size: protectedSize }, nextSize, blank, clear)) return 'guard'
+    const recreates = base < currentRevision && nextSize > EMPTY_CIPHERTEXT_BYTES && blank !== true
+    if (currentRevision !== base && !recreates) return 'stale'
+    return 'accept'
+  }
+  if (currentRevision !== base) return 'stale'
+  if (rejectsBlankOverwrite(current, nextSize, blank, clear)) return 'guard'
+  return 'accept'
+}
+
 const listRevisionFiles = async (directory) => {
   let names
   try {
@@ -786,12 +818,16 @@ const handlePutFile = async (request, response, auth, fileId) => {
   await withAccountLock(auth.account.id, async () => {
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
-    const currentRevision = current ? current.revision : 0
-    // A tombstone holds no content, so a device that still has the note may put
-    // it back from any older base. The deleted blob stays in the archive.
-    const recreatesTombstone = Boolean(current?.deleted) && base < currentRevision && body.length > EMPTY_CIPHERTEXT_BYTES && blank !== true
-    if (currentRevision !== base && !recreatesTombstone) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
-    if (rejectsBlankOverwrite(current, body.length, blank, clear)) {
+    // A tombstone's live size is zero. The blob that was deleted is the newest
+    // file in the revision archive; a short or empty upload must not become the
+    // live note in its place. A device that still has the note puts that copy
+    // back from any older base. Client clocks are not part of the decision.
+    const archivedSize = current?.deleted
+      ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
+      : 0
+    const decision = evaluateSyncWrite({ current: current ?? null, base, nextSize: body.length, blank, clear, archivedSize })
+    if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
+    if (decision === 'guard') {
       await quarantineRejected(auth.account.id, fileId, base, body)
       return guardRejected(request, response, current)
     }
@@ -904,12 +940,16 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
       sendJson(request, response, 200, { revision: currentRevision, tableRevision: table.revision })
       return
     }
-    table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, 0, true)
+    // Copy first. The live blob is removed only after the tombstone is durable,
+    // so a crash leaves the note in the archive and still in the live slot.
+    const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
+    table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, 0, false)
     const entry = { id: fileId, revision: table.revision + 1, deleted: true, size: 0, sha256: null, meta: null, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
     table.entries.set(fileId, entry)
     table.bytes -= Number(current.size) || 0
     await appendChange(auth.account.id, table, entry)
+    await fs.rm(blobPath, { force: true })
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision })
   })
 }
