@@ -1,5 +1,19 @@
 # Änderungsverlauf
 
+## 2026.11.2
+
+- **Sync-Konflikte.** Neue Seite unter Einstellungen → Konflikte: beide Fassungen nebeneinander mit Vorschau (Text mit markierten Unterschieden, Handschrift, PDF, Bild). Eine Fassung behalten oder beide; die Wahl gilt auf allen Geräten.
+- **Sync.** Ein Gerät mit altem Stand löscht keine neuere Fassung mehr, auch nicht später. Leere, ältere oder unvollständige Fassungen ersetzen keine Notiz, und eine zweite Konfliktkopie in derselben Minute überschreibt die erste nicht.
+- **Handschrift.** Eine leere Seite wird nicht über Tinte gespeichert, die noch lädt. Lange Notizen speichern ohne Ruckeln.
+- **Suche.** Die Vault-Suche findet Text in Notizen, PDFs, gescannten Seiten (lokale Texterkennung) und Arbeitsblättern und öffnet PDFs an der Fundstelle.
+- **PDF.** Seiten erscheinen schneller, Vorschaubilder werden nur nahe der Ansicht gemalt.
+- **Kanti+ Pendeln.** Strecken zur Schule und zurück mit Live-Verbindungen, Verspätungen, Gleisen, Umstiegen und Auslastung, einer festen Verbindung pro Tag, bis zu zwei Via-Halten, einer Detailansicht mit allen Halten, Warnungen und einem Widget.
+- **Kanti+ Stundenplan.** Ausfälle erscheinen als „Fällt aus“, Änderungen mit Stellvertretung, dazu Pläne anderer Klassen und Räume und der frühere Heimweg, wenn die letzten Stunden ausfallen.
+- **Kanti+ Prüfungen und Noten.** Nur die eigenen Prüfungen, neue Noten innert 10 Minuten als Mitteilung, geplante Absenzen mit vorläufigen Punkten.
+- **Kanti+ im Browser.** schulnetz.fasrv.ch mit neuem Design, Übersicht auf Heute und Notendiagrammen; Kopplung mit einem Code aus der App.
+- **Kanti+.** Mensa-Menü auf Heute, mehrere Schulkonten und das TAM-Intranet, neu gestaltete Widgets, Zurück-Geste mit Vorschau, der Schulkontoauszug lädt wieder, keine falsche Offline-Meldung beim Start.
+- **Stabilität.** Stundenplan und Prüfungen bleiben erhalten, wenn ein Schulnetz-Abruf leer ist oder blockiert wird.
+
 ## 2026.11.2-beta.31
 
 - Pendeln: the train card on Heute now sits under "Von der Schule" (Android and browser).
