@@ -156,6 +156,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var onEdgeHistory: (Int) -> Unit = {}
     var onTogglePaperTask: (Int) -> Unit = {}
     var onFollowMarkdown: (String, Boolean, String?) -> Unit = { _, _, _ -> }
+    /** A tap on a drawn study block: its kind and its position among the note's study blocks. */
+    var onStudyBlock: (String, Int) -> Unit = { _, _ -> }
     var onCamera: (Float, Float, Float) -> Unit = { _, _, _ -> }
     var onPenActive: (Boolean) -> Unit = {}
     var placingSection = false
@@ -893,6 +895,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 if (fingers.remove(id) != null && fingers.size < 2 && action != MotionEvent.ACTION_CANCEL) {
                     if (taskTap && tryTogglePaperTask(event.getX(index), event.getY(index))) navTap = false
                     else if (taskTap && tryFollowPaperLink(event.getX(index), event.getY(index))) navTap = false
+                    else if (taskTap && tryOpenStudyBlock(event.getX(index), event.getY(index))) navTap = false
                     else maybeSwipe(event)
                     settleZoom()
                 }
@@ -1303,6 +1306,7 @@ class InkSurfaceView @JvmOverloads constructor(
                     top += height
                 }
                 is PaperBlock.Image -> top += block.frameHeight + 24f * scale
+                is PaperBlock.Study -> top += block.height
             }
         }
         return false
@@ -1351,7 +1355,37 @@ class InkSurfaceView @JvmOverloads constructor(
                     top += height
                 }
                 is PaperBlock.Image -> top += block.frameHeight + 24f * scale
+                is PaperBlock.Study -> top += block.height
             }
+        }
+        return false
+    }
+
+    /** A stationary tap on a drawn study block opens its editor (sorting board, definition cards) or the hint. */
+    private fun tryOpenStudyBlock(x: Float, y: Float): Boolean {
+        if (!showMarkdown || markdown.isBlank() || !markdown.contains("fanotes-")) return false
+        val scale = pixelsPerPageUnit()
+        if (scale <= 0f) return false
+        val point = unrotated(x, y)
+        val originX = (session?.document?.originX ?: 0.0).toFloat()
+        val originY = (session?.document?.originY ?: 0.0).toFloat()
+        val textX = point.first - pageLeft - (TEXT_PAD_X + originX) * scale
+        val textY = point.second - pageTop - (TEXT_PAD_Y + originY) * scale
+        if (textX < -8f || textY < 0f || textX > TEXT_COLUMN * scale + 8f) return false
+        var top = 0f
+        for (block in paperBlocks(scale)) {
+            val height = when (block) {
+                is PaperBlock.Text -> block.layout.height.toFloat()
+                is PaperBlock.Table -> block.rowHeights.sum() + 10f * scale
+                is PaperBlock.Image -> block.frameHeight + 24f * scale
+                is PaperBlock.Study -> block.height
+            }
+            if (textY >= top && textY < top + height) {
+                if (block !is PaperBlock.Study) return false
+                onStudyBlock(block.kindId, block.index)
+                return true
+            }
+            top += height
         }
         return false
     }
@@ -2182,6 +2216,16 @@ class InkSurfaceView @JvmOverloads constructor(
                     number += 1
                     drawImageCard(canvas, block, scale)
                 }
+                is PaperBlock.Study -> {
+                    if (showLineNumbers) drawNumber(canvas, number.toString(), editorFontPx * scale, scale)
+                    number += 1
+                    canvas.save()
+                    canvas.translate(0f, 6f * scale)
+                    canvas.scale(block.unit, block.unit)
+                    studyPainterFor(accentColor).draw(canvas, block.scene, paperImages)
+                    canvas.restore()
+                    canvas.translate(0f, block.height)
+                }
             }
         }
         canvas.restore()
@@ -2198,8 +2242,11 @@ class InkSurfaceView @JvmOverloads constructor(
             built += PaperBlock.Text(textLayoutFor(styled.text, scale), styled.starts, styled.tasks, styled.links)
             textLines.clear()
         }
-        for (line in paperLines(markdown)) {
-            if (line.kind == PaperKind.TABLE) {
+        for (line in paperLines(markdown, studyBlocks = true)) {
+            if (line.kind == PaperKind.STUDY) {
+                flush()
+                studyBlock(line.text, scale)?.let { built += it }
+            } else if (line.kind == PaperKind.TABLE) {
                 flush()
                 built += tableBlock(line.text, scale)
             } else if (line.kind == PaperKind.IMAGE) {
@@ -2218,6 +2265,29 @@ class InkSurfaceView @JvmOverloads constructor(
         cachedImageEpoch = imageEpoch
         textStamp = scale
         return built
+    }
+
+    private var studyPainter: StudyPainter? = null
+    private var studyPainterAccent = 0
+
+    private fun studyPainterFor(accent: Int): StudyPainter {
+        val current = studyPainter
+        if (current != null && studyPainterAccent == accent) return current
+        return StudyPainter(accent).also {
+            studyPainter = it
+            studyPainterAccent = accent
+        }
+    }
+
+    /** Lays a study block out for the text column; the block's text follows the editor font size. */
+    private fun studyBlock(text: String, scale: Float): PaperBlock.Study? {
+        val parts = text.split('\u001f', limit = 3)
+        if (parts.size < 3) return null
+        val kind = ch.fasrv.fanotes.study.StudyKind.of(parts[0]) ?: return null
+        val fontScale = (editorFontPx / 16f).coerceAtLeast(0.5f)
+        val scene = cachedStudyScene(kind.id, parts[2], (TEXT_COLUMN / fontScale).toDouble()) ?: return null
+        val unit = scale * fontScale
+        return PaperBlock.Study(parts[0], parts[1].toIntOrNull() ?: 0, scene, unit, (scene.height * unit).toFloat() + 12f * scale)
     }
 
     private fun textLayoutFor(text: CharSequence, scale: Float): StaticLayout {
@@ -2771,6 +2841,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 is PaperBlock.Text -> block.layout.height.toFloat()
                 is PaperBlock.Table -> block.rowHeights.sum() + 10f * scale
                 is PaperBlock.Image -> block.frameHeight + 24f * scale
+                is PaperBlock.Study -> block.height
             }
         }
         val originY = session?.document?.originY ?: 0.0
@@ -2969,6 +3040,7 @@ private sealed class PaperBlock {
     ) : PaperBlock()
     class Table(val rows: List<List<String>>, val rowHeights: FloatArray, val cellLayouts: List<List<StaticLayout>>) : PaperBlock()
     class Image(val caption: String, val source: String, val frameHeight: Float, val bitmap: android.graphics.Bitmap?) : PaperBlock()
+    class Study(val kindId: String, val index: Int, val scene: ch.fasrv.fanotes.study.StudyScene, val unit: Float, val height: Float) : PaperBlock()
 }
 
 private data class GuideDrag(

@@ -189,6 +189,7 @@ private fun spanFor(
     LiveKind.CODE_FENCE -> CodeFenceSpan()
     LiveKind.MATH -> PaperInlineMathSpan(textSizePx)
     LiveKind.MATH_BLOCK -> PaperMathBlockSpan(mark.label, paperMathFillArgb(accent), paperMathBorderArgb(accent), textSizePx)
+    LiveKind.STUDY_BLOCK -> StudyBlockSpan(mark.label, mark.body, images, imageColumnPx, accent)
     LiveKind.LINK -> LinkSpan(readable, textSizePx)
     LiveKind.DETAILS_SUMMARY -> DetailsSummarySpan(
         mark.label,

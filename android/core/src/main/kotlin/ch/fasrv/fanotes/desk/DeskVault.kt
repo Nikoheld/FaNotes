@@ -264,6 +264,8 @@ data class FlashCard(
     val due: String,
     val reps: Int = 0,
     val lapses: Int = 0,
+    /** Picture on the front (picture sheets). Derived from the note's study block, never stored with the schedule. */
+    val frontImage: String? = null,
 )
 
 private const val CARDS_START = "<!-- fanotes-cards-v1"
@@ -286,15 +288,22 @@ private fun cardIdFor(front: String, used: MutableSet<String>): String {
 }
 
 fun cardsFromMarkdown(markdown: String, today: String): List<FlashCard> {
-    val stored = parseStoredCards(markdown)
+    val storedAll = parseStoredCards(markdown)
+    // Definition cards and picture sheets feed the same schedule; their ids come from the block.
+    val stored = storedAll.filterNot { ch.fasrv.fanotes.study.isStudyCardId(it.id) }
     val byFront = stored.associateBy { it.front }
     val questions = questionBlocks(markdown)
-    if (questions.isEmpty()) return stored
-    val used = stored.map { it.id }.toMutableSet()
-    return questions.map { pair ->
+    val used = storedAll.map { it.id }.toMutableSet()
+    val fromQuestions = if (questions.isEmpty()) stored else questions.map { pair ->
         byFront[pair.first]?.copy(back = pair.second.ifBlank { byFront[pair.first]?.back.orEmpty() })
             ?: FlashCard(cardIdFor(pair.first, used), pair.first, pair.second, due = today)
     }
+    val byId = storedAll.associateBy { it.id }
+    val fromStudy = ch.fasrv.fanotes.study.studyCardSources(markdown).map { source ->
+        (byId[source.id] ?: FlashCard(source.id, source.front, source.back, due = today))
+            .copy(front = source.front, back = source.back, frontImage = source.frontImage)
+    }
+    return fromQuestions + fromStudy
 }
 
 fun dueCards(cards: List<FlashCard>, today: String) = cards.filter { it.due <= today }

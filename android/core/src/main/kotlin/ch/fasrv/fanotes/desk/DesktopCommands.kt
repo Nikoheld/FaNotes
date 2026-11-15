@@ -141,9 +141,13 @@ private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWor
     "study" -> work.copy(destination = "study", message = null)
     "flashcards" -> work.copy(overlays = work.overlays + "flashcards", destination = "notes", message = null)
     "homework" -> work.copy(destination = "homework", message = null)
-    // The study tools (blocks, task panel) live in the shared editor on desktop and web; on Android they only point there.
-    "study-key", "study-sort", "study-map", "study-plate", "study-term", "study-tasks", "study-marks" ->
-        work.copy(message = "Lernwerkzeuge öffnest du in der Computer-App oder im Browser. Die Blöcke bleiben als Text in der Notiz lesbar.")
+    // Assignments and highlights open as a panel of the open PDF; sorting boards and definition cards are inserted
+    // and edited on the tablet. Key tables, concept maps and picture sheets are drawn here but built on the computer.
+    "study-tasks", "study-marks" -> work.copy(overlays = work.overlays + id, message = null)
+    "study-sort" -> insertStudyTemplate(work, ch.fasrv.fanotes.study.StudyKind.SORT, ch.fasrv.fanotes.study.sortDataJson(ch.fasrv.fanotes.study.defaultSortData()))
+    "study-term" -> insertStudyTemplate(work, ch.fasrv.fanotes.study.StudyKind.TERM, ch.fasrv.fanotes.study.termDataJson(ch.fasrv.fanotes.study.defaultTermData()))
+    "study-key", "study-map", "study-plate" ->
+        work.copy(message = "Diesen Block legst du am Computer an. Auf dem Tablet siehst du ihn in der Notiz.")
     "calendar" -> work.copy(destination = "calendar", message = null)
     "daily" -> openDaily(work, extras.today, extras)
     "daily-previous" -> openAdjacentDaily(work, extras, -1)
@@ -397,6 +401,11 @@ private fun insertStamp(work: DeskWork, stamp: String): DeskWork {
     val index = work.cursorLine.coerceIn(0, lines.lastIndex.coerceAtLeast(0))
     if (lines.isEmpty()) lines += inserted else lines[index] = lines[index] + inserted
     return replaceOpen(work, lines.joinToString("\n"))
+}
+
+private fun insertStudyTemplate(work: DeskWork, kind: ch.fasrv.fanotes.study.StudyKind, data: ch.fasrv.fanotes.json.JsonValue): DeskWork {
+    if (work.openPath == null) return work.copy(message = "Öffne zuerst eine Notiz.")
+    return replaceOpen(work, ch.fasrv.fanotes.study.insertStudyBlock(work.markdown, kind, data))
 }
 
 private fun toggleOpenTask(work: DeskWork): DeskWork {

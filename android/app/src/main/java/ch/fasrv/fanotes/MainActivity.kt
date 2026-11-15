@@ -3016,6 +3016,8 @@ private fun NotePage(
                                 "tags" -> "Tag hinzufügen"
                                 "search" -> "Im Text suchen …"
                                 "more" -> "Mehr"
+                                "study-tasks" -> "Aufträge"
+                                "study-marks" -> "Markierungen"
                                 else -> "Werkzeuge"
                             },
                         ),
@@ -3030,12 +3032,14 @@ private fun NotePage(
                     "pdf-search" -> PdfSearchBar(model)
                     "pdf-thumbs" -> PdfThumbStrip(model)
                     "pdf-password" -> PdfPasswordPrompt(model)
+                    "study-tasks", "study-marks" -> StudyPanel(model, editorMenu.orEmpty())
                     "more" -> EditorMoreMenu(model, noteKind, backdrop, showRelations, onExportPdf, onDownload, onImportSheet)
                     else -> Unit
                 }
                 if (noteKind == NoteKind.PDF && editorMenu == "pdf-search") PdfQuoteMarks(model)
             }
         }
+        StudyBlockDialog(model)
         if (showGoto) {
             GotoLineDialog { input ->
                 model.closeGotoLine()
@@ -3218,6 +3222,7 @@ private fun PageSurface(
             )
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
+            page.onStudyBlock = { kind, index -> model.openStudyBlock(kind, index) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
             val pendingStamp = model.stampRequest.value
             if (!pendingStamp.isNullOrEmpty()) {

@@ -34,3 +34,12 @@ The highlights overview reads the existing `fanotes-pdf-marks-v1` marks.
 
 - `npm run check:study-tools` parses, serialises, detects and lays out (no browser).
 - `scripts/check-study-ui.mjs` is a Playwright smoke test against a web build (see its header).
+
+## Android tablet
+
+The Android app (`android/core/.../study`) reads and writes the same text, so a note edited on either side stays valid on the other.
+
+- **Aufträge** (PDF notes, toolbar chip "Aufträge" or the command palette): the same detection rules, the same `fanotes-tasks-v1` comment, checkbox, timer (saved every ten seconds while it runs), jump to page, add, edit, remove and progress. Detection reads the PDF text layer through the Android 15 PDF renderer; on older Android versions assignments are added by hand. The ported rules are checked against the desktop results in `android/core/src/test/resources/study/vectors.json`, which `node scripts/generate-android-study-fixtures.mjs` regenerates from the desktop code.
+- **Markierungen** (PDF notes): highlights grouped by page with jump, remove and "Als Notiz kopieren". Android stores them in the same `fanotes-pdf-marks-v1` comment.
+- **Blocks in Markdown notes**: all five kinds are drawn read-only (table, key tree, sorting groups, concept map with arrows, picture grid, definition cards) in the text editor and on the paper view; a block whose JSON cannot be read stays a raw code block. Tapping a drawn block opens the sorting board (drag cards between groups, or tap a card and pick the group) or the definition card editor; every change is written back into the block. Key tables, concept maps and picture sheets are created and edited on the computer; the tablet shows them and "Quelltext zeigen" reveals the JSON.
+- **Flashcards**: `fanotes-plate` and `fanotes-term` feed the Android flashcards with the same `plate:<id>` / `term:<id>` ids; picture cards show the vault file.
