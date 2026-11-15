@@ -261,6 +261,26 @@ test('an app older than pins and two vias keeps them when it saves the route', a
   }
 })
 
+test('two saves at once keep the pins the earlier save wrote when the later one omits them', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-pin-'))
+  const accountId = 'a'.repeat(32)
+  const commute = createCommute({ root, fetch: fakeSearch(() => answer(direct())).fetchImpl, now: () => new Date(parseLocal('2026-11-13 06:00:00')) })
+  try {
+    const full = route()
+    const { pins, ...old } = full
+    const newer = commute.save(accountId, { routes: [{ ...full, name: 'Neu', pins: [pin({ departure: '07:42', arrival: '08:11' })] }], settings: {} })
+    const older = commute.save(accountId, { routes: [{ ...old, name: 'Alt' }], settings: {} })
+    const [, second] = await Promise.all([newer, older])
+    assert.equal(second.routes[0].name, 'Alt')
+    assert.equal(second.routes[0].pins[0].departure, '07:42')
+    const stored = await commute.view(accountId)
+    assert.equal(stored.routes[0].name, 'Alt')
+    assert.equal(stored.routes[0].pins[0].departure, '07:42')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('the connection picker answers for unsaved stops through the app API, in departure order', async () => {
   const { createSchulnetzRuntime } = await import('./schulnetz-api.mjs')
   const { Readable } = await import('node:stream')
