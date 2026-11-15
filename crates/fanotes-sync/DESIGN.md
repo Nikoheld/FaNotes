@@ -245,9 +245,11 @@ conflict and log events stream as Tauri events and come back with the result, de
 by sequence number. `markCleared` paths go in and the unused ones come back.
 
 Story scenes (`X.story/scenes/*.json`): the engine treats them as ordinary files today
-(conflict copy on concurrent edits). `merge::SceneMerge` is the extension point: a
-`fanotes-story` implementation can be registered on the engine and is consulted where the
-homework merge is (pull step 6). It is not implemented here.
+(conflict copy on concurrent edits). `EngineOptions::content_merge` is the extension point:
+a `fanotes-story` scene merge can be set there and is consulted where the homework merge
+is (pull step 6, both sides changed and present; `None` keeps the conflict copy). It is
+unset by default and not implemented here. Its log line is still the homework wording and
+should get its own text when a merge is plugged in.
 
 ## 10. Parity harness
 

@@ -38,6 +38,11 @@ pub struct EngineOptions {
     pub on_signed_out: Arc<dyn Fn(&str) + Send + Sync>,
     pub on_log: Arc<dyn Fn(&LogEntry) + Send + Sync>,
     pub now: Option<Callback<f64>>,
+    /// Extension point for structured merges (story scenes from `fanotes-story`):
+    /// `(path, local, remote)` → merged bytes, or `None` for the ordinary conflict copy.
+    /// Consulted where the homework merge is, only when both sides changed and are present.
+    /// Unset by default, so the engine behaves exactly like the TypeScript one.
+    pub content_merge: Option<Arc<dyn Fn(&str, &[u8], &[u8]) -> Option<Vec<u8>> + Send + Sync>>,
 }
 
 impl EngineOptions {
@@ -56,6 +61,7 @@ impl EngineOptions {
             on_signed_out: Arc::new(|_| {}),
             on_log: Arc::new(|_| {}),
             now: None,
+            content_merge: None,
         }
     }
 }
@@ -1073,37 +1079,43 @@ impl SyncEngine {
         }
         let remote_kind = famd::note_sync_kind(&path, &plain);
         let mut result = Applied::Written;
-        if path == HOMEWORK_NOTE_PATH {
-            if let Some(local) = local.as_ref().filter(|local| {
-                local_changed
-                    && local.kind == NoteSyncKind::Present
-                    && remote_kind == NoteSyncKind::Present
-            }) {
-                if let Some(merged) = merge_homework_markdown_bytes(&local.bytes, &plain) {
-                    self.host
-                        .write(&path, &merged, now_ms())
-                        .map_err(host_err)?;
-                    self.set_base(
-                        &path,
-                        LocalBase {
-                            id: entry.id.clone(),
-                            revision,
-                            sha256: meta.sha256.clone(),
-                            size: plain.len() as f64,
-                            mtime_ms: 0.0,
-                            content_sha256: (!plain_identity.is_empty())
-                                .then(|| plain_identity.clone()),
-                            blank: false,
-                        },
-                    );
-                    index(&path);
-                    self.log(
-                        "info",
-                        format!("„{path}“ wurde Aufgabe für Aufgabe zusammengeführt."),
-                    );
-                    return Ok((Applied::Written, Some(path)));
-                }
+        let both_present = |local: &LocalSnapshot| {
+            local_changed
+                && local.kind == NoteSyncKind::Present
+                && remote_kind == NoteSyncKind::Present
+        };
+        let merged = match (&self.options.content_merge, local.as_ref()) {
+            (Some(merge), Some(local)) if path != HOMEWORK_NOTE_PATH && both_present(local) => {
+                merge(&path, &local.bytes, &plain)
             }
+            (_, Some(local)) if path == HOMEWORK_NOTE_PATH && both_present(local) => {
+                merge_homework_markdown_bytes(&local.bytes, &plain)
+            }
+            _ => None,
+        };
+        if let Some(merged) = merged {
+            // Task-by-task merge; the base stays the remote revision, so the next push uploads the merge.
+            self.host
+                .write(&path, &merged, now_ms())
+                .map_err(host_err)?;
+            self.set_base(
+                &path,
+                LocalBase {
+                    id: entry.id.clone(),
+                    revision,
+                    sha256: meta.sha256.clone(),
+                    size: plain.len() as f64,
+                    mtime_ms: 0.0,
+                    content_sha256: (!plain_identity.is_empty()).then(|| plain_identity.clone()),
+                    blank: false,
+                },
+            );
+            index(&path);
+            self.log(
+                "info",
+                format!("„{path}“ wurde Aufgabe für Aufgabe zusammengeführt."),
+            );
+            return Ok((Applied::Written, Some(path)));
         }
         if let Some(local) = local.as_ref().filter(|local| {
             local_changed
