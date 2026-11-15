@@ -572,6 +572,111 @@ try {
     assert.equal(controller.isDirty(), true, 'a failed save keeps the change pending')
     assert.equal(controller.lastSaveError, 'disk full')
   })
+
+  await test('live sync: edits from another device merge into the open story, never overwritten', async () => {
+    const syncMerge = await load('/src/writing/syncMerge.ts')
+    const live = await load('/src/writing/liveSync.ts')
+    const text = (controller) => controller.state.doc.flow.filter((block) => block.ref.kind === 'para').map((block) => runs.runsText(block.runs)).join(' | ')
+    // One disk shared by both devices; sync is simulated by merging into it like the engine does.
+    const disk = new Map()
+    const storageFor = () => ({
+      writeManifest: async (manifest) => { disk.set('story.json', JSON.stringify(manifest)) },
+      writeScene: async (scene) => { disk.set(scene.id, JSON.stringify(scene)) },
+      readScene: async (id) => (disk.has(id) ? syncMerge.mergeableScene(JSON.parse(disk.get(id)), id) : null),
+      readManifest: async () => (disk.has('story.json') ? syncMerge.mergeableManifest(JSON.parse(disk.get('story.json'))) : null),
+    })
+    const a = new controllerMod.WritingController(freshState().doc, 'dev1')
+    disk.set('story.json', JSON.stringify(a.state.doc.manifest))
+    a.apply(type(a.state, 'Hier schreibt der Laptop.'), 'typing', '.')
+    assert.equal(await a.save(storageFor()), true)
+    const sceneId = [...a.state.doc.scenes.keys()][0]
+    // The tablet opens the same story and adds a paragraph.
+    const otherDevice = (edit) => {
+      const scene = JSON.parse(disk.get(sceneId))
+      const b = new controllerMod.WritingController(docMod.makeDoc(JSON.parse(disk.get('story.json')), new Map([[sceneId, scene]])), 'dev2')
+      const end = b.state.doc.flow.filter((block) => block.ref.kind === 'para').at(-1)
+      b.select(docMod.caret({ block: end.key, offset: docMod.blockLength(end) }))
+      b.apply(commands.splitParagraph(b.state), 'structure')
+      b.apply(type(b.state, edit), 'typing', '.')
+      return [...b.state.doc.scenes.values()][0]
+    }
+    const tablet = otherDevice('Das Tablet schreibt auch.')
+    // Sync merges the tablet's version with the file here (both changed) and writes it.
+    disk.set(sceneId, JSON.stringify(syncMerge.mergeSceneVersions(JSON.parse(disk.get(sceneId)), tablet).scene))
+    assert.equal(a.isDirty(), false)
+    assert.equal(a.absorb([syncMerge.mergeableScene(JSON.parse(disk.get(sceneId)), sceneId)], null), true)
+    assert.match(text(a), /Laptop.*Tablet schreibt auch/u, 'the open editor shows the paragraph from the other device')
+    assert.equal(a.isDirty(), false, 'absorbed changes count as saved')
+
+    // The tablet writes again while the laptop has unsaved typing (the race the gate prevents, simulated):
+    a.apply(type(a.state, ' Mehr vom Laptop.'), 'typing', '.')
+    const second = otherDevice('Zweiter Absatz vom Tablet.')
+    disk.set(sceneId, JSON.stringify(syncMerge.mergeSceneVersions(JSON.parse(disk.get(sceneId)), second).scene))
+    assert.equal(await a.save(storageFor()), true)
+    const onDisk = runs.runsText(JSON.parse(disk.get(sceneId)).paragraphs.filter((p) => !p.deleted).flatMap((p) => p.runs))
+    assert.match(onDisk, /Mehr vom Laptop/u)
+    assert.match(onDisk, /Zweiter Absatz vom Tablet/u, 'the save merged the file on disk instead of writing over it')
+    assert.match(text(a), /Zweiter Absatz vom Tablet/u, 'and the editor shows it')
+
+    // Typing during a slow save: the merged-in version still reaches the editor and the next save.
+    const third = otherDevice('Dritter vom Tablet.')
+    disk.set(sceneId, JSON.stringify(syncMerge.mergeSceneVersions(JSON.parse(disk.get(sceneId)), third).scene))
+    a.apply(type(a.state, ' Noch mehr.'), 'typing', '.')
+    const slow = storageFor()
+    const write = slow.writeScene
+    slow.writeScene = async (scene) => { a.apply(type(a.state, ' Während des Speicherns.'), 'typing', '.'); await write(scene) }
+    await a.save(slow)
+    assert.match(text(a), /Dritter vom Tablet/u)
+    assert.match(text(a), /Während des Speicherns/u)
+    await a.save(storageFor())
+    const final = runs.runsText(JSON.parse(disk.get(sceneId)).paragraphs.filter((p) => !p.deleted).flatMap((p) => p.runs))
+    for (const part of ['Laptop', 'Tablet schreibt auch', 'Zweiter Absatz', 'Dritter vom Tablet', 'Noch mehr', 'Während des Speicherns']) assert.match(final, new RegExp(part, 'u'), part)
+
+    // Undo after another device's text was merged in must not take that text out again.
+    a.apply(type(a.state, ' Letzter Satz.'), 'typing', '.')
+    await a.save(storageFor())
+    const fourth = otherDevice('Vierter vom Tablet.')
+    disk.set(sceneId, JSON.stringify(syncMerge.mergeSceneVersions(JSON.parse(disk.get(sceneId)), fourth).scene))
+    a.absorb([syncMerge.mergeableScene(JSON.parse(disk.get(sceneId)), sceneId)], null)
+    assert.equal(a.canUndo(), false, 'the history ends at a merge')
+    assert.equal(a.undo(), false)
+    assert.match(text(a), /Vierter vom Tablet/u)
+
+    // Sync wrote over a save that finished during its download: our text is not on disk.
+    a.apply(type(a.state, ' Nur hier.'), 'typing', '.')
+    await a.save(storageFor())
+    const before = JSON.parse(disk.get(sceneId))
+    const lost = { ...before, paragraphs: before.paragraphs.map((p) => ({ ...p, runs: p.runs.map((run) => ({ ...run, text: run.text.replace(' Nur hier.', '') })) })) }
+    disk.set(sceneId, JSON.stringify(lost))
+    a.absorb([syncMerge.mergeableScene(JSON.parse(disk.get(sceneId)), sceneId)], null)
+    assert.match(text(a), /Nur hier/u, 'the editor keeps the text')
+    assert.equal(a.isDirty(), true, 'and saves it again, since it is not on disk')
+    await a.save(storageFor())
+    assert.match(runs.runsText(JSON.parse(disk.get(sceneId)).paragraphs.filter((p) => !p.deleted).flatMap((p) => p.runs)), /Nur hier/u)
+
+    // A clean editor absorbing the same content written with another key order stays clean (no save ping-pong).
+    const same = JSON.parse(disk.get(sceneId))
+    const reordered = { paragraphs: same.paragraphs.map((p) => Object.fromEntries(Object.entries(p).reverse())), id: same.id, format: same.format }
+    disk.set(sceneId, JSON.stringify(reordered))
+    a.absorb([syncMerge.mergeableScene(JSON.parse(disk.get(sceneId)), sceneId)], null)
+    assert.equal(a.isDirty(), false, 'same content, other key order: nothing to save')
+
+    // The gate: scenes and manifest of the open story may be written only while the editor is clean.
+    let dirty = false
+    const changed = []
+    const off = live.registerStoryGate({ path: 'B/R.story', isBusy: () => dirty, changed: (files) => changed.push(...files) })
+    assert.equal(live.storySyncBusy('B/R.story', 'B/R.story/scenes/abc123.json'), false)
+    assert.equal(live.storySyncBusy('B/R.story', 'B/R.story/story.json'), false)
+    assert.equal(live.storySyncBusy('B/R.story', 'B/R.story/bible/characters/abc123.json'), true, 'other story files wait until it is closed')
+    assert.equal(live.storySyncBusy('B/R.story', 'B/R.story/scenes/../x.json'), true)
+    assert.equal(live.storySyncBusy('B/R.story', 'B/Other.md'), false)
+    dirty = true
+    assert.equal(live.storySyncBusy('B/R.story', 'B/R.story/scenes/abc123.json'), true, 'unsaved edits make it wait')
+    live.notifyStoryWritten('B/R.story', ['B/R.story/scenes/abc123.json', 'B/R.story/progress/x.json', 'B/Other.md'])
+    assert.deepEqual(changed, ['scenes/abc123.json'])
+    off()
+    assert.equal(live.storySyncBusy('B/R.story', 'B/R.story/scenes/abc123.json'), true, 'without an editor the whole story waits')
+  })
 } finally {
   await vite.close()
 }

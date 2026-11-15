@@ -61,6 +61,7 @@ import {
   Type,
   X,
 } from 'lucide-react'
+import { notifyStoryWritten, storySyncBusy } from './writing/liveSync'
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
@@ -2420,9 +2421,10 @@ export default function App({ startupBootstrap }: AppProps) {
 
   /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
   const isSyncPathBusy = useCallback((path: string) => {
-    // The open story's files: the writing mode holds them in memory and saves from there,
-    // so remote changes wait until it is closed (the sync then merges them paragraph by paragraph).
-    if (writingPathRef.current && path.startsWith(`${writingPathRef.current}/`)) return true
+    // The open story's files: the writing mode holds them in memory and saves from there.
+    // Its other files wait until it is closed (the sync then merges them paragraph by paragraph).
+    // Its scenes and manifest may be written while nothing is unsaved there; the editor then merges them live.
+    if (writingPathRef.current && path.startsWith(`${writingPathRef.current}/`)) return storySyncBusy(writingPathRef.current, path)
     const companionOwner = path.endsWith('.famd') ? tabsRef.current.find((tab) => companionNotePath(tab.path, '.famd') === path)?.path : undefined
     const notePath = companionOwner ?? path
     if (pendingWrites.current.has(notePath) || saveTimers.current.has(notePath)) return true
@@ -2435,6 +2437,7 @@ export default function App({ startupBootstrap }: AppProps) {
 
   /** Files another device changed: refresh the tree, reload clean open tabs, drop tabs of deleted notes. */
   const applyRemoteChanges = useCallback(async ({ written, removed }: { written: string[]; removed: string[] }) => {
+    if (writingPathRef.current) notifyStoryWritten(writingPathRef.current, written)
     await refreshTree()
     const stories = new Set([...written, ...removed].flatMap((path) => /^(.+?\.story)\//iu.exec(path)?.[1] ?? []))
     if (stories.size) void import('./lib/docSearch/service').then(({ docSearch }) => { for (const story of stories) docSearch.notifyStoryChanged(story) })
