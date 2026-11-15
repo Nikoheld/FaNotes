@@ -776,6 +776,56 @@ class SyncEngineTest {
         }
     }
 
+    private fun storyScene(vararg paragraphs: Triple<String, String, String>, vectors: Map<String, Map<String, Int>> = emptyMap()) =
+        ("{\"format\":\"fanotes-story-scene-v1\",\"id\":\"scene000001\",\"paragraphs\":[" + paragraphs.joinToString(",") { (id, key, text) ->
+            val v = (vectors[id] ?: mapOf("laptop" to 1)).entries.joinToString(",") { "\"${it.key}\":${it.value}" }
+            "{\"id\":\"$id\",\"key\":\"$key\",\"v\":{$v},\"style\":\"body\",\"runs\":[{\"text\":\"$text\"}]}"
+        } + "]}\n").encodeToByteArray()
+
+    private suspend fun storyTexts(host: MemoryHost, path: String) = ((parseJson(host.read(path).decodeToString()) as JsonValue.Obj).array("paragraphs")!!.items)
+        .map { it as JsonValue.Obj }.filter { it["deleted"] == null }.map { p -> p.array("runs")!!.items.joinToString("") { (it as JsonValue.Obj).string("text")!! } }
+
+    @Test
+    fun storyScenesMergeParagraphByParagraphWithoutAConflictCopy() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Laptop")
+        val engineB = engine(SyncApi(server), hostB, "Tablet")
+        val path = "Bücher/Roman.story/scenes/scene000001.json"
+        val long = "über Straßen und Brücken ".repeat(40)
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            hostA.put(path, storyScene(Triple("para000001", "a0", "Eins $long"), Triple("para000002", "a1", "Zwei $long"), Triple("para000003", "a2", "Drei $long")), 1_000)
+            engineA.syncNow()
+            engineB.login("ada@example.com", "correct horse")
+            engineB.syncNow()
+            // A edits the first paragraph, B the third and adds a fourth; both edit the second.
+            hostA.put(path, storyScene(Triple("para000001", "a0", "Eins neu"), Triple("para000002", "a1", "Zwei vom Laptop"), Triple("para000003", "a2", "Drei $long"),
+                vectors = mapOf("para000001" to mapOf("laptop" to 2), "para000002" to mapOf("laptop" to 2))), 2_000)
+            hostB.put(path, storyScene(Triple("para000001", "a0", "Eins $long"), Triple("para000002", "a1", "Zwei vom Tablet"), Triple("para000003", "a2", "Drei neu"), Triple("para000004", "a3", "Vier"),
+                vectors = mapOf("para000002" to mapOf("laptop" to 1, "tablet" to 1), "para000003" to mapOf("laptop" to 1, "tablet" to 1), "para000004" to mapOf("tablet" to 1))), 3_000)
+            engineA.syncNow()
+            engineB.syncNow()
+            engineA.syncNow()
+            engineB.syncNow()
+            assertEquals(hostA.read(path).decodeToString(), hostB.read(path).decodeToString())
+            val texts = storyTexts(hostA, path)
+            for (expected in listOf("Eins neu", "Zwei vom Laptop", "Zwei vom Tablet", "Drei neu", "Vier")) assertTrue(expected in texts, expected)
+            assertTrue(hostA.files.keys.none { it.contains("Konflikt") })
+            assertTrue(hostB.files.keys.none { it.contains("Konflikt") })
+            // A truncated file (paragraphs gone without tombstones) does not replace the scene.
+            hostB.put(path, storyScene(Triple("para000001", "a0", "Eins neu"), vectors = mapOf("para000001" to mapOf("laptop" to 2))), 4_000)
+            engineB.syncNow()
+            engineA.syncNow()
+            assertTrue("Vier" in storyTexts(hostA, path))
+            assertTrue("Vier" in storyTexts(hostB, path))
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
     private fun engine(api: SyncApi, host: MemoryHost, name: String): SyncEngine {
         val engine = SyncEngine(api, SyncEngineOptions(platform = "android", deviceName = { name }, automatic = { true }))
         engine.attach(host)

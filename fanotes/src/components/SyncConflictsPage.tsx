@@ -30,6 +30,15 @@ const formatBytes = (bytes: number) => (bytes >= 1024 ** 2 ? `${(bytes / 1024 **
 const folderOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')
 const count = (value: number, one: [string, string], many: [string, string]) => `${value.toLocaleString(getUiLocale())} ${value === 1 ? L(...one) : L(...many)}`
 
+/** "Roman · Szene" for a file inside a story, else the document's name. */
+const groupTitle = (group: ConflictGroup) => {
+  if (!group.story) return group.title
+  const role = group.story.role
+  const part = role === 'scene' ? L('Szene', 'scene') : role === 'manifest' ? L('Aufbau', 'outline') : role === 'entity' ? L('Figur, Ort oder Ereignis', 'character, place or event')
+    : role === 'note' ? L('Notiz', 'note') : role === 'progress' ? L('Fortschritt', 'progress') : role === 'snapshot' ? L('Schnappschuss', 'snapshot') : group.title
+  return `${group.story.name} · ${part}`
+}
+
 const lineClass = (line: string) => (
   /^#{1,2}\s/u.test(line) ? 'is-heading'
     : /^#{3,6}\s/u.test(line) ? 'is-subheading'
@@ -143,6 +152,7 @@ function PreviewBody({ preview, changed, highlight }: { preview: ConflictPreview
         ? <InkThumbnail inkJson={preview.inkJson} label={L('Handschrift', 'Handwriting')} />
         : <p className="conflict-empty">{L('Keine Handschrift auf dieser Seite.', 'No handwriting on this page.')}</p>
     case 'text':
+    case 'story':
     case 'note': {
       const lines = preview.lines
       return (
@@ -151,7 +161,7 @@ function PreviewBody({ preview, changed, highlight }: { preview: ConflictPreview
           {lines.length ? (
             <div className={`conflict-text ${preview.kind === 'text' ? 'is-plain' : ''}`}>
               {lines.map((line, index) => (
-                <div key={index} className={`conflict-line ${preview.kind === 'note' ? lineClass(line) : ''} ${highlight && changed.has(index) ? 'is-changed' : ''}`}>
+                <div key={index} className={`conflict-line ${preview.kind !== 'text' ? lineClass(line) : ''} ${highlight && changed.has(index) ? 'is-changed' : ''}`}>
                   {(preview.kind === 'note' ? lineText(line) : line) || ' '}
                 </div>
               ))}
@@ -174,6 +184,12 @@ const facts = (preview: ConflictPreview) => {
   }
   if (preview.kind === 'ink') out.push(count(preview.strokes, ['Strich', 'stroke'], ['Striche', 'strokes']))
   if (preview.kind === 'text') out.push(count(preview.lines.length, ['Zeile', 'line'], ['Zeilen', 'lines']))
+  if (preview.kind === 'story') {
+    out.push(preview.role === 'scene' ? L('Szene', 'Scene') : preview.role === 'manifest' ? L('Aufbau der Geschichte', 'Story outline') : L('Figuren und Orte', 'Characters and places'))
+    if (preview.role === 'scene') out.push(count(preview.paragraphs, ['Absatz', 'paragraph'], ['Absätze', 'paragraphs']))
+    if (preview.role === 'manifest') out.push(count(preview.paragraphs, ['Eintrag', 'entry'], ['Einträge', 'entries']))
+    out.push(count(preview.words, ['Wort', 'word'], ['Wörter', 'words']))
+  }
   if (preview.kind !== 'missing') out.push(formatBytes(preview.size))
   return out
 }
@@ -241,7 +257,7 @@ export function SyncConflictsPage({ engine, syncState }: { engine: SyncEngine; s
     if (!loaded) return { left: new Set<number>(), right: new Set<number>() }
     const left = loaded.previews.original
     const right = loaded.previews.copy
-    const linesOf = (preview: ConflictPreview) => (preview.kind === 'note' || preview.kind === 'text' ? preview.lines : [])
+    const linesOf = (preview: ConflictPreview) => (preview.kind === 'note' || preview.kind === 'text' || preview.kind === 'story' ? preview.lines : [])
     return changedLines(linesOf(left), linesOf(right))
   }, [loaded])
 
@@ -322,7 +338,7 @@ export function SyncConflictsPage({ engine, syncState }: { engine: SyncEngine; s
                   <button type="button" onClick={() => { setNotice(null); setSelectedId(group.id) }}>
                     <span className="conflict-list-icon">{group.internal ? <PenLine size={16} /> : /\.pdf$/iu.test(group.path) ? <FileText size={16} /> : /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/iu.test(group.path) ? <ImageIcon size={16} /> : <FileText size={16} />}</span>
                     <span className="conflict-list-copy">
-                      <strong>{group.internal ? L('Handschrift-Daten', 'Handwriting data') : group.title}</strong>
+                      <strong>{group.internal ? L('Handschrift-Daten', 'Handwriting data') : groupTitle(group)}</strong>
                       <small>
                         {[folderOf(group.path) || L('Vault', 'Vault'), group.device ? L(`Kopie von ${group.device}`, `copy from ${group.device}`) : null, formatWhen(group.at)].filter(Boolean).join(' · ')}
                       </small>
@@ -358,7 +374,7 @@ export function SyncConflictsPage({ engine, syncState }: { engine: SyncEngine; s
       changed: diff.right,
     },
   ]
-  const textual = (preview: ConflictPreview) => preview.kind === 'note' || preview.kind === 'text'
+  const textual = (preview: ConflictPreview) => preview.kind === 'note' || preview.kind === 'text' || preview.kind === 'story'
   const identicalText = textual(previews.original) && textual(previews.copy) && diff.left.size === 0 && diff.right.size === 0
   const confirmText = confirm === 'copy'
     ? L(`Die Fassung von ${group.device ?? 'der Kopie'} wird hochgeladen und ersetzt „${group.title}“ auf allen Geräten. Die bisherige Fassung bleibt im Archiv des Sync-Servers${window.fanotes?.platform !== 'web' ? ' und landet auf diesem Computer im Papierkorb' : ''}.`, `The version from ${group.device ?? 'the copy'} is uploaded and replaces “${group.title}” on all devices. The current version stays in the sync server's archive${window.fanotes?.platform !== 'web' ? ' and goes to this computer’s trash' : ''}.`)
@@ -371,7 +387,7 @@ export function SyncConflictsPage({ engine, syncState }: { engine: SyncEngine; s
       <div className="conflict-detail-head">
         <button type="button" className="secondary-button" onClick={() => { setSelectedId(null); setConfirm(null) }} disabled={busy}><ArrowLeft size={14} /> {L('Alle Konflikte', 'All conflicts')}</button>
         <div>
-          <h3>{group.internal ? L('Handschrift-Daten', 'Handwriting data') : group.title}</h3>
+          <h3>{group.internal ? L('Handschrift-Daten', 'Handwriting data') : groupTitle(group)}</h3>
           <small>{group.pairs.map((pair) => pair.path).join(' · ')}</small>
         </div>
       </div>

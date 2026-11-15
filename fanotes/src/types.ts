@@ -344,7 +344,9 @@ export type SearchHit = {
   /** Document index: where the text came from. */
   source?: 'text' | 'text-layer' | 'ocr' | 'transcript'
   /** Document index: what part of the document matched. */
-  unit?: 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations'
+  unit?: 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations' | 'scene' | 'bible'
+  /** Document index: the story scene of a writing-mode hit. */
+  sceneId?: string
   /** Document index: estimated OCR confidence 0–1. */
   confidence?: number
   /** Document index: [start, end) ranges of matched words in `excerpt`. */

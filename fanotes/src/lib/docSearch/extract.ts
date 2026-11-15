@@ -15,6 +15,7 @@ import type { IndexUnit, UnitKind } from './docIndex'
 import type { DocExtractor, DocSource, ExtractContext, ExtractOutcome } from './indexer'
 import { letterCount, recognizeOriented, type RecognizeLine } from './ocrOrientation'
 import { preparePageInWorker } from './ocrPrep'
+import { storySearchUnits } from '../../writing/searchUnits'
 import { buildPageTextRecord, PAGE_TEXT_MAX_DOCUMENT_BYTES, PAGE_TEXT_MAX_PAGE_CHARS, pageTextRecordMatches, sanitizePageTextRecord, type PageTextPage, type PageTextRecord } from './pageText'
 
 export const OCR_ENGINE_ID = 'fanotes-trocr-v1'
@@ -28,7 +29,7 @@ const EXCLUDED_NOTES = new Set(['hausaufgaben.md', 'kalender.md'])
 
 /** Host methods the index needs; all exist on desktop and web except the page-text pair. */
 export type DocSearchHostApi = Pick<FaNotesApi, 'getTree' | 'readFile' | 'readAssetBytes' | 'readWorksheet' | 'readFamdInk'>
-  & Partial<Pick<FaNotesApi, 'readNoteCompanion' | 'readPdfOcr' | 'writePdfOcr' | 'platform'>>
+  & Partial<Pick<FaNotesApi, 'readNoteCompanion' | 'readPdfOcr' | 'writePdfOcr' | 'platform' | 'storyRead' | 'storyList'>>
   & {
     readPageText?: (relativePath: string) => Promise<unknown>
     writePageText?: (record: PageTextRecord) => Promise<unknown>
@@ -46,7 +47,7 @@ const titleOf = (path: string) => (path.split('/').pop() ?? path).replace(/\.[^.
  * sync state, Schulnetz data), dotfiles and excluded notes are never listed.
  * A `.famd` beside a `.pdf` or `.md` is that document's companion, not its own.
  */
-export const listSearchDocuments = (tree: VaultEntry[]) => {
+export const listSearchDocuments = (tree: VaultEntry[], storyStamp?: (path: string) => string) => {
   const files = new Map<string, VaultEntry>()
   const walk = (entries: VaultEntry[] | undefined) => {
     for (const entry of entries ?? []) {
@@ -62,7 +63,11 @@ export const listSearchDocuments = (tree: VaultEntry[]) => {
     const extension = extensionOf(entry.name)
     if (EXCLUDED_NOTES.has(entry.name.toLocaleLowerCase('de-DE')) && !path.includes('/')) continue
     const modifiedAt = Date.parse(entry.modifiedAt ?? '') || 0
-    if (extension === 'pdf') {
+    if (extension === 'story') {
+      // A story folder's own time does not change when a scene does; the service adds a stamp
+      // that changes with every save and sync of the story (and once per app start).
+      if (storyStamp) sources.push({ path, title: titleOf(path), kind: 'story', fingerprint: `story:${fp(entry)}|${storyStamp(path)}`, modifiedAt })
+    } else if (extension === 'pdf') {
       const companion = files.get(`${stemOf(path)}.famd`)
       sources.push({ path, title: titleOf(path), kind: 'pdf', fingerprint: `${fp(entry)}|${fp(companion)}`, modifiedAt })
     } else if (extension === 'md') {
@@ -369,7 +374,22 @@ export const createBrowserExtractor = (deps: Deps): DocExtractor => {
     if (record) await api.writePageText(record).catch(() => undefined)
   }
 
+  const extractStory = async (source: DocSource, context: ExtractContext): Promise<ExtractOutcome> => {
+    if (!api.storyRead || !api.storyList) return { status: 'unsupported', reason: 'Geschichten werden hier nicht unterstützt' }
+    try {
+      const files = await api.storyList(source.path)
+      const units = await storySearchUnits(source.path, files, async (relative) => {
+        await context.pause()
+        return api.storyRead!(`${source.path}/${relative}`)
+      })
+      await context.commit(units)
+      return { status: 'done' }
+    } catch (error) {
+      return { status: 'failed', reason: `Lesen: ${errorText(error)}` }
+    }
+  }
+
   return {
-    extract: (source, context) => (source.kind === 'pdf' ? extractPdf(source, context) : extractNote(source, context)),
+    extract: (source, context) => (source.kind === 'pdf' ? extractPdf(source, context) : source.kind === 'story' ? extractStory(source, context) : extractNote(source, context)),
   }
 }

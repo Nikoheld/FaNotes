@@ -781,6 +781,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [glyphenWerkOpen, setGlyphenWerkOpen] = useState(false)
   /** The `.story` project open in the writing mode (full screen). */
   const [writingPath, setWritingPath] = useState<string | null>(null)
+  const writingPathRef = useRef<string | null>(null)
+  writingPathRef.current = writingPath
   const [glyphenWerkView, setGlyphenWerkView] = useState<GlyphenWerkView>('capture')
   const [glyphenWerkSampleCount, setGlyphenWerkSampleCount] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -2350,6 +2352,9 @@ export default function App({ startupBootstrap }: AppProps) {
 
   /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
   const isSyncPathBusy = useCallback((path: string) => {
+    // The open story's files: the writing mode holds them in memory and saves from there,
+    // so remote changes wait until it is closed (the sync then merges them paragraph by paragraph).
+    if (writingPathRef.current && path.startsWith(`${writingPathRef.current}/`)) return true
     const companionOwner = path.endsWith('.famd') ? tabsRef.current.find((tab) => companionNotePath(tab.path, '.famd') === path)?.path : undefined
     const notePath = companionOwner ?? path
     if (pendingWrites.current.has(notePath) || saveTimers.current.has(notePath)) return true
@@ -2363,6 +2368,8 @@ export default function App({ startupBootstrap }: AppProps) {
   /** Files another device changed: refresh the tree, reload clean open tabs, drop tabs of deleted notes. */
   const applyRemoteChanges = useCallback(async ({ written, removed }: { written: string[]; removed: string[] }) => {
     await refreshTree()
+    const stories = new Set([...written, ...removed].flatMap((path) => /^(.+?\.story)\//iu.exec(path)?.[1] ?? []))
+    if (stories.size) void import('./lib/docSearch/service').then(({ docSearch }) => { for (const story of stories) docSearch.notifyStoryChanged(story) })
     for (const path of removed) {
       if (!tabsRef.current.some((tab) => tab.path === path)) continue
       setTabs((current) => current.filter((tab) => tab.path !== path))
@@ -4467,6 +4474,11 @@ export default function App({ startupBootstrap }: AppProps) {
       if (!hit.inkAnchor) return
       setInkReveal({ path, y: hit.inkAnchor.y, token: Date.now() })
     }
+    if (hit.unit === 'scene' && hit.sceneId) {
+      // A story hit opens the writing mode at that scene (and the paragraph with the words).
+      const { requestStoryReveal } = await import('./writing/reveal')
+      requestStoryReveal(hit.relativePath, { sceneId: hit.sceneId, query: hit.query ?? '' })
+    }
     if (hit.kind !== 'drawing' || !hit.drawingId) {
       await openNote(hit.relativePath)
       reveal(hit.relativePath)
@@ -6381,8 +6393,8 @@ export default function App({ startupBootstrap }: AppProps) {
             <WritingMode
               key={writingPath}
               path={writingPath}
-              onClose={() => { setWritingPath(null); void refreshTree() }}
-              onSaved={() => syncEngine.notifyLocalChange()}
+              onClose={() => { setWritingPath(null); void refreshTree(); syncEngine.notifyLocalChange() }}
+              onSaved={() => { syncEngine.notifyLocalChange(); void import('./lib/docSearch/service').then(({ docSearch }) => docSearch.notifyStoryChanged(writingPath)) }}
             />
           </SafeBoundary>
         </Suspense>

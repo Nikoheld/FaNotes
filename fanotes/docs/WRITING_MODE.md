@@ -132,3 +132,15 @@ Tests: `node scripts/check-writing-tools.mjs` (7: binder moves/refusals, trash s
 - **Import** DOCX (FaNotes styles round-trip; "Heading n"/"Überschrift n"/outline levels, footnotes, endnotes, comments, links, page breaks, scene markers), Markdown, text (chapter headings, hard-wrapped prose, Windows-1252).
 
 Tests: `node scripts/check-writing-export.mjs` (11). 639-page novel (132 000 words, Node, fontkit measurer): layout 0.3–0.5 s, PDF 1.1–1.6 s, 1.6 MB, peak RSS ~260–360 MB on the shared server.
+
+### Milestone 5 (sync and integration) — 2026-11-15
+
+- **Sync, desktop/web** (`src/lib/sync/engine.ts` + `src/writing/syncMerge.ts`): when both sides changed a story file, `scenes/<id>.json` is merged paragraph by paragraph (`mergeScenes`; footnotes/comments by id, deterministic) and `story.json` with `mergeManifests` (newer `updatedAt` gives titles, attributes, page, goals, styles; styles only the older side has stay; binder union by node id, an older-only node stays after its older sibling; dictionary/ignored unioned; unknown fields kept). The merge is written locally and uploaded in the same cycle; no whole-file conflict copy. Bible entries (`bible/<kind>/<id>.json`, `bible/notes/<id>.md`): the newer `updatedAt` (else mtime) keeps the path, the other version is a conflict copy on every device. `progress/**`, `snapshots/**` and damaged files keep the general rules (both versions kept).
+- **Guards**: every scene upload is checked against the server's copy (cached per session, else one download): a scene that lost paragraphs without tombstones is merged back before upload. A severe shrink is uploaded with the clear flag only when every server paragraph is still there as a tombstone (a cut) or, for `story.json`, the same story at least as new; otherwise the existing guard applies. A remote empty or damaged story file never replaces a valid local one.
+- **Open story**: while the writing mode has a story open, App's `isSyncPathBusy` holds remote changes to its files; they are merged when it closes (live merge into the open editor is not wired yet).
+- **Web**: story files (Markdown included) are stored as assets; the writing mode's saves stamp `storyAssetTimes`, so an edit of the same length is uploaded.
+- **Android** (`android/core/.../sync/StorySync.kt`, `SyncEngine.kt`): the same merges and guards; checked on the shared fixtures `scripts/fixtures/writing-sync/cases.json` (`StorySyncTest`) and in `SyncEngineTest`.
+- **Search**: one doc-search unit per scene (chapter and scene title, synopsis, live paragraphs; trash left out) and per bible entry; hits carry `sceneId`; App calls `requestStoryReveal` (`src/writing/reveal.ts`) before opening the story.
+- **Conflict page**: scenes, `story.json` and bible sheets preview as text (`storyPreview`), titled "Story · scene/outline/…".
+
+Tests: `node scripts/check-writing-sync.mjs` (13 groups; `--write` regenerates the fixtures).

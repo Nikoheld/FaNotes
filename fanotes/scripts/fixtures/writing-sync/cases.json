@@ -1,0 +1,1062 @@
+[
+ {
+  "name": "different paragraphs edited on two devices",
+  "path": "Roman.story/scenes/scene000001.json",
+  "left": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 2
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein großes Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Süßes."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ]
+  },
+  "right": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Süßes."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1,
+      "tablet": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende gut, alles gut."
+      }
+     ]
+    },
+    {
+     "id": "para000004",
+     "key": "a3",
+     "v": {
+      "tablet": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Nachwort."
+      }
+     ]
+    }
+   ]
+  },
+  "expected": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 2
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein großes Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Süßes."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1,
+      "tablet": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende gut, alles gut."
+      }
+     ]
+    },
+    {
+     "id": "para000004",
+     "key": "a3",
+     "v": {
+      "tablet": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Nachwort."
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "same paragraph edited on both devices keeps both",
+  "path": "Roman.story/scenes/scene000001.json",
+  "left": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 2
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Schokolade."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ]
+  },
+  "right": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1,
+      "tablet": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Äpfel und Süßes.",
+       "m": {
+        "i": true
+       }
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ]
+  },
+  "expected": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 2,
+      "tablet": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Äpfel und Süßes.",
+       "m": {
+        "i": true
+       }
+      }
+     ]
+    },
+    {
+     "id": "para000002x05ahste",
+     "key": "a1V1akeewl",
+     "v": {
+      "laptop": 2
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Schokolade."
+      }
+     ],
+     "conflictOf": "para000002"
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "edit beats a concurrent delete",
+  "path": "Roman.story/scenes/scene000001.json",
+  "left": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 2
+     },
+     "style": "body",
+     "runs": [],
+     "deleted": true
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ]
+  },
+  "right": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1,
+      "phone": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß sehr gern Süßes."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ]
+  },
+  "expected": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 2,
+      "phone": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß sehr gern Süßes."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "reorder on one device, edit on the other",
+  "path": "Roman.story/scenes/scene000001.json",
+  "left": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Süßes."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "Zz",
+     "v": {
+      "laptop": 2
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ]
+  },
+  "right": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1,
+      "tablet": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Kuchen."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ]
+  },
+  "expected": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000003",
+     "key": "Zz",
+     "v": {
+      "laptop": 2
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    },
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1,
+      "tablet": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Kuchen."
+      }
+     ]
+    }
+   ]
+  }
+ },
+ {
+  "name": "footnotes and comments union",
+  "path": "Roman.story/scenes/scene000001.json",
+  "left": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Süßes."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ],
+   "footnotes": {
+    "fn00000001": {
+     "id": "fn00000001",
+     "runs": [
+      {
+       "text": "Quelle A"
+      }
+     ]
+    }
+   }
+  },
+  "right": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Süßes."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ],
+   "footnotes": {
+    "fn00000002": {
+     "id": "fn00000002",
+     "runs": [
+      {
+       "text": "Quelle B"
+      }
+     ]
+    }
+   },
+   "comments": {
+    "cm00000001": {
+     "id": "cm00000001",
+     "author": "Fabio",
+     "at": "2026-11-15",
+     "text": "Gut"
+    }
+   }
+  },
+  "expected": {
+   "format": "fanotes-story-scene-v1",
+   "id": "scene000001",
+   "paragraphs": [
+    {
+     "id": "para000001",
+     "key": "a0",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Es war einmal ein Mädchen."
+      }
+     ]
+    },
+    {
+     "id": "para000002",
+     "key": "a1",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Sie aß gern Süßes."
+      }
+     ]
+    },
+    {
+     "id": "para000003",
+     "key": "a2",
+     "v": {
+      "laptop": 1
+     },
+     "style": "body",
+     "runs": [
+      {
+       "text": "Ende."
+      }
+     ]
+    }
+   ],
+   "footnotes": {
+    "fn00000001": {
+     "id": "fn00000001",
+     "runs": [
+      {
+       "text": "Quelle A"
+      }
+     ]
+    },
+    "fn00000002": {
+     "id": "fn00000002",
+     "runs": [
+      {
+       "text": "Quelle B"
+      }
+     ]
+    }
+   },
+   "comments": {
+    "cm00000001": {
+     "id": "cm00000001",
+     "author": "Fabio",
+     "at": "2026-11-15",
+     "text": "Gut"
+    }
+   }
+  }
+ },
+ {
+  "name": "manifest: binder union, newer titles, dictionary union",
+  "path": "Roman.story/story.json",
+  "left": {
+   "format": "fanotes-story-v1",
+   "id": "story000001",
+   "title": "Der Roman",
+   "language": "de",
+   "page": {
+    "size": "A5"
+   },
+   "styles": {
+    "body": {
+     "id": "body"
+    }
+   },
+   "binder": [
+    {
+     "id": "chap000001",
+     "kind": "chapter",
+     "title": "Erstes Kapitel",
+     "children": [
+      {
+       "id": "scene000001",
+       "kind": "scene",
+       "title": "Anfang",
+       "synopsis": "Wie alles beginnt"
+      },
+      {
+       "id": "scene000002",
+       "kind": "scene",
+       "title": "Mitte"
+      }
+     ]
+    }
+   ],
+   "dictionary": [
+    "Mädchen",
+    "Zwölfe"
+   ],
+   "createdAt": "2026-11-01T10:00:00.000Z",
+   "updatedAt": "2026-11-12T10:00:00.000Z"
+  },
+  "right": {
+   "format": "fanotes-story-v1",
+   "id": "story000001",
+   "title": "Roman",
+   "language": "de",
+   "page": {
+    "size": "A5"
+   },
+   "styles": {
+    "body": {
+     "id": "body"
+    }
+   },
+   "binder": [
+    {
+     "id": "chap000001",
+     "kind": "chapter",
+     "title": "Kapitel 1",
+     "children": [
+      {
+       "id": "scene000001",
+       "kind": "scene",
+       "title": "Anfang"
+      },
+      {
+       "id": "scene000003",
+       "kind": "scene",
+       "title": "Schluss"
+      }
+     ]
+    },
+    {
+     "id": "trashbin",
+     "kind": "folder",
+     "title": "Papierkorb",
+     "children": [
+      {
+       "id": "scene000009",
+       "kind": "scene",
+       "title": "Gestrichen"
+      }
+     ]
+    }
+   ],
+   "dictionary": [
+    "Mädchen"
+   ],
+   "createdAt": "2026-11-01T10:00:00.000Z",
+   "updatedAt": "2026-11-11T10:00:00.000Z",
+   "ignored": [
+    "spelling:Grüße"
+   ],
+   "futureField": {
+    "keep": true
+   }
+  },
+  "expected": {
+   "format": "fanotes-story-v1",
+   "id": "story000001",
+   "title": "Der Roman",
+   "language": "de",
+   "page": {
+    "size": "A5"
+   },
+   "styles": {
+    "body": {
+     "id": "body"
+    }
+   },
+   "binder": [
+    {
+     "id": "chap000001",
+     "kind": "chapter",
+     "title": "Erstes Kapitel",
+     "children": [
+      {
+       "id": "scene000001",
+       "kind": "scene",
+       "title": "Anfang",
+       "synopsis": "Wie alles beginnt"
+      },
+      {
+       "id": "scene000003",
+       "kind": "scene",
+       "title": "Schluss"
+      },
+      {
+       "id": "scene000002",
+       "kind": "scene",
+       "title": "Mitte"
+      }
+     ]
+    },
+    {
+     "id": "trashbin",
+     "kind": "folder",
+     "title": "Papierkorb",
+     "children": [
+      {
+       "id": "scene000009",
+       "kind": "scene",
+       "title": "Gestrichen"
+      }
+     ]
+    }
+   ],
+   "dictionary": [
+    "Mädchen",
+    "Zwölfe"
+   ],
+   "createdAt": "2026-11-01T10:00:00.000Z",
+   "updatedAt": "2026-11-12T10:00:00.000Z",
+   "ignored": [
+    "spelling:Grüße"
+   ],
+   "futureField": {
+    "keep": true
+   }
+  }
+ },
+ {
+  "name": "manifest: node deleted on newer side and edited on older side is kept",
+  "path": "Roman.story/story.json",
+  "left": {
+   "format": "fanotes-story-v1",
+   "id": "story000001",
+   "title": "Roman",
+   "language": "de",
+   "page": {
+    "size": "A5"
+   },
+   "styles": {
+    "body": {
+     "id": "body"
+    }
+   },
+   "binder": [
+    {
+     "id": "chap000001",
+     "kind": "chapter",
+     "title": "Kapitel 1",
+     "children": []
+    }
+   ],
+   "dictionary": [
+    "Mädchen"
+   ],
+   "createdAt": "2026-11-01T10:00:00.000Z",
+   "updatedAt": "2026-11-12T10:00:00.000Z"
+  },
+  "right": {
+   "format": "fanotes-story-v1",
+   "id": "story000001",
+   "title": "Roman",
+   "language": "de",
+   "page": {
+    "size": "A5"
+   },
+   "styles": {
+    "body": {
+     "id": "body"
+    }
+   },
+   "binder": [
+    {
+     "id": "chap000001",
+     "kind": "chapter",
+     "title": "Kapitel 1",
+     "children": [
+      {
+       "id": "scene000001",
+       "kind": "scene",
+       "title": "Anfang (überarbeitet)"
+      }
+     ]
+    }
+   ],
+   "dictionary": [
+    "Mädchen"
+   ],
+   "createdAt": "2026-11-01T10:00:00.000Z",
+   "updatedAt": "2026-11-11T10:00:00.000Z"
+  },
+  "expected": {
+   "format": "fanotes-story-v1",
+   "id": "story000001",
+   "title": "Roman",
+   "language": "de",
+   "page": {
+    "size": "A5"
+   },
+   "styles": {
+    "body": {
+     "id": "body"
+    }
+   },
+   "binder": [
+    {
+     "id": "chap000001",
+     "kind": "chapter",
+     "title": "Kapitel 1",
+     "children": [
+      {
+       "id": "scene000001",
+       "kind": "scene",
+       "title": "Anfang (überarbeitet)"
+      }
+     ]
+    }
+   ],
+   "dictionary": [
+    "Mädchen"
+   ],
+   "createdAt": "2026-11-01T10:00:00.000Z",
+   "updatedAt": "2026-11-12T10:00:00.000Z"
+  }
+ }
+]

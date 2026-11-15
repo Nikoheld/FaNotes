@@ -10,6 +10,7 @@
 
 import { identitySyncBytes } from '../famd'
 import { sha256Hex } from './crypto'
+import { storyPartOf, storyRoleOf, type StoryRole } from '../../writing/syncMerge'
 
 export type ConflictPair = { path: string; copyPath: string }
 
@@ -31,6 +32,8 @@ export type ConflictGroup = {
   originalMissing: boolean
   /** A FaNotes data file under `.fanotes/` (handwriting record, settings). */
   internal: boolean
+  /** A file inside a writing-mode project: the story's name and what the file is. */
+  story?: { name: string; role: StoryRole }
   /** Size and modification time of each file, when the engine listed them. */
   files?: Record<string, { size: number; mtimeMs: number }>
 }
@@ -117,6 +120,7 @@ export const groupConflicts = (present: ReadonlySet<string>, recorded: readonly 
       at: group.at,
       originalMissing: pairs.every((pair) => !present.has(pair.path)),
       internal: primary.path.startsWith('.fanotes/'),
+      ...(storyRoleOf(primary.path) ? { story: { name: splitPath(storyPartOf(primary.path)!.root).name.replace(/\.story$/iu, ''), role: storyRoleOf(primary.path)! } } : {}),
     }
   }).sort((left, right) => (right.at ?? '').localeCompare(left.at ?? '') || left.title.localeCompare(right.title))
 }

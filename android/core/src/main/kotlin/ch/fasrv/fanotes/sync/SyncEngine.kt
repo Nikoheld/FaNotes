@@ -733,7 +733,44 @@ class SyncEngine(
                     idIndex[entry.id] = path
                     return ApplyResult("written", path)
                 }
-                if (local != null && (changedLocal != null || (remoteKind == NoteSyncKind.BLANK && local.kind != NoteSyncKind.BLANK))) {
+                var storyAdopt = false
+                if (storyRoleOf(path) != null && local != null && changedLocal != null && local.kind == NoteSyncKind.PRESENT) {
+                    // Story files merge instead of becoming whole-file conflict copies (StorySync.kt).
+                    val localMtime = currentHost.scan().firstOrNull { it.path == path }?.mtimeMs ?: 0L
+                    val outcome = mergeStoryFile(path, local.bytes, plain, localMtime, meta.mtimeMs)
+                    // The base becomes the remote revision with the remote size and no mtime, so the push uploads what stays here.
+                    val remoteBase = LocalBase(entry.id, download.revision, meta.sha256, plain.size.toLong(), 0L, plainIdentity, false)
+                    when {
+                        outcome is StoryMergeOutcome.Merged && outcome.sameAsRemote -> storyAdopt = true
+                        outcome is StoryMergeOutcome.Merged -> {
+                            if (!outcome.sameAsLocal) currentHost.write(path, outcome.bytes, options.now())
+                            table.files[path] = remoteBase
+                            idIndex[entry.id] = path
+                            log("info", if (outcome.conflicts > 0) "“$path” was merged paragraph by paragraph; ${outcome.conflicts} paragraph(s) changed on both devices are kept twice." else "“$path” was merged paragraph by paragraph.")
+                            return ApplyResult("written", path)
+                        }
+                        outcome is StoryMergeOutcome.KeepLocal || (outcome is StoryMergeOutcome.Pick && outcome.keepLocal) -> {
+                            // The local version keeps the path; the remote one is kept beside it.
+                            var kept = "written"
+                            if (remoteKind == NoteSyncKind.PRESENT) {
+                                val at = java.time.Instant.ofEpochMilli(options.now())
+                                val copyPath = freeConflictCopyPath(path, at, currentHost)
+                                currentHost.write(copyPath, plain, meta.mtimeMs.takeIf { it > 0 } ?: at.toEpochMilli())
+                                val conflict = SyncConflict(path, copyPath, isoNow(at.toEpochMilli()))
+                                table.conflicts.add(conflict)
+                                if (table.conflicts.size > 50) table.conflicts.removeAt(0)
+                                log("warn", "Conflict in “$path”. The newer copy on this device stays; the other one is now “$copyPath”.")
+                                options.onConflict(conflict)
+                                publish(state.value.copy(conflicts = table.conflicts.toList()))
+                                kept = "conflict"
+                            }
+                            table.files[path] = remoteBase
+                            idIndex[entry.id] = path
+                            return ApplyResult(kept, path)
+                        }
+                    }
+                }
+                if (local != null && !storyAdopt && (changedLocal != null || (remoteKind == NoteSyncKind.BLANK && local.kind != NoteSyncKind.BLANK))) {
                     val at = java.time.Instant.ofEpochMilli(options.now())
                     val copyPath = freeConflictCopyPath(path, at, currentHost)
                     currentHost.write(copyPath, local.bytes, at.toEpochMilli())
@@ -746,6 +783,7 @@ class SyncEngine(
                     result = "conflict"
                 }
                 val stat = currentHost.write(path, body, meta.mtimeMs.takeIf { it > 0 } ?: options.now())
+                rememberStoryBase(path, download.revision, plain)
                 table.files[path] = LocalBase(entry.id, download.revision, meta.sha256, stat.size, stat.mtimeMs, storedIdentity, storedKind == NoteSyncKind.BLANK)
                 idIndex[entry.id] = path
                 return ApplyResult(result, path)
@@ -845,7 +883,55 @@ class SyncEngine(
         }
     }
 
-    private suspend fun uploadPath(entry: SyncScanEntry, table: EngineState, syncKeys: SyncKeys, active: SyncSession, currentHost: SyncHost): String {
+    /** Server copies of story scenes seen this session, to check uploads against without a download. */
+    private val storyBases = LinkedHashMap<String, Pair<Long, ByteArray>>()
+
+    private fun rememberStoryBase(path: String, revision: Long, bytes: ByteArray) {
+        if (storyRoleOf(path) != StoryRole.SCENE) return
+        storyBases.remove(path)
+        storyBases[path] = revision to bytes
+        if (storyBases.size > 400) storyBases.remove(storyBases.keys.first())
+    }
+
+    private sealed class StoryCheck {
+        data object Cut : StoryCheck()
+        class Merge(val bytes: ByteArray) : StoryCheck()
+        data object Guard : StoryCheck()
+        data object Stale : StoryCheck()
+    }
+
+    /** What the server's copy says about a story upload (see `judgeStoryShrink`). */
+    private suspend fun checkStoryUpload(entry: SyncScanEntry, base: LocalBase, raw: ByteArray, syncKeys: SyncKeys, active: SyncSession): StoryCheck {
+        val cached = storyBases[entry.path]
+        val server = if (cached != null && cached.first == base.revision) cached.second else {
+            val download = when (val response = api.download(active, base.id)) {
+                is DownloadResult.Deleted -> return StoryCheck.Stale
+                is DownloadResult.Blob -> response
+            }
+            if (download.revision != base.revision) return StoryCheck.Stale
+            if (sha256Hex(download.bytes) != download.sha256) return StoryCheck.Guard
+            decryptBytes(syncKeys, base.id, download.bytes).also { rememberStoryBase(entry.path, download.revision, it) }
+        }
+        return when (val verdict = judgeStoryShrink(entry.path, raw, server)) {
+            is ShrinkVerdict.Cut -> StoryCheck.Cut
+            is ShrinkVerdict.Merge -> {
+                log("warn", "“${entry.path}” was missing paragraphs of the copy on the server; they were put back.")
+                StoryCheck.Merge(verdict.bytes)
+            }
+            is ShrinkVerdict.Guard -> StoryCheck.Guard
+        }
+    }
+
+    /** Writes a merged story file here and uploads it once. A file the editor holds waits for the next cycle. */
+    private suspend fun rewriteStory(entry: SyncScanEntry, bytes: ByteArray, depth: Int, table: EngineState, syncKeys: SyncKeys, active: SyncSession, currentHost: SyncHost): String {
+        if (options.isPathBusy(entry.path)) return "skipped"
+        val stat = currentHost.write(entry.path, bytes, options.now())
+        options.onApplied(listOf(entry.path), emptyList())
+        if (depth > 0) return "conflict"
+        return uploadPath(stat, table, syncKeys, active, currentHost, depth + 1)
+    }
+
+    private suspend fun uploadPath(entry: SyncScanEntry, table: EngineState, syncKeys: SyncKeys, active: SyncSession, currentHost: SyncHost, depth: Int = 0): String {
         requireSyncDocumentBudget(entry.path, entry.size)
         val raw = try {
             currentHost.read(entry.path)
@@ -878,7 +964,23 @@ class SyncEngine(
         val clearing = entry.path in cleared
         val severeShrink = base != null && !base.blank && base.size >= 4096 && (raw.size <= 1024 || raw.size * 4 < base.size)
         val baseHoldsContent = base != null && !base.blank && (base.size > raw.size + 64 || kind == NoteSyncKind.BLANK || severeShrink)
-        if ((kind == NoteSyncKind.BLANK || severeShrink) && baseHoldsContent && !clearing) {
+        val storyRole = storyRoleOf(entry.path)
+        val storyShrinkable = kind == NoteSyncKind.PRESENT && (storyRole == StoryRole.SCENE || storyRole == StoryRole.MANIFEST)
+        var storyClear = false
+        if (storyRole == StoryRole.SCENE && kind == NoteSyncKind.PRESENT && base != null && !base.blank && !clearing && !(severeShrink && baseHoldsContent)) {
+            // Every scene upload keeps every paragraph of the server's copy (deleted ones as tombstones).
+            val check = checkStoryUpload(entry, base, raw, syncKeys, active)
+            if (check is StoryCheck.Merge) return rewriteStory(entry, check.bytes, depth, table, syncKeys, active, currentHost)
+        }
+        if (severeShrink && baseHoldsContent && !clearing && storyShrinkable && base != null) {
+            // A cut the writer made is uploaded; a file that lost paragraphs is merged first.
+            when (val check = checkStoryUpload(entry, base, raw, syncKeys, active)) {
+                is StoryCheck.Merge -> return rewriteStory(entry, check.bytes, depth, table, syncKeys, active, currentHost)
+                is StoryCheck.Guard -> return restoreInstead(entry, base, raw, table, syncKeys, active, currentHost)
+                is StoryCheck.Cut -> storyClear = true
+                is StoryCheck.Stale -> Unit
+            }
+        } else if ((kind == NoteSyncKind.BLANK || severeShrink) && baseHoldsContent && !clearing) {
             log("warn", "“${entry.path}” is empty and was not uploaded over the copy already on the server.")
             return restoreInstead(entry, base!!, raw, table, syncKeys, active, currentHost)
         }
@@ -890,8 +992,9 @@ class SyncEngine(
         var recreating = false
         while (true) {
             try {
-                val revision = api.upload(active, id, sentBase, meta, sha256Hex(blob), blob, blank, clearing && blank)
+                val revision = api.upload(active, id, sentBase, meta, sha256Hex(blob), blob, blank, (clearing && blank) || storyClear)
                 cleared.remove(entry.path)
+                rememberStoryBase(entry.path, revision, bytes)
                 table.files[entry.path] = LocalBase(id, revision, hash, entry.size, entry.mtimeMs, identity, blank)
                 if (recreating) log("info", "“${entry.path}” had been deleted on the server. The copy on this device was uploaded again.")
                 return "uploaded"
@@ -908,6 +1011,14 @@ class SyncEngine(
                     ?.takeIf { it.id == id }
                     ?: return "conflict"
                 val guard = !remote.deleted && (error.reason == "guard" || (error.reason == null && remote.revision == sentBase))
+                if (guard && storyShrinkable && base != null && !storyClear) {
+                    // The server's guard counts encrypted bytes; check the story file the same way.
+                    when (val check = checkStoryUpload(entry, base.copy(revision = remote.revision), raw, syncKeys, active)) {
+                        is StoryCheck.Merge -> return rewriteStory(entry, check.bytes, depth, table, syncKeys, active, currentHost)
+                        is StoryCheck.Cut -> { storyClear = true; continue }
+                        else -> Unit
+                    }
+                }
                 when {
                     guard -> return keepBothOnFailure(entry.path) {
                         // Never send this body again. The local bytes become a conflict copy and the server copy returns.
@@ -928,7 +1039,15 @@ class SyncEngine(
                         }
                         return "conflict"
                     }
-                    else -> return applyRejected(remote, table, syncKeys, active, currentHost)
+                    else -> {
+                        val outcome = applyRejected(remote, table, syncKeys, active, currentHost)
+                        if (storyRole != null && depth == 0 && table.files[entry.path]?.revision == remote.revision && table.files[entry.path]?.mtimeMs == 0L) {
+                            // A story file was merged with the newer version: upload the merge in this cycle.
+                            val fresh = currentHost.scan().firstOrNull { it.path == entry.path }
+                            if (fresh != null) return if (uploadPath(fresh, table, syncKeys, active, currentHost, depth + 1) == "uploaded") "uploaded" else "conflict"
+                        }
+                        return outcome
+                    }
                 }
             }
         }
