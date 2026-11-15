@@ -121,3 +121,14 @@ Tests: `node scripts/check-writing-assist.mjs` (11 groups, ~150 assertions: ever
 - **Split view**: a scene, a bible entry or a linked note next to the manuscript. **Typewriter mode** keeps the current line at a fixed height. **High-contrast** page theme. Bible names count as correctly spelled.
 
 Tests: `node scripts/check-writing-tools.mjs` (7: binder moves/refusals, trash survives reload, link sanitizing, bible round trip and hostile input, mentions as whole words, progress per device and day, streaks, deadline maths, calendar, snapshot stamps, paragraph/word diff, restore merged with a concurrent edit from another device); browser end-to-end (14: binder drag reorders the manuscript, corkboard ↔ outline, character sheet finds both scenes, timeline, goals, version → edit → compare → restore → undo, split view, trash, everything still there after reload). Earlier suites unchanged: 26 unit, 11 assistance, 11 desktop, 15 + 11 browser; typing p95 in the 608-page novel 32–40 ms.
+
+### Milestone 4 (export and import) — 2026-11-15
+
+`src/writing/export/` and `src/writing/import/`; `exportStory(project, format, options)` and `importStory(bytes, fileName)`, plus `ExportDialog` / `ImportDialog` (not wired into the editor yet). Excluded nodes and the trash are left out of every export.
+
+- **PDF** drawn from `layoutManuscript` piece by piece (pdf-lib, subset-embedded bundled fonts, kerning as TJ adjustments): headers/footers, footnotes, drop caps, lists, marks, colours, highlights, links, blank pages for right-hand chapters, mirror margins, bookmarks for parts/chapters/scenes, page labels, metadata. Endnotes per chapter or per book through the new export-only layout option `LayoutOptions.endnotes` (`layout/endnotes.ts`); unset, the layout is unchanged.
+- **DOCX**: `FN<id>` paragraph styles, a section per chapter (odd page when chapters start right), PAGE/NUMPAGES/STYLEREF fields, even/first headers, footnotes or endnotes, comments, drop-cap frames, lists, `w:lang`, hyphenation.
+- **EPUB 3**: XHTML per part/chapter, nav + NCX, CSS from the styles, linked footnotes/endnotes, optional fonts. **Markdown/text** with front matter, headings, emphasis, `[^n]`.
+- **Import** DOCX (FaNotes styles round-trip; "Heading n"/"Überschrift n"/outline levels, footnotes, endnotes, comments, links, page breaks, scene markers), Markdown, text (chapter headings, hard-wrapped prose, Windows-1252).
+
+Tests: `node scripts/check-writing-export.mjs` (11). 639-page novel (132 000 words, Node, fontkit measurer): layout 0.3–0.5 s, PDF 1.1–1.6 s, 1.6 MB, peak RSS ~260–360 MB on the shared server.
