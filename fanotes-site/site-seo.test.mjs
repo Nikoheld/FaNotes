@@ -105,6 +105,14 @@ test('robots.txt blocks the API and points at the sitemap', () => {
   assert.match(robots, /^Sitemap: https:\/\/fanotes\.fasrv\.ch\/sitemap\.xml$/mu)
 })
 
+test('origin gzip covers sitemap and svg and varies on the encoding', () => {
+  const fanotes = readFileSync(join(root, 'deploy/fanotes-fasrv.conf'), 'utf8')
+  const schulnetz = readFileSync(join(root, 'deploy/schulnetz-fasrv.conf'), 'utf8')
+  for (const conf of [fanotes, schulnetz]) assert.match(conf, /^    gzip_vary on;$/mu)
+  assert.match(fanotes, /gzip_types[^\n]*application\/xml[^\n]*image\/svg\+xml/)
+  assert.doesNotMatch(fanotes, /gzip_types[^\n]*wasm/)
+})
+
 test('server maps .xml and serves the HTML 404 to crawlers', () => {
   const server = readFileSync(join(root, 'server.mjs'), 'utf8')
   assert.ok(server.includes("['.xml', 'application/xml; charset=utf-8']"))
