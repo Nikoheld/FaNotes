@@ -51,6 +51,8 @@ export type ManuscriptLayout = {
   setup: PageSetup
   /** Title, subtitle, author and page count the headers were filled with. */
   headerKey: string
+  /** Footnote bodies this layout was made with (an edited footnote re-paginates its page). */
+  footnoteBodies: Map<string, Run[] | null>
   stats: { lines: number; layoutMs: number; paginateMs: number; measured: number; repaginatedPages: number }
 }
 
@@ -143,6 +145,7 @@ export const layoutManuscript = (manifest: StoryManifest, flow: FlowBlock[], cac
   cache.prune(new Set(blocks.map((block) => block.key)))
   const layoutDone = performance.now()
 
+  const footnoteBodies = new Map([...footnoteNumbers.keys()].map((id) => [id, options.footnoteRuns?.(id) ?? null] as const))
   const footnoteLayouts = new Map<string, ParagraphLayout>()
   const footnoteLayout = (id: string) => {
     const cached = footnoteLayouts.get(id)
@@ -163,6 +166,7 @@ export const layoutManuscript = (manifest: StoryManifest, flow: FlowBlock[], cac
     const before = previous?.blocks[index]
     const now = blocks[index]
     return !before || before.key !== now.key || previous!.layouts[index] !== layouts[index] || before.chapterStart !== now.chapterStart || before.breakBefore !== now.breakBefore || before.chapterTitle !== now.chapterTitle
+      || now.runs.some((run) => run.m?.fn !== undefined && previous!.footnoteBodies?.get(run.m.fn) !== footnoteBodies.get(run.m.fn))
   }
   const incremental = Boolean(previous && previous.setup === setup && previous.pages.length && previous.blockPages.length === previous.blocks.length)
   const delta = blocks.length - (previous?.blocks.length ?? 0)
@@ -366,6 +370,7 @@ export const layoutManuscript = (manifest: StoryManifest, flow: FlowBlock[], cac
     blocks,
     layouts,
     blockPages,
+    footnoteBodies,
     pageWidth: first.width,
     pageHeight: first.height,
     contentWidth,

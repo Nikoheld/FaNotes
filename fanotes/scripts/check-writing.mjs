@@ -301,6 +301,36 @@ try {
     assert.ok(result.pages.some((page) => page.blank && page.lines.length === 0 && page.header === null))
   })
 
+  await test('an edited footnote re-paginates incrementally exactly like a full pass', () => {
+    const manifest = structuredClone(story.manifest)
+    const scene = structuredClone(story.scenes[0])
+    scene.paragraphs[0].runs = [{ text: 'Ein Satz mit Fussnote' }, { text: '', m: { fn: 'note000001' } }, { text: ' und weiter.' }]
+    scene.footnotes = { note000001: { id: 'note000001', runs: [{ text: 'Kurz.' }] } }
+    const scenes = new Map([[scene.id, scene]])
+    const blocks = flow.buildFlow(manifest, scenes)
+    const cache = new paginate.LayoutCache()
+    const first = paginate.layoutManuscript(manifest, blocks, cache, { measurer, footnoteRuns: (id) => scene.footnotes[id]?.runs ?? null })
+    scene.footnotes = { note000001: { id: 'note000001', runs: [{ text: 'Eine viel längere Erklärung, '.repeat(12) }] } }
+    const incremental = paginate.layoutManuscript(manifest, blocks, cache, { measurer, footnoteRuns: (id) => scene.footnotes[id]?.runs ?? null }, first)
+    const full = paginate.layoutManuscript(manifest, blocks, new paginate.LayoutCache(), { measurer, footnoteRuns: (id) => scene.footnotes[id]?.runs ?? null })
+    const shape = (result) => result.pages.map((page) => page.footnotes.map((note) => note.layout?.lines?.length ?? note.lines?.length ?? JSON.stringify(note).length))
+    assert.deepEqual(shape(incremental), shape(full))
+    assert.notDeepEqual(shape(first), shape(full))
+  })
+
+  await test('sanitize: names of Object.prototype members are not style ids; text is never cut inside an emoji', () => {
+    const raw = structuredClone(story.manifest)
+    raw.styles.constructor = { ...raw.styles.body, id: 'constructor' }
+    raw.page = { ...raw.page, size: 'toString' }
+    const manifest = sanitize.sanitizeManifest(JSON.parse(JSON.stringify(raw)))
+    assert.ok(!Object.hasOwn(manifest.styles, 'constructor'))
+    assert.equal(manifest.page.size, 'A5')
+    const scene = sanitize.sanitizeScene({ format: 'fanotes-story-scene-v1', id: 'scene0001', paragraphs: [{ id: 'para000001', key: 'a0', v: {}, style: 'constructor', runs: [{ text: `${'x'.repeat(2)}😀` }] }] })
+    assert.equal(scene.paragraphs[0].style, 'body')
+    const cut = sanitize.sanitizeScene({ format: 'fanotes-story-scene-v1', id: 'scene0001', paragraphs: [{ id: 'para000001', key: 'a0', v: {}, style: 'body', runs: [{ text: 'ab\uD83D' }] }] })
+    assert.equal(cut.paragraphs[0].runs[0].text, 'ab\uFFFD', 'a lone surrogate becomes U+FFFD')
+  })
+
   await test('footnotes sit at the bottom of the page of their reference', () => {
     const manifest = structuredClone(story.manifest)
     const scene = structuredClone(story.scenes[0])

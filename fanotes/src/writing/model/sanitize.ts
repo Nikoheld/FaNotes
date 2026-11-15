@@ -34,7 +34,16 @@ const COLOR = /^#[0-9a-f]{6}$/iu
 const MAX_TEXT = 200_000
 
 const record = (value: unknown): Record<string, unknown> | null => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null)
-const text = (value: unknown, max = 2000) => (typeof value === 'string' ? value.slice(0, max) : '')
+/** Cuts at `max` UTF-16 units without splitting a surrogate pair; lone surrogates become U+FFFD (strict JSON readers reject them). */
+const clip = (value: string, max: number) => {
+  let out = value.length > max ? value.slice(0, max) : value
+  if (out.length < value.length && /[\uD800-\uDBFF]$/u.test(out)) out = out.slice(0, -1)
+  return out.replace(/\p{Cs}/gu, '\uFFFD')
+}
+const text = (value: unknown, max = 2000) => (typeof value === 'string' ? clip(value, max) : '')
+/** Style ids are object keys: names of Object.prototype members would resolve to built-ins. */
+const RESERVED = new Set(Object.getOwnPropertyNames(Object.prototype))
+const styleId = (value: unknown): value is string => typeof value === 'string' && /^[a-z0-9-]{1,40}$/u.test(value) && !RESERVED.has(value)
 const number = (value: unknown, min: number, max: number, fallback: number) => (typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback)
 const language = (value: unknown): StoryLanguage | undefined => (LANGUAGES.has(value as StoryLanguage) ? value as StoryLanguage : undefined)
 
@@ -102,7 +111,7 @@ export const sanitizeScene = (value: unknown, expectedId?: string): Scene | null
       id: pid,
       key,
       v: sanitizeVector(paragraph.v),
-      style: typeof paragraph.style === 'string' && /^[a-z0-9-]{1,40}$/u.test(paragraph.style) ? paragraph.style : 'body',
+      style: styleId(paragraph.style) ? paragraph.style : 'body',
       runs: paragraph.deleted === true ? [] : sanitizeRuns(paragraph.runs),
     }
     const lang = language(paragraph.lang)
@@ -174,7 +183,7 @@ const sanitizeStyle = (id: string, value: unknown, fallback: ParagraphStyle | un
   if (typeof source.color === 'string' && COLOR.test(source.color)) style.color = source.color
   const dropCap = number(source.dropCap, 0, 6, base.dropCap ?? 0)
   if (dropCap) style.dropCap = Math.round(dropCap)
-  if (typeof source.next === 'string' && /^[a-z0-9-]{1,40}$/u.test(source.next)) style.next = source.next
+  if (styleId(source.next)) style.next = source.next
   else if (base.next) style.next = base.next
   const marker = typeof source.listMarker === 'string' ? source.listMarker.slice(0, 4) : base.listMarker
   if (marker) style.listMarker = marker
@@ -185,7 +194,7 @@ const sanitizeStyle = (id: string, value: unknown, fallback: ParagraphStyle | un
 
 const sanitizePage = (value: unknown, languageCode: StoryLanguage): PageSetup => {
   const source = record(value)
-  const size = source && (source.size as string) in PAGE_SIZES ? source.size as Exclude<PageSetup['size'], 'custom'> : source?.size === 'custom' ? 'custom' : 'A5'
+  const size = source && typeof source.size === 'string' && Object.hasOwn(PAGE_SIZES, source.size) ? source.size as Exclude<PageSetup['size'], 'custom'> : source?.size === 'custom' ? 'custom' : 'A5'
   const base = defaultPageSetup(size === 'custom' ? 'A5' : size, languageCode)
   if (!source) return base
   const margins = record(source.margins)
@@ -255,8 +264,8 @@ export const sanitizeManifest = (value: unknown): StoryManifest | null => {
   const styles: Record<string, ParagraphStyle> = {}
   const rawStyles = record(source.styles) ?? {}
   for (const id of new Set([...Object.keys(defaults), ...Object.keys(rawStyles)])) {
-    if (!/^[a-z0-9-]{1,40}$/u.test(id)) continue
-    const style = sanitizeStyle(id, rawStyles[id], defaults[id])
+    if (!styleId(id)) continue
+    const style = sanitizeStyle(id, Object.hasOwn(rawStyles, id) ? rawStyles[id] : undefined, Object.hasOwn(defaults, id) ? defaults[id] : undefined)
     if (style) styles[id] = style
   }
   const goalsSource = record(source.goals)
