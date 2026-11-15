@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { connect as connectTcp } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -289,6 +289,32 @@ test('a replaced note is flushed to the archive before the live blob changes', a
   const archived = readFileSync(join(dataDirectory, 'accounts', accountId, 'revisions', id, String(revision)))
   assert.deepEqual(archived, original)
   assert.deepEqual((await readFile(id)).body, next)
+})
+
+test('a symlink in the revision archive does not count as stored notes', async () => {
+  const authKey = b64(32)
+  const registered = await jsonCall('POST', '/api/v1/sync/register', {
+    email: `archive-link-${randomBytes(4).toString('hex')}@example.com`,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Link', platform: 'linux' },
+  })
+  assert.equal(registered.status, 201)
+  const linkAccount = registered.json.accountId
+  const linkToken = registered.json.token
+  const fileId = randomBytes(32).toString('hex')
+  const outside = join(dataDirectory, `outside-${fileId.slice(0, 8)}`)
+  writeFileSync(outside, randomBytes(200_000))
+  const directory = join(dataDirectory, 'accounts', linkAccount, 'revisions', fileId)
+  mkdirSync(directory, { recursive: true })
+  symlinkSync(outside, join(directory, '1'))
+  const account = await call('GET', '/api/v1/sync/account', {
+    token: linkToken,
+    headers: { 'X-FaNotes-Account': linkAccount },
+  })
+  assert.equal(account.status, 200, account.body.toString('utf8'))
+  assert.equal(JSON.parse(account.body.toString('utf8')).usage.bytes, 0)
 })
 
 test('a download serves one inode and does not follow a symlink', async () => {
