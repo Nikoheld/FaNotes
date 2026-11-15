@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  POLL_MAX_BACKOFF_MS, POLL_QUIET_MS, POLL_SCHOOL_MAX_MS, POLL_SCHOOL_MIN_MS, POLL_WEEKEND_MS, createPollScheduler, describePollError, pollDelayMs, pollPhase,
+  INITIAL_GRADE_STAGGER_CAP_MS, POLL_MAX_BACKOFF_MS, POLL_QUIET_MS, POLL_SCHOOL_MAX_MS, POLL_SCHOOL_MIN_MS, POLL_WEEKEND_MS, createPollScheduler, describePollError, pollDelayMs, pollPhase,
 } from './schulnetz-logic.mjs'
 
 // November is CET (UTC+1): 08:00Z is 09:00 in Zurich.
@@ -101,6 +101,28 @@ test('the scheduler reads due accounts one at a time, staggers new ones, backs o
   accounts.pop()
   await scheduler.tick()
   assert.equal(scheduler.due.has('b'.repeat(32)), false)
+})
+
+test('empty directories cannot push the first grade check past the cap', async () => {
+  let clock = Date.parse('2026-11-15T08:00:00Z')
+  const linked = 'f'.repeat(32)
+  const accounts = [...Array.from({ length: 80 }, (_, index) => index.toString(16).padStart(32, '0')), linked]
+  const polled = []
+  const scheduler = createPollScheduler({
+    listAccounts: async () => accounts,
+    pollAccount: async (id) => { polled.push(id); return id === linked ? { revision: 1 } : { skipped: true } },
+    readSnapshot: async () => schoolWeek,
+    now: () => new Date(clock),
+    random: middle,
+    sleep: async (ms) => { clock += ms },
+  })
+  await scheduler.tick()
+  assert.equal(polled.includes(linked), false)
+  clock += INITIAL_GRADE_STAGGER_CAP_MS
+  polled.length = 0
+  await scheduler.tick()
+  assert.equal(polled.at(-1), linked)
+  assert.ok(scheduler.gradeDue.get(linked) > clock)
 })
 
 test('a failed school read reported by the poll counts like an error', async () => {
