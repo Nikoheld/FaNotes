@@ -16,6 +16,7 @@ const { handleSyncRequest } = await import('./sync-api.mjs')
 const { createSchulnetzRuntime } = await import('./schulnetz-api.mjs')
 const { createKantiWebApi, createKantiWebAppRoutes, createKantiWebStore } = await import('./kanti-web-api.mjs')
 const { CLASS_CODE, createClassTimetables, expandClassList, expandClassListInfo, isAksaBase, parseTimetableBbox } = await import('./class-timetables.mjs')
+const { createServiceLog } = await import('./service-log.mjs')
 const { buildBboxXhtml, buildPdf, SYNTHETIC_PAGES } = await import('./test-fixtures/synthetic-timetable-pdf.mjs')
 
 const have = (tool) => { try { execFileSync(tool, ['-v'], { stdio: 'ignore' }); return true } catch (error) { return error?.code !== 'ENOENT' } }
@@ -469,5 +470,48 @@ test('timetables are served only to Alte Kanti identities, in the app and in the
     assert.equal(anonymous.status, 401)
   } finally {
     await env.close()
+  }
+})
+
+test('an upload is logged as JSON with counts and without class codes or names', async () => {
+  const lines = []
+  const jsonLog = createServiceLog('class-timetables', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const root = await mkdtemp(join(tmpdir(), 'timetables-log-'))
+  try {
+    const store = createClassTimetables({
+      root,
+      run: fakeRun(BBOX, []),
+      log: () => {},
+      jsonLog,
+      now: () => new Date('2026-11-15T11:00:00.000Z'),
+    })
+    const result = await store.ingest(PDF)
+    assert.equal(result.classes, 3)
+    assert.equal(lines.length, 1)
+    const row = JSON.parse(lines[0])
+    assert.equal(row.service, 'class-timetables')
+    assert.equal(row.level, 'info')
+    assert.equal(row.method, 'POST')
+    assert.equal(row.route, '/timetables')
+    assert.equal(row.status, 200)
+    assert.equal(row.classes, 3)
+    assert.equal(row.rooms, 14)
+    assert.equal(row.warnings, 0)
+    assert.equal(typeof row.ms, 'number')
+    assert.equal(lines[0].includes('G26'), false)
+    assert.equal(lines[0].includes('Peter'), false)
+    assert.equal(lines[0].includes('Telli'), false)
+    assert.equal(lines[0].includes('?'), false)
+
+    lines.length = 0
+    await assert.rejects(store.ingest(Buffer.from('not a pdf')), { status: 400 })
+    const denied = JSON.parse(lines[0])
+    assert.equal(lines.length, 1)
+    assert.equal(denied.level, 'warn')
+    assert.equal(denied.status, 400)
+    assert.equal(denied.route, '/timetables')
+    assert.equal(lines[0].includes('not a pdf'), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })

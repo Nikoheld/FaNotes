@@ -19,6 +19,7 @@ import { randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { createServiceLog } from './service-log.mjs'
 
 export const MAX_PDF_BYTES = 25 * 1024 * 1024
 export const MAX_PDF_PAGES = 200
@@ -499,6 +500,10 @@ export const createClassTimetables = (options = {}) => {
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz', 'timetables')
   const now = options.now || (() => new Date())
   const log = options.log || ((level, message) => console.log(`${now().toISOString()} timetables ${level} ${message}`))
+  // Production emits one JSON line per upload. Tests pass jsonLog when they want the lines.
+  const events = options.jsonLog || createServiceLog('class-timetables', (line) => {
+    if (process.env.NODE_ENV === 'production') console.log(line)
+  }, now)
   const run = options.run || defaultRun
   let tail = Promise.resolve()
   const building = new Map()
@@ -609,9 +614,21 @@ export const createClassTimetables = (options = {}) => {
   }
 
   const doIngest = async (pdf) => {
-    if (!Buffer.isBuffer(pdf) || pdf.length < 8) throw problem(400, 'Das ist keine PDF-Datei.')
-    if (pdf.length > MAX_PDF_BYTES) throw problem(413, 'Die PDF-Datei ist zu gross (höchstens 25 MB).')
-    if (pdf.subarray(0, 5).toString('latin1') !== '%PDF-') throw problem(400, 'Das ist keine PDF-Datei.')
+    const requestId = events.requestId()
+    const started = now().getTime()
+    const elapsed = () => Math.max(0, now().getTime() - started)
+    const report = (level, status, extra = {}) => {
+      const fields = { requestId, method: 'POST', route: '/timetables', status, ms: elapsed(), ...extra }
+      if (level === 'warn') events.warn(fields)
+      else events.info(fields)
+    }
+    const reject = (status, message) => {
+      report('warn', status, { error: 'Error' })
+      throw problem(status, message)
+    }
+    if (!Buffer.isBuffer(pdf) || pdf.length < 8) reject(400, 'Das ist keine PDF-Datei.')
+    if (pdf.length > MAX_PDF_BYTES) reject(413, 'Die PDF-Datei ist zu gross (höchstens 25 MB).')
+    if (pdf.subarray(0, 5).toString('latin1') !== '%PDF-') reject(400, 'Das ist keine PDF-Datei.')
     const at = now()
     const version = `${at.toISOString().replace(/[-:]/gu, '').replace(/\.\d+Z$/u, 'Z')}-${randomBytes(3).toString('hex')}`
     const dir = join(root, version)
@@ -652,9 +669,12 @@ export const createClassTimetables = (options = {}) => {
       indexCache = null
       await prune(version)
       log('info', `Stundenplan-PDF übernommen (${index.classes.length} Klassen, ${roomNames.length} Räume, ${index.warnings.length} Hinweise)`)
+      report('info', 200, { classes: index.classes.length, rooms: roomNames.length, warnings: index.warnings.length })
       return { uploadedAt: index.uploadedAt, classes: index.classes.length, rooms: roomNames.length, warnings: index.warnings }
     } catch (error) {
       await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined)
+      const status = Number(error?.status) || 422
+      report('warn', status, { error: String(error?.name || 'error') })
       if (error?.status) throw error
       log('warn', `Stundenplan-PDF abgelehnt (${error?.name || 'error'})`)
       throw problem(422, 'Die PDF-Datei konnte nicht verarbeitet werden.')
