@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { connect as connectTcp } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -1172,6 +1172,87 @@ test('completing an upload of the same bytes keeps the live inode', async () => 
   assert.equal(live.status, 200)
   assert.equal(live.headers['x-fanotes-meta'], nextMeta)
   assert.equal((await call('GET', `/api/v1/sync/files/${id}/uploads/${uploadId}`, { token })).status, 404)
+})
+
+test('a resumed upload of the same bytes stores the new metadata', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = revisionOf(created)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const nextMeta = b64(32)
+  assert.notEqual(nextMeta, meta)
+  const openBody = Buffer.from(JSON.stringify({ size: original.length }))
+  const opened = await call('POST', `/api/v1/sync/files/${id}/uploads`, {
+    token,
+    body: openBody,
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': String(openBody.length),
+      'If-Match': String(revision),
+      'X-FaNotes-Meta': nextMeta,
+      'X-FaNotes-Sha256': sha256(original),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(opened.status, 201, opened.body.toString('utf8'))
+  const uploadId = jsonOf(opened).uploadId
+  const patched = await call('PATCH', `/api/v1/sync/files/${id}/uploads/${uploadId}`, {
+    token,
+    body: original,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(original.length),
+      'Upload-Offset': '0',
+    },
+  })
+  assert.equal(patched.status, 200, patched.body.toString('utf8'))
+  const partialBody = join(dataDirectory, 'accounts', accountId, 'partials', uploadId, 'body.bin')
+  renameSync(partialBody, blobPath)
+  const renamed = statSync(blobPath)
+  const completeHeaders = {
+    'Content-Length': '0',
+    'If-Match': String(revision),
+    'X-FaNotes-Meta': nextMeta,
+    'X-FaNotes-Sha256': sha256(original),
+    'X-FaNotes-Blank': '0',
+  }
+  const finished = await call('POST', `/api/v1/sync/files/${id}/uploads/${uploadId}/complete`, {
+    token,
+    headers: completeHeaders,
+  })
+  assert.equal(finished.status, 200, finished.body.toString('utf8'))
+  const stored = revisionOf(finished)
+  assert.ok(stored > revision)
+  const after = statSync(blobPath)
+  assert.equal(after.dev, renamed.dev)
+  assert.equal(after.ino, renamed.ino)
+  assert.deepEqual(readFileSync(blobPath), original)
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.equal(live.headers['x-fanotes-meta'], nextMeta)
+  assert.equal(live.headers['x-fanotes-sha256'], sha256(original))
+  assert.equal(existsSync(join(dataDirectory, 'accounts', accountId, 'partials', uploadId)), false)
+  assert.equal(existsSync(join(dataDirectory, 'accounts', accountId, 'revisions', id)), false)
+  const repeated = await call('POST', `/api/v1/sync/files/${id}/uploads/${uploadId}/complete`, {
+    token,
+    headers: { ...completeHeaders, 'If-Match': String(stored) },
+  })
+  assert.equal(repeated.status, 200, repeated.body.toString('utf8'))
+  assert.equal(revisionOf(repeated), stored)
+  assert.equal(statSync(blobPath).ino, renamed.ino)
+  const stale = await call('POST', `/api/v1/sync/files/${id}/uploads/${uploadId}/complete`, {
+    token,
+    headers: completeHeaders,
+  })
+  assert.equal(stale.status, 409, stale.body.toString('utf8'))
+  const conflict = jsonOf(stale)
+  assert.equal(conflict.reason, 'stale')
+  assert.equal(conflict.entry.meta, nextMeta)
+  assert.equal(conflict.entry.revision, stored)
+  assert.deepEqual(readFileSync(blobPath), original)
+  assert.equal((await readFile(id)).headers['x-fanotes-meta'], nextMeta)
 })
 
 test('a rejected spool is removed and a stored note leaves no spool name', async () => {
