@@ -48,6 +48,64 @@ const webError = (status, message) => {
   return error
 }
 const fail = (status, message) => { throw webError(status, message) }
+const BAD_QUERY = 'Ungültige Anfrage.'
+const REVEAL_ID = /^[A-Za-z0-9_-]{1,64}$/u
+const ROUTE_ID = /^[a-f0-9]{12}$/u
+const AT_VALUE = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$/u
+
+/** One value. A repeated parameter is rejected so `since=1&since=9` cannot mean two different things. */
+const soleParam = (params, name) => {
+  const all = params.getAll(name)
+  if (all.length > 1) fail(400, BAD_QUERY)
+  return all.length === 1 ? all[0] : null
+}
+
+/** Missing or blank stays `fallback`. Anything else must be an integer inside the range. */
+const queryInt = (params, name, { min, max, fallback }) => {
+  const raw = soleParam(params, name)
+  if (raw == null || raw === '') return fallback
+  if (!/^(0|[1-9][0-9]{0,15})$/u.test(raw)) fail(400, BAD_QUERY)
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < min || value > max) fail(400, BAD_QUERY)
+  return value
+}
+
+const queryChoice = (params, name, allowed, fallback) => {
+  const raw = soleParam(params, name)
+  if (raw == null || raw === '') return fallback
+  if (!allowed.includes(raw)) fail(400, BAD_QUERY)
+  return raw
+}
+
+const queryText = (params, name, max) => {
+  const raw = soleParam(params, name)
+  if (raw == null) return ''
+  if (raw.length > max || /[\u0000-\u001f\u007f]/u.test(raw)) fail(400, BAD_QUERY)
+  return raw
+}
+
+/** `limit` absent: the caller returns the whole list, as the web app does today. */
+const pageWindow = (params) => {
+  const limitGiven = soleParam(params, 'limit')
+  const offsetGiven = soleParam(params, 'offset')
+  if ((limitGiven == null || limitGiven === '') && (offsetGiven == null || offsetGiven === '')) return null
+  if (offsetGiven != null && offsetGiven !== '' && (limitGiven == null || limitGiven === '')) fail(400, BAD_QUERY)
+  const limit = queryInt(params, 'limit', { min: 1, max: 100, fallback: null })
+  if (limit == null) fail(400, BAD_QUERY)
+  return { limit, offset: queryInt(params, 'offset', { min: 0, max: 100_000, fallback: 0 }) }
+}
+
+const slicePage = (items, page) => {
+  const pageItems = items.slice(page.offset, page.offset + page.limit)
+  const next = page.offset + pageItems.length < items.length ? page.offset + pageItems.length : null
+  return { pageItems, total: items.length, next }
+}
+
+const atParam = (params) => {
+  const at = queryText(params, 'at', 40)
+  if (at && !AT_VALUE.test(at)) fail(400, BAD_QUERY)
+  return at
+}
 const sameText = (left, right) => {
   const a = Buffer.from(String(left ?? ''))
   const b = Buffer.from(String(right ?? ''))
@@ -672,24 +730,47 @@ export const createKantiWebApi = (options = {}) => {
       send(response, 200, await commute.save(accountId, await readBody(request)))
       return
     }
-    if (part === 'stops' && method === 'GET') { send(response, 200, await commute.stops(url.searchParams.get('q') || '')); return }
-    if (part === 'board' && method === 'GET') { send(response, 200, await commute.board(accountId, String(url.searchParams.get('route') || ''))); return }
+    if (part === 'stops' && method === 'GET') {
+      send(response, 200, await commute.stops(queryText(url.searchParams, 'q', 60)))
+      return
+    }
+    if (part === 'board' && method === 'GET') {
+      const route = queryText(url.searchParams, 'route', 12)
+      if (route && !ROUTE_ID.test(route)) fail(400, BAD_QUERY)
+      send(response, 200, await commute.board(accountId, route))
+      return
+    }
     if (part === 'trip' && method === 'GET') {
       const params = url.searchParams
-      const found = await commute.tripDetail(accountId, String(params.get('route') || ''), String(params.get('trip') || '').slice(0, 200), String(params.get('at') || ''))
+      const route = queryText(params, 'route', 12)
+      const trip = queryText(params, 'trip', 200)
+      if (!ROUTE_ID.test(route) || !trip) fail(400, BAD_QUERY)
+      const found = await commute.tripDetail(accountId, route, trip, atParam(params))
       if (!found) fail(404, 'Diese Pendelstrecke gibt es nicht.')
       send(response, 200, found)
       return
     }
     if (part === 'connections' && method === 'GET') {
       const params = url.searchParams
-      const found = await commute.connections({ from: params.get('from'), to: params.get('to'), vias: params.getAll('via').slice(0, 2), at: String(params.get('at') || ''), timeType: String(params.get('timeType') || 'depart') })
+      const vias = params.getAll('via')
+      if (vias.length > 2) fail(400, BAD_QUERY)
+      for (const via of vias) if (via.length > 80 || /[\u0000-\u001f\u007f]/u.test(via)) fail(400, BAD_QUERY)
+      const found = await commute.connections({
+        from: queryText(params, 'from', 80),
+        to: queryText(params, 'to', 80),
+        vias,
+        at: atParam(params),
+        timeType: queryChoice(params, 'timeType', ['depart', 'arrive'], 'depart'),
+      })
       if (!found) fail(400, 'Start und Ziel fehlen.')
       send(response, 200, found)
       return
     }
     if (part === 'trips' && method === 'GET') {
-      const found = await commute.tripsFor(accountId, String(url.searchParams.get('route') || ''), String(url.searchParams.get('at') || ''), String(url.searchParams.get('timeType') || 'depart'))
+      const params = url.searchParams
+      const route = queryText(params, 'route', 12)
+      if (!ROUTE_ID.test(route)) fail(400, BAD_QUERY)
+      const found = await commute.tripsFor(accountId, route, atParam(params), queryChoice(params, 'timeType', ['depart', 'arrive'], 'depart'))
       if (!found) fail(404, 'Diese Pendelstrecke gibt es nicht.')
       send(response, 200, found)
       return
@@ -697,17 +778,31 @@ export const createKantiWebApi = (options = {}) => {
     fail(404, 'Diesen Endpunkt gibt es nicht.')
   }
 
-  const timetableRoute = async (response, session, id, kind, rawName) => {
+  const timetableRoute = async (response, session, id, kind, rawName, url) => {
     const connection = connectionOf(session, id)
     const status = await access.readStatus(connection.accountId)
     const store = status.linked ? await access.timetablesFor(connection.accountId) : null
-    // Asking whether there is anything is an answer, not an error (the page asks for every connection).
-    if (!store && !kind) { send(response, 200, { available: false }); return }
-    if (!store) fail(404, 'Diesen Endpunkt gibt es nicht.')
     if (!kind) {
-      send(response, 200, await store.summary())
+      const page = pageWindow(url.searchParams)
+      // Asking whether there is anything is an answer, not an error (the page asks for every connection).
+      if (!store) { send(response, 200, { available: false }); return }
+      const summary = await store.summary()
+      // No limit: the picker still receives every class and every room.
+      if (!page || summary?.available !== true) { send(response, 200, summary); return }
+      const classes = slicePage(Array.isArray(summary.classes) ? summary.classes : [], page)
+      const rooms = slicePage(Array.isArray(summary.rooms) ? summary.rooms : [], page)
+      const nexts = [classes.next, rooms.next].filter((value) => value != null)
+      send(response, 200, {
+        ...summary,
+        classes: classes.pageItems,
+        rooms: rooms.pageItems,
+        classTotal: classes.total,
+        roomTotal: rooms.total,
+        next: nexts.length ? Math.max(...nexts) : null,
+      })
       return
     }
+    if (!store) fail(404, 'Diesen Endpunkt gibt es nicht.')
     let name = ''
     try { name = decodeURIComponent(rawName) } catch { fail(404, 'Diesen Stundenplan gibt es nicht.') }
     if (kind === 'class' && !name.endsWith('.png')) {
@@ -892,9 +987,13 @@ export const createKantiWebApi = (options = {}) => {
       return
     }
     if (tail === '/changes' && method === 'GET') {
-      const since = Number(url.searchParams.get('since') || 0)
-      const [{ changes }, reveals] = await Promise.all([access.changesSince(accountId, Number.isFinite(since) ? since : 0), revealView(accountId)])
-      send(response, 200, { changes: prepareGradeNotifications(changes, reveals.guessGrades).map(changeView) })
+      const since = queryInt(url.searchParams, 'since', { min: 0, max: Number.MAX_SAFE_INTEGER, fallback: 0 })
+      const page = pageWindow(url.searchParams)
+      const [{ changes }, reveals] = await Promise.all([access.changesSince(accountId, since), revealView(accountId)])
+      const visible = prepareGradeNotifications(changes, reveals.guessGrades).map(changeView)
+      if (!page) { send(response, 200, { changes: visible }); return }
+      const sliced = slicePage(visible, page)
+      send(response, 200, { changes: sliced.pageItems, total: sliced.total, next: sliced.next })
       return
     }
     if (tail === '/reveals' && method === 'GET') {
@@ -905,7 +1004,8 @@ export const createKantiWebApi = (options = {}) => {
       assertSameOrigin(request)
       assertCsrf(request, session)
       const body = await readBody(request)
-      const ids = (Array.isArray(body.ids) ? body.ids : []).slice(0, 200)
+      const ids = body.ids == null ? [] : body.ids
+      if (!Array.isArray(ids) || ids.length > 200 || ids.some((id) => typeof id !== 'string' || !REVEAL_ID.test(id))) fail(400, BAD_QUERY)
       await access.mergeReveals(accountId, { revealed: ids })
       send(response, 200, await revealView(accountId))
       return
@@ -1047,7 +1147,7 @@ export const createKantiWebApi = (options = {}) => {
       }
       const timetableMatch = /^\/connections\/([^/]+)\/timetables(?:\/(class|room)\/([^/]+))?$/u.exec(route)
       if (timetableMatch && method === 'GET') {
-        await timetableRoute(response, session, timetableMatch[1], timetableMatch[2] || '', timetableMatch[3] || '')
+        await timetableRoute(response, session, timetableMatch[1], timetableMatch[2] || '', timetableMatch[3] || '', url)
         return true
       }
       // Pendelstrecken (commute-api.md): the same routes, boards and alerts the app uses.
