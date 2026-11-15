@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data>
+  <event id="L1">
+    <start_date>2026-11-16 07:45</start_date>
+    <end_date>2026-11-16 08:30</end_date>
+    <text>PHY</text>
+    <fachbezeichnung>Physik</fachbezeichnung>
+    <event_type>0_stp</event_type>
+    <zimmerkuerzel>A12</zimmerkuerzel>
+    <lehrerkuerzelname>Kern</lehrerkuerzelname>
+    <markierung>none</markierung>
+  </event>
+  <event id="L2">
+    <start_date>2026-11-16 08:35</start_date>
+    <end_date>2026-11-16 09:20</end_date>
+    <text>MAT</text>
+    <fachbezeichnung>Mathematik</fachbezeichnung>
+    <event_type>0_stp</event_type>
+    <zimmerkuerzel>B04</zimmerkuerzel>
+    <markierung>deleted</markierung>
+    <textdeco>line-through</textdeco>
+  </event>
+  <event id="E1">
+    <start_date>2026-11-18 10:15</start_date>
+    <end_date>2026-11-18 11:00</end_date>
+    <text>Chemie-K26A-1 Test</text>
+    <event_type>exam</event_type>
+    <zimmer>C11</zimmer>
+    <markierung>Stoichiometrie</markierung>
+  </event>
+</data>
