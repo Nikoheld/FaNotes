@@ -316,3 +316,27 @@ test('menu fetches are logged as JSON without the query or the menu text', async
     assert.equal(line.includes('='), false)
   }
 })
+
+test('a redirect is not followed and is not retried', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-redirect-'))
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push(String(url))
+    assert.equal(init.method, 'GET')
+    assert.equal(init.redirect, 'manual')
+    if (String(url).includes('/api/_Combine/')) return { ok: false, status: 302, text: async () => '' }
+    return { ok: true, status: 200, text: async () => fixture }
+  }
+  const mensa = createMensa({
+    fetch: fetchImpl,
+    sleep: async () => {},
+    now: () => new Date('2026-11-10T07:00:00.000Z'),
+    root,
+    log: () => {},
+  })
+  const body = await mensa.get()
+  assert.equal(body.days.length, 1)
+  assert.equal(body.day.date, '2026-11-10')
+  assert.equal(calls.filter((url) => url.includes('/api/_Combine/')).length, 1)
+  assert.equal(calls.some((url) => url.includes('example.test')), false)
+})
