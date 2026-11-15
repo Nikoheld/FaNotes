@@ -44,7 +44,7 @@ const titleOf = (path: string) => (path.split('/').pop() ?? path).replace(/\.[^.
 /**
  * Searchable documents of the current vault. Dot folders (`.fanotes` data,
  * sync state, Schulnetz data), dotfiles and excluded notes are never listed.
- * A `.famd` beside a `.pdf` or `.md` is that document's companion, not its own.
+ * A `.famd` beside a `.pdf`, `.md`, or `.markdown` note is that document's companion, not its own.
  */
 export const listSearchDocuments = (tree: VaultEntry[]) => {
   const files = new Map<string, VaultEntry>()
@@ -62,14 +62,12 @@ export const listSearchDocuments = (tree: VaultEntry[]) => {
     const extension = extensionOf(entry.name)
     if (EXCLUDED_NOTES.has(entry.name.toLocaleLowerCase('de-DE')) && !path.includes('/')) continue
     const modifiedAt = Date.parse(entry.modifiedAt ?? '') || 0
-    if (extension === 'pdf') {
+    if (extension === 'pdf' || extension === 'md' || extension === 'markdown') {
       const companion = files.get(`${stemOf(path)}.famd`)
-      sources.push({ path, title: titleOf(path), kind: 'pdf', fingerprint: `${fp(entry)}|${fp(companion)}`, modifiedAt })
-    } else if (extension === 'md') {
-      const companion = files.get(`${stemOf(path)}.famd`)
-      sources.push({ path, title: titleOf(path), kind: 'note', fingerprint: `${fp(entry)}|${fp(companion)}`, modifiedAt })
+      sources.push({ path, title: titleOf(path), kind: extension === 'pdf' ? 'pdf' : 'note', fingerprint: `${fp(entry)}|${fp(companion)}`, modifiedAt })
     } else if (extension === 'famd') {
-      if (files.has(`${stemOf(path)}.pdf`) || files.has(`${stemOf(path)}.md`)) continue
+      const stem = stemOf(path)
+      if (files.has(`${stem}.pdf`) || files.has(`${stem}.md`) || files.has(`${stem}.markdown`)) continue
       sources.push({ path, title: titleOf(path), kind: 'note', fingerprint: fp(entry), modifiedAt })
     }
   }

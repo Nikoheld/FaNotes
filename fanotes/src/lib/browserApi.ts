@@ -1230,7 +1230,10 @@ export function createBrowserApi(): FaNotesApi {
       const extensionMatch = /\.[^.]+$/u.exec(name)
       const extension = extensionMatch ? extensionMatch[0] : ''
       const base = extension ? name.slice(0, -extension.length) : name
-      const companionExt = /\.(md|markdown)$/iu.test(name) ? '.famd' : /\.famd$/iu.test(name) ? '.md' : ''
+      const proseSibling = /\.famd$/iu.test(path)
+        ? (files.has(path.replace(/\.famd$/iu, '.markdown')) ? '.markdown' : '.md')
+        : ''
+      const companionExt = /\.(md|markdown|pdf)$/iu.test(name) ? '.famd' : proseSibling
       const occupied = (candidate: string) => files.has(candidate) || folders.has(candidate) || (assets.has(candidate) && !candidate.startsWith('.fanotes/'))
       const companionExtForPdf = /\.pdf$/iu.test(name) ? '.famd' : companionExt
       const companionOf = (candidate: string) => companionExtForPdf ? `${candidate.replace(/\.[^.]+$/u, '')}${companionExtForPdf}` : ''
@@ -1365,8 +1368,9 @@ export function createBrowserApi(): FaNotesApi {
         if (isPlaceholderDescendant(record.path, folderLocations) && visiblePath === record.path) return []
         if (/\.famd$/iu.test(record.path)) {
           const sibling = companionNotePath(record.path, '.md')
+          const markdown = sibling.replace(/\.md$/iu, '.markdown')
           const pdf = record.path.replace(/\.famd$/iu, '.pdf')
-          if (files.has(sibling) || files.has(pdf)) return []
+          if (files.has(sibling) || files.has(markdown) || files.has(pdf)) return []
         }
         const parsed = parseFamd(record.content)
         const content = /\.famd$/iu.test(record.path) ? parsed.markdown : record.content

@@ -30,6 +30,27 @@ try {
   const contract = await server.ssrLoadModule('/src/lib/docSearch/pageText.ts')
   const orientation = await server.ssrLoadModule('/src/lib/docSearch/ocrOrientation.ts')
   const { DocIndexer, EXTRACTOR_VERSION, retryDelay } = indexer
+  const { listSearchDocuments } = await server.ssrLoadModule('/src/lib/docSearch/extract.ts')
+
+  await test('vault listing keeps .markdown notes and hides their .famd companion', () => {
+    const file = (relativePath) => ({
+      name: relativePath.split('/').pop(),
+      relativePath,
+      kind: 'file',
+      size: 12,
+      modifiedAt: '2026-11-01T00:00:00.000Z',
+    })
+    const listed = listSearchDocuments([
+      file('Essay.markdown'),
+      file('Essay.famd'),
+      file('Kurs/Heft.md'),
+      file('Kurs/Heft.famd'),
+      file('Scan.pdf'),
+      file('Scan.famd'),
+      file('Skizze.famd'),
+    ]).map((source) => source.path).sort()
+    assert.deepEqual(listed, ['Essay.markdown', 'Kurs/Heft.md', 'Scan.pdf', 'Skizze.famd'])
+  })
 
   await test('German folding matches Kanti+ rules', () => {
     const f = text.foldPlain
