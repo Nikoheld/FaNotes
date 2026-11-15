@@ -27,6 +27,37 @@ export const UPSTREAM_TIMEOUT_MS = 12_000
 export const UPSTREAM_ATTEMPTS = 3
 /** Wait before the second and third attempt. A 4xx is not retried. */
 export const UPSTREAM_RETRY_MS = [200, 800]
+/** A timetable or stop answer larger than this is dropped. It is not parsed and not retried. */
+export const UPSTREAM_BODY_MAX = 1024 * 1024
+
+// Stop once the cap is passed. The rest of the body is never stored.
+const readLimitedText = async (response, max) => {
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const body = typeof response.text === 'function' ? await response.text() : ''
+    if (body.length > max) throw new Error('page too large')
+    return body
+  }
+  const decoder = new TextDecoder('utf-8')
+  let size = 0
+  let body = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return body + decoder.decode()
+    const bytes = value?.byteLength || 0
+    size += bytes
+    if (size > max) {
+      if (typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+      throw new Error('page too large')
+    }
+    if (bytes) body += decoder.decode(value, { stream: true })
+  }
+}
+const readUpstreamJson = async (response) => {
+  const hasReader = typeof response.body?.getReader === 'function'
+  if (!hasReader && typeof response.text !== 'function' && typeof response.json === 'function') return response.json()
+  return JSON.parse(await readLimitedText(response, UPSTREAM_BODY_MAX))
+}
 const USER_AGENT = 'KantiPlus/1.0 (+https://fanotes.fasrv.ch; commute)'
 const PROVIDERS = {
   'search.ch': { name: 'search.ch', occupancy: 'train-class', formation: false },
@@ -166,7 +197,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
           events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!upstreamRetryable(last) || attempt === UPSTREAM_ATTEMPTS) throw last
         } else {
-          const body = await response.json()
+          const body = await readUpstreamJson(response)
           events.info({ requestId, method: 'GET', route, status: response.status || 200, attempt, ms: elapsed() })
           return body
         }

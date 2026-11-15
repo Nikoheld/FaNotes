@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hasViaLoop, parseLocal, parseSearchChRoute, passesVias } from './commute-logic.mjs'
-import { ROUTE_DISK_MS, UPSTREAM_ATTEMPTS, UPSTREAM_TIMEOUT_MS, createCommuteProvider, upstreamRetryable } from './commute.mjs'
+import { ROUTE_DISK_MS, UPSTREAM_ATTEMPTS, UPSTREAM_BODY_MAX, UPSTREAM_TIMEOUT_MS, createCommuteProvider, upstreamRetryable } from './commute.mjs'
 import { createServiceLog, requestIdFrom } from './service-log.mjs'
 
 const fixture = JSON.parse(await readFile(new URL('./test-fixtures/commute-searchch-brugg-aarau-loop.json', import.meta.url), 'utf8'))
@@ -275,4 +275,67 @@ test('timetable requests are logged as JSON without the query, a token, or a coo
     assert.equal(row.route.includes('Brugg'), false)
     assert.match(row.requestId, /^[A-Za-z0-9._-]{8,64}$/u)
   }
+})
+
+const byteStream = (chunks, counters) => ({
+  ok: true,
+  status: 200,
+  text: async () => { counters.text += 1; return '' },
+  json: async () => { counters.json += 1; return {} },
+  body: {
+    getReader: () => ({
+      read: async () => {
+        if (!chunks.length) return { done: true }
+        counters.reads += 1
+        return { done: false, value: chunks.shift() }
+      },
+      cancel: async () => { counters.cancelled += 1 },
+    }),
+  },
+})
+
+test('a streamed stop list is parsed, and an oversized body is not retried', async () => {
+  const payload = Buffer.from(JSON.stringify([{ id: '8500309', label: 'Brügg AG', iconclass: 'sl-icon-type-train' }]))
+  const split = payload.indexOf(0xc3)
+  assert.ok(split > 0)
+  const counters = { text: 0, json: 0, reads: 0, cancelled: 0 }
+  const fetchImpl = async (url) => {
+    assert.equal(new URL(String(url)).hostname, 'timetable.search.ch')
+    return byteStream([payload.subarray(0, split + 1), payload.subarray(split + 1)], counters)
+  }
+  const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {} })
+  const found = await provider.stops('Brugg')
+  assert.equal(found.stops[0].name, 'Brügg AG')
+  assert.equal(counters.text, 0)
+  assert.equal(counters.json, 0)
+  assert.equal(counters.reads, 2)
+  assert.equal(counters.cancelled, 0)
+
+  const hosts = []
+  const huge = { text: 0, json: 0, reads: 0, cancelled: 0 }
+  const lines = []
+  const log = createServiceLog('commute', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const oversized = createCommuteProvider({
+    jsonLog: log,
+    sleep: async () => {},
+    now: () => new Date(ASK_AT),
+    fetchImpl: async (url) => {
+      const host = new URL(String(url)).hostname
+      hosts.push(host)
+      if (host === 'timetable.search.ch') return byteStream([new Uint8Array(UPSTREAM_BODY_MAX + 1)], huge)
+      return ok({ stations: [{ id: '8500309', name: 'Brugg AG' }] })
+    },
+  })
+  const answer = await oversized.stops('Brugg')
+  assert.equal(answer.stops[0].name, 'Brugg AG')
+  assert.deepEqual(hosts, ['timetable.search.ch', 'transport.opendata.ch'])
+  assert.equal(huge.text, 0)
+  assert.equal(huge.json, 0)
+  assert.equal(huge.reads, 1)
+  assert.equal(huge.cancelled, 1)
+  assert.equal(upstreamRetryable(new Error('page too large')), false)
+  const searchRows = lines.map((line) => JSON.parse(line)).filter((row) => row.route.endsWith('/completion.json'))
+  assert.equal(searchRows.length, 1)
+  assert.equal(searchRows[0].error, 'Error')
+  assert.equal(lines.some((line) => line.includes('page too large')), false)
 })
