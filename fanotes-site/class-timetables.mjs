@@ -688,5 +688,26 @@ export const createClassTimetables = (options = {}) => {
     return result
   }
 
-  return { root, ingest, summary, readIndex, classPdf, classPng, classWeek, room }
+  // A read log names the kind of timetable, never the class code, teacher, or room.
+  const logged = (route, load) => async (...args) => {
+    const requestId = events.requestId()
+    const started = now().getTime()
+    const value = await load(...args)
+    const status = value == null ? 404 : 200
+    const fields = { requestId, method: 'GET', route, status, ms: Math.max(0, now().getTime() - started) }
+    if (status >= 400) events.warn(fields)
+    else events.info(fields)
+    return value
+  }
+
+  return {
+    root,
+    ingest,
+    summary: logged('/timetables', summary),
+    readIndex,
+    classPdf: logged('/timetables/class.pdf', classPdf),
+    classPng: logged('/timetables/class.png', classPng),
+    classWeek: logged('/timetables/class', classWeek),
+    room: logged('/timetables/room', room),
+  }
 }
