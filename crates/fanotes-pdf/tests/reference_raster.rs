@@ -91,8 +91,12 @@ fn a_worksheet_page_matches_the_reference_raster() {
         "the reference shows the page content ({ink} ink pixels)"
     );
     assert!(mean < 1.0, "mean channel difference {mean:.3} ≥ 1.0");
+    // The page uses the non-embedded Helvetica. On Windows PDFium maps it to the
+    // system's Arial instead of its built-in Foxit Sans, so glyph edges differ there
+    // (about 0.6 % of the pixels); layout errors still move far more than 1 %.
+    let far_share = if cfg!(windows) { 0.01 } else { 0.002 };
     assert!(
-        (far as f64) < pixels as f64 * 0.002,
+        (far as f64) < pixels as f64 * far_share,
         "{far} pixels differ by more than 48 levels"
     );
 }

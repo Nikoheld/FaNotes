@@ -947,7 +947,7 @@ mod tests {
         );
         let directory = history_dir(&root, "Note.md").unwrap();
         let index = directory.join("index.json");
-        fs::set_permissions(&index, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&index, fs::Permissions::from_mode(0o000)).unwrap();
         let readable = fs::read(&index).is_ok();
         let error = record(
             &root,

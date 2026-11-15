@@ -482,7 +482,8 @@ export const runAll = async () => {
       if (!existsSync(expectedPath)) { failures.push(`${name}: no expected record (run with --update)`); continue }
       const expected = JSON.parse(readFileSync(expectedPath, 'utf8'))
       const diff = describeDiff(expected, record)
-      if (diff) failures.push(`${name}/${mode}: ${diff}`)
+      const refused = record.steps?.find((step) => step.ok === false && step.error)
+      if (diff) failures.push(`${name}/${mode}: ${diff}${refused ? ` (${refused.do} on ${refused.device}: ${refused.error})` : ''}`)
       else if (!quiet) origLog(`ok ${name}/${mode}`)
     }
   }
