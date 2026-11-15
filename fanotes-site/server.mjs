@@ -24,6 +24,7 @@ import { createAnalyticsService } from './analytics.mjs'
 import { loadGithubReleases, pickGithubPackage } from './github-release.mjs'
 import { startSystemdWatchdog } from './systemd-notify.mjs'
 import { createReleaseCache } from './release-cache.mjs'
+import { FAVICON_TARGET, clientAddress, createPublicLimiter, publicCacheControl } from './public-http.mjs'
 import {
   DELTA_ROUTE_PATTERN,
   DOWNLOAD_ROUTE_PATTERN,
@@ -569,12 +570,11 @@ const serveStatic = async (request, response, pathname) => {
     return true
   }
   const extension = extname(filePath).toLowerCase()
-  const immutable = pathname.startsWith('/assets/') || pathname.includes('/assets/')
   response.writeHead(200, {
     'Content-Type': MIME_TYPES.get(extension) || 'application/octet-stream',
     'Content-Length': stats.size,
     ETag: etag,
-    'Cache-Control': immutable ? 'public, max-age=2592000, immutable' : 'no-cache',
+    'Cache-Control': publicCacheControl(pathname),
   })
   if (request.method === 'HEAD') response.end()
   else {
@@ -616,6 +616,8 @@ const serveNotFoundPage = async (request, response) => {
   return true
 }
 
+const limitPublic = createPublicLimiter()
+
 const server = createServer(async (request, response) => {
   try {
     response.fanotesLanguage = languageForRequest(request)
@@ -624,6 +626,16 @@ const server = createServer(async (request, response) => {
       return
     }
     const url = new URL(request.url, 'http://localhost')
+    if (limitPublic({ ip: clientAddress(request.headers['x-forwarded-for']), pathname: url.pathname, method: request.method || 'GET' })) {
+      response.writeHead(429, { 'Cache-Control': 'no-store', 'Retry-After': '1', 'Content-Length': '0' })
+      response.end()
+      return
+    }
+    if (url.pathname === '/favicon.ico' && (request.method === 'GET' || request.method === 'HEAD')) {
+      response.writeHead(308, { Location: FAVICON_TARGET, 'Cache-Control': 'public, max-age=86400' })
+      response.end()
+      return
+    }
     if (await handleBackupRequest(request, response, url)) return
     if (await handleSyncRequest(request, response, url)) return
     if (await mensa.handle(request, response, url)) return
