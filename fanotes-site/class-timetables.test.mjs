@@ -199,6 +199,28 @@ test('ingest stores a version, switches the pointer, keeps three versions and re
   }
 })
 
+test('a failure after the pointer switches leaves the new timetable in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetables-keep-'))
+  const store = createClassTimetables({
+    root,
+    run: fakeRun(BBOX, []),
+    log: (level) => { if (level === 'info') throw new Error('log failed') },
+    now: () => new Date(Date.UTC(2026, 10, 11, 8, 0, 0)),
+  })
+  try {
+    await assert.rejects(() => store.ingest(PDF), /log failed/u)
+    const pointer = JSON.parse(await readFile(join(store.root, 'current.json'), 'utf8'))
+    assert.equal((await stat(join(store.root, pointer.version))).isDirectory(), true)
+    assert.equal((await readdir(store.root)).some((name) => name.endsWith('.tmp')), false)
+    const summary = await store.summary()
+    assert.equal(summary.available, true)
+    assert.equal(summary.classes.length, 3)
+    assert.equal((await store.classPdf('G26D')).toString().startsWith('%PDF-fake'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 const poppler = have('pdftotext') && have('qpdf') && have('pdftoppm') && have('pdfseparate')
 test('real pipeline on a synthetic PDF: pdftotext, qpdf split, pdftoppm PNG', { skip: poppler ? false : 'poppler-utils and qpdf are not installed' }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'timetables-real-'))
