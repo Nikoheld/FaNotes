@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { markOnce } from '../lib/benchMarks'
 import {
   Check,
   ChevronRight,
@@ -256,6 +257,8 @@ export const FileTree = memo(function FileTree({
     setExpanded(readExpandedFolders(expansionStorageKey))
   }, [expansionStorageKey])
   useEffect(() => { writeExpandedFolders(expansionStorageKey, expanded) }, [expanded, expansionStorageKey])
+  // Inert startup mark for scripts/bench-desktop: the tree has painted its first rows.
+  useEffect(() => { if (orderedEntries.length) markOnce('fanotes:tree-rendered') }, [orderedEntries])
 
   // Reveal the active note when it was opened elsewhere. Folder toggles must not move the list.
   useEffect(() => {
