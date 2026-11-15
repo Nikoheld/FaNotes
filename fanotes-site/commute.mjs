@@ -54,7 +54,10 @@ export const upstreamRetryable = (error) => {
  * to the last good answer (stale).
  */
 export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(), log = () => {}, budgetFile = '', sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), jsonLog } = {}) => {
-  const events = jsonLog || createServiceLog('commute', (line) => console.log(line), now)
+  // Production emits one JSON line per upstream call. Tests pass jsonLog when they want the lines.
+  const events = jsonLog || createServiceLog('commute', (line) => {
+    if (process.env.NODE_ENV === 'production') console.log(line)
+  }, now)
   const cache = new Map()
   const inflight = new Map()
   let budget = { day: '', route: 0, completion: 0, fallback: 0, detail: 0 }
