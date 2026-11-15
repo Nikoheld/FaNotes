@@ -4066,5 +4066,11 @@
   "hemimetabol": "hemimetabolous",
   "holometabol": "holometabolous",
   "ametabol": "ametabolous",
-  "trifft zu": "applies"
+  "trifft zu": "applies",
+  "Auswahl: Beschriftung": "Selected: label",
+  "Auswahl: Zeichen": "Selected: mark",
+  "Auswahl: Legende": "Selected: legend",
+  "Auswahl: Bild": "Selected: image",
+  "Auswahl: Markierung": "Selected: highlight",
+  "Auswahl: Messung": "Selected: measurement"
 }

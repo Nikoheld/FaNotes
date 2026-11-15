@@ -40,6 +40,7 @@ export type StudyAnnotationLayerProps = {
   onClose: () => void
 }
 
+const KIND_LABELS: Record<string, string> = { callout: 'Beschriftung', stamp: 'Zeichen', legend: 'Legende', image: 'Bild', stroke: 'Markierung', measure: 'Messung' }
 const LABEL_COLORS = ['#1d4ed8', '#dc2626', '#16a34a', '#111827']
 const HIGHLIGHT_COLORS = ['#facc15', '#f97316', '#22c55e', '#38bdf8', '#e879f9']
 const A4_WIDTH_CM = 21
@@ -858,7 +859,7 @@ export function StudyAnnotationLayer({ path, pdf, open, onClose }: StudyAnnotati
             {status && <p className="study-status" role="status">{status}</p>}
           </div>
           <div className="study-foot">
-            <span>{selected ? `Auswahl: ${selected.kind}` : `${items.filter((i) => i.kind !== 'terms').length} Objekte`}</span>
+            <span>{selected ? `Auswahl: ${KIND_LABELS[selected.kind] ?? selected.kind}` : `${items.filter((i) => i.kind !== 'terms').length} Objekte`}</span>
             {selected && <button type="button" className="study-tool" onClick={() => remove(selected.id)}><Trash2 size={13} /> Löschen</button>}
             {tool !== 'select' && <button type="button" className="study-tool" onClick={finishTool}>Fertig</button>}
           </div>

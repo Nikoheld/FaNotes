@@ -164,6 +164,7 @@ private fun documentIsBlank(parsed: FamdDocument): Boolean {
     val payload = parsed.payload ?: return true
     if (inkHasMarks(payload)) return false
     val fields = payload.array("textFields")?.items.orEmpty()
+    if (payload.array("annotations")?.items.orEmpty().any { (it as? JsonValue.Obj)?.string("kind") != "terms" }) return false
     return fields.none { field ->
         val text = (field as? JsonValue.Obj)?.string("text")
         !text.isNullOrBlank()
