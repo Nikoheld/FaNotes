@@ -205,6 +205,7 @@
     "check:addons": "node scripts/check-addons.mjs",
     "check:sync": "node scripts/check-sync.mjs",
     "check:mcp": "node scripts/check-mcp.mjs",
+    "check:local-mcp": "node scripts/check-local-mcp.mjs",
     "check:spelling-suggest": "node scripts/check-spelling-suggest.mjs",
     "check:paper-view-memory": "node scripts/check-paper-view-memory.mjs",
     "check:pdf-camera": "node scripts/check-pdf-camera.mjs",

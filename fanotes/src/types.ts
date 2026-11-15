@@ -74,6 +74,14 @@ export type HandwritingRecognitionResources = {
   characters: string[]
 }
 
+export type LocalMcpInfo = {
+  httpRunning: boolean
+  httpUrl: string
+  httpToken: string
+  httpError: string
+  stdio: { packaged: boolean; appImage: string; execPath: string; entryPath: string; platform: string; userData: string }
+}
+
 export type AppSettings = {
   uiLanguage: UiLanguagePreference
   theme: ThemeMode
@@ -110,6 +118,10 @@ export type AppSettings = {
   syncDeviceName: string
   /** Newline-separated vault folders that stay on this device. */
   syncExcludedFolders: string
+  mcpEnabled: boolean
+  mcpWriteAccess: boolean
+  mcpHttpEnabled: boolean
+  mcpExcludedFolders: string
   /** Upload the personal handwriting model as its own encrypted file. */
   syncHandwritingModel: boolean
   /** Also synchronise the local note-history folder. */
@@ -708,6 +720,8 @@ export type FaNotesApi = {
     expiresAt?: number
     rotated?: boolean
   } | null>
+  /** Local MCP server (Electron only): connection info for Settings → KI-Zugriff (MCP). */
+  mcpLocal?: (request: { action: 'info' | 'regenerate' }) => Promise<LocalMcpInfo>
   loadSecureSettings?: () => Promise<Partial<AppSettings>>
   saveSettings: (settings: AppSettings, options?: { clearProtectedSecrets?: boolean }) => Promise<AppSettings>
   getServerBackupState?: () => Promise<ServerBackupState>
