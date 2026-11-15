@@ -531,3 +531,27 @@ test('a second registration does not replace the account that already owns the a
   assert.equal(login.status, 200)
   assert.equal(login.json.accountId, first.json.accountId)
 })
+
+test('a delete leaves a newer live blob in place', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const next = randomBytes(5000)
+  writeFileSync(join(dataDirectory, 'accounts', accountId, 'blobs', id), next)
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(revision), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 409, removed.body.toString('utf8'))
+  assert.equal(JSON.parse(removed.body.toString('utf8')).reason, 'guard')
+  assert.deepEqual(readFileSync(join(dataDirectory, 'accounts', accountId, 'blobs', id)), next)
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, next)
+  const changes = await call('GET', '/api/v1/sync/changes?since=0', { token })
+  const entry = JSON.parse(changes.body.toString('utf8')).entries.find((item) => item.id === id)
+  assert.equal(entry.deleted, false)
+  assert.equal(entry.revision, revision)
+})
