@@ -188,9 +188,12 @@ const IDENTITY_STAMP = '1970-01-01T00:00:00.000Z'
 
 const headerLooksStored = (text: string) => text.includes('fanotes-famd:v1') || text.includes('fanotes-famd:v2')
 
-/** True when the ink object, including packed strokes and collapsed sections, holds marks. */
+/**
+ * True when the ink object, including packed strokes and collapsed sections, holds marks.
+ * A collapsed subsection parks its strokes eight levels under the famd payload.
+ */
 export const inkHasMarks = (value: unknown, depth = 0): boolean => {
-  if (!value || depth > 6) return false
+  if (!value || depth > 24) return false
   if (Array.isArray(value)) return value.some((item) => inkHasMarks(item, depth + 1))
   if (typeof value !== 'object') return false
   const record = value as Record<string, unknown>

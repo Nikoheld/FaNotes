@@ -156,8 +156,18 @@ try {
   put(companionPath, companionOf(inked))
   assert.equal(saveLikeMain(skeleton).refused, true, 'companion with strokes and no record keeps the page')
 
-  // Strokes only in a collapsed subsection (deeper than famd.cjs inkHasMarks looks).
-  assert.equal(famd.inkHasMarks(nestedCollapsed), false, 'fixture: famd.cjs inkHasMarks misses a subsection body')
+  // Strokes only in a collapsed subsection. The payload is one level deeper than the page.
+  assert.equal(famd.inkHasMarks(nestedCollapsed), true, 'strokes in a collapsed subsection count as ink')
+  assert.equal(famd.inkHasMarks({ ink: nestedCollapsed }), true, 'a companion payload with only subsection ink counts as ink')
+  const storedNested = companionOf(nestedCollapsed)
+  const plainMarkdown = `${BODY}`
+  assert.equal(
+    famd.famdLooksStored(storedNested)
+      && famd.inkHasMarks(famd.parseFamd(storedNested).payload)
+      && !famd.inkHasMarks(famd.parseFamd(plainMarkdown).payload),
+    true,
+    'a text save of a legacy note keeps ink that lives only in a collapsed subsection',
+  )
   assert.equal(guard.pageHasStrokes(nestedCollapsed), true)
   put(recordPath, JSON.stringify(nestedCollapsed))
   put(companionPath, companionOf(nestedCollapsed))
