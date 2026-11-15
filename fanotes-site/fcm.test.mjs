@@ -5,7 +5,7 @@ import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { claimPushKeys, deliverFcm, exchangeServiceAccount, FCM_ATTEMPTS, FCM_AUTH_ATTEMPTS, FCM_BODY_MAX, fcmDropToken, pushDedupKey } from './fcm.mjs'
+import { claimPushKeys, deliverFcm, exchangeServiceAccount, FCM_ATTEMPTS, FCM_AUTH_ATTEMPTS, FCM_BODY_MAX, FCM_TIMEOUT_MS, fcmDropToken, pushDedupKey } from './fcm.mjs'
 import { createServiceLog } from './service-log.mjs'
 import { createSchulnetzRuntime, SCHOOL_BODY_MAX, updateChangeLog } from './schulnetz-api.mjs'
 
@@ -526,4 +526,54 @@ test('an oversized Schulnetz page is not stored and an error page is not read', 
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+const untilAbort = (signal) => new Promise((_, reject) => {
+  const fail = () => reject(signal.reason)
+  if (signal?.aborted) fail()
+  else signal.addEventListener('abort', fail, { once: true })
+})
+
+test('a hung FCM call is abandoned and tried again', async () => {
+  assert.equal(FCM_TIMEOUT_MS, 12_000)
+  let posts = 0
+  const sent = await deliverFcm({
+    fetchImpl: async (_url, init) => {
+      posts += 1
+      assert.equal(init.redirect, 'error')
+      if (posts === 1) await untilAbort(init.signal)
+      return { status: 200, text: async () => '{}' }
+    },
+    url: 'https://fcm.googleapis.com/v1/projects/demo/messages:send',
+    message: { message: { token: 'phone:APA91b-example-token-value', data: { event: 'sync' } } },
+    headers: { Authorization: 'Bearer secret-token' },
+    sleep: async () => {},
+    timeoutMs: 30,
+    jsonLog: createServiceLog('fcm', () => {}, () => new Date('2026-11-15T11:00:00.000Z')),
+  })
+  assert.equal(sent.status, 200)
+  assert.equal(posts, 2)
+
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const account = {
+    client_email: 'push@kanti-test.iam.gserviceaccount.com',
+    private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    project_id: 'kanti-test',
+  }
+  const lines = []
+  let signIns = 0
+  const signed = await exchangeServiceAccount(account, async (_url, init) => {
+    signIns += 1
+    assert.equal(init.redirect, 'error')
+    if (signIns === 1) await untilAbort(init.signal)
+    return { ok: true, status: 200, text: async () => JSON.stringify({ access_token: 'ya29.secret-access-token', expires_in: 3600 }) }
+  }, Date.parse('2026-11-15T11:00:00Z'), {
+    sleep: async () => {},
+    timeoutMs: 30,
+    jsonLog: createServiceLog('fcm', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z')),
+  })
+  assert.equal(signed.projectId, 'kanti-test')
+  assert.equal(signIns, 2)
+  assert.equal(lines.join('\n').includes('ya29'), false)
+  assert.equal(lines.join('\n').includes('PRIVATE'), false)
 })
