@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -617,6 +617,45 @@ test('a timetable read is logged without the class code or the room name', async
     assert.equal(text.includes('G26'), false)
     assert.equal(text.includes('Telli'), false)
   } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable timetable file is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-read-'))
+  const runs = []
+  const store = createClassTimetables({
+    root,
+    run: async (tool) => { runs.push(tool); throw new Error('pdf tool') },
+    now: () => new Date('2026-11-15T12:00:00.000Z'),
+  })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const classesFile = join(dir, 'classes.json')
+  const pointer = join(store.root, 'current.json')
+  const classes = { G26A: { teacher: 'Tst', semester: 'SJ', entries: [{ day: 1 }], footnotes: [] } }
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(classesFile, JSON.stringify(classes), { mode: 0o600 })
+  await writeFile(join(dir, 'index.json'), JSON.stringify({
+    uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+    classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: ['T01'], warnings: [],
+  }), { mode: 0o600 })
+  await writeFile(pointer, JSON.stringify({ version }), { mode: 0o600 })
+  const beforeClasses = await readFile(classesFile)
+  const beforePointer = await readFile(pointer)
+  try {
+    await chmod(pointer, 0o000)
+    await assert.rejects(() => store.summary(), (error) => error?.code === 'EACCES')
+    await chmod(pointer, 0o600)
+    assert.deepEqual(await readFile(pointer), beforePointer)
+    await chmod(classesFile, 0o000)
+    await assert.rejects(() => store.classWeek('G26A'), (error) => error?.code === 'EACCES')
+    assert.deepEqual(runs, [])
+    await chmod(classesFile, 0o600)
+    assert.deepEqual(await readFile(classesFile), beforeClasses)
+  } finally {
+    await chmod(pointer, 0o600).catch(() => undefined)
+    await chmod(classesFile, 0o600).catch(() => undefined)
     await rm(root, { recursive: true, force: true })
   }
 })
