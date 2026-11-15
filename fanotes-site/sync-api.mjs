@@ -1164,6 +1164,16 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
   return { matchesRequest, entry }
 }
 
+// True when the live file is already the body this request would write.
+// Replacing that inode can drop the only copy: a same-byte update does not
+// archive the note first. A missing file, a symlink, or a different body is
+// not a match, so those still go through the normal write.
+const liveBlobMatches = async (accountId, fileId, current, size, sha) => {
+  if (!current || current.deleted || current.sha256 !== sha || (Number(current.size) || 0) !== size) return false
+  const info = await fs.lstat(safeJoin(accountDirectory(accountId), 'blobs', fileId)).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  return Boolean(info?.isFile() && info.size === size)
+}
+
 const handlePutFile = async (request, response, auth, fileId) => {
   const base = parseIfMatch(request)
   const meta = parseMeta(request)
@@ -1215,11 +1225,19 @@ const handlePutFile = async (request, response, auth, fileId) => {
     if (current && !current.deleted && current.sha256 !== declaredSha) {
       table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, incoming.size, false)
     }
-    const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
-    await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
-    await fs.rename(incoming.path, blobPath)
-    // The new name has to be durable before the change log records it.
-    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
+    const blobDirectory = safeJoin(accountDirectory(auth.account.id), 'blobs')
+    const blobPath = safeJoin(blobDirectory, fileId)
+    if (await liveBlobMatches(auth.account.id, fileId, current, incoming.size, declaredSha)) {
+      // The live file is already this body. Leave that inode in place and
+      // drop the spool. The new revision still records a metadata change.
+      await fs.rm(incoming.path, { force: true })
+      await syncDirectory(dirname(incoming.path))
+    } else {
+      await fs.mkdir(blobDirectory, { recursive: true, mode: 0o700 })
+      await fs.rename(incoming.path, blobPath)
+      // The new name has to be durable before the change log records it.
+      await syncDirectory(blobDirectory)
+    }
     committed = true
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: incoming.size, sha256: declaredSha, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
@@ -1692,10 +1710,13 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     if (current && !current.deleted && current.sha256 !== declaredSha) {
       table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, meta.size, false)
     }
-    const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
-    await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
-    await fs.rename(bodyPath, blobPath)
-    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
+    const blobDirectory = safeJoin(accountDirectory(auth.account.id), 'blobs')
+    const blobPath = safeJoin(blobDirectory, fileId)
+    if (!await liveBlobMatches(auth.account.id, fileId, current, Number(meta.size) || 0, declaredSha)) {
+      await fs.mkdir(blobDirectory, { recursive: true, mode: 0o700 })
+      await fs.rename(bodyPath, blobPath)
+      await syncDirectory(blobDirectory)
+    }
     await removePartial(auth.account.id, uploadId)
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision

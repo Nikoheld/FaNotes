@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { connect as connectTcp } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -1028,4 +1028,120 @@ test('a deleted note is not copied back from its archive', async () => {
   assert.equal(live.status, 204)
   assert.equal(existsSync(blobPath), false)
   assert.equal(live.headers['x-fanotes-deleted'], '1')
+})
+
+test('putting the same bytes keeps the live inode and stores the new metadata', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = revisionOf(created)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const before = statSync(blobPath)
+  const incomingDir = join(dataDirectory, 'accounts', accountId, 'incoming')
+  const partsBefore = existsSync(incomingDir) ? readdirSync(incomingDir).filter((name) => name.endsWith('.part')) : []
+  const nextMeta = b64(32)
+  const again = await putFile(id, original, revision, { 'X-FaNotes-Blank': '0', 'X-FaNotes-Meta': nextMeta })
+  assert.equal(again.status, 200, again.body.toString('utf8'))
+  assert.ok(revisionOf(again) > revision)
+  const after = statSync(blobPath)
+  assert.equal(after.dev, before.dev)
+  assert.equal(after.ino, before.ino)
+  assert.deepEqual(readFileSync(blobPath), original)
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.equal(live.headers['x-fanotes-meta'], nextMeta)
+  assert.equal(live.headers['x-fanotes-sha256'], sha256(original))
+  const partsAfter = existsSync(incomingDir) ? readdirSync(incomingDir).filter((name) => name.endsWith('.part')) : []
+  assert.deepEqual(partsAfter.sort(), partsBefore.sort())
+})
+
+test('putting different bytes still replaces the live note', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = revisionOf(created)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const before = statSync(blobPath)
+  const next = randomBytes(4800)
+  const replaced = await putFile(id, next, revision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  const after = statSync(blobPath)
+  assert.notEqual(after.ino, before.ino)
+  assert.deepEqual(readFileSync(blobPath), next)
+  assert.deepEqual(readFileSync(join(dataDirectory, 'accounts', accountId, 'revisions', id, String(revision))), original)
+})
+
+test('putting the same bytes recreates a missing live blob', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = revisionOf(created)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  rmSync(blobPath)
+  const again = await putFile(id, original, revision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(again.status, 200, again.body.toString('utf8'))
+  assert.ok(revisionOf(again) > revision)
+  assert.deepEqual(readFileSync(blobPath), original)
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, original)
+})
+
+test('completing an upload of the same bytes keeps the live inode', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = revisionOf(created)
+  const blobPath = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const before = statSync(blobPath)
+  const nextMeta = b64(32)
+  const openBody = Buffer.from(JSON.stringify({ size: original.length }))
+  const opened = await call('POST', `/api/v1/sync/files/${id}/uploads`, {
+    token,
+    body: openBody,
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': String(openBody.length),
+      'If-Match': String(revision),
+      'X-FaNotes-Meta': nextMeta,
+      'X-FaNotes-Sha256': sha256(original),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(opened.status, 201, opened.body.toString('utf8'))
+  const uploadId = jsonOf(opened).uploadId
+  const patched = await call('PATCH', `/api/v1/sync/files/${id}/uploads/${uploadId}`, {
+    token,
+    body: original,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(original.length),
+      'Upload-Offset': '0',
+    },
+  })
+  assert.equal(patched.status, 200, patched.body.toString('utf8'))
+  const finished = await call('POST', `/api/v1/sync/files/${id}/uploads/${uploadId}/complete`, {
+    token,
+    headers: {
+      'Content-Length': '0',
+      'If-Match': String(revision),
+      'X-FaNotes-Meta': nextMeta,
+      'X-FaNotes-Sha256': sha256(original),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(finished.status, 200, finished.body.toString('utf8'))
+  assert.ok(revisionOf(finished) > revision)
+  const after = statSync(blobPath)
+  assert.equal(after.dev, before.dev)
+  assert.equal(after.ino, before.ino)
+  assert.deepEqual(readFileSync(blobPath), original)
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.equal(live.headers['x-fanotes-meta'], nextMeta)
+  assert.equal((await call('GET', `/api/v1/sync/files/${id}/uploads/${uploadId}`, { token })).status, 404)
 })
