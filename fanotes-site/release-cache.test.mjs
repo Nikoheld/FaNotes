@@ -37,6 +37,14 @@ test('a failed refresh keeps the previous listing', async () => {
   assert.deepEqual(await cache.get(), { version: '1' })
 })
 
+test('a health check does not wait for a share that never answers', async () => {
+  const cache = createReleaseCache(() => new Promise(() => {}), 5_000, () => 0)
+  const started = Date.now()
+  assert.equal(await cache.get('stable', 30), null)
+  assert.ok(Date.now() - started < 500)
+  assert.equal(await cache.get('stable', 30), null)
+})
+
 test('the first load failure is visible', async () => {
   const cache = createReleaseCache(async () => { throw new Error('share down') }, 10, () => 0)
   await assert.rejects(cache.get(), /share down/)
