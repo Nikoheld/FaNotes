@@ -158,6 +158,16 @@ export const createProject = async (host: StoryHost, parentFolder: string, optio
   return path
 }
 
+/** Writes an imported story (DOCX, Markdown, text) as `Title.story` in a folder. */
+export const saveImportedProject = async (host: StoryHost, parentFolder: string, story: { manifest: StoryManifest; scenes: Scene[] }) => {
+  const safe = story.manifest.title.replace(/[\\/:*?"<>|\u0000-\u001f]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 120) || 'Geschichte'
+  const path = await host.create(parentFolder, `${safe}${STORY_EXTENSION}`)
+  const adapter = storageAdapter(host, path)
+  for (const scene of story.scenes) await adapter.writeScene(scene)
+  await adapter.writeManifest(story.manifest)
+  return path
+}
+
 // ── Crash journal ──────────────────────────────────────────────────────────
 
 const journalKey = (path: string) => `fanotes.writing.journal.v1:${path}`

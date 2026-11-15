@@ -1,6 +1,6 @@
 import {
   AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowLeft, Bold, BookOpen, ChevronDown, ChevronRight, Columns2, Eye, FilePlus2, FileText,
-  CalendarRange, Focus, Italic, LayoutGrid, ListTree, LoaderCircle, MapPin, MessageSquarePlus, Minus, MoreHorizontal, PanelRight, Plus, Redo2, Replace, Search, SlidersHorizontal, SpellCheck, Strikethrough, Subscript, Superscript, Target, TextCursor, Trash2, Underline, Undo2, Users, X,
+  CalendarRange, Download, Focus, Italic, LayoutGrid, ListTree, LoaderCircle, MapPin, MessageSquarePlus, Minus, MoreHorizontal, PanelRight, Plus, Redo2, Replace, Search, SlidersHorizontal, SpellCheck, Strikethrough, Subscript, Superscript, Target, TextCursor, Trash2, Underline, Undo2, Users, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as commands from '../editor/commands'
@@ -27,6 +27,8 @@ import { BibleSheets, Timeline } from './BibleViews'
 import { GoalsView } from './GoalsView'
 import { ReferencePane, type Reference } from './ReferencePane'
 import { ScenePanel, SnapshotCompare } from './ScenePanel'
+import { ExportDialog } from '../export/ExportDialog'
+import { androidBridge } from '../androidHost'
 import { useStoryTools } from './storyTools'
 import { canDrop, findIn, moveNode, moveToTrash, trashedIds, updateNode, TRASH_ID, type DropPosition } from '../model/binder'
 import { diffScene, restoreSnapshot, type DiffRow, type Snapshot } from '../model/snapshots'
@@ -83,6 +85,7 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const [typewriter, setTypewriter] = useState(() => localStorage.getItem('fanotes.writing.typewriter') === '1')
   const [compare, setCompare] = useState<{ snapshot: Snapshot; rows: DiffRow[] } | null>(null)
   const [storyFiles, setStoryFiles] = useState<string[] | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
   const writer = useMemo(() => writerId(), [])
   const [assistSettings, setAssistSettings] = useState<AssistSettings>(() => {
     try { return { ...defaultAssistSettings(), ...JSON.parse(localStorage.getItem('fanotes.writing.assist.v1') ?? '{}') } } catch { return defaultAssistSettings() }
@@ -206,6 +209,13 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     }
     onClose()
   }, [controller, onClose, path, save])
+
+  // The Android app asks the editor to close (back button): save first, like the arrow does.
+  useEffect(() => {
+    const onRequest = () => { void close() }
+    window.addEventListener('fanotes-writing-close', onRequest)
+    return () => window.removeEventListener('fanotes-writing-close', onRequest)
+  }, [close])
 
   // ── Writing assistance ────────────────────────────────────────────────
   useEffect(() => {
@@ -524,7 +534,10 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
   }
 
   // ── Pointer ────────────────────────────────────────────────────────────
+  /** A finger on a tablet scrolls; a tap (little movement) places the caret on release. */
+  const touchStart = useRef<{ pointer: PagePointer; at: number } | null>(null)
   const onPointerDown = (pointer: PagePointer) => {
+    if (pointer.pointerType === 'touch') { touchStart.current = { pointer, at: Date.now() }; return }
     if (!controller || !layout || !measurer || pointer.button !== 0) return
     const pos = hitTest(layout, pointer.page, pointer.x, pointer.y, measurer)
     input.current?.focus({ preventScroll: true })
@@ -556,11 +569,28 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
     openPopover(pos, true, pointer.page, pointer.x, pointer.y)
   }
   const onPointerMove = (pointer: PagePointer) => {
+    if (pointer.pointerType === 'touch') {
+      const start = touchStart.current?.pointer
+      if (start && (start.page !== pointer.page || Math.hypot(pointer.x - start.x, pointer.y - start.y) > 10 / zoom)) touchStart.current = null
+      return
+    }
     if (!controller || !layout || !measurer || !dragging.current) return
     const pos = hitTest(layout, pointer.page, pointer.x, pointer.y, measurer)
     if (pos) controller.select({ anchor: dragging.current.anchor, head: pos })
   }
-  const onPointerUp = () => { dragging.current = null }
+  const onPointerUp = (pointer?: PagePointer) => {
+    dragging.current = null
+    const tap = touchStart.current
+    touchStart.current = null
+    if (pointer?.pointerType !== 'touch' || !tap || Date.now() - tap.at > 600 || !controller || !layout || !measurer) return
+    const pos = hitTest(layout, tap.pointer.page, tap.pointer.x, tap.pointer.y, measurer)
+    if (!pos) return
+    controller.select(caret(pos))
+    // Focusing on the tap itself opens the on-screen keyboard.
+    input.current?.focus({ preventScroll: true })
+    setPopover(null)
+    if (issueAt(pos)) openPopover(pos, true, tap.pointer.page, tap.pointer.x, tap.pointer.y)
+  }
 
   // ── Footnotes and comments ─────────────────────────────────────────────
   const addFootnote = () => {
@@ -897,6 +927,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
           <option value="night">{L('Nacht', 'Night')}</option>
           <option value="contrast">{L('Hoher Kontrast', 'High contrast')}</option>
         </select>
+        <button type="button" className="wm-icon" title={L('Exportieren: PDF, Word, EPUB, Markdown, Text', 'Export: PDF, Word, EPUB, Markdown, text')} onClick={() => setExportOpen(true)}><Download size={16} /></button>
         <button type="button" className={`wm-icon${typewriter ? ' is-on' : ''}`} title={L('Schreibmaschinen-Modus: die aktuelle Zeile bleibt auf gleicher Höhe', 'Typewriter mode: the current line stays at the same height')} aria-pressed={typewriter} onClick={() => { setTypewriter((value) => !value); refocus() }}><TextCursor size={16} /></button>
         <button type="button" className={`wm-icon${reference ? ' is-on' : ''}`} title={L('Geteilte Ansicht: Szene, Figur oder Notiz daneben', 'Split view: a scene, character or note alongside')} aria-pressed={Boolean(reference)} onClick={() => {
           if (reference) { setReference(null); return }
@@ -1073,6 +1104,24 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
         )}
       </div>
 
+      {exportOpen && (
+        <ExportDialog
+          project={{ manifest: doc.manifest, scenes: doc.scenes }}
+          currentChapter={(() => { const chapter = headBlock?.chapterId ? findIn(doc.manifest.binder, headBlock.chapterId) : null; return chapter ? { id: chapter.id, title: chapter.title } : null })()}
+          measurer={measurer ?? undefined}
+          hyphenators={hyphenators}
+          layout={layout}
+          onSave={androidBridge() ? async (result) => {
+            let binary = ''
+            for (let index = 0; index < result.bytes.length; index += 0x8000) binary += String.fromCharCode(...result.bytes.subarray(index, index + 0x8000))
+            const raw = JSON.parse(androidBridge()!.saveExport(path, result.fileName, btoa(binary))) as { ok: boolean; value?: string; error?: string }
+            if (!raw.ok) throw new Error(raw.error ?? 'Export failed')
+            setNotice(L(`Gespeichert als ${raw.value}`, `Saved as ${raw.value}`))
+            onSaved?.([raw.value!])
+          } : undefined}
+          onClose={() => { setExportOpen(false); refocus() }}
+        />
+      )}
       {compare && <SnapshotCompare snapshot={compare.snapshot} rows={compare.rows} onRestore={() => { void restoreCompare() }} onClose={() => { setCompare(null); refocus() }} />}
 
       {noteDialog && (

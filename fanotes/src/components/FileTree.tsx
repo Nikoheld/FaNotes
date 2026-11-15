@@ -56,6 +56,8 @@ export type FileTreeProps = {
   onImportPdf?: (parentPath?: string) => MaybePromise
   /** Creates a writing-mode story in this folder. */
   onCreateStory?: (parentPath?: string) => MaybePromise
+  /** Imports a DOCX, Markdown or text file as a new story in the folder. */
+  onImportStory?: (parentPath?: string) => MaybePromise
   onAttachBook?: (parentPath: string) => MaybePromise
   onDetachBook?: (parentPath: string) => MaybePromise
   bookFolderPaths?: string[]
@@ -216,6 +218,7 @@ export const FileTree = memo(function FileTree({
   onCreateFolder,
   onImportPdf,
   onCreateStory,
+  onImportStory,
   onAttachBook,
   onDetachBook,
   bookFolderPaths = [],
@@ -954,6 +957,16 @@ export const FileTree = memo(function FileTree({
               >
                 <BookOpen aria-hidden="true" size={15} />
                 Neue Geschichte
+              </button>
+              )}
+              {onImportStory && (
+              <button
+                onClick={() => { setContextMenu(null); void Promise.resolve(onImportStory(contextMenu.entry.relativePath)) }}
+                role="menuitem"
+                type="button"
+              >
+                <BookOpen aria-hidden="true" size={15} />
+                Geschichte importieren …
               </button>
               )}
               {onAttachBook && (

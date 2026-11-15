@@ -188,6 +188,19 @@ private const val HOMEWORK_UNREADABLE = "Hausaufgaben.md konnte nicht gelesen we
 private const val CALENDAR_UNREADABLE = "Kalender.md konnte nicht gelesen werden. Die Datei bleibt unverändert."
 
 class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
+    /** Opens a `.story` folder in the writing mode (a WebView with the shared editor). */
+    fun openStory(path: String) {
+        viewModelScope.launch { saveNow() }
+        val context = getApplication<Application>()
+        context.startActivity(WritingActivity.intent(context, path).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** Creates a story in a folder and opens it. */
+    fun createStory(parent: String) {
+        val context = getApplication<Application>()
+        context.startActivity(WritingActivity.createIntent(context, parent).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     private val graph = (app as FaNotesApplication).graph
     val session = InkSession(newInkDocument("Note", "dots", isoNow()))
     val tree = MutableStateFlow<List<VaultNode>>(emptyList())
@@ -415,6 +428,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var openGeneration = 0
 
     fun openPath(path: String, force: Boolean = false, fromHistory: NoteTrail? = null, headingAnchor: String? = null) {
+        if (ch.fasrv.fanotes.vault.StoryFiles.isStoryFolder(path)) {
+            openStory(path)
+            return
+        }
         val generation = ++openGeneration
         viewModelScope.launch {
             try {
@@ -2402,7 +2419,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val found = mutableListOf<VaultNode>()
         fun visit(nodes: List<VaultNode>) {
             for (node in nodes) {
-                if (node.kind == NoteKind.FOLDER) visit(node.children) else found += node
+                // Stories open in the writing mode; they are not notes the note screens can read.
+                if (node.kind == NoteKind.FOLDER) visit(node.children) else if (node.kind != NoteKind.STORY) found += node
             }
         }
         visit(tree.value)

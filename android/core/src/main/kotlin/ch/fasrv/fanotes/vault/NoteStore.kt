@@ -64,7 +64,8 @@ interface VaultIo {
 
 data class VaultEntry(val path: String, val directory: Boolean, val size: Long, val mtimeMs: Long)
 
-enum class NoteKind { MARKDOWN, PDF, FOLDER }
+/** STORY: a writing-mode project folder (`Name.story/`), shown and opened as one document. */
+enum class NoteKind { MARKDOWN, PDF, FOLDER, STORY }
 
 data class VaultNode(
     val name: String,
@@ -628,7 +629,9 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             .filter { !it.path.substringAfterLast('/').startsWith(".") }
             .mapNotNull { entry ->
                 val name = entry.path.substringAfterLast('/')
-                if (entry.directory) {
+                if (entry.directory && StoryFiles.isStoryFolder(entry.path)) {
+                    VaultNode(name.removeSuffix(".story").removeSuffix(".STORY"), entry.path, NoteKind.STORY, entry.mtimeMs)
+                } else if (entry.directory) {
                     VaultNode(name, entry.path, NoteKind.FOLDER, entry.mtimeMs, buildTree(entry.path))
                 } else {
                     val extension = extensionOf(name)

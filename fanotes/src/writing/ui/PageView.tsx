@@ -31,7 +31,7 @@ type Props = {
   scroller: HTMLDivElement | null
   onPointerDown: (pointer: PagePointer) => void
   onPointerMove: (pointer: PagePointer) => void
-  onPointerUp: () => void
+  onPointerUp: (pointer?: PagePointer) => void
   onContextMenu?: (pointer: PagePointer) => void
 }
 
@@ -179,7 +179,7 @@ const PageBox = memo(function PageBox(props: {
       data-page={page.index}
       onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); props.onPointerDown(pointer(event)) }}
       onPointerMove={(event) => { if (event.buttons & 1) props.onPointerMove(pointer(event)) }}
-      onPointerUp={() => props.onPointerUp()}
+      onPointerUp={(event) => props.onPointerUp(pointer(event))}
       onContextMenu={(event) => { if (props.onContextMenu) { event.preventDefault(); props.onContextMenu(pointer(event as unknown as ReactPointerEvent<HTMLDivElement>)) } }}
       // The hidden input keeps the focus; a click on paper must not take it away.
       onMouseDown={(event) => event.preventDefault()}

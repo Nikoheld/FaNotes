@@ -3993,5 +3993,8 @@
   "Der Schreibmodus ist abgestürzt": "The writing mode crashed",
   "Geschichten gibt es in dieser Version nicht.": "Stories are not available in this version.",
   "Die Geschichte konnte nicht angelegt werden.": "The story could not be created.",
-  "Schreibmodus mit Seiten, Kapiteln und Szenen": "Writing mode with pages, chapters and scenes"
+  "Schreibmodus mit Seiten, Kapiteln und Szenen": "Writing mode with pages, chapters and scenes",
+  "Geschichte importieren …": "Import story …",
+  "Word (.docx), Markdown oder Text als Geschichte öffnen": "Open Word (.docx), Markdown or text as a story",
+  "Der Import ist abgestürzt": "The import crashed"
 }

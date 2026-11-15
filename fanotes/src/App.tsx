@@ -278,6 +278,7 @@ const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
 const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspace').then((module) => ({ default: module.GlyphenWerkWorkspace })))
 const WritingMode = lazy(() => import('./writing/ui/WritingMode').then((module) => ({ default: module.WritingMode })))
+const StoryImportDialog = lazy(() => import('./writing/import/ImportDialog').then((module) => ({ default: module.ImportDialog })))
 const CommandPalette = lazy(() => import('./components/CommandPalette').then((module) => ({ default: module.CommandPalette })))
 const StudyOverview = lazy(() => import('./components/StudyOverview').then((module) => ({ default: module.StudyOverview })))
 const FlashcardReview = lazy(() => import('./components/FlashcardReview').then((module) => ({ default: module.FlashcardReview })))
@@ -2586,6 +2587,19 @@ export default function App({ startupBootstrap }: AppProps) {
       toast(error instanceof Error ? error.message : 'Die Geschichte konnte nicht angelegt werden.', 'error')
     }
   }, [refreshTree, toast])
+
+  /** Folder an imported story goes into; undefined while the import dialog is closed. */
+  const [storyImportParent, setStoryImportParent] = useState<string | undefined>(undefined)
+  const importStoryFile = useCallback(async (story: import('./writing/import/build').ImportedStory) => {
+    const { storyHost, saveImportedProject } = await import('./writing/storage')
+    const host = storyHost()
+    if (!host) throw new Error('Geschichten gibt es in dieser Version nicht.')
+    const path = await saveImportedProject(host, storyImportParent ?? '', story)
+    setStoryImportParent(undefined)
+    await refreshTree()
+    syncEngine.notifyLocalChange()
+    setWritingPath(path)
+  }, [refreshTree, storyImportParent])
 
   const createNote = useCallback(async (parent?: string) => {
     const session = vaultSessionGenerationRef.current
@@ -5030,6 +5044,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'import-pdf-note', label: 'PDF importieren', detail: 'PDF wird selbst zur Notiz — mit Handschrift und Viewer', group: 'Dateien', keywords: 'pdf import notiz viewer', icon: <FileText size={15} />, run: () => void importPdfNote() },
     { id: 'new-folder', label: 'Neuer Ordner', detail: 'Fach auf oberster Ebene anlegen', group: 'Dateien', icon: <FolderPlus size={15} />, run: () => void createFolder() },
     { id: 'new-story', label: 'Neue Geschichte', detail: 'Schreibmodus mit Seiten, Kapiteln und Szenen', group: 'Dateien', keywords: 'geschichte roman buch schreiben story novel writing kapitel', icon: <BookOpen size={15} />, run: () => void createStory() },
+    { id: 'import-story', label: 'Geschichte importieren …', detail: 'Word (.docx), Markdown oder Text als Geschichte öffnen', group: 'Dateien', keywords: 'import docx word markdown geschichte roman story', icon: <BookOpen size={15} />, run: () => setStoryImportParent('') },
     { id: 'new-subfolder', label: 'Unterordner anlegen', detail: activeTab ? `In ${parentPath(activeTab.path) || 'Vault-Wurzel'}` : 'Rechtsklick auf einen Ordner oder hier nach dem Öffnen einer Notiz', group: 'Dateien', keywords: 'unterordner ordner verschachteln fach', icon: <FolderPlus size={15} />, run: () => void createFolder(activeTab ? parentPath(activeTab.path) || undefined : undefined) },
     { id: 'save', label: 'Aktuelle Notiz speichern', detail: 'Text, Handschrift und Arbeitsblätter sichern', shortcut: 'Ctrl S', group: 'Dateien', icon: <Save size={15} />, run: () => { void saveCurrentWork(true) } },
     { id: 'search', label: 'Im Vault suchen', shortcut: 'Ctrl ⇧ F', group: 'Navigation', icon: <Search size={15} />, run: () => setSearchOpen(true) },
@@ -5708,6 +5723,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onCreateFolder={createFolder}
                 onImportPdf={importPdfNote}
                 onCreateStory={(parent) => void createStory(parent)}
+                onImportStory={window.fanotes?.storyCreate ? (parent) => setStoryImportParent(parent ?? '') : undefined}
                 onAttachBook={attachBookToSubject}
                 onDetachBook={detachBookFromSubject}
                 localOnlyPaths={syncPrefixesFromSetting(settings.syncExcludedFolders)}
@@ -6358,6 +6374,7 @@ export default function App({ startupBootstrap }: AppProps) {
       )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} mode={paletteMode} rankNotes={rankNotesForPalette} activePath={activePath} onOpenNote={(path) => void openNote(path)} onOpenNoteInSplit={(path) => void openInSplit(path)} onClose={closePalette} /></SafeBoundary></Suspense>}
       <ProfileOverviewPublisher settings={settings} />
+      {storyImportParent !== undefined && <Suspense fallback={null}><SafeBoundary name="Import" fallbackTitle="Der Import ist abgestürzt"><StoryImportDialog onImport={(story) => importStoryFile(story)} onClose={() => setStoryImportParent(undefined)} /></SafeBoundary></Suspense>}
       {writingPath && (
         <Suspense fallback={<div className="editor-module-loading"><LoaderCircle className="spin" size={20} /><span>Schreibmodus wird geladen …</span></div>}>
           <SafeBoundary name="Schreiben" fallbackTitle="Der Schreibmodus ist abgestürzt">
