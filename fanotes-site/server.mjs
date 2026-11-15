@@ -23,6 +23,7 @@ import { languageForRequest, localizeExactText, localizeResponse } from './i18n.
 import { createAnalyticsService } from './analytics.mjs'
 import { loadGithubReleases, pickGithubPackage } from './github-release.mjs'
 import { startSystemdWatchdog } from './systemd-notify.mjs'
+import { createReleaseCache } from './release-cache.mjs'
 import {
   DELTA_ROUTE_PATTERN,
   DOWNLOAD_ROUTE_PATTERN,
@@ -308,8 +309,12 @@ const discoverReleases = async (channel = 'stable') => {
   return { linux, windows }
 }
 
+// The release share can take many seconds when its directory cache is cold.
+// Health and download routes keep the last listing for five minutes.
+const releaseCache = createReleaseCache(discoverReleases, 5 * 60 * 1000)
+
 const discoverRelease = async () => {
-  const { linux, windows } = await discoverReleases()
+  const { linux, windows } = await releaseCache.get()
   return {
     product: 'FaNotes',
     version: linux.version,
@@ -438,7 +443,7 @@ const signedUpdateManifest = async (release, currentVersion, language, channel =
 }
 
 const deltaDownload = async (request, response, platform, currentVersion, channel = 'stable') => {
-  const releases = await discoverReleases(channel)
+  const releases = await releaseCache.get(channel)
   const delta = await deltaForRelease(releases[platform], currentVersion, channel)
   if (!delta) throw new Error('Für diese Basisversion ist kein differentielles Update verfügbar.')
   await assertTrustedPackage(delta.fileName, delta.sha256)
@@ -476,7 +481,7 @@ const releaseDownload = async (request, response, kind, channel = 'stable') => {
       return
     }
   }
-  const releases = await discoverReleases(channel)
+  const releases = await releaseCache.get(channel)
   const target = kind === 'appimage'
     ? releases.linux.packages.appimage
     : kind === 'portable'
@@ -666,7 +671,7 @@ const server = createServer(async (request, response) => {
       return
     }
     if (url.pathname === '/api/health') {
-      const releases = await discoverReleases()
+      const releases = await releaseCache.get()
       // Kanti+ grade promise: max age of the last successful grade check across linked accounts (< 600 s).
       const kanti = await schulnetz.health().catch(() => null)
       json(response, 200, {
@@ -701,7 +706,7 @@ const server = createServer(async (request, response) => {
         json(response, 400, { error: 'Dieser Update-Kanal wird nicht unterstützt.' })
         return
       }
-      const releases = await discoverReleases(channel)
+      const releases = await releaseCache.get(channel)
       // A signed manifest must be emitted byte-for-byte from the object that was
       // signed. Language selection therefore happens before Ed25519 signing.
       json(response, 200, await signedUpdateManifest(releases[updatePlatform], currentVersion, response.fanotesLanguage, channel), {}, false)
