@@ -114,6 +114,10 @@ const probe = `<!doctype html>
     const { createPdfPagePainter } = await import('/src/lib/pdfPagePainter.ts')
     const { drawInkStroke } = await import('/src/lib/inkStrokePaint.ts')
     const { rasterizeInkStrokes } = await import('/src/lib/viewportRaster.ts')
+    if (!window.fanotes) {
+      // The init script did not install the bridge: run it here to see why.
+      try { (0, eval)(await (await fetch('/src-tauri/src/fanotes-api.js')).text()) } catch (error) { await post('bridge-error', String(error && error.message || error)) }
+    }
     const api = window.fanotes
     await post('env', {
       ua: navigator.userAgent, bridge: Boolean(api), pdfNative: Boolean(api && api.pdfNative),
