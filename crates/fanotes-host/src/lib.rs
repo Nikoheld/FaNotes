@@ -448,6 +448,14 @@ impl Host {
         }))
     }
 
+    /// The file `fanotes:render-pdf-page` would read for `relative`, confined to
+    /// the vault and its folder locations. The Tauri shell's native PDF
+    /// commands (`fanotes-native:pdf-*`, WP8) read it on their own worker.
+    pub fn resolve_vault_pdf(&self, relative: &str) -> Result<PathBuf, String> {
+        self.folder_locations
+            .resolve_existing(self.require_vault()?, relative)
+    }
+
     fn read_asset_bytes(&self, relative: &str) -> Result<Value, String> {
         let mime = asset_mime(relative)
             .ok_or_else(|| "Dieser Dateityp ist für die Vorschau nicht erlaubt.".to_owned())?;

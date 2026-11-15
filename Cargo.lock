@@ -1465,7 +1465,9 @@ name = "fanotes-pdf"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "libc",
  "pdfium-bundled",
+ "png 0.17.16",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1530,6 +1532,7 @@ dependencies = [
  "cairo-rs",
  "fanotes-host",
  "fanotes-index",
+ "fanotes-pdf",
  "fanotes-sync",
  "gdk",
  "gdk-pixbuf",

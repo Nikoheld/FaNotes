@@ -415,7 +415,8 @@ macro_rules! fanotes_commands {
                 native::migration::migration_run,
                 native::migration::migration_backups,
                 native::migration::migration_restore_electron,
-                native_search::search_query, native_search::search_status, native_search::search_notify, native_search::search_rebuild
+                native_search::search_query, native_search::search_status, native_search::search_notify, native_search::search_rebuild,
+                native::pdf::pdf_open, native::pdf::pdf_page_sizes, native::pdf::pdf_render, native::pdf::pdf_cancel, native::pdf::pdf_close
             ]
         }
     };
@@ -614,7 +615,9 @@ fn close_companion_windows(app: &tauri::AppHandle) {
 fn system_language_script(language: &str) -> String {
     let language = if language == "de" { "de" } else { "en-US" };
     format!(
-        "(function(){{const language={language:?};const languages=Object.freeze([language]);const define=(name,value)=>{{try{{Object.defineProperty(Navigator.prototype,name,{{configurable:true,get:()=>value}})}}catch(e){{}}}};define('language',language);define('languages',languages);}})();\n"
+        // Leading `;`: Tauri appends this to its invoke script, which ends in
+        // `})()`, so a bare `(` would call that result and stop every script after it.
+        ";(function(){{const language={language:?};const languages=Object.freeze([language]);const define=(name,value)=>{{try{{Object.defineProperty(Navigator.prototype,name,{{configurable:true,get:()=>value}})}}catch(e){{}}}};define('language',language);define('languages',languages);}})();\n"
     )
 }
 
@@ -801,6 +804,8 @@ mod tests {
         assert!(english.contains("const language=\"en-US\""));
         assert!(!english.contains("const language=\"de\""));
         assert!(super::system_language_script("fr").contains("const language=\"en-US\""));
+        // Appended after Tauri's `})()`: must not start with a bare `(`.
+        assert!(german.starts_with(';'));
     }
 
     #[test]

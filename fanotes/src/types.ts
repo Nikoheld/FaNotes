@@ -512,6 +512,18 @@ export type PdfiumRasterRequest = {
   originY: number
   rotation: number
   password?: string
+  /** Painter layer the window is for; a newer window for it cancels a queued one. */
+  slot?: string
+}
+
+/** Tauri `fanotes-native:pdf-*` (WP8). Desktop only; used behind the native-PDF flag. */
+export type NativePdfApi = {
+  open: (request: { path: string; password?: string }) => Promise<{ doc: number; pageCount: number; reused: boolean }>
+  pageSizes: (doc: number) => Promise<Array<[number, number]>>
+  /** Tightly packed RGBA of the window. */
+  render: (request: Omit<PdfiumRasterRequest, 'path' | 'password'> & { doc: number }) => Promise<ArrayBuffer>
+  cancel: (request: { slot?: string; doc?: number }) => Promise<number>
+  close: (doc: number) => Promise<void>
 }
 
 export type PdfiumRasterResult = {
@@ -734,6 +746,8 @@ export type FaNotesApi = {
   captureWindow?: () => Promise<string>
   /** PDFium bitmap for one camera window. Absent in the browser; pdf.js paints instead. */
   renderPdfPage?: (request: PdfiumRasterRequest) => Promise<PdfiumRasterResult>
+  /** Tauri only: PDFium rasters in the host. Painted with only when the native-PDF flag is on. */
+  pdfNative?: NativePdfApi
   addons?: AddonsHostApi
   sync?: SyncHostApi
   /** Desktop-only native sync engine (Tauri, preview). Missing on Electron, web and Android. */

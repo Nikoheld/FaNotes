@@ -6,7 +6,7 @@ import {
   type PdfPaintBox,
   type PdfPaintJob,
 } from './pdfDocument'
-import { rasterizePdfPage } from './pdfiumRaster'
+import { cancelPdfRaster, rasterizePdfPage } from './pdfiumRaster'
 import { layoutOffsetInScroller, readUsedSheetZoom, resolvePaperZoomScroller } from './paperView'
 
 /**
@@ -33,7 +33,11 @@ type Layer = {
   pending: string
   token: number
   task: RenderTask | null
+  /** Names this layer's native windows, so a newer one cancels a queued one. */
+  slot: string
 }
+
+let painterSerial = 0
 
 export type PdfBasePaintInfo = {
   page: PDFPageProxy
@@ -113,11 +117,13 @@ const isCancel = (error: unknown) => error instanceof Error && error.name === 'R
 
 export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePainter => {
   const { host, label } = options
-  const makeLayer = (canvases: PdfPageLayerCanvases): Layer => (
-    { canvases, front: 0, key: '', box: null, pending: '', token: 0, task: null }
+  painterSerial += 1
+  const serial = painterSerial
+  const makeLayer = (canvases: PdfPageLayerCanvases, name: string): Layer => (
+    { canvases, front: 0, key: '', box: null, pending: '', token: 0, task: null, slot: `${serial}:${name}` }
   )
-  const base = makeLayer(options.base)
-  const detail = makeLayer(options.detail)
+  const base = makeLayer(options.base, 'base')
+  const detail = makeLayer(options.detail, 'detail')
   let page: PDFPageProxy | null = null
   let rotation = 0
   let disposed = false
@@ -133,6 +139,7 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
   }
 
   const dropLayer = (layer: Layer) => {
+    if (layer.pending) cancelPdfRaster(layer.slot)
     cancelLayer(layer)
     layer.key = ''
     layer.box = null
@@ -207,6 +214,7 @@ export const createPdfPagePainter = (options: PdfPagePainterOptions): PdfPagePai
           originX: Math.round(box.cssLeft * backingPerCss),
           originY: Math.round(box.cssTop * (box.pixelHeight / Math.max(1, box.cssHeight))),
           rotation: usedRotation,
+          slot: layer.slot,
         })
         if (bitmap && bitmap.length === box.pixelWidth * box.pixelHeight * 4 && token === layer.token) {
           try {
