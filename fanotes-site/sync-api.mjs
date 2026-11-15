@@ -240,6 +240,38 @@ const atomicWrite = async (target, data) => {
   await fs.rename(temporary, target)
 }
 
+// Copy a durable archive onto a blob without holding the ciphertext in the heap.
+// The temporary file is renamed only after fsync, so a crash keeps the live note.
+const copyDurable = async (source, destination) => {
+  const temporary = `${destination}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
+  const input = await fs.open(source, 'r')
+  const output = await fs.open(temporary, 'wx', 0o600)
+  const buffer = Buffer.alloc(64 * 1024)
+  try {
+    let position = 0
+    while (true) {
+      const { bytesRead } = await input.read(buffer, 0, buffer.length, position)
+      if (!bytesRead) break
+      let written = 0
+      while (written < bytesRead) {
+        const result = await output.write(buffer, written, bytesRead - written, position + written)
+        if (!result.bytesWritten) fail(400, 'Die Datei kam unvollständig an.')
+        written += result.bytesWritten
+      }
+      position += bytesRead
+    }
+    await output.sync()
+  } catch (error) {
+    await output.close().catch(() => {})
+    await input.close().catch(() => {})
+    await fs.rm(temporary, { force: true })
+    throw error
+  }
+  await output.close()
+  await input.close()
+  await fs.rename(temporary, destination)
+}
+
 const readJsonFile = async (target, fallback = null) => {
   try {
     return JSON.parse(await fs.readFile(target, 'utf8'))
@@ -941,21 +973,32 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     const directory = revisionsDirectory(auth.account.id, fileId)
     const archived = (await listRevisionFiles(directory)).find((file) => file.revision === archivedRevision)
     if (!archived) fail(404, 'Diese Fassung liegt nicht im Archiv.')
-    const bytes = await fs.readFile(safeJoin(directory, archived.name))
+    const source = safeJoin(directory, archived.name)
+    const info = await fs.lstat(source).catch(() => null)
+    if (!info?.isFile()) fail(404, 'Diese Fassung liegt nicht im Archiv.')
+    if (info.size > MAX_BLOB_BYTES) fail(413, 'Die Datei ist zu groß für den Sync.')
+    if (info.size < 28) fail(400, 'Der verschlüsselte Inhalt ist zu kurz.')
+    const digest = await hashFile(source)
     const meta = await metaForRestore(auth.account.id, fileId, current)
     if (!meta) fail(404, 'Diese Fassung liegt nicht im Archiv.')
-    if (current && !current.deleted && current.sha256 !== sha256(bytes)) {
-      table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, bytes.length, false)
-    }
-    const digest = sha256(bytes)
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
-    await atomicWrite(safeJoin(accountDirectory(auth.account.id), 'blobs', fileId), bytes)
-    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: bytes.length, sha256: digest, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
+    const replaces = Boolean(current && !current.deleted && current.sha256 !== digest)
+    const historyDelta = replaces ? previousBytes : 0
+    const reserved = await reservedPartialBytes(auth.account.id)
+    if (table.bytes - previousBytes + info.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+    const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
+    if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+    if (replaces) {
+      table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, info.size, false)
+    }
+    await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
+    await copyDurable(source, safeJoin(accountDirectory(auth.account.id), 'blobs', fileId))
+    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: info.size, sha256: digest, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
     table.entries.set(fileId, entry)
-    table.bytes += bytes.length - previousBytes
+    table.bytes += info.size - previousBytes
     await appendChange(auth.account.id, table, entry)
-    sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, size: bytes.length }, { ETag: `"${entry.revision}"` })
+    sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, size: info.size }, { ETag: `"${entry.revision}"` })
   })
 }
 
