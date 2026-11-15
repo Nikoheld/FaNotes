@@ -1,0 +1,128 @@
+{
+ "about": "A device switches engines (state, vault and secrets carried over) in both directions: no uploads, no copies, sync continues.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "A.md",
+   "text": "# A\n"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "B.famd",
+   "famd": {
+    "markdown": "# B\n",
+    "strokes": 2,
+    "encoding": "v2",
+    "pageStats": 3
+   }
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "T.md",
+   "text": "# T\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "switch",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "A.md",
+   "text": "# A\n\nNach dem Wechsel."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "switch",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "T.md",
+   "text": "# T\n\nGeändert."
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "switch",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "restart",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "A.md",
+   "text": "# A\n\nNach dem Wechsel."
+  },
+  {
+   "device": "Laptop",
+   "path": "T.md",
+   "text": "# T\n\nGeändert."
+  }
+ ]
+}

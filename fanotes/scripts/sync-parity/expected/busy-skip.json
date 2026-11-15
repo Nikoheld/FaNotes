@@ -1,0 +1,460 @@
+{
+ "scenario": "busy-skip",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Offen.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Offen.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Offen.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Offen.md 200"
+   ]
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /changes 200",
+    "PUT /files/Offen.md 409"
+   ]
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Offen.md"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Offen.md -> Offen (Konflikt Tablet 2030-01-01 00-00).md"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht, 1 Konflikt(e)).",
+    "warn: Konflikt bei „Offen.md“: die lokale Fassung liegt jetzt unter „Offen (Konflikt Tablet 2030-01-01 00-00).md“."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Offen.md 200",
+    "PUT /files/Offen (Konflikt Tablet 2030-01-01 00-00).md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Offen (Konflikt Tablet 2030-01-01 00-00).md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Offen (Konflikt Tablet 2030-01-01 00-00).md 200"
+   ]
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Privat/Geheim.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Privat/Geheim.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Privat/Geheim.md 200"
+   ]
+  },
+  {
+   "do": "settings",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/.fanotes/history/n/1.json 200"
+   ]
+  },
+  {
+   "do": "restart",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    ".fanotes/history/n/1.json": {
+     "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91",
+     "size": 7
+    },
+    "Offen (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "57d8c8bf8b3bc52d02a84d55eba85d30359b62d8b4acac8ac8579a19c153f81b",
+     "size": 22
+    },
+    "Offen.md": {
+     "sha256": "154cf4935336bc037c535ac799abf6da6f196df82816933a83e02e8e79e6c822",
+     "size": 13
+    },
+    "Privat/Geheim.md": {
+     "sha256": "3759aad2777fd632bee95d9bba4b13ea015516f7f7324a0fe9b714f6c3509c58",
+     "size": 9
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     ".fanotes/history/n/1.json": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91",
+      "size": 7,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91",
+      "blank": false
+     },
+     "Offen (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "57d8c8bf8b3bc52d02a84d55eba85d30359b62d8b4acac8ac8579a19c153f81b",
+      "size": 22,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "57d8c8bf8b3bc52d02a84d55eba85d30359b62d8b4acac8ac8579a19c153f81b",
+      "blank": false
+     },
+     "Offen.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "154cf4935336bc037c535ac799abf6da6f196df82816933a83e02e8e79e6c822",
+      "size": 13,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "154cf4935336bc037c535ac799abf6da6f196df82816933a83e02e8e79e6c822",
+      "blank": false
+     },
+     "Privat/Geheim.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "3759aad2777fd632bee95d9bba4b13ea015516f7f7324a0fe9b714f6c3509c58",
+      "size": 9,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "3759aad2777fd632bee95d9bba4b13ea015516f7f7324a0fe9b714f6c3509c58",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Offen (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "57d8c8bf8b3bc52d02a84d55eba85d30359b62d8b4acac8ac8579a19c153f81b",
+     "size": 22
+    },
+    "Offen.md": {
+     "sha256": "154cf4935336bc037c535ac799abf6da6f196df82816933a83e02e8e79e6c822",
+     "size": 13
+    },
+    "Privat/Geheim.md": {
+     "sha256": "3759aad2777fd632bee95d9bba4b13ea015516f7f7324a0fe9b714f6c3509c58",
+     "size": 9
+    }
+   },
+   "state": {
+    "cursorLag": 1,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Offen (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "57d8c8bf8b3bc52d02a84d55eba85d30359b62d8b4acac8ac8579a19c153f81b",
+      "size": 22,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "57d8c8bf8b3bc52d02a84d55eba85d30359b62d8b4acac8ac8579a19c153f81b",
+      "blank": false
+     },
+     "Offen.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "154cf4935336bc037c535ac799abf6da6f196df82816933a83e02e8e79e6c822",
+      "size": 13,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "154cf4935336bc037c535ac799abf6da6f196df82816933a83e02e8e79e6c822",
+      "blank": false
+     },
+     "Privat/Geheim.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "3759aad2777fd632bee95d9bba4b13ea015516f7f7324a0fe9b714f6c3509c58",
+      "size": 9,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "3759aad2777fd632bee95d9bba4b13ea015516f7f7324a0fe9b714f6c3509c58",
+      "blank": false
+     }
+    },
+    "conflicts": [
+     "Offen.md -> Offen (Konflikt Tablet 2030-01-01 00-00).md"
+    ],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  ".fanotes/history/n/1.json": {
+   "deleted": false,
+   "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91",
+   "revisions": 1
+  },
+  "Offen (Konflikt Tablet 2030-01-01 00-00).md": {
+   "deleted": false,
+   "sha256": "57d8c8bf8b3bc52d02a84d55eba85d30359b62d8b4acac8ac8579a19c153f81b",
+   "revisions": 1
+  },
+  "Offen.md": {
+   "deleted": false,
+   "sha256": "154cf4935336bc037c535ac799abf6da6f196df82816933a83e02e8e79e6c822",
+   "revisions": 2
+  },
+  "Privat/Geheim.md": {
+   "deleted": false,
+   "sha256": "3759aad2777fd632bee95d9bba4b13ea015516f7f7324a0fe9b714f6c3509c58",
+   "revisions": 1
+  }
+ }
+}

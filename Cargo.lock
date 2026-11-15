@@ -1488,12 +1488,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "fanotes-sync"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "fanotes-famd",
+ "icu_collator",
+ "icu_locale_core",
+ "ring",
+ "serde",
+ "serde_json",
+ "unicode-normalization",
+ "ureq",
+]
+
+[[package]]
 name = "fanotes-tauri"
 version = "2026.10.2"
 dependencies = [
  "base64 0.22.1",
  "cairo-rs",
  "fanotes-host",
+ "fanotes-sync",
  "gdk",
  "gdk-pixbuf",
  "gio",

@@ -1,0 +1,411 @@
+{
+ "scenario": "clock-skew",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Plan.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Plan.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Plan.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Plan.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Plan.md"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Plan.md -> Plan (Konflikt Laptop 2030-01-01 00-00).md"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht, 1 Konflikt(e)).",
+    "warn: Konflikt bei „Plan.md“: die lokale Fassung liegt jetzt unter „Plan (Konflikt Laptop 2030-01-01 00-00).md“."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Plan.md 200",
+    "PUT /files/Plan (Konflikt Laptop 2030-01-01 00-00).md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Plan (Konflikt Laptop 2030-01-01 00-00).md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Plan (Konflikt Laptop 2030-01-01 00-00).md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Hausaufgaben.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Hausaufgaben.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Hausaufgaben.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Hausaufgaben.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Hausaufgaben.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht).",
+    "info: „Hausaufgaben.md“ wurde Aufgabe für Aufgabe zusammengeführt."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Hausaufgaben.md 200",
+    "PUT /files/Hausaufgaben.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Hausaufgaben.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Hausaufgaben.md 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Hausaufgaben.md": {
+     "sha256": "375bd48b8960f83fca1697feb99a472c3d3720480862bedd37e847a755e0afc7",
+     "size": 838
+    },
+    "Plan (Konflikt Laptop 2030-01-01 00-00).md": {
+     "sha256": "2cf12855450fec1fbc6a1fd2858e9220bd2461a121ebc7f5031eee47396f97e5",
+     "size": 15
+    },
+    "Plan.md": {
+     "sha256": "1ed0e00406f47ebaf4bbfc4f41087490f64268ec06e257aa1b4957e51f4432c2",
+     "size": 15
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Hausaufgaben.md": {
+      "idMatchesPath": true,
+      "revision": 3,
+      "sha256": "375bd48b8960f83fca1697feb99a472c3d3720480862bedd37e847a755e0afc7",
+      "size": 838,
+      "mtimeMs": "<now>",
+      "contentSha256": "375bd48b8960f83fca1697feb99a472c3d3720480862bedd37e847a755e0afc7",
+      "blank": false
+     },
+     "Plan (Konflikt Laptop 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "2cf12855450fec1fbc6a1fd2858e9220bd2461a121ebc7f5031eee47396f97e5",
+      "size": 15,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "2cf12855450fec1fbc6a1fd2858e9220bd2461a121ebc7f5031eee47396f97e5",
+      "blank": false
+     },
+     "Plan.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "1ed0e00406f47ebaf4bbfc4f41087490f64268ec06e257aa1b4957e51f4432c2",
+      "size": 15,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "1ed0e00406f47ebaf4bbfc4f41087490f64268ec06e257aa1b4957e51f4432c2",
+      "blank": false
+     }
+    },
+    "conflicts": [
+     "Plan.md -> Plan (Konflikt Laptop 2030-01-01 00-00).md"
+    ],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Hausaufgaben.md": {
+     "sha256": "375bd48b8960f83fca1697feb99a472c3d3720480862bedd37e847a755e0afc7",
+     "size": 838
+    },
+    "Plan (Konflikt Laptop 2030-01-01 00-00).md": {
+     "sha256": "2cf12855450fec1fbc6a1fd2858e9220bd2461a121ebc7f5031eee47396f97e5",
+     "size": 15
+    },
+    "Plan.md": {
+     "sha256": "1ed0e00406f47ebaf4bbfc4f41087490f64268ec06e257aa1b4957e51f4432c2",
+     "size": 15
+    }
+   },
+   "state": {
+    "cursorLag": 1,
+    "lastSyncAt": "2020-06-15T12:00:00.000Z",
+    "files": {
+     "Hausaufgaben.md": {
+      "idMatchesPath": true,
+      "revision": 3,
+      "sha256": "375bd48b8960f83fca1697feb99a472c3d3720480862bedd37e847a755e0afc7",
+      "size": 838,
+      "mtimeMs": "<now>",
+      "contentSha256": "375bd48b8960f83fca1697feb99a472c3d3720480862bedd37e847a755e0afc7",
+      "blank": false
+     },
+     "Plan (Konflikt Laptop 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "2cf12855450fec1fbc6a1fd2858e9220bd2461a121ebc7f5031eee47396f97e5",
+      "size": 15,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "2cf12855450fec1fbc6a1fd2858e9220bd2461a121ebc7f5031eee47396f97e5",
+      "blank": false
+     },
+     "Plan.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "1ed0e00406f47ebaf4bbfc4f41087490f64268ec06e257aa1b4957e51f4432c2",
+      "size": 15,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "1ed0e00406f47ebaf4bbfc4f41087490f64268ec06e257aa1b4957e51f4432c2",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "Hausaufgaben.md": {
+   "deleted": false,
+   "sha256": "375bd48b8960f83fca1697feb99a472c3d3720480862bedd37e847a755e0afc7",
+   "revisions": 3
+  },
+  "Plan (Konflikt Laptop 2030-01-01 00-00).md": {
+   "deleted": false,
+   "sha256": "2cf12855450fec1fbc6a1fd2858e9220bd2461a121ebc7f5031eee47396f97e5",
+   "revisions": 1
+  },
+  "Plan.md": {
+   "deleted": false,
+   "sha256": "1ed0e00406f47ebaf4bbfc4f41087490f64268ec06e257aa1b4957e51f4432c2",
+   "revisions": 2
+  }
+ }
+}

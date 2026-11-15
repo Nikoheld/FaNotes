@@ -1,0 +1,528 @@
+{
+ "scenario": "delete-edit",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (5 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Bild.png 200",
+    "PUT /files/Bleibt.md 200",
+    "PUT /files/Notiz.md 200",
+    "PUT /files/Ordner/Andere.md 200",
+    "PUT /files/Ordner/Neu.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Bild.png",
+    "Bleibt.md",
+    "Notiz.md",
+    "Ordner/Andere.md",
+    "Ordner/Neu.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Bild.png 200",
+    "GET /files/Bleibt.md 200",
+    "GET /files/Notiz.md 200",
+    "GET /files/Ordner/Andere.md 200",
+    "GET /files/Ordner/Neu.md 200"
+   ]
+  },
+  {
+   "do": "delete",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 1 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "DELETE /files/Bild.png 200",
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [
+    "Bild.png"
+   ],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "delete",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 1 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "DELETE /files/Notiz.md 200",
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht).",
+    "info: „Notiz.md“ wurde anderswo gelöscht, hier aber geändert – die lokale Fassung bleibt."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Notiz.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Notiz.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Notiz.md 200"
+   ]
+  },
+  {
+   "do": "vanish",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Bleibt.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Ordner/Neu.md 200"
+   ]
+  },
+  {
+   "do": "delete",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "delete",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "markDeleted",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Ordner/Neu.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 1 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "DELETE /files/Ordner/Andere.md 200",
+    "GET /changes 200",
+    "GET /files/Ordner/Neu.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [
+    "Ordner/Andere.md"
+   ],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "vanish",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Ordner/Neu.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Bleibt.md": {
+     "sha256": "85eff26d490cad4f9c676efb6c4646ec9759223730ab154eec7cc33fbcd0d8fb",
+     "size": 9
+    },
+    "Notiz.md": {
+     "sha256": "d3e06366ef50853de6dc1718cdcb7f9a7d387f00fa788279e9627a12b70627de",
+     "size": 23
+    },
+    "Ordner/Neu.md": {
+     "sha256": "68fd9b3b157e18a4dfcea4ae343ae4e36fccb00b8e1a4dec642602e9543f2c66",
+     "size": 22
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Bleibt.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "85eff26d490cad4f9c676efb6c4646ec9759223730ab154eec7cc33fbcd0d8fb",
+      "size": 9,
+      "mtimeMs": "<now>",
+      "contentSha256": "85eff26d490cad4f9c676efb6c4646ec9759223730ab154eec7cc33fbcd0d8fb",
+      "blank": false
+     },
+     "Notiz.md": {
+      "idMatchesPath": true,
+      "revision": 3,
+      "sha256": "d3e06366ef50853de6dc1718cdcb7f9a7d387f00fa788279e9627a12b70627de",
+      "size": 23,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "d3e06366ef50853de6dc1718cdcb7f9a7d387f00fa788279e9627a12b70627de",
+      "blank": false
+     },
+     "Ordner/Neu.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "68fd9b3b157e18a4dfcea4ae343ae4e36fccb00b8e1a4dec642602e9543f2c66",
+      "size": 22,
+      "mtimeMs": 1700000006000,
+      "contentSha256": "68fd9b3b157e18a4dfcea4ae343ae4e36fccb00b8e1a4dec642602e9543f2c66",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Bleibt.md": {
+     "sha256": "85eff26d490cad4f9c676efb6c4646ec9759223730ab154eec7cc33fbcd0d8fb",
+     "size": 9
+    },
+    "Notiz.md": {
+     "sha256": "d3e06366ef50853de6dc1718cdcb7f9a7d387f00fa788279e9627a12b70627de",
+     "size": 23
+    },
+    "Ordner/Neu.md": {
+     "sha256": "68fd9b3b157e18a4dfcea4ae343ae4e36fccb00b8e1a4dec642602e9543f2c66",
+     "size": 22
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Bleibt.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "85eff26d490cad4f9c676efb6c4646ec9759223730ab154eec7cc33fbcd0d8fb",
+      "size": 9,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "85eff26d490cad4f9c676efb6c4646ec9759223730ab154eec7cc33fbcd0d8fb",
+      "blank": false
+     },
+     "Notiz.md": {
+      "idMatchesPath": true,
+      "revision": 3,
+      "sha256": "d3e06366ef50853de6dc1718cdcb7f9a7d387f00fa788279e9627a12b70627de",
+      "size": 23,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "d3e06366ef50853de6dc1718cdcb7f9a7d387f00fa788279e9627a12b70627de",
+      "blank": false
+     },
+     "Ordner/Neu.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "68fd9b3b157e18a4dfcea4ae343ae4e36fccb00b8e1a4dec642602e9543f2c66",
+      "size": 22,
+      "mtimeMs": "<now>",
+      "contentSha256": "68fd9b3b157e18a4dfcea4ae343ae4e36fccb00b8e1a4dec642602e9543f2c66",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "Bild.png": {
+   "deleted": true,
+   "sha256": null,
+   "revisions": 2
+  },
+  "Bleibt.md": {
+   "deleted": false,
+   "sha256": "85eff26d490cad4f9c676efb6c4646ec9759223730ab154eec7cc33fbcd0d8fb",
+   "revisions": 1
+  },
+  "Notiz.md": {
+   "deleted": false,
+   "sha256": "d3e06366ef50853de6dc1718cdcb7f9a7d387f00fa788279e9627a12b70627de",
+   "revisions": 3
+  },
+  "Ordner/Andere.md": {
+   "deleted": true,
+   "sha256": null,
+   "revisions": 2
+  },
+  "Ordner/Neu.md": {
+   "deleted": false,
+   "sha256": "68fd9b3b157e18a4dfcea4ae343ae4e36fccb00b8e1a4dec642602e9543f2c66",
+   "revisions": 2
+  }
+ }
+}

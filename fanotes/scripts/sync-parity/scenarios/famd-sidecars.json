@@ -1,0 +1,228 @@
+{
+ "about": ".famd notes (v1 and v2): page statistics and timestamps stay local, ink edits sync, a download keeps local statistics, a note pair conflicts as a pair.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Heft.famd",
+   "famd": {
+    "markdown": "# Heft\n\nText.",
+    "strokes": 4,
+    "encoding": "v1",
+    "pageStats": 3
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Neu.famd",
+   "famd": {
+    "markdown": "# Neu\n",
+    "strokes": 5,
+    "encoding": "v2",
+    "pageStats": 2
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Paar.md",
+   "text": "# Paar\n\nAlt."
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Paar.famd",
+   "famd": {
+    "markdown": "",
+    "strokes": 1,
+    "encoding": "v2"
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Heft.famd",
+   "famd": {
+    "markdown": "# Heft\n\nText.",
+    "strokes": 4,
+    "encoding": "v1",
+    "pageStats": 9
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Neu.famd",
+   "famd": {
+    "markdown": "# Neu\n",
+    "strokes": 5,
+    "encoding": "v2",
+    "pageStats": 7,
+    "updatedAt": "2029-12-24T00:00:00.000Z"
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Heft.famd",
+   "famd": {
+    "markdown": "# Heft\n\nText.",
+    "strokes": 4,
+    "encoding": "v1",
+    "pageStats": 5
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Heft.famd",
+   "famd": {
+    "markdown": "# Heft\n\nText.",
+    "strokes": 6,
+    "encoding": "v1",
+    "pageStats": 9
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Neu.famd",
+   "famd": {
+    "markdown": "# Neu\n",
+    "strokes": 8,
+    "encoding": "v2",
+    "pageStats": 4,
+    "textFields": [
+     {
+      "id": "tf-1",
+      "page": 1,
+      "x": 0.2,
+      "y": 0.3,
+      "width": 0.4,
+      "fontSize": 16,
+      "text": "Feld"
+     }
+    ]
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Paar.md",
+   "text": "# Paar\n\nLaptop."
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Paar.famd",
+   "famd": {
+    "markdown": "",
+    "strokes": 2,
+    "encoding": "v2"
+   }
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Paar.md",
+   "text": "# Paar\n\nTablet."
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Paar.famd",
+   "famd": {
+    "markdown": "",
+    "strokes": 3,
+    "encoding": "v2"
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "Heft.famd",
+   "famd": {
+    "markdown": "# Heft\n\nText.",
+    "strokes": 6,
+    "encoding": "v1",
+    "pageStats": 5
+   }
+  },
+  {
+   "device": "Laptop",
+   "path": "Paar (Konflikt Tablet 2030-01-01 00-00).md",
+   "text": "# Paar\n\nTablet."
+  },
+  {
+   "device": "Laptop",
+   "path": "Paar (Konflikt Tablet 2030-01-01 00-00).famd",
+   "famd": {
+    "markdown": "",
+    "strokes": 3,
+    "encoding": "v2"
+   }
+  }
+ ]
+}

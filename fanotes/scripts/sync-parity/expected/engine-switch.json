@@ -1,0 +1,410 @@
+{
+ "scenario": "engine-switch",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/A.md 200",
+    "PUT /files/B.famd 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "A.md",
+    "B.famd"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/A.md 200",
+    "GET /files/B.famd 200",
+    "PUT /files/T.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "T.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/T.md 200"
+   ]
+  },
+  {
+   "do": "switch",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/A.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "A.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/A.md 200"
+   ]
+  },
+  {
+   "do": "switch",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/T.md 200"
+   ]
+  },
+  {
+   "do": "switch",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "T.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/T.md 200"
+   ]
+  },
+  {
+   "do": "restart",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "A.md": {
+     "sha256": "ab5aa65ca67ae6a1419eefac576c4a229aa0e55de41ce9e3200b5dbb975440f3",
+     "size": 22
+    },
+    "B.famd": {
+     "sha256": "16ae8a9a297e500e03d63e7f952e5345d2dc730768b3fc5bd574a2136e9ad968",
+     "size": 3386
+    },
+    "T.md": {
+     "sha256": "ba0e614858099a1c0b4a53411a2c11cc566b9905492cb39057dbb0fe13056160",
+     "size": 15
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "A.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "ab5aa65ca67ae6a1419eefac576c4a229aa0e55de41ce9e3200b5dbb975440f3",
+      "size": 22,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "ab5aa65ca67ae6a1419eefac576c4a229aa0e55de41ce9e3200b5dbb975440f3",
+      "blank": false
+     },
+     "B.famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "48b53025a21ed4b84397c88f2fa2c527e6463b30614e419a6ea7e45b0a4d57d3",
+      "size": 3386,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "e1a0bc5ac575632371c0163049e928b0f79ec8710baa7f43624a31cbe63e9355",
+      "blank": false
+     },
+     "T.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "ba0e614858099a1c0b4a53411a2c11cc566b9905492cb39057dbb0fe13056160",
+      "size": 15,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "ba0e614858099a1c0b4a53411a2c11cc566b9905492cb39057dbb0fe13056160",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "A.md": {
+     "sha256": "ab5aa65ca67ae6a1419eefac576c4a229aa0e55de41ce9e3200b5dbb975440f3",
+     "size": 22
+    },
+    "B.famd": {
+     "sha256": "48b53025a21ed4b84397c88f2fa2c527e6463b30614e419a6ea7e45b0a4d57d3",
+     "size": 2077
+    },
+    "T.md": {
+     "sha256": "ba0e614858099a1c0b4a53411a2c11cc566b9905492cb39057dbb0fe13056160",
+     "size": 15
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "A.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "ab5aa65ca67ae6a1419eefac576c4a229aa0e55de41ce9e3200b5dbb975440f3",
+      "size": 22,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "ab5aa65ca67ae6a1419eefac576c4a229aa0e55de41ce9e3200b5dbb975440f3",
+      "blank": false
+     },
+     "B.famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "48b53025a21ed4b84397c88f2fa2c527e6463b30614e419a6ea7e45b0a4d57d3",
+      "size": 2077,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "e1a0bc5ac575632371c0163049e928b0f79ec8710baa7f43624a31cbe63e9355",
+      "blank": false
+     },
+     "T.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "ba0e614858099a1c0b4a53411a2c11cc566b9905492cb39057dbb0fe13056160",
+      "size": 15,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "ba0e614858099a1c0b4a53411a2c11cc566b9905492cb39057dbb0fe13056160",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "A.md": {
+   "deleted": false,
+   "sha256": "ab5aa65ca67ae6a1419eefac576c4a229aa0e55de41ce9e3200b5dbb975440f3",
+   "revisions": 2
+  },
+  "B.famd": {
+   "deleted": false,
+   "sha256": "48b53025a21ed4b84397c88f2fa2c527e6463b30614e419a6ea7e45b0a4d57d3",
+   "revisions": 1
+  },
+  "T.md": {
+   "deleted": false,
+   "sha256": "ba0e614858099a1c0b4a53411a2c11cc566b9905492cb39057dbb0fe13056160",
+   "revisions": 2
+  }
+ }
+}

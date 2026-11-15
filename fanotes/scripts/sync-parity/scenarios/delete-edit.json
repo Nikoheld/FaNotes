@@ -1,0 +1,193 @@
+{
+ "about": "Deletes, a delete racing an edit, a vanished file, and a stale folder delete after a newer version was published.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Bild.png",
+   "gen": {
+    "bytes": 300,
+    "seed": 3
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Notiz.md",
+   "text": "# Notiz\n\nAlt."
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Bleibt.md",
+   "text": "# Bleibt\n"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Ordner/Neu.md",
+   "text": "# Neu\n\nAlt."
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Ordner/Andere.md",
+   "text": "# Andere\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "delete",
+   "device": "Laptop",
+   "path": "Bild.png"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "delete",
+   "device": "Laptop",
+   "path": "Notiz.md"
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Notiz.md",
+   "text": "# Notiz\n\nDoch behalten."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "vanish",
+   "device": "Laptop",
+   "path": "Bleibt.md"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Ordner/Neu.md",
+   "text": "# Neu\n\nNeu vom Laptop."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "delete",
+   "device": "Tablet",
+   "path": "Ordner/Neu.md"
+  },
+  {
+   "do": "delete",
+   "device": "Tablet",
+   "path": "Ordner/Andere.md"
+  },
+  {
+   "do": "markDeleted",
+   "device": "Tablet",
+   "path": "Ordner"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "vanish",
+   "device": "Tablet",
+   "path": "Ordner/Neu.md"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "Bild.png",
+   "absent": true
+  },
+  {
+   "device": "Laptop",
+   "path": "Notiz.md",
+   "text": "# Notiz\n\nDoch behalten."
+  },
+  {
+   "device": "Laptop",
+   "path": "Bleibt.md",
+   "text": "# Bleibt\n"
+  },
+  {
+   "device": "Tablet",
+   "path": "Ordner/Neu.md",
+   "text": "# Neu\n\nNeu vom Laptop."
+  },
+  {
+   "device": "Laptop",
+   "path": "Ordner/Neu.md",
+   "text": "# Neu\n\nNeu vom Laptop."
+  },
+  {
+   "device": "Laptop",
+   "path": "Ordner/Andere.md",
+   "absent": true
+  }
+ ]
+}
