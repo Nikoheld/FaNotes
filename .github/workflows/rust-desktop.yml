@@ -91,14 +91,11 @@ jobs:
         # Skipped, with the reason:
         # - a_blank_line_returns_pylaia_probabilities: loads the PyLaia model
         #   through the system ONNX Runtime library, which a runner does not have.
-        # - a_traced_completion_prefers_dauern_when_the_model_agrees: reads
-        #   /workspace/fanotes/public/ocr/fanotes-ink/de.fnlm, a path that only
-        #   exists on one developer machine.
         # On Windows fanotes-host runs in the next step, without failing the job.
         # The GTK and WebView2 tests need a display: Xvfb on Linux, the
         # runner's desktop on Windows.
         run: |
-          skip="--skip a_blank_line_returns_pylaia_probabilities --skip a_traced_completion_prefers_dauern_when_the_model_agrees"
+          skip="--skip a_blank_line_returns_pylaia_probabilities"
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a cargo test --locked --workspace --no-fail-fast -- $skip
           else
