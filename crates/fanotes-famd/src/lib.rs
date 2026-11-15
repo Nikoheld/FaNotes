@@ -1,14 +1,26 @@
-//! `fanotes-famd-v1` codec.
+//! `fanotes-famd-v1` and `fanotes-famd:v2` codec.
 //!
 //! The byte layout matches `fanotes/electron/famd.cjs`: a markdown body, a
 //! length-prefixed `<!-- fanotes-famd:v1 chars=N -->` header, then JSON.
-//! `N` is the JavaScript string length of that JSON.
+//! `N` is the JavaScript string length of that JSON. The compact v2 layout
+//! (`famdV2.mjs`) lives in [`v2`].
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
 
+mod v2;
 mod v8_date;
+
+pub use v2::{
+    crc_hex, crc32, decode85, is_active_v2, js_float_text, js_stringify, pack_v2_ink,
+    unpack_v2_ink, FamdCorruptError, FAMD_V2_SCHEMA, FAMD_V2_TOKEN, POINT_STRIDE,
+};
+
+/// The message `composeFamdCompanion` and `rewriteFamdText` throw when a
+/// stored note cannot be parsed. The note on disk is left alone.
+pub const UNREADABLE_NOTE_MESSAGE: &str =
+    "Die Notiz konnte nicht gelesen werden und wurde nicht überschrieben.";
 
 pub const FAMD_SCHEMA: &str = "fanotes-famd-v1";
 pub const FAMD_EXTENSION: &str = ".famd";
@@ -146,7 +158,14 @@ pub fn strip_famd_payload(source: &str) -> String {
         return String::new();
     }
     let mut text = source.to_string();
-    if let Some((index, _, _)) = last_header(&text) {
+    // The later of the last v1 header and the v2 header ends the markdown.
+    let mut cut = last_header(&text).map(|(index, _, _)| index);
+    if let Some(v2_cut) = v2::v2_cut_index(&text) {
+        if cut.is_none_or(|v1_cut| v2_cut > v1_cut) {
+            cut = Some(v2_cut);
+        }
+    }
+    if let Some(index) = cut {
         text.truncate(index);
     }
     let trimmed = trim_end_js(&text).to_string();
@@ -159,59 +178,114 @@ pub fn strip_famd_payload(source: &str) -> String {
     trimmed
 }
 
+/// `parseFamd(source)`. A damaged v2 note has no payload here; use
+/// [`try_parse_famd`] or [`famd_looks_stored`] to tell it from a plain note.
 pub fn parse_famd(source: &str) -> ParsedFamd {
+    parse_famd_with(source, true).unwrap_or_else(|_| ParsedFamd {
+        markdown: strip_famd_payload(source),
+        payload: None,
+    })
+}
+
+/// `parseFamd(source)` including its `FamdCorruptError` for a damaged v2 note.
+pub fn try_parse_famd(source: &str) -> Result<ParsedFamd, FamdCorruptError> {
+    parse_famd_with(source, true)
+}
+
+/// `parseFamd(source, { unpack: false })`: v2 ink stays in its packed columns.
+///
+/// Only a caller that writes the payload back with the encoding of the same
+/// source may use it. That is v2 again, and packed strokes pass through.
+pub fn try_parse_famd_packed(source: &str) -> Result<ParsedFamd, FamdCorruptError> {
+    parse_famd_with(source, false)
+}
+
+fn parse_famd_with(source: &str, unpack: bool) -> Result<ParsedFamd, FamdCorruptError> {
     let markdown = strip_famd_payload(source);
+    let empty = |markdown: String| ParsedFamd {
+        markdown,
+        payload: None,
+    };
     if source.is_empty() {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+        return Ok(empty(markdown));
     }
-    let Some((index, end, length)) = last_header(source) else {
-        return ParsedFamd {
+    if is_active_v2(source) {
+        let object = v2::read_v2_payload(source, unpack)?;
+        return Ok(ParsedFamd {
             markdown,
-            payload: None,
-        };
+            payload: Some(FamdPayload::from_object(&object)),
+        });
+    }
+    let Some((_, end, length)) = last_header(source) else {
+        return Ok(empty(markdown));
     };
     if !(2..=MAX_FAMD_JSON_CHARS).contains(&length) {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+        return Ok(empty(markdown));
     }
     let Some(json) = slice_js(source, end, length as usize) else {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+        return Ok(empty(markdown));
     };
-    let _ = index;
-    let Ok(parsed) = serde_json::from_str::<Value>(json) else {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(json) else {
+        return Ok(empty(markdown));
     };
-    let Value::Object(object) = parsed else {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
-    };
-    if object.get("schema").and_then(Value::as_str) != Some(FAMD_SCHEMA) {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+    // `payloadFromParsed` takes either schema name.
+    let schema = object.get("schema").and_then(Value::as_str);
+    if schema != Some(FAMD_SCHEMA) && schema != Some(FAMD_V2_SCHEMA) {
+        return Ok(empty(markdown));
     }
-    ParsedFamd {
+    Ok(ParsedFamd {
         markdown,
         payload: Some(FamdPayload::from_object(&object)),
+    })
+}
+
+/// The two on-disk layouts `serializeFamd` can write.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FamdEncoding {
+    V1,
+    V2,
+}
+
+/// `famdEncodingForSave`: a v2 or new note stays v2, a v1 note stays v1.
+pub fn famd_encoding_for_save(existing: Option<&str>) -> FamdEncoding {
+    match existing {
+        None | Some("") => FamdEncoding::V2,
+        Some(source) if is_active_v2(source) => FamdEncoding::V2,
+        Some(source) if source.contains(v2::FAMD_V1_TOKEN) => FamdEncoding::V1,
+        Some(_) => FamdEncoding::V2,
     }
 }
 
+/// `famdLooksStored`: the text carries a v1 or v2 marker. A stored note
+/// without a payload is damaged and must not be overwritten.
+pub fn famd_looks_stored(source: &str) -> bool {
+    source.contains(v2::FAMD_V1_TOKEN) || source.contains(FAMD_V2_TOKEN)
+}
+
+/// `serializeFamd(markdown, payload)` in the v1 layout.
 pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
+    serialize_famd_with(markdown, payload, FamdEncoding::V1)
+}
+
+/// `serializeFamd(markdown, payload, encoding)`.
+pub fn serialize_famd_with(markdown: &str, payload: &FamdPayload, encoding: FamdEncoding) -> String {
     let body = strip_famd_payload(markdown);
+    let object = famd_object(&body, payload);
+    if encoding == FamdEncoding::V2 {
+        return v2::encode_v2_document(&body, object);
+    }
+    // `JSON.stringify`: JavaScript number text and key order, not serde's.
+    let json = v2::js_stringify(&Value::Object(object));
+    let header = format!("<!-- fanotes-famd:v1 chars={} -->\n{json}\n", js_len(&json));
+    if body.is_empty() {
+        header
+    } else {
+        format!("{body}\n\n{header}")
+    }
+}
+
+/// The sanitized object `serializeFamd` writes, in its key order.
+fn famd_object(body: &str, payload: &FamdPayload) -> Map<String, Value> {
     // `payload.updatedAt || now`. An empty string is the only missing time.
     // A month name or other text is written unchanged.
     let updated_at = if payload.updated_at.is_empty() {
@@ -220,14 +294,19 @@ pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
         payload.updated_at.clone()
     };
     let worksheets = if payload.worksheets.is_empty() {
-        worksheet_ids_from_markdown(&body)
+        worksheet_ids_from_markdown(body)
     } else {
         payload.worksheets.clone()
+    };
+    // `payload.ink && typeof payload.ink === 'object' ? payload.ink : null`.
+    let ink = match &payload.ink {
+        Some(ink @ (Value::Object(_) | Value::Array(_))) => ink.clone(),
+        _ => Value::Null,
     };
     let mut object = Map::new();
     object.insert("schema".into(), Value::String(FAMD_SCHEMA.into()));
     object.insert("updatedAt".into(), Value::String(updated_at));
-    object.insert("ink".into(), payload.ink.clone().unwrap_or(Value::Null));
+    object.insert("ink".into(), ink);
     object.insert(
         "worksheets".into(),
         Value::Array(worksheets.into_iter().map(Value::String).collect()),
@@ -263,13 +342,7 @@ pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
             Value::Array(text_fields.iter().map(NoteTextField::to_json).collect()),
         );
     }
-    let json = Value::Object(object).to_string();
-    let header = format!("<!-- fanotes-famd:v1 chars={} -->\n{json}\n", js_len(&json));
-    if body.is_empty() {
-        header
-    } else {
-        format!("{body}\n\n{header}")
-    }
+    object
 }
 
 impl FamdPayload {
@@ -324,6 +397,430 @@ impl FamdPayload {
             page_stats,
             text_fields,
         }
+    }
+}
+
+impl FamdPayload {
+    /// The object `payloadFromParsed` returns, in its key order.
+    pub fn to_json(&self) -> Value {
+        let mut object = Map::new();
+        object.insert("schema".into(), Value::String(self.schema.clone()));
+        object.insert("updatedAt".into(), Value::String(self.updated_at.clone()));
+        object.insert("ink".into(), self.ink.clone().unwrap_or(Value::Null));
+        object.insert(
+            "worksheets".into(),
+            Value::Array(self.worksheets.iter().cloned().map(Value::String).collect()),
+        );
+        if let Some(style) = &self.paper_style {
+            object.insert("paperStyle".into(), Value::String(style.clone()));
+        }
+        if !self.note_links.is_empty() {
+            object.insert(
+                "noteLinks".into(),
+                Value::Array(self.note_links.iter().map(NoteLink::to_json).collect()),
+            );
+        }
+        if !self.note_backups.is_empty() {
+            object.insert(
+                "noteBackups".into(),
+                Value::Array(self.note_backups.iter().map(NoteBackup::to_json).collect()),
+            );
+        }
+        if let Some(stats) = &self.page_stats {
+            object.insert("pageStats".into(), stats.clone());
+        }
+        if !self.text_fields.is_empty() {
+            object.insert(
+                "textFields".into(),
+                Value::Array(self.text_fields.iter().map(NoteTextField::to_json).collect()),
+            );
+        }
+        Value::Object(object)
+    }
+}
+
+/// Why a companion write refused to produce new bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FamdWriteError {
+    /// `parseFamd` threw `FamdCorruptError` for the stored note or the incoming text.
+    Corrupt(FamdCorruptError),
+    /// The stored note carries a famd marker but no payload could be read.
+    Unreadable,
+}
+
+impl std::fmt::Display for FamdWriteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Corrupt(error) => error.fmt(formatter),
+            Self::Unreadable => formatter.write_str(UNREADABLE_NOTE_MESSAGE),
+        }
+    }
+}
+
+impl std::error::Error for FamdWriteError {}
+
+impl From<FamdCorruptError> for FamdWriteError {
+    fn from(error: FamdCorruptError) -> Self {
+        Self::Corrupt(error)
+    }
+}
+
+/// `createNoteCompanion`: a new note is written in the compact v2 layout.
+pub fn create_note_companion(markdown: &str, updated_at: &str) -> String {
+    serialize_famd_with(markdown, &empty_famd_payload(updated_at), FamdEncoding::V2)
+}
+
+/// `rewriteFamdText`: the next bytes of a `.famd` note after a text save.
+///
+/// The stored payload and ink stay as they are on disk (packed v2 ink is not
+/// unpacked and packed again). The update time moves only when the text changed.
+pub fn rewrite_famd_text(
+    existing: Option<&str>,
+    markdown_body: &str,
+    now: &str,
+) -> Result<String, FamdWriteError> {
+    let source = existing.unwrap_or("");
+    let parsed = try_parse_famd_packed(source)?;
+    if !source.is_empty() && famd_looks_stored(source) && parsed.payload.is_none() {
+        return Err(FamdWriteError::Unreadable);
+    }
+    let mut payload = parsed.payload.unwrap_or_else(|| empty_famd_payload(now));
+    let text_changed = markdown_body != strip_famd_payload(&parsed.markdown);
+    if text_changed || payload.updated_at.is_empty() {
+        payload.updated_at = now.to_owned();
+    }
+    payload.worksheets = worksheet_ids_from_markdown(markdown_body);
+    Ok(serialize_famd_with(
+        markdown_body,
+        &payload,
+        famd_encoding_for_save(existing),
+    ))
+}
+
+/// `composeFamdCompanion(existing, markdown, ink, settingsPaperStyle)`.
+///
+/// `ink` is `None` for JavaScript `undefined` (keep the stored ink) and
+/// `Some(Value::Null)` for an explicit `null`. A v2 note stays v2 and new ink
+/// is packed once; a v1 note stays v1.
+pub fn compose_famd_companion(
+    existing: Option<&str>,
+    markdown: &str,
+    ink: Option<&Value>,
+    settings_paper_style: Option<&str>,
+    now: &str,
+) -> Result<String, FamdWriteError> {
+    let encoding = famd_encoding_for_save(existing);
+    let source = existing.unwrap_or("");
+    let stored = if source.is_empty() {
+        ParsedFamd {
+            markdown: String::new(),
+            payload: Some(empty_famd_payload(now)),
+        }
+    } else {
+        try_parse_famd_packed(source)?
+    };
+    if !source.is_empty() && famd_looks_stored(source) && stored.payload.is_none() {
+        return Err(FamdWriteError::Unreadable);
+    }
+    let incoming = try_parse_famd(markdown)?;
+    let body = if incoming.markdown.is_empty() {
+        strip_famd_payload(markdown)
+    } else {
+        incoming.markdown.clone()
+    };
+    let existing_payload = stored.payload.unwrap_or_else(|| empty_famd_payload(now));
+    let existing_ink = existing_payload.ink.clone().unwrap_or(Value::Null);
+    let ink_document = match ink {
+        None => existing_ink.clone(),
+        Some(ink) if encoding == FamdEncoding::V2 => pack_v2_ink(ink),
+        Some(ink) => ink.clone(),
+    };
+    let paper_from_ink = match &ink_document {
+        Value::Object(map) => map
+            .get("paperStyle")
+            .and_then(Value::as_str)
+            .filter(|style| is_paper_style(style))
+            .map(str::to_owned),
+        _ => None,
+    };
+    let text_changed = body != strip_famd_payload(&stored.markdown);
+    let ink_changed = ink.is_some() && js_stringify(&ink_document) != js_stringify(&existing_ink);
+    let mut payload = existing_payload.clone();
+    let incoming_paper = incoming
+        .payload
+        .as_ref()
+        .and_then(|payload| payload.paper_style.clone());
+    if let Some(incoming) = incoming.payload {
+        // `...incoming.payload` replaces only the keys that payload has.
+        if !incoming.note_links.is_empty() {
+            payload.note_links = incoming.note_links;
+        }
+        if !incoming.note_backups.is_empty() {
+            payload.note_backups = incoming.note_backups;
+        }
+        if incoming.page_stats.is_some() {
+            payload.page_stats = incoming.page_stats;
+        }
+        if !incoming.text_fields.is_empty() {
+            payload.text_fields = incoming.text_fields;
+        }
+    }
+    payload.updated_at = if text_changed || ink_changed || existing_payload.updated_at.is_empty() {
+        now.to_owned()
+    } else {
+        existing_payload.updated_at.clone()
+    };
+    payload.worksheets = worksheet_ids_from_markdown(&body);
+    payload.ink = match ink_document {
+        Value::Object(_) | Value::Array(_) => Some(ink_document),
+        _ => None,
+    };
+    payload.paper_style = existing_payload
+        .paper_style
+        .clone()
+        .or(incoming_paper)
+        .or(paper_from_ink)
+        .or_else(|| {
+            settings_paper_style
+                .filter(|style| is_paper_style(style))
+                .map(str::to_owned)
+        });
+    Ok(serialize_famd_with(&body, &payload, encoding))
+}
+
+/// `inkHasMarks`: the ink holds at least one point, packed point block, or
+/// figure path, looking six levels deep.
+pub fn ink_has_marks(value: &Value) -> bool {
+    ink_has_marks_at(value, 0)
+}
+
+fn ink_has_marks_at(value: &Value, depth: usize) -> bool {
+    if v2::js_falsy(value) || depth > 6 {
+        return false;
+    }
+    let map = match value {
+        Value::Array(items) => return items.iter().any(|item| ink_has_marks_at(item, depth + 1)),
+        Value::Object(map) => map,
+        _ => return false,
+    };
+    if map
+        .get("famdPts")
+        .and_then(Value::as_str)
+        .is_some_and(|points| !points.is_empty())
+    {
+        return true;
+    }
+    for key in ["points", "figurePaths"] {
+        if map
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+        {
+            return true;
+        }
+    }
+    if map
+        .get("strokes")
+        .and_then(Value::as_array)
+        .is_some_and(|strokes| strokes.iter().any(|stroke| ink_has_marks_at(stroke, depth + 1)))
+    {
+        return true;
+    }
+    ["ink", "hidden", "sections"]
+        .iter()
+        .any(|key| map.get(*key).is_some_and(|nested| ink_has_marks_at(nested, depth + 1)))
+}
+
+/// `sameFamdPayload`: equal after a v2 round trip, with point coordinates
+/// within the 1/65535 quantization step.
+pub fn same_famd_payload(left: &FamdPayload, right: &FamdPayload) -> bool {
+    let list = |values: Vec<Value>| js_stringify(&Value::Array(values));
+    left.updated_at == right.updated_at
+        && left.paper_style == right.paper_style
+        && left.worksheets == right.worksheets
+        && list(left.note_links.iter().map(NoteLink::to_json).collect())
+            == list(right.note_links.iter().map(NoteLink::to_json).collect())
+        && list(left.note_backups.iter().map(NoteBackup::to_json).collect())
+            == list(right.note_backups.iter().map(NoteBackup::to_json).collect())
+        && js_stringify(left.page_stats.as_ref().unwrap_or(&Value::Null))
+            == js_stringify(right.page_stats.as_ref().unwrap_or(&Value::Null))
+        && list(left.text_fields.iter().map(NoteTextField::to_json).collect())
+            == list(right.text_fields.iter().map(NoteTextField::to_json).collect())
+        && same_ink(left.ink.as_ref(), right.ink.as_ref())
+}
+
+const POINT_TOLERANCE: f64 = 1e-4;
+
+/// JavaScript `===` between two parsed values. Objects and arrays are never
+/// the same reference after two parses.
+fn strict_equal(left: Option<&Value>, right: Option<&Value>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(Value::Null), Some(Value::Null)) => true,
+        (Some(Value::Bool(left)), Some(Value::Bool(right))) => left == right,
+        (Some(Value::Number(left)), Some(Value::Number(right))) => left.as_f64() == right.as_f64(),
+        (Some(Value::String(left)), Some(Value::String(right))) => left == right,
+        _ => false,
+    }
+}
+
+fn is_js_object(value: &Value) -> bool {
+    matches!(value, Value::Object(_) | Value::Array(_))
+}
+
+fn utf16_sorted(mut keys: Vec<String>) -> Vec<String> {
+    keys.sort_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()));
+    keys
+}
+
+fn keys_without(value: &Value, skip: &str) -> Vec<String> {
+    utf16_sorted(
+        v2::js_keys(value)
+            .into_iter()
+            .filter(|key| key != skip)
+            .collect(),
+    )
+}
+
+fn same_keyed_values(left: &Value, right: &Value, keys: &[String]) -> bool {
+    keys.iter().all(|key| {
+        let stringify = |value: &Value| v2::js_get(value, key).map(js_stringify);
+        stringify(left) == stringify(right)
+    })
+}
+
+fn list_of<'a>(value: &'a Value, key: &str) -> &'a [Value] {
+    v2::js_get(value, key)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn same_ink(left: Option<&Value>, right: Option<&Value>) -> bool {
+    let left = left.filter(|value| !value.is_null());
+    let right = right.filter(|value| !value.is_null());
+    let (left, right) = match (left, right) {
+        (None, None) => return true,
+        (Some(left), Some(right)) if is_js_object(left) && is_js_object(right) => (left, right),
+        _ => return false,
+    };
+    let left_keys = keys_without(left, "strokes");
+    if left_keys != keys_without(right, "strokes") || !same_keyed_values(left, right, &left_keys) {
+        return false;
+    }
+    let left_strokes = list_of(left, "strokes");
+    let right_strokes = list_of(right, "strokes");
+    left_strokes.len() == right_strokes.len()
+        && left_strokes
+            .iter()
+            .zip(right_strokes)
+            .all(|(left, right)| same_stroke(left, right))
+}
+
+fn same_stroke(left: &Value, right: &Value) -> bool {
+    // JavaScript also calls two primitive strokes equal when neither has
+    // keys; a stroke that is not an object only matches an equal value here.
+    if v2::js_falsy(left) || v2::js_falsy(right) || !is_js_object(left) || !is_js_object(right) {
+        return strict_equal(Some(left), Some(right));
+    }
+    let left_points = list_of(left, "points");
+    let right_points = list_of(right, "points");
+    if left_points.len() != right_points.len()
+        || !left_points
+            .iter()
+            .zip(right_points)
+            .all(|(left, right)| same_point(left, right))
+    {
+        return false;
+    }
+    let left_keys = keys_without(left, "points");
+    left_keys == keys_without(right, "points") && same_keyed_values(left, right, &left_keys)
+}
+
+fn same_point(left: &Value, right: &Value) -> bool {
+    if v2::js_falsy(left) || v2::js_falsy(right) || !is_js_object(left) || !is_js_object(right) {
+        return strict_equal(Some(left), Some(right));
+    }
+    for axis in ["x", "y"] {
+        // A `NaN` difference is not greater than the tolerance.
+        let difference = (js_number(v2::js_get(left, axis)) - js_number(v2::js_get(right, axis))).abs();
+        if difference > POINT_TOLERANCE {
+            return false;
+        }
+    }
+    let mut keys = v2::js_keys(left);
+    for key in v2::js_keys(right) {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    keys.iter()
+        .filter(|key| *key != "x" && *key != "y")
+        .all(|key| strict_equal(v2::js_get(left, key), v2::js_get(right, key)))
+}
+
+/// What `convertFamdSource` did with one file's text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConvertStatus {
+    Converted,
+    Skipped,
+    Failed,
+}
+
+impl ConvertStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Converted => "converted",
+            Self::Skipped => "skipped",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FamdConversion {
+    pub status: ConvertStatus,
+    /// The v2 text when converted, otherwise the original text.
+    pub source: String,
+}
+
+/// `convertFamdSource`: a v1 note becomes v2 only when the v2 text reads
+/// back to the same markdown and payload. Anything else keeps its text.
+pub fn convert_famd_source(source: &str) -> FamdConversion {
+    let keep = |status| FamdConversion {
+        status,
+        source: source.to_owned(),
+    };
+    if is_active_v2(source) {
+        return match try_parse_famd(source) {
+            Ok(_) => keep(ConvertStatus::Skipped),
+            Err(_) => keep(ConvertStatus::Failed),
+        };
+    }
+    if !source.contains(v2::FAMD_V1_TOKEN) {
+        return keep(ConvertStatus::Skipped);
+    }
+    let Ok(parsed) = try_parse_famd(source) else {
+        return keep(ConvertStatus::Failed);
+    };
+    let Some(payload) = parsed.payload.as_ref() else {
+        return keep(ConvertStatus::Failed);
+    };
+    let next = serialize_famd_with(&parsed.markdown, payload, FamdEncoding::V2);
+    let Ok(back) = try_parse_famd(&next) else {
+        return keep(ConvertStatus::Failed);
+    };
+    let same = back.markdown == parsed.markdown
+        && back
+            .payload
+            .as_ref()
+            .is_some_and(|back| same_famd_payload(payload, back));
+    if !same {
+        return keep(ConvertStatus::Failed);
+    }
+    FamdConversion {
+        status: ConvertStatus::Converted,
+        source: next,
     }
 }
 
