@@ -725,6 +725,8 @@ export type FaNotesApi = {
   renderPdfPage?: (request: PdfiumRasterRequest) => Promise<PdfiumRasterResult>
   addons?: AddonsHostApi
   sync?: SyncHostApi
+  /** Desktop-only native sync engine (Tauri, preview). Missing on Electron, web and Android. */
+  nativeSync?: NativeSyncApi
   /** An editable share opened from fanotes://share/<id>. Missing until the desktop build that registers the protocol. */
   onShareOpen?: (callback: (id: string) => void) => () => void
   platform: string
@@ -755,6 +757,40 @@ export type SyncHostApi = {
   writeState: (vaultId: string, json: string | null) => Promise<void>
   readSecrets: () => Promise<string | null>
   writeSecrets: (json: string | null) => Promise<void>
+}
+
+/** One native cycle request and its outcome (`fanotes-native:sync-cycle`). */
+export type NativeSyncRequest = {
+  platform: string
+  deviceName: string
+  excludedPrefixes: readonly string[]
+  includeRecognitionModel: boolean
+  includeHistory: boolean
+  cleared: string[]
+  busy: string[]
+}
+
+export type NativeSyncEvent =
+  | { seq: number; kind: 'applied'; written: string[]; removed: string[] }
+  | { seq: number; kind: 'conflict'; path: string; copyPath: string; at: string }
+  | { seq: number; kind: 'log'; level: 'info' | 'warn' | 'error'; text: string }
+
+export type NativeSyncOutcome = {
+  ran: boolean
+  reason?: 'disabled' | 'signed-out'
+  conflicts?: number
+  pushed?: { uploads: number; deletes: number; conflicts: number }
+  error?: { status: number; message: string; entry: unknown; reason: 'stale' | 'guard' | null }
+  events?: NativeSyncEvent[]
+  cleared?: string[]
+}
+
+export type NativeSyncApi = {
+  cycle: (request: NativeSyncRequest) => Promise<NativeSyncOutcome>
+  setBusy: (paths: string[]) => Promise<void>
+  enabled: () => Promise<boolean>
+  setEnabled: (on: boolean) => Promise<boolean>
+  onEvent: (callback: (event: NativeSyncEvent) => void) => () => void
 }
 
 export type AddonsHostApi = {

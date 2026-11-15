@@ -3293,6 +3293,8 @@
   "Ein Ordner je Zeile, zum Beispiel Physik/Buch. Der Rest des Vaults wird weiter synchronisiert.": "One folder per line, for example Physik/Buch. The rest of the vault still syncs.",
   "Färben": "Recolor",
   "Handschriftmodell synchronisieren": "Sync handwriting model",
+  "Nativer Sync (Vorschau)": "Native sync (preview)",
+  "Synchronisiert mit der Rust-Engine dieser Desktop-App. Gleiches Konto, gleicher Zustand; aus: die bisherige Engine.": "Syncs with this desktop app's Rust engine. Same account, same state; off: the previous engine.",
   "Importieren": "Import",
   "In den aktuellen Ordner einfügen": "Insert into the current folder",
   "Karteikarten": "Flashcards",

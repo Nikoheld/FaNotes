@@ -4,6 +4,7 @@ import { getUiLocale } from '../i18n'
 import { MCP_CONNECTOR_NAME, mcpServerUrl, type McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { syncStatusLabel } from '../lib/sync/status'
+import { NativeSyncToggle } from './NativeSyncToggle'
 import type { AppSettings } from '../types'
 
 type Props = {
@@ -172,6 +173,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
               <div className="setting-copy"><span>Automatisch synchronisieren</span><small>Nach jedem Speichern, beim Fokuswechsel und im Hintergrund jede Minute. Aus: nur über „Jetzt synchronisieren“.</small></div>
               <div className="setting-control"><button type="button" className={`toggle ${settings.syncAutomatic ? 'is-on' : ''}`} role="switch" aria-checked={settings.syncAutomatic} aria-label="Automatisch synchronisieren" onClick={() => update('syncAutomatic', !settings.syncAutomatic)}><span /></button></div>
             </div>
+            <NativeSyncToggle />
             <div className="setting-row">
               <div className="setting-copy"><span>Handschriftmodell synchronisieren</span><small>Persönliche GlyphenWerk-Beispiele als eigene verschlüsselte Datei. Aus: das Modell bleibt auf diesem Gerät.</small></div>
               <div className="setting-control"><button type="button" className={`toggle ${settings.syncHandwritingModel ? 'is-on' : ''}`} role="switch" aria-checked={settings.syncHandwritingModel} aria-label="Handschriftmodell synchronisieren" onClick={() => update('syncHandwritingModel', !settings.syncHandwritingModel)}><span /></button></div>

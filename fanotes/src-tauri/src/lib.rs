@@ -138,6 +138,8 @@ fn arm_close_warning(handle: tauri::AppHandle) {
 }
 
 mod capture;
+#[path = "native/sync.rs"]
+mod native_sync;
 mod export;
 
 pub use capture::capture_html;
@@ -872,7 +874,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(register())
+        .invoke_handler(native_sync::with_sync_commands(register()))
         .append_invoke_initialization_script(system_language_script(
             fanotes_host::desktop_navigator_language(),
         ))
