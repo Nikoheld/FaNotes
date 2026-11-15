@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { connect as connectTcp } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -289,6 +289,30 @@ test('a replaced note is flushed to the archive before the live blob changes', a
   const archived = readFileSync(join(dataDirectory, 'accounts', accountId, 'revisions', id, String(revision)))
   assert.deepEqual(archived, original)
   assert.deepEqual((await readFile(id)).body, next)
+})
+
+test('a download serves one inode and does not follow a symlink', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(80)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const live = await readFile(id)
+  assert.equal(live.status, 200)
+  assert.equal(Number(live.headers['content-length']), original.length)
+  assert.deepEqual(live.body, original)
+  const head = await call('HEAD', `/api/v1/sync/files/${id}`, { token })
+  assert.equal(head.status, 200)
+  assert.equal(Number(head.headers['content-length']), original.length)
+  assert.equal(head.body.length, 0)
+  const blob = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const outside = join(dataDirectory, 'outside-marker')
+  const marker = Buffer.from('SYMLINK-MARKER-should-not-leak')
+  writeFileSync(outside, marker)
+  rmSync(blob)
+  symlinkSync(outside, blob)
+  const blocked = await readFile(id)
+  assert.equal(blocked.status, 404)
+  assert.equal(blocked.body.includes(marker), false)
 })
 
 test('an explicit clear keeps the previous blob in the revision archive', async () => {
