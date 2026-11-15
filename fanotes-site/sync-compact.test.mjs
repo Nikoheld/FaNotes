@@ -41,7 +41,7 @@ const call = (method, path, { token, accountId, headers = {}, body } = {}) => ne
   }, (response) => {
     const chunks = []
     response.on('data', (chunk) => chunks.push(chunk))
-    response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks) }))
+    response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }))
   })
   req.on('error', reject)
   if (body) req.end(body)
@@ -100,6 +100,39 @@ test('compacting the change log keeps the notes that were in it', async () => {
   assert.equal(index.entries[secondId].deleted, false)
   assert.deepEqual((await call('GET', `/api/v1/sync/files/${firstId}`, { token, accountId })).body, first)
   assert.deepEqual((await call('GET', `/api/v1/sync/files/${secondId}`, { token, accountId })).body, second)
+})
+
+test('a deleted note can be restored after the change log is compacted', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const firstRevision = JSON.parse(created.body.toString('utf8')).revision
+  const replaced = await putFile(id, randomBytes(4800), firstRevision)
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  const secondRevision = JSON.parse(replaced.body.toString('utf8')).revision
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    accountId,
+    headers: { 'If-Match': String(secondRevision), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 200, removed.body.toString('utf8'))
+  const deletedRevision = JSON.parse(removed.body.toString('utf8')).revision
+  const log = readFileSync(join(dataDirectory, 'accounts', accountId, 'changes.jsonl'))
+  assert.equal(log.length, 0)
+  const index = JSON.parse(readFileSync(join(dataDirectory, 'accounts', accountId, 'index.json'), 'utf8'))
+  assert.equal(index.entries[id].deleted, true)
+  assert.equal(index.entries[id].meta, meta)
+  const feed = JSON.parse((await call('GET', '/api/v1/sync/changes?since=0', { token, accountId })).body.toString('utf8'))
+  const listed = feed.entries.find((entry) => entry.id === id)
+  assert.equal(listed.deleted, true)
+  assert.equal(listed.meta, null)
+  const restored = await jsonCall('POST', `/api/v1/sync/files/${id}/restore`, { revision: firstRevision }, token, accountId, { 'If-Match': String(deletedRevision) })
+  assert.equal(restored.status, 200, JSON.stringify(restored.json))
+  const live = await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })
+  assert.equal(live.status, 200)
+  assert.equal(live.headers['x-fanotes-meta'], meta)
+  assert.deepEqual(live.body, original)
 })
 
 test.after(() => new Promise((resolve) => {

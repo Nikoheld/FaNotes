@@ -1332,7 +1332,9 @@ const moveToQuarantine = async (accountId, fileId, base, sourcePath) => {
 }
 
 const metaForRestore = async (accountId, fileId, current) => {
-  if (current && !current.deleted && typeof current.meta === 'string' && current.meta) return current.meta
+  // Compaction drops the log. The table row has to keep the meta, including
+  // on a tombstone, or the archived note can no longer be restored.
+  if (typeof current?.meta === 'string' && current.meta) return current.meta
   let text = ''
   try {
     text = await fs.readFile(safeJoin(accountDirectory(accountId), 'changes.jsonl'), 'utf8')
@@ -1473,7 +1475,7 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
     // Copy first. The live blob is removed only after the tombstone is durable,
     // so a crash leaves the note in the archive and still in the live slot.
     table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, 0, false)
-    const entry = { id: fileId, revision: table.revision + 1, deleted: true, size: 0, sha256: null, meta: null, updatedAt: nowIso(), deviceId: auth.deviceId }
+    const entry = { id: fileId, revision: table.revision + 1, deleted: true, size: 0, sha256: null, meta: typeof current.meta === 'string' && current.meta ? current.meta : null, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
     table.entries.set(fileId, entry)
     table.bytes -= Number(current.size) || 0
