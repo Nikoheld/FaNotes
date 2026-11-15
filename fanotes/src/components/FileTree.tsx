@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -58,6 +59,8 @@ export type FileTreeProps = {
   localOnlyPaths?: string[]
   onToggleLocalOnly?: (relativePath: string) => void
   onSetFolderColor?: (relativePath: string, color: string | null) => MaybePromise
+  /** Colours a note or PDF icon in the tree; `null` restores the default. */
+  onSetFileColor?: (relativePath: string, color: string | null) => MaybePromise
   onEditFolderPath?: (relativePath: string) => MaybePromise
   onRename: (relativePath: string, nextName: string) => MaybePromise
   onMove: (relativePath: string, destFolder: string) => MaybePromise
@@ -210,6 +213,7 @@ export const FileTree = memo(function FileTree({
   localOnlyPaths = [],
   onToggleLocalOnly,
   onSetFolderColor,
+  onSetFileColor,
   onEditFolderPath,
   onRename,
   onMove,
@@ -228,6 +232,8 @@ export const FileTree = memo(function FileTree({
 }: FileTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => readExpandedFolders(expansionStorageKey))
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
+  const [menuPlacement, setMenuPlacement] = useState<{ menu: ContextMenuState; left: number; top: number; maxHeight: number } | null>(null)
   const [renaming, setRenaming] = useState<RenameState | null>(null)
   const [renameBusy, setRenameBusy] = useState(false)
   const [dragPath, setDragPath] = useState<string | null>(null)
@@ -284,14 +290,40 @@ export const FileTree = memo(function FileTree({
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape') close()
     }
+    // A long menu scrolls itself; only scrolling the tree or page closes it.
+    const closeOnScroll = (event: Event) => {
+      if (event.target instanceof Node && contextMenuRef.current?.contains(event.target)) return
+      close()
+    }
     document.addEventListener('pointerdown', close)
-    document.addEventListener('scroll', close, true)
+    document.addEventListener('scroll', closeOnScroll, true)
     document.addEventListener('keydown', closeOnEscape)
     return () => {
       document.removeEventListener('pointerdown', close)
-      document.removeEventListener('scroll', close, true)
+      document.removeEventListener('scroll', closeOnScroll, true)
       document.removeEventListener('keydown', closeOnEscape)
     }
+  }, [contextMenu])
+
+  // Measure the open menu and keep all of it inside the window: shift it left
+  // or up as needed, and let it scroll when it is taller than the window.
+  useLayoutEffect(() => {
+    if (!contextMenu) return
+    const place = () => {
+      const menu = contextMenuRef.current
+      if (!menu) return
+      const margin = 8
+      const maxHeight = Math.max(120, window.innerHeight - margin * 2)
+      const frame = menu.offsetHeight - menu.clientHeight
+      const height = Math.min(menu.scrollHeight + frame, maxHeight)
+      const width = menu.offsetWidth
+      const left = Math.max(margin, Math.min(contextMenu.x, window.innerWidth - width - margin))
+      const top = Math.max(margin, Math.min(contextMenu.y, window.innerHeight - height - margin))
+      setMenuPlacement({ menu: contextMenu, left, top, maxHeight })
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => window.removeEventListener('resize', place)
   }, [contextMenu])
 
   useEffect(() => {
@@ -536,6 +568,50 @@ export const FileTree = memo(function FileTree({
     }
   }
 
+  const renderColorPicker = (
+    entry: VaultEntry,
+    onSetColor: (relativePath: string, color: string | null) => MaybePromise,
+    labels: { group: string; clear: string },
+  ) => (
+    <div className="folder-color-menu">
+      <span><Palette aria-hidden="true" size={14} /> Darstellung</span>
+      <div className="folder-color-swatches" role="group" aria-label={labels.group}>
+        {FOLDER_COLORS.map((color) => (
+          <button
+            aria-label={color}
+            aria-checked={entry.color === color}
+            className={entry.color === color ? 'active' : ''}
+            key={color}
+            onClick={() => {
+              const path = entry.relativePath
+              setContextMenu(null)
+              void Promise.resolve(onSetColor(path, color))
+            }}
+            role="menuitemradio"
+            style={{ '--folder-swatch': color, '--folder-swatch-contrast': bestContrastText(color) } as CSSProperties}
+            title={color}
+            type="button"
+          >
+            {entry.color === color && <Check size={12} />}
+          </button>
+        ))}
+        <button
+          aria-checked={!entry.color}
+          aria-label={labels.clear}
+          className="folder-color-clear"
+          onClick={() => {
+            const path = entry.relativePath
+            setContextMenu(null)
+            void Promise.resolve(onSetColor(path, null))
+          }}
+          role="menuitemradio"
+          title="Standardfarbe"
+          type="button"
+        ><X size={12} /></button>
+      </div>
+    </div>
+  )
+
   const renderEntry = (entry: VaultEntry, depth: number) => {
     const isFolder = entry.kind === 'folder'
     const isExpanded = isFolder && expanded.has(entry.relativePath)
@@ -546,6 +622,7 @@ export const FileTree = memo(function FileTree({
     const depthStyle = {
       '--tree-depth': depth,
       ...(isFolder ? { '--folder-color': entry.color ?? 'var(--accent)' } : {}),
+      ...(!isFolder && entry.color ? { '--file-color': entry.color } : {}),
     } as CSSProperties
 
     return (
@@ -562,6 +639,7 @@ export const FileTree = memo(function FileTree({
             isFolder && dropFolder === entry.relativePath ? 'is-drop-target' : ''
           }`.trim()}
           data-kind={entry.kind}
+          data-colored={!isFolder && entry.color ? '' : undefined}
           onContextMenu={(event) => {
             event.preventDefault()
             setContextMenu({ entry, x: event.clientX, y: event.clientY })
@@ -825,17 +903,14 @@ export const FileTree = memo(function FileTree({
           aria-label={`Aktionen für ${displayName(contextMenu.entry)}`}
           className="file-tree__context-menu"
           onPointerDown={(event) => event.stopPropagation()}
+          ref={contextMenuRef}
           role="menu"
-          style={{
-            left: Math.min(Math.max(8, contextMenu.x), window.innerWidth - 232),
-            top: Math.min(
-              Math.max(8, contextMenu.y),
-              window.innerHeight - (contextMenu.entry.kind === 'folder' ? 700 : 500),
-            ),
-          }}
+          style={menuPlacement?.menu === contextMenu
+            ? { left: menuPlacement.left, top: menuPlacement.top, maxHeight: menuPlacement.maxHeight }
+            : { left: contextMenu.x, top: contextMenu.y, visibility: 'hidden' }}
         >
           <div className="file-tree__menu-head">
-            <span>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : isPdfEntry(contextMenu.entry) ? <File size={16} /> : <FileText size={16} />}</span>
+            <span style={contextMenu.entry.color ? { '--folder-color': contextMenu.entry.color } as CSSProperties : undefined}>{contextMenu.entry.kind === 'folder' ? <FolderOpen size={16} /> : isPdfEntry(contextMenu.entry) ? <File size={16} /> : <FileText size={16} />}</span>
             <div><small>{contextMenu.entry.kind === 'folder' ? 'Ordner' : isPdfEntry(contextMenu.entry) ? 'PDF-Notiz' : 'Notiz'}</small><strong>{displayName(contextMenu.entry)}</strong></div>
           </div>
           {contextMenu.entry.kind === 'folder' && (
@@ -920,44 +995,10 @@ export const FileTree = memo(function FileTree({
                   Ordnerpfad …
                 </button>
               )}
-              {onSetFolderColor && (
-                <div className="folder-color-menu">
-                  <span><Palette aria-hidden="true" size={14} /> Darstellung</span>
-                  <div className="folder-color-swatches" role="group" aria-label="Ordnerfarbe wählen">
-                    {FOLDER_COLORS.map((color) => (
-                      <button
-                        aria-label={`Ordnerfarbe ${color}`}
-                        aria-pressed={contextMenu.entry.color === color}
-                        className={contextMenu.entry.color === color ? 'active' : ''}
-                        key={color}
-                        onClick={() => {
-                          const path = contextMenu.entry.relativePath
-                          setContextMenu(null)
-                          void Promise.resolve(onSetFolderColor(path, color))
-                        }}
-                        role="menuitemradio"
-                        style={{ '--folder-swatch': color, '--folder-swatch-contrast': bestContrastText(color) } as CSSProperties}
-                        title={color}
-                        type="button"
-                      >
-                        {contextMenu.entry.color === color && <Check size={12} />}
-                      </button>
-                    ))}
-                    <button
-                      aria-label="Ordnerfarbe entfernen"
-                      className="folder-color-clear"
-                      onClick={() => {
-                        const path = contextMenu.entry.relativePath
-                        setContextMenu(null)
-                        void Promise.resolve(onSetFolderColor(path, null))
-                      }}
-                      role="menuitemradio"
-                      title="Standardfarbe"
-                      type="button"
-                    ><X size={12} /></button>
-                  </div>
-                </div>
-              )}
+              {onSetFolderColor && renderColorPicker(contextMenu.entry, onSetFolderColor, {
+                group: 'Ordnerfarbe wählen',
+                clear: 'Ordnerfarbe entfernen',
+              })}
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}
@@ -976,6 +1017,15 @@ export const FileTree = memo(function FileTree({
                 <Columns2 aria-hidden="true" size={15} />
                 Rechts öffnen
               </button>
+              <span className="file-tree__menu-separator" role="separator" />
+            </>
+          )}
+          {contextMenu.entry.kind === 'file' && onSetFileColor && (
+            <>
+              {renderColorPicker(contextMenu.entry, onSetFileColor, {
+                group: 'Dokumentfarbe wählen',
+                clear: 'Dokumentfarbe entfernen',
+              })}
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}

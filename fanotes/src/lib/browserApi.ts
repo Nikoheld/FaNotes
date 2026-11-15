@@ -268,6 +268,8 @@ export function createBrowserApi(): FaNotesApi {
   /** `fanotes-page-text-v1` records of browser-vault PDFs (document search). */
   const pageText = new Map<string, PageTextRecord>()
   const notePaper = new Map<string, PaperStyle>()
+  /** Note and PDF colours in the tree, by path (synced as `.fanotes/file-colors.json`). */
+  const fileColors = new Map<string, string>()
   let subjectBooks: SubjectBookRecord[] = []
   let folderLocations: FolderLocationMap = {}
   const noteHistory = new Map<string, Array<{ id: string; createdAt: string; content: string; bytes: number; tier?: 'week' | 'short'; ext?: string; companion?: string }>>()
@@ -425,6 +427,12 @@ export function createBrowserApi(): FaNotesApi {
         if (isPaperStyle(style)) notePaper.set(path, style)
       })
     }
+    const storedFileColors = meta.get('fileColors')
+    if (isRecord(storedFileColors)) {
+      Object.entries(storedFileColors).forEach(([path, color]) => {
+        if (typeof color === 'string' && /^#[a-f0-9]{6}$/iu.test(color)) fileColors.set(path, color.toLowerCase())
+      })
+    }
     subjectBooks = parseSubjectBooks(meta.get('subjectBooks'))
     folderLocations = sanitizeFolderLocationMap(meta.get('folderLocations'))
     fileRows.forEach((row) => files.set(row.path, row))
@@ -463,6 +471,11 @@ export function createBrowserApi(): FaNotesApi {
   const persistFolderLocations = () => setMeta('folderLocations', folderLocations)
   const logicalResult = (logical: string, storedResult: string) => [parentPath(logical), fileName(storedResult)].filter(Boolean).join('/')
 
+  const colorOf = (path: string) => {
+    const color = fileColors.get(path)
+    return color ? { color } : {}
+  }
+
   const buildTree = () => {
     if (cachedTree) return clone(cachedTree)
     const root: VaultEntry[] = []
@@ -492,13 +505,13 @@ export function createBrowserApi(): FaNotesApi {
       if (hiddenFamd.has(record.path)) return
       if (isPlaceholderDescendant(record.path, folderLocations)) return
       const extension = fileName(record.path).split('.').pop()?.toLocaleLowerCase('en-US') || 'md'
-      const entry: VaultEntry = { name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content) }
+      const entry: VaultEntry = { name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content), ...colorOf(record.path) }
       ;(directories.get(parentPath(record.path)) ?? root).push(entry)
     })
     assets.forEach((blob, path) => {
       if (path.startsWith('.') || !/\.pdf$/iu.test(path)) return
       if (isPlaceholderDescendant(path, folderLocations)) return
-      const entry: VaultEntry = { name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size }
+      const entry: VaultEntry = { name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size, ...colorOf(path) }
       ;(directories.get(parentPath(path)) ?? root).push(entry)
     })
     const listStored = (parent: string): VaultEntry[] => {
@@ -510,11 +523,11 @@ export function createBrowserApi(): FaNotesApi {
       files.forEach((record) => {
         if (record.path === '.fanotes/recognition-model.json' || hiddenFamd.has(record.path) || parentPath(record.path) !== parent) return
         const extension = fileName(record.path).split('.').pop()?.toLocaleLowerCase('en-US') || 'md'
-        items.push({ name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content) })
+        items.push({ name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content), ...colorOf(record.path) })
       })
       assets.forEach((blob, path) => {
         if (path.startsWith('.') || !/\.pdf$/iu.test(path) || parentPath(path) !== parent) return
-        items.push({ name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size })
+        items.push({ name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size, ...colorOf(path) })
       })
       return items
     }
@@ -527,7 +540,20 @@ export function createBrowserApi(): FaNotesApi {
 
   const persistNotePaper = () => setMeta('notePaper', Object.fromEntries(notePaper))
 
+  const remapFileColors = async (from: string, to: string | null) => {
+    let changed = false
+    for (const [path, color] of [...fileColors.entries()]) {
+      if (path !== from && !path.startsWith(`${from}/`)) continue
+      fileColors.delete(path)
+      if (to !== null) fileColors.set(path === from ? to : `${to}${path.slice(from.length)}`, color)
+      changed = true
+    }
+    if (changed) await setMeta('fileColors', Object.fromEntries(fileColors))
+  }
+
+  // Per-note settings follow the note: paper style and tree colour.
   const remapNotePaper = async (from: string, to: string | null) => {
+    await remapFileColors(from, to)
     const next = new Map<string, PaperStyle>()
     let changed = false
     notePaper.forEach((style, path) => {
@@ -1042,6 +1068,17 @@ export function createBrowserApi(): FaNotesApi {
       folders.set(path, record)
       cachedTree = null
       return { color }
+    },
+    setFileColor: async (rawPath, color) => {
+      await ready
+      const path = normalizePath(rawPath)
+      if (!files.has(path) && !(assets.has(path) && /\.pdf$/iu.test(path) && !path.startsWith('.'))) throw new Error('Das Dokument wurde nicht gefunden.')
+      if (color !== null && !/^#[a-f0-9]{6}$/iu.test(color)) throw new Error('Die Dokumentfarbe ist ungültig.')
+      if (color) fileColors.set(path, color.toLowerCase())
+      else fileColors.delete(path)
+      await setMeta('fileColors', Object.fromEntries(fileColors))
+      cachedTree = null
+      return { color: color?.toLowerCase() ?? null }
     },
     getFolderLocations: async (rawPath) => {
       await ready
@@ -1873,6 +1910,13 @@ export function createBrowserApi(): FaNotesApi {
       deleteDrawing: async (id) => { await write('drawings', (store) => { store.delete(id) }); drawings.delete(id) },
       putWorksheet: async (document) => { await write('worksheets', (store) => { store.put(document) }); worksheets.set(document.id, document) },
       deleteWorksheet: async (id) => { await write('worksheets', (store) => { store.delete(id) }); worksheets.delete(id) },
+      fileColors,
+      putFileColors: async (next) => {
+        fileColors.clear()
+        next.forEach((color, path) => fileColors.set(path, color))
+        await setMeta('fileColors', Object.fromEntries(fileColors), false)
+        cachedTree = null
+      },
       putFolders: async (list) => {
         await write('folders', (store) => { store.clear(); list.forEach((folder) => store.put(folder satisfies FolderRecord)) })
         folders.clear()

@@ -194,6 +194,7 @@ const IPC = Object.freeze({
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
   setFolderColor: 'fanotes:set-folder-color',
+  setFileColor: 'fanotes:set-file-color',
   getFolderLocations: 'fanotes:get-folder-locations',
   pickFolderLocation: 'fanotes:pick-folder-location',
   setFolderLocations: 'fanotes:set-folder-locations',
@@ -1121,9 +1122,12 @@ function cleanFolderColorEntries(candidate) {
   return colors
 }
 
-async function readFolderColors(root) {
+// Folder colours live in `folder-colors.json`; note and PDF colours use the same
+// format in `file-colors.json`, so clients that only know folder colours never
+// mistake a document for a folder.
+async function readFolderColors(root, fileName = 'folder-colors.json') {
   const internalDirectory = await ensureInternalVaultDirectory(root)
-  const metadataPath = path.join(internalDirectory, 'folder-colors.json')
+  const metadataPath = path.join(internalDirectory, fileName)
   try {
     const parentInfo = await fsp.lstat(path.dirname(metadataPath))
     if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink()) {
@@ -1146,7 +1150,7 @@ async function readFolderColors(root) {
   }
 }
 
-async function writeFolderColors(root, colors) {
+async function writeFolderColors(root, colors, fileName = 'folder-colors.json') {
   const internalDirectory = await ensureInternalVaultDirectory(root)
   const entries = [...colors.entries()]
     .filter(([relativePath, color]) => {
@@ -1163,7 +1167,7 @@ async function writeFolderColors(root, colors) {
   if (Buffer.byteLength(snapshot, 'utf8') > MAX_FOLDER_COLOR_BYTES) {
     throw new Error('Zu viele Ordnerfarben für diesen Vault.')
   }
-  await atomicWrite(path.join(internalDirectory, 'folder-colors.json'), snapshot, { encoding: 'utf8', mode: 0o600 })
+  await atomicWrite(path.join(internalDirectory, fileName), snapshot, { encoding: 'utf8', mode: 0o600 })
 }
 
 async function readSubjectBooksFromVault(root) {
@@ -1218,16 +1222,61 @@ function queueFolderColorMutation(root, vaultGeneration, operation) {
   return next
 }
 
-function mutateFolderColors(root, vaultGeneration, mutation) {
+function mutateFolderColors(root, vaultGeneration, mutation, fileName = 'folder-colors.json') {
   return queueFolderColorMutation(root, vaultGeneration, async () => {
     assertVaultWriteContext(root, vaultGeneration)
-    const colors = await readFolderColors(root)
+    const colors = await readFolderColors(root, fileName)
     assertVaultWriteContext(root, vaultGeneration)
     const changed = mutation(colors)
     if (changed === false) return
-    await writeFolderColors(root, colors)
+    await writeFolderColors(root, colors, fileName)
     assertVaultWriteContext(root, vaultGeneration)
   })
+}
+
+const FILE_COLORS_FILE = 'file-colors.json'
+
+function readFileColors(root) {
+  return readFolderColors(root, FILE_COLORS_FILE)
+}
+
+function mutateFileColors(root, vaultGeneration, mutation) {
+  return mutateFolderColors(root, vaultGeneration, mutation, FILE_COLORS_FILE)
+}
+
+/** Moves (or with `to === null` drops) the colour of a path and everything below it. */
+function retargetColorEntries(colors, from, to) {
+  let changed = false
+  for (const [candidate, candidateColor] of [...colors.entries()]) {
+    if (candidate !== from && !candidate.startsWith(`${from}/`)) continue
+    colors.delete(candidate)
+    if (to !== null) colors.set(candidate === from ? to : `${to}${candidate.slice(from.length)}`, candidateColor)
+    changed = true
+  }
+  return changed
+}
+
+/** Adds `color` to the note and PDF entries of a tree that have one. */
+function applyFileColors(entries, colors) {
+  if (!colors.size) return entries
+  for (const entry of entries) {
+    if (entry.kind === 'folder') applyFileColors(entry.children ?? [], colors)
+    else {
+      const color = colors.get(entry.relativePath)
+      if (color) entry.color = color
+    }
+  }
+  return entries
+}
+
+async function readFileColorsForTree(root) {
+  try {
+    return await readFileColors(root)
+  } catch (error) {
+    // The tree must still load when only the colour list is unreadable.
+    console.warn('Dokumentfarben konnten nicht gelesen werden:', error?.message ?? error)
+    return new Map()
+  }
 }
 
 async function persistConfig({
@@ -2371,6 +2420,7 @@ function cleanCachedTreeEntries(candidate, parentPath = '', depth = 0, state = {
       const extension = path.extname(entry.name).slice(1).toLocaleLowerCase('en-US')
       if (!extension || !TREE_EXTENSIONS.has(`.${extension}`)) throw new Error('Der Dateibaum-Cache enthält einen unbekannten Dateityp.')
       cleaned.extension = extension
+      if (typeof entry.color === 'string' && /^#[\da-f]{6}$/i.test(entry.color)) cleaned.color = entry.color.toLowerCase()
       if (entry.modifiedAt !== undefined) {
         if (typeof entry.modifiedAt !== 'string' || !Number.isFinite(Date.parse(entry.modifiedAt))) {
           throw new Error('Der Dateibaum-Cache enthält ein ungültiges Änderungsdatum.')
@@ -3567,7 +3617,7 @@ function registerIpcHandlers() {
     const root = await assertCurrentVaultRoot()
     if (vaultPath !== root) throw new Error('Der Vault wurde während des Ladens verändert.')
     const folderColors = await readFolderColors(root)
-    const entries = await readFastTreeDirectory(root, root, 0, folderColors)
+    const entries = applyFileColors(await readFastTreeDirectory(root, root, 0, folderColors), await readFileColorsForTree(root))
     setImmediate(() => { void writeTreeCache(root, entries) })
     return entries
   })
@@ -3577,7 +3627,7 @@ function registerIpcHandlers() {
     const root = await assertCurrentVaultRoot()
     if (vaultPath !== root) throw new Error('Der Vault wurde während des Ladens verändert.')
     const folderColors = await readFolderColors(root)
-    const entries = await readTreeDirectory(root, root, 0, folderColors)
+    const entries = applyFileColors(await readTreeDirectory(root, root, 0, folderColors), await readFileColorsForTree(root))
     // The verified local cache makes subsequent starts independent of a full
     // NAS/disk traversal. Refreshing it must never delay the live tree result.
     setImmediate(() => { void writeTreeCache(root, entries) })
@@ -3806,6 +3856,22 @@ function registerIpcHandlers() {
     return { color: color?.toLowerCase() ?? null }
   })
 
+  handle(IPC.setFileColor, async (_event, relativePath, color) => {
+    await ensureBootstrap()
+    const normalizedRelativePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    if (color !== null && (typeof color !== 'string' || !/^#[\da-f]{6}$/i.test(color))) {
+      throw new Error('Ungültige Dokumentfarbe.')
+    }
+    const requestedVaultGeneration = currentVaultGeneration
+    const { root } = await resolveVaultPath(normalizedRelativePath, { expected: 'file' })
+    await mutateFileColors(root, requestedVaultGeneration, (colors) => {
+      if (color === null) return colors.delete(normalizedRelativePath)
+      colors.set(normalizedRelativePath, color.toLowerCase())
+      return true
+    })
+    return { color: color?.toLowerCase() ?? null }
+  })
+
   handle(IPC.getFolderLocations, async (_event, relativePath) => {
     await ensureBootstrap()
     const logical = normalizeRelativePath(relativePath).split(path.sep).join('/')
@@ -3928,6 +3994,11 @@ function registerIpcHandlers() {
       } catch (error) {
         console.warn('Ordnerfarben konnten nach dem Umbenennen nicht verschoben werden:', error?.message ?? error)
       }
+      try {
+        await mutateFileColors(root, requestedVaultGeneration, (colors) => retargetColorEntries(colors, oldRelativePath, nextRelativePath))
+      } catch (error) {
+        console.warn('Dokumentfarben konnten nach dem Umbenennen nicht verschoben werden:', error?.message ?? error)
+      }
       await rewritePdfOcrSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
         console.warn('FaNotes: PDF-Texterkennung konnte nicht mit umbenannt werden:', error?.message ?? error)
       })
@@ -4033,6 +4104,11 @@ function registerIpcHandlers() {
       } catch (error) {
         console.warn('Ordnerfarben konnten nach dem Verschieben nicht mitgezogen werden:', error?.message ?? error)
       }
+      try {
+        await mutateFileColors(root, requestedVaultGeneration, (colors) => retargetColorEntries(colors, oldRelativePath, nextRelativePath))
+      } catch (error) {
+        console.warn('Dokumentfarben konnten nach dem Verschieben nicht mitgezogen werden:', error?.message ?? error)
+      }
       await rewritePdfOcrSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
         console.warn('FaNotes: PDF-Texterkennung konnte nicht mit verschoben werden:', error?.message ?? error)
       })
@@ -4089,6 +4165,11 @@ function registerIpcHandlers() {
         })
       } catch (error) {
         console.warn('Ordnerfarben konnten nach dem Löschen nicht bereinigt werden:', error?.message ?? error)
+      }
+      try {
+        await mutateFileColors(root, requestedVaultGeneration, (colors) => retargetColorEntries(colors, trashedRelativePath, null))
+      } catch (error) {
+        console.warn('Dokumentfarben konnten nach dem Löschen nicht bereinigt werden:', error?.message ?? error)
       }
       await rewritePdfOcrSidecars(root, trashedRelativePath, null).catch((error) => {
         console.warn('FaNotes: PDF-Texterkennung konnte nicht gelöscht werden:', error?.message ?? error)

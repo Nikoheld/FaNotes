@@ -3977,5 +3977,15 @@
   "Melde dich beim Sync an, um einen Konflikt zu lösen.": "Sign in to sync to resolve a conflict.",
   "Die Originaldatei fehlt. Behalte die Kopie oder beide Fassungen.": "The original file is missing. Keep the copy or both versions.",
   "Die Sync-Anmeldung ist abgelaufen. Melde dich erneut an; der Konflikt bleibt bis dahin bestehen.": "The sync sign-in has expired. Sign in again; the conflict stays until then.",
-  "Keine Verbindung zum Sync-Server. Der Konflikt bleibt bestehen; löse ihn, sobald du online bist.": "No connection to the sync server. The conflict stays; resolve it once you are online."
+  "Keine Verbindung zum Sync-Server. Der Konflikt bleibt bestehen; löse ihn, sobald du online bist.": "No connection to the sync server. The conflict stays; resolve it once you are online.",
+  "Dokumentfarbe wählen": "Choose document color",
+  "Dokumentfarbe entfernen": "Remove document color",
+  "Dokumentfarbe gespeichert.": "Document color saved.",
+  "Dokumentfarbe auf Standard zurückgesetzt.": "Document color reset to default.",
+  "Dokumentfarbe konnte nicht gespeichert werden.": "Document color could not be saved.",
+  "Dokumentfarben gibt es in dieser Version nicht.": "Document colors are not available in this version.",
+  "Ungültige Dokumentfarbe.": "Invalid document color.",
+  "Die Dokumentfarbe ist ungültig.": "The document color is invalid.",
+  "Das Dokument wurde nicht gefunden.": "The document was not found.",
+  "Standardfarbe": "Default color"
 }
