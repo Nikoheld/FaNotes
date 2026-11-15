@@ -9,14 +9,16 @@ export type BusySource = { isDirty(): boolean; isSaving(): boolean; subscribe(li
 
 /** The global Kotlin calls with a JSON array of story-relative paths. */
 export const STORY_WRITTEN_ENTRY = 'fanotesStoryWritten'
+/** The global Kotlin calls when its gate changed (a new story was opened): report the state again. */
+export const REPORT_BUSY_ENTRY = 'fanotesReportBusy'
 
 /**
  * Reports `isDirty() || isSaving()` to Kotlin on every change. A failed report is
  * retried, and counts as busy on the Kotlin side until one goes through.
  */
-export const reportEditorBusy = (source: BusySource, bridge: BusyBridge | null, schedule: (retry: () => void, ms: number) => unknown = (retry, ms) => setTimeout(retry, ms)): (() => void) => {
+export const reportEditorBusy = (source: BusySource, bridge: BusyBridge | null, schedule: (retry: () => void, ms: number) => unknown = (retry, ms) => setTimeout(retry, ms)): (() => void) & { resend: () => void } => {
   const send = bridge?.storyBusy
-  if (!bridge || typeof send !== 'function') return () => undefined
+  if (!bridge || typeof send !== 'function') return Object.assign(() => undefined, { resend: () => undefined })
   let last: boolean | null = null
   let alive = true
   const push = () => {
@@ -34,11 +36,13 @@ export const reportEditorBusy = (source: BusySource, bridge: BusyBridge | null, 
   const off = source.subscribe(push)
   push()
   // Whatever happens next (reload, unmount) is unknown to Kotlin: hold the files.
-  return () => { alive = false; off(); try { send.call(bridge, true) } catch { /* Kotlin resets on page load */ } }
+  const stop = () => { alive = false; off(); try { send.call(bridge, true) } catch { /* Kotlin resets on page load */ } }
+  /** Sends the state even if unchanged (Kotlin swapped its gate and knows nothing). */
+  return Object.assign(stop, { resend: () => { last = null; push() } })
 }
 
 /** Installs the entry Kotlin calls; `written` receives the live story files (relative to the story folder). */
-export const installStoryWrittenEntry = (target: Record<string, unknown>, written: (relatives: string[]) => void): (() => void) => {
+export const installStoryWrittenEntry = (target: Record<string, unknown>, written: (relatives: string[]) => void, resend: () => void = () => undefined): (() => void) => {
   const entry = (json: string) => {
     let value: unknown
     try { value = JSON.parse(json) } catch { return }
@@ -47,5 +51,9 @@ export const installStoryWrittenEntry = (target: Record<string, unknown>, writte
     if (relatives.length) written(relatives)
   }
   target[STORY_WRITTEN_ENTRY] = entry
-  return () => { if (target[STORY_WRITTEN_ENTRY] === entry) delete target[STORY_WRITTEN_ENTRY] }
+  target[REPORT_BUSY_ENTRY] = resend
+  return () => {
+    if (target[STORY_WRITTEN_ENTRY] === entry) delete target[STORY_WRITTEN_ENTRY]
+    if (target[REPORT_BUSY_ENTRY] === resend) delete target[REPORT_BUSY_ENTRY]
+  }
 }

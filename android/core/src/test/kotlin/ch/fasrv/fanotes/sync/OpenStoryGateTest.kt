@@ -51,4 +51,15 @@ class OpenStoryGateTest {
         assertEquals(listOf("scenes/abc123def.json", "story.json"), gate.liveFiles(written))
         assertEquals(emptyList(), gate.liveFiles(listOf("Bücher/Notiz.md")))
     }
+
+    @Test
+    fun aNewGateKnowsNothingUntilTheEditorReportsAgain() {
+        val first = OpenStoryGate("Bücher/Roman.story")
+        first.report(false)
+        val second = OpenStoryGate("Bücher/Zweit.story")
+        assertTrue(second.isBusy("Bücher/Zweit.story/scenes/abc123def.json"), "busy until the resent report arrives")
+        second.report(false)
+        assertFalse(second.isBusy("Bücher/Zweit.story/scenes/abc123def.json"))
+        assertFalse(first.isBusy("Bücher/Roman.story/scenes/abc123def.json"), "the old gate keeps its own state")
+    }
 }

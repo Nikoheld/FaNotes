@@ -220,8 +220,8 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     }
     const off = registerStoryGate(gate)
     // Android: sync is native, so the editor pushes its state and Kotlin calls back (androidLive.ts).
-    const stopEntry = androidBridge() ? installStoryWrittenEntry(window as unknown as Record<string, unknown>, (relatives) => gate.changed(relatives)) : () => undefined
     const stopReport = reportEditorBusy(controller, androidBridge())
+    const stopEntry = androidBridge() ? installStoryWrittenEntry(window as unknown as Record<string, unknown>, (relatives) => gate.changed(relatives), stopReport.resend) : () => undefined
     return () => { alive = false; off(); stopReport(); stopEntry() }
   }, [controller, host, path])
   const version = controller?.version ?? 0

@@ -38,7 +38,7 @@ class WritingActivity : ComponentActivity() {
         fileCallback = null
     }
 
-    private var gate: OpenStoryGate? = null
+    @Volatile private var gate: OpenStoryGate? = null
     private val storyListener: (List<String>, List<String>) -> Unit = { written, _ -> notifyWritten(written) }
 
     /**
@@ -52,6 +52,8 @@ class WritingActivity : ComponentActivity() {
         gate = next
         graph.openStories = graph.openStories + next
         synchronized(graph.remoteListeners) { graph.remoteListeners += storyListener }
+        // The page reported to the previous gate and sends only changes: ask it to report again.
+        web.evaluateJavascript("window.fanotesReportBusy && window.fanotesReportBusy()", null)
     }
 
     private fun releaseStory() {
