@@ -125,6 +125,7 @@ import { MarginTranscript } from './MarginTranscript'
 import { addPersonalWord } from '../lib/spellingSuggest'
 import { replaceTranscriptWord } from '../lib/marginTranscript'
 import { detectScribbleErase } from '../lib/scribbleErase'
+import { mayWipeLiveInk } from '../lib/liveInkHandoff'
 import {
   applyInkNoticeOp,
   inkNoticeAutoClearDelayMs,
@@ -2380,6 +2381,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.imageSmoothingQuality = activeStrokeRef.current ? 'low' : 'high'
     const activeStroke = activeStrokeRef.current
     if (!activeStroke) {
+      if (inkPaintJobRef.current && liveCanvasHasInkRef.current) return
       if (liveCanvasHasInkRef.current) {
         context.setTransform(1, 0, 0, 1, 0, 0)
         context.clearRect(0, 0, canvas.width, canvas.height)
@@ -2677,6 +2679,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           committedBitmapRef.current = { key: contentKey, topPx }
           inkPaintJobRef.current = null
           markInkPainted()
+          if (!activeStrokeRef.current && liveCanvasHasInkRef.current) wipeLiveInk()
           if (canvasPixelSizeRef.current.topPx !== topPx) requestAnimationFrame(() => redraw())
           return
         }
@@ -2724,7 +2727,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     paintLiveInk(context, activeStroke, [])
-  }, [inline, paintLiveInk, paperStyle, redrawViewportRaster, settings.paperSquareMm, settings.smoothing, sourceHeight, sourceWidth])
+  }, [inline, paintLiveInk, paperStyle, redrawViewportRaster, settings.paperSquareMm, settings.smoothing, sourceHeight, sourceWidth, wipeLiveInk])
 
   const onInkActivityRef = useRef(onInkActivity)
   onInkActivityRef.current = onInkActivity
@@ -2760,25 +2763,25 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (removed > 0) onInkActivityRef.current?.({ kind: 'erase', removed })
   }, [])
 
-  const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
+  const commitStrokeToCanvas = useCallback((stroke: InkStroke): boolean => {
     noteStrokeDrawn(stroke)
     if (viewportRasterRef.current) {
       // The stroke is already in strokesRef: the scene diff sees one appended
       // stroke and paints only its region, in this same event.
       committedCanvasDirtyRef.current = true
       const placement = viewportPlacementRef.current
-      if (!placement) return
+      if (!placement) return false
       syncViewportScene(canvasPixelSizeRef.current.layoutWidth, canvasPixelSizeRef.current.layoutHeight)
       paintViewportCommitted(placement)
-      return
+      return true
     }
     const canvas = committedCanvasRef.current
     const { width, height, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
-    if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return
+    if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return false
     const inkWindow = inkWindowRef.current
-    if (!strokeIntersectsWindow(stroke, inkWindow)) return
+    if (!strokeIntersectsWindow(stroke, inkWindow)) return true
     const context = canvas.getContext('2d')
-    if (!context) return
+    if (!context) return false
     context.save()
     context.beginPath()
     context.rect(0, 0, width, height)
@@ -2798,6 +2801,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       coverage && coverage.width === canvas.width && coverage.height === canvas.height ? { coverage, stamp: true } : undefined,
     )
     context.restore()
+    return true
   }, [noteStrokeDrawn, paintViewportCommitted, settings.smoothing, sourceWidth, syncViewportScene])
 
   useEffect(() => {
@@ -5785,6 +5789,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     let scribbleDeleted = 0
+    let committedHasStroke = true
     if (gestureToolRef.current === 'pen' && activeStroke?.points.length) {
       const handwritingEntries = beforeGestureRef.current
         .map((stroke, index) => ({ stroke, index }))
@@ -5806,12 +5811,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         gestureChangedRef.current = scribbleDeleted > 0
       } else {
         strokesRef.current.push(activeStroke)
-        commitStrokeToCanvas(activeStroke)
+        committedHasStroke = commitStrokeToCanvas(activeStroke)
         gestureChangedRef.current = true
       }
     }
     activeStrokeRef.current = null
-    wipeLiveInk()
+    // Keep the live stroke on screen until the committed bitmap shows it.
+    // The redraw below clears the live layer once that has happened.
+    if (mayWipeLiveInk({ committedHasStroke, committedPaintRunning: Boolean(inkPaintJobRef.current) })) wipeLiveInk()
     activeRenderedPointCountRef.current = 0
     shapeSnappedRef.current = false
     endInteraction()
