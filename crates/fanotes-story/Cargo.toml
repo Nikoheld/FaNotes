@@ -1,0 +1,22 @@
+[package]
+name = "fanotes-story"
+version = "0.1.0"
+description = "FaNotes writing mode in Rust: story model, sanitize, paragraph merge, line breaking, hyphenation and pagination (port of fanotes/src/writing)"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["fonts", "os-random"]
+# Measures text with the bundled TTF fonts (rustybuzz shaping).
+fonts = ["dep:rustybuzz", "dep:ttf-parser"]
+# Random ids from the operating system (getrandom). Without it, callers pass an IdSource.
+os-random = ["dep:getrandom"]
+
+[dependencies]
+regex = { version = "1", default-features = false, features = ["std", "unicode-case", "unicode-gencat", "unicode-perl"] }
+getrandom = { version = "0.2", optional = true }
+rustybuzz = { version = "0.20", optional = true }
+ttf-parser = { version = "0.25", optional = true }
+
+[dev-dependencies]
