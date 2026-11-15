@@ -1008,6 +1008,13 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   return after - before
 }
 
+// A crash can rename the live blob and stop before that directory entry is
+// durable. The change log names the file only after the directory is synced.
+const recordLiveBlob = async (accountId, table, entry) => {
+  await syncDirectory(safeJoin(accountDirectory(accountId), 'blobs'))
+  await appendChange(accountId, table, entry)
+}
+
 /** Hash of the newest archived blob for this note, or null when the archive is empty. */
 const newestArchivedIdentity = async (accountId, fileId) => {
   const directory = revisionsDirectory(accountId, fileId)
@@ -1064,7 +1071,7 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
     table.revision = entry.revision
     table.entries.set(fileId, entry)
     table.bytes += stat.size
-    await appendChange(accountId, table, entry)
+    await recordLiveBlob(accountId, table, entry)
     return { matchesRequest: true, entry }
   }
   const currentSize = Number(current.size) || 0
@@ -1084,7 +1091,7 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
   table.revision = entry.revision
   table.entries.set(fileId, entry)
   table.bytes += stat.size - currentSize
-  await appendChange(accountId, table, entry)
+  await recordLiveBlob(accountId, table, entry)
   return { matchesRequest, entry }
 }
 
@@ -1507,7 +1514,7 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
   table.revision = entry.revision
   table.entries.set(fileId, entry)
   table.bytes += stat.size - previousBytes
-  await appendChange(auth.account.id, table, entry)
+  await recordLiveBlob(auth.account.id, table, entry)
   sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
 }
 
