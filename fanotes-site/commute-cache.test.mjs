@@ -1,12 +1,12 @@
 // Commute provider: short-lived cache, in-flight coalescing, upstream retries, and a recorded
 // search.ch answer for Brugg → Aarau via Aarau, Lenzburg (a via equal to the destination).
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { hasViaLoop, parseLocal, parseSearchChRoute, passesVias } from './commute-logic.mjs'
-import { ROUTE_DISK_MS, UPSTREAM_ATTEMPTS, UPSTREAM_TIMEOUT_MS, createCommuteProvider, upstreamRetryable } from './commute.mjs'
+import { ROUTE_DISK_MS, UPSTREAM_ATTEMPTS, UPSTREAM_BODY_MAX, UPSTREAM_TIMEOUT_MS, createCommuteProvider, upstreamRetryable } from './commute.mjs'
 import { createServiceLog, requestIdFrom } from './service-log.mjs'
 
 const fixture = JSON.parse(await readFile(new URL('./test-fixtures/commute-searchch-brugg-aarau-loop.json', import.meta.url), 'utf8'))
@@ -209,6 +209,66 @@ test('two timetables saved together both stay on disk', async () => {
   }
 })
 
+test('parallel route queries add up in the daily budget', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-budget-'))
+  const budgetFile = join(root, 'commute-budget.json')
+  await writeFile(budgetFile, JSON.stringify({ day: '2026-11-16', route: 10, completion: 0, fallback: 0, detail: 0 }))
+  let waiting = 0
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  const fetchImpl = async () => {
+    waiting += 1
+    if (waiting >= 2) release()
+    await gate
+    return ok(fixture)
+  }
+  try {
+    const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, budgetFile, log: () => {} })
+    const second = { from: BRUGG, to: LENZBURG, vias: [], at: ASK_AT, timeType: 'depart' }
+    await Promise.all([provider.trips(query), provider.trips(second)])
+    assert.equal(provider.budget().route, 12)
+    const stored = JSON.parse(await readFile(budgetFile, 'utf8'))
+    assert.equal(stored.day, '2026-11-16')
+    assert.equal(stored.route, 12)
+    assert.equal((await stat(budgetFile)).mode & 0o777, 0o600)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable commute file keeps its previous contents', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-unreadable-'))
+  const budgetFile = join(root, 'commute-budget.json')
+  const routeFile = join(root, 'commute-routes.json')
+  const budgetText = JSON.stringify({ day: '2026-11-16', route: 10, completion: 0, fallback: 0, detail: 0 })
+  const routeText = JSON.stringify({ version: 1, entries: [{ key: 'route:keep', at: ASK_AT, value: { trips: [{ id: 'kept' }] } }] })
+  await writeFile(budgetFile, budgetText, { mode: 0o600 })
+  await writeFile(routeFile, routeText, { mode: 0o600 })
+  await chmod(budgetFile, 0o000)
+  await chmod(routeFile, 0o000)
+  const fetchImpl = async () => ok(fixture)
+  try {
+    const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, budgetFile, routeFile, log: () => {} })
+    await assert.rejects(() => provider.trips(query), (error) => error?.code === 'EACCES')
+    assert.equal((await readdir(root)).some((name) => name.endsWith('.tmp')), false)
+    await chmod(budgetFile, 0o600)
+    await chmod(routeFile, 0o600)
+    assert.equal(await readFile(budgetFile, 'utf8'), budgetText)
+    assert.equal(await readFile(routeFile, 'utf8'), routeText)
+    const again = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, budgetFile, routeFile, log: () => {} })
+    const answer = await again.trips(query)
+    assert.ok(answer.trips.length > 0)
+    assert.equal(JSON.parse(await readFile(budgetFile, 'utf8')).route, 11)
+    const stored = JSON.parse(await readFile(routeFile, 'utf8'))
+    assert.equal(stored.entries.some((entry) => entry.key === 'route:keep'), true)
+    assert.equal(stored.entries.length, 2)
+  } finally {
+    await chmod(budgetFile, 0o600).catch(() => undefined)
+    await chmod(routeFile, 0o600).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('timetable requests are logged as JSON without the query, a token, or a cookie', async () => {
   assert.equal(requestIdFrom('req-1234.ok'), 'req-1234.ok')
   const generated = requestIdFrom('short')
@@ -248,4 +308,100 @@ test('timetable requests are logged as JSON without the query, a token, or a coo
     assert.equal(row.route.includes('Brugg'), false)
     assert.match(row.requestId, /^[A-Za-z0-9._-]{8,64}$/u)
   }
+})
+
+const byteStream = (chunks, counters) => ({
+  ok: true,
+  status: 200,
+  text: async () => { counters.text += 1; return '' },
+  json: async () => { counters.json += 1; return {} },
+  body: {
+    getReader: () => ({
+      read: async () => {
+        if (!chunks.length) return { done: true }
+        counters.reads += 1
+        return { done: false, value: chunks.shift() }
+      },
+      cancel: async () => { counters.cancelled += 1 },
+    }),
+  },
+})
+
+test('a streamed stop list is parsed, and an oversized body is not retried', async () => {
+  const payload = Buffer.from(JSON.stringify([{ id: '8500309', label: 'Brügg AG', iconclass: 'sl-icon-type-train' }]))
+  const split = payload.indexOf(0xc3)
+  assert.ok(split > 0)
+  const counters = { text: 0, json: 0, reads: 0, cancelled: 0 }
+  const fetchImpl = async (url) => {
+    assert.equal(new URL(String(url)).hostname, 'timetable.search.ch')
+    return byteStream([payload.subarray(0, split + 1), payload.subarray(split + 1)], counters)
+  }
+  const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {} })
+  const found = await provider.stops('Brugg')
+  assert.equal(found.stops[0].name, 'Brügg AG')
+  assert.equal(counters.text, 0)
+  assert.equal(counters.json, 0)
+  assert.equal(counters.reads, 2)
+  assert.equal(counters.cancelled, 0)
+
+  const hosts = []
+  const huge = { text: 0, json: 0, reads: 0, cancelled: 0 }
+  const lines = []
+  const log = createServiceLog('commute', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const oversized = createCommuteProvider({
+    jsonLog: log,
+    sleep: async () => {},
+    now: () => new Date(ASK_AT),
+    fetchImpl: async (url) => {
+      const host = new URL(String(url)).hostname
+      hosts.push(host)
+      if (host === 'timetable.search.ch') return byteStream([new Uint8Array(UPSTREAM_BODY_MAX + 1)], huge)
+      return ok({ stations: [{ id: '8500309', name: 'Brugg AG' }] })
+    },
+  })
+  const answer = await oversized.stops('Brugg')
+  assert.equal(answer.stops[0].name, 'Brugg AG')
+  assert.deepEqual(hosts, ['timetable.search.ch', 'transport.opendata.ch'])
+  assert.equal(huge.text, 0)
+  assert.equal(huge.json, 0)
+  assert.equal(huge.reads, 1)
+  assert.equal(huge.cancelled, 1)
+  assert.equal(upstreamRetryable(new Error('page too large')), false)
+  const searchRows = lines.map((line) => JSON.parse(line)).filter((row) => row.route.endsWith('/completion.json'))
+  assert.equal(searchRows.length, 1)
+  assert.equal(searchRows[0].error, 'Error')
+  assert.equal(lines.some((line) => line.includes('page too large')), false)
+})
+
+test('an upstream error page is cancelled and is not parsed', async () => {
+  const hosts = []
+  const errors = { text: 0, json: 0, reads: 0, cancelled: 0 }
+  const lines = []
+  const log = createServiceLog('commute', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const fetchImpl = async (url) => {
+    const host = new URL(String(url)).hostname
+    hosts.push(host)
+    if (host !== 'timetable.search.ch') return ok({ stations: [{ id: '8500309', name: 'Brugg AG' }] })
+    return {
+      ok: false,
+      status: 503,
+      text: async () => { errors.text += 1; return 'secret-error-page' },
+      json: async () => { errors.json += 1; return {} },
+      body: {
+        getReader: () => ({
+          read: async () => { errors.reads += 1; return { done: false, value: new Uint8Array(32) } },
+          cancel: async () => { errors.cancelled += 1 },
+        }),
+      },
+    }
+  }
+  const provider = createCommuteProvider({ fetchImpl, jsonLog: log, now: () => new Date(ASK_AT), sleep: async () => {} })
+  const answer = await provider.stops('Brugg')
+  assert.equal(answer.stops[0].name, 'Brugg AG')
+  assert.equal(hosts.filter((host) => host === 'timetable.search.ch').length, UPSTREAM_ATTEMPTS)
+  assert.equal(errors.cancelled, UPSTREAM_ATTEMPTS)
+  assert.equal(errors.reads, 0)
+  assert.equal(errors.text, 0)
+  assert.equal(errors.json, 0)
+  assert.equal(lines.some((line) => line.includes('secret-error-page')), false)
 })

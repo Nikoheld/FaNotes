@@ -49,6 +49,12 @@ const webError = (status, message) => {
   return error
 }
 const fail = (status, message) => { throw webError(status, message) }
+// The response is sent by the caller. The request is closed after that, so the rest of the body is not read.
+const failLarge = (request, message) => {
+  const error = webError(413, message)
+  error.releaseRequest = request
+  throw error
+}
 const BAD_QUERY = 'Ungültige Anfrage.'
 const REVEAL_ID = /^[A-Za-z0-9_-]{1,64}$/u
 const ROUTE_ID = /^[a-f0-9]{12}$/u
@@ -173,7 +179,13 @@ export const createKantiWebStore = (options = {}) => {
   }
 
   const readJson = async (file) => {
-    try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch { return null }
+    try {
+      return JSON.parse(await fs.readFile(file, 'utf8'))
+    } catch (error) {
+      // A missing or broken file is absent. Any other read error must not look the same, or a live session is deleted.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
   }
   const writeJson = async (file, value, flag) => {
     await fs.mkdir(resolve(file, '..'), { recursive: true, mode: 0o700 })
@@ -181,9 +193,14 @@ export const createKantiWebStore = (options = {}) => {
       await fs.writeFile(file, JSON.stringify(value), { mode: 0o600, flag: 'wx' })
       return
     }
-    const temporary = `${file}.${randomBytes(6).toString('hex')}.tmp`
-    await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
-    await fs.rename(temporary, file)
+    const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+    try {
+      await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
+      await fs.rename(temporary, file)
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+      throw error
+    }
   }
   const sessionPath = (hash) => {
     if (!HASH_PATTERN.test(hash)) fail(400, 'Ungültige Sitzung.')
@@ -209,7 +226,13 @@ export const createKantiWebStore = (options = {}) => {
     const built = new Map()
     const names = await fs.readdir(sessionsDir).catch(() => [])
     for (const name of names.filter((item) => /^[a-f0-9]{64}\.json$/u.test(item)).slice(0, MAX_SESSIONS)) {
-      const session = await readJson(resolve(sessionsDir, name))
+      let session
+      try {
+        session = await readJson(resolve(sessionsDir, name))
+      } catch {
+        // Leave an unreadable session out of this pass. The file stays, and a later start can read it.
+        continue
+      }
       if (alive(session)) built.set(name.slice(0, 64), indexEntry(session))
     }
     index ??= built
@@ -471,13 +494,23 @@ export const createKantiWebStore = (options = {}) => {
     lastSweep = nowMs()
     for (const name of await fs.readdir(pairingsDir).catch(() => [])) {
       if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue
-      const record = await readJson(resolve(pairingsDir, name))
+      let record
+      try {
+        record = await readJson(resolve(pairingsDir, name))
+      } catch {
+        continue
+      }
       if (!record || Date.parse(record.expiresAt) <= nowMs()) await fs.rm(resolve(pairingsDir, name), { force: true })
     }
     for (const name of await fs.readdir(sessionsDir).catch(() => [])) {
       if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue
       const hash = name.slice(0, 64)
-      const session = await readJson(resolve(sessionsDir, name))
+      let session
+      try {
+        session = await readJson(resolve(sessionsDir, name))
+      } catch {
+        continue
+      }
       if (!alive(session)) await locked(`session:${hash}`, () => deleteSession(hash))
     }
   }
@@ -654,11 +687,12 @@ export const createKantiWebApi = (options = {}) => {
   }
 
   const readBody = async (request) => {
+    if (Number(request.headers['content-length']) > MAX_BODY) failLarge(request, 'Die Anfrage ist zu gross.')
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > MAX_BODY) fail(413, 'Die Anfrage ist zu gross.')
+      if (size > MAX_BODY) failLarge(request, 'Die Anfrage ist zu gross.')
       chunks.push(chunk)
     }
     if (!chunks.length) return {}
@@ -672,12 +706,12 @@ export const createKantiWebApi = (options = {}) => {
 
 
   const readRaw = async (request, limit) => {
-    if (Number(request.headers['content-length']) > limit) fail(413, 'Die Datei ist zu gross (höchstens 25 MB).')
+    if (Number(request.headers['content-length']) > limit) failLarge(request, 'Die Datei ist zu gross (höchstens 25 MB).')
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > limit) fail(413, 'Die Datei ist zu gross (höchstens 25 MB).')
+      if (size > limit) failLarge(request, 'Die Datei ist zu gross (höchstens 25 MB).')
       chunks.push(chunk)
     }
     return Buffer.concat(chunks)
@@ -883,7 +917,13 @@ export const createKantiWebApi = (options = {}) => {
   }
 
   const optionalSession = async (request) => {
-    try { return await authorize(request) } catch { return null }
+    try {
+      return await authorize(request)
+    } catch (error) {
+      // A refused sign-in is "no session". A read error must keep the cookie so the browser can try again.
+      if (error?.status) return null
+      throw error
+    }
   }
 
   const connectionOf = (session, id) => {
@@ -1196,6 +1236,8 @@ export const createKantiWebApi = (options = {}) => {
       if (status >= 500) log('warn', `Anfrage fehlgeschlagen (${error?.name || 'error'})`)
       const cookies = status === 401 ? [clearCookie(SESSION_COOKIE)] : []
       send(response, status, { error: error?.publicMessage || 'Kanti+ ist vorübergehend nicht erreichbar.' }, cookies)
+      const release = error?.releaseRequest
+      if (release && typeof release.destroy === 'function') response.on('finish', () => release.destroy())
     }
     return true
   }

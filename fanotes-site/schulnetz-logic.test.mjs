@@ -84,6 +84,7 @@ import {
   isExamLike,
   isLesson,
   parseSchedulerXml,
+  isCancelled,
   parseIcs,
   carryTimetableExams,
   schedulerFetchUrl,
@@ -1327,6 +1328,16 @@ test('week range follows the page span and stays quiet for a new week', () => {
   assert.equal(icsTest[0].eventType, 'exam')
   const icsLesson = parseIcs('BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-lesson\nDTSTART:20261112T080000\nDTEND:20261112T084500\nSUMMARY:Lesetest\nEND:VEVENT\nEND:VCALENDAR')
   assert.equal(icsLesson[0].eventType, 'lesson')
+  assert.equal(icsLesson[0].status, '')
+  const icsGone = parseIcs('BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-gone\nDTSTART:20261116T080000\nDTEND:20261116T084500\nSUMMARY:Mathematik\nSTATUS:CANCELLED\nEND:VEVENT\nEND:VCALENDAR')
+  assert.equal(icsGone.length, 1)
+  assert.equal(icsGone[0].status, 'cancelled')
+  assert.equal(icsGone[0].text, 'Mathematik')
+  assert.equal(isCancelled(icsGone[0]), true)
+  const icsFolded = parseIcs('BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u-fold\r\nDTSTART:20261116T080000\r\nDTEND:20261116T084500\r\nSUMMARY:Mathe\r\n matik\r\nSTATUS:CANCEL\r\n LED\r\nEND:VEVENT\r\nEND:VCALENDAR')
+  assert.equal(icsFolded.length, 1)
+  assert.equal(icsFolded[0].text, 'Mathematik')
+  assert.equal(icsFolded[0].status, 'cancelled')
   const narrow = eventQueryWindow({ spanStart: '', spanEnd: '', weekFetched: {}, icalFetchedAt: '', today: '2026-11-04', now: '2026-11-04T12:00:00Z' })
   assert.equal(narrow.wide, false)
   assert.equal(narrow.min, '2026-10-28')

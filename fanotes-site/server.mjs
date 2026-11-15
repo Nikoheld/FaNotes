@@ -23,6 +23,7 @@ import { languageForRequest, localizeExactText, localizeResponse } from './i18n.
 import { createAnalyticsService } from './analytics.mjs'
 import { loadGithubReleases, pickGithubPackage } from './github-release.mjs'
 import { startSystemdWatchdog } from './systemd-notify.mjs'
+import { readBackupStatus } from './backup-status.mjs'
 import { createReleaseCache } from './release-cache.mjs'
 import { FAVICON_TARGET, clientAddress, createPublicLimiter, publicCacheControl } from './public-http.mjs'
 import {
@@ -686,10 +687,12 @@ const server = createServer(async (request, response) => {
       const releases = await releaseCache.get()
       // Kanti+ grade promise: max age of the last successful grade check across linked accounts (< 600 s).
       const kanti = await schulnetz.health().catch(() => null)
+      const backup = await readBackupStatus(process.env.FANOTES_SYNC_BACKUP_DIR || '/var/lib/fanotes-sync-backups')
       json(response, 200, {
         status: 'ok',
         version: releases.linux.version,
         windowsVersion: releases.windows?.version ?? null,
+        backup,
         ...(kanti ? { schulnetz: { status: kanti.status, gradeCheckMaxAgeSeconds: kanti.gradeChecks.maxAgeSeconds, overdue: kanti.gradeChecks.overdue, slaSeconds: kanti.slaSeconds, pollErrors: kanti.pollErrors, push: { p50LatencyMs: kanti.pushes24h.p50LatencyMs, p95LatencyMs: kanti.pushes24h.p95LatencyMs, maxLatencyMs: kanti.pushes24h.maxLatencyMs, overdue: kanti.pushes24h.overdue } } } : {}),
       })
       return
@@ -745,7 +748,9 @@ const server = createServer(async (request, response) => {
 
 server.keepAliveTimeout = 65_000
 server.headersTimeout = 70_000
-server.requestTimeout = 30_000
+// Sync accepts a 110 MB encrypted note and nginx allows 300 s for that body.
+// 30 s aborted a slow upload before it could be stored.
+server.requestTimeout = 300_000
 
 startSystemdWatchdog()
 

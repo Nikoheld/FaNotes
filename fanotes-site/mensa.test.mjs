@@ -4,7 +4,7 @@ import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createMensa, mensaQuery, parseMensaApi, parseMensaHtml, pickMensaDay } from './mensa.mjs'
+import { MAX_HTML_BYTES, createMensa, mensaQuery, parseMensaApi, parseMensaHtml, pickMensaDay } from './mensa.mjs'
 import { createServiceLog } from './service-log.mjs'
 
 const apiFixture = JSON.parse(await fs.readFile(new URL('./test-fixtures/mensa-api-week.json', import.meta.url), 'utf8'))
@@ -339,4 +339,219 @@ test('a redirect is not followed and is not retried', async () => {
   assert.equal(body.day.date, '2026-11-10')
   assert.equal(calls.filter((url) => url.includes('/api/_Combine/')).length, 1)
   assert.equal(calls.some((url) => url.includes('example.test')), false)
+})
+
+test('a slow cache read is shared and is not replaced by an older copy', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-load-'))
+  let release
+  const gate = new Promise((resolve) => { release = resolve })
+  let reads = 0
+  const stored = { fetchedAt: '2026-11-16T08:00:00.000Z', days: [{ date: '2026-11-16', weekday: 'Mo', closed: false, menus: [] }] }
+  const readFile = async () => {
+    reads += 1
+    await gate
+    return JSON.stringify(stored)
+  }
+  let fetches = 0
+  const lines = []
+  const mensa = createMensa({
+    readFile,
+    fetch: async () => {
+      fetches += 1
+      throw new Error('https://clients.compass-group.ch/secret-menu')
+    },
+    now: () => new Date('2026-11-16T08:00:00.000Z'),
+    root,
+    log: (_level, message) => lines.push(String(message)),
+  })
+  try {
+    const first = mensa.get()
+    for (let i = 0; i < 20 && reads < 1; i += 1) await new Promise((resolve) => setImmediate(resolve))
+    const second = mensa.get()
+    release()
+    const [left, right] = await Promise.all([first, second])
+    assert.equal(reads, 1)
+    assert.equal(fetches, 0)
+    assert.equal(left.day.date, '2026-11-16')
+    assert.equal(right.day.date, '2026-11-16')
+    assert.equal(left.stale, false)
+    assert.equal(right.stale, false)
+    assert.equal(lines.some((line) => line.includes('secret-menu')), false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+const byteStream = (payload, { onText, onCancel, reads } = {}) => {
+  const parts = Array.isArray(payload) ? payload : [payload]
+  let index = 0
+  return {
+    ok: true,
+    status: 200,
+    text: async () => {
+      if (onText) onText()
+      return ''
+    },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (index >= parts.length) return { done: true }
+          const value = parts[index]
+          index += 1
+          if (reads) reads.count += 1
+          return { done: false, value }
+        },
+        cancel: async () => { if (onCancel) onCancel() },
+      }),
+    },
+  }
+}
+
+test('a streamed menu answer is assembled without buffering through text()', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-stream-'))
+  let textCalls = 0
+  const fetchImpl = async (url) => {
+    const kind = String(url).split('/api/_Combine/')[1].split('/')[0].toLowerCase()
+    const bytes = Buffer.from(JSON.stringify(apiFixture[kind]))
+    const mid = Math.max(1, Math.floor(bytes.length / 2))
+    return byteStream([bytes.subarray(0, mid), bytes.subarray(mid)], { onText: () => { textCalls += 1 } })
+  }
+  const mensa = createMensa({ fetch: fetchImpl, now: () => new Date('2026-11-13T14:00:00Z'), root, log: () => {} })
+  try {
+    const body = await mensa.get()
+    assert.equal(textCalls, 0)
+    assert.equal(body.days.length, 10)
+    assert.equal(body.day.date, '2026-11-16')
+    assert.equal(body.stale, false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an oversized menu body is dropped after one read and is not retried', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-cap-'))
+  let calls = 0
+  let textCalls = 0
+  let cancelled = 0
+  const reads = { count: 0 }
+  const lines = []
+  const fetchImpl = async () => {
+    calls += 1
+    return byteStream([new Uint8Array(MAX_HTML_BYTES + 1)], {
+      onText: () => { textCalls += 1 },
+      onCancel: () => { cancelled += 1 },
+      reads,
+    })
+  }
+  const mensa = createMensa({
+    fetch: fetchImpl,
+    sleep: async () => {},
+    now: () => new Date('2026-11-10T07:00:00Z'),
+    root,
+    log: (_level, message) => lines.push(String(message)),
+  })
+  try {
+    const body = await mensa.get()
+    assert.equal(body.days.length, 0)
+    assert.equal(body.stale, true)
+    assert.equal(calls, 2)
+    assert.equal(textCalls, 0)
+    assert.equal(reads.count, 2)
+    assert.equal(cancelled, 2)
+    assert.equal(lines.some((line) => line.includes('page too large')), false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an upstream error page is cancelled and the menu still falls back', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-release-'))
+  let apiCalls = 0
+  let textCalls = 0
+  let reads = 0
+  let cancelled = 0
+  const lines = []
+  const fetchImpl = async (url) => {
+    if (String(url).includes('/api/_Combine/')) {
+      apiCalls += 1
+      return {
+        ok: false,
+        status: 503,
+        text: async () => { textCalls += 1; return 'secret-error-page' },
+        body: {
+          getReader: () => ({
+            read: async () => { reads += 1; return { done: false, value: new Uint8Array(32) } },
+            cancel: async () => { cancelled += 1 },
+          }),
+        },
+      }
+    }
+    return { ok: true, status: 200, text: async () => fixture }
+  }
+  const mensa = createMensa({
+    fetch: fetchImpl,
+    sleep: async () => {},
+    now: () => new Date('2026-11-10T07:00:00.000Z'),
+    root,
+    log: () => {},
+    jsonLog: createServiceLog('mensa', (line) => lines.push(line), () => new Date('2026-11-10T07:00:00.000Z')),
+  })
+  try {
+    const body = await mensa.get()
+    assert.equal(body.days.length, 1)
+    assert.equal(body.day.date, '2026-11-10')
+    assert.equal(apiCalls, 2)
+    assert.equal(cancelled, 2)
+    assert.equal(reads, 0)
+    assert.equal(textCalls, 0)
+    assert.equal(lines.some((line) => line.includes('secret-error-page')), false)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable mensa cache is left unchanged and merged once it can be read', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-disk-'))
+  const file = join(root, 'mensa.json')
+  const stored = JSON.stringify({
+    fetchedAt: '2026-11-15T08:00:00.000Z',
+    days: [{ date: '2026-12-01', weekday: 'Di', closed: false, note: 'kept', menus: [] }],
+  })
+  await fs.writeFile(file, stored, { mode: 0o600 })
+  await fs.chmod(file, 0o000)
+  let clock = new Date('2026-11-15T10:00:00Z')
+  const calls = []
+  const mensa = createMensa({ fetch: makeFetch(calls, [], { api: true }), now: () => clock, root, log: () => {} })
+  try {
+    const live = await mensa.get()
+    await mensa.idle()
+    assert.equal(live.days.length, 10)
+    assert.equal((await fs.readdir(root)).some((name) => name.endsWith('.tmp')), false)
+    await fs.chmod(file, 0o600)
+    assert.equal(await fs.readFile(file, 'utf8'), stored)
+
+    clock = new Date('2026-11-16T10:00:00Z')
+    await mensa.get()
+    await mensa.idle()
+    const saved = JSON.parse(await fs.readFile(file, 'utf8'))
+    assert.equal(saved.days.some((day) => day.date === '2026-12-01' && day.note === 'kept'), true)
+    assert.ok(saved.days.length > 1)
+  } finally {
+    await fs.chmod(file, 0o600).catch(() => undefined)
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a broken mensa cache can be replaced by a fresh menu', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-broken-'))
+  const file = join(root, 'mensa.json')
+  await fs.writeFile(file, '{', { mode: 0o600 })
+  const mensa = createMensa({ fetch: makeFetch([], [fixture]), now: () => new Date('2026-11-10T07:00:00Z'), root, log: () => {} })
+  try {
+    const body = await mensa.get()
+    assert.equal(body.days.length, 1)
+    assert.equal(JSON.parse(await fs.readFile(file, 'utf8')).days.length, 1)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
 })

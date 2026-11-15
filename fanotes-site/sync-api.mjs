@@ -19,8 +19,8 @@
 //   accounts/<id>/partials/<uploadId>/ -> a resumable upload (meta.json, body.bin)
 //     that is not a live note until its size and checksum match
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
-import { createReadStream, promises as fs } from 'node:fs'
-import { resolve, sep } from 'node:path'
+import { constants as fsConstants, promises as fs } from 'node:fs'
+import { dirname, resolve, sep } from 'node:path'
 import { languageForRequest, localizeText } from './i18n.mjs'
 import { hashFile, inspectSyncAccount } from './sync-integrity.mjs'
 
@@ -71,7 +71,7 @@ const MAX_SESSIONS = 40
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const SESSION_TOUCH_MS = 6 * 60 * 60 * 1000
 const CHANGES_PAGE = 500
-const COMPACT_LOG_BYTES = 4 * 1024 * 1024
+const COMPACT_LOG_BYTES = Number(process.env.FANOTES_SYNC_COMPACT_BYTES || 4 * 1024 * 1024)
 const MIN_KDF_ITERATIONS = 300_000
 const MAX_KDF_ITERATIONS = 5_000_000
 const FILE_ID_PATTERN = /^[a-f0-9]{64}$/u
@@ -238,6 +238,18 @@ const atomicWrite = async (target, data) => {
     await handle.close()
   }
   await fs.rename(temporary, target)
+  // The new directory entry has to be durable. A crash after the rename and
+  // before this sync can lose the file the caller just replaced.
+  await syncDirectory(dirname(target))
+}
+
+const syncDirectory = async (directory) => {
+  const handle = await fs.open(directory, 'r')
+  try {
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
 }
 
 // Copy a durable archive onto a blob without holding the ciphertext in the heap.
@@ -270,6 +282,7 @@ const copyDurable = async (source, destination) => {
   await output.close()
   await input.close()
   await fs.rename(temporary, destination)
+  await syncDirectory(dirname(destination))
 }
 
 const readJsonFile = async (target, fallback = null) => {
@@ -388,7 +401,7 @@ const measureHistory = async (accountId) => {
     }
     for (const name of names) {
       if (!/^(?:c-)?\d+$/u.test(name)) continue
-      const stat = await fs.stat(safeJoin(revisionsDirectory(accountId, fileId), name)).catch(() => null)
+      const stat = await fs.lstat(safeJoin(revisionsDirectory(accountId, fileId), name)).catch(() => null)
       if (stat?.isFile()) total += stat.size
     }
   }
@@ -405,6 +418,9 @@ const appendChange = async (accountId, table, entry) => {
   } finally {
     await handle.close()
   }
+  // The first append creates the log. The file sync does not make that new
+  // name durable, and the response is sent only after this returns.
+  await syncDirectory(directory)
   table.logBytes += Buffer.byteLength(line)
   if (table.logBytes > COMPACT_LOG_BYTES) await compactTable(accountId, table)
 }
@@ -412,7 +428,21 @@ const appendChange = async (accountId, table, entry) => {
 const compactTable = async (accountId, table) => {
   const directory = accountDirectory(accountId)
   await atomicWrite(safeJoin(directory, 'index.json'), JSON.stringify({ revision: table.revision, entries: Object.fromEntries(table.entries) }))
-  await fs.writeFile(safeJoin(directory, 'changes.jsonl'), '', { mode: 0o600 })
+  // The index rename has to be durable before the log is truncated. A crash
+  // that kept the new index and lost the log would drop every revision that
+  // lived only in the log.
+  const directoryHandle = await fs.open(directory, 'r')
+  try {
+    await directoryHandle.sync()
+  } finally {
+    await directoryHandle.close()
+  }
+  const log = await fs.open(safeJoin(directory, 'changes.jsonl'), 'w', 0o600)
+  try {
+    await log.sync()
+  } finally {
+    await log.close()
+  }
   table.logBytes = 0
 }
 
@@ -556,10 +586,24 @@ const handleRegister = async (request, response) => {
   const deviceId = registerDevice(account, device)
   const session = issueSession(account, deviceId)
   await fs.mkdir(safeJoin(accountDirectory(id), 'blobs'), { recursive: true, mode: 0o700 })
+  const emailPath = emailIndexPath(email)
+  let emailCreated = false
   try {
     // 'wx' makes the e-mail index the uniqueness check; two racing registrations cannot both win.
-    await fs.writeFile(emailIndexPath(email), id, { flag: 'wx', mode: 0o600 })
+    // The name is flushed before the account record is saved, and a failed
+    // attempt removes only the index entry this attempt created.
+    const emailHandle = await fs.open(emailPath, 'wx', 0o600)
+    emailCreated = true
+    try {
+      await emailHandle.writeFile(id)
+      await emailHandle.sync()
+    } finally {
+      await emailHandle.close()
+    }
+    await syncDirectory(dirname(emailPath))
+    await saveAccount(account)
   } catch (error) {
+    if (emailCreated) await fs.rm(emailPath, { force: true })
     await fs.rm(accountDirectory(id), { recursive: true, force: true })
     if (error?.code === 'EEXIST') {
       const existing = await loadAccountByEmail(email)
@@ -574,7 +618,6 @@ const handleRegister = async (request, response) => {
     }
     throw error
   }
-  await saveAccount(account)
   await scryptHash(authKey, randomBytes(16))
   sendJson(request, response, 201, { accountId: id, deviceId, token: session.token, expiresAt: session.expiresAt, revision: 0 })
 }
@@ -721,32 +764,96 @@ const parseMeta = (request) => {
 }
 
 const handleGetFile = async (request, response, auth, fileId) => {
-  const table = await loadTable(auth.account.id)
-  const entry = table.entries.get(fileId)
-  if (!entry) fail(404, 'Diese Datei gibt es im Sync nicht.')
-  if (entry.deleted) {
-    sendEmpty(request, response, 204, { 'X-FaNotes-Revision': String(entry.revision), 'X-FaNotes-Deleted': '1', ETag: `"${entry.revision}"` })
-    return
-  }
   const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
-  const stat = await fs.stat(blobPath).catch(() => null)
-  if (!stat) fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
-  response.writeHead(200, {
-    ...baseHeaders(request),
-    'Content-Type': 'application/octet-stream',
-    'Content-Length': stat.size,
-    ETag: `"${entry.revision}"`,
-    'X-FaNotes-Revision': String(entry.revision),
-    'X-FaNotes-Meta': entry.meta,
-    'X-FaNotes-Sha256': entry.sha256,
+  // Open the inode while the account lock is held, then stream it after the
+  // lock is released. A replace renames a new inode into place, so this
+  // descriptor keeps the revision named in the headers, and Content-Length
+  // is the size of that same inode. O_NOFOLLOW refuses a symlink.
+  const opened = await withAccountLock(auth.account.id, async () => {
+    const table = await loadTable(auth.account.id)
+    const entry = table.entries.get(fileId)
+    if (!entry) fail(404, 'Diese Datei gibt es im Sync nicht.')
+    if (entry.deleted) return { entry, handle: null, size: 0 }
+    let handle
+    try {
+      handle = await fs.open(blobPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    } catch (error) {
+      if (error?.code === 'ENOENT' || error?.code === 'ELOOP') fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
+      throw error
+    }
+    try {
+      const info = await handle.stat()
+      if (!info.isFile()) fail(404, 'Die Datei ist auf dem Server nicht mehr vorhanden.')
+      // The headers would name this revision's checksum. A different size is
+      // not sent under that checksum. A full ciphertext is recorded first, so
+      // the download names the body that is actually on disk.
+      if (info.size !== (Number(entry.size) || 0)) {
+        await handle.close()
+        if (info.size >= EMPTY_CIPHERTEXT_BYTES) {
+          const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, entry, null)
+          if (settled) {
+            const reopened = await fs.open(blobPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+            try {
+              const again = await reopened.stat()
+              if (!again.isFile() || again.size !== settled.entry.size) {
+                await reopened.close()
+                return { entry: settled.entry, handle: null, size: again.size, mismatch: true }
+              }
+              return { entry: settled.entry, handle: reopened, size: again.size }
+            } catch (error) {
+              await reopened.close()
+              throw error
+            }
+          }
+        }
+        return { entry, handle: null, size: info.size, mismatch: true }
+      }
+      return { entry, handle, size: info.size }
+    } catch (error) {
+      await handle.close()
+      throw error
+    }
   })
-  if (request.method === 'HEAD') {
-    response.end()
+  if (opened.entry.deleted) {
+    sendEmpty(request, response, 204, { 'X-FaNotes-Revision': String(opened.entry.revision), 'X-FaNotes-Deleted': '1', ETag: `"${opened.entry.revision}"` })
     return
   }
-  const stream = createReadStream(blobPath)
-  stream.on('error', () => { if (!response.destroyed) response.destroy() })
-  stream.pipe(response)
+  if (opened.mismatch) {
+    sendJson(request, response, 409, {
+      error: 'Die gespeicherte Datei stimmt nicht mit dieser Fassung überein.',
+      entry: publicEntry(opened.entry),
+      reason: 'guard',
+    }, { 'X-FaNotes-Rejected': 'guard' })
+    return
+  }
+  const { entry, handle, size } = opened
+  let handedOff = false
+  const closeHandle = () => {
+    if (handedOff) return
+    handedOff = true
+    handle.close().catch(() => {})
+  }
+  try {
+    response.writeHead(200, {
+      ...baseHeaders(request),
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': size,
+      ETag: `"${entry.revision}"`,
+      'X-FaNotes-Revision': String(entry.revision),
+      'X-FaNotes-Meta': entry.meta,
+      'X-FaNotes-Sha256': entry.sha256,
+    })
+    if (request.method === 'HEAD' || size === 0) {
+      response.end()
+      return
+    }
+    const stream = handle.createReadStream({ start: 0, end: size - 1 })
+    handedOff = true
+    stream.on('error', () => { if (!response.destroyed) response.destroy() })
+    stream.pipe(response)
+  } finally {
+    closeHandle()
+  }
 }
 
 // `reason` tells a client which 409 this is. "stale": the base is not the current
@@ -756,6 +863,14 @@ const handleGetFile = async (request, response, auth, fileId) => {
 const conflict = (request, response, entry) => {
   sendJson(request, response, 409, { error: 'Die Datei wurde inzwischen von einem anderen Gerät geändert.', entry: publicEntry(entry), reason: 'stale' })
 }
+
+// The live blob stays, and the caller must not replace it. A missing row is
+// reported as a tombstone so the client keeps its copy and retries.
+const preservedConflict = (request, response, fileId, current) => conflict(
+  request,
+  response,
+  current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null },
+)
 
 const guardRejected = (request, response, entry) => {
   sendJson(request, response, 409, { error: 'Die leere oder stark gekürzte Fassung wurde nicht über die vorhandene Notiz gelegt.', entry: publicEntry(entry), reason: 'guard' }, { 'X-FaNotes-Rejected': 'guard' })
@@ -826,7 +941,7 @@ const listRevisionFiles = async (directory) => {
   const files = []
   for (const name of names) {
     if (!/^(?:c-)?\d+$/u.test(name)) continue
-    const stat = await fs.stat(safeJoin(directory, name)).catch(() => null)
+    const stat = await fs.lstat(safeJoin(directory, name)).catch(() => null)
     if (!stat?.isFile()) continue
     files.push({ name, size: stat.size, revision: Number(name.slice(name.startsWith('c-') ? 2 : 0)) })
   }
@@ -839,27 +954,54 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
   const stat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
   if (!stat?.isFile()) return 0
-  const collapse = stat.size >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < stat.size)
+  // Name the slot from the table's size, not the live file. After a crash the
+  // live file can already be the newer body, and the archived name must stay
+  // the one written on the first attempt.
+  const currentSize = Number(current.size) || 0
+  const collapse = currentSize >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < currentSize)
   const directory = revisionsDirectory(accountId, fileId)
   await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+  // Link the new archive directory before the previous note is copied into it.
+  // A crash after the live blob is replaced must not drop that directory.
+  await syncDirectory(dirname(dirname(directory)))
+  await syncDirectory(dirname(directory))
   const before = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
   const name = `${collapse ? 'c-' : ''}${current.revision}`
   const dest = safeJoin(directory, name)
-  if (move) await fs.rename(blobPath, dest)
-  else await fs.copyFile(blobPath, dest)
-  // The caller deletes or replaces the live blob after this returns. The copy
-  // has to be on disk first, or a crash loses the only copy of the note.
-  const archived = await fs.open(dest, 'r+')
-  try {
-    await archived.sync()
-  } finally {
-    await archived.close()
+  const holdsCurrent = async (path, size) => size === currentSize && await hashFile(path) === current.sha256
+  // A crash can replace the live blob before the change log records it. The
+  // retry still believes this revision is current, so copying the live blob
+  // again would overwrite the archived copy with the newer body.
+  if (move) {
+    await fs.rename(blobPath, dest)
+  } else {
+    const existing = await fs.lstat(dest).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+    if (!existing) {
+      await fs.copyFile(blobPath, dest)
+    } else if (existing.isFile()) {
+      if (!await holdsCurrent(dest, existing.size) && await holdsCurrent(blobPath, stat.size)) await fs.copyFile(blobPath, dest)
+    } else if (await holdsCurrent(blobPath, stat.size)) {
+      await fs.unlink(dest)
+      await fs.copyFile(blobPath, dest)
+    }
   }
-  const directoryHandle = await fs.open(directory, 'r')
-  try {
-    await directoryHandle.sync()
-  } finally {
-    await directoryHandle.close()
+  // The caller replaces the live blob after this returns. The copy has to be
+  // on disk first, or a crash loses the only copy of the note. A non-file
+  // left in the slot is not opened, so a symlink is not followed.
+  const archivedStat = await fs.lstat(dest).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (archivedStat?.isFile()) {
+    const archived = await fs.open(dest, 'r+')
+    try {
+      await archived.sync()
+    } finally {
+      await archived.close()
+    }
+    const directoryHandle = await fs.open(directory, 'r')
+    try {
+      await directoryHandle.sync()
+    } finally {
+      await directoryHandle.close()
+    }
   }
   const files = await listRevisionFiles(directory)
   const keep = revisionNamesToKeep(files, MAX_REVISIONS_KEPT, nextSize)
@@ -868,6 +1010,96 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   }
   const after = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
   return after - before
+}
+
+// A crash can rename the live blob and stop before that directory entry is
+// durable. The change log names the file only after the directory is synced.
+const recordLiveBlob = async (accountId, table, entry) => {
+  await syncDirectory(safeJoin(accountDirectory(accountId), 'blobs'))
+  await appendChange(accountId, table, entry)
+}
+
+/** Hash of the newest archived blob for this note, or null when the archive is empty. */
+const newestArchivedIdentity = async (accountId, fileId) => {
+  const directory = revisionsDirectory(accountId, fileId)
+  const files = await listRevisionFiles(directory)
+  if (!files.length) return null
+  const newestRevision = files.reduce((max, file) => Math.max(max, file.revision), 0)
+  const exact = files.find((file) => file.revision === newestRevision && !file.name.startsWith('c-'))
+    ?? files.find((file) => file.revision === newestRevision)
+  if (!exact) return null
+  return { size: exact.size, sha256: await hashFile(safeJoin(directory, exact.name)) }
+}
+
+/**
+ * A crash after the live blob is replaced, and before the change log records
+ * it, leaves a newer body in the live slot. Copying that slot onto the archive
+ * name of the old revision, or replacing it, would drop the only copy.
+ * The bytes are already on disk, so this records them and does not copy them.
+ * Returns null when the live file matches the table entry. A tombstone whose
+ * live file still matches the archived delete is a duplicate of that delete,
+ * not a new note. Only the idempotent delete removes the duplicate.
+ * A full ciphertext with no logged row is recorded only when this request's
+ * bytes and metadata are that file; anything else is left in place.
+ */
+const settleDivergentLiveBlob = async (accountId, table, fileId, current, incoming) => {
+  const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
+  const stat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (!stat?.isFile()) return null
+  if (!current || current.deleted) {
+    // A short remnant is not a ciphertext. A logged delete can also leave the
+    // archived body in the live slot; publishing that would undo the delete.
+    if (stat.size < EMPTY_CIPHERTEXT_BYTES) return null
+    const liveSha = await hashFile(blobPath)
+    if (current?.deleted) {
+      const archived = await newestArchivedIdentity(accountId, fileId)
+      // Same bytes as the archived delete. Callers must not publish them, and
+      // only the idempotent delete may remove this copy.
+      if (archived && archived.size === stat.size && archived.sha256 === liveSha) return { duplicate: true }
+    }
+    const matchesRequest = Boolean(incoming)
+      && incoming.size === stat.size
+      && incoming.sha256 === liveSha
+      && typeof incoming.meta === 'string'
+      && incoming.meta
+    // The previous meta describes the deleted note, not these bytes. Keep the
+    // file until a request that actually wrote it arrives with its own meta.
+    if (!matchesRequest) return { preserved: true }
+    const entry = {
+      id: fileId,
+      revision: table.revision + 1,
+      deleted: false,
+      size: stat.size,
+      sha256: liveSha,
+      meta: incoming.meta,
+      updatedAt: nowIso(),
+      deviceId: incoming.deviceId,
+    }
+    table.revision = entry.revision
+    table.entries.set(fileId, entry)
+    table.bytes += stat.size
+    await recordLiveBlob(accountId, table, entry)
+    return { matchesRequest: true, entry }
+  }
+  const currentSize = Number(current.size) || 0
+  const liveSha = await hashFile(blobPath)
+  if (stat.size === currentSize && liveSha === current.sha256) return null
+  const matchesRequest = Boolean(incoming) && incoming.size === stat.size && incoming.sha256 === liveSha
+  const entry = {
+    id: fileId,
+    revision: table.revision + 1,
+    deleted: false,
+    size: stat.size,
+    sha256: liveSha,
+    meta: matchesRequest ? incoming.meta : current.meta,
+    updatedAt: nowIso(),
+    deviceId: matchesRequest ? incoming.deviceId : current.deviceId,
+  }
+  table.revision = entry.revision
+  table.entries.set(fileId, entry)
+  table.bytes += stat.size - currentSize
+  await recordLiveBlob(accountId, table, entry)
+  return { matchesRequest, entry }
 }
 
 const handlePutFile = async (request, response, auth, fileId) => {
@@ -885,6 +1117,18 @@ const handlePutFile = async (request, response, auth, fileId) => {
     await withAccountLock(auth.account.id, async () => {
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
+    const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, {
+      size: incoming.size,
+      sha256: declaredSha,
+      meta,
+      deviceId: auth.deviceId,
+    })
+    if (settled?.matchesRequest) {
+      sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision }, { ETag: `"${settled.entry.revision}"` })
+      return
+    }
+    if (settled?.entry) return conflict(request, response, settled.entry)
+    if (settled?.preserved) return preservedConflict(request, response, fileId, current)
     // A tombstone's live size is zero. The blob that was deleted is the newest
     // file in the revision archive; a short or empty upload must not become the
     // live note in its place. A device that still has the note puts that copy
@@ -912,6 +1156,8 @@ const handlePutFile = async (request, response, auth, fileId) => {
     const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
     await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
     await fs.rename(incoming.path, blobPath)
+    // The new name has to be durable before the change log records it.
+    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
     committed = true
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: incoming.size, sha256: declaredSha, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
@@ -995,6 +1241,18 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     const digest = await hashFile(source)
     const meta = await metaForRestore(auth.account.id, fileId, current)
     if (!meta) fail(404, 'Diese Fassung liegt nicht im Archiv.')
+    const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, {
+      size: info.size,
+      sha256: digest,
+      meta,
+      deviceId: auth.deviceId,
+    })
+    if (settled?.matchesRequest) {
+      sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision, size: info.size }, { ETag: `"${settled.entry.revision}"` })
+      return
+    }
+    if (settled?.entry) return conflict(request, response, settled.entry)
+    if (settled?.preserved) return preservedConflict(request, response, fileId, current)
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
     const replaces = Boolean(current && !current.deleted && current.sha256 !== digest)
     const historyDelta = replaces ? previousBytes : 0
@@ -1025,12 +1283,52 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
     const currentRevision = current ? current.revision : 0
     if (currentRevision !== base) return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
     if (!current || current.deleted) {
+      // A resurrection can be renamed into place before its log line. Leave
+      // that body where it is, and do not report the delete as already done.
+      const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current ?? null, null)
+      if (settled?.entry) return conflict(request, response, settled.entry)
+      if (settled?.preserved) {
+        sendJson(request, response, 409, {
+          error: 'Die gespeicherte Datei gehört zu einer neueren Fassung und wurde nicht gelöscht.',
+          entry: publicEntry(current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null }),
+          reason: 'guard',
+        }, { 'X-FaNotes-Rejected': 'guard' })
+        return
+      }
+      // The archive was synced before the tombstone. Removing this duplicate
+      // finishes that delete. A different body is left in place above.
+      if (settled?.duplicate) {
+        const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
+        const info = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+        if (info?.isFile()) {
+          await fs.rm(blobPath)
+          await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
+        }
+      }
       sendJson(request, response, 200, { revision: currentRevision, tableRevision: table.revision })
+      return
+    }
+    // A crash can leave a newer body in the live slot before the change log
+    // records it. Deleting that file would drop the only copy of the newer note.
+    const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
+    const liveStat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+    const currentSize = Number(current.size) || 0
+    if (liveStat?.isFile() && (liveStat.size !== currentSize || await hashFile(blobPath) !== current.sha256)) {
+      // A full ciphertext is the newer note. Record it and leave it in place.
+      // A shorter remnant is not published and is not deleted.
+      if (liveStat.size >= EMPTY_CIPHERTEXT_BYTES) {
+        const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, null)
+        if (settled) return conflict(request, response, settled.entry)
+      }
+      sendJson(request, response, 409, {
+        error: 'Die gespeicherte Datei gehört zu einer neueren Fassung und wurde nicht gelöscht.',
+        entry: publicEntry(current),
+        reason: 'guard',
+      }, { 'X-FaNotes-Rejected': 'guard' })
       return
     }
     // Copy first. The live blob is removed only after the tombstone is durable,
     // so a crash leaves the note in the archive and still in the live slot.
-    const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
     table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, 0, false)
     const entry = { id: fileId, revision: table.revision + 1, deleted: true, size: 0, sha256: null, meta: null, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
@@ -1038,6 +1336,7 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
     table.bytes -= Number(current.size) || 0
     await appendChange(auth.account.id, table, entry)
     await fs.rm(blobPath, { force: true })
+    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision })
   })
 }
@@ -1202,6 +1501,40 @@ const handleUploadPatch = async (request, response, auth, fileId, uploadId) => {
   }
 }
 
+// The partial is already gone and the live blob is the uploaded body. Record
+// the revision without copying that body onto the archive slot.
+const finishRenamedUpload = async (request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear) => {
+  const table = await loadTable(auth.account.id)
+  const current = table.entries.get(fileId) ?? null
+  const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
+  const stat = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (!stat?.isFile()) fail(404, 'Dieser Upload ist nicht bekannt.')
+  if (await hashFile(blobPath) !== declaredSha) fail(404, 'Dieser Upload ist nicht bekannt.')
+  const archivedSize = current?.deleted
+    ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
+    : 0
+  const decision = evaluateSyncWrite({ current, base, nextSize: stat.size, blank, clear, archivedSize })
+  if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
+  if (decision === 'guard') return guardRejected(request, response, current)
+  if (current && !current.deleted && current.sha256 === declaredSha && Number(current.size) === stat.size) {
+    sendJson(request, response, 200, { revision: current.revision, tableRevision: table.revision, uploadId }, { ETag: `"${current.revision}"` })
+    return
+  }
+  const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
+  // The archive copy was counted when the table was loaded. Adding it again
+  // would reserve the previous note twice.
+  const reserved = await reservedPartialBytes(auth.account.id)
+  if (table.bytes - previousBytes + stat.size + (table.historyBytes || 0) + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+  const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
+  if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+  const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: stat.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
+  table.revision = entry.revision
+  table.entries.set(fileId, entry)
+  table.bytes += stat.size - previousBytes
+  await recordLiveBlob(auth.account.id, table, entry)
+  sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
+}
+
 const handleUploadComplete = async (request, response, auth, fileId, uploadId) => {
   const base = parseIfMatch(request)
   const metaHeader = parseMeta(request)
@@ -1211,14 +1544,39 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
   const clear = request.headers['x-fanotes-clear'] === '1'
   await withAccountLock(auth.account.id, async () => {
     const meta = await readPartial(auth.account.id, uploadId)
-    if (!meta || meta.fileId !== fileId) fail(404, 'Dieser Upload ist nicht bekannt.')
+    if (!meta || meta.fileId !== fileId) {
+      await finishRenamedUpload(request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear)
+      return
+    }
     if (meta.received !== meta.size) fail(409, 'Der Upload ist noch nicht vollständig.', { offset: meta.received, size: meta.size, reason: 'incomplete' })
     if (declaredSha !== meta.sha256) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
     const bodyPath = safeJoin(partialDirectory(auth.account.id, uploadId), 'body.bin')
+    const bodyStat = await fs.lstat(bodyPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+    if (!bodyStat?.isFile()) {
+      // The body was already renamed onto the live blob. Drop the partial
+      // before the response so a retry cannot reserve its bytes again, then
+      // record the revision from the live file.
+      await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+      await finishRenamedUpload(request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear)
+      return
+    }
     const actual = await hashFile(bodyPath)
     if (actual !== declaredSha) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
+    const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, {
+      size: Number(meta.size) || 0,
+      sha256: declaredSha,
+      meta: metaHeader,
+      deviceId: auth.deviceId,
+    })
+    if (settled?.matchesRequest) {
+      await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
+      sendJson(request, response, 200, { revision: settled.entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${settled.entry.revision}"` })
+      return
+    }
+    if (settled?.entry) return conflict(request, response, settled.entry)
+    if (settled?.preserved) return preservedConflict(request, response, fileId, current)
     const archivedSize = current?.deleted
       ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
       : 0
@@ -1243,6 +1601,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     const blobPath = safeJoin(accountDirectory(auth.account.id), 'blobs', fileId)
     await fs.mkdir(safeJoin(accountDirectory(auth.account.id), 'blobs'), { recursive: true, mode: 0o700 })
     await fs.rename(bodyPath, blobPath)
+    await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
     await fs.rm(partialDirectory(auth.account.id, uploadId), { recursive: true, force: true })
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision

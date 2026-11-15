@@ -2,7 +2,7 @@
 // Stops, lines and lessons are synthetic; the answers have the shape of search.ch's route API.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -514,4 +514,50 @@ test('lastLesson: the target is lesson end + walking time and an earlier trip ne
     const after = (await commute.board(accountId)).boards[0]
     assert.equal(after.trips[0].departure.slice(11, 16), '15:56')
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('an unreadable commute file is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-account-'))
+  const accountId = 'c'.repeat(32)
+  const routeFile = join(root, 'accounts', accountId, 'commute.json')
+  const stateFile = join(root, 'accounts', accountId, 'commute-state.json')
+  const clock = parseLocal('2026-11-13 06:00:00')
+  const pinned = route({ pins: [{ line: 'S29', stop: 'Knoten', departure: '07:30', days: [5] }] })
+  const commute = createCommute({
+    root,
+    now: () => new Date(clock),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [pinned], settings: { delayThreshold: 3 } })
+    const marker = '{"version":1,"routes":{"a1b2c3d4e5f6":{"signature":"keep-this-alert"}}}\n'
+    await writeFile(stateFile, marker, { mode: 0o600 })
+    await chmod(stateFile, 0o000)
+    try {
+      await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EACCES')
+    } finally {
+      await chmod(stateFile, 0o600)
+    }
+    assert.equal(await readFile(stateFile, 'utf8'), marker)
+    const before = await readFile(routeFile)
+    await chmod(routeFile, 0o000)
+    try {
+      await assert.rejects(
+        () => commute.save(accountId, { routes: [route()], settings: { delayThreshold: 9 } }),
+        (error) => error?.code === 'EACCES',
+      )
+    } finally {
+      await chmod(routeFile, 0o600)
+    }
+    assert.deepEqual(await readFile(routeFile), before)
+    assert.equal(JSON.parse(before.toString()).routes[0].pins[0].line, 'S29')
+    await writeFile(routeFile, '{')
+    const repaired = await commute.save(accountId, { routes: [pinned], settings: { delayThreshold: 3 } })
+    assert.equal(repaired.routes[0].pins[0].line, 'S29')
+  } finally {
+    await chmod(routeFile, 0o600).catch(() => undefined)
+    await chmod(stateFile, 0o600).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
 })

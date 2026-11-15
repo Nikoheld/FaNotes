@@ -11,6 +11,12 @@ test('sitemap and robots can be cached and pages stay fresh', () => {
   assert.equal(publicCacheControl('/assets/fanotes.svg'), 'public, max-age=2592000, immutable')
 })
 
+test('a large sync upload is allowed the same 300 seconds nginx allows', () => {
+  const server = readFileSync(new URL('./server.mjs', import.meta.url), 'utf8')
+  assert.match(server, /server\.requestTimeout = 300_000/)
+  assert.match(server, /server\.headersTimeout = 70_000/)
+})
+
 test('the automatic favicon request is not a JSON 404', () => {
   const server = readFileSync(new URL('./server.mjs', import.meta.url), 'utf8')
   assert.equal(FAVICON_TARGET, '/assets/fanotes.svg')

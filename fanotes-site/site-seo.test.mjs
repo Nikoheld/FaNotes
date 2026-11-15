@@ -111,6 +111,13 @@ test('origin gzip covers sitemap and svg and varies on the encoding', () => {
   for (const conf of [fanotes, schulnetz]) assert.match(conf, /^    gzip_vary on;$/mu)
   assert.match(fanotes, /gzip_types[^\n]*application\/xml[^\n]*image\/svg\+xml/)
   assert.doesNotMatch(fanotes, /gzip_types[^\n]*wasm/)
+  assert.match(schulnetz, /location = \/sitemap\.xml \{\n        expires 1h;/u)
+  assert.match(schulnetz, /location = \/robots\.txt \{\n        expires 1h;/u)
+  const blocks = fanotes.split(/\n    location /u).slice(1)
+  for (const block of blocks) {
+    if (!block.includes('add_header X-Content-Type-Options')) continue
+    assert.match(block, /add_header X-Frame-Options "DENY" always;/)
+  }
 })
 
 test('server maps .xml and serves the HTML 404 to crawlers', () => {

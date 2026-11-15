@@ -27,6 +27,42 @@ export const UPSTREAM_TIMEOUT_MS = 12_000
 export const UPSTREAM_ATTEMPTS = 3
 /** Wait before the second and third attempt. A 4xx is not retried. */
 export const UPSTREAM_RETRY_MS = [200, 800]
+/** A timetable or stop answer larger than this is dropped. It is not parsed and not retried. */
+export const UPSTREAM_BODY_MAX = 1024 * 1024
+
+// Stop once the cap is passed. The rest of the body is never stored.
+const readLimitedText = async (response, max) => {
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const body = typeof response.text === 'function' ? await response.text() : ''
+    if (body.length > max) throw new Error('page too large')
+    return body
+  }
+  const decoder = new TextDecoder('utf-8')
+  let size = 0
+  let body = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return body + decoder.decode()
+    const bytes = value?.byteLength || 0
+    size += bytes
+    if (size > max) {
+      if (typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+      throw new Error('page too large')
+    }
+    if (bytes) body += decoder.decode(value, { stream: true })
+  }
+}
+const readUpstreamJson = async (response) => {
+  const hasReader = typeof response.body?.getReader === 'function'
+  if (!hasReader && typeof response.text !== 'function' && typeof response.json === 'function') return response.json()
+  return JSON.parse(await readLimitedText(response, UPSTREAM_BODY_MAX))
+}
+// An error page is not parsed. Cancel it so the rest is not kept.
+const releaseUnread = async (response) => {
+  const reader = response?.body?.getReader?.()
+  if (reader && typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+}
 const USER_AGENT = 'KantiPlus/1.0 (+https://fanotes.fasrv.ch; commute)'
 const PROVIDERS = {
   'search.ch': { name: 'search.ch', occupancy: 'train-class', formation: false },
@@ -64,23 +100,52 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   const inflight = new Map()
   let budget = { day: '', route: 0, completion: 0, fallback: 0, detail: 0 }
   let budgetLoaded = false
+  let budgetQueue = Promise.resolve()
+  const withBudget = (task) => {
+    const run = budgetQueue.then(task, task)
+    budgetQueue = run.then(() => undefined, () => undefined)
+    return run
+  }
   const loadBudget = async () => {
     if (budgetLoaded || !budgetFile) return
+    try {
+      budget = { ...budget, ...JSON.parse(await fs.readFile(budgetFile, 'utf8')) }
+    } catch (error) {
+      // A missing or broken file can start again. A read error must not replace today's count with zeros.
+      if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+    }
     budgetLoaded = true
-    try { budget = { ...budget, ...JSON.parse(await fs.readFile(budgetFile, 'utf8')) } } catch { /* first run */ }
   }
-  const spend = async (kind) => {
-    await loadBudget()
+  const rollBudget = () => {
     const day = zurichWall(now().getTime()).day
     if (budget.day !== day) budget = { day, route: 0, completion: 0, fallback: 0, detail: 0 }
-    budget[kind] += 1
-    if (budgetFile) await fs.writeFile(budgetFile, JSON.stringify(budget), { mode: 0o600 }).catch(() => undefined)
   }
-  const left = async (kind, limit) => {
+  const writeBudget = async () => {
+    if (!budgetFile) return
+    const temporary = `${budgetFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+    try {
+      await fs.mkdir(dirname(budgetFile), { recursive: true })
+      await fs.writeFile(temporary, JSON.stringify(budget), { mode: 0o600 })
+      await fs.rename(temporary, budgetFile)
+    } catch {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+    }
+  }
+  // Check and increment under one lock. Two requests must not both pass the daily cap.
+  const reserve = (kind, limit) => withBudget(async () => {
     await loadBudget()
-    const day = zurichWall(now().getTime()).day
-    return budget.day !== day || budget[kind] < limit
-  }
+    rollBudget()
+    if (budget[kind] >= limit) return false
+    budget[kind] += 1
+    await writeBudget()
+    return true
+  })
+  const spend = (kind) => withBudget(async () => {
+    await loadBudget()
+    rollBudget()
+    budget[kind] += 1
+    await writeBudget()
+  })
   const DISK_LIMIT = 40
   let disk = { entries: [] }
   let diskLoading = null
@@ -96,7 +161,11 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
               && Number.isFinite(entry.at) && entry.value && Array.isArray(entry.value.trips)
             )).slice(-DISK_LIMIT)
           }
-        } catch { /* first run */ }
+        } catch (error) {
+          if (error?.code === 'ENOENT' || error instanceof SyntaxError) return
+          diskLoading = null
+          throw error
+        }
       })()
     }
     return diskLoading
@@ -107,7 +176,8 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   const remember = (key, at, value) => {
     const run = diskQueue.then(async () => {
       if (!routeFile || !key.startsWith('route:') || !Array.isArray(value?.trips) || !value.trips.length) return
-      await loadDisk()
+      // Leave an unreadable timetable file as it is. The live answer is still returned.
+      try { await loadDisk() } catch { return }
       disk.entries = [...disk.entries.filter((entry) => entry.key !== key), { key, at, value }].slice(-DISK_LIMIT)
       const temporary = `${routeFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
       try {
@@ -138,11 +208,12 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
       try {
         const response = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': USER_AGENT }, redirect: 'error', signal: AbortSignal.timeout?.(UPSTREAM_TIMEOUT_MS) })
         if (!response.ok && response.status !== 200) {
+          await releaseUnread(response)
           last = Object.assign(new Error('provider'), { status: response.status })
           events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!upstreamRetryable(last) || attempt === UPSTREAM_ATTEMPTS) throw last
         } else {
-          const body = await response.json()
+          const body = await readUpstreamJson(response)
           events.info({ requestId, method: 'GET', route, status: response.status || 200, attempt, ms: elapsed() })
           return body
         }
@@ -188,9 +259,8 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     const term = String(query || '').trim().slice(0, 60)
     if (term.length < 2) return Promise.resolve({ stops: [] })
     return cached(`stops:${term.toLowerCase()}`, STOP_CACHE_MS, async () => {
-      if (await left('completion', COMPLETION_BUDGET)) {
+      if (await reserve('completion', COMPLETION_BUDGET)) {
         try {
-          await spend('completion')
           return { stops: parseCompletion(await getJson(`${SEARCH_CH}/completion.json?term=${encodeURIComponent(term)}&show_ids=1&nofavorites=1`)) }
         } catch (error) { log('warn', `Haltestellensuche search.ch fehlgeschlagen (${error?.status || error?.name || 'error'})`) }
       }
@@ -212,9 +282,8 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   /** One timetable query (search.ch, then transport.opendata.ch) for from → to through [vias] in order; no guard, no cache. */
   const fetchTrips = async ({ from, to, vias, at, timeType, num }) => {
     const when = searchDate(at)
-    if (await left('route', ROUTE_BUDGET)) {
+    if (await reserve('route', ROUTE_BUDGET)) {
       try {
-        await spend('route')
         // search.ch reads an arrival time as the earliest arrival; `pre` adds the trips that arrive in time.
         const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.date, time: when.time, time_type: timeType === 'arrive' ? 'arrival' : 'depart', num: String(num || (timeType === 'arrive' ? 2 : 5)), pre: timeType === 'arrive' ? '4' : '1', show_delays: '1', show_trackchanges: '1' })
         // search.ch reads repeated via[] in order (a plain repeated via keeps only the last one).
@@ -324,8 +393,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     const key = `detail:${leg.from.stopId || leg.from.name}>${leg.to.stopId || leg.to.name}@${when.isoDay}T${when.time}:${leg.trainNo || leg.line}`
     try {
       const answer = await cached(key, ROUTE_CACHE_MS, async () => {
-        if (!(await left('detail', DETAIL_BUDGET))) throw Object.assign(new Error('budget'), { status: 429 })
-        await spend('detail')
+        if (!(await reserve('detail', DETAIL_BUDGET))) throw Object.assign(new Error('budget'), { status: 429 })
         const params = new URLSearchParams({ from: leg.from.stopId || leg.from.name, to: leg.to.stopId || leg.to.name, date: when.isoDay, time: when.time, limit: '3' })
         return { trips: parseTransportRoute(await getJson(`${TRANSPORT}/connections?${params}`)) }
       })
@@ -365,13 +433,37 @@ export const createCommute = (options = {}) => {
   const file = (accountId) => resolve(accountDir(accountId), 'commute.json')
   const stateFile = (accountId) => resolve(accountDir(accountId), 'commute-state.json')
   const due = new Map()
+  // Saves and removals for one account run one at a time. Two clients otherwise both read the
+  // old pins, and the slower write puts those pins back over the newer ones.
+  const accountQueues = new Map()
+  const withAccount = (accountId, task) => {
+    const previous = accountQueues.get(accountId) || Promise.resolve()
+    const run = previous.then(task, task)
+    const tail = run.then(() => undefined, () => undefined)
+    accountQueues.set(accountId, tail)
+    tail.then(() => { if (accountQueues.get(accountId) === tail) accountQueues.delete(accountId) })
+    return run
+  }
 
-  const readJson = async (path) => { try { return JSON.parse(await fs.readFile(path, 'utf8')) } catch { return null } }
+  const readJson = async (path) => {
+    try {
+      return JSON.parse(await fs.readFile(path, 'utf8'))
+    } catch (error) {
+      // A missing or broken file can start again. A read error must not look empty, or the next save replaces the route.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
+  }
   const writeJson = async (path, value) => {
-    const temp = `${path}.${randomBytes(4).toString('hex')}.tmp`
+    const temp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
     await fs.mkdir(resolve(path, '..'), { recursive: true, mode: 0o700 })
-    await fs.writeFile(temp, JSON.stringify(value), { mode: 0o600 })
-    await fs.rename(temp, path)
+    try {
+      await fs.writeFile(temp, JSON.stringify(value), { mode: 0o600 })
+      await fs.rename(temp, path)
+    } catch (error) {
+      await fs.rm(temp, { force: true }).catch(() => undefined)
+      throw error
+    }
   }
 
   const read = async (accountId) => {
@@ -383,7 +475,7 @@ export const createCommute = (options = {}) => {
     return { routes: sanitizeRoutes(stored?.routes), settings }
   }
   const view = async (accountId) => ({ ...(await read(accountId)), provider: PROVIDERS['search.ch'] })
-  const save = async (accountId, body) => {
+  const save = (accountId, body) => withAccount(accountId, async () => {
     // A client older than pins/two vias sends routes without those keys: keep what is stored.
     const known = new Map((await read(accountId)).routes.map((route) => [route.id, route]))
     const incoming = (Array.isArray(body?.routes) ? body.routes : []).map((raw) => {
@@ -401,7 +493,7 @@ export const createCommute = (options = {}) => {
     await writeJson(file(accountId), { version: 2, routes, settings, updatedAt: now().toISOString() })
     due.delete(accountId)
     return { routes, settings, provider: PROVIDERS['search.ch'] }
-  }
+  })
 
   /**
    * The live board of one route: target, ranked trips, alternatives when the first is unusable. A
@@ -590,7 +682,16 @@ export const createCommute = (options = {}) => {
       next = Math.min(next, nextCheckAt(target, tracked || (live.pinned ? { departure: target.at, arrival: target.at } : null), at))
     }
     for (const id of Object.keys(state.routes)) if (!routes.some((route) => route.id === id)) delete state.routes[id]
-    await writeJson(stateFile(accountId), state)
+    // A removal that finished during this check must not bring the state file back.
+    const kept = await withAccount(accountId, async () => {
+      try { await fs.stat(file(accountId)) } catch { return false }
+      await writeJson(stateFile(accountId), state)
+      return true
+    })
+    if (!kept) {
+      due.delete(accountId)
+      return { checked, alerts: 0 }
+    }
     if (alerts.length) await publish(accountId, alerts)
     // The widget and the open app follow the tracked trip; a silent push when it changed.
     else if (moved) await ping(accountId)
@@ -616,11 +717,11 @@ export const createCommute = (options = {}) => {
     return checked
   }
 
-  const remove = async (accountId) => {
+  const remove = (accountId) => withAccount(accountId, async () => {
     await fs.rm(file(accountId), { force: true })
     await fs.rm(stateFile(accountId), { force: true })
     due.delete(accountId)
-  }
+  })
 
   /**
    * The connection detail: one trip of a route with every leg, every intermediate stop, real times,

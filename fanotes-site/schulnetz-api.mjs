@@ -7,7 +7,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { resolve, sep } from 'node:path'
+import { dirname, resolve, sep } from 'node:path'
 import { authenticateSyncRequest, syncAccountExists } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { CLASS_CODE, isAksaBase } from './class-timetables.mjs'
@@ -65,6 +65,8 @@ import {
 
 const API_PREFIX = '/api/v1/schulnetz'
 const MAX_BODY = 64 * 1024
+/** One Schulnetz page. Larger than a semester list, small enough that a runaway reply cannot fill memory. */
+export const SCHOOL_BODY_MAX = 8 * 1024 * 1024
 const SCHOOL_FILES = ['link.json', 'snapshot.json', 'notified-grades.json', 'changes.jsonl', 'notification-baseline.json', 'reveals.json', 'monitor.json', 'pushed-notices.json']
 // Pendelstrecken move with the identity (guest → account) like the school files.
 const COMMUTE_FILES = ['commute.json', 'commute-state.json']
@@ -156,12 +158,62 @@ const fail = (status, message) => {
   error.publicMessage = message
   throw error
 }
+// The response is sent by the caller. The request is closed after that, so the rest of the body is not read.
+const failLarge = (request, message) => {
+  const error = new Error('schulnetz')
+  error.status = 413
+  error.publicMessage = message
+  error.releaseRequest = request
+  throw error
+}
 
 const keptSsoHeader = (value) => String(value || '')
   .split(';')
   .map((part) => part.trim())
   .filter((part) => SSO_COOKIE_NAMES.has(part.slice(0, part.indexOf('='))))
   .join('; ')
+
+const changeLogs = new Map()
+
+/**
+ * Read, change and replace one change log. Overlapping updates for the same file wait, and the
+ * replacement is one rename, so a slower update cannot drop a line the earlier one just added.
+ * A mutate result of null leaves the file alone. An empty list removes it.
+ */
+export const updateChangeLog = (file, mutate) => {
+  const previous = changeLogs.get(file) || Promise.resolve()
+  const run = previous.then(() => replaceChangeLog(file, mutate), () => replaceChangeLog(file, mutate))
+  const tail = run.then(() => undefined, () => undefined)
+  changeLogs.set(file, tail)
+  tail.then(() => { if (changeLogs.get(file) === tail) changeLogs.delete(file) })
+  return run
+}
+
+const replaceChangeLog = async (file, mutate) => {
+  let existing = []
+  let missing = false
+  try {
+    existing = (await fs.readFile(file, 'utf8')).split('\n').filter((line) => line.length > 0)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    missing = true
+  }
+  const next = await mutate(existing, { missing })
+  if (!next) return
+  if (!next.length) {
+    await fs.rm(file, { force: true })
+    return
+  }
+  const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+  try {
+    await fs.mkdir(dirname(file), { recursive: true, mode: 0o700 })
+    await fs.writeFile(temporary, `${next.join('\n')}\n`, { mode: 0o600 })
+    await fs.rename(temporary, file)
+  } catch (error) {
+    await fs.rm(temporary, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
 
 export const createSchulnetzRuntime = (options = {}) => {
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz')
@@ -206,14 +258,25 @@ export const createSchulnetzRuntime = (options = {}) => {
   }
 
   const readJson = async (file) => {
-    try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch { return null }
+    try {
+      return JSON.parse(await fs.readFile(file, 'utf8'))
+    } catch (error) {
+      // A missing or broken file is absent. Any other read error must not look the same, or a later write replaces the account file.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
   }
 
   const writeJson = async (file, value) => {
     await fs.mkdir(resolve(file, '..'), { recursive: true, mode: 0o700 })
-    const temporary = `${file}.${randomBytes(6).toString('hex')}.tmp`
-    await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
-    await fs.rename(temporary, file)
+    const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+    try {
+      await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
+      await fs.rename(temporary, file)
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+      throw error
+    }
   }
 
   const stripLegacyPush = (link) => {
@@ -656,6 +719,32 @@ export const createSchulnetzRuntime = (options = {}) => {
     return run()
   }
 
+  const releaseUnread = async (response) => {
+    const reader = response?.body?.getReader?.()
+    if (reader && typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+  }
+  const readSchoolText = async (response) => {
+    const reader = response?.body?.getReader?.()
+    if (!reader) {
+      const text = typeof response.text === 'function' ? await response.text() : ''
+      if (text.length > SCHOOL_BODY_MAX) throw new Error('page too large')
+      return text
+    }
+    const decoder = new TextDecoder('utf-8')
+    let size = 0
+    let text = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) return text + decoder.decode()
+      const bytes = value?.byteLength || 0
+      size += bytes
+      if (size > SCHOOL_BODY_MAX) {
+        if (typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+        throw new Error('page too large')
+      }
+      if (bytes) text += decoder.decode(value, { stream: true })
+    }
+  }
   const schoolFetch = async (url, method, headers, body) => {
     if (!schulnetzCallAllowed(method, url, body || '')) fail(400, 'Diese Schulnetz-Anfrage ist nicht erlaubt.')
     const verb = String(method || 'GET').toUpperCase()
@@ -666,12 +755,17 @@ export const createSchulnetzRuntime = (options = {}) => {
       if (attempt) await pause(retryBackoffMs(attempt - 1))
       try {
         const response = await fetchImpl(url, { method, headers, body, redirect: 'manual' })
-        const responseBody = await response.text()
-        if ((verb === 'GET' || verb === 'HEAD') && TRANSIENT_HTTP.has(response.status) && attempt < attempts - 1) continue
+        // An error page is not stored. Leave it unread so a retry does not buffer it.
+        if ((verb === 'GET' || verb === 'HEAD') && response.status >= 400) {
+          await releaseUnread(response)
+          if (TRANSIENT_HTTP.has(response.status) && attempt < attempts - 1) continue
+          return { status: response.status, body: '' }
+        }
+        const responseBody = await readSchoolText(response)
         return { status: response.status, body: responseBody }
       } catch (error) {
         lastError = error
-        if (attempt === attempts - 1) throw error
+        if (error?.message === 'page too large' || attempt === attempts - 1) throw error
       }
     }
     throw lastError || tagErrorStage('fetch', new Error('read failed'))
@@ -789,18 +883,14 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   const rollbackProbe = async (accountId, link, revision) => {
     const file = resolve(accountDir(accountId), 'changes.jsonl')
-    const text = await fs.readFile(file, 'utf8').catch(() => '')
-    const kept = text.split('\n').filter((line) => {
-      if (!line) return false
+    await updateChangeLog(file, (existing) => existing.filter((line) => {
       try {
         const row = JSON.parse(line)
         return !(row.revision === revision && isNotificationProbe(row.id))
       } catch {
         return true
       }
-    })
-    if (kept.length) await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
-    else await fs.rm(file, { force: true })
+    }))
     if (link.revision === revision) {
       link.revision = revision - 1
       await saveLink(accountId, link)
@@ -811,45 +901,36 @@ export const createSchulnetzRuntime = (options = {}) => {
   const clearProbeChanges = async (accountId, deviceHash) => {
     if (!/^[a-f0-9]{32}$/u.test(String(deviceHash || ''))) return { removed: 0, failed: true }
     const file = resolve(accountDir(accountId), 'changes.jsonl')
-    let text = ''
-    try {
-      text = await fs.readFile(file, 'utf8')
-    } catch (error) {
-      if (error?.code === 'ENOENT') return { removed: 0, failed: false }
-      return { removed: 0, failed: true }
-    }
-    const kept = []
     let removed = 0
-    for (const line of text.split('\n')) {
-      if (!line) continue
-      try {
-        const row = JSON.parse(line)
-        if (isNotificationProbe(row?.id) && row?.device === deviceHash) {
-          removed += 1
-          continue
-        }
-      } catch {
-        /* unreadable lines are not probe rows */
-      }
-      kept.push(line)
-    }
     try {
-      if (kept.length) await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
-      else await fs.rm(file, { force: true })
+      await updateChangeLog(file, (existing, info) => {
+        if (info.missing) return null
+        const kept = []
+        for (const line of existing) {
+          try {
+            const row = JSON.parse(line)
+            if (isNotificationProbe(row?.id) && row?.device === deviceHash) {
+              removed += 1
+              continue
+            }
+          } catch {
+            /* unreadable lines are not probe rows */
+          }
+          kept.push(line)
+        }
+        return kept
+      })
     } catch {
       return { removed: 0, failed: true }
     }
     return { removed, failed: false }
   }
 
-  const appendChanges = async (accountId, changes, revision) => {
-    if (!changes.length) return
+  const appendChanges = (accountId, changes, revision) => {
+    if (!changes.length) return Promise.resolve()
     const file = resolve(accountDir(accountId), 'changes.jsonl')
     const lines = changes.map((change) => JSON.stringify({ ...change, revision, at: now().toISOString() }))
-    await fs.appendFile(file, `${lines.join('\n')}\n`, { mode: 0o600 })
-    const text = await fs.readFile(file, 'utf8')
-    const kept = text.trim().split('\n').slice(-200)
-    await fs.writeFile(file, `${kept.join('\n')}\n`, { mode: 0o600 })
+    return updateChangeLog(file, (existing) => [...existing, ...lines].slice(-200))
   }
 
   const knownChangeIds = async (accountId) => {
@@ -877,13 +958,29 @@ export const createSchulnetzRuntime = (options = {}) => {
     await writeJson(resolve(accountDir(accountId), 'notified-grades.json'), { version: 1, keys: unique })
   }
 
+  // A missing ledger is "not migrated". Putting that file back means deleting it.
+  const restoreGradeLedger = async (accountId, ledger) => {
+    const file = resolve(accountDir(accountId), 'notified-grades.json')
+    if (ledger == null) {
+      await fs.rm(file, { force: true })
+      return
+    }
+    await writeGradeLedger(accountId, ledger)
+  }
+
   const publishChanges = async (accountId, link, changes, revision, grades = [], { push = true, detectedAt = 0 } = {}) => {
     // No allowed school alert means no row and no push. Callers still save the snapshot.
     const ledger = await readGradeLedger(accountId)
     const settled = settleGradeNotifications(changes, grades, ledger)
     await writeGradeLedger(accountId, settled.keys)
     const unseen = unseenChanges(settled.changes, await knownChangeIds(accountId))
-    await appendChanges(accountId, unseen, revision)
+    try {
+      await appendChanges(accountId, unseen, revision)
+    } catch (error) {
+      // The row was not stored. Leave the ledger as it was, or the grade stays marked as announced.
+      try { await restoreGradeLedger(accountId, ledger) } catch { /* the change-log error is the one to report */ }
+      throw error
+    }
     // Hidden grades: a grade that arrives while they are on stays hidden in every browser until revealed.
     if (link.settings?.guessGrades === true) {
       try { await addHiddenGrades(accountId, newGradeTargetIds(unseen)) } catch (error) { log('warn', `Verdeckte Noten nicht gespeichert (${error?.name || 'error'})`) }
@@ -965,12 +1062,14 @@ export const createSchulnetzRuntime = (options = {}) => {
     let maxAge = 0
     const latencies = []
     for (const accountId of await listAccounts()) {
-      const link = await readLink(accountId)
+      let link
+      try { link = await readLink(accountId) } catch { continue }
       // A device link (TAM) is read on the phone; the server has nothing to check.
       if (!link || link.mode === 'device') continue
       if (link.needsReauth) { needsReauth += 1; continue }
       accounts += 1
-      const monitor = await readMonitor(accountId)
+      let monitor
+      try { monitor = await readMonitor(accountId) } catch { continue }
       const okAt = Date.parse(monitor.gradeCheckOkAt || '')
       const age = Number.isFinite(okAt) ? Math.max(0, nowMs - okAt) : Number.POSITIVE_INFINITY
       maxAge = Math.max(maxAge, age)
@@ -1415,11 +1514,12 @@ export const createSchulnetzRuntime = (options = {}) => {
   // A snapshot upload carries a semester of lessons: it may be up to SNAPSHOT_BODY_LIMIT raw and gzip.
   // Every other request stays small and plain.
   const readBody = async (request, { limit = MAX_BODY, inflate = false } = {}) => {
+    if (Number(request.headers?.['content-length']) > limit) failLarge(request, 'Die Anfrage ist zu gross.')
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > limit) fail(413, 'Die Anfrage ist zu gross.')
+      if (size > limit) failLarge(request, 'Die Anfrage ist zu gross.')
       chunks.push(chunk)
     }
     if (!chunks.length) return {}
@@ -1717,6 +1817,9 @@ export const createSchulnetzRuntime = (options = {}) => {
       const status = Number(error?.status) || 500
       if (status >= 500) log('warn', `Anfrage fehlgeschlagen (${error?.name || 'error'})`)
       send(response, status, { error: error?.publicMessage || 'Der Schulnetz-Dienst ist vorübergehend nicht erreichbar.' })
+      const release = error?.releaseRequest
+      // Test doubles have no socket. A real response closes the upload only after the 413 is sent.
+      if (release && typeof release.destroy === 'function' && typeof response.on === 'function') response.on('finish', () => release.destroy())
     }
     return true
   }
