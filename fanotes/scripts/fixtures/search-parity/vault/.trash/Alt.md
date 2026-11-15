@@ -1,0 +1,1 @@
+Photosynthese im Papierkorb
