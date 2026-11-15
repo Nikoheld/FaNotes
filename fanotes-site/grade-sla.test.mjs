@@ -429,3 +429,42 @@ test('a broken guest file does not remove the account', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('an unreadable poller lock and change log are left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-lock-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  const lock = join(root, 'poller.lock')
+  const marker = '2147483646\n'
+  const accountId = 'b'.repeat(32)
+  const logFile = join(root, 'accounts', accountId, 'changes.jsonl')
+  const row = '{"id":"keep","revision":2,"category":"grade"}\n'
+  try {
+    await writeFile(lock, marker, { mode: 0o600 })
+    await chmod(lock, 0o000)
+    assert.equal(await runtime.claimPoller(), false)
+    await chmod(lock, 0o600)
+    assert.equal(await readFile(lock, 'utf8'), marker)
+    await writeFile(lock, marker, { mode: 0o600 })
+    assert.equal(await runtime.claimPoller(), true)
+    assert.equal(await readFile(lock, 'utf8'), String(process.pid))
+    await mkdir(join(root, 'accounts', accountId), { recursive: true, mode: 0o700 })
+    await writeFile(logFile, row, { mode: 0o600 })
+    const seen = await runtime.webAccess.changesSince(accountId, 0)
+    assert.equal(seen.changes.length, 1)
+    assert.equal(seen.changes[0].id, 'keep')
+    await chmod(logFile, 0o000)
+    await assert.rejects(() => runtime.webAccess.changesSince(accountId, 0), (error) => error?.code === 'EACCES')
+    await chmod(logFile, 0o600)
+    assert.equal(await readFile(logFile, 'utf8'), row)
+    assert.deepEqual((await runtime.webAccess.changesSince('c'.repeat(32), 0)).changes, [])
+  } finally {
+    await chmod(lock, 0o600).catch(() => undefined)
+    await chmod(logFile, 0o600).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})
