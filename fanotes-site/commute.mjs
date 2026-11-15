@@ -101,18 +101,25 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     }
     return diskLoading
   }
-  const remember = async (key, at, value) => {
-    if (!routeFile || !key.startsWith('route:') || !Array.isArray(value?.trips) || !value.trips.length) return
-    await loadDisk()
-    disk.entries = [...disk.entries.filter((entry) => entry.key !== key), { key, at, value }].slice(-DISK_LIMIT)
-    const temporary = `${routeFile}.${process.pid}.tmp`
-    try {
-      await fs.mkdir(dirname(routeFile), { recursive: true })
-      await fs.writeFile(temporary, JSON.stringify({ version: 1, entries: disk.entries }), { mode: 0o600 })
-      await fs.rename(temporary, routeFile)
-    } catch {
-      await fs.rm(temporary, { force: true }).catch(() => undefined)
-    }
+  // Different routes finish together. Writes run one at a time, each into its own temp file,
+  // so one rename cannot replace the file with the other route missing.
+  let diskQueue = Promise.resolve()
+  const remember = (key, at, value) => {
+    const run = diskQueue.then(async () => {
+      if (!routeFile || !key.startsWith('route:') || !Array.isArray(value?.trips) || !value.trips.length) return
+      await loadDisk()
+      disk.entries = [...disk.entries.filter((entry) => entry.key !== key), { key, at, value }].slice(-DISK_LIMIT)
+      const temporary = `${routeFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+      try {
+        await fs.mkdir(dirname(routeFile), { recursive: true })
+        await fs.writeFile(temporary, JSON.stringify({ version: 1, entries: disk.entries }), { mode: 0o600 })
+        await fs.rename(temporary, routeFile)
+      } catch {
+        await fs.rm(temporary, { force: true }).catch(() => undefined)
+      }
+    })
+    diskQueue = run.then(() => undefined, () => undefined)
+    return run
   }
   const recall = async (key) => {
     if (!routeFile || !key.startsWith('route:')) return null
