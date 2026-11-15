@@ -1,6 +1,6 @@
 // Commute provider: short-lived cache, in-flight coalescing, upstream retries, and a recorded
 // search.ch answer for Brugg → Aarau via Aarau, Lenzburg (a via equal to the destination).
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -232,6 +232,39 @@ test('parallel route queries add up in the daily budget', async () => {
     assert.equal(stored.route, 12)
     assert.equal((await stat(budgetFile)).mode & 0o777, 0o600)
   } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable commute file keeps its previous contents', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-unreadable-'))
+  const budgetFile = join(root, 'commute-budget.json')
+  const routeFile = join(root, 'commute-routes.json')
+  const budgetText = JSON.stringify({ day: '2026-11-16', route: 10, completion: 0, fallback: 0, detail: 0 })
+  const routeText = JSON.stringify({ version: 1, entries: [{ key: 'route:keep', at: ASK_AT, value: { trips: [{ id: 'kept' }] } }] })
+  await writeFile(budgetFile, budgetText, { mode: 0o600 })
+  await writeFile(routeFile, routeText, { mode: 0o600 })
+  await chmod(budgetFile, 0o000)
+  await chmod(routeFile, 0o000)
+  const fetchImpl = async () => ok(fixture)
+  try {
+    const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, budgetFile, routeFile, log: () => {} })
+    await assert.rejects(() => provider.trips(query), (error) => error?.code === 'EACCES')
+    assert.equal((await readdir(root)).some((name) => name.endsWith('.tmp')), false)
+    await chmod(budgetFile, 0o600)
+    await chmod(routeFile, 0o600)
+    assert.equal(await readFile(budgetFile, 'utf8'), budgetText)
+    assert.equal(await readFile(routeFile, 'utf8'), routeText)
+    const again = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, budgetFile, routeFile, log: () => {} })
+    const answer = await again.trips(query)
+    assert.ok(answer.trips.length > 0)
+    assert.equal(JSON.parse(await readFile(budgetFile, 'utf8')).route, 11)
+    const stored = JSON.parse(await readFile(routeFile, 'utf8'))
+    assert.equal(stored.entries.some((entry) => entry.key === 'route:keep'), true)
+    assert.equal(stored.entries.length, 2)
+  } finally {
+    await chmod(budgetFile, 0o600).catch(() => undefined)
+    await chmod(routeFile, 0o600).catch(() => undefined)
     await rm(root, { recursive: true, force: true })
   }
 })

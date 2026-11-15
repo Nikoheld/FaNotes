@@ -108,8 +108,13 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   }
   const loadBudget = async () => {
     if (budgetLoaded || !budgetFile) return
+    try {
+      budget = { ...budget, ...JSON.parse(await fs.readFile(budgetFile, 'utf8')) }
+    } catch (error) {
+      // A missing or broken file can start again. A read error must not replace today's count with zeros.
+      if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+    }
     budgetLoaded = true
-    try { budget = { ...budget, ...JSON.parse(await fs.readFile(budgetFile, 'utf8')) } } catch { /* first run */ }
   }
   const rollBudget = () => {
     const day = zurichWall(now().getTime()).day
@@ -156,7 +161,11 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
               && Number.isFinite(entry.at) && entry.value && Array.isArray(entry.value.trips)
             )).slice(-DISK_LIMIT)
           }
-        } catch { /* first run */ }
+        } catch (error) {
+          if (error?.code === 'ENOENT' || error instanceof SyntaxError) return
+          diskLoading = null
+          throw error
+        }
       })()
     }
     return diskLoading
@@ -167,7 +176,8 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   const remember = (key, at, value) => {
     const run = diskQueue.then(async () => {
       if (!routeFile || !key.startsWith('route:') || !Array.isArray(value?.trips) || !value.trips.length) return
-      await loadDisk()
+      // Leave an unreadable timetable file as it is. The live answer is still returned.
+      try { await loadDisk() } catch { return }
       disk.entries = [...disk.entries.filter((entry) => entry.key !== key), { key, at, value }].slice(-DISK_LIMIT)
       const temporary = `${routeFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
       try {
