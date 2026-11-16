@@ -291,9 +291,11 @@ export const createSchulnetzRuntime = (options = {}) => {
     const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
     const rowsKnown = (list) => list.every(plain)
     const lessonWeekKnown = (event) => !isLesson(event) || Boolean(weekMondayKey(event.start))
+    const stampKnown = (map) => Object.entries(map).every(([key, stamp]) => typeof key === 'string' && key && typeof stamp === 'string' && Number.isFinite(Date.parse(stamp)))
     // A saved row that is not a record must not be dropped, or the next upload replaces the snapshot.
     // A saved lesson with no week must not be dropped, or the next upload keeps the dated lessons and replaces the snapshot.
-    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && (stored.events == null || stored.events.every(lessonWeekKnown)) && maps.every((name) => stored[name] == null || plain(stored[name]))
+    // A saved week stamp that is not a time must not look unread, or the next read fetches that week again.
+    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && (stored.events == null || stored.events.every(lessonWeekKnown)) && maps.every((name) => stored[name] == null || (plain(stored[name]) && stampKnown(stored[name])))
     if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
     return stored
   }
