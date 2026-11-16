@@ -469,6 +469,50 @@ test('an unreadable poller lock and change log are left in place', async () => {
   }
 })
 
+test('a grade ledger key that is not text is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-ledger-key-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.89')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const file = join(root, 'accounts', guest.accountId, 'notified-grades.json')
+    const call = async () => {
+      const request = {
+        method: 'PUT',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.89' },
+        async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+      return status
+    }
+    const keep = async (keys) => {
+      const stored = `${JSON.stringify({ version: 1, keys })}\n`
+      await writeFile(file, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep(['c:keep', { kept: true }])
+    await keep(['c:keep', ''])
+    await keep(['c:keep', 1])
+    await writeFile(file, `${JSON.stringify({ version: 1, keys: ['c:keep'] })}\n`, { mode: 0o600 })
+    assert.equal(await call(), 200)
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).keys.includes('c:keep'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a grade ledger that is not the known shape is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'grade-ledger-'))
   const runtime = createSchulnetzRuntime({
