@@ -328,6 +328,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const sealKnown = (value) => value == null || value === '' || (plainObject(value) && value.v === 1 && typeof value.iv === 'string' && typeof value.tag === 'string' && typeof value.data === 'string')
     const modeKnown = (value) => value == null || value === '' || value === 'web' || value === 'rest' || value === 'device'
     const deviceKnown = (value) => value == null || value === '' || (typeof value === 'string' && /^[a-f0-9]{24}$/u.test(value))
+    const baseKnown = (link) => link.baseUrl == null || link.baseUrl === '' || (link.mode === 'device' ? typeof link.baseUrl === 'string' : typeof normalizeSchoolBase(link.baseUrl) === 'string')
     const known = plainObject(link)
       && (link.fcmTokens == null || (Array.isArray(link.fcmTokens) && link.fcmTokens.every(isValidFcmToken)))
       && (link.pushKeys == null || plainObject(link.pushKeys))
@@ -342,6 +343,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       && modeKnown(link.mode)
       // A saved device id that is not an id must not be sent, or the next poll marks the account signed out.
       && deviceKnown(link.deviceId)
+      // A saved school address that is not an allowed address must not be opened, or the next poll drops the session.
+      && baseKnown(link)
     if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)
