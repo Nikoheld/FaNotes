@@ -23,18 +23,30 @@ fun changeDay(change: SchulnetzChange): LocalDate? =
 
 /**
  * True when the lesson, exam or appointment a notice is about has already ended: an earlier day,
- * or today after its end time. Such a notice ("Neue Prüfung" for last week) is noise.
+ * or today after its end time. A range whose end clock is before its start finishes the next morning.
+ * Such a notice ("Neue Prüfung" for last week) is noise.
  * Grades, absences, messages, deadlines and delivery tests are never treated as over.
  */
 fun changeIsOver(change: SchulnetzChange, now: ZonedDateTime = ZonedDateTime.now(SCHOOL_ZONE)): Boolean {
     if (change.category !in DATED_CATEGORIES || isNotificationProbe(change.id)) return false
     val day = changeDay(change) ?: return false
-    val today = now.withZoneSameInstant(SCHOOL_ZONE).toLocalDate()
-    if (day.isBefore(today)) return true
+    val zurich = now.withZoneSameInstant(SCHOOL_ZONE)
+    val today = zurich.toLocalDate()
     if (day.isAfter(today)) return false
-    val range = CLOCK_RANGE.find(change.body) ?: return false
-    val end = runCatching { LocalTime.of(range.groupValues[3].toInt(), range.groupValues[4].toInt()) }.getOrNull() ?: return false
-    return now.withZoneSameInstant(SCHOOL_ZONE).toLocalTime().isAfter(end)
+    val range = CLOCK_RANGE.find(change.body)
+    val start = range?.let { runCatching { LocalTime.of(it.groupValues[1].toInt(), it.groupValues[2].toInt()) }.getOrNull() }
+    val end = range?.let { runCatching { LocalTime.of(it.groupValues[3].toInt(), it.groupValues[4].toInt()) }.getOrNull() }
+    // 23:00–00:30 ends the next morning. Clock order would call that over at 22:00.
+    val crossesMidnight = start != null && end != null && end.isBefore(start)
+    if (day.isBefore(today)) {
+        if (!crossesMidnight || end == null) return true
+        val next = day.plusDays(1)
+        if (today.isAfter(next)) return true
+        if (today.isBefore(next)) return false
+        return zurich.toLocalTime().isAfter(end)
+    }
+    if (end == null || crossesMidnight) return false
+    return zurich.toLocalTime().isAfter(end)
 }
 
 /** More new appointments than this in one read is the list growing, not news. */
