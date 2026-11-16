@@ -677,6 +677,75 @@ try {
     off()
     assert.equal(live.storySyncBusy('B/R.story', 'B/R.story/scenes/abc123.json'), true, 'without an editor the whole story waits')
   })
+
+  await test('absorb: a document that turns clean without changing still emits', async () => {
+    const c = new controllerMod.WritingController(freshState().doc, 'dev1')
+    c.apply(type(c.state, 'Schon auf der Platte.'), 'typing', '.')
+    const saved = { writeManifest: async () => {}, writeScene: async () => {} }
+    assert.equal(await c.save(saved), true)
+    const sceneId = [...c.state.doc.scenes.keys()][0]
+    const onDisk = c.state.doc.scenes.get(sceneId)
+    // An equal but not identical saved copy (what a reload of the same file gives): dirty by identity.
+    c.savedScenes.set(sceneId, JSON.parse(JSON.stringify(onDisk)))
+    assert.equal(c.isDirty(), true, 'dirty by identity')
+    let emitted = 0
+    c.subscribe(() => { emitted += 1 })
+    // Sync wrote exactly what the editor shows.
+    c.absorb([JSON.parse(JSON.stringify(onDisk))], null)
+    assert.equal(c.isDirty(), false, 'equal to what is on disk: clean')
+    assert.ok(emitted >= 1, 'listeners hear that it is clean')
+  })
+
+  await test('android host: the editor pushes busy, Kotlin calls back with the written files', async () => {
+    const al = await load('/src/writing/androidLive.ts')
+    let dirty = false
+    let saving = false
+    const listeners = new Set()
+    const source = { isDirty: () => dirty, isSaving: () => saving, subscribe: (l) => { listeners.add(l); return () => listeners.delete(l) } }
+    const emit = () => [...listeners].forEach((l) => l())
+    const pushed = []
+    let failing = false
+    const retries = []
+    const bridge = { storyBusy: (busy) => { if (failing) throw new Error('bridge'); pushed.push(busy) } }
+    const stop = al.reportEditorBusy(source, bridge, (retry) => retries.push(retry))
+    assert.deepEqual(pushed, [false], 'initial state is reported')
+    emit()
+    assert.deepEqual(pushed, [false], 'unchanged state is not pushed again')
+    dirty = true; emit()
+    saving = true; dirty = false; emit()
+    assert.deepEqual(pushed, [false, true], 'saving counts as busy')
+    saving = false; emit()
+    assert.deepEqual(pushed, [false, true, false])
+    failing = true; dirty = true; emit()
+    assert.equal(retries.length, 1, 'a failed push is retried')
+    failing = false; retries.shift()()
+    assert.deepEqual(pushed, [false, true, false, true])
+    // Kotlin swapped its gate: the same state is sent again although it did not change.
+    const count = pushed.length
+    stop.resend()
+    assert.deepEqual(pushed.slice(count), [true], 'resend pushes an unchanged state')
+    stop()
+    assert.equal(pushed.at(-1), true, 'stopping holds the files')
+    dirty = false; emit()
+    assert.equal(pushed.at(-1), true, 'no push after stop')
+    // No bridge method (older app): nothing happens.
+    al.reportEditorBusy(source, {})()
+    al.reportEditorBusy(source, null)()
+    // The entry Kotlin calls.
+    const target = {}
+    const got = []
+    let resent = 0
+    const off = al.installStoryWrittenEntry(target, (files) => got.push(...files), () => { resent += 1 })
+    target[al.REPORT_BUSY_ENTRY]()
+    assert.equal(resent, 1)
+    target[al.STORY_WRITTEN_ENTRY](JSON.stringify(['scenes/abc123.json', 5, 'story.json']))
+    target[al.STORY_WRITTEN_ENTRY]('not json')
+    target[al.STORY_WRITTEN_ENTRY]('{}')
+    assert.deepEqual(got, ['scenes/abc123.json', 'story.json'])
+    off()
+    assert.equal(target[al.STORY_WRITTEN_ENTRY], undefined)
+    assert.equal(target[al.REPORT_BUSY_ENTRY], undefined)
+  })
 } finally {
   await vite.close()
 }

@@ -14,6 +14,8 @@ export type AndroidBridge = {
   /** Writes an exported file (base64) next to the story; returns the vault path. */
   saveExport(storyPath: string, fileName: string, base64: string): string
   saved(pathsJson: string): void
+  /** Pushes whether the editor holds unsaved or saving text (sync must then leave scenes and story.json alone). */
+  storyBusy?(busy: boolean): void
   close(): void
 }
 

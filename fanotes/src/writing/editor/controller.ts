@@ -240,7 +240,11 @@ export class WritingController {
    * and its next save writes the merge.
    */
   absorb(scenes: Scene[], manifest: StoryManifest | null) {
+    const wasDirty = this.isDirty()
     const changed = this.mergeIn(scenes, manifest, true)
+    // The document can turn clean without changing (it already equals what is on disk): listeners
+    // (the Android busy report) must hear that too.
+    if (!changed && wasDirty && !this.isDirty()) this.emit()
     if (changed) {
       // Undo would put back a document without the other device's text, and the next save would
       // record that as deleting it. The history ends here.

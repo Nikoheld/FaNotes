@@ -29,7 +29,8 @@ import { ReferencePane, type Reference } from './ReferencePane'
 import { ScenePanel, SnapshotCompare } from './ScenePanel'
 import { ExportDialog } from '../export/ExportDialog'
 import { androidBridge } from '../androidHost'
-import { registerStoryGate } from '../liveSync'
+import { installStoryWrittenEntry, reportEditorBusy } from '../androidLive'
+import { registerStoryGate, type StoryGate } from '../liveSync'
 import { paragraphForQuery, subscribeStoryReveal } from '../reveal'
 import { sanitizeManifest, sanitizeScene } from '../model/sanitize'
 import { mergeableManifest, mergeableScene } from '../syncMerge'
@@ -193,7 +194,7 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   useEffect(() => {
     if (!controller || !host) return
     let alive = true
-    const off = registerStoryGate({
+    const gate: StoryGate = {
       path,
       isBusy: () => controller.isDirty() || controller.isSaving(),
       changed: (relatives) => {
@@ -216,8 +217,12 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
           if (alive && controller.absorb(scenes, manifest)) setNotice(L('Änderungen von einem anderen Gerät wurden übernommen.', 'Changes from another device were merged in.'))
         })()
       },
-    })
-    return () => { alive = false; off() }
+    }
+    const off = registerStoryGate(gate)
+    // Android: sync is native, so the editor pushes its state and Kotlin calls back (androidLive.ts).
+    const stopReport = reportEditorBusy(controller, androidBridge())
+    const stopEntry = androidBridge() ? installStoryWrittenEntry(window as unknown as Record<string, unknown>, (relatives) => gate.changed(relatives), stopReport.resend) : () => undefined
+    return () => { alive = false; off(); stopReport(); stopEntry() }
   }, [controller, host, path])
   const version = controller?.version ?? 0
   useEffect(() => {

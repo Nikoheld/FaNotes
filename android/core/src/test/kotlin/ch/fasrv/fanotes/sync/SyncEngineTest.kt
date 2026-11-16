@@ -826,6 +826,37 @@ class SyncEngineTest {
         }
     }
 
+    @Test
+    fun aStoryFileTheEditorStartedOnDuringTheDownloadIsNotWritten() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Laptop")
+        val path = "Bücher/Roman.story/scenes/scene000001.json"
+        var armed = false
+        var mark = 0
+        // Free when sync looks first; the editor is dirty by the time the download is done.
+        val engineB = SyncEngine(SyncApi(server), SyncEngineOptions(platform = "android", deviceName = { "Tablet" }, automatic = { false },
+            isPathBusy = { it == path && armed && server.callsSince(mark).any { call -> call.method == "GET" && call.fileId != null } }))
+        engineB.attach(hostB)
+        try {
+            engineA.register("ada@example.com", "correct horse")
+            engineB.login("ada@example.com", "correct horse")
+            hostA.put(path, storyScene(Triple("para000001", "a0", "Eins vom Laptop")), 1_000)
+            engineA.syncNow()
+            mark = server.callCount()
+            armed = true
+            engineB.syncNow()
+            assertTrue(path !in hostB.files, "nothing was written while the editor held the file")
+            armed = false
+            engineB.syncNow()
+            assertEquals(listOf("Eins vom Laptop"), storyTexts(hostB, path))
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
     private fun engine(api: SyncApi, host: MemoryHost, name: String): SyncEngine {
         val engine = SyncEngine(api, SyncEngineOptions(platform = "android", deviceName = { name }, automatic = { true }))
         engine.attach(host)
