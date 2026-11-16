@@ -5947,6 +5947,25 @@ export default function App({ startupBootstrap }: AppProps) {
     } as React.CSSProperties
   }, [settings, sidebarVisible, theme])
 
+  // Portaled popovers, menus and dialogs render under document.body, outside .app-shell,
+  // so mirror the theme class and tokens there to keep them themed.
+  useEffect(() => {
+    const body = document.body
+    const themeClass = `app-theme-${theme}`
+    body.classList.add(themeClass)
+    const names = Object.keys(cssVars)
+    for (const name of names) body.style.setProperty(name, String((cssVars as Record<string, unknown>)[name]))
+    const root = document.documentElement
+    const scheme = getComputedStyle(body).colorScheme.includes('light') ? 'light' : 'dark'
+    root.dataset.theme = scheme
+    root.style.colorScheme = scheme
+    return () => {
+      body.classList.remove(themeClass)
+      for (const name of names) body.style.removeProperty(name)
+      document.documentElement.style.colorScheme = ''
+    }
+  }, [theme, cssVars])
+
   if (fatalError) return <div className="fatal-screen"><section className="fatal-card" role="alert"><div className="startup-mark is-error"><CircleAlert size={22} /></div><h1>FaNotes konnte nicht starten</h1><p>Deine Daten wurden nicht verändert. Prüfe den Vault und versuche es erneut.</p><code>{fatalError}</code><button className="primary-button" type="button" onClick={() => window.location.reload()}>Erneut versuchen</button></section></div>
   if (!bootstrap) return <div className="fatal-screen startup-screen"><section className="fatal-card startup-card" aria-live="polite"><div className="startup-mark"><PenLine size={22} /></div><h1>FaNotes öffnet deinen Schreibtisch</h1><p>Deine letzte Notiz erscheint gleich. Handschrift und weitere Werkzeuge werden danach im Hintergrund bereitgestellt.</p><div className="startup-progress" aria-hidden="true"><span /></div><small><LoaderCircle className="spin" size={12} /> Lokal und privat</small></section></div>
   if (popoutBookPath) {
