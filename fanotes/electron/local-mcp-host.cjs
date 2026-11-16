@@ -5,13 +5,42 @@
 // the settings page how a client can start the stdio server. No Electron
 // import (the caller passes what it knows), so it is testable in plain Node.
 
+const fs = require('node:fs')
 const path = require('node:path')
 const { createLocalMcpServer } = require('./local-mcp.cjs')
 const { createHttpTransport, loadTokenStore, regenerateToken, saveTokenStore } = require('./local-mcp-transport.cjs')
 const { normalizeExcluded } = require('./local-mcp-vault.cjs')
 
-const createLocalMcpHost = ({ userData, getState, packaged = false, execPath = process.execPath, appImage = '' }) => {
+// Files a headless `ELECTRON_RUN_AS_NODE=1 <AppImage> <copy>/fanotes-mcp.cjs` start needs. An AppImage
+// is a squashfs mount that only exists while the image runs, so the entry is copied next to the
+// user data, where a client can point at it (and the path survives updates of the AppImage).
+const MCP_RUNTIME_FILES = [
+  'fanotes-mcp.cjs', 'local-mcp.cjs', 'local-mcp-transport.cjs', 'local-mcp-vault.cjs', 'local-mcp-host.cjs',
+  'german-search.cjs', 'famd.cjs', 'famdV2.mjs', 'famdPack.mjs', 'noteAnnotation.mjs',
+]
+
+/** Copies the stdio server files to `<userData>/mcp`; returns the entry path, or '' when that failed. */
+const syncMcpRuntime = (userData, sourceDir = __dirname) => {
+  const target = path.join(userData, 'mcp')
+  try {
+    fs.mkdirSync(target, { recursive: true })
+    for (const name of MCP_RUNTIME_FILES) {
+      const from = path.join(sourceDir, name)
+      const to = path.join(target, name)
+      const data = fs.readFileSync(from)
+      let same = false
+      try { same = data.equals(fs.readFileSync(to)) } catch { same = false }
+      if (!same) fs.writeFileSync(to, data)
+    }
+    return path.join(target, 'fanotes-mcp.cjs')
+  } catch {
+    return ''
+  }
+}
+
+const createLocalMcpHost = ({ userData, getState, packaged = false, execPath = process.execPath, appImage = '', version }) => {
   const server = createLocalMcpServer({
+    version,
     context: () => {
       const state = getState()
       return {
@@ -64,7 +93,12 @@ const createLocalMcpHost = ({ userData, getState, packaged = false, execPath = p
 
   const info = () => {
     const store = loadTokenStore(userData)
-    const entry = path.join(__dirname, 'fanotes-mcp.cjs')
+    let entry = path.join(__dirname, 'fanotes-mcp.cjs')
+    let copied = false
+    if (appImage) {
+      const copy = syncMcpRuntime(userData)
+      if (copy) { entry = copy; copied = true }
+    }
     return {
       httpRunning: running !== null,
       httpUrl: `http://127.0.0.1:${running ?? store.port}/mcp`,
@@ -75,6 +109,7 @@ const createLocalMcpHost = ({ userData, getState, packaged = false, execPath = p
         appImage,
         execPath,
         entryPath: entry,
+        copied,
         platform: process.platform,
         userData,
       },
@@ -86,4 +121,4 @@ const createLocalMcpHost = ({ userData, getState, packaged = false, execPath = p
   return { apply, info, regenerate, stop }
 }
 
-module.exports = { createLocalMcpHost }
+module.exports = { createLocalMcpHost, syncMcpRuntime, MCP_RUNTIME_FILES }

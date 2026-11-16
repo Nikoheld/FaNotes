@@ -12,19 +12,27 @@ type Launch = { command: string; args: string[]; env: Record<string, string> }
 /** How a client starts the stdio server for this installation. */
 export const mcpLaunch = (info: LocalMcpInfo): Launch => {
   const { stdio } = info
+  // AppImage: run the copied entry as plain Node (headless, no display or sandbox flags needed);
+  // `--mcp` starts the whole Electron app and is only the fallback when the copy failed.
+  if (stdio.appImage && stdio.copied) return { command: stdio.appImage, args: [stdio.entryPath], env: { ELECTRON_RUN_AS_NODE: '1' } }
   if (stdio.appImage) return { command: stdio.appImage, args: ['--mcp'], env: {} }
   if (stdio.packaged) return { command: stdio.execPath, args: [stdio.entryPath], env: { ELECTRON_RUN_AS_NODE: '1' } }
   return { command: 'node', args: [stdio.entryPath], env: {} }
 }
 
-const quote = (value: string) => (/^[\w./:@=+-]+$/u.test(value) ? value : `"${value.replace(/(["\\$`])/gu, '\\$1')}"`)
+// Windows shells take backslashes literally: only wrap the value in plain double quotes there.
+const quote = (value: string, platform = '') => {
+  if (/^[\w./:@=+\\-]+$/u.test(value) && (platform === 'win32' || !value.includes('\\'))) return value
+  return platform === 'win32' ? `"${value}"` : `"${value.replace(/(["\\$`])/gu, '\\$1')}"`
+}
 
 export const mcpSnippets = (info: LocalMcpInfo, token: string) => {
   const launch = mcpLaunch(info)
   const envEntry = Object.keys(launch.env).length ? { env: launch.env } : {}
   const stdioJson = JSON.stringify({ mcpServers: { fanotes: { command: launch.command, args: launch.args, ...envEntry } } }, null, 2)
   const envFlags = Object.entries(launch.env).map(([key, value]) => `-e ${key}=${value}`).join(' ')
-  const claudeCode = `claude mcp add fanotes${envFlags ? ` ${envFlags}` : ''} -- ${[launch.command, ...launch.args].map(quote).join(' ')}`
+  // Options go before the server name (documented order); user scope so it is not tied to one project.
+  const claudeCode = `claude mcp add --scope user${envFlags ? ` ${envFlags}` : ''} fanotes -- ${[launch.command, ...launch.args].map((part) => quote(part, info.stdio.platform)).join(' ')}`
   const httpJson = JSON.stringify({ mcpServers: { fanotes: { type: 'http', url: info.httpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2)
   const claudeCodeHttp = `claude mcp add --transport http fanotes ${info.httpUrl} --header "Authorization: Bearer ${token}"`
   return { stdioJson, claudeCode, httpJson, claudeCodeHttp }
@@ -119,6 +127,8 @@ export function McpSettingsSection({ settings, update }: Props) {
       <div className="setting-card">
         <div className="setting-card-title"><TerminalSquare size={16} /><span>Verbinden über stdio</span></div>
         {error && <div className="setting-callout" role="alert">{error}</div>}
+        {info && !settings.mcpEnabled && <div className="setting-callout">Der Zugriff ist noch aus. Die Konfiguration kann schon kopiert werden. Das KI-Programm sieht die Werkzeuge, sobald du den Zugriff erlaubst.</div>}
+        {info?.stdio.appImage && !info.stdio.copied && <div className="setting-callout">Dieser Befehl startet die komplette App und braucht eine Bildschirmsitzung (DISPLAY). Ohne Anzeige, etwa per SSH, funktioniert er nicht.</div>}
         {snippets && masked && (
           <>
             <Snippet label="Claude Desktop (claude_desktop_config.json)" text={snippets.stdioJson} display={masked.stdioJson} />
