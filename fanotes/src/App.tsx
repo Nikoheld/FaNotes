@@ -927,7 +927,7 @@ export default function App({ startupBootstrap }: AppProps) {
   /** Counts note opens. A text box job that began in an earlier open must not touch the boxes of the next one. */
   const textFieldSessionRef = useRef(0)
   const refreshNoteTextFieldsRef = useRef<() => void>(() => undefined)
-  const flushNoteTextFieldsRef = useRef<() => Promise<boolean>>(async () => true)
+  const flushNoteTextFieldsRef = useRef<(closing?: boolean) => Promise<boolean>>(async () => true)
   const noteBackupsRef = useRef<NoteBackupSnapshot[]>([])
   const subjectBooksRef = useRef<SubjectBookRecord[]>([])
   const subjectBooksDiskRef = useRef<SubjectBookRecord[]>([])
@@ -3017,7 +3017,8 @@ export default function App({ startupBootstrap }: AppProps) {
    * process merges it into the boxes stored right now. Another window's boxes
    * therefore survive, and they come back in the result.
    */
-  const flushNoteTextFields = useCallback((): Promise<boolean> => {
+  /** `closing`: the page is going away, so the save must not wait behind a queued re-read. */
+  const flushNoteTextFields = useCallback((closing = false): Promise<boolean> => {
     if (textFieldTimerRef.current !== null) {
       window.clearTimeout(textFieldTimerRef.current)
       textFieldTimerRef.current = null
@@ -3035,7 +3036,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const fields = noteTextFieldsRef.current
     const session = textFieldSessionRef.current
     textFieldDirtyRef.current = false
-    return textFieldQueueRef.current.run(async () => {
+    const job = async () => {
       try {
         const base = textFieldBasesRef.current.get(path) ?? []
         const persist = persistableNoteTextFields(fields, base)
@@ -3056,7 +3057,9 @@ export default function App({ startupBootstrap }: AppProps) {
         toast(error instanceof Error ? error.message : 'Das Textfeld konnte nicht gespeichert werden.', 'error')
         return false
       }
-    })
+    }
+    // Only re-reads may be queued ahead of a closing save; a running save keeps its order.
+    return closing && textFieldQueueRef.current.writes() === 0 ? job() : textFieldQueueRef.current.run(job)
   }, [absorbStoredTextFields, pushEditableShare, toast])
   flushNoteTextFieldsRef.current = flushNoteTextFields
 
@@ -4575,7 +4578,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const saveBoxesOnHide = () => {
       if (document.visibilityState === 'hidden') void flushNoteTextFieldsRef.current()
     }
-    const saveBoxesOnPageHide = () => { void flushNoteTextFieldsRef.current() }
+    const saveBoxesOnPageHide = () => { void flushNoteTextFieldsRef.current(true) }
     window.addEventListener('beforeunload', guard)
     window.addEventListener('pagehide', saveBoxesOnPageHide)
     document.addEventListener('visibilitychange', saveBoxesOnHide)

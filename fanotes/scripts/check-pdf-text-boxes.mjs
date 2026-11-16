@@ -16,7 +16,7 @@ const server = await createServer({
   root,
   appType: 'spa',
   logLevel: 'error',
-  server: { host: '127.0.0.1', port: 0, fs: { strict: false } },
+  server: { host: '127.0.0.1', port: Number(process.env.FANOTES_CHECK_PORT ?? 0), fs: { strict: false } },
 })
 
 await server.listen()
@@ -419,7 +419,7 @@ const pdfPath = join(mkdtempSync(join(tmpdir(), 'fanotes-pdf-text-')), 'Textfeld
 writeFileSync(pdfPath, buildPdf(2))
 
 const address = server.httpServer.address()
-const base = `http://127.0.0.1:${address.port}/?web`
+const base = process.env.FANOTES_CHECK_URL ?? `http://127.0.0.1:${address.port}/?web`
 const browser = await browserType.launch({ executablePath: chromium, args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'] })
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US' })
 const page = await context.newPage()
@@ -444,7 +444,15 @@ const noteOnDisk = () => page.evaluate(async () => {
   return walk(await window.fanotes.getTree()).find((entry) => /Textfelder\.pdf$/iu.test(entry.relativePath))?.relativePath ?? null
 })
 const storedBoxes = async () => page.evaluate(async (path) => (await window.fanotes.readNoteCompanion(path))?.textFields ?? [], await noteOnDisk())
-const storedFamd = async () => page.evaluate(async (path) => window.fanotes.readFile(path.replace(/\.pdf$/iu, '.famd')), await noteOnDisk())
+// The raw .famd record from IndexedDB (readFile only returns the markdown part).
+const storedFamd = async () => page.evaluate(async (path) => {
+  const databases = [{ name: 'fanotes-web-vault' }]
+  const name = databases.find((item) => /fanotes/iu.test(item.name ?? ''))?.name
+  const db = await new Promise((resolve, reject) => { const r = indexedDB.open(name); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error) })
+  const record = await new Promise((resolve, reject) => { const r = db.transaction('files').objectStore('files').get(path.replace(/\.pdf$/iu, '.famd')); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error) })
+  db.close()
+  return record?.content ?? ''
+}, await noteOnDisk())
 const settle = (ms = 350) => page.waitForTimeout(ms)
 const scrollPaperTo = async (n) => {
   await page.evaluate((index) => {
@@ -624,6 +632,7 @@ try {
   })
   assert.equal(await idleGuard(), false, 'nothing unsaved: closing the tab does not ask')
   await page.locator('[data-note-text-field]').first().click()
+  await page.keyboard.press('Control+End')
   await page.keyboard.type(' +x')
   assert.equal(await idleGuard(), true, 'a typed box that is not saved yet makes the tab ask before it closes')
   await page.evaluate(() => {
@@ -637,12 +646,13 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
   await settle(250)
   assert.ok((await storedBoxes()).some((item) => item.text.endsWith(' +x!')), 'pagehide saves the box too')
+  await page.evaluate(() => window.dispatchEvent(new Event('pageshow'))) // the synthetic pagehide above did not really leave the page
   await settle(1200)
   assert.equal(await idleGuard(), false, 'once saved the tab closes without asking')
   assert.ok((await storedBoxes()).every((item) => item.updatedAt > 0), 'every stored box carries its edit stamp')
 
   // 10. deleting a box removes it for good and leaves a tombstone, kept apart from the live boxes.
-  assert.equal((await storedFamd()).includes('textFieldTombstones'), false, 'no tombstone before anything was deleted')
+  assert.equal((famdTs.parseFamd(await storedFamd()).payload?.textFieldTombstones ?? []).length, 0, 'no tombstone before anything was deleted')
   await scrollPaperTo(2)
   const doomed = (await boxes()).find((item) => item.value.startsWith('Seite zwei'))
   await page.locator(`[data-note-text-field="${doomed.id}"]`).click()
@@ -650,8 +660,66 @@ try {
   await settle(900)
   assert.equal((await boxes()).length, 1)
   assert.equal((await storedBoxes()).length, 1, 'the deleted box is gone from the stored list')
-  const afterDelete = await storedFamd()
-  assert.ok(afterDelete.includes('textFieldTombstones') && afterDelete.includes(doomed.id), 'the delete left a tombstone for that box')
+  const tombstones = famdTs.parseFamd(await storedFamd()).payload?.textFieldTombstones ?? []
+  assert.ok(tombstones.some((item) => item.id === doomed.id), 'the delete left a tombstone for that box')
+
+  // 11. two windows on the same note: a box added in each survives, and an edit in one does not drop the other's box.
+  const openNoteIn = async (p) => {
+    await p.goto(base, { waitUntil: 'domcontentloaded' })
+    await p.waitForSelector('.file-tree__entry-button', { timeout: 90_000 })
+    await p.locator('.file-tree__entry-button', { hasText: 'Textfelder' }).first().click()
+    await p.waitForSelector('[data-note-text-field]', { timeout: 60_000 })
+    await p.waitForTimeout(1200)
+  }
+  const addBoxIn = async (p, fx, fy, text) => {
+    await p.locator(TOOL).click()
+    await p.evaluate(() => document.querySelector('[data-pdf-page="1"]').scrollIntoView({ block: 'start', inline: 'start' }))
+    await p.waitForTimeout(300)
+    const rect = await p.evaluate(() => {
+      const r = document.querySelector('[data-pdf-page="1"]').getBoundingClientRect()
+      return { x: r.x, y: r.y, w: r.width, h: r.height }
+    })
+    await p.mouse.click(Math.min(rect.x + rect.w * fx, 1200), Math.min(rect.y + rect.h * fy, 860))
+    await p.waitForTimeout(400)
+    await p.keyboard.type(text)
+  }
+  const valuesIn = (p) => p.evaluate(() => [...document.querySelectorAll('[data-note-text-field]')].map((node) => node.value).sort())
+  const winA = page
+  const winB = await context.newPage()
+  winB.on('pageerror', (error) => pageErrors.push(String(error)))
+  await openNoteIn(winB)
+  const baseline = (await valuesIn(winA)).length
+  await addBoxIn(winA, 0.2, 0.45, 'from window A')
+  await addBoxIn(winB, 0.6, 0.45, 'from window B')
+  await settle(1500)
+  await winA.evaluate(() => { const n = [...document.querySelectorAll('[data-note-text-field]')].find((x) => x.value.startsWith('from window A')); n.focus() })
+  await winA.keyboard.press('End')
+  await winA.keyboard.type(' edited')
+  await settle(1500)
+  await winA.reload({ waitUntil: 'domcontentloaded' })
+  await winB.reload({ waitUntil: 'domcontentloaded' })
+  for (const w of [winA, winB]) {
+    await w.waitForSelector('.file-tree__entry-button', { timeout: 90_000 })
+    await w.locator('.file-tree__entry-button', { hasText: 'Textfelder' }).first().click()
+    await w.waitForSelector('[data-note-text-field]', { timeout: 60_000 })
+    await w.waitForTimeout(1500)
+    const values = await valuesIn(w)
+    assert.equal(values.length, baseline + 2, `both windows' boxes are present after reload: ${JSON.stringify(values)}`)
+    assert.ok(values.includes('from window A edited'), 'window A edit kept')
+    assert.ok(values.includes('from window B'), "window B's box kept")
+  }
+  await winB.close()
+
+  // 12. closing the tab within the 650 ms debounce still saves the typed text.
+  const closer = await context.newPage()
+  closer.on('dialog', (dialog) => dialog.accept().catch(() => undefined))
+  await openNoteIn(closer)
+  await addBoxIn(closer, 0.7, 0.35, 'typed then closed')
+  await closer.close({ runBeforeUnload: true })
+  const reopened = await context.newPage()
+  await openNoteIn(reopened)
+  assert.ok((await valuesIn(reopened)).includes('typed then closed'), 'text typed right before closing the tab is saved')
+  await reopened.close()
   assert.deepEqual(pageErrors, [], 'no page errors')
   console.log('pdf text box browser check ok')
 } finally {
