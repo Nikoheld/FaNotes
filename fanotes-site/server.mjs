@@ -26,6 +26,7 @@ import { loadGithubReleases, pickGithubPackage } from './github-release.mjs'
 import { startSystemdWatchdog } from './systemd-notify.mjs'
 import { readBackupStatus } from './backup-status.mjs'
 import { createReleaseCache } from './release-cache.mjs'
+import { readReleaseShare } from './release-list.mjs'
 import { FAVICON_TARGET, clientAddress, createPublicLimiter, publicCacheControl } from './public-http.mjs'
 import {
   DELTA_ROUTE_PATTERN,
@@ -139,13 +140,12 @@ const updateSigningMaterial = () => {
   return updateSigningMaterialPromise
 }
 
-const checksumMap = async () => {
-  const text = await fs.readFile(join(RELEASE_DIR, 'SHA256SUMS'), 'utf8')
-  return new Map(text.split(/\r?\n/u).flatMap((line) => {
-    const match = /^([a-f0-9]{64})\s+\*?(.+)$/iu.exec(line.trim())
-    return match ? [[match[2], match[1].toLowerCase()]] : []
-  }))
-}
+const checksumMapFromText = (text) => new Map(String(text).split(/\r?\n/u).flatMap((line) => {
+  const match = /^([a-f0-9]{64})\s+\*?(.+)$/iu.exec(line.trim())
+  return match ? [[match[2], match[1].toLowerCase()]] : []
+}))
+
+const checksumMap = async () => checksumMapFromText(await fs.readFile(join(RELEASE_DIR, 'SHA256SUMS'), 'utf8'))
 
 let trustedChecksumCache = null
 const releaseDigestCache = new Map()
@@ -300,10 +300,11 @@ const discoverPlatformRelease = async (platform, entries, checksums, channel = '
 
 const discoverReleases = async (channel = 'stable') => {
   if (!UPDATE_CHANNELS.includes(channel)) throw new Error('Unbekannter Release-Kanal.')
-  const [entries, checksums] = await Promise.all([
-    fs.readdir(RELEASE_DIR, { withFileTypes: true }),
-    checksumMap(),
-  ])
+  // A child, not fs.readdir: a hung share must not keep a libuv thread, and a
+  // second listing waits until that child has actually exited.
+  const share = await readReleaseShare(RELEASE_DIR)
+  const entries = share.files.map((name) => ({ name, isFile: () => true }))
+  const checksums = checksumMapFromText(share.checksums)
   const [linux, windows] = await Promise.all([
     discoverPlatformRelease('linux', entries, checksums, channel),
     discoverPlatformRelease('windows', entries, checksums, channel),
