@@ -45,8 +45,10 @@ export const parseMark = (raw) => {
 }
 
 export const parseWeight = (raw) => {
-  const value = Number(String(raw ?? '').trim().replace(',', '.'))
-  if (!Number.isFinite(value) || value <= 0 || value > 100) return 1
+  const text = String(raw ?? '').trim().replace(',', '.')
+  if (!text) return 1
+  const value = Number(text)
+  if (!Number.isFinite(value) || value < 0 || value > 100) return 1
   return value
 }
 
