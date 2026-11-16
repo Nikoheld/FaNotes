@@ -194,7 +194,7 @@ const EXTRA_VISIBLE = [
 const runOnce = async () => {
   const harvested = [...new Set([...harvest(), ...EXTRA_VISIBLE])].sort((left, right) => left.localeCompare(right, 'de'))
   const settingsSource = readFileSync(new URL('../src/components/SettingsModal.tsx', import.meta.url), 'utf8')
-  assert.match(settingsSource, /\{`Anpassung · \$\{section\.count\} Optionen`\}/)
+  assert.match(settingsSource, /`Anpassung · \$\{section\.count\} Optionen`/)
   assert.doesNotMatch(settingsSource, /Anpassung · \{section\.count\} Optionen/)
   assert.ok(harvested.includes('Experimentell'), 'harvest missed Experimentell')
   assert.ok(harvested.includes('Blatt'), 'harvest missed Blatt toolbar chrome')

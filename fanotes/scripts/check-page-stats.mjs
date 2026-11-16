@@ -226,7 +226,7 @@ const runOnce = () => {
   assert.deepEqual(reloaded, closed, 'the full record must survive the .famd round trip')
   assert.deepEqual(parsePageStats(JSON.parse(JSON.stringify(reloaded))), reloaded, 'parsing is idempotent')
   assert.equal(JSON.stringify(parsePageStats(reloaded)), JSON.stringify(reloaded), 'key order is stable for sameJson checks')
-  assert.match(persistedNote, /"schema":"fanotes-famd-v1"/u)
+  assert.match(persistedNote, /"schema":"fanotes-famd-v2"/u)
   const visible = stripFamdPayload(persistedNote)
   assert.equal(visible.includes('fanotes-famd'), false)
   assert.equal(visible.includes('"schema"'), false)

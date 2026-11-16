@@ -4,6 +4,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// The Tauri/Rust desktop shell was abandoned (PR #1163 closed). Electron is the
+// only shipped host and src-tauri/crates/fanotes-host no longer track preload.cjs,
+// so this parity check guards nothing that ships. Set FANOTES_CHECK_TAURI=1 to run it.
+if (process.env.FANOTES_CHECK_TAURI !== '1') {
+  console.log('Tauri-Kanalparität übersprungen: Die Tauri-Shell wurde aufgegeben (PR #1163), Electron ist der einzige Host. FANOTES_CHECK_TAURI=1 erzwingt die Prüfung.')
+  process.exit(0)
+}
+
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = path.resolve(appRoot, '..')
 const read = (relative) => fs.readFileSync(path.join(appRoot, relative), 'utf8')
