@@ -1224,6 +1224,20 @@ export const evaluateSyncWrite = ({ current, base, nextSize, blank, clear, archi
   return 'accept'
 }
 
+// The row was recorded from bytes that were already on disk. Its metadata was
+// copied, so only this same body may replace that metadata. A blank claim is
+// still refused, and a different body stays stale.
+const heldMetaCanReplace = (current, nextSize, sha) => Boolean(
+  current && !current.deleted && current.metaHeld === true
+  && current.sha256 === sha
+  && (Number(current.size) || 0) === nextSize
+)
+
+const decisionForHeldMeta = (decision, current, nextSize, sha, blank, clear) => {
+  if (decision !== 'stale' || !heldMetaCanReplace(current, nextSize, sha)) return decision
+  return rejectsBlankOverwrite(current, nextSize, blank, clear) ? 'guard' : 'accept'
+}
+
 const listRevisionFiles = async (directory) => {
   let names
   try {
@@ -1482,6 +1496,8 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
     updatedAt: nowIso(),
     deviceId: matchesRequest ? incoming.deviceId : current.deviceId,
   }
+  // Metadata copied from the previous note does not describe this body.
+  if (!matchesRequest) entry.metaHeld = true
   await recordLiveBlob(accountId, table, entry)
   return { matchesRequest, entry }
 }
@@ -1530,7 +1546,7 @@ const handlePutFile = async (request, response, auth, fileId) => {
     const archivedSize = current?.deleted
       ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
       : 0
-    const decision = evaluateSyncWrite({ current: current ?? null, base, nextSize: incoming.size, blank, clear, archivedSize })
+    const decision = decisionForHeldMeta(evaluateSyncWrite({ current: current ?? null, base, nextSize: incoming.size, blank, clear, archivedSize }), current, incoming.size, declaredSha, blank, clear)
     if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
     if (decision === 'guard') {
       committed = await moveToQuarantine(auth.account.id, fileId, base, incoming.path)
@@ -2028,7 +2044,7 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
   const archivedSize = current?.deleted
     ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
     : 0
-  const decision = evaluateSyncWrite({ current, base, nextSize: stat.size, blank, clear, archivedSize })
+  const decision = decisionForHeldMeta(evaluateSyncWrite({ current, base, nextSize: stat.size, blank, clear, archivedSize }), current, stat.size, declaredSha, blank, clear)
   if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
   if (decision === 'guard') return guardRejected(request, response, current)
   if (current && !current.deleted && current.sha256 === declaredSha && Number(current.size) === stat.size) {
@@ -2108,7 +2124,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     const archivedSize = current?.deleted
       ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
       : 0
-    const decision = evaluateSyncWrite({ current: current ?? null, base, nextSize: meta.size, blank, clear, archivedSize })
+    const decision = decisionForHeldMeta(evaluateSyncWrite({ current: current ?? null, base, nextSize: meta.size, blank, clear, archivedSize }), current, Number(meta.size) || 0, declaredSha, blank, clear)
     if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
     if (decision === 'guard') {
       // The live blob stays. Drop the partial only after the rejected body is
@@ -2326,6 +2342,10 @@ export const handleSyncRequest = async (request, response, url) => {
     }
     fail(404, 'Diesen Sync-Endpunkt gibt es nicht.')
   } catch (error) {
+    if (response.headersSent || response.writableEnded) {
+      // The client already has this response. A cleanup error must not start a second one.
+      return true
+    }
     if (error instanceof SyncApiError) {
       sendJson(request, response, error.status, { error: error.publicMessage, ...error.extra }, error.status === 429 && error.extra?.retryAfter ? { 'Retry-After': String(error.extra.retryAfter) } : {})
     } else {
