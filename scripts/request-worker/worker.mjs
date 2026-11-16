@@ -53,9 +53,11 @@ class Job {
 
   async execute() {
     if (this.state.phase !== 'claimed') this.log.info(`resuming request ${this.id} in phase ${this.state.phase}`)
-    try { await this.drive() } catch (e) { await this.fail(`Interner Fehler: ${this.log.redact(e.message)}`) }
-    // Stopped by SIGTERM mid-request: keep state and worktree so the next start resumes.
-    if (this.stopping && !['done', 'failed'].includes(this.state.phase)) return false
+    if (this.state.phase === 'failed' && this.state.reported === false) await this.reportFailure()
+    else try { await this.drive() } catch (e) { await this.fail(`Interner Fehler: ${this.log.redact(e.message)}`) }
+    // Stopped by SIGTERM mid-request (or before the failure reached the server): keep state and
+    // worktree so the next start resumes.
+    if (this.stopping && (!['done', 'failed'].includes(this.state.phase) || this.state.reported === false)) return false
     try { await removeWorktree(this.config, this.id, { deleteBranch: this.state.phase === 'done' }) } catch (e) { this.log.warn('cleanup: ' + e.message) }
     return true
   }
@@ -63,8 +65,26 @@ class Job {
   async fail(reason) {
     if (this.state.phase === 'done' || this.state.phase === 'failed') return
     this.log.warn(`request ${this.id} failed: ${reason}`)
-    this.go('failed', { reason })
-    await this.postStatus({ status: 'failed', reason })
+    this.go('failed', { reason, reported: false })
+    await this.reportFailure()
+  }
+  // The server keeps a request "working" until it hears otherwise, and only one request may be
+  // working at a time, so a lost failure report would block the whole queue. Keep trying (also
+  // across restarts) until the server has the failure or refuses it.
+  async reportFailure() {
+    for (let i = 0; !this.stopping; i++) {
+      try { await this.api.status(this.id, { status: 'failed', reason: this.state.reason }) } catch (e) {
+        if (!(e.status >= 400 && e.status < 500 && e.status !== 429)) {
+          this.log.warn(`failure report for ${this.id} failed (${i + 1}): ${e.message}`)
+          await this.sleep(Math.min(60_000, 1000 * 2 ** i))
+          continue
+        }
+        this.log.warn(`failure report for ${this.id} refused: ${e.message}`)
+      }
+      this.state = { ...this.state, reported: true }
+      this.save()
+      return
+    }
   }
   // The owner cancelled: the server already moved the request to `rejected`; nothing to post.
   cancelled() {
