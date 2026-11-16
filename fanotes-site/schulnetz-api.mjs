@@ -324,12 +324,15 @@ export const createSchulnetzRuntime = (options = {}) => {
     const link = await readJson(file)
     // A missing or broken file can start again. A file that is there but not this link, including a push token that is not a token, must not look connected, or the next link drops that token and the next upload replaces the snapshot.
     if (link == null) return null
+    const timeKnown = (value) => value == null || value === '' || (typeof value === 'string' && Number.isFinite(Date.parse(value)))
     const known = plainObject(link)
       && (link.fcmTokens == null || (Array.isArray(link.fcmTokens) && link.fcmTokens.every(isValidFcmToken)))
       && (link.pushKeys == null || plainObject(link.pushKeys))
       && (link.settings == null || plainObject(link.settings))
       // A saved revision that is not a count must not look new, or the next upload replaces the count.
       && (link.revision == null || (typeof link.revision === 'number' && Number.isFinite(link.revision)))
+      // A saved sign-in time that is not a time must not look expired, or the next poll deletes the session.
+      && timeKnown(link.cookiesSavedAt) && timeKnown(link.accessExpiresAt)
     if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)
