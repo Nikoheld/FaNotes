@@ -3575,6 +3575,7 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .ribbon-status .sync-status-item.is-idle { color: var(--success); }
 .ribbon-status .sync-status-item.is-error { color: var(--danger); }
 .ribbon-status .sync-status-item.is-offline { color: var(--text-muted); }
+.ribbon-status .sync-status-item.is-paused { color: var(--warning); }
 .ribbon-status .sync-status-item em { display: inline-grid; min-width: 14px; height: 14px; padding: 0 4px; place-items: center; border-radius: 7px; background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); font-size: 12px; font-style: normal; font-weight: 700; }
 .sync-mode-switch { margin-left: auto; display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); text-transform: none; letter-spacing: 0; }
 .sync-mode-switch button { min-height: 24px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 650; cursor: pointer; }
@@ -3590,8 +3591,10 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .sync-status-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 13px; padding: 15px; border-bottom: 1px solid var(--border); background: linear-gradient(125deg, rgba(var(--accent-rgb), .12), transparent); }
 .sync-status-card.is-error .sync-status-hero { background: linear-gradient(125deg, color-mix(in srgb, var(--danger) 12%, transparent), transparent); }
 .sync-status-card.is-offline .sync-status-hero { background: linear-gradient(125deg, color-mix(in srgb, var(--text-muted) 10%, transparent), transparent); }
+.sync-status-card.is-paused .sync-status-hero { background: linear-gradient(125deg, color-mix(in srgb, var(--warning) 12%, transparent), transparent); }
 .sync-status-icon { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid rgba(var(--accent-rgb), .2); border-radius: 12px; color: var(--accent-readable); background: rgba(var(--accent-rgb), .16); }
 .sync-status-card.is-error .sync-status-icon { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, transparent); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.sync-status-card.is-paused .sync-status-icon { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 30%, transparent); background: color-mix(in srgb, var(--warning) 10%, transparent); }
 .sync-status-hero > div:nth-child(2) { min-width: 0; display: grid; gap: 2px; }
 .sync-status-hero strong { color: var(--text); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sync-status-hero p { margin: 0; color: var(--text-muted); font-size: 12px; }
