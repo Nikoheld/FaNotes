@@ -328,6 +328,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       && (link.fcmTokens == null || (Array.isArray(link.fcmTokens) && link.fcmTokens.every(isValidFcmToken)))
       && (link.pushKeys == null || plainObject(link.pushKeys))
       && (link.settings == null || plainObject(link.settings))
+      // A saved revision that is not a count must not look new, or the next upload replaces the count.
+      && (link.revision == null || (typeof link.revision === 'number' && Number.isFinite(link.revision)))
     if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)

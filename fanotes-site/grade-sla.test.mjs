@@ -1303,3 +1303,67 @@ test('a link that is not the known shape is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a link revision that is not a count is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-link-revision-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.93')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const dir = join(root, 'accounts', guest.accountId)
+    const linkFile = join(dir, 'link.json')
+    const snapshot = join(dir, 'snapshot.json')
+    const keptSnapshot = '{"grades":[{"id":"g-keep"}]}\n'
+    await writeFile(snapshot, keptSnapshot, { mode: 0o600 })
+    const call = async (method, path, body) => {
+      const request = {
+        method,
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.93' },
+        async *[Symbol.asyncIterator]() { if (body != null) yield Buffer.from(body) },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL(`http://127.0.0.1/api/v1/schulnetz${path}`))
+      return status
+    }
+    const live = JSON.parse(await readFile(linkFile, 'utf8'))
+    const keep = async (revision) => {
+      const stored = JSON.stringify({ ...live, revision })
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call('GET', '/status'), 500)
+      assert.equal(await call('PUT', '/snapshot', '{"grades":[]}'), 500)
+      await assert.rejects(() => runtime.pollAccount(guest.accountId), (error) => error?.code === 'EBADMSG')
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await keep('12')
+    await keep(true)
+    await keep({ n: 1 })
+    await keep('')
+    const open = async (revision) => {
+      const next = { ...live }
+      if (revision === undefined) delete next.revision
+      else next.revision = revision
+      const stored = JSON.stringify(next)
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call('GET', '/status'), 200)
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await open(12)
+    await open(0)
+    await open(-1)
+    await open(undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
