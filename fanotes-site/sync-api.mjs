@@ -483,19 +483,87 @@ const applyLoggedEntry = (table, entry) => {
   table.bytes += nextBytes - previousBytes
 }
 
+// A crash can leave a partial last line. Appending onto it joins the two into
+// one invalid line, so a restart skips the revision that was just accepted.
+const repairLogTail = async (handle) => {
+  let size = (await handle.stat()).size
+  if (size === 0) return 0
+  const last = Buffer.alloc(1)
+  const readLast = await handle.read(last, 0, 1, size - 1)
+  if (readLast.bytesRead === 1 && last[0] === 0x0a) return size
+  const chunk = Buffer.alloc(64 * 1024)
+  let pos = size
+  let newlineAt = -1
+  while (pos > 0) {
+    const start = Math.max(0, pos - chunk.length)
+    const length = pos - start
+    const read = await handle.read(chunk, 0, length, start)
+    if (!read.bytesRead) break
+    for (let index = read.bytesRead - 1; index >= 0; index -= 1) {
+      if (chunk[index] === 0x0a) {
+        newlineAt = start + index
+        break
+      }
+    }
+    if (newlineAt >= 0 || start === 0) break
+    pos = start
+  }
+  const tailStart = newlineAt + 1
+  const tailLength = size - tailStart
+  let keep = false
+  if (tailLength > 0 && tailLength <= 1024 * 1024) {
+    const tail = Buffer.alloc(tailLength)
+    const readTail = await handle.read(tail, 0, tailLength, tailStart)
+    if (readTail.bytesRead === tailLength) {
+      try {
+        const parsed = JSON.parse(tail.toString('utf8'))
+        const revision = Number(parsed?.revision)
+        keep = Boolean(parsed && FILE_ID_PATTERN.test(parsed.id) && Number.isInteger(revision) && revision >= 0)
+      } catch {
+        keep = false
+      }
+    }
+  }
+  if (keep) {
+    const newline = Buffer.from('\n')
+    const written = await handle.write(newline, 0, 1, size)
+    if (written.bytesWritten !== 1) throw new Error('change log was not written')
+    return size + 1
+  }
+  // A torn log tail must not swallow the next revision.
+  await handle.truncate(tailStart)
+  return tailStart
+}
+
+const writeAt = async (handle, payload, position) => {
+  let written = 0
+  while (written < payload.length) {
+    const result = await handle.write(payload, written, payload.length - written, position + written)
+    if (!result.bytesWritten) throw new Error('change log was not written')
+    written += result.bytesWritten
+  }
+}
+
 const appendChange = async (accountId, table, entry) => {
   // Tests set this so a failed log write cannot publish a revision. Production
   // leaves it unset. A thrown error here must leave the in-memory table as it was.
   if (process.env.FANOTES_SYNC_APPEND_FAIL === '1') throw new Error('change log was not written')
   const directory = accountDirectory(accountId)
-  const line = `${JSON.stringify(entry)}\n`
-  const handle = await fs.open(safeJoin(directory, 'changes.jsonl'), 'a', 0o600)
+  const logPath = safeJoin(directory, 'changes.jsonl')
+  const line = Buffer.from(`${JSON.stringify(entry)}\n`)
+  let handle
+  try {
+    handle = await fs.open(logPath, 'r+')
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    handle = await fs.open(logPath, 'wx', 0o600)
+  }
   let offset = 0
   let appended = false
   try {
-    offset = (await handle.stat()).size
+    offset = await repairLogTail(handle)
     appended = true
-    await handle.writeFile(line)
+    await writeAt(handle, line, offset)
     await handle.sync()
     // The first append creates the log. The file sync does not make that new
     // name durable, and the response is sent only after this returns.
@@ -521,7 +589,7 @@ const appendChange = async (accountId, table, entry) => {
   }
   // The revision becomes visible only after the log line is durable.
   applyLoggedEntry(table, entry)
-  table.logBytes += Buffer.byteLength(line)
+  table.logBytes = offset + line.length
   if (table.logBytes > COMPACT_LOG_BYTES) await compactTable(accountId, table)
 }
 
