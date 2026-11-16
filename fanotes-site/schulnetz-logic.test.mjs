@@ -33,6 +33,7 @@ import {
   prepareAgendaRead,
   normalizeSchoolBase,
   parseGradesHtml,
+  parseWeight,
   parseRawSnapshot,
   pluspunkte,
   redactSecrets,
@@ -1608,6 +1609,19 @@ test('seal round trip uses aes-256-gcm', () => {
   assert.throws(() => openToken(key, sealed))
 })
 
+
+test('a grade weighted zero does not count as weight one', () => {
+  assert.equal(parseWeight(''), 1)
+  assert.equal(parseWeight('0'), 0)
+  assert.equal(parseWeight('0,5'), 0.5)
+  assert.equal(parseWeight('-1'), 1)
+  const html = `<table><tr><td>Chemie-K26A-1 Chemie</td><td>5.0</td></tr><tr><td><table>
+    <tr><td>02.03.2026</td><td>Übung</td><td>5.0</td><td>0</td></tr>
+  </table></td></tr></table>`
+  const [grade] = parseGradesHtml(html)
+  assert.equal(grade.mark, 5)
+  assert.equal(grade.weight, 0)
+})
 
 test('two exams on the same day with the same mark stay distinct and are not announced again', () => {
   const html = `<table><tr><td>Chemie-K26A-1 Chemie</td><td>5.0</td></tr><tr><td><table>
