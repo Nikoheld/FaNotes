@@ -546,7 +546,8 @@ export type FaNotesApi = {
   selectVault: () => Promise<BootstrapData | null>
   getCachedTree: () => Promise<VaultEntry[] | null>
   getFastTree: () => Promise<VaultEntry[]>
-  getTree: () => Promise<VaultEntry[]>
+  /** `fromWatcher`: reuse the vault walk the file watcher just did (desktop). */
+  getTree: (options?: { fromWatcher?: boolean }) => Promise<VaultEntry[]>
   readFile: (relativePath: string) => Promise<string>
   readAssetDataUrl: (relativePath: string) => Promise<string>
   readAssetBytes: (relativePath: string) => Promise<Uint8Array>

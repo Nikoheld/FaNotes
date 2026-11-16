@@ -4,7 +4,8 @@ export type StatsFileRow = { path: string; name: string; kind: StatsKind; size: 
 export type NoteFacts = {
   words: number
   ink: boolean
-  cards: { total: number; due: number; reviewed: number; reps: number; lapses: number } | null
+  /** `dueDays` (ISO days) lets the aggregate recount "due" after midnight without re-reading the note. */
+  cards: { total: number; due: number; dueDays?: string[]; reviewed: number; reps: number; lapses: number } | null
   stats: { dwellMs: number; wordsTyped: number; strokes: number; penMs: number; activeDays: string[]; dwellByWeekday: number[] } | null
 }
 export type StatsSubject = { name: string; color: string | null; count: number; bytes: number; words: number; dwellMs: number; kinds: Record<StatsKind, number> }

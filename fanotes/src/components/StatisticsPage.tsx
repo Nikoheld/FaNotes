@@ -153,6 +153,14 @@ export function StatisticsPage({ settings, update, syncState }: {
     return () => controller.abort()
   }, [reload]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // "Heute fällig" is relative to the calendar day: recompute (from the caches) after local midnight.
+  useEffect(() => {
+    const next = new Date()
+    next.setHours(24, 0, 5, 0)
+    const timer = window.setTimeout(() => { setForce(false); setReload((value) => value + 1) }, Math.max(1000, next.getTime() - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [reload])
+
   const working = progress && progress.phase !== 'done'
   const phaseLabel = progress?.phase === 'history' ? 'Verlauf wird gelesen' : progress?.phase === 'stories' ? 'Geschichten werden gelesen' : 'Notizen werden gelesen'
 
