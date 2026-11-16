@@ -490,15 +490,35 @@ const appendChange = async (accountId, table, entry) => {
   const directory = accountDirectory(accountId)
   const line = `${JSON.stringify(entry)}\n`
   const handle = await fs.open(safeJoin(directory, 'changes.jsonl'), 'a', 0o600)
+  let offset = 0
+  let appended = false
   try {
+    offset = (await handle.stat()).size
+    appended = true
     await handle.writeFile(line)
     await handle.sync()
+    // The first append creates the log. The file sync does not make that new
+    // name durable, and the response is sent only after this returns.
+    // Tests set this after the bytes are in the file. Production leaves it unset.
+    if (process.env.FANOTES_SYNC_DIRSYNC_FAIL === '1') throw new Error('change log directory was not synced')
+    await syncDirectory(directory)
+    appended = false
+  } catch (error) {
+    if (appended) {
+      // A directory sync that fails takes that log line back. Leaving it in
+      // the file would let a later compaction drop a revision this request
+      // rejects, or let a restart skip the retry that reused its number.
+      try {
+        await handle.truncate(offset)
+        await handle.sync()
+      } catch {
+        // The line may remain on disk. Memory is still unchanged.
+      }
+    }
+    throw error
   } finally {
     await handle.close()
   }
-  // The first append creates the log. The file sync does not make that new
-  // name durable, and the response is sent only after this returns.
-  await syncDirectory(directory)
   // The revision becomes visible only after the log line is durable.
   applyLoggedEntry(table, entry)
   table.logBytes += Buffer.byteLength(line)
