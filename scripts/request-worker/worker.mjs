@@ -4,7 +4,7 @@
 //   claim(picked) -> working -> pr_open -> waiting_for_you -> (approved) merged | failed
 import fs from 'node:fs'
 import path from 'node:path'
-import { childEnv } from './config.mjs'
+import { childEnv, modelFor } from './config.mjs'
 import { run } from './exec.mjs'
 import { buildPrompt } from './prompt.mjs'
 import { createThrottle, estimatePercent } from './progress.mjs'
@@ -166,7 +166,9 @@ class Job {
     let steps = st.steps || 0
     const throttle = createThrottle({ minIntervalMs: config.throttleMs, post: (p) => this.postEvent(p.text, { percent: p.percent }) })
     const outcome = { cancelled: false, timedOut: false }
-    const handle = startClaude(config, {
+    const model = modelFor(config, this.id)
+    if (model !== config.model) this.log.info(`request ${this.id} uses model ${model}`)
+    const handle = startClaude({ ...config, model }, {
       cwd: this.dir, env: await this.claudeEnv(), prompt, sessionId: resumeId,
       onItem: (item) => {
         if (item.kind === 'session') { if (st.sessionId !== item.id) { st.sessionId = item.id; this.save() } }
