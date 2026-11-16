@@ -1062,6 +1062,29 @@ test('a browser session whose expiry is not a time is left in place', async () =
   }
 })
 
+test('a pairing code whose connections are not a list is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const offer = await env.store.createOffer()
+    const pairings = join(env.store.root, 'pairings')
+    const [name] = await readdir(pairings)
+    const file = join(pairings, name)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    const keep = async (value) => {
+      const stored = `${JSON.stringify(value)}\n`
+      await writeFile(file, stored)
+      await assert.rejects(() => env.store.lookupPairing(offer.code), (error) => error?.code === 'EBADMSG')
+      await env.store.sweep(true)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ ...parsed, connections: { accountId: 'd'.repeat(32) } })
+    await keep({ ...parsed, finished: 'yes' })
+    await keep({ ...parsed, connections: [{ accountId: 'not-an-id' }] })
+  } finally {
+    await env.close()
+  }
+})
+
 test('a pairing code of another version is left in place', async () => {
   const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
   try {
