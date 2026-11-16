@@ -636,6 +636,45 @@ test('a commute route the sanitizer would skip is left in place', async () => {
   }
 })
 
+test('commute settings that are not the known shape are left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-settings-'))
+  const accountId = 'e'.repeat(32)
+  const routeFile = join(root, 'accounts', accountId, 'commute.json')
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [route()], settings: { delayThreshold: 3, hiddenLabels: ['sport'] } })
+    const valid = await readFile(routeFile, 'utf8')
+    const keep = async (settings) => {
+      const parsed = JSON.parse(valid)
+      parsed.settings = settings
+      const stored = `${JSON.stringify(parsed)}\n`
+      await writeFile(routeFile, stored, { mode: 0o600 })
+      await assert.rejects(() => commute.view(accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(
+        () => commute.save(accountId, { routes: [route()], settings: { delayThreshold: 9 } }),
+        (error) => error?.code === 'EBADMSG',
+      )
+      assert.equal(await readFile(routeFile, 'utf8'), stored)
+    }
+    await keep({ delayThreshold: 3, hiddenLabels: 'kept' })
+    await keep({ delayThreshold: 3, hiddenLabels: ['sport', 1] })
+    await keep({ delayThreshold: 'kept', hiddenLabels: [] })
+    await keep(['kept'])
+    await writeFile(routeFile, valid, { mode: 0o600 })
+    const opened = await commute.view(accountId)
+    assert.equal(opened.settings.delayThreshold, 3)
+    assert.deepEqual(opened.settings.hiddenLabels, ['sport'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a commute alert that is not an alert record is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'commute-state-entry-'))
   const accountId = 'c'.repeat(32)
