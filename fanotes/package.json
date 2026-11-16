@@ -68,6 +68,7 @@
     "check:trackpad-after-pen": "node scripts/check-trackpad-after-pen.mjs",
     "check:hand-gestures": "node scripts/check-hand-gestures.mjs",
     "check:wacom-buttons": "node scripts/check-wacom-buttons.mjs",
+    "check:pen-quick-menu": "node scripts/check-pen-quick-menu.mjs",
     "check:jump-filter": "node scripts/check-jump-filter.mjs",
     "check:midstroke-grow": "node scripts/check-midstroke-grow.mjs",
     "check:ink-stay-put": "node scripts/check-ink-stay-put.mjs",
