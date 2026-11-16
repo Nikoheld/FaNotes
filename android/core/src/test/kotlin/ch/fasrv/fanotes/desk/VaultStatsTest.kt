@@ -183,6 +183,8 @@ class VaultStatsTest {
             val reads = java.util.concurrent.ConcurrentHashMap<String, Int>()
             val counting = object : ch.fasrv.fanotes.vault.VaultIo by io {
                 override fun read(path: String): ByteArray? { reads.merge(path, 1, Int::plus); return io.read(path) }
+                override fun readHead(path: String, maxBytes: Int): ch.fasrv.fanotes.vault.VaultHead? { reads.merge(path, 1, Int::plus); return io.readHead(path, maxBytes) }
+                override fun readHead(entry: ch.fasrv.fanotes.vault.VaultEntry, maxBytes: Int) = readHead(entry.path, maxBytes)
             }
             val loader = VaultStatsLoader(counting, zone) { clockMs }
             val first = loader.load { _, _ -> }
