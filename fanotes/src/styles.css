@@ -737,6 +737,86 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--paper-accent-readable, var(--accent)) 14%, transparent);
 }
 .note-text-field textarea::placeholder { color: #747887; font-weight: 400; }
+/* Rendered Markdown, shown while the box is not being edited. The textarea
+   stays mounted (focusable, keeps the caret logic) but invisible. */
+.note-text-field.is-rendered textarea {
+  position: absolute;
+  inset: 0 auto auto 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.note-text-field:not(.is-rendered) .note-text-field-render { display: none; }
+.note-text-field-render {
+  box-sizing: border-box;
+  width: 100%;
+  padding: .22em .4em;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--tf-ink, #20222b);
+  font-family: var(--ui-font);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  /* No italic face of the UI font ships, so *italic* needs a synthesized slant. */
+  font-synthesis: style;
+  cursor: text;
+  transition: border-color .12s ease;
+}
+.note-text-field:hover .note-text-field-render { border-color: color-mix(in srgb, var(--tf-line) 45%, transparent); }
+.note-text-field-render > :first-child { margin-top: 0; }
+.note-text-field-render > :last-child { margin-bottom: 0; }
+.note-text-field-render :is(p, ul, ol, blockquote, pre, table, hr) { margin: 0 0 .45em; }
+.note-text-field-render :is(h1, h2, h3, h4, h5, h6) { margin: .2em 0 .3em; font-weight: 700; line-height: 1.2; color: inherit; }
+.note-text-field-render h1 { font-size: 1.5em; }
+.note-text-field-render h2 { font-size: 1.28em; }
+.note-text-field-render h3 { font-size: 1.12em; }
+.note-text-field-render :is(h4, h5, h6) { font-size: 1em; }
+.note-text-field-render :is(ul, ol) { padding-left: 1.35em; }
+.note-text-field-render ul { list-style-type: disc; }
+.note-text-field-render ol { list-style-type: decimal; }
+.note-text-field-render li > :is(ul, ol) { margin-bottom: 0; }
+.note-text-field-render li > p { margin-bottom: .2em; }
+.note-text-field-render li.note-text-md-task { list-style-type: none; margin-left: -1.2em; }
+.note-text-field-render li.note-text-md-task > p:first-of-type { display: inline; }
+.note-text-field-render li.note-text-md-task.is-done { color: color-mix(in srgb, var(--tf-ink, #20222b) 62%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--tf-ink, #20222b) 45%, transparent); }
+.note-text-md-check {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: .95em;
+  height: .95em;
+  margin: 0 .3em 0 0;
+  padding: 0;
+  vertical-align: -.12em;
+  border: 1.5px solid currentColor;
+  border-radius: .22em;
+  background: transparent;
+  color: var(--tf-ink, #20222b);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.note-text-md-check[aria-checked="true"] { background: var(--tf-ink, #20222b); color: #fff; border-color: var(--tf-ink, #20222b); }
+.note-text-md-check svg { width: .72em; height: .72em; display: block; }
+.note-text-md-check:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.note-text-field-render code {
+  padding: .05em .3em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--tf-ink, #20222b) 9%, transparent);
+  font-family: var(--mono-font, 'JetBrains Mono', ui-monospace, monospace);
+  font-size: .9em;
+}
+.note-text-field-render pre { padding: .35em .5em; border-radius: 6px; background: color-mix(in srgb, var(--tf-ink, #20222b) 7%, transparent); white-space: pre-wrap; }
+.note-text-field-render pre code { padding: 0; background: transparent; }
+.note-text-field-render a { color: #2563c9; text-decoration: underline; text-underline-offset: .15em; cursor: pointer; }
+.note-text-field-render a:not([href]) { color: inherit; cursor: text; }
+.note-text-field-render blockquote { padding-left: .6em; border-left: 3px solid color-mix(in srgb, var(--tf-ink, #20222b) 30%, transparent); }
+.note-text-field-render hr { border: 0; border-top: 1px solid color-mix(in srgb, var(--tf-ink, #20222b) 30%, transparent); }
+.note-text-field-render table { border-collapse: collapse; }
+.note-text-field-render :is(th, td) { padding: .1em .4em; border: 1px solid color-mix(in srgb, var(--tf-ink, #20222b) 25%, transparent); }
+.note-text-field-render strong { font-weight: 700; }
+.note-text-field-render em { font-style: italic; }
+@media (pointer: coarse) {
+  .note-text-md-check { width: 1.15em; height: 1.15em; }
+}
 .note-text-field-move {
   position: absolute;
   z-index: 2;
@@ -1577,6 +1657,11 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   html.is-printing .lw-draw-toolbar,
   html.is-printing .lw-draw-footer,
   html.is-printing .toast-stack { display: none !important; }
+  html.is-printing .note-text-field-toolbar,
+  html.is-printing .note-text-field-move,
+  html.is-printing .note-text-field-resize,
+  html.is-printing .note-text-field textarea[data-snapshot="hide"] { display: none !important; }
+  html.is-printing .note-text-field .note-text-field-render { display: block !important; border-color: transparent !important; }
   html.is-printing .app-body { display: block !important; }
   html.is-printing .workspace, html.is-printing .editor-stage, html.is-printing .unified-note-view { overflow: visible !important; height: auto !important; }
   html.is-printing .unified-paper { margin: 0 !important; box-shadow: none !important; }

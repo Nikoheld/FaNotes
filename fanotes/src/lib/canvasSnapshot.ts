@@ -24,7 +24,7 @@ const STYLE_PROPS = [
   'background-repeat', 'background-position',
   'font-family', 'font-size', 'font-weight', 'font-style', 'line-height',
   'letter-spacing', 'text-align', 'white-space', 'overflow-wrap', 'word-break',
-  'text-decoration', 'vertical-align',
+  'text-decoration', 'vertical-align', 'list-style-type', 'list-style-position',
   'border-top', 'border-right', 'border-bottom', 'border-left', 'border-radius',
   'box-sizing', 'box-shadow', 'opacity', 'overflow', 'transform', 'transform-origin',
   'flex-direction', 'align-items', 'justify-content', 'gap',
@@ -61,6 +61,9 @@ const cloneStyled = (source: Element, drop: string): HTMLElement | null => {
   if (!(source instanceof HTMLElement) && !(source instanceof SVGElement)) return null
   if (source instanceof HTMLCanvasElement) return null
   if (source.matches(DROP_CHROME) || (drop && source.matches(drop))) return null
+  // A text box exports its rendered Markdown even while it is being edited.
+  const snapshot = source.getAttribute('data-snapshot')
+  if (snapshot === 'hide') return null
   let clone: HTMLElement
   if (source instanceof HTMLInputElement || source instanceof HTMLTextAreaElement) {
     clone = document.createElement(source instanceof HTMLTextAreaElement ? 'div' : 'span')
@@ -72,6 +75,7 @@ const cloneStyled = (source: Element, drop: string): HTMLElement | null => {
   }
   clone = source.cloneNode(false) as HTMLElement
   styleOf(source, clone)
+  if (snapshot === 'show' && clone.style.display === 'none') clone.style.display = 'block'
   for (const child of source.childNodes) {
     if (child instanceof Element) {
       const next = cloneStyled(child, drop)
@@ -82,6 +86,9 @@ const cloneStyled = (source: Element, drop: string): HTMLElement | null => {
   }
   return clone
 }
+
+/** The styled copy used for export, exposed for regression checks. */
+export const snapshotCloneForCheck = (source: Element) => cloneStyled(source, '')
 
 const loadSvg = (svg: SVGSVGElement) => new Promise<HTMLImageElement>((resolve, reject) => {
   const xml = new XMLSerializer().serializeToString(svg)
