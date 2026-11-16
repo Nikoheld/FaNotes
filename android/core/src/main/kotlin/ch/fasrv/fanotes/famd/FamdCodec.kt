@@ -184,6 +184,8 @@ fun serializeFamd(markdown: String, payload: JsonValue.Obj, encoding: String = "
         if (stats is JsonValue.Obj) next.put("pageStats", stats)
     }
     copyIfArray(payload, next, "textFields")
+    // Boxes deleted on desktop; desktop uses them to tell a stale edit from a box that never existed.
+    copyIfArray(payload, next, "textFieldTombstones")
     // Desktop study annotations (callouts, stamps, images, measures): carried through untouched.
     copyIfArray(payload, next, "annotations")
     if (encoding == "v2") return encodeV2Document(body, next)

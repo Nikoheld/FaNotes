@@ -113,6 +113,7 @@ fun encodeV2Document(body: String, payload: JsonValue.Obj): String {
     val stats = payload["pageStats"]
     if (stats is JsonValue.Obj) stored.put("pageStats", stats)
     copyArray(payload, stored, "textFields")
+    copyArray(payload, stored, "textFieldTombstones")
     copyArray(payload, stored, "annotations")
     val json = stored.stringify()
     val header = "<!-- fanotes-famd:v2 chars=${json.length} crc=${crcHex(json)} -->\n"

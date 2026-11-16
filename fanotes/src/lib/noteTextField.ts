@@ -1,4 +1,5 @@
 import { keepMarkOnPage } from './noteCanvas'
+import { sameNoteTextFieldContent } from '../../electron/noteTextFieldMerge.mjs'
 
 /** A keyboard text box placed on a markdown note or a PDF note. */
 export type NoteTextField = {
@@ -13,7 +14,16 @@ export type NoteTextField = {
   color?: string
   /** Optional bold weight. Absent means regular. */
   bold?: boolean
+  /**
+   * Epoch milliseconds of the last edit of this box. Lets two windows, devices
+   * or share editors decide which edit of one box is newer. Files from older
+   * builds have none, and older builds drop it again when they save.
+   */
+  updatedAt?: number
 }
+
+/** A deleted box. Kept in the payload next to `textFields`, never inside it. */
+export type NoteTextFieldTombstone = { id: string; deletedAt: number }
 
 export const NOTE_TEXT_FIELD_FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48] as const
 export const NOTE_TEXT_FIELD_COLORS = [
@@ -31,7 +41,10 @@ const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu
 
 const TEXT_FIELD_ID = /^[a-zA-Z0-9._-]{1,96}$/u
 export const NOTE_TEXT_FIELD_LIMIT = 200
-const TEXT_FIELD_MAX_CHARS = 8000
+/** Longest text one box stores; the textarea stops at it, so a paste never snaps back and loses the caret. */
+export const NOTE_TEXT_FIELD_MAX_CHARS = 8000
+/** Largest epoch millisecond a JS Date can hold; a stamp beyond it is junk. */
+const TEXT_FIELD_STAMP_MAX = 8.64e15
 const DEFAULT_WIDTH = 0.32
 const DEFAULT_FONT_SIZE = 16
 
@@ -65,6 +78,13 @@ const clampFontSize = (value: unknown) => {
   return size
 }
 
+/** Epoch milliseconds of an edit or delete. Anything that is not a positive finite number is "unknown". */
+const sanitizeStamp = (value: unknown): number | null => (
+  typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= TEXT_FIELD_STAMP_MAX
+    ? Math.floor(value)
+    : null
+)
+
 export const newNoteTextFieldId = () => (
   `tf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 )
@@ -73,8 +93,9 @@ export const sanitizeNoteTextField = (value: unknown): NoteTextField | null => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const raw = value as Record<string, unknown>
   const id = typeof raw.id === 'string' && TEXT_FIELD_ID.test(raw.id) ? raw.id : newNoteTextFieldId()
-  const text = typeof raw.text === 'string' ? raw.text.slice(0, TEXT_FIELD_MAX_CHARS) : ''
+  const text = typeof raw.text === 'string' ? raw.text.slice(0, NOTE_TEXT_FIELD_MAX_CHARS) : ''
   const color = typeof raw.color === 'string' && COLOR_PATTERN.test(raw.color) ? raw.color.toLowerCase() : undefined
+  const updatedAt = sanitizeStamp(raw.updatedAt)
   return {
     id,
     page: clampPage(raw.page),
@@ -85,6 +106,7 @@ export const sanitizeNoteTextField = (value: unknown): NoteTextField | null => {
     text,
     ...(color ? { color } : {}),
     ...(raw.bold === true ? { bold: true } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
   }
 }
 
@@ -102,6 +124,24 @@ export const parseNoteTextFields = (value: unknown): NoteTextField[] => {
   return fields
 }
 
+/** Deleted boxes from a payload, newest first, one per id. Mirrors `parseNoteTextFieldTombstones` in `electron/famd.cjs`. */
+export const parseNoteTextFieldTombstones = (value: unknown): NoteTextFieldTombstone[] => {
+  if (!Array.isArray(value)) return []
+  const latest = new Map<string, number>()
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const raw = entry as Record<string, unknown>
+    if (typeof raw.id !== 'string' || !TEXT_FIELD_ID.test(raw.id)) continue
+    const deletedAt = sanitizeStamp(raw.deletedAt)
+    if (!deletedAt) continue
+    latest.set(raw.id, Math.max(latest.get(raw.id) ?? 0, deletedAt))
+  }
+  return [...latest]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, NOTE_TEXT_FIELD_LIMIT)
+    .map(([id, deletedAt]) => ({ id, deletedAt }))
+}
+
 /** Click point becomes the top-left of a new empty field, kept on the page. */
 export const placeNoteTextField = (point: { page: number; x: number; y: number }): NoteTextField => {
   const width = DEFAULT_WIDTH
@@ -113,18 +153,26 @@ export const placeNoteTextField = (point: { page: number; x: number; y: number }
     width,
     fontSize: DEFAULT_FONT_SIZE,
     text: '',
+    updatedAt: Date.now(),
   })
   if (!field) throw new Error('Das Textfeld konnte nicht gesetzt werden.')
   return field
 }
 
+/** A real change of one box stamps it; a patch that changes nothing keeps the box (and its stamp) as it was. */
 export const patchNoteTextField = (
   fields: readonly NoteTextField[],
   id: string,
   patch: Partial<Pick<NoteTextField, 'page' | 'x' | 'y' | 'width' | 'text' | 'fontSize'>> & { color?: string | undefined; bold?: boolean | undefined },
+  now: number = Date.now(),
 ): NoteTextField[] => {
-  const current = parseNoteTextFields(fields)
-  return parseNoteTextFields(current.map((field) => field.id === id ? { ...field, ...patch } : field))
+  // The list is cleaned once; only the patched box is cleaned again. This runs on every keystroke.
+  return parseNoteTextFields(fields).map((field) => {
+    if (field.id !== id) return field
+    const next = sanitizeNoteTextField({ ...field, ...patch })
+    if (!next || sameNoteTextFieldContent(field, next)) return field
+    return { ...next, updatedAt: Math.max(now, (field.updatedAt ?? 0) + 1) }
+  })
 }
 
 /**
@@ -193,5 +241,34 @@ export const noteTextFieldPointFromRects = (
     page: best.page,
     x: clampUnit((clientX - best.left) / best.width, 0),
     y: clampUnit((clientY - best.top) / best.height, 0),
+  }
+}
+
+/**
+ * Runs text box jobs (writes and re-reads) one after the other. A job starts
+ * only when every earlier job has finished, and `run` resolves with that job's
+ * result, so a caller that awaits it knows nothing is still in flight before it.
+ */
+export type SerialJobQueue = {
+  /** `write` jobs count as unsaved work while they are queued or running. */
+  run: (job: () => Promise<boolean>, write?: boolean) => Promise<boolean>
+  /** Queued or running write jobs. */
+  writes: () => number
+  /** Resolves after everything queued so far (false when the last job failed). Never rejects. */
+  drained: () => Promise<boolean>
+}
+
+export const createSerialJobQueue = (): SerialJobQueue => {
+  let tail: Promise<boolean> = Promise.resolve(true)
+  let writes = 0
+  return {
+    run: (job, write = true) => {
+      if (write) writes += 1
+      const result = tail.then(job)
+      tail = result.catch(() => false)
+      return result.finally(() => { if (write) writes -= 1 })
+    },
+    writes: () => writes,
+    drained: () => tail,
   }
 }

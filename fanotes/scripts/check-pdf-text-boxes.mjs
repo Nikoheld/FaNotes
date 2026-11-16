@@ -1,8 +1,11 @@
 // Regression check for the "Textfeld" tool on PDF notes.
 // Part 1: pure logic (storage format, backward compatibility, geometry helpers).
+// Part 1b: per-box merge of several windows, devices and shares (concurrent add, delete vs edit,
+//          absorbing remote boxes), write queue, and the .famd round trip with the real codecs.
 // Part 2: real Chromium via playwright-core (skipped with FANOTES_SKIP_BROWSER=1 or when no browser exists).
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -18,6 +21,9 @@ const server = await createServer({
 
 await server.listen()
 const fields = await server.ssrLoadModule('/src/lib/noteTextField.ts')
+const famdTs = await server.ssrLoadModule('/src/lib/famd.ts')
+const famd = createRequire(import.meta.url)('../electron/famd.cjs')
+const merge = await import(pathToFileURL(join(root, 'electron/noteTextFieldMerge.mjs')).href)
 
 // ---- Part 1: logic -------------------------------------------------------
 const legacy = { id: 'tf-old', page: 2, x: 0.25, y: 0.4, width: 0.3, fontSize: 18, text: 'Alt äöü' }
@@ -46,6 +52,336 @@ assert.equal(gutter.page, 2, 'the gutter snaps to the nearest page, not page 1')
 assert.equal(gutter.y, 0)
 assert.equal(fields.noteTextFieldPointFromRects(pages, 900, 1200).page, 2, 'dragging past the sheet clamps to the last page')
 assert.equal(fields.noteTextFieldPointFromRects(pages, 900, 1200).x, 1)
+// ---- Part 1b: per-box merge ----------------------------------------------
+const box = (id, text, extra = {}) => fields.parseNoteTextFields([{ id, page: 1, x: 0.2, y: 0.3, width: 0.3, fontSize: 16, text, ...extra }])[0]
+const texts = (list) => list.map((item) => `${item.id}=${item.text}`).sort()
+const STAMP = 1_731_800_000_000
+
+// Stamps: kept by both sanitizers, junk is dropped, old files stay free of the new keys.
+const stamped = box('tf-s', 'a', { updatedAt: STAMP })
+assert.equal(stamped.updatedAt, STAMP)
+assert.equal(famd.parseNoteTextFields([stamped])[0].updatedAt, STAMP, 'the main-process sanitizer keeps the stamp')
+assert.equal(box('tf-f', 'a', { updatedAt: STAMP + 0.9 }).updatedAt, STAMP, 'a stamp is a whole millisecond')
+for (const junk of [0, -5, String(STAMP), Infinity, NaN, 1e300, null, {}]) {
+  assert.equal('updatedAt' in box('tf-j', 'a', { updatedAt: junk }), false, `renderer drops stamp ${String(junk)}`)
+  assert.equal('updatedAt' in famd.parseNoteTextFields([{ ...legacy, updatedAt: junk }])[0], false, `main drops stamp ${String(junk)}`)
+}
+assert.equal('updatedAt' in famd.parseNoteTextFields([legacy])[0], false, 'a legacy box gains no stamp when it is only read')
+
+// Tombstones: newest first, one per id, junk dropped, the same in both parsers.
+const rawTombs = [{ id: 'tf-a', deletedAt: 10 }, { id: 'tf-a', deletedAt: 30 }, { id: 'bad id', deletedAt: 5 }, { id: 'tf-b', deletedAt: 'x' }, null, 7, { id: 'tf-c', deletedAt: 20 }]
+assert.deepEqual(famd.parseNoteTextFieldTombstones(rawTombs), [{ id: 'tf-a', deletedAt: 30 }, { id: 'tf-c', deletedAt: 20 }])
+assert.deepEqual(fields.parseNoteTextFieldTombstones(rawTombs), famd.parseNoteTextFieldTombstones(rawTombs))
+assert.deepEqual(famd.parseNoteTextFieldOps({ upserts: [{ text: 'no id' }, stamped, stamped], deletes: [{ id: 'tf-x', deletedAt: 9 }, { id: '' }] }), {
+  upserts: [stamped],
+  deletes: [{ id: 'tf-x', deletedAt: 9 }],
+}, 'an op without a valid id is dropped, a repeated id counts once')
+assert.deepEqual(famd.parseNoteTextFieldOps('junk'), { upserts: [], deletes: [] })
+
+// File format: both encodings and both codecs keep stamps and tombstones, and a reader that only knows
+// `textFields` (every older build) never sees a deleted box in it.
+const goneBox = { id: 'tf-gone', deletedAt: STAMP + 500 }
+for (const encoding of ['v1', 'v2']) {
+  const payload = { ...famd.emptyFamdPayload('2026-01-02T00:00:00.000Z'), textFields: [stamped], textFieldTombstones: [goneBox] }
+  for (const [label, codec] of [['main', famd], ['renderer', famdTs]]) {
+    const text = codec.serializeFamd('Hallo\n', { ...payload }, encoding)
+    for (const [readLabel, reader] of [['main', famd], ['renderer', famdTs]]) {
+      const back = reader.parseFamd(text).payload
+      assert.deepEqual(back.textFields, [stamped], `${label} ${encoding} written, ${readLabel} read: boxes`)
+      assert.deepEqual(back.textFieldTombstones, [goneBox], `${label} ${encoding} written, ${readLabel} read: tombstones`)
+      assert.equal(back.textFields.some((item) => item.id === goneBox.id), false, 'a deleted box is not an entry of textFields')
+    }
+  }
+  const plain = famd.serializeFamd('Hallo\n', { ...famd.emptyFamdPayload('2026-01-02T00:00:00.000Z'), textFields: [legacy] }, encoding)
+  assert.equal(plain.includes('textFieldTombstones') || plain.includes('updatedAt":17'), false, `${encoding}: a legacy note gains no new keys`)
+  assert.deepEqual(famd.parseFamd(plain).payload.textFields, [legacy])
+}
+
+// patch / place stamp real edits only.
+const patchedLater = fields.patchNoteTextField([stamped], 'tf-s', { text: 'b' }, STAMP + 5000)[0]
+assert.equal(patchedLater.updatedAt, STAMP + 5000, 'an edit stamps the box')
+assert.equal(fields.patchNoteTextField([stamped], 'tf-s', { text: 'b' }, STAMP - 9999)[0].updatedAt, STAMP + 1, 'a stamp is always newer than the one it replaces, even with a slow clock')
+assert.deepEqual(fields.patchNoteTextField([stamped], 'tf-s', { text: 'a', fontSize: 16 }, STAMP + 9)[0], stamped, 'a patch that changes nothing keeps the box and its stamp')
+assert.ok(fields.placeNoteTextField({ page: 1, x: 0.1, y: 0.1 }).updatedAt > 0, 'a placed box carries a stamp')
+
+// diff: only what changed is sent.
+{
+  const base = [box('tf-a', 'eins', { updatedAt: 100 }), box('tf-b', 'zwei', { updatedAt: 100 }), box('tf-c', 'drei')]
+  assert.deepEqual(merge.diffNoteTextFields(base, base, 500), { upserts: [], deletes: [] }, 'untouched boxes send nothing')
+  const local = [{ ...base[0], text: 'eins!', updatedAt: 300 }, base[1], box('tf-new', 'neu', { updatedAt: 310 })]
+  const ops = merge.diffNoteTextFields(base, local, 500)
+  assert.deepEqual(texts(ops.upserts), ['tf-a=eins!', 'tf-new=neu'])
+  assert.equal(ops.upserts.find((item) => item.id === 'tf-a').updatedAt, 300, 'a fresh stamp is kept')
+  assert.deepEqual(ops.deletes, [{ id: 'tf-c', deletedAt: 500 }])
+  const unstamped = merge.diffNoteTextFields(base, [{ ...base[1], x: 0.9 }], 500)
+  assert.equal(unstamped.upserts[0].updatedAt, 500, 'a change without a fresh stamp (a page remap) is stamped when it is sent')
+  const slow = merge.diffNoteTextFields(base, [{ ...base[0], text: 'x' }], 50)
+  assert.equal(slow.upserts[0].updatedAt, 101, 'the stamp is newer than the base copy even when the local clock runs behind')
+  // empty boxes: a new one stays in the window, one the disk already knows is kept.
+  const fresh = box('tf-e', '')
+  const knownEmpty = box('tf-k', '  ')
+  assert.deepEqual(merge.persistableNoteTextFields([base[0], fresh, knownEmpty], [knownEmpty]).map((item) => item.id), ['tf-a', 'tf-k'])
+}
+
+// apply (main process): concurrent adds keep both, per-box newest wins, delete vs edit by time.
+{
+  const NOW = 10_000
+  const alpha = box('tf-a', 'Fenster 1', { updatedAt: 1000 })
+  const beta = box('tf-b', 'Fenster 2', { updatedAt: 1100 })
+  const one = merge.applyNoteTextFieldOps([], [], { upserts: [alpha], deletes: [] }, NOW)
+  const two = merge.applyNoteTextFieldOps(one.fields, one.tombstones, { upserts: [beta], deletes: [] }, NOW)
+  assert.deepEqual(texts(two.fields), ['tf-a=Fenster 1', 'tf-b=Fenster 2'], 'a box added in a second window does not replace the first window\'s box')
+  const reversed = merge.applyNoteTextFieldOps(merge.applyNoteTextFieldOps([], [], { upserts: [beta], deletes: [] }, NOW).fields, [], { upserts: [alpha], deletes: [] }, NOW)
+  assert.deepEqual(texts(reversed.fields), texts(two.fields), 'the arrival order does not matter')
+
+  // the same box edited twice: the newer edit stays even when the older one arrives last
+  const newer = { ...alpha, text: 'neu', updatedAt: 3000 }
+  const older = { ...alpha, text: 'alt', updatedAt: 2000 }
+  const keep = merge.applyNoteTextFieldOps([newer], [], { upserts: [older, beta], deletes: [] }, NOW)
+  assert.equal(keep.fields.find((item) => item.id === 'tf-a').text, 'neu', 'a late older edit never overwrites a newer one')
+  assert.ok(keep.fields.some((item) => item.id === 'tf-b'), 'but the other boxes of that write still land')
+  assert.equal(merge.applyNoteTextFieldOps([older], [], { upserts: [{ ...newer }], deletes: [] }, NOW).fields[0].text, 'neu')
+  assert.equal(merge.applyNoteTextFieldOps([newer], [], { upserts: [{ ...newer, text: 'same stamp' }], deletes: [] }, NOW).fields[0].text, 'same stamp', 'the same stamp: the latest write wins')
+
+  // delete vs edit
+  const afterDelete = merge.applyNoteTextFieldOps([alpha], [], { upserts: [], deletes: [{ id: 'tf-a', deletedAt: 2000 }] }, NOW)
+  assert.deepEqual(afterDelete.fields, [])
+  assert.deepEqual(afterDelete.tombstones, [{ id: 'tf-a', deletedAt: 2000 }])
+  const staleEdit = merge.applyNoteTextFieldOps(afterDelete.fields, afterDelete.tombstones, { upserts: [{ ...alpha, text: 'getippt vor dem Löschen', updatedAt: 1500 }], deletes: [] }, NOW)
+  assert.deepEqual(staleEdit.fields, [], 'an edit made before the delete does not bring the box back')
+  const laterEdit = merge.applyNoteTextFieldOps(afterDelete.fields, afterDelete.tombstones, { upserts: [{ ...alpha, text: 'getippt nach dem Löschen', updatedAt: 2500 }], deletes: [] }, NOW)
+  assert.deepEqual(texts(laterEdit.fields), ['tf-a=getippt nach dem Löschen'], 'an edit made after the delete keeps the typed text')
+  assert.deepEqual(laterEdit.tombstones, [], 'a box that is back loses its tombstone')
+  const lateDelete = merge.applyNoteTextFieldOps([{ ...alpha, text: 'bearbeitet', updatedAt: 3000 }], [], { upserts: [], deletes: [{ id: 'tf-a', deletedAt: 2000 }] }, NOW)
+  assert.deepEqual(texts(lateDelete.fields), ['tf-a=bearbeitet'], 'a delete older than the stored edit is ignored')
+  assert.deepEqual(lateDelete.tombstones, [])
+  const sameInstant = merge.applyNoteTextFieldOps([{ ...alpha, updatedAt: 2000 }], [], { upserts: [], deletes: [{ id: 'tf-a', deletedAt: 2000 }] }, NOW)
+  assert.equal(sameInstant.fields.length, 1, 'a delete and an edit at the very same millisecond: the box stays')
+  assert.equal(merge.applyNoteTextFieldOps([], [{ id: 'tf-a', deletedAt: 2000 }], { upserts: [{ ...alpha, updatedAt: 2000 }], deletes: [] }, NOW).fields.length, 1)
+  const twoDeletes = merge.applyNoteTextFieldOps([], [{ id: 'tf-a', deletedAt: 3000 }], { upserts: [], deletes: [{ id: 'tf-a', deletedAt: 2000 }] }, NOW)
+  assert.deepEqual(twoDeletes.tombstones, [{ id: 'tf-a', deletedAt: 3000 }], 'the newest delete time is kept')
+  assert.deepEqual(merge.applyNoteTextFieldOps([alpha], [], { upserts: [], deletes: [{ id: 'tf-never', deletedAt: 5 }] }, NOW).fields.map((item) => item.id), ['tf-a'], 'deleting an unknown box changes nothing else')
+
+  // housekeeping: old tombstones expire, the list is capped, a skewed clock cannot win for ever, the box limit holds
+  const DAY = 24 * 3600 * 1000
+  const aged = merge.applyNoteTextFieldOps([], [{ id: 'tf-old', deletedAt: NOW - 31 * DAY }, { id: 'tf-recent', deletedAt: NOW - DAY }], { upserts: [], deletes: [] }, NOW)
+  assert.deepEqual(aged.tombstones, [{ id: 'tf-recent', deletedAt: NOW - DAY }])
+  const crowd = merge.applyNoteTextFieldOps([], [], { upserts: [], deletes: Array.from({ length: 260 }, (_, index) => ({ id: `tf-d${index}`, deletedAt: NOW - index })) }, NOW)
+  assert.equal(crowd.tombstones.length, 200)
+  assert.equal(crowd.tombstones[0].id, 'tf-d0', 'the newest tombstones survive the cap')
+  const future = merge.applyNoteTextFieldOps([], [], { upserts: [{ ...alpha, updatedAt: NOW + 400 * DAY }], deletes: [] }, NOW)
+  assert.ok(future.fields[0].updatedAt <= NOW + 5 * 60 * 1000, 'a stamp from a clock far ahead is clamped')
+  // ... and a box that such a clock already stamped can still be edited here by someone who saw that version.
+  const poisoned = box('tf-p', 'von der falschen Uhr', { updatedAt: NOW + 400 * DAY })
+  const repaired = merge.applyNoteTextFieldOps([poisoned], [], { upserts: [{ ...poisoned, text: 'hier korrigiert', updatedAt: poisoned.updatedAt + 1 }], deletes: [] }, NOW)
+  assert.equal(repaired.fields[0].text, 'hier korrigiert', 'a box stamped far ahead is not locked against edits')
+  const poisonedTomb = merge.applyNoteTextFieldOps([], [{ id: 'tf-p', deletedAt: NOW + 400 * DAY }], { upserts: [{ ...poisoned, updatedAt: NOW + 400 * DAY + 1 }], deletes: [] }, NOW)
+  assert.equal(poisonedTomb.fields.length, 1, 'a tombstone from a clock far ahead does not lock the box either')
+  const many = merge.applyNoteTextFieldOps([], [], { upserts: Array.from({ length: 230 }, (_, index) => box(`tf-m${index}`, 'x', { updatedAt: 1 })), deletes: [] }, NOW)
+  assert.equal(many.fields.length, 200)
+  assert.equal(merge.applyNoteTextFieldOps(undefined, undefined, undefined, NOW).fields.length, 0, 'missing inputs are tolerated')
+}
+
+// absorb (window side): three-way merge of this window, the disk and the disk state this window saw last.
+{
+  const a = box('tf-a', 'eins', { updatedAt: 100 })
+  const b = box('tf-b', 'zwei', { updatedAt: 100 })
+  const ids = (list) => list.map((item) => item.id)
+  assert.deepEqual(ids(merge.mergeNoteTextFields([a], [a], [a, b])), ['tf-a', 'tf-b'], 'a box another window added comes in')
+  assert.equal(merge.mergeNoteTextFields([a], [a], [{ ...a, text: 'eins!', updatedAt: 200 }])[0].text, 'eins!', 'an edit from outside comes in')
+  const both = merge.mergeNoteTextFields([a], [{ ...a, x: 0.7, updatedAt: 150 }, box('tf-n', 'neu', { updatedAt: 160 })], [a, b])
+  assert.deepEqual(texts(both), ['tf-a=eins', 'tf-b=zwei', 'tf-n=neu'].sort(), 'local edit, local add and remote add all stay')
+  assert.equal(both.find((item) => item.id === 'tf-a').x, 0.7)
+  assert.deepEqual(ids(merge.mergeNoteTextFields([a, b], [a, b], [a])), ['tf-a'], 'a box deleted elsewhere goes away here')
+  assert.deepEqual(ids(merge.mergeNoteTextFields([a, b], [a, { ...b, text: 'zwei!', updatedAt: 150 }], [a])), ['tf-a', 'tf-b'], 'but not when it was edited here: typed text is never dropped')
+  assert.deepEqual(ids(merge.mergeNoteTextFields([a, b], [a], [a, b])), ['tf-a'], 'a box deleted here stays deleted')
+  assert.deepEqual(ids(merge.mergeNoteTextFields([a, b], [a], [a, { ...b, text: 'zwei!', updatedAt: 150 }])), ['tf-a', 'tf-b'], 'unless it was edited elsewhere meanwhile')
+  const clash = merge.mergeNoteTextFields([a], [{ ...a, text: 'hier', updatedAt: 300 }], [{ ...a, text: 'dort', updatedAt: 200 }])
+  assert.equal(clash[0].text, 'hier', 'both edited it: the newer edit wins')
+  assert.equal(merge.mergeNoteTextFields([a], [{ ...a, text: 'hier', updatedAt: 200 }], [{ ...a, text: 'dort', updatedAt: 300 }])[0].text, 'dort')
+  assert.equal(merge.mergeNoteTextFields([a], [{ ...a, text: 'hier', updatedAt: 200 }], [{ ...a, text: 'dort', updatedAt: 200 }])[0].text, 'hier', 'a tie stays local')
+  assert.deepEqual(ids(merge.mergeNoteTextFields([], [a], [b])), ['tf-a', 'tf-b'], 'nothing known about the disk: both sets are kept')
+  const inProgress = box('tf-e', '')
+  assert.deepEqual(ids(merge.mergeNoteTextFields([a], [a, inProgress], [a, b])), ['tf-a', 'tf-e', 'tf-b'], 'a box still being placed survives an absorb')
+  assert.equal(merge.mergeNoteTextFields([a], [a], [{ ...a, updatedAt: 999 }])[0].updatedAt, 999, 'same content: the stored copy (and its stamp) is the one kept')
+  assert.equal(merge.mergeNoteTextFields([], [], Array.from({ length: 230 }, (_, index) => box(`tf-r${index}`, 'x'))).length, 200)
+  assert.ok(merge.noteTextFieldsEqual([a, b], [a, b]) && !merge.noteTextFieldsEqual([a], [{ ...a, updatedAt: 101 }]))
+}
+
+// Two windows on one note, driven through the real codecs exactly like the app does it
+// (diff against the last seen disk state, the main-process merge inside the write, absorb of the result).
+for (const encoding of ['v1', 'v2']) {
+  const makeDisk = () => {
+    let source = famd.serializeFamd('Text\n', famd.emptyFamdPayload('2026-01-01T00:00:00.000Z'), encoding)
+    return {
+      raw: () => source,
+      boxes: () => famd.parseFamd(source).payload?.textFields ?? [],
+      tombstones: () => famd.parseFamd(source).payload?.textFieldTombstones ?? [],
+      // The main-process handler: parse the ops like the IPC does, read the stored note, apply, write.
+      merge(rawOps, now) {
+        const ops = famd.parseNoteTextFieldOps(JSON.parse(JSON.stringify(rawOps)))
+        if (!ops.upserts.length && !ops.deletes.length) return this.boxes()
+        const parsed = famd.parseFamd(source, { unpack: false })
+        const merged = merge.applyNoteTextFieldOps(parsed.payload.textFields, parsed.payload.textFieldTombstones, ops, now)
+        source = famd.serializeFamd(parsed.markdown, { ...parsed.payload, textFields: merged.fields, textFieldTombstones: merged.tombstones }, famd.famdEncodingForSave(source))
+        return merged.fields
+      },
+    }
+  }
+  const openWindow = (disk) => {
+    const win = { base: fields.parseNoteTextFields(disk.boxes()), live: fields.parseNoteTextFields(disk.boxes()) }
+    win.add = (id, text, now) => { win.live = [...win.live, box(id, text, { updatedAt: now })] }
+    win.type = (id, text, now) => { win.live = fields.patchNoteTextField(win.live, id, { text }, now) }
+    win.remove = (id) => { win.live = win.live.filter((item) => item.id !== id) }
+    win.flush = (now) => {
+      const persist = merge.persistableNoteTextFields(win.live, win.base)
+      const ops = merge.diffNoteTextFields(win.base, persist, now)
+      if (!ops.upserts.length && !ops.deletes.length) return
+      const stored = fields.parseNoteTextFields(disk.merge(ops, now))
+      win.live = fields.parseNoteTextFields(merge.mergeNoteTextFields(persist, win.live, stored))
+      win.base = [...stored]
+    }
+    win.refresh = () => {
+      const stored = fields.parseNoteTextFields(disk.merge({ upserts: [], deletes: [] }, 0))
+      win.live = fields.parseNoteTextFields(merge.mergeNoteTextFields(win.base, win.live, stored))
+      win.base = [...stored]
+    }
+    return win
+  }
+
+  // The reported repro: a box in each window, then edit again in the first.
+  {
+    const disk = makeDisk()
+    const first = openWindow(disk)
+    const second = openWindow(disk)
+    first.add('tf-1', 'erstes', 1000)
+    first.flush(1100)
+    second.add('tf-2', 'zweites', 1200)
+    second.flush(1300)
+    assert.deepEqual(texts(second.live), ['tf-1=erstes', 'tf-2=zweites'], `${encoding}: the second window's write brings the first window's box in`)
+    first.type('tf-1', 'erstes, bearbeitet', 1400)
+    first.flush(1500)
+    assert.deepEqual(texts(disk.boxes()), ['tf-1=erstes, bearbeitet', 'tf-2=zweites'], `${encoding}: the first window's next write no longer deletes the second window's box`)
+    assert.deepEqual(texts(first.live), texts(disk.boxes()), `${encoding}: and shows it`)
+    second.refresh()
+    assert.deepEqual(texts(second.live), texts(disk.boxes()), `${encoding}: a re-read brings the edit to the other window`)
+  }
+
+  // Both windows add before either saves; the order of the saves does not matter.
+  for (const order of ['12', '21']) {
+    const disk = makeDisk()
+    const first = openWindow(disk)
+    const second = openWindow(disk)
+    first.add('tf-1', 'links', 1000)
+    second.add('tf-2', 'rechts', 1001)
+    for (const which of order) (which === '1' ? first : second).flush(2000 + Number(which))
+    first.refresh()
+    second.refresh()
+    assert.deepEqual(texts(disk.boxes()), ['tf-1=links', 'tf-2=rechts'], `${encoding}: concurrent adds (${order}) keep both`)
+    assert.deepEqual(texts(first.live), texts(second.live), `${encoding}: both windows converge (${order})`)
+  }
+
+  // Delete vs edit, in both arrival orders; the later action wins either way.
+  for (const order of ['delete-first', 'edit-first']) {
+    for (const [editAt, deleteAt, expected] of [[1500, 2000, []], [2500, 2000, ['tf-x=nachher getippt']]]) {
+      const disk = makeDisk()
+      const seed = openWindow(disk)
+      seed.add('tf-x', 'Start', 1000)
+      seed.flush(1001)
+      const editor = openWindow(disk)
+      const deleter = openWindow(disk)
+      editor.type('tf-x', 'nachher getippt', editAt)
+      deleter.remove('tf-x')
+      const flushDelete = () => deleter.flush(deleteAt)
+      const flushEdit = () => editor.flush(editAt + 10)
+      if (order === 'delete-first') { flushDelete(); flushEdit() } else { flushEdit(); flushDelete() }
+      editor.refresh()
+      deleter.refresh()
+      assert.deepEqual(texts(disk.boxes()), expected, `${encoding}: delete at ${deleteAt} vs edit at ${editAt} (${order})`)
+      assert.deepEqual(texts(editor.live), expected, `${encoding}: the editing window follows (${order}, edit ${editAt})`)
+      assert.deepEqual(texts(deleter.live), expected, `${encoding}: the deleting window follows (${order}, edit ${editAt})`)
+    }
+  }
+
+  // A box another window deleted disappears here without an edit, and a window that never saw a box cannot delete it.
+  {
+    const disk = makeDisk()
+    const owner = openWindow(disk)
+    owner.add('tf-keep', 'bleibt', 1000)
+    owner.add('tf-drop', 'geht', 1001)
+    owner.flush(1100)
+    const viewer = openWindow(disk)
+    owner.remove('tf-drop')
+    owner.flush(1200)
+    viewer.refresh()
+    assert.deepEqual(texts(viewer.live), ['tf-keep=bleibt'], `${encoding}: a delete from another window shows up on re-read`)
+    const late = openWindow(makeDisk())
+    late.add('tf-solo', 'allein', 1)
+    late.flush(2)
+    assert.deepEqual(late.base.map((item) => item.id), ['tf-solo'])
+    assert.equal(disk.tombstones().some((item) => item.id === 'tf-drop'), true, `${encoding}: the delete left a tombstone on disk`)
+  }
+
+  // A rejected write (the box was deleted after this edit) does not leave a phantom box behind.
+  {
+    const disk = makeDisk()
+    const seed = openWindow(disk)
+    seed.add('tf-x', 'Start', 1000)
+    seed.flush(1001)
+    const stale = openWindow(disk)
+    const other = openWindow(disk)
+    other.remove('tf-x')
+    other.flush(5000)
+    stale.type('tf-x', 'alt getippt', 3000)
+    stale.flush(6000)
+    assert.deepEqual(disk.boxes(), [], `${encoding}: the older edit does not resurrect the box`)
+    assert.deepEqual(stale.live, [], `${encoding}: the window drops the rejected box instead of keeping a phantom`)
+  }
+
+  // An empty box another device placed (Android saves it at once) is not deleted by this window.
+  {
+    const disk = makeDisk()
+    disk.merge({ upserts: [box('tf-empty', '', { updatedAt: 500 })], deletes: [] }, 600)
+    const win = openWindow(disk)
+    win.add('tf-t', 'Text', 700)
+    win.flush(800)
+    assert.deepEqual(disk.boxes().map((item) => item.id).sort(), ['tf-empty', 'tf-t'], `${encoding}: a known empty box stays on disk`)
+    win.add('tf-pending', '', 900)
+    win.flush(1000)
+    assert.equal(disk.boxes().some((item) => item.id === 'tf-pending'), false, `${encoding}: a box still empty is not written`)
+    assert.ok(win.live.some((item) => item.id === 'tf-pending'), `${encoding}: but it stays in the window`)
+  }
+}
+
+// Writes and re-reads run one after the other, and a caller learns about success only after everything before it is done.
+{
+  const queue = fields.createSerialJobQueue()
+  const log = []
+  const job = (name, ms, result = true) => async () => {
+    log.push(`start ${name}`)
+    await new Promise((resolve) => setTimeout(resolve, ms))
+    log.push(`end ${name}`)
+    if (result === 'throw') throw new Error(name)
+    return result
+  }
+  const slow = queue.run(job('slow', 60))
+  const fast = queue.run(job('fast', 5))
+  const reread = queue.run(job('reread', 5), false)
+  assert.equal(queue.writes(), 2, 'queued writes count as unsaved, a plain re-read does not')
+  assert.equal(await fast, true)
+  assert.deepEqual(log.slice(0, 4), ['start slow', 'end slow', 'start fast', 'end fast'], 'jobs never overlap and keep their order')
+  assert.equal(log.includes('end slow'), true, 'the second job only reports success after the first finished')
+  await slow
+  await reread
+  assert.equal(queue.writes(), 0)
+  const failing = queue.run(job('bad', 1, 'throw'))
+  const after = queue.run(job('after', 1))
+  await assert.rejects(failing)
+  assert.equal(await after, true, 'a failed write does not block the next one')
+  assert.equal(await queue.drained(), true)
+  assert.equal(queue.writes(), 0)
+}
+
 console.log('text box logic ok')
 
 // ---- Part 2: browser -----------------------------------------------------
@@ -102,6 +438,13 @@ const pageRect = (n) => page.evaluate((index) => {
   return { x: rect.x, y: rect.y, w: rect.width, h: rect.height }
 }, n)
 const near = (actual, expected, tolerance, label) => assert.ok(Math.abs(actual - expected) <= tolerance, `${label}: ${actual} vs ${expected}`)
+// What the app has stored for the open note (the web build keeps the .famd in IndexedDB).
+const noteOnDisk = () => page.evaluate(async () => {
+  const walk = (entries) => entries.flatMap((entry) => (entry.kind === 'file' ? [entry] : walk(entry.children ?? [])))
+  return walk(await window.fanotes.getTree()).find((entry) => /Textfelder\.pdf$/iu.test(entry.relativePath))?.relativePath ?? null
+})
+const storedBoxes = async () => page.evaluate(async (path) => (await window.fanotes.readNoteCompanion(path))?.textFields ?? [], await noteOnDisk())
+const storedFamd = async () => page.evaluate(async (path) => window.fanotes.readFile(path.replace(/\.pdf$/iu, '.famd')), await noteOnDisk())
 const settle = (ms = 350) => page.waitForTimeout(ms)
 const scrollPaperTo = async (n) => {
   await page.evaluate((index) => {
@@ -177,6 +520,10 @@ try {
   // 3. an empty box vanishes when left
   await placeAt(1, 0.7, 0.2)
   assert.equal((await boxes()).length, 2)
+  await settle(900)
+  const writtenWhileEmpty = await storedBoxes()
+  assert.equal(writtenWhileEmpty.length, 1, 'a box that is still empty is not written, so it cannot come back as a ghost')
+  assert.ok(writtenWhileEmpty.every((item) => item.text.trim() !== '' && item.updatedAt > 0), 'a saved box has text and an edit stamp')
   const outside = await pageRect(1)
   await page.mouse.click(outside.x + 20, outside.y + 20)
   await settle()
@@ -267,6 +614,44 @@ try {
   assert.ok(reloaded, 'edited text is saved')
   assert.ok(reloaded.weight === '700' || reloaded.weight === 'bold', 'bold survives the reload')
   assert.equal(reloaded.color, 'rgb(37, 99, 201)', 'colour survives the reload')
+  assert.equal(await page.evaluate(() => typeof window.fanotes.mergeNoteTextFields), 'function', 'the app saves boxes through the per-box merge')
+
+  // 9. a box that is typed but not yet saved counts as unsaved, and hiding the page saves it at once.
+  const idleGuard = () => page.evaluate(() => {
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  })
+  assert.equal(await idleGuard(), false, 'nothing unsaved: closing the tab does not ask')
+  await page.locator('[data-note-text-field]').first().click()
+  await page.keyboard.type(' +x')
+  assert.equal(await idleGuard(), true, 'a typed box that is not saved yet makes the tab ask before it closes')
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await settle(250)
+  assert.ok((await storedBoxes()).some((item) => item.text.endsWith(' +x')), 'hiding the page saves the box without waiting for the pause')
+  await page.evaluate(() => { delete document.visibilityState })
+  await page.keyboard.type('!')
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+  await settle(250)
+  assert.ok((await storedBoxes()).some((item) => item.text.endsWith(' +x!')), 'pagehide saves the box too')
+  await settle(1200)
+  assert.equal(await idleGuard(), false, 'once saved the tab closes without asking')
+  assert.ok((await storedBoxes()).every((item) => item.updatedAt > 0), 'every stored box carries its edit stamp')
+
+  // 10. deleting a box removes it for good and leaves a tombstone, kept apart from the live boxes.
+  assert.equal((await storedFamd()).includes('textFieldTombstones'), false, 'no tombstone before anything was deleted')
+  await scrollPaperTo(2)
+  const doomed = (await boxes()).find((item) => item.value.startsWith('Seite zwei'))
+  await page.locator(`[data-note-text-field="${doomed.id}"]`).click()
+  await page.locator('.note-text-field-toolbar button[aria-label="Remove text field"], .note-text-field-toolbar button[aria-label="Textfeld entfernen"]').click()
+  await settle(900)
+  assert.equal((await boxes()).length, 1)
+  assert.equal((await storedBoxes()).length, 1, 'the deleted box is gone from the stored list')
+  const afterDelete = await storedFamd()
+  assert.ok(afterDelete.includes('textFieldTombstones') && afterDelete.includes(doomed.id), 'the delete left a tombstone for that box')
   assert.deepEqual(pageErrors, [], 'no page errors')
   console.log('pdf text box browser check ok')
 } finally {

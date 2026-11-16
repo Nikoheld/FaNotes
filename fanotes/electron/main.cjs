@@ -66,12 +66,14 @@ const {
   parseNoteBackups,
   parseNoteLinks,
   parseNoteTextFields,
+  parseNoteTextFieldOps,
   parseAnnotations: parseNoteAnnotations,
   serializeFamd,
   stripFamdPayload,
   worksheetIdsFromMarkdown,
 } = require('./famd.cjs')
 const { companionInkNeedsRecord, isUnexplainedEmptyPage, recordDocumentForEmptyCompanion, refusesEmptyInkSave } = require('./ink-save-guard.cjs')
+const { applyNoteTextFieldOps } = require('./noteTextFieldMerge.mjs')
 const { packInk: packDrawingInk } = require('./famdPack.mjs')
 const pdfOcrStore = require('./pdf-ocr.cjs')
 const pageTextStore = require('./page-text.cjs')
@@ -227,6 +229,7 @@ const IPC = Object.freeze({
   readNoteBackups: 'fanotes:read-note-backups',
   writeNoteBackups: 'fanotes:write-note-backups',
   writeNoteTextFields: 'fanotes:write-note-text-fields',
+  mergeNoteTextFields: 'fanotes:merge-note-text-fields',
   writeNoteAnnotations: 'fanotes:write-note-annotations',
   readNoteCompanion: 'fanotes:read-note-companion',
   readSubjectBooks: 'fanotes:read-subject-books',
@@ -4818,6 +4821,26 @@ function registerIpcHandlers() {
     assertNotePath(notePath)
     const fields = parseNoteTextFields(rawFields)
     return mutateFamdCompanion(notePath, () => ({ payload: { textFields: fields }, result: fields }))
+  })
+
+  // One window's text box changes (adds, edits, deletes), merged box by box into
+  // what is on disk right now. The read happens inside the per-file write queue,
+  // so two windows, or a sync that landed a moment ago, never lose each other's
+  // boxes. Without changes it only reads the stored boxes (null: no companion yet).
+  handle(IPC.mergeNoteTextFields, async (_event, relativePath, rawOps) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const ops = parseNoteTextFieldOps(rawOps)
+    if (!ops.upserts.length && !ops.deletes.length) {
+      const loaded = await loadFamdCompanion(notePath)
+      return loaded ? (loaded.textFields ?? []) : null
+    }
+    return mutateFamdCompanion(notePath, ({ payload }) => {
+      const merged = applyNoteTextFieldOps(payload.textFields, payload.textFieldTombstones, ops, Date.now())
+      return { payload: { textFields: merged.fields, textFieldTombstones: merged.tombstones }, result: merged.fields }
+    })
   })
 
   handle(IPC.writeNoteAnnotations, async (_event, relativePath, rawList) => {

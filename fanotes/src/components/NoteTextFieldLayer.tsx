@@ -3,6 +3,7 @@ import { Bold, Minus, Plus, Trash2 } from 'lucide-react'
 import { noteLinkMarkerCss } from '../lib/noteLink'
 import {
   NOTE_TEXT_FIELD_COLORS,
+  NOTE_TEXT_FIELD_MAX_CHARS,
   NOTE_TEXT_FIELD_REFERENCE_PAGE_WIDTH,
   noteTextFieldPointFromRects,
   stepNoteTextFieldFontSize,
@@ -174,6 +175,9 @@ export function NoteTextFieldLayer({
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target
       if (target instanceof Element && target.closest('.note-text-field')) return
+      // A press that a tool swallows (pen, touch) never moves focus, so the box would keep typing unseen.
+      const active = document.activeElement
+      if (active instanceof HTMLElement && active.closest('.note-text-field')) active.blur()
       setSelectedId(null)
     }
     document.addEventListener('pointerdown', onPointerDown, true)
@@ -183,6 +187,12 @@ export function NoteTextFieldLayer({
   useEffect(() => {
     if (selectedId && !fields.some((field) => field.id === selectedId)) setSelectedId(null)
   }, [fields, selectedId])
+
+  // A composition that never ends (the box unmounts, or focus leaves first) must not block deselecting later boxes.
+  useEffect(() => {
+    if (!selectedId) composingRef.current = false
+  }, [selectedId])
+  useEffect(() => () => { composingRef.current = false }, [])
 
   const pointAt = (clientX: number, clientY: number) => {
     const layer = layerRef.current
@@ -289,14 +299,21 @@ export function NoteTextFieldLayer({
   }
 
   const onKeyDown = (field: NoteTextField, event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    const mod = event.ctrlKey || event.metaKey
+    // Keys that belong to an input method (Esc closes the candidate list, Enter commits it) are not ours,
+    // and the sheet's own shortcuts must not see them either.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+      event.stopPropagation()
+      return
+    }
+    // AltGr arrives as ctrl+alt: those keys type characters (@ € { [ ]), they are not shortcuts.
+    const mod = (event.ctrlKey || event.metaKey) && !event.altKey
     if (event.key === 'Escape' || (mod && event.key === 'Enter')) {
       event.preventDefault()
       event.stopPropagation()
       finish(event.currentTarget)
       return
     }
-    if (mod && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'b') {
+    if (mod && !event.shiftKey && (event.code === 'KeyB' || event.key.toLowerCase() === 'b')) {
       event.preventDefault()
       event.stopPropagation()
       onStyle(field.id, { bold: field.bold ? undefined : true })
@@ -390,6 +407,7 @@ export function NoteTextFieldLayer({
               data-note-text-field={field.id}
               value={field.text}
               rows={1}
+              maxLength={NOTE_TEXT_FIELD_MAX_CHARS}
               placeholder="Text eingeben …"
               spellCheck
               style={{
@@ -402,7 +420,12 @@ export function NoteTextFieldLayer({
                 onText(field.id, event.target.value)
               }}
               onCompositionStart={() => { composingRef.current = true }}
-              onCompositionEnd={() => { composingRef.current = false }}
+              onCompositionEnd={(event) => {
+                composingRef.current = false
+                // Focus may have left while the composition was open: the blur that was ignored then is due now.
+                const wrap = event.currentTarget.closest('.note-text-field')
+                if (wrap && !wrap.contains(document.activeElement)) setSelectedId((current) => current === field.id ? null : current)
+              }}
               onKeyDown={(event) => onKeyDown(field, event)}
               onPointerDown={(event) => event.stopPropagation()}
             />

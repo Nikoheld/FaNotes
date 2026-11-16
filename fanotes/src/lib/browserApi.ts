@@ -16,7 +16,8 @@ import { sanitizePageTextRecord, type PageTextRecord } from './docSearch/pageTex
 import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
-import { parseNoteTextFields } from './noteTextField'
+import { parseNoteTextFields, parseNoteTextFieldTombstones } from './noteTextField'
+import { applyNoteTextFieldOps } from '../../electron/noteTextFieldMerge.mjs'
 import { parseAnnotations } from '../../electron/noteAnnotation.mjs'
 import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
 import { isPaperStyle } from './paperStyles'
@@ -1708,6 +1709,32 @@ export function createBrowserApi(): FaNotesApi {
       files.set(famdPath, record)
       cachedTree = null
       return fields
+    },
+    mergeNoteTextFields: async (rawPath, rawOps) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const famdPath = companionNotePath(path, '.famd')
+      const existing = files.get(famdPath)
+      const parsed = parseFamd(existing?.content ?? '')
+      const source = rawOps && typeof rawOps === 'object' ? rawOps as { upserts?: unknown; deletes?: unknown } : {}
+      const ops = { upserts: parseNoteTextFields(source.upserts), deletes: parseNoteTextFieldTombstones(source.deletes) }
+      if (!ops.upserts.length && !ops.deletes.length) return existing ? parsed.payload?.textFields ?? [] : null
+      const merged = applyNoteTextFieldOps(parsed.payload?.textFields, parsed.payload?.textFieldTombstones, ops, Date.now())
+      const payload = {
+        ...(parsed.payload || emptyFamdPayload()),
+        updatedAt: new Date().toISOString(),
+        textFields: merged.fields,
+        textFieldTombstones: merged.tombstones,
+      }
+      const record = {
+        path: famdPath,
+        content: serializeFamd(parsed.markdown, payload, famdEncodingForSave(existing?.content ?? '')),
+        modifiedAt: new Date().toISOString(),
+      }
+      await write('files', (store) => { store.put(record) })
+      files.set(famdPath, record)
+      cachedTree = null
+      return merged.fields
     },
     readSubjectBooks: async () => {
       await ready

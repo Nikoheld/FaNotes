@@ -182,12 +182,19 @@ import {
   type NoteLinkStyleId,
 } from './lib/noteLink'
 import {
+  createSerialJobQueue,
   newNoteTextFieldId,
   parseNoteTextFields,
   patchNoteTextField,
   placeNoteTextField,
   type NoteTextField,
 } from './lib/noteTextField'
+import {
+  diffNoteTextFields,
+  mergeNoteTextFields,
+  noteTextFieldsEqual,
+  persistableNoteTextFields,
+} from '../electron/noteTextFieldMerge.mjs'
 import {
   createNoteBackup,
   listNoteBackups,
@@ -221,7 +228,7 @@ import { installChromeTextSelect } from './lib/chromeTextSelect'
 import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
-import { collectShareNotes, createFetchSharePort, loadShareEntries, parseShareDirectory, publicShareInk, publicShareTextFields, publishShare, queueLiveShareRefresh, readShare, resolveShareOrigin, serializeShareDirectory } from './lib/sync/share'
+import { collectShareNotes, createFetchSharePort, loadShareEntries, parseShareDirectory, publicShareInk, publicShareTextFields, publishShare, queueLiveShareRefresh, readShare, resolveShareOrigin, serializeShareDirectory, type ShareTextField } from './lib/sync/share'
 import { applyRemoteTextFields, beginDesktopShareOpen, chooseShareFolder, confirmShareIdentity, drawingJsonWithRemoteInk, openShareEditor, parseShareProtocol, remoteTextForEditor, shareTickDecision, type ShareEditClient, type ShareOpenState } from './lib/sync/shareEdit'
 import { claimUsername, createFetchProfilePort, createProfileOwnerId, ProfileRequestError } from './lib/sync/profile'
 import { PaperStylePicker } from './components/PaperStylePicker'
@@ -894,10 +901,18 @@ export default function App({ startupBootstrap }: AppProps) {
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const noteLinksRef = useRef<NoteLinkRecord[]>([])
   const noteTextFieldsRef = useRef<NoteTextField[]>([])
-  const noteTextFieldsEditedRef = useRef(false)
+  /** The boxes as last read from or written to disk, per note: the common ground of the next per-box merge. */
+  const textFieldBasesRef = useRef(new Map<string, NoteTextField[]>())
   const textFieldDirtyRef = useRef(false)
   const textFieldSavePathRef = useRef<string | null>(null)
   const textFieldTimerRef = useRef<number | null>(null)
+  /** When the box state first became dirty without a flush since: the debounce may slide, but not forever. */
+  const textFieldDirtySinceRef = useRef(0)
+  /** Every text box read and write runs on this queue, one after the other. The boxes are unsaved while a write is queued. */
+  const textFieldQueueRef = useRef(createSerialJobQueue())
+  /** Counts note opens. A text box job that began in an earlier open must not touch the boxes of the next one. */
+  const textFieldSessionRef = useRef(0)
+  const refreshNoteTextFieldsRef = useRef<() => void>(() => undefined)
   const flushNoteTextFieldsRef = useRef<() => Promise<boolean>>(async () => true)
   const noteBackupsRef = useRef<NoteBackupSnapshot[]>([])
   const subjectBooksRef = useRef<SubjectBookRecord[]>([])
@@ -1311,11 +1326,12 @@ export default function App({ startupBootstrap }: AppProps) {
     setTextFieldFocusId(null)
     setSelectedNoteLinkId(null)
     setBackupMenuOpen(false)
-    noteTextFieldsEditedRef.current = false
+    textFieldSessionRef.current += 1
     noteTextFieldsRef.current = []
     setNoteTextFields([])
     textFieldDirtyRef.current = false
     textFieldSavePathRef.current = path
+    if (path) textFieldBasesRef.current.delete(path)
     if (!path) {
       noteLinksRef.current = []
       setNoteLinks([])
@@ -1333,21 +1349,23 @@ export default function App({ startupBootstrap }: AppProps) {
       const links = Array.isArray(fields?.noteLinks) ? fields.noteLinks : []
       noteLinksRef.current = links
       setNoteLinks(links)
-      const loadedFields = parseNoteTextFields(fields?.textFields)
-      if (noteTextFieldsEditedRef.current) {
-        const localIds = new Set(noteTextFieldsRef.current.map((field) => field.id))
-        const merged = parseNoteTextFields([
-          ...loadedFields.filter((field) => !localIds.has(field.id)),
-          ...noteTextFieldsRef.current,
-        ])
-        noteTextFieldsRef.current = merged
-        setNoteTextFields(merged)
-        textFieldDirtyRef.current = true
-        textFieldSavePathRef.current = path
-        void flushNoteTextFieldsRef.current()
-      } else {
-        noteTextFieldsRef.current = loadedFields
-        setNoteTextFields(loadedFields)
+      // A write that already finished holds a newer copy of the disk than this read.
+      if (!textFieldBasesRef.current.has(path)) {
+        const loadedFields = parseNoteTextFields(fields?.textFields)
+        textFieldBasesRef.current.set(path, loadedFields)
+        const local = noteTextFieldsRef.current
+        if (local.length) {
+          // The user placed or typed a box before the read came back: keep it next to the stored ones.
+          const merged = parseNoteTextFields(mergeNoteTextFields([], local, loadedFields))
+          noteTextFieldsRef.current = merged
+          setNoteTextFields(merged)
+          textFieldDirtyRef.current = true
+          textFieldSavePathRef.current = path
+          void flushNoteTextFieldsRef.current()
+        } else {
+          noteTextFieldsRef.current = loadedFields
+          setNoteTextFields(loadedFields)
+        }
       }
       const backups = listNoteBackups(fields?.noteBackups ?? [], path)
       noteBackupsRef.current = backups
@@ -1356,10 +1374,6 @@ export default function App({ startupBootstrap }: AppProps) {
       if (!alive) return
       noteLinksRef.current = []
       setNoteLinks([])
-      if (!noteTextFieldsEditedRef.current) {
-        noteTextFieldsRef.current = []
-        setNoteTextFields([])
-      }
       noteBackupsRef.current = []
       setNoteBackups([])
     })
@@ -2956,45 +2970,129 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [flushDocumentLayers, openNote, refreshTree, saveContent, toast])
 
-  const flushNoteTextFields = useCallback(async () => {
+  /**
+   * Fold the boxes now on disk (`stored`) into the open note, box by box.
+   * `known` is the disk state this window compared against: what it sent
+   * for a write, or the state it saw last for a plain re-read. Boxes another
+   * window, device or share editor added or changed come in. What this window
+   * changed since `known` stays, and so does a box that was rejected because
+   * it lost against a newer edit or a later delete only if it changed again.
+   */
+  const absorbStoredTextFields = useCallback((path: string, known: readonly NoteTextField[], stored: readonly NoteTextField[], session: number) => {
+    if (session !== textFieldSessionRef.current) {
+      // The note was closed and opened again meanwhile. The new copy may have read the disk before this
+      // write landed, so read once more when the queue gets to it.
+      if (textFieldSavePathRef.current === path) refreshNoteTextFieldsRef.current()
+      return
+    }
+    textFieldBasesRef.current.set(path, [...stored])
+    if (textFieldSavePathRef.current !== path) return
+    const live = noteTextFieldsRef.current
+    const merged = parseNoteTextFields(mergeNoteTextFields(known, live, stored))
+    if (noteTextFieldsEqual(merged, live)) return
+    noteTextFieldsRef.current = merged
+    setNoteTextFields(merged)
+  }, [])
+
+  /**
+   * Writes the open note's boxes. The caller waits until this write and every
+   * earlier one has finished, so `true` means the boxes are on disk.
+   * Only what changed since the last read or write is sent, and the main
+   * process merges it into the boxes stored right now. Another window's boxes
+   * therefore survive, and they come back in the result.
+   */
+  const flushNoteTextFields = useCallback((): Promise<boolean> => {
     if (textFieldTimerRef.current !== null) {
       window.clearTimeout(textFieldTimerRef.current)
       textFieldTimerRef.current = null
     }
     const path = textFieldSavePathRef.current
-    if (!path || !textFieldDirtyRef.current) return true
-    if (typeof window.fanotes.writeNoteTextFields !== 'function') {
+    if (!path || !textFieldDirtyRef.current) {
+      return textFieldQueueRef.current.writes() > 0 ? textFieldQueueRef.current.drained() : Promise.resolve(true)
+    }
+    const api = window.fanotes
+    if (typeof api.mergeNoteTextFields !== 'function' && typeof api.writeNoteTextFields !== 'function') {
       textFieldDirtyRef.current = false
-      return true
+      return Promise.resolve(true)
     }
+    // Captured now: the open note and its boxes are swapped as soon as another note opens.
     const fields = noteTextFieldsRef.current
+    const session = textFieldSessionRef.current
     textFieldDirtyRef.current = false
-    try {
-      await window.fanotes.writeNoteTextFields(path, fields)
-      pushEditableShare(path, { textFields: publicShareTextFields(fields) })
-      return true
-    } catch (error) {
-      if (textFieldSavePathRef.current === path) textFieldDirtyRef.current = true
-      toast(error instanceof Error ? error.message : 'Das Textfeld konnte nicht gespeichert werden.', 'error')
-      return false
-    }
-  }, [pushEditableShare, toast])
+    return textFieldQueueRef.current.run(async () => {
+      try {
+        const base = textFieldBasesRef.current.get(path) ?? []
+        const persist = persistableNoteTextFields(fields, base)
+        let stored: NoteTextField[]
+        if (typeof api.mergeNoteTextFields === 'function') {
+          const ops = diffNoteTextFields(base, persist, Date.now())
+          if (!ops.upserts.length && !ops.deletes.length) return true
+          const result = await api.mergeNoteTextFields(path, ops)
+          stored = Array.isArray(result) ? parseNoteTextFields(result) : persist
+        } else {
+          stored = parseNoteTextFields(await api.writeNoteTextFields!(path, persist))
+        }
+        absorbStoredTextFields(path, persist, stored, session)
+        pushEditableShare(path, { textFields: publicShareTextFields(stored) })
+        return true
+      } catch (error) {
+        if (textFieldSavePathRef.current === path && textFieldSessionRef.current === session) textFieldDirtyRef.current = true
+        toast(error instanceof Error ? error.message : 'Das Textfeld konnte nicht gespeichert werden.', 'error')
+        return false
+      }
+    })
+  }, [absorbStoredTextFields, pushEditableShare, toast])
   flushNoteTextFieldsRef.current = flushNoteTextFields
+
+  /** Reads the boxes on disk again, so another window's or device's boxes show up without a local edit. */
+  const refreshNoteTextFields = useCallback(() => {
+    const path = textFieldSavePathRef.current
+    const api = window.fanotes
+    if (!path || path !== activePathRef.current || typeof api.mergeNoteTextFields !== 'function') return
+    const session = textFieldSessionRef.current
+    void textFieldQueueRef.current.run(async () => {
+      try {
+        if (session !== textFieldSessionRef.current) return true
+        const result = await api.mergeNoteTextFields!(path, { upserts: [], deletes: [] })
+        const known = textFieldBasesRef.current.get(path)
+        // No companion yet, or the note was not read yet: there is nothing to compare with.
+        if (!Array.isArray(result) || !known) return true
+        absorbStoredTextFields(path, known, parseNoteTextFields(result), session)
+      } catch {
+        // A failed re-read changes nothing; the next focus tries again.
+      }
+      return true
+    }, false)
+  }, [absorbStoredTextFields])
+  refreshNoteTextFieldsRef.current = refreshNoteTextFields
+
+  useEffect(() => {
+    const onWake = () => { if (!document.hidden) refreshNoteTextFields() }
+    window.addEventListener('focus', onWake)
+    document.addEventListener('visibilitychange', onWake)
+    return () => {
+      window.removeEventListener('focus', onWake)
+      document.removeEventListener('visibilitychange', onWake)
+    }
+  }, [refreshNoteTextFields])
 
   const queueNoteTextFields = useCallback((path: string) => {
     textFieldSavePathRef.current = path
     textFieldDirtyRef.current = true
+    const now = Date.now()
     if (textFieldTimerRef.current !== null) window.clearTimeout(textFieldTimerRef.current)
+    else textFieldDirtySinceRef.current = now
+    // Typing keeps pushing the save back, but never past 5 s after the first unsaved edit.
+    const wait = Math.max(0, Math.min(650, 5000 - (now - textFieldDirtySinceRef.current)))
     textFieldTimerRef.current = window.setTimeout(() => {
       textFieldTimerRef.current = null
       void flushNoteTextFieldsRef.current()
-    }, 650)
+    }, wait)
   }, [])
 
   const rememberNoteTextFields = useCallback((path: string, fields: readonly NoteTextField[], commit: boolean) => {
     const next = parseNoteTextFields(fields)
     noteTextFieldsRef.current = next
-    noteTextFieldsEditedRef.current = true
     setNoteTextFields(next)
     if (commit) {
       textFieldDirtyRef.current = true
@@ -3959,20 +4057,40 @@ export default function App({ startupBootstrap }: AppProps) {
       } else if (decision === 'absorb' && editorDoc !== null) {
         session.absorb(sharePath, { content: editorDoc })
       }
-      if (!noteTextFieldsEditedRef.current && !textFieldDirtyRef.current && tab.path === activePathRef.current) {
+      // Settled boxes only: while a box is being typed or saved, the next tick looks again.
+      const boxesSettled = !textFieldDirtyRef.current && textFieldTimerRef.current === null && textFieldQueueRef.current.writes() === 0
+      if (boxesSettled && tab.path === activePathRef.current) {
         const remoteFields = session.noteFields(sharePath)
         const fieldSig = (fields: readonly { page?: number; x?: number; y?: number; width?: number; fontSize?: number; text?: string }[]) => (
           JSON.stringify(fields.map((field) => [field.page, field.x, field.y, field.width, field.fontSize, field.text]))
         )
         const remoteSig = `${sharePath}\n${fieldSig(remoteFields)}`
-        const openSig = `${sharePath}\n${fieldSig(noteTextFieldsRef.current)}`
+        // The share holds boxes with text only, so a box still empty is not part of the comparison.
+        const openFields = publicShareTextFields(noteTextFieldsRef.current)
+        const openSig = `${sharePath}\n${fieldSig(openFields)}`
         if (openSig !== remoteSig) {
-          const mergedFields = applyRemoteTextFields(noteTextFieldsRef.current, remoteFields)
-          noteTextFieldsRef.current = mergedFields
-          setNoteTextFields(mergedFields)
+          // Per-box three-way merge against the share's basis: boxes others added or changed come in,
+          // and what this window changed (and the share has not seen yet) stays.
+          let sharedFields: ShareTextField[] | null = null
+          try {
+            sharedFields = session.prepareLocalEdit(sharePath, { textFields: openFields }).textFields ?? []
+          } catch {
+            sharedFields = null
+          }
+          if (sharedFields && fieldSig(sharedFields) !== fieldSig(openFields)) {
+            const absorbed = applyRemoteTextFields(noteTextFieldsRef.current, sharedFields)
+            const inProgress = noteTextFieldsRef.current.filter((field) => field.text.trim() === '')
+            const mergedFields = parseNoteTextFields([...absorbed, ...inProgress])
+            noteTextFieldsRef.current = mergedFields
+            setNoteTextFields(mergedFields)
+            // The note on disk gets the boxes that arrived.
+            textFieldDirtyRef.current = true
+            textFieldSavePathRef.current = tab.path
+            void flushNoteTextFieldsRef.current()
+          }
           shownFieldSignature = remoteSig
         } else if (shownFieldSignature === remoteSig) {
-          session.absorb(sharePath, { textFields: noteTextFieldsRef.current })
+          session.absorb(sharePath, { textFields: openFields })
         } else {
           shownFieldSignature = remoteSig
         }
@@ -4429,14 +4547,27 @@ export default function App({ startupBootstrap }: AppProps) {
       flushPaperViewMemory()
       editorRef.current?.flushChanges()
       splitEditorRef.current?.flushChanges()
-      const unsaved = pendingWrites.current.size > 0 || drawingDirtyRef.current || worksheetDirtyIdsRef.current.size > 0
+      // A text box is unsaved while it waits for its debounce and while a write is still running.
+      const boxesUnsaved = textFieldDirtyRef.current || textFieldTimerRef.current !== null || textFieldQueueRef.current.writes() > 0
+      const unsaved = pendingWrites.current.size > 0 || drawingDirtyRef.current || worksheetDirtyIdsRef.current.size > 0 || boxesUnsaved
       if (!unsaved) return
       void flushDocumentLayers().then(() => flushPendingWrites()).catch(() => undefined)
       event.preventDefault()
       event.returnValue = ''
     }
+    // A tab that is hidden, frozen or put in the back/forward cache may never run beforeunload.
+    const saveBoxesOnHide = () => {
+      if (document.visibilityState === 'hidden') void flushNoteTextFieldsRef.current()
+    }
+    const saveBoxesOnPageHide = () => { void flushNoteTextFieldsRef.current() }
     window.addEventListener('beforeunload', guard)
-    return () => window.removeEventListener('beforeunload', guard)
+    window.addEventListener('pagehide', saveBoxesOnPageHide)
+    document.addEventListener('visibilitychange', saveBoxesOnHide)
+    return () => {
+      window.removeEventListener('beforeunload', guard)
+      window.removeEventListener('pagehide', saveBoxesOnPageHide)
+      document.removeEventListener('visibilitychange', saveBoxesOnHide)
+    }
   }, [flushDocumentLayers, flushPendingWrites, isWeb])
 
   const openDrawing = useCallback(() => {

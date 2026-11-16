@@ -25,8 +25,15 @@ data class NoteTextField(
     /** Optional #rrggbb ink colour written by desktop; null means the default dark ink. */
     val color: String? = null,
     val bold: Boolean = false,
+    /**
+     * Epoch milliseconds of the last edit of this box. Desktop windows, devices and share editors use it to
+     * decide which edit of one box is newer. Null for boxes written before desktop stamped them.
+     */
+    val updatedAt: Long? = null,
 )
 
+/** Largest epoch millisecond a JS Date can hold; a stamp beyond it is junk. */
+private const val TEXT_FIELD_STAMP_MAX = 8_640_000_000_000_000L
 private val TEXT_FIELD_COLOR = Regex("^#[0-9a-fA-F]{6}$")
 private val TEXT_FIELD_ID = Regex("^[a-zA-Z0-9._-]{1,96}$")
 const val NOTE_TEXT_FIELD_LIMIT = 200
@@ -48,7 +55,7 @@ fun newNoteTextFieldId(): String {
 }
 
 /** Click point becomes the top-left of a new empty field, kept on the page. */
-fun placeNoteTextField(point: NoteLinkPoint, id: String? = null): NoteTextField {
+fun placeNoteTextField(point: NoteLinkPoint, id: String? = null, now: Long = System.currentTimeMillis()): NoteTextField {
     val width = NOTE_TEXT_FIELD_WIDTH
     return sanitizeNoteTextField(
         id = id,
@@ -58,6 +65,7 @@ fun placeNoteTextField(point: NoteLinkPoint, id: String? = null): NoteTextField 
         width = width,
         text = "",
         fontSize = NOTE_TEXT_FIELD_FONT,
+        updatedAt = now,
     )
 }
 
@@ -90,7 +98,7 @@ fun acceptPlacedTextField(existing: List<NoteTextField>, field: NoteTextField): 
     if (current.size >= NOTE_TEXT_FIELD_LIMIT) {
         return ArmedTextFieldTap(current, null, TEXT_FIELD_LIMIT_MESSAGE, true)
     }
-    val clean = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold)
+    val clean = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold, field.updatedAt)
     if (current.any { it.id == clean.id }) return ArmedTextFieldTap(current, null, null, true)
     return ArmedTextFieldTap(current + clean, clean, null, false)
 }
@@ -111,6 +119,7 @@ fun parseNoteTextFields(array: JsonValue.Arr?): List<NoteTextField> {
             fontSize = wholeInt(obj, "fontSize"),
             color = obj.string("color"),
             bold = (obj.get("bold") as? JsonValue.Bool)?.value == true,
+            updatedAt = obj.double("updatedAt")?.takeIf { it.isFinite() }?.toLong(),
         )
         if (field.id in seen) continue
         seen += field.id
@@ -124,7 +133,7 @@ fun parseNoteTextFieldList(fields: List<NoteTextField>): List<NoteTextField> {
     val seen = linkedSetOf<String>()
     val clean = mutableListOf<NoteTextField>()
     for (field in fields) {
-        val next = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold)
+        val next = sanitizeNoteTextField(field.id, field.page, field.x, field.y, field.width, field.text, field.fontSize, field.color, field.bold, field.updatedAt)
         if (next.id in seen) continue
         seen += next.id
         clean += next
@@ -145,6 +154,8 @@ fun noteTextFieldsJson(fields: List<NoteTextField>): JsonValue.Arr = JsonValue.A
     )
     field.color?.let { obj.put("color", jsonString(it)) }
     if (field.bold) obj.put("bold", JsonValue.Bool(true))
+    // Written back as read, so desktop's per-box merge still sees when this box was last edited.
+    field.updatedAt?.let { obj.put("updatedAt", jsonNumber(it.toDouble())) }
     obj
 }.toMutableList())
 
@@ -156,6 +167,7 @@ fun writeNoteTextFields(payload: JsonValue.Obj, fields: List<NoteTextField>): Js
     return next
 }
 
+/** A real change stamps the box with `now` (always newer than its old stamp); a patch that changes nothing keeps it. */
 fun patchNoteTextField(
     fields: List<NoteTextField>,
     id: String,
@@ -167,11 +179,12 @@ fun patchNoteTextField(
     fontSize: Int? = null,
     color: String? = null,
     bold: Boolean? = null,
+    now: Long = System.currentTimeMillis(),
 ): List<NoteTextField> {
     val current = parseNoteTextFieldList(fields)
     return parseNoteTextFieldList(current.map { field ->
-        if (field.id != id) field
-        else field.copy(
+        if (field.id != id) return@map field
+        val changed = field.copy(
             page = page ?: field.page,
             x = x ?: field.x,
             y = y ?: field.y,
@@ -181,6 +194,7 @@ fun patchNoteTextField(
             color = color ?: field.color,
             bold = bold ?: field.bold,
         )
+        if (changed == field) field else changed.copy(updatedAt = maxOf(now, (field.updatedAt ?: 0L) + 1L))
     })
 }
 
@@ -250,6 +264,7 @@ private fun sanitizeNoteTextField(
     fontSize: Int?,
     color: String? = null,
     bold: Boolean = false,
+    updatedAt: Long? = null,
 ): NoteTextField {
     val safeId = if (id != null && TEXT_FIELD_ID.matches(id)) id else newNoteTextFieldId()
     return NoteTextField(
@@ -262,6 +277,7 @@ private fun sanitizeNoteTextField(
         fontSize = clampFontSize(fontSize),
         color = color?.takeIf { TEXT_FIELD_COLOR.matches(it) }?.lowercase(),
         bold = bold,
+        updatedAt = updatedAt?.takeIf { it in 1..TEXT_FIELD_STAMP_MAX },
     )
 }
 

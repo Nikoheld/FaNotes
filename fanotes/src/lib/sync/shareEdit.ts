@@ -264,6 +264,7 @@ export const applyRemoteTextFields = (
       text: field.text,
       ...(existing?.color ? { color: existing.color } : {}),
       ...(existing?.bold ? { bold: true } : {}),
+      ...(existing?.updatedAt ? { updatedAt: existing.updatedAt } : {}),
     }
   })
 }
