@@ -156,7 +156,7 @@ try {
   await settle()
   list = await boxes()
   assert.equal(list[0].value, 'Grüße äöü Größ', 'typing, umlauts and edit keys stay inside the box')
-  assert.equal(await page.locator('.note-text-field-toolbar').count(), 1, 'the floating toolbar shows for the selected box')
+  assert.equal(await page.locator('.note-text-field-toolbar').count(), 1, 'the top toolbar shows the controls for the selected box')
   await shot('pdf-text-box-selected.png')
 
   // long text grows the box instead of cutting it off

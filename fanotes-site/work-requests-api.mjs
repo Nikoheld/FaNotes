@@ -3,6 +3,7 @@
 // Owner endpoints use the sync session (Authorization: Bearer + X-FaNotes-Account) and the
 // allow-list env FANOTES_REQUEST_OWNERS (comma separated account ids; empty = feature off).
 // Worker endpoints use the bearer token env FANOTES_AGENT_TOKEN.
+// FANOTES_REQUESTS_AUTO_APPROVE=1 approves a request as soon as the worker reports waiting_for_you.
 //   GET  /api/v1/requests/capabilities
 //   POST /api/v1/requests                      GET /api/v1/requests
 //   GET  /api/v1/requests/:id                  GET /api/v1/requests/:id/events   (SSE)
@@ -73,6 +74,7 @@ const writeAtomic = async (path, data) => {
 export const createWorkRequestsStore = (directory, options = {}) => {
   const root = resolve(directory)
   const now = options.now ?? (() => Date.now())
+  const autoApprove = Boolean(options.autoApprove)
   const bus = new EventEmitter()
   bus.setMaxListeners(0)
   const requestPath = (id) => join(root, 'requests', `${id}.json`)
@@ -208,7 +210,13 @@ export const createWorkRequestsStore = (directory, options = {}) => {
       if (input.pr) request.pr = { ...(request.pr ?? {}), ...input.pr }
       if (input.reason) request.reason = input.reason
       if (input.status === 'merged') request.percent = 100
-      return { request, event: await move(request, input.status, { reason: input.reason || undefined, pr: request.pr ?? undefined }) }
+      const event = await move(request, input.status, { reason: input.reason || undefined, pr: request.pr ?? undefined })
+      // Auto-approve: once CI is green the worker may merge without waiting for the owner.
+      if (input.status === 'waiting_for_you' && autoApprove && !request.approved) {
+        request.approved = true
+        await record(request, { type: 'approved', by: 'auto' })
+      }
+      return { request, event }
     }),
     async workerMessages(id, after) {
       const request = await load(id)
@@ -494,5 +502,7 @@ export const createWorkRequestsHandler = (store, options = {}) => {
   }
 }
 
-const defaultStore = createWorkRequestsStore(process.env.FANOTES_REQUESTS_DIR || '/var/lib/fanotes-requests')
+const defaultStore = createWorkRequestsStore(process.env.FANOTES_REQUESTS_DIR || '/var/lib/fanotes-requests', {
+  autoApprove: process.env.FANOTES_REQUESTS_AUTO_APPROVE === '1',
+})
 export const handleWorkRequestsRequest = createWorkRequestsHandler(defaultStore)

@@ -65,7 +65,7 @@ import {
   X,
 } from 'lucide-react'
 import { notifyStoryWritten, storySyncBusy } from './writing/liveSync'
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
 import { ConfirmDialog } from './components/ConfirmDialog'
@@ -75,7 +75,7 @@ import { FileTree } from './components/FileTree'
 import { EditorExportControls } from './components/EditorExportControls'
 import { FormattingToolbar } from './components/FormattingToolbar'
 import { NoteLinkLayer } from './components/NoteLinkLayer'
-import { NoteTextFieldLayer } from './components/NoteTextFieldLayer'
+import { NoteTextFieldLayer, NoteTextFieldToolbar } from './components/NoteTextFieldLayer'
 import { StudyAnnotationLayer } from './components/StudyAnnotationLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
@@ -276,6 +276,7 @@ import { templatesToSeed, templatePath, NOTE_TEMPLATES, type NoteProfileId } fro
 import { backlinksFor } from './lib/backlinks'
 import { highlightPdfImportantMarks } from './lib/pdfImportantMarks'
 import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
+import { createPdfMarkEraseHost, unmarkPdfNote } from './lib/pdfMarkEraseHost'
 import { getHandwritingSamples, getMathLayoutExamples, getImportedLabels, putHandwritingSamples, putMathLayoutExamples, putHandwritingLabels } from './lib/handwritingDb'
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
@@ -286,7 +287,8 @@ import { snowLayerActive } from './lib/snowTheme'
 import { SnowLayer } from './components/SnowLayer'
 import type { AppSettings, BootstrapData, CreateResult, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
-const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module) => ({ default: module.DrawingBoard })))
+const loadDrawingBoardModule = () => import('./components/DrawingBoard')
+const DrawingBoard = lazy(() => loadDrawingBoardModule().then((module) => ({ default: module.DrawingBoard })))
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
 const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspace').then((module) => ({ default: module.GlyphenWerkWorkspace })))
 const WritingMode = lazy(() => import('./writing/ui/WritingMode').then((module) => ({ default: module.WritingMode })))
@@ -326,10 +328,20 @@ const VaultOverview = lazy(() => import('./components/VaultOverview').then((modu
 const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
 const CalendarView = lazy(() => import('./components/CalendarView').then((module) => ({ default: module.CalendarView })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
-const PdfNoteView = lazy(() => import('./components/PdfNoteView').then((module) => ({ default: module.PdfNoteView })))
+const loadPdfNoteViewModule = () => import('./components/PdfNoteView')
+const PdfNoteView = lazy(() => loadPdfNoteViewModule().then((module) => ({ default: module.PdfNoteView })))
 const StableWorksheetLayer = memo(WorksheetLayer)
 const STARTUP_TREE_REFRESH_DELAY_MS = 18_000
 const STARTUP_DOCUMENT_LAYER_DELAY_MS = 160
+/**
+ * Opening a document keeps the previous one on screen while the next one's
+ * PDF and handwriting load, at most this long. Then the switch is one commit:
+ * no loading box, no text that gets its ink a moment later.
+ */
+const DOCUMENT_OPEN_PREPARE_MS = 450
+/** Handwriting read for an open that never committed is not used after this. */
+const PREPARED_INK_TTL_MS = 3_000
+type PreparedNoteInk = { path: string; content: string; at: number; document: DrawingLibraryDocument | null }
 /** How long a renamed/moved path still redirects late editor flushes to the new name. */
 const MOVED_PATH_ALIAS_MS = 30_000
 /** Statistics of the open note reach the disk at least this often (in one-second ticks). */
@@ -864,6 +876,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteTextFields, setNoteTextFields] = useState<NoteTextField[]>([])
   const [noteLinkPlacing, setNoteLinkPlacing] = useState(false)
   const [textFieldPlacing, setTextFieldPlacing] = useState(false)
+  const [selectedTextFieldId, setSelectedTextFieldId] = useState<string | null>(null)
   const [studyToolsOpen, setStudyToolsOpen] = useState(false)
   const [textFieldFocusId, setTextFieldFocusId] = useState<string | null>(null)
   const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
@@ -978,6 +991,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const drawingLoadRequestRef = useRef(0)
   const worksheetLoadRequestRef = useRef(0)
   const initialDrawingLoadRef = useRef(true)
+  const preparedInkRef = useRef<PreparedNoteInk | null>(null)
+  const openSequenceRef = useRef(0)
   const initialWorksheetLoadRef = useRef(true)
   const worksheetDirtyIdsRef = useRef(new Set<string>())
   const closeInProgressRef = useRef(false)
@@ -1287,7 +1302,9 @@ export default function App({ startupBootstrap }: AppProps) {
     relativePath: activeTab.path,
     markdown: visibleNoteContent(pendingWrites.current.get(activeTab.path) ?? activeTab.content),
   } : null, [activeTab, lmStudioOpen])
-  useEffect(() => {
+  // A layout effect: handwriting read before the switch (prepareDocumentOpen)
+  // mounts in the same commit as the note's text, not one paint later.
+  useLayoutEffect(() => {
     const requestId = ++drawingLoadRequestRef.current
     drawingDirtyRef.current = false
     const path = activeTab?.path
@@ -1307,6 +1324,18 @@ export default function App({ startupBootstrap }: AppProps) {
     }, requestId)
     drawingOpenRef.current = switched.drawingOpen
     setDrawingOpen(switched.drawingOpen)
+    const prepared = preparedInkRef.current
+    preparedInkRef.current = null
+    if (
+      !initialNoteLoad && prepared && prepared.path === path && prepared.content === content
+      && Date.now() - prepared.at <= PREPARED_INK_TTL_MS
+    ) {
+      setDrawingSession({
+        ...overlaySessionAfterInkReady(switched.drawingOpen, drawingSessionFromLoad(requestId, prepared.document)),
+        path,
+      })
+      return
+    }
     setDrawingSession({ ...overlaySessionAfterNoteSwitch(switched), path })
 
     // Saved handwriting loads in both input modes; keyboard mode mounts it
@@ -1873,6 +1902,31 @@ export default function App({ startupBootstrap }: AppProps) {
     void loadNoteCompanion(path)
   }, [activatePageStats, flushPageStats, loadNoteCompanion, rememberLastOpenNote])
 
+  /**
+   * Load what the next document shows in its first frame while the current
+   * one stays on screen: a PDF's parsed document (handed to PdfNoteView) and
+   * the note's handwriting (picked up by the drawing session effect). Capped
+   * at DOCUMENT_OPEN_PREPARE_MS; a slower load finishes after the switch.
+   */
+  const prepareDocumentOpen = useCallback(async (path: string, content: string) => {
+    const work: Promise<unknown>[] = []
+    if (isPdfNotePath(path)) {
+      work.push(Promise.all([loadPdfNoteViewModule(), import('./lib/pdfPrepare')])
+        .then(([, prepare]) => prepare.preparePdfDocument(path)))
+    }
+    work.push(readNoteInk(path, content).then((document) => {
+      preparedInkRef.current = { path, content, at: Date.now(), document }
+      if (document || drawingOpenRef.current) return loadDrawingBoardModule()
+      return undefined
+    }))
+    let timer = 0
+    await Promise.race([
+      Promise.all(work).catch(() => undefined),
+      new Promise<void>((resolve) => { timer = window.setTimeout(resolve, DOCUMENT_OPEN_PREPARE_MS) }),
+    ])
+    window.clearTimeout(timer)
+  }, [])
+
   const openNote = useCallback(async (path: string): Promise<boolean> => {
     if (activePathRef.current && activePathRef.current !== path) {
       // Book the last keystrokes under the note that is leaving before its editor unmounts.
@@ -1898,9 +1952,13 @@ export default function App({ startupBootstrap }: AppProps) {
     const previousActive = activePathRef.current
     const swapIntoSplit = splitPathRef.current === path && previousActive && previousActive !== path
     const existing = tabsRef.current.find((tab) => tab.path === path)
+    // A later open wins; an earlier one still preparing must not switch back.
+    const sequence = ++openSequenceRef.current
     if (existing) {
       if (session !== vaultSessionGenerationRef.current) return false
       if (!isPdfNotePath(path)) await loadMarkdownEditor()
+      if (path !== previousActive) await prepareDocumentOpen(path, existing.content)
+      if (session !== vaultSessionGenerationRef.current || sequence !== openSequenceRef.current) return false
       revealOpenedNote(path, existing.content, swapIntoSplit ? previousActive : null)
       return true
     }
@@ -1915,6 +1973,12 @@ export default function App({ startupBootstrap }: AppProps) {
       ) return false
       const { content } = tab
       if (!isPdfNotePath(path)) await loadMarkdownEditor()
+      await prepareDocumentOpen(path, content)
+      if (
+        session !== vaultSessionGenerationRef.current ||
+        structureRevision !== vaultStructureRevisionRef.current ||
+        sequence !== openSequenceRef.current
+      ) return false
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       revealOpenedNote(path, content, swapIntoSplit ? previousActive : null)
@@ -1930,7 +1994,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [flushDocumentLayers, readNoteTab, revealOpenedNote, toast])
+  }, [flushDocumentLayers, prepareDocumentOpen, readNoteTab, revealOpenedNote, toast])
 
   /**
    * Bring back the tabs, pins and split the vault was left with. The active
@@ -2494,6 +2558,20 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePath) updateContentFor(activePath, content)
   }, [activePath, updateContentFor])
 
+  // The eraser in pen mode also takes PDF text highlights off, undoable with the ink.
+  const updateContentForRef = useRef(updateContentFor)
+  updateContentForRef.current = updateContentFor
+  const latestNoteContent = useCallback((path: string) => (
+    pendingWrites.current.get(path) ?? tabsRef.current.find((tab) => tab.path === path)?.content ?? null
+  ), [])
+  const pdfMarkEraseHost = useMemo(() => createPdfMarkEraseHost({
+    notePath: () => activePathRef.current || null,
+    pages: () => document.querySelector('.unified-note-view.is-main-pane .unified-paper.is-pdf-note')
+      ?? document.querySelector('.unified-paper.is-pdf-note'),
+    read: latestNoteContent,
+    write: (path, content) => updateContentForRef.current(path, content),
+  }), [latestNoteContent])
+
   const closeTab = useCallback(async (path: string) => {
     const session = pageStatsRef.current.get(path)
     let statsNeedWrite = false
@@ -2528,6 +2606,13 @@ export default function App({ startupBootstrap }: AppProps) {
       // edit while this save was in flight.
       if (!saved || pendingWrites.current.has(closing.path)) return
     }
+    if (activePathRef.current === path) {
+      // The neighbour that takes over opens like any other document: prepared first.
+      const index = tabsRef.current.findIndex((tab) => tab.path === path)
+      const remaining = tabsRef.current.filter((tab) => tab.path !== path)
+      const next = remaining[Math.min(Math.max(index, 0), remaining.length - 1)]
+      if (next) await prepareDocumentOpen(next.path, next.content)
+    }
     closedTabsRef.current = rememberClosedTab(closedTabsRef.current, path)
     setTabs((current) => current.filter((tab) => tab.path !== path))
     setSplitPath((current) => current === path ? null : current)
@@ -2538,7 +2623,7 @@ export default function App({ startupBootstrap }: AppProps) {
       const remaining = latestTabs.filter((tab) => tab.path !== path)
       return remaining[Math.min(Math.max(latestIndex, 0), remaining.length - 1)]?.path ?? null
     })
-  }, [flushDocumentLayers, saveContent, tabHoldsRef])
+  }, [flushDocumentLayers, prepareDocumentOpen, saveContent, tabHoldsRef])
 
   /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
   const isSyncPathBusy = useCallback((path: string) => {
@@ -5947,6 +6032,25 @@ export default function App({ startupBootstrap }: AppProps) {
     } as React.CSSProperties
   }, [settings, sidebarVisible, theme])
 
+  // Portaled popovers, menus and dialogs render under document.body, outside .app-shell,
+  // so mirror the theme class and tokens there to keep them themed.
+  useEffect(() => {
+    const body = document.body
+    const themeClass = `app-theme-${theme}`
+    body.classList.add(themeClass)
+    const names = Object.keys(cssVars)
+    for (const name of names) body.style.setProperty(name, String((cssVars as Record<string, unknown>)[name]))
+    const root = document.documentElement
+    const scheme = getComputedStyle(body).colorScheme.includes('light') ? 'light' : 'dark'
+    root.dataset.theme = scheme
+    root.style.colorScheme = scheme
+    return () => {
+      body.classList.remove(themeClass)
+      for (const name of names) body.style.removeProperty(name)
+      document.documentElement.style.colorScheme = ''
+    }
+  }, [theme, cssVars])
+
   if (fatalError) return <div className="fatal-screen"><section className="fatal-card" role="alert"><div className="startup-mark is-error"><CircleAlert size={22} /></div><h1>FaNotes konnte nicht starten</h1><p>Deine Daten wurden nicht verändert. Prüfe den Vault und versuche es erneut.</p><code>{fatalError}</code><button className="primary-button" type="button" onClick={() => window.location.reload()}>Erneut versuchen</button></section></div>
   if (!bootstrap) return <div className="fatal-screen startup-screen"><section className="fatal-card startup-card" aria-live="polite"><div className="startup-mark"><PenLine size={22} /></div><h1>FaNotes öffnet deinen Schreibtisch</h1><p>Deine letzte Notiz erscheint gleich. Handschrift und weitere Werkzeuge werden danach im Hintergrund bereitgestellt.</p><div className="startup-progress" aria-hidden="true"><span /></div><small><LoaderCircle className="spin" size={12} /> Lokal und privat</small></section></div>
   if (popoutBookPath) {
@@ -6236,6 +6340,8 @@ export default function App({ startupBootstrap }: AppProps) {
             </div>
             <div className="toolbar-context">
               {(() => {
+                const selectedTextField = selectedTextFieldId ? noteTextFields.find((field) => field.id === selectedTextFieldId) : undefined
+                if (selectedTextField) return <NoteTextFieldToolbar field={selectedTextField} onStyle={changeTextFieldStyle} onRemove={removePlacedTextField} />
                 const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
                 if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
                 if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
@@ -6532,6 +6638,11 @@ export default function App({ startupBootstrap }: AppProps) {
                             const marks = addPdfMark(readPdfMarks(activeTab.content), { page, quote, kind: 'highlight' })
                             updateContentFor(activeTab.path, writePdfMarks(activeTab.content, marks))
                           }}
+                          onUnmarkSpans={(hit) => {
+                            const content = latestNoteContent(activeTab.path)
+                            const result = content === null ? null : unmarkPdfNote(content, [hit])
+                            if (result) updateContentFor(activeTab.path, result.content)
+                          }}
                         />
                       </SafeBoundary>
                     </Suspense>
@@ -6584,6 +6695,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         onTextFieldsExtent={remapPlacedTextFields}
                         onInkActivity={handleInkActivity}
                         onTrainingChanged={handleTrainingChanged}
+                        foreignErase={isPdfActive ? pdfMarkEraseHost : undefined}
                         onOpenGlyphenWerk={openGlyphenWerk}
                         onSectionFold={(index, collapsed) => {
                           const line = headingLineForSection(activeTab.content, index)
@@ -6619,6 +6731,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     onFinish={finishTextFieldEdit}
                     onRemove={removePlacedTextField}
                     onFocusHandled={clearTextFieldFocus}
+                    onSelectedChange={setSelectedTextFieldId}
                   />
                   <StudyAnnotationLayer
                     path={activeTab.path}

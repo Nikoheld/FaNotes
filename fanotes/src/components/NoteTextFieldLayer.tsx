@@ -40,6 +40,7 @@ type NoteTextFieldLayerProps = {
   onFinish?: () => void
   onRemove: (id: string) => void
   onFocusHandled?: () => void
+  onSelectedChange?: (id: string | null) => void
 }
 
 type Gesture =
@@ -51,6 +52,44 @@ const MIN_BOX_HEIGHT = 1.9 // em
 const fitTextArea = (node: HTMLTextAreaElement) => {
   node.style.height = '0px'
   node.style.height = `${Math.max(node.scrollHeight, 0)}px`
+}
+
+/** Size, bold and colour controls of the selected text box; shown in the top toolbar. */
+export function NoteTextFieldToolbar({ field, onStyle, onRemove }: {
+  field: NoteTextField
+  onStyle: (id: string, patch: StylePatch) => void
+  onRemove: (id: string) => void
+}) {
+  return (
+    <div
+      className="note-text-field-toolbar"
+      role="toolbar"
+      aria-label="Textfeld-Werkzeuge"
+      onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <button type="button" aria-label="Schrift kleiner" title="Schrift kleiner" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, -1) })}><Minus size={13} aria-hidden="true" /></button>
+        <span className="note-text-field-size" title="Schriftgröße">{field.fontSize}</span>
+        <button type="button" aria-label="Schrift größer" title="Schrift größer" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, 1) })}><Plus size={13} aria-hidden="true" /></button>
+        <i className="note-text-field-sep" aria-hidden="true" />
+        <button type="button" className={field.bold ? 'is-on' : ''} aria-pressed={Boolean(field.bold)} aria-label="Fett" title="Fett (Strg+B)" onClick={() => onStyle(field.id, { bold: field.bold ? undefined : true })}><Bold size={13} aria-hidden="true" /></button>
+        <i className="note-text-field-sep" aria-hidden="true" />
+        {NOTE_TEXT_FIELD_COLORS.map((color) => (
+          <button
+            key={color.label}
+            type="button"
+            className={`note-text-field-swatch ${(field.color ?? undefined) === color.value ? 'is-on' : ''}`}
+            style={{ '--swatch': color.css } as CSSProperties}
+            aria-label={color.label}
+            title={color.label}
+            aria-pressed={(field.color ?? undefined) === color.value}
+            onClick={() => onStyle(field.id, { color: color.value })}
+          />
+        ))}
+        <i className="note-text-field-sep" aria-hidden="true" />
+        <button type="button" className="is-danger" aria-label="Textfeld entfernen" title="Textfeld entfernen" onClick={() => onRemove(field.id)}><Trash2 size={13} aria-hidden="true" /></button>
+    </div>
+  )
 }
 
 export function NoteTextFieldLayer({
@@ -65,6 +104,7 @@ export function NoteTextFieldLayer({
   onFinish,
   onRemove,
   onFocusHandled,
+  onSelectedChange,
 }: NoteTextFieldLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<Gesture | null>(null)
@@ -72,6 +112,8 @@ export function NoteTextFieldLayer({
   fieldsRef.current = fields
   const [layout, setLayout] = useState<FieldLayout[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  useEffect(() => { onSelectedChange?.(selectedId) }, [selectedId, onSelectedChange])
+  useEffect(() => () => onSelectedChange?.(null), [onSelectedChange])
   const previousSelectedRef = useRef<string | null>(null)
   const composingRef = useRef(false)
   const onTextRef = useRef(onText)
@@ -203,7 +245,7 @@ export function NoteTextFieldLayer({
     if (!selectedId) return
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target
-      if (target instanceof Element && target.closest('.note-text-field')) return
+      if (target instanceof Element && target.closest('.note-text-field, .note-text-field-toolbar')) return
       setSelectedId(null)
     }
     document.addEventListener('pointerdown', onPointerDown, true)
@@ -349,7 +391,6 @@ export function NoteTextFieldLayer({
         const inverse = position?.inverse ?? 1
         const empty = field.text.trim() === ''
         const rendered = !selected && !empty
-        const flipBelow = (position?.top ?? 0) * (1 / Math.max(inverse, 0.01)) < 64
         const style = {
           left: position?.left ?? 0,
           top: position?.top ?? 0,
@@ -358,10 +399,6 @@ export function NoteTextFieldLayer({
           '--tf-inv': inverse,
           '--tf-ink': field.color ?? '#20222b',
         } as CSSProperties
-        const stopFocusSteal = (event: ReactPointerEvent<HTMLElement>) => {
-          event.preventDefault()
-          event.stopPropagation()
-        }
         return (
           <div
             key={field.id}
@@ -377,36 +414,6 @@ export function NoteTextFieldLayer({
               if (next instanceof Node && !event.currentTarget.contains(next) && !composingRef.current) setSelectedId((current) => current === field.id ? null : current)
             }}
           >
-            {selected && (
-              <div
-                className={`note-text-field-toolbar ${flipBelow ? 'is-below' : ''} ${field.x > 0.5 ? 'is-right' : ''}`}
-                role="toolbar"
-                aria-label="Textfeld-Werkzeuge"
-                onPointerDown={stopFocusSteal}
-                onMouseDown={(event) => event.preventDefault()}
-              >
-                <button type="button" aria-label="Schrift kleiner" title="Schrift kleiner" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, -1) })}><Minus size={13} aria-hidden="true" /></button>
-                <span className="note-text-field-size" title="Schriftgröße">{field.fontSize}</span>
-                <button type="button" aria-label="Schrift größer" title="Schrift größer" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, 1) })}><Plus size={13} aria-hidden="true" /></button>
-                <i className="note-text-field-sep" aria-hidden="true" />
-                <button type="button" className={field.bold ? 'is-on' : ''} aria-pressed={Boolean(field.bold)} aria-label="Fett" title="Fett (Strg+B)" onClick={() => onStyle(field.id, { bold: field.bold ? undefined : true })}><Bold size={13} aria-hidden="true" /></button>
-                <i className="note-text-field-sep" aria-hidden="true" />
-                {NOTE_TEXT_FIELD_COLORS.map((color) => (
-                  <button
-                    key={color.label}
-                    type="button"
-                    className={`note-text-field-swatch ${(field.color ?? undefined) === color.value ? 'is-on' : ''}`}
-                    style={{ '--swatch': color.css } as CSSProperties}
-                    aria-label={color.label}
-                    title={color.label}
-                    aria-pressed={(field.color ?? undefined) === color.value}
-                    onClick={() => onStyle(field.id, { color: color.value })}
-                  />
-                ))}
-                <i className="note-text-field-sep" aria-hidden="true" />
-                <button type="button" className="is-danger" aria-label="Textfeld entfernen" title="Textfeld entfernen" onClick={() => onRemove(field.id)}><Trash2 size={13} aria-hidden="true" /></button>
-              </div>
-            )}
             <button
               type="button"
               tabIndex={-1}

@@ -817,6 +817,16 @@ export type DrawingBoardHandle = {
   finishCanvasExport: () => void
 }
 
+/** See `DrawingBoardProps.foreignErase`. Points and radius are client pixels. */
+export type ForeignEraseHost = {
+  /** Erases what lies under the eraser path; true when anything went. */
+  erase: (path: ReadonlyArray<{ x: number; y: number }>, radius: number) => boolean
+  /** Seals what this gesture erased into one undo step; null when nothing was erased. */
+  commit: () => number | null
+  undo: (step: number) => void
+  redo: (step: number) => void
+}
+
 export type DrawingBoardProps = {
   settings: Pick<
     AppSettings,
@@ -863,6 +873,11 @@ export type DrawingBoardProps = {
   /** Reports finished strokes and erased strokes for the note's quiet statistics. */
   onInkActivity?: (activity: InkActivity) => void
   onTrainingChanged?: (sampleCount: number) => void
+  /**
+   * Marks under the ink that are not strokes (PDF text highlights). The
+   * eraser takes them off too, and one undo step brings back both.
+   */
+  foreignErase?: ForeignEraseHost
   onOpenGlyphenWerk?: () => void
   onClose?: () => void
   pagePaperStyle?: PaperStyle
@@ -1517,6 +1532,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onDirtyChange,
   onInkActivity,
   onTrainingChanged,
+  foreignErase,
   onOpenGlyphenWerk,
   onClose,
   pagePaperStyle,
@@ -1686,6 +1702,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const gestureChangedRef = useRef(false)
   const undoRef = useRef<InkStroke[][]>([])
   const redoRef = useRef<InkStroke[][]>([])
+  const foreignEraseRef = useRef(foreignErase)
+  foreignEraseRef.current = foreignErase
+  /** Foreign erase step of an undo or redo entry (see ForeignEraseHost). */
+  const foreignStepsRef = useRef(new WeakMap<InkStroke[], number>())
   const drawFrameRef = useRef<number | null>(null)
   const activeRenderedPointCountRef = useRef(0)
   const liveCanvasHasInkRef = useRef(false)
@@ -4368,6 +4388,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     )
     const last = points.at(-1)
     if (last) eraserAnchorRef.current = last
+    const foreign = foreignEraseRef.current
+    if (foreign) {
+      const surface = canvasRef.current?.closest('.unified-paper') as HTMLElement | null
+      const box = surface?.getBoundingClientRect()
+      if (box && box.width > 0 && sourceWidthRef.current > 0) {
+        const path = samples.map((sample) => ({ x: box.left + sample.x * box.width, y: box.top + sample.y * box.height }))
+        if (foreign.erase(path, eraserSize * box.width / sourceWidthRef.current)) gestureChangedRef.current = true
+      }
+    }
     if (next === before) return
     noteErasedInkRef.current(before, next)
     noteStrokesErased(Math.max(1, before.length - next.length))
@@ -5979,6 +6008,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     })
     if (gestureChangedRef.current) {
       undoRef.current.push(beforeGestureRef.current)
+      const foreignStep = gestureToolRef.current === 'eraser' ? foreignEraseRef.current?.commit() ?? null : null
+      if (foreignStep !== null) foreignStepsRef.current.set(beforeGestureRef.current, foreignStep)
       if (undoRef.current.length > 80) undoRef.current.shift()
       redoRef.current = []
       setTokens([])
@@ -6640,7 +6671,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
-    redoRef.current.push(snapshotStrokes(strokesRef.current))
+    const redoEntry = snapshotStrokes(strokesRef.current)
+    redoRef.current.push(redoEntry)
+    const foreignStep = foreignStepsRef.current.get(previous)
+    if (foreignStep !== undefined) {
+      foreignStepsRef.current.set(redoEntry, foreignStep)
+      foreignEraseRef.current?.undo(foreignStep)
+    }
     strokesRef.current = snapshotStrokes(previous)
     setTokens([])
     setCorrection('')
@@ -6658,7 +6695,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
-    undoRef.current.push(snapshotStrokes(strokesRef.current))
+    const undoEntry = snapshotStrokes(strokesRef.current)
+    undoRef.current.push(undoEntry)
+    const foreignStep = foreignStepsRef.current.get(next)
+    if (foreignStep !== undefined) {
+      foreignStepsRef.current.set(undoEntry, foreignStep)
+      foreignEraseRef.current?.redo(foreignStep)
+    }
     strokesRef.current = snapshotStrokes(next)
     setTokens([])
     setCorrection('')
