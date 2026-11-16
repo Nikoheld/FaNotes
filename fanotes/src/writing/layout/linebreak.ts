@@ -66,9 +66,12 @@ export type Piece = {
   /** A hyphen drawn at the end of this piece (line ends inside a word). */
   hyphen?: boolean
   /**
-   * A space at the end of a line. It hangs past the text: alignment and
+   * A space at the end of a line: at a soft wrap, before a forced break or at
+   * the end of the paragraph. It hangs past the text: alignment and
    * justification ignore it and nothing is drawn, but the caret can sit after
-   * it, so a typed space moves the caret right away.
+   * it, so a typed space moves the caret right away. At a soft wrap the spaces
+   * belong to the line they end (the next line starts with its word), so the
+   * caret has a place at the end of that line.
    */
   hang?: true
 }
@@ -314,9 +317,11 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
   const lines: LineBox[] = []
   const footnotes: ParagraphLayout['footnotes'] = []
   let cursor = 0
-  const hyphenWidth = measurer.width(HYPHEN, baseFont)
+  const baseHyphenWidth = measurer.width(HYPHEN, baseFont)
 
   const finish = (lineTokens: Token[], forced: boolean, endsParagraph: boolean, hyphen: boolean) => {
+    // A forced break stays the last piece of its line; the spaces before it hang like any trailing spaces.
+    const breakToken = lineTokens.length && lineTokens[lineTokens.length - 1].kind === 'newline' ? lineTokens.pop()! : null
     // Trailing spaces hang outside the line (see `Piece.hang`).
     const hanging: Token[] = []
     while (lineTokens.length && lineTokens[lineTokens.length - 1].kind === 'space') hanging.unshift(lineTokens.pop()!)
@@ -324,8 +329,11 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
     const width = available(index)
     const pieces = lineTokens.flatMap((token) => token.pieces)
     // Set on the piece itself: the x positions below are written to these same objects.
-    if (hyphen && pieces.length) pieces[pieces.length - 1].hyphen = true
-    const natural = lineTokens.reduce((sum, token) => sum + token.width, 0) + (hyphen ? hyphenWidth : 0)
+    const lastPiece = pieces[pieces.length - 1]
+    // The hyphen is drawn in the font of the piece it ends, so it is measured in that font.
+    const hyphenWidth = hyphen && lastPiece ? measurer.width(HYPHEN, lastPiece.font) : 0
+    if (hyphen && lastPiece) lastPiece.hyphen = true
+    const natural = lineTokens.reduce((sum, token) => sum + token.width, 0) + hyphenWidth
     const last = forced || endsParagraph
     const spaces = lineTokens.filter((token) => token.kind === 'space').length
     let extra = 0
@@ -354,14 +362,20 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
         pieces.push(piece)
       }
     }
+    if (breakToken) {
+      // A caret before the break sits after the hanging spaces.
+      breakToken.pieces[0].x = hangX
+      pieces.push(breakToken.pieces[0])
+    }
     const largest = pieces.reduce((max, piece) => Math.max(max, piece.marks?.size ? ptToPx(piece.marks.size) : 0), style.size)
     const height = largest * style.lineHeight
     const metrics = largest === style.size ? baseMetrics : measurer.metrics({ ...baseFont, size: largest })
     const baseline = (height - (metrics.ascent + metrics.descent)) / 2 + metrics.ascent
-    const from = lineTokens[0]?.from ?? hanging[0]?.from ?? cursor
-    const to = hanging.length ? hanging[hanging.length - 1].to : lineTokens.length ? lineTokens[lineTokens.length - 1].to : cursor
+    // An empty line (an empty paragraph, the line after a trailing break) starts and ends at the cursor.
+    const from = (lineTokens[0] ?? hanging[0] ?? breakToken)?.from ?? cursor
+    const to = (breakToken ?? hanging[hanging.length - 1] ?? lineTokens[lineTokens.length - 1])?.to ?? cursor
     for (const piece of pieces) if (piece.kind === 'anchor' && piece.marks?.fn) footnotes.push({ id: piece.marks.fn, line: index })
-    lines.push({ from: index === 0 ? 0 : from, to, pieces, x: lineStart(index), available: width, width: hyphen ? x + hyphenWidth : x, height, baseline, last })
+    lines.push({ from: index === 0 ? 0 : from, to, pieces, x: lineStart(index), available: width, width: x + hyphenWidth, height, baseline, last })
   }
 
   let lineTokens: Token[] = []
@@ -385,11 +399,11 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
       continue
     }
     if (token.kind === 'space') {
-      // Spaces at the start of a wrapped line vanish; at the start of the paragraph they are typed text.
-      if (lineTokens.length || lines.length === 0) {
-        pending.push(token)
-        pendingSpace += token.width
-      }
+      // Spaces wait for the next word. If it fits they sit before it; if the line wraps they hang at the end of
+      // this line (a wrapped line never starts with a space). After a forced break and at the start of the
+      // paragraph they are typed text (verse, an address block) and stay.
+      pending.push(token)
+      pendingSpace += token.width
       index += 1
       continue
     }
@@ -402,8 +416,8 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
       continue
     }
     // The word does not fit. Try a hyphenation point, then break before it.
-    const room = limit - lineWidth - pendingSpace - hyphenWidth
-    if (input.hyphenate && input.hyphenator && room > style.size) {
+    const space = limit - lineWidth - pendingSpace
+    if (input.hyphenate && input.hyphenator && space - baseHyphenWidth > style.size) {
       const text = wordText(token)
       const letters = text.replace(/[^\p{L}]/gu, '')
       if (letters.length >= 5 && /^[\p{L}\-’']+[.,;:!?»«“”„"’)]*$/u.test(text)) {
@@ -412,7 +426,9 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
         for (let pointIndex = points.length - 1; pointIndex >= 0; pointIndex -= 1) {
           const at = token.from + points[pointIndex]
           const [head, tail] = splitToken(token, at, fragments, measurer)
-          if (head.width <= room) {
+          const headEnd = head.pieces[head.pieces.length - 1]
+          // The hyphen is drawn in the font of the piece before it.
+          if (head.width + (headEnd ? measurer.width(HYPHEN, headEnd.font) : baseHyphenWidth) <= space) {
             lineTokens.push(...pending, head)
             pending.length = 0
             pendingSpace = 0
@@ -427,6 +443,18 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
         if (lineTokens.length === 0 && tokens[index] !== token) continue
       }
     }
+    if (lineTokens.length === 0 && pending.length) {
+      // Typed spaces at the start of a line and a word that does not fit after them: the spaces hang on a line
+      // of their own and the word starts the next one (it may still fit there, or be broken).
+      lineTokens.push(...pending)
+      pending.length = 0
+      pendingSpace = 0
+      finish(lineTokens, false, false, false)
+      cursor = token.from
+      lineTokens = []
+      lineWidth = 0
+      continue
+    }
     if (lineTokens.length === 0) {
       // A single word wider than the line: break it by characters.
       const text = wordText(token)
@@ -437,13 +465,14 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
         cut -= 1
       }
       const [head, tail] = splitToken(token, token.from + Math.max(1, cut), fragments, measurer)
-      pending.length = 0
-      pendingSpace = 0
       finish([head], false, false, false)
       cursor = head.to
       tokens[index] = tail
       continue
     }
+    // The line wraps before this word. The spaces between the lines hang at the end of this one, so the caret
+    // can sit after its last word and the next line starts with its word.
+    lineTokens.push(...pending)
     pending.length = 0
     pendingSpace = 0
     finish(lineTokens, false, false, false)
@@ -471,8 +500,21 @@ export const layoutParagraph = (input: LayoutInput): ParagraphLayout => {
 }
 
 // ── Caret geometry ─────────────────────────────────────────────────────────
+//
+// A caret is an offset into the paragraph. At a soft wrap, one offset can sit in
+// two places: after the last word of a line and before the first word of the
+// next. When spaces separate the lines they hang at the end of the first line
+// (see `Piece.hang`), so each place has its own offset: the one before the
+// spaces ends the first line, the one after them starts the second. When nothing
+// separates the lines (a break after a hyphen or inside a word) both places share
+// one offset; `lineAt` then needs to know which one is meant (`forward`, drawn at
+// the start of the next line, or not, drawn at the end of this one).
 
-/** The line index holding an offset (a caret at a line end belongs to that line unless `forward`). */
+/**
+ * The line index holding an offset. An offset that ends a line belongs to that
+ * line unless `forward`: then it is the start of the next one (how a caret is
+ * drawn and moved, unless it was put at the end of the line on purpose).
+ */
 export const lineAt = (layout: ParagraphLayout, offset: number, forward = false) => {
   for (let index = 0; index < layout.lines.length; index += 1) {
     const line = layout.lines[index]
@@ -481,48 +523,88 @@ export const lineAt = (layout: ParagraphLayout, offset: number, forward = false)
   return layout.lines.length - 1
 }
 
-/** x of a caret at `offset` within its line, relative to the line start. */
+/**
+ * Where the caret goes at the end of a line (End key, a click right of the text).
+ * Spaces that hang at a soft wrap are left out so the caret stays on the line;
+ * spaces typed at the end of the paragraph or before a forced break are text
+ * and come first. `upstream` is set when the offset also starts the next line
+ * (a break after a hyphen or inside a word): the caret is then drawn at the end
+ * of this line (`lineAt(..., false)`), not at the start of the next one.
+ */
+export const lineEnd = (layout: ParagraphLayout, lineIndex: number): { offset: number; upstream: boolean } => {
+  const line = layout.lines[lineIndex]
+  const last = line.pieces[line.pieces.length - 1]
+  if (last?.kind === 'newline') return { offset: last.from, upstream: false }
+  if (lineIndex === layout.lines.length - 1) return { offset: line.to, upstream: false }
+  const hanging = line.pieces.find((piece) => piece.hang)
+  return hanging ? { offset: hanging.from, upstream: false } : { offset: line.to, upstream: true }
+}
+
+/** x of a caret between the letters of the drop cap: left of the line start, which is where the cap ends. */
+const capX = (cap: DropCap, offset: number, measurer: TextMeasurer) => -cap.width + measurer.width(cap.text.slice(0, offset), cap.font)
+
+/** x of a caret at `offset` inside a piece, relative to the line start. */
+const pieceX = (piece: Piece, offset: number, measurer: TextMeasurer) => {
+  const inside = piece.kind === 'space'
+    ? piece.width * ((offset - piece.from) / Math.max(1, piece.to - piece.from))
+    : measurer.width(piece.display.slice(0, offset - piece.from), piece.font)
+  // At the end of a line that breaks inside a word the caret sits after the hyphen.
+  return piece.x + inside + (piece.hyphen && offset === piece.to ? measurer.width(HYPHEN, piece.font) : 0)
+}
+
+/**
+ * x of a caret at `offset` within its line, relative to the line start. It never
+ * leaves the line's box: spaces hanging past the margin do not push it out.
+ */
 export const caretX = (layout: ParagraphLayout, lineIndex: number, offset: number, measurer: TextMeasurer) => {
   const line = layout.lines[lineIndex]
+  const cap = layout.dropCap
+  if (cap && lineIndex === 0 && offset < cap.text.length) return capX(cap, Math.max(0, offset), measurer)
   if (!line.pieces.some((piece) => piece.kind !== 'marker')) {
     if (layout.style.align === 'center') return line.available / 2
     if (layout.style.align === 'right') return line.available
     return 0
   }
+  const lastPiece = line.pieces[line.pieces.length - 1]
   for (const piece of line.pieces) {
     if (piece.kind === 'marker') continue
-    if (offset <= piece.from) return piece.x
-    if (offset < piece.to || (offset === piece.to && piece === line.pieces[line.pieces.length - 1])) {
-      if (piece.kind === 'space') return piece.x + piece.width * ((offset - piece.from) / Math.max(1, piece.to - piece.from))
-      return piece.x + measurer.width(piece.display.slice(0, offset - piece.from), piece.font)
+    if (offset <= piece.from) return Math.min(piece.x, line.available)
+    if (offset < piece.to || (offset === piece.to && piece === lastPiece)) return Math.min(pieceX(piece, offset, measurer), line.available)
+  }
+  return Math.min(lastPiece.x + lastPiece.width, line.available)
+}
+
+/**
+ * The caret nearest to x (relative to the line start): its offset, and whether it
+ * belongs at the end of the line rather than at the start of the next one. It
+ * never lies beyond `lineEnd`, so a click right of a wrapped line ends that line.
+ */
+export const caretAtX = (layout: ParagraphLayout, lineIndex: number, x: number, measurer: TextMeasurer) => {
+  const line = layout.lines[lineIndex]
+  const end = lineEnd(layout, lineIndex)
+  let best = line.from
+  let bestDistance = Number.POSITIVE_INFINITY
+  // On a tie the later offset wins: spaces hanging past the margin share one x, and a click there ends the line.
+  const consider = (offset: number, position: number) => {
+    const distance = Math.abs(position - x)
+    if (distance <= bestDistance) {
+      bestDistance = distance
+      best = offset
     }
   }
-  const lastPiece = line.pieces[line.pieces.length - 1]
-  return lastPiece.x + lastPiece.width
+  const cap = layout.dropCap
+  if (cap && lineIndex === 0) for (let offset = 0; offset < cap.text.length; offset += 1) consider(offset, capX(cap, offset, measurer))
+  let visited = false
+  for (const piece of line.pieces) {
+    if (piece.kind === 'newline' || piece.kind === 'anchor' || piece.kind === 'marker') continue
+    if (visited && x < piece.x - 1) break
+    for (let offset = piece.from; offset <= piece.to && offset <= end.offset; offset += 1) consider(offset, Math.min(pieceX(piece, offset, measurer), line.available))
+    visited = true
+  }
+  // The end of the line is a stop of its own: an empty line, or one that only a break follows, has no piece to stop at.
+  consider(end.offset, caretX(layout, lineIndex, end.offset, measurer))
+  return { offset: best, upstream: end.upstream && best === end.offset }
 }
 
 /** The offset nearest to x (relative to the line start). */
-export const offsetAtX = (layout: ParagraphLayout, lineIndex: number, x: number, measurer: TextMeasurer) => {
-  const line = layout.lines[lineIndex]
-  if (!line.pieces.length) return line.from
-  let best = line.from
-  let bestDistance = Number.POSITIVE_INFINITY
-  for (const piece of line.pieces) {
-    if (piece.kind === 'newline' || piece.kind === 'anchor' || piece.kind === 'marker') continue
-    if (x < piece.x - 1 && best !== line.from) break
-    for (let offset = piece.from; offset <= piece.to; offset += 1) {
-      const position = piece.kind === 'space'
-        ? piece.x + piece.width * ((offset - piece.from) / Math.max(1, piece.to - piece.from))
-        : piece.x + measurer.width(piece.display.slice(0, offset - piece.from), piece.font)
-      const distance = Math.abs(position - x)
-      if (distance < bestDistance) {
-        bestDistance = distance
-        best = offset
-      }
-    }
-  }
-  // A caret never sits after a line's trailing break.
-  const lastPiece = line.pieces[line.pieces.length - 1]
-  if (lastPiece.kind === 'newline' && best > lastPiece.from) best = lastPiece.from
-  return best
-}
+export const offsetAtX = (layout: ParagraphLayout, lineIndex: number, x: number, measurer: TextMeasurer) => caretAtX(layout, lineIndex, x, measurer).offset

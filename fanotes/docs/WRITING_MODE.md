@@ -43,6 +43,7 @@ Marks: bold, italic, underline, strike, small caps, superscript, subscript, font
 ## 3. Layout and editing
 
 - Text is measured with canvas `measureText` on the bundled fonts (cached per font/size/word). Line breaking: greedy with hyphenation for left-aligned text, Knuth–Plass-lite (best of a few breakpoints) for justified text. Pages take lines until the content box is full; widows/orphans (2 lines), keep-with-next for headings, chapter starts on a new (optionally right-hand) page, drop caps take N lines.
+- Soft wraps and the caret: the spaces between two lines hang at the end of the first line (never drawn, ignored by alignment and justification, like those at the end of a paragraph or before a Shift+Enter break), so each side of a wrap has an offset of its own: the caret before the spaces ends the first line, the one after them starts the next. A wrap without a space (after a hyphen, inside a long word) has one offset for both; End, a click right of the line and Up/Down into a line end then set the selection's `upstream` flag, which draws the caret at the end of its line until the selection changes. Spaces typed after a Shift+Enter are kept (indentation), the caret never leaves the content box, and the characters of a drop cap have caret positions of their own.
 - Incremental: a paragraph is re-laid out only when its text, style or the page width changes; pagination re-flows from the first changed page and stops when page starts line up again. Only pages near the viewport are in the DOM.
 - Views: print layout (pages), draft (continuous, no page chrome), two-page spread, zoom 50–300 %, focus mode (one paragraph or sentence lit, the rest dimmed), typewriter scrolling.
 - Input: a hidden `textarea` receives keys, IME composition, dictation and pasting; selection and caret are drawn by the engine; mouse/touch/stylus hit-testing maps to (paragraph, offset). Undo/redo is transactional (typing coalesced per word, formatting and structure as one step), per scene, kept for the session.
@@ -99,7 +100,7 @@ Measured (web build in headless Chromium on the shared server; real fonts):
 - Typing in it (event timing, key to next paint, after warm-up): p50 16–40 ms, p95 40–56 ms at the start, middle and end, on a shared server (load 5–12) in headless Chromium with software rendering. Per keystroke the engine re-lays out one paragraph (about 1 ms) and, incrementally, one page (0.1 ms); the rest is the browser painting.
 - Node, fixed-width measurer: 674 pages laid out from scratch in about 260 ms; one keystroke 1.9 ms including flow and layout (1 page re-paginated). 120 random edits re-paginated incrementally give exactly the pages of a full pass.
 
-Tests: `node scripts/check-writing.mjs` (24: keys, runs, repair, merge convergence, tombstones, flow, line breaking, hyphenation, lists, drop caps, caret geometry, pagination rules, footnotes, cache, editing commands, undo grouping, saving); `node scripts/check-writing-desktop.mjs` (real Electron under Xvfb: channels refuse paths outside `.story`, files on disk, tree entry, reopen, footnote and comment); browser end-to-end on the web build (15 checks incl. the 608-page latency run).
+Tests: `node scripts/check-writing.mjs` (43: keys, runs, repair, merge convergence, tombstones, flow, line breaking, hyphenation, lists, drop caps, caret geometry, soft-wrap line ends for every alignment (End, Home, clicks, Up/Down), Shift+Enter indentation, pagination rules, footnotes, cache, editing commands, undo grouping, saving); `node scripts/check-writing-desktop.mjs` (real Electron under Xvfb: channels refuse paths outside `.story`, files on disk, tree entry, reopen, footnote and comment); browser end-to-end on the web build (15 checks incl. the 608-page latency run).
 
 ### Milestone 2 (writing assistance) — 2026-11-15
 
@@ -131,7 +132,7 @@ Tests: `node scripts/check-writing-tools.mjs` (7: binder moves/refusals, trash s
 - **EPUB 3**: XHTML per part/chapter, nav + NCX, CSS from the styles, linked footnotes/endnotes, optional fonts. **Markdown/text** with front matter, headings, emphasis, `[^n]`.
 - **Import** DOCX (FaNotes styles round-trip; "Heading n"/"Überschrift n"/outline levels, footnotes, endnotes, comments, links, page breaks, scene markers), Markdown, text (chapter headings, hard-wrapped prose, Windows-1252).
 
-Tests: `node scripts/check-writing-export.mjs` (11). 639-page novel (132 000 words, Node, fontkit measurer): layout 0.3–0.5 s, PDF 1.1–1.6 s, 1.6 MB, peak RSS ~260–360 MB on the shared server.
+Tests: `node scripts/check-writing-export.mjs` (12; the PDF is read back piece by piece: runs of spaces keep their length, hanging spaces are not drawn). 639-page novel (132 000 words, Node, fontkit measurer): layout 0.3–0.5 s, PDF 1.1–1.6 s, 1.6 MB, peak RSS ~260–360 MB on the shared server.
 
 ### Milestone 5 (sync and integration) — 2026-11-15
 
