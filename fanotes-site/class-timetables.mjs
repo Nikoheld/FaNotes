@@ -602,8 +602,11 @@ export const createClassTimetables = (options = {}) => {
       const stored = await readJson(join(dir, 'classes.json'))
       // A missing or broken file can be built again. A file that is there but not the class weeks must not look empty, or this rebuild replaces it.
       if (stored != null) {
+        const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+        const weekKnown = (week) => plain(week) && Array.isArray(week.entries) && Array.isArray(week.footnotes)
         const weeks = typeof stored === 'object' && !Array.isArray(stored) && Object.keys(stored).every((code) => CLASS_CODE.test(code))
-        if (!weeks) throw Object.assign(new Error('timetable classes'), { code: 'EBADMSG' })
+        // A saved week that is not a week must not be returned as an empty week.
+        if (!weeks || !Object.values(stored).every(weekKnown)) throw Object.assign(new Error('timetable classes'), { code: 'EBADMSG' })
         return stored
       }
       let text
