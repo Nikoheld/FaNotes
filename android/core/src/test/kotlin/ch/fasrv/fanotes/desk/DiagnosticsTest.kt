@@ -88,6 +88,37 @@ class DiagnosticsTest {
     }
 
     @Test
+    fun androidPathsWithSpacesContentUrisAndEmailsAreScrubbed() {
+        val plain = listOf(
+            "Fehler in /storage/emulated/0/Meine Geheime Notizen/Mathe Klausur.md beim Lesen",
+            "Open failed: /sdcard/Alte Tagebuecher/Eintrag eins.md",
+            "Open failed: /sdcard0/Familie Mueller/Brief.md",
+            "ENOENT /data/user/0/ch.fasrv.fanotes/files/Mein Vault/Privat Krank/x.md",
+            "Zugriff auf content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMein%20Tagebuch%20Anna/document/x failed",
+            "tree/primary%3ADokumente%2FScheidung%20Anwalt Fehler",
+            "Kontakt anna.muster@example.org oder Anna+Test@mail.example.ch",
+        )
+        val banned = listOf("Geheime", "Notizen", "Klausur", "Tagebuecher", "Eintrag", "Mueller", "Familie", "Privat", "Krank", "Tagebuch", "Scheidung", "Anwalt", "Dokumente", "anna.muster", "example", "Mathe")
+        for (line in plain) {
+            val clean = scrubText(line)
+            for (word in banned) assertFalse(clean.contains(word, ignoreCase = true), "$word leaked: $clean")
+        }
+    }
+
+    @Test
+    fun contextFeedsSafTreeDisplayNameAndDeviceNames() {
+        val tree = "content://com.android.externalstorage.documents/tree/primary%3ADocuments%2FMein%20Schulheft"
+        val context = DiagnosticsContext(
+            vaultPath = "/storage/emulated/0/Documents/Mein Schulheft",
+            homeDir = "/data/user/0/ch.fasrv.fanotes",
+            extraPaths = listOf(tree),
+            extraNames = listOf("Mein Schulheft", "Pixel Tablet", "Annas Tablet"),
+        )
+        val clean = scrubText("Fehler $tree und Mein Schulheft auf Pixel Tablet von Annas Tablet, Ordner Mein Schulheft/Sek", context)
+        for (word in listOf("Schulheft", "Pixel", "Annas", "Documents")) assertFalse(clean.contains(word), "$word leaked: $clean")
+    }
+
+    @Test
     fun errorsLeaveAsClassCodeFramesAndHashOnly() {
         val thrown = IllegalStateException("Fehler beim Öffnen von Mein Tagebuch „Scheidung“ in /home/anna/Notizen/Privat/Krankheit.md")
         val described = describeError(thrown, desktop)
