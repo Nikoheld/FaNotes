@@ -38,7 +38,7 @@ assert.equal(A.sanitizeAnnotation({ kind: 'image', src: 'data:image/svg+xml;base
 const img = A.sanitizeAnnotation({ kind: 'image', id: 'i1', src: 'data:image/png;base64,iVBORw0KGgo=', w: 9, opacity: -1 })
 assert.equal(img.w, 1); assert.equal(img.opacity, 0.1); assert.equal(img.locked, false)
 const callout = A.sanitizeAnnotation({ kind: 'callout', id: 'bad id!', ax: 4, ay: -2, text: 'x'.repeat(500), color: 'red' })
-assert.match(callout.id, /^an-/); assert.equal(callout.ax, 1); assert.equal(callout.ay, 0); assert.equal(callout.text.length, 120); assert.equal(callout.color, '#1d4ed8')
+assert.match(callout.id, /^an-[0-9a-z]+$/); assert.equal(callout.ax, 1); assert.equal(callout.ay, 0); assert.equal(callout.text.length, 120); assert.equal(callout.color, '#1d4ed8')
 assert.equal(A.sanitizeAnnotation({ kind: 'stroke', pts: [[0.1, 0.1]] }), null)
 assert.equal(A.sanitizeAnnotation({ kind: 'measure', mode: 'angle', pts: [[0, 0], [1, 1]] }), null)
 assert.equal(A.sanitizeAnnotation({ kind: 'stamp', stamp: 'nonsense' }).stamp, 'event')
@@ -105,4 +105,28 @@ for (const encoding of ['v1', 'v2']) {
   const future = famd.serializeFamd('x', payload({ annotations: [...saved, { kind: 'hologram', id: 'z' }] }), encoding)
   assert.equal(famd.parseFamd(future).payload.annotations.length, 7)
 }
+// deterministic replacement ids: the same file loads to the same ids, copies do not multiply
+const unnamed = [
+  { kind: 'callout', page: 2, ax: 0.25, ay: 0.5, lx: 0.4, ly: 0.6, text: 'Caput' },
+  { kind: 'callout', page: 2, ax: 0.25, ay: 0.5, lx: 0.4, ly: 0.6, text: 'Caput' },
+  { kind: 'stamp', page: 1, x: 0.1, y: 0.2, stamp: 'gain' },
+  { kind: 'stroke', id: '!!', pts: [[0.1, 0.1], [0.2, 0.2]] },
+]
+const run1 = A.parseAnnotations(unnamed)
+const run2 = A.parseAnnotations(JSON.parse(JSON.stringify(unnamed)))
+assert.deepEqual(run1.map((i) => i.id), run2.map((i) => i.id))
+assert.equal(new Set(run1.map((i) => i.id)).size, 4, 'identical items at different positions stay distinct')
+assert.equal(A.stableAnnotationId('callout', 0, 2, 0.25, 0.5, 'Caput'), run1[0].id)
+// pinned value: Android must produce the same id for the same input
+assert.equal(A.stableAnnotationId('stamp', 2, 1, 0.1, 0.2, 'gain'), run1[2].id)
+console.log('pinned id', A.stableAnnotationId('callout', 0, 2, 0.25, 0.5, 'Caput'))
+const once = famd.serializeFamd('', { ...famd.emptyFamdPayload(), annotations: run1 }, 'v2')
+const twice = famd.serializeFamd('', { ...famd.parseFamd(once).payload }, 'v2')
+assert.deepEqual(famd.parseFamd(twice).payload.annotations.map((i) => i.id), run1.map((i) => i.id))
+
+// image budget helpers
+const fake = (n) => ({ kind: 'image', src: 'data:image/png;base64,' + 'A'.repeat(n) })
+assert.equal(A.annotationImageChars([fake(100), { kind: 'stamp' }, fake(50)]), 2 * 'data:image/png;base64,'.length + 150)
+assert.ok(A.ANNOTATION_IMAGE_BUDGET_CHARS < 16 * 1024 * 1024 / 2, 'budget leaves room for the rest of a 16 MB note')
+assert.ok(A.ANNOTATION_IMAGE_TARGET_CHARS <= 300_000 && A.ANNOTATION_IMAGE_BUDGET_CHARS >= A.ANNOTATION_IMAGE_LIMIT * A.ANNOTATION_IMAGE_NEW_MAX_CHARS, 'twelve capped images always fit the budget')
 console.log('study annotation checks passed')
