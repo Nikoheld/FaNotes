@@ -84,7 +84,7 @@ Every item also has `id` and `page`. Unknown kinds are dropped and bad values ar
 | Compare view | yes | yes (#1220; side panel in landscape, bottom in portrait) |
 | Annotation undo/redo | yes | yes (own stack; ink undo unchanged) |
 
-On Android, study gestures go through the normal ink path, so palm rejection, pen-only and "finger draws" apply; a plain finger still navigates. Android camera capture, PDF crop and the compare view came with #1220; images from every source are re-encoded to the same caps as desktop (≈300 KB, long edge 1200 px, 8 MB per note).
+On Android, study gestures go through the normal ink path, so palm rejection, pen-only and "finger draws" apply; a plain finger still navigates. Stamps, legends and measure points are placed when the contact lifts without having moved, never when it lands, so a palm the system rejects or a cancelled contact leaves nothing behind. The open tool, selection, collected measure points, an unconfirmed crop and the label editor (with its typed text) survive a rotation or a restart of the activity. Android camera capture, PDF crop and the compare view came with #1220; images from every source are re-encoded to the same caps as desktop (≈300 KB, long edge 1200 px, 8 MB per note).
 
 ## Checks
 
