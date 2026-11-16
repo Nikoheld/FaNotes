@@ -39,7 +39,8 @@ import {
   pdfStartPageForLoad,
 } from '../lib/pdfDocument'
 import { createPdfPagePainter, type PdfBasePaintInfo, type PdfPagePainter } from '../lib/pdfPagePainter'
-import { spanIndexesForQuotes } from '../lib/pdfTextMarks'
+import { spanIndexesForQuotes, type PdfQuoteRef } from '../lib/pdfTextMarks'
+import { markedSpansInSelection, PDF_MARK_SPAN_CLASS, pdfTextLeafSpans, type ErasedPdfMarkSpans } from '../lib/pdfMarkErase'
 import { bindPdfTextSelection, releasePdfTextSelection } from '../lib/pdfTextSelection'
 import {
   PDF_FIT_GUTTER,
@@ -73,8 +74,10 @@ type PdfNoteViewProps = {
   toolbarSlotId?: string
   initialPage?: number
   onPageChange?: (page: number, pageCount: number) => void
-  quotes?: Array<{ page: number; quote: string }>
+  quotes?: Array<{ page: number; quote: string; nth?: number }>
   onMarkSelection?: (quote: string, page: number) => void
+  /** "Markieren" on text that is already highlighted takes the highlight off. */
+  onUnmarkSpans?: (hit: ErasedPdfMarkSpans) => void
 }
 
 type OutlineItem = {
@@ -133,7 +136,7 @@ function PdfPageCanvas({
   rotation: number
   textEnabled: boolean
   highlight?: string
-  quotes?: string[]
+  quotes?: PdfQuoteRef[]
   sourcePath: string
   password?: string
   onRatio: (ratio: number) => void
@@ -192,9 +195,9 @@ function PdfPageCanvas({
       await layer.render()
       if (textLayerRef.current !== layer) return
       // Marked-content wrappers are spans too. Only the leaf runs carry the glyphs.
-      const spans = [...textHost.querySelectorAll('span')].filter((span) => !span.querySelector('span'))
+      const spans = pdfTextLeafSpans(textHost)
       const marked = new Set(spanIndexesForQuotes(spans.map((span) => span.textContent ?? ''), quotesRef.current))
-      spans.forEach((span, index) => { if (marked.has(index)) span.classList.add('pdf-anchored-mark') })
+      spans.forEach((span, index) => { if (marked.has(index)) span.classList.add(PDF_MARK_SPAN_CLASS) })
       releaseTextSelectionRef.current = bindPdfTextSelection(textHost)
     } catch (error: unknown) {
       if (!(error instanceof Error) || !/cancel/iu.test(error.name)) {
@@ -244,7 +247,7 @@ function PdfPageCanvas({
   }, [paintTextLayer, textEnabled])
 
   // Marks arrive after the bitmap. Rebuild the text layer only, not the painter.
-  const quotesKey = quotes.join('\u0001')
+  const quotesKey = quotes.map((entry) => `${entry.nth ?? ''}\u0002${entry.quote}`).join('\u0001')
   useEffect(() => {
     const info = lastBaseRef.current
     if (!textEnabledRef.current || !info) return
@@ -349,7 +352,7 @@ function PdfPage({
   rotation: number
   textEnabled: boolean
   highlight?: string
-  quotes?: string[]
+  quotes?: PdfQuoteRef[]
   defaultRatio: number
   active: boolean
   sourcePath: string
@@ -603,6 +606,7 @@ export function PdfNoteView({
   onPageChange,
   quotes = [],
   onMarkSelection,
+  onUnmarkSpans,
 }: PdfNoteViewProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1340,7 +1344,13 @@ export function PdfNoteView({
               disabled={!pdf}
             />
           </form>
-          <button type="button" aria-label="Auswahl markieren" title="Markiert die ausgewählte PDF-Textstelle und macht sie suchbar" onClick={() => {
+          <button type="button" aria-label="Auswahl markieren" title="Markiert die ausgewählte PDF-Textstelle und macht sie suchbar. Auf einer Markierung entfernt es sie wieder." onClick={() => {
+            const marked = onUnmarkSpans ? markedSpansInSelection(window.getSelection()) : null
+            if (marked) {
+              onUnmarkSpans?.(marked)
+              window.getSelection()?.removeAllRanges()
+              return
+            }
             const quote = window.getSelection()?.toString().replace(/\s+/gu, ' ').trim() ?? ''
             if (quote.length < 2) return
             onMarkSelection?.(quote, currentPage)
@@ -1456,7 +1466,7 @@ export function PdfNoteView({
                   rotation={rotation}
                   textEnabled
                   highlight={searchHits.some((hit) => hit.page === page) ? searchQuery.trim() : activeHighlight}
-                  quotes={quotes.filter((mark) => mark.page === page).map((mark) => mark.quote)}
+                  quotes={quotes.filter((mark) => mark.page === page).map((mark) => ({ quote: mark.quote, nth: mark.nth }))}
                   defaultRatio={pageRatio}
                   active={page === currentPage}
                   sourcePath={path}

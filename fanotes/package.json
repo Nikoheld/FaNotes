@@ -61,6 +61,7 @@
     "check:tth-dialog": "node scripts/check-tth-dialog.mjs",
     "check:scribble-erase": "node scripts/check-scribble-erase.mjs",
     "check:tool-erase": "node scripts/check-tool-erase.mjs",
+    "check:pdf-highlighter-erase": "node scripts/check-pdf-highlighter-erase.mjs",
     "check:live-ink-handoff": "node scripts/check-live-ink-handoff.mjs",
     "check:ink-select": "node scripts/check-ink-select.mjs",
     "check:trackpad-after-pen": "node scripts/check-trackpad-after-pen.mjs",

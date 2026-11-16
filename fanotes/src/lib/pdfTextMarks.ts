@@ -10,7 +10,17 @@ export type PdfTextMark = {
   page: number
   quote: string
   kind: 'highlight' | 'underline'
+  /**
+   * Only this occurrence of the quote on the page (0-based, counted at every
+   * start). Absent: every occurrence, as marks were stored before. Erasing
+   * part of a highlight writes the remaining parts with it, so a remnant does
+   * not light up the same words elsewhere on the page.
+   */
+  nth?: number
 }
+
+/** A quote as the text layer paints it. */
+export type PdfQuoteRef = { quote: string; nth?: number }
 
 const QUOTE_MAX = 400
 
@@ -28,11 +38,13 @@ export const readPdfMarks = (markdown: string): PdfTextMark[] => {
       const quote = typeof mark.quote === 'string' ? cleanQuote(mark.quote) : ''
       const page = Number(mark.page)
       if (!quote || !Number.isInteger(page) || page < 1 || page > 5_000) return []
+      const nth = Number(mark.nth)
       return [{
         id: typeof mark.id === 'string' && mark.id.length < 80 ? mark.id : `mark-${page}-${quote.slice(0, 12)}`,
         page,
         quote,
         kind: mark.kind === 'underline' ? 'underline' as const : 'highlight' as const,
+        ...(mark.nth !== undefined && Number.isInteger(nth) && nth >= 0 && nth < 100_000 ? { nth } : {}),
       }]
     }).slice(0, 200)
   } catch {
@@ -51,6 +63,7 @@ export const writePdfMarks = (markdown: string, marks: readonly PdfTextMark[]) =
       page: mark.page,
       quote: cleanQuote(mark.quote),
       kind: mark.kind,
+      ...(mark.nth !== undefined ? { nth: mark.nth } : {}),
     })).filter((mark) => mark.quote),
   }
   if (!payload.marks.length) return without.replace(/\n{3,}/gu, '\n\n')
@@ -64,7 +77,7 @@ export const addPdfMark = (
 ): PdfTextMark[] => {
   const quote = cleanQuote(input.quote)
   if (!quote || input.page < 1) return [...marks]
-  if (marks.some((mark) => mark.page === input.page && mark.quote === quote)) return [...marks]
+  if (marks.some((mark) => mark.page === input.page && mark.quote === quote && mark.nth === undefined)) return [...marks]
   return [...marks, {
     id: `mark-${Date.now().toString(36)}`,
     page: input.page,
@@ -78,11 +91,8 @@ export const quotesOnPage = (marks: readonly PdfTextMark[], page: number) => (
   marks.filter((mark) => mark.page === page).map((mark) => mark.quote)
 )
 
-/**
- * Spans that cover a stored quote. The quote marks that passage.
- * A shorter span is not marked just because its text also occurs inside the quote.
- */
-export const spanIndexesForQuotes = (spanTexts: readonly string[], quotes: readonly string[]): number[] => {
+/** Page text as the text layer joins it, and the leaf span of every character (-1: the joining space). */
+const pageTextIndex = (spanTexts: readonly string[]) => {
   const spanAt: number[] = []
   let norm = ''
   spanTexts.forEach((raw, index) => {
@@ -97,20 +107,125 @@ export const spanIndexesForQuotes = (spanTexts: readonly string[], quotes: reado
       spanAt.push(index)
     }
   })
+  return { norm, spanAt }
+}
+
+const quoteRef = (quote: string | PdfQuoteRef): PdfQuoteRef => (typeof quote === 'string' ? { quote } : quote)
+
+/** Every start of `needle` in `norm`, overlapping ones included. */
+const quoteStarts = (norm: string, needle: string) => {
+  const starts: number[] = []
+  let at = norm.indexOf(needle)
+  while (at >= 0) {
+    starts.push(at)
+    at = norm.indexOf(needle, at + 1)
+  }
+  return starts
+}
+
+/** Starts a mark paints: its one occurrence, or every non-overlapping one. */
+const paintedStarts = (norm: string, ref: PdfQuoteRef) => {
+  const needle = ref.quote.replace(/\s+/gu, ' ').trim()
+  if (needle.length < 2) return { needle, starts: [] as number[] }
+  if (ref.nth !== undefined) {
+    const at = quoteStarts(norm, needle)[ref.nth]
+    return { needle, starts: at === undefined ? [] : [at] }
+  }
+  const starts: number[] = []
+  let from = 0
+  while (from < norm.length) {
+    const at = norm.indexOf(needle, from)
+    if (at < 0) break
+    starts.push(at)
+    from = at + needle.length
+  }
+  return { needle, starts }
+}
+
+/**
+ * Spans that cover a stored quote. The quote marks that passage.
+ * A shorter span is not marked just because its text also occurs inside the quote.
+ */
+export const spanIndexesForQuotes = (spanTexts: readonly string[], quotes: ReadonlyArray<string | PdfQuoteRef>): number[] => {
+  const { norm, spanAt } = pageTextIndex(spanTexts)
   const hit = new Set<number>()
   for (const quote of quotes) {
-    const needle = quote.replace(/\s+/gu, ' ').trim()
-    if (needle.length < 2) continue
-    let from = 0
-    while (from < norm.length) {
-      const at = norm.indexOf(needle, from)
-      if (at < 0) break
+    const { needle, starts } = paintedStarts(norm, quoteRef(quote))
+    for (const at of starts) {
       for (let cursor = at; cursor < at + needle.length; cursor += 1) {
         const span = spanAt[cursor]
         if (span >= 0) hit.add(span)
       }
-      from = at + needle.length
     }
   }
   return [...hit].sort((left, right) => left - right)
+}
+
+let pieceSerial = 0
+const pieceId = () => {
+  pieceSerial = (pieceSerial + 1) % 1_000_000
+  return `mark-${Date.now().toString(36)}-${pieceSerial.toString(36)}`
+}
+
+/**
+ * Takes the highlight off the leaf spans `erasedSpans` of `page` and nothing
+ * else. A mark that only partly lies on them keeps the rest of its passage,
+ * pinned to that occurrence. Returns `marks` itself when no mark lay on them.
+ */
+export const unmarkPdfSpans = (
+  marks: readonly PdfTextMark[],
+  page: number,
+  spanTexts: readonly string[],
+  erasedSpans: Iterable<number>,
+): readonly PdfTextMark[] => {
+  const erased = new Set(erasedSpans)
+  if (!erased.size || !marks.some((mark) => mark.page === page)) return marks
+  const { norm, spanAt } = pageTextIndex(spanTexts)
+  let changed = false
+  const next: PdfTextMark[] = []
+  for (const mark of marks) {
+    if (mark.page !== page) {
+      next.push(mark)
+      continue
+    }
+    const { needle, starts } = paintedStarts(norm, mark)
+    const touched = (at: number) => {
+      for (let cursor = at; cursor < at + needle.length; cursor += 1) {
+        if (erased.has(spanAt[cursor])) return true
+      }
+      return false
+    }
+    if (!starts.some(touched)) {
+      next.push(mark)
+      continue
+    }
+    changed = true
+    const keep = (start: number, end: number) => {
+      while (start < end && norm[start] === ' ') start += 1
+      while (end > start && norm[end - 1] === ' ') end -= 1
+      const quote = norm.slice(start, end)
+      if (quote.length < 2) return
+      const nth = quoteStarts(norm, quote).indexOf(start)
+      if (nth < 0) return
+      next.push({ id: pieceId(), page, quote, kind: mark.kind, nth })
+    }
+    for (const at of starts) {
+      if (!touched(at)) {
+        // Another occurrence of the same words keeps its highlight.
+        keep(at, at + needle.length)
+        continue
+      }
+      let run = -1
+      for (let cursor = at; cursor <= at + needle.length; cursor += 1) {
+        const gone = cursor === at + needle.length || erased.has(spanAt[cursor])
+        if (gone) {
+          if (run >= 0) keep(run, cursor)
+          run = -1
+        } else if (run < 0) {
+          run = cursor
+        }
+      }
+    }
+  }
+  return changed ? next : marks
 }
