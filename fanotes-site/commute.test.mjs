@@ -561,3 +561,38 @@ test('an unreadable commute file is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a commute file that is not the route list is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-routes-'))
+  const accountId = 'd'.repeat(32)
+  const routeFile = join(root, 'accounts', accountId, 'commute.json')
+  const stored = '{"version":2,"routes":{"a1b2c3d4e5f6":{"from":"keep"}}}\n'
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [], settings: {} })
+    await writeFile(routeFile, stored, { mode: 0o600 })
+    await assert.rejects(() => commute.view(accountId), (error) => error?.code === 'EBADMSG')
+    await assert.rejects(
+      () => commute.save(accountId, { routes: [], settings: { delayThreshold: 9 } }),
+      (error) => error?.code === 'EBADMSG',
+    )
+    assert.equal(await readFile(routeFile, 'utf8'), stored)
+    await writeFile(routeFile, JSON.stringify({
+      version: 1,
+      routes: [route()],
+      settings: { delayThreshold: 4, hiddenLabels: ['sport'] },
+    }))
+    const legacy = await commute.view(accountId)
+    assert.equal(legacy.routes[0].id, 'a1b2c3d4e5f6')
+    assert.deepEqual(legacy.settings.hiddenLabels, [])
+    await rm(routeFile)
+    assert.deepEqual((await commute.view(accountId)).routes, [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
