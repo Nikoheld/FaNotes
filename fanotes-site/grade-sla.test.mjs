@@ -856,7 +856,7 @@ test('a snapshot row that is not a record is left in place', async () => {
     await keep({ exams: [[]] })
     await keep({ absences: ['kept'] })
     const lesson = { id: 'e-keep', start: '2026-11-16T08:00:00', eventType: 'lesson' }
-    await writeFile(file, `${JSON.stringify({ fetchedAt: '2026-11-16T08:00:00.000Z', grades: [{ id: 'g-keep' }], events: [lesson] })}\n`, { mode: 0o600 })
+    await writeFile(file, `${JSON.stringify({ fetchedAt: '2026-11-16T08:00:00.000Z', grades: [{ id: 'g-keep' }], events: [lesson], startMessages: ['Willkommen'] })}\n`, { mode: 0o600 })
     assert.equal(await call(), 200)
     const saved = JSON.parse(await readFile(file, 'utf8'))
     assert.equal(saved.grades.some((grade) => grade.id === 'g-keep'), true)
