@@ -942,6 +942,62 @@ test('a browser session whose version is not a number is left in place', async (
   }
 })
 
+test('a browser session whose connections are not connections is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-16T12:00:00.000Z') })
+  try {
+    const app = await appIdentity(env.base)
+    const created = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: app.accountId,
+      provider: 'schulnetz',
+      label: 'Bleibt',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const file = join(env.store.root, 'sessions', `${created.hash}.json`)
+    const valid = await readFile(file, 'utf8')
+    const parsed = JSON.parse(valid)
+    const client = browser(env.base)
+    client.jar[SESSION_COOKIE] = created.token
+    const opened = await client.session()
+    assert.equal(opened.status, 200)
+    assert.equal(opened.body.connections.length, 1)
+    assert.equal(await readFile(file, 'utf8'), valid)
+    const keep = async (value) => {
+      const stored = JSON.stringify(value)
+      await writeFile(file, stored)
+      const result = await client.call('GET', '/session')
+      assert.equal(result.status, 500)
+      assert.equal(client.jar[SESSION_COOKIE], created.token)
+      assert.equal(await readFile(file, 'utf8'), stored)
+      await assert.rejects(
+        () => env.store.revoke(app.accountId, created.session.publicId),
+        (error) => error?.code === 'EBADMSG',
+      )
+      assert.equal(await readFile(file, 'utf8'), stored)
+      await env.store.sweep(true)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ ...parsed, connections: 'kept' })
+    await keep({ ...parsed, connections: null })
+    await keep({ ...parsed, connections: [{ kept: true }] })
+    await keep({ ...parsed, connections: [...parsed.connections, { kept: true }] })
+    await keep({ ...parsed, fanotes: 'kept' })
+    await keep({ ...parsed, fanotes: { kept: true } })
+    await writeFile(file, valid)
+    const restored = await client.session()
+    assert.equal(restored.status, 200)
+    assert.equal(restored.body.connections.length, 1)
+    assert.equal(await readFile(file, 'utf8'), valid)
+    await writeFile(file, JSON.stringify({ ...parsed, connections: [] }))
+    const dropped = await client.session()
+    assert.equal(dropped.status, 401)
+    assert.equal(client.jar[SESSION_COOKIE], undefined)
+    await assert.rejects(readFile(file), (error) => error?.code === 'ENOENT')
+  } finally {
+    await env.close()
+  }
+})
+
 test('a pairing code of another version is left in place', async () => {
   const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
   try {
