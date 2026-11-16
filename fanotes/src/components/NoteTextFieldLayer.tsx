@@ -10,6 +10,8 @@ import {
   type NoteTextFieldPageRect,
 } from '../lib/noteTextField'
 import { readUsedSheetZoom } from '../lib/paperView'
+import { toggleNoteTextTask } from '../lib/noteTextMarkdown'
+import { NoteTextFieldMarkdown } from './NoteTextFieldMarkdown'
 
 type FieldLayout = {
   id: string
@@ -72,6 +74,34 @@ export function NoteTextFieldLayer({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const previousSelectedRef = useRef<string | null>(null)
   const composingRef = useRef(false)
+  const onTextRef = useRef(onText)
+  onTextRef.current = onText
+  const onFinishRef = useRef(onFinish)
+  onFinishRef.current = onFinish
+
+  // The rendered Markdown is memoised on its text, so these read the current props.
+  const toggleTask = useCallback((id: string, line: number) => {
+    const field = fieldsRef.current.find((item) => item.id === id)
+    if (!field) return
+    const next = toggleNoteTextTask(field.text, line)
+    if (next === field.text) return
+    onTextRef.current(id, next)
+    onFinishRef.current?.()
+  }, [])
+
+  const openLink = useCallback((href: string) => {
+    void window.fanotes.openExternal(href).catch(() => {})
+  }, [])
+
+  // A click on the rendered text opens the box for typing, caret at the end.
+  const startEditing = useCallback((id: string) => {
+    const node = layerRef.current?.querySelector<HTMLTextAreaElement>(`[data-note-text-field="${CSS.escape(id)}"]`)
+    setSelectedId(id)
+    if (!node) return
+    node.focus({ preventScroll: true })
+    const end = node.value.length
+    node.setSelectionRange(end, end)
+  }, [])
 
   const measure = useCallback(() => {
     const layer = layerRef.current
@@ -318,6 +348,7 @@ export function NoteTextFieldLayer({
         const scale = position?.scale ?? 1
         const inverse = position?.inverse ?? 1
         const empty = field.text.trim() === ''
+        const rendered = !selected && !empty
         const flipBelow = (position?.top ?? 0) * (1 / Math.max(inverse, 0.01)) < 64
         const style = {
           left: position?.left ?? 0,
@@ -334,9 +365,13 @@ export function NoteTextFieldLayer({
         return (
           <div
             key={field.id}
-            className={`note-text-field ${selected ? 'is-selected' : ''} ${empty ? 'is-empty' : ''}`}
+            className={`note-text-field ${selected ? 'is-selected' : ''} ${empty ? 'is-empty' : ''} ${rendered ? 'is-rendered' : ''}`}
             style={style}
-            onFocus={() => setSelectedId(field.id)}
+            onFocus={(event) => {
+              // Tabbing to a link or checkbox of the rendered text does not start an edit.
+              if (event.target instanceof Element && event.target.closest('.note-text-field-render')) return
+              setSelectedId(field.id)
+            }}
             onBlur={(event) => {
               const next = event.relatedTarget
               if (next instanceof Node && !event.currentTarget.contains(next) && !composingRef.current) setSelectedId((current) => current === field.id ? null : current)
@@ -388,6 +423,7 @@ export function NoteTextFieldLayer({
             </button>
             <textarea
               data-note-text-field={field.id}
+              data-snapshot={empty ? undefined : 'hide'}
               value={field.text}
               rows={1}
               placeholder="Text eingeben …"
@@ -406,6 +442,26 @@ export function NoteTextFieldLayer({
               onKeyDown={(event) => onKeyDown(field, event)}
               onPointerDown={(event) => event.stopPropagation()}
             />
+            {!empty && (
+              <div
+                className="note-text-field-render"
+                data-snapshot="show"
+                data-i18n-ignore
+                style={{
+                  fontSize: `${field.fontSize * scale}px`,
+                  minHeight: `${MIN_BOX_HEIGHT}em`,
+                  fontWeight: field.bold ? 700 : 400,
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => startEditing(field.id)}
+              >
+                <NoteTextFieldMarkdown
+                  text={field.text}
+                  onToggleTask={(line) => toggleTask(field.id, line)}
+                  onOpenLink={openLink}
+                />
+              </div>
+            )}
             <button
               type="button"
               tabIndex={-1}
