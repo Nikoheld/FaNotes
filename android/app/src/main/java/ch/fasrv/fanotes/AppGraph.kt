@@ -166,6 +166,13 @@ class AppGraph(context: Context) {
         handwritingLearning.attach()
     }
 
+    /**
+     * Where the Statistik page keeps what it read from each note of the open vault, so opening it again
+     * (or after the app restarted) does not read the vault again. One file per vault, in private storage.
+     */
+    fun statsCache(): ch.fasrv.fanotes.desk.StatsCacheStore =
+        ch.fasrv.fanotes.desk.FileStatsCacheStore(File(File(appContext.filesDir, "stats-cache"), fingerprint(vaultId) + ".jsonl"))
+
     fun rememberTree(uri: String?) {
         prefs.edit().putString("vault-uri", uri).apply()
     }

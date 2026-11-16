@@ -18,6 +18,7 @@ import ch.fasrv.fanotes.desk.homeworkSecretReady
 import ch.fasrv.fanotes.desk.homeworkTasksFromApiJson
 import ch.fasrv.fanotes.desk.mergeHomeworkFromRemote
 import ch.fasrv.fanotes.desk.rememberPublishedHomeworkIds
+import ch.fasrv.fanotes.desk.runDailyCheck
 import ch.fasrv.fanotes.desk.newHomeworkChannelId
 import ch.fasrv.fanotes.desk.newHomeworkSecret
 import ch.fasrv.fanotes.desk.SearchHit
@@ -186,6 +187,9 @@ data class BookPaneState(
 
 private const val HOMEWORK_UNREADABLE = "Hausaufgaben.md konnte nicht gelesen werden. Die Datei bleibt unverändert."
 private const val CALENDAR_UNREADABLE = "Kalender.md konnte nicht gelesen werden. Die Datei bleibt unverändert."
+
+/** A Statistik run that finished this recently is shown as it is when the page opens again. */
+private const val STATS_FRESH_MS = 60_000L
 
 class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     /** Opens a `.story` folder in the writing mode (a WebView with the shared editor). */
@@ -2901,7 +2905,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val historyComparison = MutableStateFlow<Pair<String, String>?>(null)
     val study = MutableStateFlow<StudyPicture?>(null)
 
-    /** Settings → Statistik. Computed off the main thread, cached per file signature, cancelled on leave. */
+    /**
+     * Settings → Statistik. Computed off the main thread, kept per file in app storage (path, size and
+     * modification time, no expiry) so opening the page again reads only what changed, cancelled on leave.
+     */
     val vaultStats = MutableStateFlow<ch.fasrv.fanotes.desk.VaultStats?>(null)
     val vaultStatsProgress = MutableStateFlow<ch.fasrv.fanotes.desk.StatsProgress?>(null)
     val vaultStatsFailed = MutableStateFlow(false)
@@ -2909,33 +2916,67 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var statsLoader: ch.fasrv.fanotes.desk.VaultStatsLoader? = null
     private var statsLoaderVault: ch.fasrv.fanotes.vault.VaultIo? = null
 
+    /** Bumped on every start and cancel, so a run that was cancelled cannot overwrite what a newer one shows. */
+    private var statsGeneration = 0
+
+    /** [android.os.SystemClock.elapsedRealtime] when a run last finished completely, or -1. */
+    private var statsFreshAt = -1L
+
+    /** Anything the run itself does not catch (it catches exceptions and running out of memory) ends the page in its failed state, not the app. */
+    private val statsErrors = kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
+        diagnostics.recordError(error)
+        vaultStatsFailed.value = true
+        vaultStatsProgress.value = null
+    }
+
     fun loadVaultStats(force: Boolean = false) {
-        statsJob?.cancel()
         val io = graph.vault
-        val loader = statsLoader?.takeIf { statsLoaderVault === io }
-            ?: ch.fasrv.fanotes.desk.VaultStatsLoader(io).also { statsLoader = it; statsLoaderVault = io }
+        val sameVault = statsLoader != null && statsLoaderVault === io
+        // The page is opened again right after a complete run (a rotation, a quick return): nothing to do.
+        if (!force && sameVault && statsJob?.isActive != true && !vaultStatsFailed.value &&
+            statsFreshAt >= 0 && android.os.SystemClock.elapsedRealtime() - statsFreshAt < STATS_FRESH_MS
+        ) return
+        statsJob?.cancel()
+        val loader = statsLoader?.takeIf { sameVault }
+            ?: ch.fasrv.fanotes.desk.VaultStatsLoader(io, cache = graph.statsCache()).also { statsLoader = it; statsLoaderVault = io }
+        // Another vault: the numbers on screen are not its numbers.
+        if (!sameVault) { vaultStats.value = null; statsFreshAt = -1L }
+        val generation = ++statsGeneration
         vaultStatsFailed.value = false
         vaultStatsProgress.value = ch.fasrv.fanotes.desk.StatsProgress("tree", 0, 0)
-        statsJob = viewModelScope.launch {
+        statsJob = viewModelScope.launch(statsErrors) {
             try {
-                val done = loader.load(force) { stats, progress ->
-                    vaultStats.value = stats
-                    vaultStatsProgress.value = progress
+                val done = loader.load(force, onProgress = { if (generation == statsGeneration) vaultStatsProgress.value = it }) { stats, progress ->
+                    if (generation == statsGeneration) {
+                        vaultStats.value = stats
+                        vaultStatsProgress.value = progress
+                    }
                 }
-                diagnostics.setVault(done.totals.notes.toLong(), done.totals.bytes)
-                vaultStatsProgress.value = null
+                if (generation == statsGeneration) {
+                    diagnostics.setVault(done.totals.notes.toLong(), done.totals.bytes)
+                    statsFreshAt = android.os.SystemClock.elapsedRealtime()
+                    vaultStatsProgress.value = null
+                }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                diagnostics.recordError(error)
-                vaultStatsFailed.value = true
-                vaultStatsProgress.value = null
+                failVaultStats(generation, error)
+            } catch (error: OutOfMemoryError) {
+                failVaultStats(generation, error)
             }
         }
     }
 
+    private fun failVaultStats(generation: Int, error: Throwable) {
+        if (generation != statsGeneration) return
+        diagnostics.recordError(error)
+        vaultStatsFailed.value = true
+        vaultStatsProgress.value = null
+    }
+
     /** The Statistik page was left: stop reading the vault. Keeps what was computed. */
     fun cancelVaultStats() {
+        statsGeneration += 1
         statsJob?.cancel()
         statsJob = null
         vaultStatsProgress.value = null
@@ -2943,13 +2984,29 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     val diagnostics: ch.fasrv.fanotes.desk.DiagnosticsClient get() = graph.diagnostics
 
-    /** At most one report a day, and only while a toggle is on; the client checks both. */
+    private var diagnosticsJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * At most one report a day, and only while a toggle is on. With both off this does nothing at all:
+     * no vault access, no job. When a report is due it takes the vault size from what is already known
+     * (this session's statistics, the saved ones, the explorer tree) and never walks the vault.
+     */
     private fun diagnosticsTick() {
-        viewModelScope.launch(Dispatchers.IO) {
+        diagnosticsJob?.cancel()
+        diagnosticsJob = null
+        if (!diagnostics.enabled()) return
+        diagnosticsJob = viewModelScope.launch(Dispatchers.IO) {
             runCatching {
-                val notes = graph.vault.walkFiles().filter { !it.directory && !it.path.startsWith(".") }
-                diagnostics.setVault(notes.count { it.path.endsWith(".md") || it.path.endsWith(".famd") || it.path.endsWith(".pdf") }.toLong(), notes.sumOf { it.size })
-                diagnostics.sendDailyIfDue()
+                diagnostics.runDailyCheck {
+                    val current = vaultStats.value?.takeIf { statsLoaderVault === graph.vault }?.let {
+                        ch.fasrv.fanotes.desk.StatsSummary(it.totals.notes.toLong(), it.totals.bytes, it.generatedAt)
+                    }
+                    ch.fasrv.fanotes.desk.diagnosticsFigures(
+                        current,
+                        ch.fasrv.fanotes.desk.readStatsSummary(graph.statsCache()),
+                        ch.fasrv.fanotes.vault.censusNotes(tree.value).notes,
+                    )
+                }
             }
         }
     }
@@ -2957,6 +3014,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     init {
         diagnostics.markStartupReady(android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime())
         viewModelScope.launch {
+            // The explorer tree is the vault size when no statistics were saved, so give it a moment to load first.
+            var waitedMs = 0L
+            while (!treeLoaded && waitedMs < 30_000) {
+                kotlinx.coroutines.delay(500)
+                waitedMs += 500
+            }
             while (true) {
                 diagnosticsTick()
                 kotlinx.coroutines.delay(6L * 60 * 60 * 1000)
