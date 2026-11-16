@@ -1713,3 +1713,74 @@ test('a link school address that is not an allowed address is left in place', as
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a link sign-in flag that is not a flag is left in place', async () => {
+  let calls = 0
+  const root = await mkdtemp(join(tmpdir(), 'grade-link-flag-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { calls += 1; throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.75')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const linkFile = join(root, 'accounts', guest.accountId, 'link.json')
+    const snapshot = join(root, 'accounts', guest.accountId, 'snapshot.json')
+    const keptSnapshot = '{"grades":[{"id":"g-keep"}]}\n'
+    await writeFile(snapshot, keptSnapshot, { mode: 0o600 })
+    const live = JSON.parse(await readFile(linkFile, 'utf8'))
+    const call = async () => {
+      const request = {
+        method: 'GET',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.75' },
+        async *[Symbol.asyncIterator]() {},
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/status'))
+      return status
+    }
+    const keep = async (extra) => {
+      const stored = JSON.stringify({ ...live, ...extra })
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      await assert.rejects(() => runtime.pollAccount(guest.accountId), (error) => error?.code === 'EBADMSG')
+      assert.equal(calls, 0)
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await keep({ needsReauth: 'false' })
+    await keep({ needsReauth: 'true' })
+    await keep({ needsReauth: 1 })
+    await keep({ needsReauth: 0 })
+    await keep({ loginPushSent: 'true' })
+    await keep({ loginPushSent: 1 })
+    const open = async (extra) => {
+      const next = { ...live, ...extra }
+      for (const [key, value] of Object.entries(extra)) if (value === undefined) delete next[key]
+      const stored = JSON.stringify(next)
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call(), 200)
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await open({ needsReauth: false, loginPushSent: false })
+    await open({ needsReauth: true, loginPushSent: true })
+    await open({ needsReauth: '', loginPushSent: '' })
+    await open({ needsReauth: undefined, loginPushSent: undefined })
+    const quiet = JSON.stringify({ ...live, needsReauth: true })
+    await writeFile(linkFile, quiet, { mode: 0o600 })
+    const skipped = await runtime.pollAccount(guest.accountId)
+    assert.equal(skipped.skipped, true)
+    assert.equal(calls, 0)
+    assert.equal(await readFile(linkFile, 'utf8'), quiet)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

@@ -329,6 +329,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const modeKnown = (value) => value == null || value === '' || value === 'web' || value === 'rest' || value === 'device'
     const deviceKnown = (value) => value == null || value === '' || (typeof value === 'string' && /^[a-f0-9]{24}$/u.test(value))
     const baseKnown = (link) => link.baseUrl == null || link.baseUrl === '' || (link.mode === 'device' ? typeof link.baseUrl === 'string' : typeof normalizeSchoolBase(link.baseUrl) === 'string')
+    const flagKnown = (value) => value == null || value === '' || typeof value === 'boolean'
     const known = plainObject(link)
       && (link.fcmTokens == null || (Array.isArray(link.fcmTokens) && link.fcmTokens.every(isValidFcmToken)))
       && (link.pushKeys == null || plainObject(link.pushKeys))
@@ -345,6 +346,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       && deviceKnown(link.deviceId)
       // A saved school address that is not an allowed address must not be opened, or the next poll drops the session.
       && baseKnown(link)
+      // A saved sign-in flag that is not a flag must not look set, or the next poll stays silent or sends another sign-in push.
+      && flagKnown(link.needsReauth) && flagKnown(link.loginPushSent)
     if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)
