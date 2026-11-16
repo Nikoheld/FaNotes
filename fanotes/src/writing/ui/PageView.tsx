@@ -4,6 +4,7 @@ import { cssFont, type TextMeasurer } from '../layout/measure'
 import type { ManuscriptLayout, Page } from '../layout/paginate'
 import type { Doc, Pos } from '../editor/doc'
 import { blockLength } from '../editor/doc'
+import type { FlowBlock } from '../model/flow'
 import type { CaretBox } from './navigation'
 
 export type ViewMode = 'page' | 'spread' | 'draft'
@@ -26,7 +27,7 @@ type Props = {
   focusBlock: string | null
   highlights: Highlight[]
   /** Assistant underlines for a block, asked for the pages in view only. */
-  underlinesFor?: (blockIndex: number) => Underline[]
+  underlinesFor?: (block: FlowBlock) => Underline[]
   /** The scrolling element (set once it is mounted; the view listens to it). */
   scroller: HTMLDivElement | null
   onPointerDown: (pointer: PagePointer) => void
@@ -142,7 +143,7 @@ const rangeRects = (layout: ManuscriptLayout, page: Page, doc: Doc, from: Pos, t
   return rects
 }
 
-const PageBox = memo(function PageBox(props: {
+type PageBoxProps = {
   page: Page
   layout: ManuscriptLayout
   rect: PageRect
@@ -160,7 +161,24 @@ const PageBox = memo(function PageBox(props: {
   onContextMenu?: (pointer: PagePointer) => void
   onPointerMove: Props['onPointerMove']
   onPointerUp: Props['onPointerUp']
-}) {
+}
+
+const sameSelection = (a: PageBoxProps['selection'], b: PageBoxProps['selection']) => a === b || (a !== null && b !== null && a.from.block === b.from.block && a.from.offset === b.from.offset && a.to.block === b.to.block && a.to.offset === b.to.offset)
+
+/**
+ * A page is redrawn only when its own content or the things drawn over it changed. The layout object itself
+ * changes with every keystroke, but a page object is reused as long as its lines are the same (see paginate.ts).
+ */
+const samePageBox = (a: PageBoxProps, b: PageBoxProps) => (
+  a.page === b.page && a.rect.left === b.rect.left && a.rect.top === b.rect.top && a.rect.width === b.rect.width && a.rect.height === b.rect.height
+  && a.zoom === b.zoom && a.view === b.view && a.measurer === b.measurer && a.focusBlock === b.focusBlock && a.highlights === b.highlights && a.underlinesFor === b.underlinesFor
+  && a.onPointerDown === b.onPointerDown && a.onPointerMove === b.onPointerMove && a.onPointerUp === b.onPointerUp && a.onContextMenu === b.onContextMenu
+  && sameSelection(a.selection, b.selection)
+  && (a.caret === b.caret || (a.caret !== null && b.caret !== null && a.caret.x === b.caret.x && a.caret.y === b.caret.y && a.caret.height === b.caret.height && a.caret.page === b.caret.page))
+  && (b.caret === null || a.caretVisible === b.caretVisible)
+)
+
+const PageBox = memo(function PageBox(props: PageBoxProps) {
   const { page, layout, rect, zoom, measurer } = props
   const pointer = (event: ReactPointerEvent<HTMLDivElement>): PagePointer => {
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -169,7 +187,7 @@ const PageBox = memo(function PageBox(props: {
   const selectionRects = props.selection ? rangeRects(layout, page, props.doc, props.selection.from, props.selection.to, measurer) : []
   const highlightRects = props.highlights.flatMap((highlight) => rangeRects(layout, page, props.doc, { block: highlight.block, offset: highlight.from }, { block: highlight.block, offset: highlight.to }, measurer).map((value) => ({ ...value, current: highlight.current })))
   const pageBlocks = [...new Set(page.lines.map((placed) => placed.blockIndex))]
-  const underlines = props.underlinesFor ? pageBlocks.flatMap((blockIndex) => props.underlinesFor!(blockIndex)) : []
+  const underlines = props.underlinesFor ? pageBlocks.flatMap((blockIndex) => props.underlinesFor!(layout.blocks[blockIndex])) : []
   const underlineRects = underlines.flatMap((underline) => rangeRects(layout, page, props.doc, { block: underline.block, offset: underline.from }, { block: underline.block, offset: underline.to }, measurer).map((value) => ({ ...value, kind: underline.kind })))
   const setup = layout
   return (
