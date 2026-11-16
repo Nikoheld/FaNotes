@@ -62,6 +62,8 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [fontsReady, setFontsReady] = useState(false)
+  /** Bumped when the assistant's story lists (dictionary, ignored, bible names) changed. */
+  const [listsVersion, setListsVersion] = useState({ key: '', n: 0 })
   const [hyphenators, setHyphenators] = useState<Partial<Record<StoryLanguage, Hyphenator | null>>>({})
   const [zoom, setZoom] = useState(() => Number(localStorage.getItem('fanotes.writing.zoom')) || 1)
   const [view, setView] = useState<ViewMode>(() => (localStorage.getItem('fanotes.writing.view') as ViewMode) || 'page')
@@ -234,7 +236,7 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const close = useCallback(async () => {
     if (controller) {
       try { localStorage.setItem(`fanotes.writing.caret:${path}`, JSON.stringify(controller.state.selection.head)) } catch { /* ignore */ }
-      await tools.flush()
+      await tools.flush(countBlocks(controller.state.doc.flow).words)
       if (!(await save())) {
         setNotice(L('Speichern fehlgeschlagen. Die Änderungen bleiben in diesem Fenster und im Notfallspeicher.', 'Saving failed. Your changes stay in this window and in the recovery journal.'))
         return
@@ -493,7 +495,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
       .map((issue) => ({ block: block.key, from: issue.from, to: issue.to, kind: issue.category === 'spelling' ? 'spelling' as const : issue.category === 'style' ? 'style' as const : 'grammar' as const }))
     // The assistant's lists, settings and lexicon are part of its cache key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assistant, assistSettings, lexiconReady, dictionaryWords, ignoredIssues, storyLanguage])
+  }, [assistant, assistSettings, lexiconReady, dictionaryWords, ignoredIssues, storyLanguage, listsVersion.n])
 
   const moveCaret = (motion: Motion, extend: boolean) => {
     if (!controller || !layout || !measurer) return
@@ -853,7 +855,13 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
   useEffect(() => {
     if (!manifestForLists) return
     const names = [...characters, ...places].flatMap((entry) => entryNames(entry).flatMap((name) => name.split(/\s+/u)))
-    assistant.setProjectLists([...(manifestForLists.dictionary ?? []), ...names], manifestForLists.ignored ?? [])
+    const words = [...(manifestForLists.dictionary ?? []), ...names]
+    const ignored = manifestForLists.ignored ?? []
+    assistant.setProjectLists(words, ignored)
+    // Pages keep their underlines until `underlinesFor` changes; the lists are set after render,
+    // so a new version re-renders the pages with the new lists (bible names included).
+    const key = JSON.stringify([words, ignored])
+    setListsVersion((current) => (current.key === key ? current : { key, n: current.n + 1 }))
   }, [assistant, manifestForLists, characters, places])
 
   /** Binder edits; typing into one field of one node is a single undo step. */

@@ -129,12 +129,20 @@ export function useStoryTools({ host, path, files, writer, totalWords, onWritten
 
   const openSnapshot = useCallback((sceneId: string, stamp: string) => (host ? readSnapshot(host, path, sceneId, stamp) : Promise.resolve(null)), [host, path])
 
-  /** Writes everything that is still pending (on close). */
-  const flush = useCallback(async () => {
+  /**
+   * Writes everything that is still pending (on close). `finalWords`: the live word count, since
+   * `totalWords` follows the document with a delay while typing and may miss the last words.
+   */
+  const flush = useCallback(async (finalWords?: number) => {
     await Promise.all([...pendingEntries.current.keys()].map((id) => flushEntry(id)))
+    if (finalWords !== undefined && bibleReady) {
+      const base = progressWrite.current.latest ?? ownProgress
+      const next = recordProgress(base, writer, finalWords)
+      if (next !== base) progressWrite.current.latest = next
+    }
     if (progressWrite.current.timer !== null) { window.clearTimeout(progressWrite.current.timer); progressWrite.current.timer = null }
     if (progressWrite.current.latest) await writeOwnProgress(progressWrite.current.latest)
-  }, [flushEntry, writeOwnProgress])
+  }, [flushEntry, writeOwnProgress, bibleReady, ownProgress, writer])
 
   useEffect(() => () => { void flush() }, [flush])
 

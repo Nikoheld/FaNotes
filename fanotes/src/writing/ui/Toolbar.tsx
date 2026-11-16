@@ -129,8 +129,8 @@ export const Toolbar = memo(function Toolbar({ act, title, binderOpen, setBinder
       </div>
     </details>
     <span className="wm-sep" />
-    {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight], ['justify', AlignJustify]] as const).map(([align, Icon]) => (
-      <button key={align} type="button" className={`wm-icon${(align ?? styles[currentStyle]?.align) === align ? ' is-on' : ''}`} title={{ left: L('Linksbündig (Strg+L)', 'Align left (Ctrl+L)'), center: L('Zentriert (Strg+E)', 'Centre (Ctrl+E)'), right: L('Rechtsbündig (Strg+R)', 'Align right (Ctrl+R)'), justify: L('Blocksatz (Strg+J)', 'Justify (Ctrl+J)') }[align]} onClick={() => { act.setAlignment(align); act.refocus() }}><Icon size={16} /></button>
+    {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight], ['justify', AlignJustify]] as const).map(([value, Icon]) => (
+      <button key={value} type="button" className={`wm-icon${(align ?? styles[currentStyle]?.align) === value ? ' is-on' : ''}`} title={{ left: L('Linksbündig (Strg+L)', 'Align left (Ctrl+L)'), center: L('Zentriert (Strg+E)', 'Centre (Ctrl+E)'), right: L('Rechtsbündig (Strg+R)', 'Align right (Ctrl+R)'), justify: L('Blocksatz (Strg+J)', 'Justify (Ctrl+J)') }[value]} onClick={() => { act.setAlignment(value); act.refocus() }}><Icon size={16} /></button>
     ))}
     <span className="wm-sep" />
     <details className="wm-menu">
