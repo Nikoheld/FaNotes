@@ -279,6 +279,15 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
   }
 
+  const readSnapshotFile = async (accountId) => {
+    const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    // A missing or broken file can start again. A file that is there but whose grades or events are not lists must not look empty, or the next save replaces them.
+    if (stored == null) return null
+    const known = typeof stored === 'object' && !Array.isArray(stored) && (stored.grades == null || Array.isArray(stored.grades)) && (stored.events == null || Array.isArray(stored.events))
+    if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
+    return stored
+  }
+
   const stripLegacyPush = (link) => {
     if (!link || typeof link !== 'object') return link
     delete link.topic
@@ -428,7 +437,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
     if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Der Schnappschuss ist ungültig.')
-    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const previous = await readSnapshotFile(accountId)
     const snapshot = { ...keepServerLessons(previous, body), revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
     snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
     // The app reads every grade row; an upload whose grades were kept is stored as a complete list.
@@ -1215,7 +1224,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       }
       await storeRefresh(tokens)
     }
-    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const previous = await readSnapshotFile(accountId)
     const span = { start: String(previous?.weekSpanStart || ''), end: String(previous?.weekSpanEnd || '') }
     const needPlan = !(span.start && span.end) && !hasFetchedWeeks(previous?.weekFetched)
     const raw = {}
@@ -1333,7 +1342,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     try { serverSession = JSON.parse(openToken(material, link.serverSession)) } catch { serverSession = null }
     const baseUrl = link.baseUrl
     const scrape = async (session) => {
-      const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+      const stored = await readSnapshotFile(accountId)
       return scrapeWithSession(baseUrl, { ...session, userAgent }, fetchImpl, {
         gradesOnly,
         previousEvents: stored?.events || [],
@@ -1381,7 +1390,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         return { needsReauth: true }
       }
     }
-    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const previous = await readSnapshotFile(accountId)
     const failed = Boolean(scraped.problem)
     // The Absenzen page with points, quota and open reports. An unread page keeps the stored statement.
     const statement = failed ? null : readAbsenceStatement(scraped.absencesHtml || '')
@@ -1769,7 +1778,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         return true
       }
       if (route === '/snapshot' && method === 'GET') {
-        const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+        const stored = await readSnapshotFile(accountId)
         // Apps that handle every timetable week say so; older ones get this week only.
         const weeks = String(request.headers?.[TIMETABLE_WEEKS_HEADER] || '') === 'weeks' ? stored : legacySnapshotView(stored, zurichToday(now()))
         // Apps before the points parser get the absences their own reader produces, so their diff stays quiet.
