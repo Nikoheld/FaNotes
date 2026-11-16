@@ -1367,3 +1367,62 @@ test('a link revision that is not a count is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a link sign-in time that is not a time is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-link-signin-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+    now: () => new Date('2026-11-16T12:00:00.000Z'),
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.98')
+    await runtime.linkAccount(guest.accountId, {
+      mode: 'web',
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      userAgent: 'KantiTest',
+      ssoCookies: { 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=synthetic' },
+    })
+    const linkFile = join(root, 'accounts', guest.accountId, 'link.json')
+    const live = JSON.parse(await readFile(linkFile, 'utf8'))
+    const call = async () => {
+      const request = {
+        method: 'GET',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.98' },
+        async *[Symbol.asyncIterator]() {},
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/status'))
+      return status
+    }
+    const keep = async (extra) => {
+      const stored = JSON.stringify({ ...live, sso: { kept: true }, serverSession: { kept: true }, ...extra })
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      await assert.rejects(() => runtime.pollAccount(guest.accountId), (error) => error?.code === 'EBADMSG')
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+    }
+    await keep({ cookiesSavedAt: 'yesterday' })
+    await keep({ cookiesSavedAt: 1_700_000_000_000 })
+    await keep({ accessExpiresAt: 'later' })
+    await keep({ accessExpiresAt: true })
+    const fresh = JSON.stringify({ ...live, cookiesSavedAt: '2026-11-16T11:00:00.000Z', accessExpiresAt: '2026-11-16T13:00:00.000Z' })
+    await writeFile(linkFile, fresh, { mode: 0o600 })
+    assert.equal(await call(), 200)
+    assert.equal(await readFile(linkFile, 'utf8'), fresh)
+    const expired = { ...live, cookiesSavedAt: '2020-01-01T00:00:00.000Z', sso: { kept: true }, serverSession: { kept: true } }
+    await writeFile(linkFile, JSON.stringify(expired), { mode: 0o600 })
+    await runtime.pollAccount(guest.accountId)
+    const cleared = JSON.parse(await readFile(linkFile, 'utf8'))
+    assert.equal(cleared.needsReauth, true)
+    assert.equal(cleared.sso, null)
+    assert.equal(cleared.serverSession, null)
+    assert.equal(cleared.cookiesSavedAt, '')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
