@@ -18,7 +18,8 @@ Insert one from the toolbar button "Lernwerkzeuge" or from the command palette (
 | `fanotes-plate` | Picture sheet | Auftrag 13 | `items` with label, note and a picture stored as a file in the vault (`.fanotes/worksheets/<id>.jpg`, the folder the sheet import uses) and referenced by path; old notes with small data URLs still read |
 | `fanotes-term` | Definition cards | Auftrag 7 | `terms` with term, definition, example, source |
 
-Key and map diagrams export as PNG (copy, save, or place on the open sheet). Sort results insert as a Markdown table or list.
+Key and map diagrams export as PNG (copy, save, or place on the open sheet). Sort results insert as a Markdown table or list; a key inserts as a table or as numbered couplets ("1. Frage / a) ja → 2 / b) nein → Art").
+Branch labels of a key hang on the drop line of their child and are wrapped to narrow lines. The width of a label is reserved in the span of its child, and the rows grow where labels need height, so long descriptive couplet texts never overlap each other, a box or a line.
 Picture sheets and definition cards feed the existing flashcards (`## Lernfragen` cards keep working):
 cards get the ids `plate:<item id>` and `term:<term id>`, and the review schedule is kept per id in the note's `fanotes-cards-v1` comment (pictures are not copied there; cards point at the same vault file).
 
@@ -34,6 +35,8 @@ The highlights overview reads the existing `fanotes-pdf-marks-v1` marks.
 
 - Blocks are read strictly. Invalid JSON, a non-object, or a block the sanitiser would cut or rewrite (list caps, over-long text, rejected pictures, dropped nodes) is reported with the reason and shown as plain source in the editor and the preview. The block editor refuses to open such a block for writing, so nothing is silently lost.
 - Unknown top-level fields of a block are kept on write-back; unknown nested fields are not.
+- The editors only write what the reader accepts again. Every write goes through `normaliseStudyData` first (lists at their caps, texts at their lengths, no dangling references, no duplicate or self-pointing arrows, no branches under a result), so editing can never lock a block out of its own editor. The editors stop short of the caps instead (`KEY_LIMITS`, `MAP_LIMITS`, `SORT_LIMITS`, `PLATE_LIMITS`, `TERM_LIMITS`: add buttons disable, inputs carry `maxLength`, pasted cards that do not fit stay in the field); if something entered still did not fit, the editor says so. Switching a question with branches to "Ergebnis" (or deleting a branch with a subtree) asks first, because everything below goes with it.
+- Cards without an id (hand-written or generated JSON) get an id made from their position and name, so it is the same on every read and the review schedule is found again. A block copied within a note shares its ids: an exact copy adds no second card, an edited copy gets an id of its own, the first block keeps the plain id.
 - Block identity: the host remembers the block's offset and a fingerprint of its body, and re-locates it on every write (also for "insert table"). If the body changed meanwhile, or identical twin blocks make the position ambiguous, the editor locks read-only with a message instead of writing into another block.
 - The `fanotes-tasks-v1` comment keeps exactly one live comment per note: the first valid one is replaced in place and valid duplicates are removed. A broken but closed comment is renamed `fanotes-tasks-v1-broken` (text stays recoverable, never wins on read); a later valid comment is read instead. A broken comment that never closes (or runs into the next marker) makes the write refuse with a message, because renaming it would not stop it swallowing the rest of the note. Clearing the list removes only the comment and its own line break.
 
@@ -84,11 +87,11 @@ Every item also has `id` and `page`. Unknown kinds are dropped and bad values ar
 | Compare view | yes | yes (#1220; side panel in landscape, bottom in portrait) |
 | Annotation undo/redo | yes | yes (own stack; ink undo unchanged) |
 
-On Android, study gestures go through the normal ink path, so palm rejection, pen-only and "finger draws" apply; a plain finger still navigates. Android camera capture, PDF crop and the compare view came with #1220; images from every source are re-encoded to the same caps as desktop (≈300 KB, long edge 1200 px, 8 MB per note).
+On Android, study gestures go through the normal ink path, so palm rejection, pen-only and "finger draws" apply; a plain finger still navigates. Stamps, legends and measure points are placed when the contact lifts without having moved, never when it lands, so a palm the system rejects or a cancelled contact leaves nothing behind. The open tool, selection, collected measure points, an unconfirmed crop and the label editor (with its typed text) survive a rotation or a restart of the activity. Android camera capture, PDF crop and the compare view came with #1220; images from every source are re-encoded to the same caps as desktop (≈300 KB, long edge 1200 px, 8 MB per note).
 
 ## Checks
 
-- `npm run check:study-tools` parses, serialises, detects and lays out (no browser).
+- `npm run check:study-tools` parses, serialises, detects and lays out (no browser). It also runs a seeded property test on random keys with long German branch labels (no two boxes or labels overlap, no line runs through a label, nothing outside the drawing), the question-to-result toggle round trip, and the checks that every editor state reads back whole.
 - `scripts/check-study-ui.mjs` is a Playwright smoke test against a web build (see its header).
 - `node scripts/check-study-annotations.cjs` covers annotation geometry, sanitising, numbering, legend, undo, ids, image budget and the `.famd` round trip; `scripts/check-study-annotations-desktop.mjs` is the Electron smoke test (synthetic PDF).
 

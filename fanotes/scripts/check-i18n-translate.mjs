@@ -283,6 +283,12 @@ const runOnce = async () => {
   assert.equal(localizeText('Lädt hoch 1/4', 'en'), 'Uploading 1/4')
   assert.equal(i18n.translateUiText('Prüft 2/2'), 'Checking 2/2')
   assert.equal(localizeText('Prüft 2/2', 'en'), 'Checking 2/2')
+  // Sync status label: the pause the server asked for, and changes that wait for an open or unreadable note.
+  assert.equal(i18n.translateUiText('Sync pausiert – geht um 14:32 weiter'), 'Sync paused – resumes at 14:32')
+  assert.equal(i18n.translateUiText('Synchron · 1 Änderung von einem anderen Gerät wartet'), 'In sync · 1 change from another device is waiting')
+  assert.equal(i18n.translateUiText('Synchron · 3 Änderungen von anderen Geräten warten'), 'In sync · 3 changes from other devices are waiting')
+  assert.equal(i18n.translateUiText('Sync pausiert – geht um 09:05 weiter · 2 Änderungen von anderen Geräten warten'), 'Sync paused – resumes at 09:05 · 2 changes from other devices are waiting')
+  assert.equal(i18n.translateUiText('Sync · ada@example.com · Sync pausiert – geht um 14:32 weiter'), 'Sync · ada@example.com · Sync paused – resumes at 14:32')
   assert.equal(i18n.translateUiText('Ungültige Add-on-ID: demo'), 'Invalid add-on ID: demo')
   assert.equal(localizeText('Ungültige Add-on-ID: demo', 'en'), 'Invalid add-on ID: demo')
   assert.equal(i18n.translateUiText('Kalender konnte nicht gespeichert werden.'), 'The calendar could not be saved.')

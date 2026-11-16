@@ -142,10 +142,13 @@ try {
     assert.deepEqual(pick(strokePointBounds(live.points)), loop(live.points), 'a rescale is measured again')
     assert.deepEqual(pick(strokePointBounds([])), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity })
 
-    // The eraser still removes the same strokes with cached bounds.
+    // The eraser still finds the same strokes with cached bounds. It cuts out
+    // the ink under the path, so those strokes become pieces: the two strokes
+    // the path runs through are replaced, the other 38 stay the same objects.
     const page = Array.from({ length: 40 }, (_, index) => stroke(index))
     const erased = applyToolErase(page, [point(0.4, 0.09), point(0.6, 0.11)], 6, 794, 1123)
-    assert.ok(erased.length < page.length, 'the eraser still erases')
+    assert.notEqual(erased, page, 'the eraser still erases')
+    assert.equal(page.filter((entry) => erased.includes(entry)).length, page.length - 2, 'and only the strokes under the path are cut')
     assert.equal(applyToolErase(page, [point(0.99, 0.99)], 4, 794, 1123), page, 'and leaves a page alone when nothing is near')
 
     for (const text of ['', 'abc', 'Größe', '✓€', '😀', 'a\ud800b', '\udc00', 'x'.repeat(1000) + '😀'.repeat(3)]) {

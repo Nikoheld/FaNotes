@@ -1,16 +1,16 @@
-import { Copy, Download, FileImage, GraduationCap, Table2, X } from 'lucide-react'
+import { Copy, Download, FileImage, GraduationCap, ListOrdered, Table2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { EditorView } from '@codemirror/view'
 import {
   findStudyBlocks, hashText, locateStudyBlock, serializeStudyBlock, studyBlockBody, STUDY_KIND_LABELS, type StudyKind,
 } from '../../lib/study/blocks'
 import type { KeyData } from '../../lib/study/keyTree'
-import { keyTableToMarkdown } from '../../lib/study/keyTree'
+import { keyTableToMarkdown, keyToCoupletsMarkdown } from '../../lib/study/keyTree'
 import type { MapData } from '../../lib/study/conceptMap'
 import type { SortData } from '../../lib/study/sortBoard'
 import { sortToMarkdown } from '../../lib/study/sortBoard'
 import type { PlateData, TermData } from '../../lib/study/cardsModels'
-import { defaultStudyData, readStudyBlock } from '../../lib/study/registry'
+import { defaultStudyData, findLoss, normaliseStudyData, readStudyBlock } from '../../lib/study/registry'
 import { EXPORT_PALETTE, renderKeyTreeSvg, renderMapSvg, type StudyAnyData } from '../../lib/study/render'
 import { downloadBlob, storeStudyImage, STUDY_EVENT, svgToPngBlob } from '../../lib/study/imageTools'
 import { KeyEditor } from './KeyEditor'
@@ -40,6 +40,8 @@ type Session = {
   broken: { error: string; body: string } | null
 }
 
+const ADJUSTED_NOTICE = 'Einige Eingaben passten nicht in den Block und wurden angepasst.'
+
 type BlockTarget = { kind: StudyKind; from: number; hash: string }
 type HostEntry = { view: EditorView; open: (target: BlockTarget | StudyKind) => void }
 const hosts = new Set<HostEntry>()
@@ -59,13 +61,17 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
   sessionRef.current = session
   const viewRef = useRef<EditorView | null>(null)
 
-  const write = useCallback((current: Session, data: StudyAnyData): Session => {
+  const write = useCallback((current: Session, edited: StudyAnyData): Session => {
     const view = viewRef.current
     if (!view || current.locked || current.broken) return current
     const ref = locateStudyBlock(view.state.doc.toString(), current.kind, current.hash, current.from)
     if (!ref) {
       return { ...current, locked: 'Die Notiz wurde inzwischen geändert und der Block ist nicht mehr eindeutig zu finden. Es wurde nichts überschrieben. Schliesse den Editor und öffne den Block neu.' }
     }
+    // The editor can hold states the block format cannot (a result that still has branches, an arrow from a box to
+    // itself, a list past its cap). They are cleaned up here, before anything is written: a block the reader would
+    // cut is refused on the next open, and the editor would lock out its own author.
+    const data = normaliseStudyData(current.kind, edited)
     const body = studyBlockBody(data, current.extra)
     view.dispatch({ changes: { from: ref.from, to: ref.to, insert: serializeStudyBlock(current.kind, data, current.extra) } })
     return { ...current, data, from: ref.from, hash: hashText(body), changed: true }
@@ -129,10 +135,14 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
     }
   }, [getView, open])
 
-  const update = useCallback((data: StudyAnyData) => {
+  const update = useCallback((edited: StudyAnyData) => {
     const current = sessionRef.current
     if (!current) return
-    setSession(write(current, data))
+    const next = write(current, edited)
+    setSession(next)
+    if (next.data === current.data) return
+    // The editors stop short of every cap, so this is rare: say so when something entered did not fit.
+    setNotice((shown) => (findLoss(edited, next.data) ? ADJUSTED_NOTICE : shown === ADJUSTED_NOTICE ? '' : shown))
   }, [write])
 
   const close = useCallback(() => {
@@ -175,6 +185,8 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
     if (!session) return undefined
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
+      // An open inline confirmation answers Escape itself (it cancels) instead of closing the whole editor.
+      if ((event.target as Element | null)?.closest?.('[data-lw-esc]')) return
       event.preventDefault()
       event.stopPropagation()
       close()
@@ -231,7 +243,12 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
               <button type="button" className="secondary-button" onClick={() => void withPng((blob) => { window.dispatchEvent(new CustomEvent(STUDY_EVENT.placeImage, { detail: { file: new File([blob], `${exportName}.png`, { type: 'image/png' }) } })); setNotice('Als Bild auf das Blatt gelegt.') })}><FileImage size={14} /> Aufs Blatt legen</button>
             </>
           )}
-          {live && session.kind === 'key' && <button type="button" className="secondary-button" onClick={() => insertAfter(keyTableToMarkdown((session.data as KeyData).table))}><Table2 size={14} /> Tabelle einfügen</button>}
+          {live && session.kind === 'key' && (
+            <>
+              <button type="button" className="secondary-button" onClick={() => insertAfter(keyTableToMarkdown((session.data as KeyData).table))}><Table2 size={14} /> Tabelle einfügen</button>
+              <button type="button" className="secondary-button" onClick={() => insertAfter(keyToCoupletsMarkdown((session.data as KeyData).tree))} title="Der Schlüssel als nummerierte Liste mit Verweisen"><ListOrdered size={14} /> Schlüssel als Text einfügen</button>
+            </>
+          )}
           {live && session.kind === 'sort' && (
             <>
               <button type="button" className="secondary-button" onClick={() => insertAfter(sortToMarkdown(session.data as SortData, 'table'))}><Table2 size={14} /> Als Tabelle einfügen</button>

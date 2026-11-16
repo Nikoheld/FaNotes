@@ -82,15 +82,23 @@ export const studyBlockBody = (data: unknown, extra: Record<string, unknown> = {
 
 export const serializeStudyBlock = (kind: StudyKind, data: unknown, extra: Record<string, unknown> = {}): string => `\`\`\`fanotes-${kind}\n${studyBlockBody(data, extra)}\n\`\`\``
 
-/** Short fingerprint of a block body, used to recognise the block again after the note changed. */
-export const hashText = (value: string) => {
+const fnv1a = (value: string) => {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {
     hash ^= value.charCodeAt(index)
     hash = Math.imul(hash, 16777619)
   }
-  return `${value.length}:${(hash >>> 0).toString(36)}`
+  return hash >>> 0
 }
+
+/** Short fingerprint of a block body, used to recognise the block again after the note changed. */
+export const hashText = (value: string) => `${value.length}:${fnv1a(value).toString(36)}`
+
+/**
+ * An id derived from content, for entries that carry none: unlike `newId` it comes out the same every time the
+ * block is read, so whatever is keyed by it (a flashcard schedule) is not orphaned by the next read.
+ */
+export const stableId = (prefix: string, seed: string) => `${prefix}${fnv1a(seed).toString(36)}`
 
 /**
  * Finds the block again by kind and body fingerprint. The offset is only a hint: if the same text appears in
