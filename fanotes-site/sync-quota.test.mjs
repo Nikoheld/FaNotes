@@ -119,6 +119,54 @@ test('a put cannot use space a partial upload has already reserved', async () =>
   assert.deepEqual((await call('GET', `/api/v1/sync/files/${secondId}`, { token, accountId })).body, second)
 })
 
+test('a retried replace does not count the archived note twice', async () => {
+  const retryEmail = `quota-retry-${randomBytes(4).toString('hex')}@example.com`
+  const retry = await jsonCall('POST', '/api/v1/sync/register', {
+    email: retryEmail,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Quota retry', platform: 'linux' },
+  })
+  assert.equal(retry.status, 201, JSON.stringify(retry.json))
+  const retryToken = retry.json.token
+  const retryAccount = retry.json.accountId
+  const put = (id, bytes, base) => call('PUT', `/api/v1/sync/files/${id}`, {
+    token: retryToken,
+    accountId: retryAccount,
+    body: bytes,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes.length),
+      'If-Match': String(base),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(bytes),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(900)
+  const created = await put(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const newer = randomBytes(900)
+  process.env.FANOTES_SYNC_PLACE_FAIL = '1'
+  try {
+    const failed = await put(id, newer, revision)
+    assert.equal(failed.status, 500, failed.body.toString('utf8'))
+    const kept = await call('GET', `/api/v1/sync/files/${id}`, { token: retryToken, accountId: retryAccount })
+    assert.equal(kept.status, 200)
+    assert.deepEqual(kept.body, original)
+  } finally {
+    delete process.env.FANOTES_SYNC_PLACE_FAIL
+  }
+  const retried = await put(id, newer, revision)
+  assert.equal(retried.status, 200, retried.body.toString('utf8'))
+  const live = await call('GET', `/api/v1/sync/files/${id}`, { token: retryToken, accountId: retryAccount })
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, newer)
+})
+
 test.after(() => new Promise((resolve) => {
   server.close(() => {
     rmSync(dataDirectory, { recursive: true, force: true })

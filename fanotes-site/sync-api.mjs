@@ -321,6 +321,8 @@ const copyDurable = async (source, destination) => {
 // The original file stays until the live name is durable. Renaming the only
 // name across directories can drop both if the process stops first.
 export const placeDurable = async (source, destination) => {
+  // Tests set this after the previous note was archived. Production leaves it unset.
+  if (process.env.FANOTES_SYNC_PLACE_FAIL === '1') throw new Error('live note was not replaced')
   const directory = dirname(destination)
   const held = await fs.open(source, 'r')
   try {
@@ -1251,6 +1253,26 @@ const restoreLiveBlob = async (accountId, fileId, entry) => {
   return true
 }
 
+const revisionArchiveName = (current, nextSize) => {
+  const currentSize = Number(current.size) || 0
+  const collapse = currentSize >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < currentSize)
+  return `${collapse ? 'c-' : ''}${current.revision}`
+}
+
+// Bytes this replace still has to reserve for the previous note.
+const unarchivedBytes = async (accountId, fileId, current, nextSize) => {
+  if (!current || current.deleted) return 0
+  const currentSize = Number(current.size) || 0
+  const dest = safeJoin(revisionsDirectory(accountId, fileId), revisionArchiveName(current, nextSize))
+  const existing = await fs.lstat(dest).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (!existing?.isFile()) return currentSize
+  if (existing.size >= currentSize) {
+    // The archived copy of this revision is already counted.
+    return 0
+  }
+  return currentSize - existing.size
+}
+
 /** Copy the live blob aside before it is replaced. Returns the byte delta of the archive. */
 const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) => {
   if (!current || current.deleted) return 0
@@ -1261,7 +1283,6 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   // live file can already be the newer body, and the archived name must stay
   // the one written on the first attempt.
   const currentSize = Number(current.size) || 0
-  const collapse = currentSize >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < currentSize)
   const directory = revisionsDirectory(accountId, fileId)
   await fs.mkdir(directory, { recursive: true, mode: 0o700 })
   // Link the new archive directory before the previous note is copied into it.
@@ -1269,7 +1290,7 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   await syncDirectory(dirname(dirname(directory)))
   await syncDirectory(dirname(directory))
   const before = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
-  const name = `${collapse ? 'c-' : ''}${current.revision}`
+  const name = revisionArchiveName(current, nextSize)
   const dest = safeJoin(directory, name)
   const holdsCurrent = async (path, size) => size === currentSize && await hashFile(path) === current.sha256
   // A crash can replace the live blob before the change log records it. The
@@ -1456,7 +1477,9 @@ const handlePutFile = async (request, response, auth, fileId) => {
       return guardRejected(request, response, current)
     }
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
-    const historyDelta = current && !current.deleted && (current.sha256 !== declaredSha) ? (Number(current.size) || 0) : 0
+    const historyDelta = current && !current.deleted && current.sha256 !== declaredSha
+      ? await unarchivedBytes(auth.account.id, fileId, current, incoming.size)
+      : 0
     // Partials already reserved their declared size. A direct PUT must not
     // spend that space a second time.
     const reserved = await reservedPartialBytes(auth.account.id)
@@ -1599,7 +1622,7 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     if (settled?.preserved) return preservedConflict(request, response, fileId, current)
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
     const replaces = Boolean(current && !current.deleted && current.sha256 !== digest)
-    const historyDelta = replaces ? previousBytes : 0
+    const historyDelta = replaces ? await unarchivedBytes(auth.account.id, fileId, current, info.size) : 0
     const reserved = await reservedPartialBytes(auth.account.id)
     if (table.bytes - previousBytes + info.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
     const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
@@ -1965,7 +1988,9 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       return guardRejected(request, response, current)
     }
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
-    const historyDelta = current && !current.deleted && current.sha256 !== declaredSha ? (Number(current.size) || 0) : 0
+    const historyDelta = current && !current.deleted && current.sha256 !== declaredSha
+      ? await unarchivedBytes(auth.account.id, fileId, current, Number(meta.size) || 0)
+      : 0
     const reserved = await reservedPartialBytes(auth.account.id, uploadId)
     if (table.bytes - previousBytes + meta.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
     const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
