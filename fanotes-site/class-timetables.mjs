@@ -578,6 +578,11 @@ export const createClassTimetables = (options = {}) => {
     const version = await currentVersion()
     if (!version) return null
     const rooms = await readJson(join(versionDir(version), 'rooms.json'))
+    // A missing or broken file is absent. A file that is there but not the room map must not look empty.
+    if (rooms != null) {
+      const known = typeof rooms === 'object' && !Array.isArray(rooms) && Object.values(rooms).every((entries) => Array.isArray(entries))
+      if (!known) throw Object.assign(new Error('timetable rooms'), { code: 'EBADMSG' })
+    }
     if (!rooms || !Object.hasOwn(rooms, name)) return null
     return { room: name, entries: rooms[name] }
   }
