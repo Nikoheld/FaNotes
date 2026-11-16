@@ -537,6 +537,11 @@ export const createClassTimetables = (options = {}) => {
     if (indexCache && indexCache.generation === generation && at - indexCache.at < 30_000) return indexCache.value
     const version = await currentVersion()
     const index = version ? await readJson(join(versionDir(version), 'index.json')) : null
+    // A missing or broken catalog can start again. A file that is there but not the class and room lists must not look unpublished.
+    if (index != null) {
+      const known = typeof index === 'object' && !Array.isArray(index) && Array.isArray(index.classes) && Array.isArray(index.rooms) && (index.warnings == null || Array.isArray(index.warnings))
+      if (!known) throw Object.assign(new Error('timetable index'), { code: 'EBADMSG' })
+    }
     const value = index ? { ...index, version } : null
     if (generation === indexGeneration) indexCache = { at: now().getTime(), value, generation }
     return value
