@@ -730,6 +730,38 @@ test('a timetable room file that is not the known shape is left in place', async
   }
 })
 
+test('a timetable index that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-index-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const indexFile = join(dir, 'index.json')
+  const stored = '{"catalog":{"classes":[{"code":"G26A","teacher":"Tst"}]}}\n'
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  await writeFile(indexFile, stored, { mode: 0o600 })
+  try {
+    await assert.rejects(() => store.summary(), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(indexFile, 'utf8'), stored)
+    await writeFile(indexFile, JSON.stringify({
+      uploadedAt: '2026-11-15T12:00:00.000Z',
+      semester: 'SJ',
+      classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }],
+      rooms: ['T01'],
+      warnings: [],
+    }))
+    const summary = await store.summary()
+    assert.equal(summary.available, true)
+    assert.equal(summary.classes.length, 1)
+    assert.deepEqual(summary.rooms, ['T01'])
+    await rm(indexFile)
+    const again = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+    assert.deepEqual(await again.summary(), { available: false })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('an unreadable timetable page is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'timetable-page-'))
   const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
