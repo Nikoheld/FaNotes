@@ -553,6 +553,20 @@ const writeAt = async (handle, payload, position) => {
   }
 }
 
+// The rollback could not remove this line. Keep the revision it already holds.
+const adoptWrittenLine = async (table, handle, offset, entry, line) => {
+  const size = (await handle.stat()).size
+  if (size < offset + line.length) return false
+  const present = Buffer.alloc(line.length)
+  const read = await handle.read(present, 0, line.length, offset)
+  if (read.bytesRead !== line.length || !present.equals(line)) return false
+  // A log line that stays on disk has to stay in the table. A later compaction
+  // would otherwise drop it, and the next write could reuse its revision number.
+  applyLoggedEntry(table, entry)
+  table.logBytes = size
+  return true
+}
+
 const appendChange = async (accountId, table, entry) => {
   // Tests set this so a failed log write cannot publish a revision. Production
   // leaves it unset. A thrown error here must leave the in-memory table as it was.
@@ -586,10 +600,16 @@ const appendChange = async (accountId, table, entry) => {
       // the file would let a later compaction drop a revision this request
       // rejects, or let a restart skip the retry that reused its number.
       try {
+        // Tests set this after the line is in the file. Production leaves it unset.
+        if (process.env.FANOTES_SYNC_TRUNCATE_FAIL === '1') throw new Error('change log was not truncated')
         await handle.truncate(offset)
         await handle.sync()
       } catch {
-        // The line may remain on disk. Memory is still unchanged.
+        try {
+          await adoptWrittenLine(table, handle, offset, entry, line)
+        } catch {
+          // A partial tail is not this revision. Memory stays as it was.
+        }
       }
     }
     throw error

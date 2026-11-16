@@ -279,6 +279,48 @@ test('a changes read cannot replace the table a write already published', async 
   }
 })
 
+test('a log line that cannot be taken back stays published', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(120)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const createdJson = JSON.parse(created.body.toString('utf8'))
+  const revision = createdJson.revision
+  const newer = randomBytes(180)
+  process.env.FANOTES_SYNC_DIRSYNC_FAIL = '1'
+  process.env.FANOTES_SYNC_TRUNCATE_FAIL = '1'
+  let failedRevision = 0
+  try {
+    const failed = await putFile(id, newer, revision)
+    assert.equal(failed.status, 500)
+    const logText = readFileSync(join(dataDirectory, 'accounts', accountId, 'changes.jsonl'), 'utf8')
+    assert.equal(logText.includes(sha256(newer)), true)
+    const feed = JSON.parse((await call('GET', '/api/v1/sync/changes?since=0', { token, accountId })).body.toString('utf8'))
+    const listed = feed.entries.find((entry) => entry.id === id)
+    assert.equal(listed.sha256, sha256(newer))
+    assert.ok(listed.revision > revision)
+    assert.equal(feed.revision, listed.revision)
+    failedRevision = listed.revision
+  } finally {
+    delete process.env.FANOTES_SYNC_DIRSYNC_FAIL
+    delete process.env.FANOTES_SYNC_TRUNCATE_FAIL
+  }
+  const otherId = randomBytes(32).toString('hex')
+  const other = await putFile(otherId, randomBytes(90), 0)
+  assert.equal(other.status, 200, other.body.toString('utf8'))
+  const otherJson = JSON.parse(other.body.toString('utf8'))
+  assert.ok(otherJson.revision > failedRevision)
+  const after = JSON.parse((await call('GET', '/api/v1/sync/changes?since=0', { token, accountId })).body.toString('utf8'))
+  const kept = after.entries.find((entry) => entry.id === id)
+  assert.equal(kept.sha256, sha256(newer))
+  assert.equal(kept.revision, failedRevision)
+  const index = JSON.parse(readFileSync(join(dataDirectory, 'accounts', accountId, 'index.json'), 'utf8'))
+  assert.equal(index.entries[id].sha256, sha256(newer))
+  const live = await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, newer)
+})
+
 test('a close error does not hide a synced revision', async () => {
   const id = randomBytes(32).toString('hex')
   const original = randomBytes(120)
