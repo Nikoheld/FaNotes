@@ -1260,17 +1260,25 @@ const revisionArchiveName = (current, nextSize) => {
 }
 
 // Bytes this replace still has to reserve for the previous note.
+// The oldest archived copies are dropped once eight revisions are kept, so a
+// full window does not reserve those bytes again.
 const unarchivedBytes = async (accountId, fileId, current, nextSize) => {
   if (!current || current.deleted) return 0
   const currentSize = Number(current.size) || 0
-  const dest = safeJoin(revisionsDirectory(accountId, fileId), revisionArchiveName(current, nextSize))
-  const existing = await fs.lstat(dest).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
-  if (!existing?.isFile()) return currentSize
-  if (existing.size >= currentSize) {
+  const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
+  const live = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (!live?.isFile()) return 0
+  const files = await listRevisionFiles(revisionsDirectory(accountId, fileId))
+  const name = revisionArchiveName(current, nextSize)
+  const simulated = files.map((file) => ({ name: file.name, size: file.size, revision: file.revision }))
+  const slot = simulated.find((file) => file.name === name)
+  if (!slot) simulated.push({ name, size: currentSize, revision: Number(current.revision) || 0 })
+  else if (slot.size === currentSize) {
     // The archived copy of this revision is already counted.
-    return 0
-  }
-  return currentSize - existing.size
+  } else slot.size = currentSize
+  const before = files.reduce((sum, file) => sum + file.size, 0)
+  const keep = revisionNamesToKeep(simulated, MAX_REVISIONS_KEPT, nextSize)
+  return simulated.reduce((sum, file) => sum + (keep.has(file.name) ? file.size : 0), 0) - before
 }
 
 /** Copy the live blob aside before it is replaced. Returns the byte delta of the archive. */

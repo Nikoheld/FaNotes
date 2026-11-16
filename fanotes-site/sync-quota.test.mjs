@@ -167,6 +167,61 @@ test('a retried replace does not count the archived note twice', async () => {
   assert.deepEqual(live.body, newer)
 })
 
+test('a replace near the quota reuses the oldest archived note', async () => {
+  const roomEmail = `quota-room-${randomBytes(4).toString('hex')}@example.com`
+  const room = await jsonCall('POST', '/api/v1/sync/register', {
+    email: roomEmail,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Quota room', platform: 'linux' },
+  })
+  assert.equal(room.status, 201, JSON.stringify(room.json))
+  const roomToken = room.json.token
+  const roomAccount = room.json.accountId
+  const put = (id, bytes, base) => call('PUT', `/api/v1/sync/files/${id}`, {
+    token: roomToken,
+    accountId: roomAccount,
+    body: bytes,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes.length),
+      'If-Match': String(base),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(bytes),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(210)
+  const created = await put(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  let revision = JSON.parse(created.body.toString('utf8')).revision
+  const firstRevision = revision
+  for (let index = 0; index < 8; index += 1) {
+    const next = randomBytes(210)
+    const stored = await put(id, next, revision)
+    assert.equal(stored.status, 200, stored.body.toString('utf8'))
+    revision = JSON.parse(stored.body.toString('utf8')).revision
+  }
+  const newest = randomBytes(210)
+  const reused = await put(id, newest, revision)
+  assert.equal(reused.status, 200, reused.body.toString('utf8'))
+  const reusedRevision = JSON.parse(reused.body.toString('utf8')).revision
+  const listed = await jsonCall('GET', `/api/v1/sync/files/${id}/revisions`, null, roomToken, roomAccount)
+  assert.equal(listed.status, 200, JSON.stringify(listed.json))
+  assert.equal(listed.json.revisions.some((entry) => entry.revision === firstRevision), false)
+  const live = await call('GET', `/api/v1/sync/files/${id}`, { token: roomToken, accountId: roomAccount })
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, newest)
+  const larger = randomBytes(400)
+  const refused = await put(id, larger, reusedRevision)
+  assert.equal(refused.status, 507, refused.body.toString('utf8'))
+  const kept = await call('GET', `/api/v1/sync/files/${id}`, { token: roomToken, accountId: roomAccount })
+  assert.equal(kept.status, 200)
+  assert.deepEqual(kept.body, newest)
+})
+
 test.after(() => new Promise((resolve) => {
   server.close(() => {
     rmSync(dataDirectory, { recursive: true, force: true })
