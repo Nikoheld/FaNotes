@@ -667,7 +667,8 @@ const publicEntry = (entry) => ({
   deleted: Boolean(entry.deleted),
   size: entry.deleted ? 0 : entry.size,
   sha256: entry.deleted ? null : entry.sha256,
-  meta: entry.deleted ? null : entry.meta,
+  // Copied metadata still names the previous note. A device that has that note would adopt this revision and could overwrite the body.
+  meta: entry.deleted || entry.metaHeld === true ? null : entry.meta,
   updatedAt: entry.updatedAt,
   deviceId: entry.deviceId,
 })
