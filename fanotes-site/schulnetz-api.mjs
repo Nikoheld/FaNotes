@@ -292,10 +292,18 @@ export const createSchulnetzRuntime = (options = {}) => {
     const rowsKnown = (list) => list.every(plain)
     const lessonWeekKnown = (event) => !isLesson(event) || Boolean(weekMondayKey(event.start))
     const stampKnown = (map) => Object.entries(map).every(([key, stamp]) => typeof key === 'string' && key && typeof stamp === 'string' && Number.isFinite(Date.parse(stamp)))
+    const timeKnown = (value) => value == null || value === '' || (typeof value === 'string' && Number.isFinite(Date.parse(value)))
+    const dayKnown = (value) => value == null || value === '' || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value))
+    const readTimeKnown = stored.fetchedAt == null || (typeof stored.fetchedAt === 'string' && stored.fetchedAt !== '' && Number.isFinite(Date.parse(stored.fetchedAt)))
+    const timesKnown = ['lessonsFetchedAt', 'gradesFetchedAt', 'icalFetchedAt'].every((name) => timeKnown(stored[name]))
+    const spansKnown = ['weekSpanStart', 'weekSpanEnd'].every((name) => dayKnown(stored[name]))
+    const saldoKnown = stored.kontoSaldo == null || typeof stored.kontoSaldo === 'string'
     // A saved row that is not a record must not be dropped, or the next upload replaces the snapshot.
     // A saved lesson with no week must not be dropped, or the next upload keeps the dated lessons and replaces the snapshot.
     // A saved week stamp that is not a time must not look unread, or the next read fetches that week again.
-    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && (stored.events == null || stored.events.every(lessonWeekKnown)) && maps.every((name) => stored[name] == null || (plain(stored[name]) && stampKnown(stored[name])))
+    // A saved read time or week span that is not a time must not look unread, or the next read uses the near window again.
+    // A saved balance that is not text must not look blank, or the next read stores an empty balance.
+    const known = plain(stored) && readTimeKnown && timesKnown && spansKnown && saldoKnown && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && (stored.events == null || stored.events.every(lessonWeekKnown)) && maps.every((name) => stored[name] == null || (plain(stored[name]) && stampKnown(stored[name])))
     if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
     return stored
   }
