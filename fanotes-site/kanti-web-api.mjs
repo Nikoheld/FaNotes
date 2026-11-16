@@ -343,6 +343,8 @@ export const createKantiWebStore = (options = {}) => {
 
   // A missing version can go. Any other version must not look unused, or the sweep deletes it once its old expiry has passed.
   const otherPairingVersion = (record) => Boolean(record) && typeof record === 'object' && Object.hasOwn(record, 'v') && record.v != null && record.v !== 1
+  // A missing or unreadable expiry must not look still open, or the code never expires.
+  const pairingExpiryKnown = (value) => typeof value === 'string' && value !== '' && Number.isFinite(Date.parse(value))
   const readPairing = async (rawCode) => {
     const code = normalizePairingCode(rawCode)
     if (!code) return null
@@ -351,6 +353,7 @@ export const createKantiWebStore = (options = {}) => {
     if (!record) return null
     if (otherPairingVersion(record)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
     if (record.v !== 1) return null
+    if (!pairingExpiryKnown(record.expiresAt)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
     if (Date.parse(record.expiresAt) <= nowMs()) {
       await fs.rm(file, { force: true })
       return null
@@ -532,6 +535,8 @@ export const createKantiWebStore = (options = {}) => {
         continue
       }
       if (otherPairingVersion(record)) continue
+      // A version 1 expiry that is not a time stays. Sweep only removes a missing, broken, or expired code.
+      if (record?.v === 1 && !pairingExpiryKnown(record.expiresAt)) continue
       if (!record || Date.parse(record.expiresAt) <= nowMs()) await fs.rm(resolve(pairingsDir, name), { force: true })
     }
     for (const name of await fs.readdir(sessionsDir).catch(() => [])) {
