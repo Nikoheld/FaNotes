@@ -302,6 +302,39 @@ test('a commute timetable file that is not the known shape is left in place', as
   }
 })
 
+test('a commute timetable entry that is not a stored trip is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-entry-shape-'))
+  const routeFile = join(root, 'commute-routes.json')
+  const kept = { key: 'route:keep', at: ASK_AT, value: { trips: [{ id: 'kept' }] } }
+  const fetchImpl = async () => ok(fixture)
+  const keep = async (entry) => {
+    const routeText = `${JSON.stringify({ version: 1, entries: [kept, entry] })}\n`
+    await writeFile(routeFile, routeText, { mode: 0o600 })
+    const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, routeFile, log: () => {} })
+    const answer = await provider.trips(query)
+    assert.ok(answer.trips.length > 0)
+    assert.equal(await readFile(routeFile, 'utf8'), routeText)
+    assert.equal((await readdir(root)).some((name) => name.endsWith('.tmp')), false)
+  }
+  try {
+    await keep('kept')
+    await keep({ key: 'keep', at: ASK_AT, value: { trips: [{ id: 'kept' }] } })
+    await keep({ key: 'route:keep-bad', at: 'kept', value: { trips: [{ id: 'kept' }] } })
+    await keep({ key: 'route:keep-bad', at: ASK_AT, value: { trips: 'kept' } })
+    await keep({ key: `route:${'k'.repeat(300)}`, at: ASK_AT, value: { trips: [{ id: 'kept' }] } })
+    const routeText = `${JSON.stringify({ version: 1, entries: [kept] })}\n`
+    await writeFile(routeFile, routeText, { mode: 0o600 })
+    const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, routeFile, log: () => {} })
+    const answer = await provider.trips(query)
+    assert.ok(answer.trips.length > 0)
+    const stored = JSON.parse(await readFile(routeFile, 'utf8'))
+    assert.equal(stored.entries.some((entry) => entry.key === 'route:keep'), true)
+    assert.equal(stored.entries.length, 2)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('timetable requests are logged as JSON without the query, a token, or a cookie', async () => {
   assert.equal(requestIdFrom('req-1234.ok'), 'req-1234.ok')
   const generated = requestIdFrom('short')
