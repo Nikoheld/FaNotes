@@ -1,8 +1,8 @@
 import { escapeHtml, type StudyKind } from './blocks'
-import { defaultKeyData, parseKeyData } from './keyTree'
-import { defaultSortData, parseSortData } from './sortBoard'
-import { defaultMapData, parseMapData } from './conceptMap'
-import { defaultPlateData, defaultTermData, parsePlateData, parseTermData } from './cardsModels'
+import { defaultKeyData, normaliseKeyData, parseKeyData, type KeyData } from './keyTree'
+import { defaultSortData, normaliseSortData, parseSortData, type SortData } from './sortBoard'
+import { defaultMapData, normaliseMapData, parseMapData, type MapData } from './conceptMap'
+import { defaultPlateData, defaultTermData, normalisePlateData, normaliseTermData, parsePlateData, parseTermData, type PlateData, type TermData } from './cardsModels'
 import { renderStudyHtml, type StudyAnyData } from './render'
 
 export const parseStudyData = (kind: StudyKind, body: string): StudyAnyData => {
@@ -22,6 +22,21 @@ export const defaultStudyData = (kind: StudyKind): StudyAnyData => {
     case 'map': return defaultMapData()
     case 'plate': return defaultPlateData()
     case 'term': return defaultTermData()
+  }
+}
+
+/**
+ * What a block is allowed to hold, applied to the editor's working data: lists are cut at their caps, texts at
+ * their lengths, dangling references and duplicates are removed. Writing anything else would leave a block that
+ * `readStudyBlock` refuses on the next open, so every write goes through here first.
+ */
+export const normaliseStudyData = (kind: StudyKind, data: StudyAnyData): StudyAnyData => {
+  switch (kind) {
+    case 'key': return normaliseKeyData(data as KeyData)
+    case 'sort': return normaliseSortData(data as SortData)
+    case 'map': return normaliseMapData(data as MapData)
+    case 'plate': return normalisePlateData(data as PlateData)
+    case 'term': return normaliseTermData(data as TermData)
   }
 }
 

@@ -1,6 +1,6 @@
 import { GraduationCap, Plus, Trash2 } from 'lucide-react'
 import { newId } from '../../lib/study/blocks'
-import type { TermData, TermEntry } from '../../lib/study/cardsModels'
+import { TERM_LIMITS, type TermData, type TermEntry } from '../../lib/study/cardsModels'
 
 type Props = { data: TermData; onChange: (data: TermData) => void; onLearn: () => void }
 
@@ -21,15 +21,15 @@ export function TermEditor({ data, onChange, onLearn }: Props) {
           {FIELDS.map(([key, label, multiline]) => (
             <label key={key}><span>{label}</span>
               {multiline
-                ? <textarea rows={2} value={entry[key]} onChange={(event) => patch(entry.id, { [key]: event.target.value })} />
-                : <input value={entry[key]} onChange={(event) => patch(entry.id, { [key]: event.target.value })} />}
+                ? <textarea rows={2} maxLength={TERM_LIMITS[key]} value={entry[key]} onChange={(event) => patch(entry.id, { [key]: event.target.value })} />
+                : <input maxLength={TERM_LIMITS[key]} value={entry[key]} onChange={(event) => patch(entry.id, { [key]: event.target.value })} />}
             </label>
           ))}
           <button type="button" className="lw-icon-btn" aria-label="Begriff löschen" title="Begriff löschen" disabled={data.terms.length < 2} onClick={() => onChange({ ...data, terms: data.terms.filter((item) => item.id !== entry.id) })}><Trash2 size={14} /></button>
         </div>
       ))}
       <div className="lw-actions">
-        <button type="button" className="secondary-button" onClick={() => onChange({ ...data, terms: [...data.terms, { id: newId('t'), term: '', definition: '', example: '', source: '' }] })}><Plus size={14} /> Begriff</button>
+        <button type="button" className="secondary-button" disabled={data.terms.length >= TERM_LIMITS.terms} title={data.terms.length >= TERM_LIMITS.terms ? 'Ein Block fasst höchstens 30 Begriffe.' : undefined} onClick={() => onChange({ ...data, terms: [...data.terms, { id: newId('t'), term: '', definition: '', example: '', source: '' }] })}><Plus size={14} /> Begriff</button>
         <button type="button" className="primary-button" disabled={!learnable} onClick={onLearn} title="Begriff und Definition als Karteikarten üben"><GraduationCap size={14} /> Lernen ({learnable})</button>
       </div>
     </div>

@@ -1781,6 +1781,7 @@ const gradeTables = (html) => {
   // Schulnetz puts an info icon and a hidden .mdl-tooltip (with more numbers) after some marks.
   // Its text is not part of the cell; the mark is the cell's own text.
   let tooltipDepth = 0
+  let boldDepth = 0
   for (const token of String(html || '').matchAll(/<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script\s*>|<[^>]+>|[^<]+/gi)) {
     const part = token[0]
     const div = /^<(\/)?div\b/i.exec(part)
@@ -1808,16 +1809,26 @@ const gradeTables = (html) => {
         const table = stack.at(-1)
         if (name === 'tr') {
           table.cell = null
+          boldDepth = 0
           table.row = close ? null : { cells: [], nested: [] }
           if (table.row) table.rows.push(table.row)
-        } else if (close) table.cell = null
-        else if (table.row) {
-          table.cell = { text: '', header: name === 'th' }
+        } else if (close) {
+          table.cell = null
+          boldDepth = 0
+        } else if (table.row) {
+          boldDepth = 0
+          table.cell = { text: '', bold: '', header: name === 'th' }
           table.row.cells.push(table.cell)
         }
       }
-    } else if (stack.length && stack.at(-1).cell && !part.startsWith('<')) {
-      stack.at(-1).cell.text += part + ' '
+    } else if (stack.length && stack.at(-1).cell) {
+      const emphasis = /^<(\/)?(?:b|strong)\b/i.exec(part)
+      if (emphasis) boldDepth = Math.max(0, boldDepth + (emphasis[1] ? -1 : 1))
+      else if (!part.startsWith('<')) {
+        const cell = stack.at(-1).cell
+        cell.text += part + ' '
+        if (boldDepth > 0) cell.bold += part + ' '
+      }
     }
   }
   return tables
@@ -1875,7 +1886,9 @@ export const parseGradesHtml = (html) => {
       const token = tokenPattern.exec(name)?.[0]
       if (!token && !courseTable) continue
       course = token ? name.slice(token.length).trim() || token : name
-      courseId = token || name.split(' ')[0]
+      // The bold label is the course code (`Kurs 2.1 (GF)`). The first word alone is `Kurs` for every such course.
+      const bold = clean(row.cells[0]?.bold || '')
+      courseId = token || bold || name.split(' ')[0]
       average = parseMark(cells[1] || '')
     }
   }
