@@ -6079,6 +6079,7 @@ export default function App({ startupBootstrap }: AppProps) {
     </div>
   )
   const editorToolbarVisible = !calendarOpen && !homeworkOpen && !overviewOpen && !glyphenWerkOpen
+  const sideToolbar = editorToolbarVisible && settings.toolbarPosition === 'side'
 
   return (
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
@@ -6219,7 +6220,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </>}
         </aside>
 
-        <main className="workspace">
+        <main className={`workspace ${sideToolbar ? 'has-side-toolbar' : ''}`}>
           <div className="tabs-bar">
             <div className="note-nav" role="group" aria-label="Verlauf">
               <button
@@ -6313,7 +6314,7 @@ export default function App({ startupBootstrap }: AppProps) {
               />
             )
           })()}
-          {editorToolbarVisible && <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'}`}>
+          {editorToolbarVisible && <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'} ${sideToolbar ? 'is-vertical' : ''}`}>
             <div className="mode-switch" role="group" aria-label="Eingabemodus">
               <button
                 type="button"

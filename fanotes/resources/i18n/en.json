@@ -4752,5 +4752,9 @@
   "Screenshot angehängt": "Screenshot attached",
   "Änderung": "Change",
   "Status": "Status",
-  "Markiert die ausgewählte PDF-Textstelle und macht sie suchbar. Auf einer Markierung entfernt es sie wieder.": "Marks the selected PDF text and makes it searchable. On a highlight it removes the highlight again."
+  "Markiert die ausgewählte PDF-Textstelle und macht sie suchbar. Auf einer Markierung entfernt es sie wieder.": "Marks the selected PDF text and makes it searchable. On a highlight it removes the highlight again.",
+  "Werkzeugleiste": "Toolbar",
+  "Legt die Werkzeugleiste des Editors oben (horizontal) oder am linken Rand (vertikal) ab.": "Places the editor toolbar at the top (horizontal) or along the left edge (vertical).",
+  "Oben (horizontal)": "Top (horizontal)",
+  "Seitlich (vertikal)": "Side (vertical)"
 }

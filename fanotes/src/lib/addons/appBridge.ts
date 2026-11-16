@@ -71,7 +71,7 @@ export const flattenNoteTree = (entries: VaultEntry[]): AddonNoteSummary[] => {
 const SAFE_SETTING_KEYS = [
   'uiLanguage', 'theme', 'workspaceBackground', 'accent', 'accentSecondary', 'uiFont', 'editorFont', 'editorFontSize', 'previewFontSize',
   'lineHeight', 'readableLineLength', 'contentWidth', 'showLineNumbers', 'spellcheck', 'autocorrect', 'vimMode', 'autosaveDelay',
-  'compactMode', 'glassEffects', 'reduceMotion', 'showWordCount', 'showOutline', 'defaultFolder', 'dailyNotesFolder', 'paperStyle',
+  'compactMode', 'glassEffects', 'reduceMotion', 'showWordCount', 'toolbarPosition', 'showOutline', 'defaultFolder', 'dailyNotesFolder', 'paperStyle',
   'viewZoomMax', 'viewZoomSpeed', 'penOnly', 'inkSmoothing',
 ] as const
 
