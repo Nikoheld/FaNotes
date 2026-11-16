@@ -2,7 +2,7 @@ import { Copy, Download, FileImage, GraduationCap, Table2, X } from 'lucide-reac
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { EditorView } from '@codemirror/view'
 import {
-  findStudyBlocks, serializeStudyBlock, STUDY_KIND_LABELS, type StudyKind,
+  findStudyBlocks, hashText, locateStudyBlock, serializeStudyBlock, studyBlockBody, STUDY_KIND_LABELS, type StudyKind,
 } from '../../lib/study/blocks'
 import type { KeyData } from '../../lib/study/keyTree'
 import { keyTableToMarkdown } from '../../lib/study/keyTree'
@@ -10,7 +10,7 @@ import type { MapData } from '../../lib/study/conceptMap'
 import type { SortData } from '../../lib/study/sortBoard'
 import { sortToMarkdown } from '../../lib/study/sortBoard'
 import type { PlateData, TermData } from '../../lib/study/cardsModels'
-import { defaultStudyData, parseStudyData } from '../../lib/study/registry'
+import { defaultStudyData, readStudyBlock } from '../../lib/study/registry'
 import { EXPORT_PALETTE, renderKeyTreeSvg, renderMapSvg, type StudyAnyData } from '../../lib/study/render'
 import { downloadBlob, storeStudyImage, STUDY_EVENT, svgToPngBlob } from '../../lib/study/imageTools'
 import { KeyEditor } from './KeyEditor'
@@ -19,9 +19,29 @@ import { MapEditor } from './MapEditor'
 import { PlateEditor, addPlateFiles } from './PlateEditor'
 import { TermEditor } from './TermEditor'
 
-type Session = { kind: StudyKind; index: number; data: StudyAnyData; isNew: boolean; changed: boolean; inserted: { from: number; text: string } | null }
+/**
+ * `from` and `hash` identify the block in the note: its offset and a fingerprint of the body as we last
+ * saw or wrote it. Every write re-locates the block by that fingerprint, so a change made meanwhile
+ * (typing, live merge, sync) can never make the editor overwrite a different block.
+ */
+type Session = {
+  kind: StudyKind
+  data: StudyAnyData
+  /** Unknown top-level fields of the block; written back unchanged. */
+  extra: Record<string, unknown>
+  from: number
+  hash: string
+  isNew: boolean
+  changed: boolean
+  inserted: { from: number; text: string } | null
+  /** Set when the block can no longer be written safely; the editor turns read-only. */
+  locked: string
+  /** Set when the block could not be read; its source is shown instead of an editor. */
+  broken: { error: string; body: string } | null
+}
 
-type HostEntry = { view: EditorView; open: (kind: StudyKind, index: number | null) => void }
+type BlockTarget = { kind: StudyKind; from: number; hash: string }
+type HostEntry = { view: EditorView; open: (target: BlockTarget | StudyKind) => void }
 const hosts = new Set<HostEntry>()
 let lastFocused: EditorView | null = null
 
@@ -41,26 +61,33 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
 
   const write = useCallback((current: Session, data: StudyAnyData): Session => {
     const view = viewRef.current
-    if (!view) return current
-    const text = serializeStudyBlock(current.kind, data)
-    const ref = findStudyBlocks(view.state.doc.toString())[current.index]
-    if (!ref || ref.kind !== current.kind) return { ...current, data }
-    view.dispatch({ changes: { from: ref.from, to: ref.to, insert: text } })
-    return { ...current, data, changed: true }
+    if (!view || current.locked || current.broken) return current
+    const ref = locateStudyBlock(view.state.doc.toString(), current.kind, current.hash, current.from)
+    if (!ref) {
+      return { ...current, locked: 'Die Notiz wurde inzwischen geändert und der Block ist nicht mehr eindeutig zu finden. Es wurde nichts überschrieben. Schliesse den Editor und öffne den Block neu.' }
+    }
+    const body = studyBlockBody(data, current.extra)
+    view.dispatch({ changes: { from: ref.from, to: ref.to, insert: serializeStudyBlock(current.kind, data, current.extra) } })
+    return { ...current, data, from: ref.from, hash: hashText(body), changed: true }
   }, [])
 
-  const open = useCallback((kind: StudyKind, index: number | null) => {
+  const open = useCallback((target: BlockTarget | StudyKind) => {
     const view = getView()
     if (!view || view.state.readOnly) return
     viewRef.current = view
     setError('')
     setNotice('')
-    if (index !== null) {
-      const ref = findStudyBlocks(view.state.doc.toString())[index]
-      if (!ref) return
-      setSession({ kind: ref.kind, index, data: parseStudyData(ref.kind, ref.body), isNew: false, changed: false, inserted: null })
+    if (typeof target !== 'string') {
+      const ref = locateStudyBlock(view.state.doc.toString(), target.kind, target.hash, target.from)
+      if (!ref) { setNotice('Der Block hat sich geändert. Bitte erneut auf „Bearbeiten“ klicken.'); return }
+      const read = readStudyBlock(ref.kind, ref.body)
+      const base = { kind: ref.kind, from: ref.from, hash: hashText(ref.body), isNew: false, changed: false, inserted: null, locked: '' }
+      setSession(read.ok
+        ? { ...base, data: read.data, extra: read.extra, broken: null }
+        : { ...base, data: defaultStudyData(ref.kind), extra: {}, broken: { error: read.error, body: ref.body } })
       return
     }
+    const kind = target
     const doc = view.state.doc
     const line = doc.lineAt(view.state.selection.main.to)
     const data = defaultStudyData(kind)
@@ -69,9 +96,9 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
     const insert = `${lead}${block}\n`
     view.dispatch({ changes: { from: line.to, insert }, selection: { anchor: line.to + insert.length } })
     const start = line.to + lead.length
-    const at = findStudyBlocks(view.state.doc.toString()).findIndex((ref) => ref.from === start)
-    if (at < 0) return
-    setSession({ kind, index: at, data, isNew: true, changed: false, inserted: { from: line.to, text: insert } })
+    const ref = findStudyBlocks(view.state.doc.toString()).find((entry) => entry.from === start)
+    if (!ref) return
+    setSession({ kind, data, extra: {}, from: start, hash: hashText(ref.body), isNew: true, changed: false, inserted: { from: line.to, text: insert }, locked: '', broken: null })
   }, [getView])
 
   useEffect(() => {
@@ -85,12 +112,12 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
     const onInsert = (event: Event) => {
       const detail = (event as CustomEvent<{ kind?: StudyKind; view?: EditorView }>).detail
       if (!detail?.kind || pickHost(detail.view) !== entry) return
-      entry.open(detail.kind, null)
+      entry.open(detail.kind)
     }
     const onEdit = (event: Event) => {
-      const detail = (event as CustomEvent<{ view?: EditorView; index?: number }>).detail
-      if (detail?.view !== view || typeof detail.index !== 'number') return
-      entry.open('key', detail.index)
+      const detail = (event as CustomEvent<{ view?: EditorView; kind?: StudyKind; from?: number; hash?: string }>).detail
+      if (detail?.view !== view || !detail.kind || typeof detail.from !== 'number' || typeof detail.hash !== 'string') return
+      entry.open({ kind: detail.kind, from: detail.from, hash: detail.hash })
     }
     window.addEventListener(STUDY_EVENT.insert, onInsert)
     window.addEventListener(STUDY_EVENT.edit, onEdit)
@@ -123,9 +150,9 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
   const insertAfter = (markdown: string) => {
     const current = sessionRef.current
     const view = viewRef.current
-    if (!current || !view) return
-    const ref = findStudyBlocks(view.state.doc.toString())[current.index]
-    if (!ref) return
+    if (!current || !view || current.locked || current.broken) return
+    const ref = locateStudyBlock(view.state.doc.toString(), current.kind, current.hash, current.from)
+    if (!ref) { setSession({ ...current, locked: 'Die Notiz wurde inzwischen geändert. Es wurde nichts eingefügt. Schliesse den Editor und öffne den Block neu.' }); return }
     view.dispatch({ changes: { from: ref.to, insert: `\n\n${markdown}\n` } })
     setNotice('In die Notiz eingefügt.')
   }
@@ -170,6 +197,7 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
   }
 
   if (!session) return null
+  const live = !session.broken && !session.locked
   const learn = () => { close(); window.dispatchEvent(new CustomEvent(STUDY_EVENT.openCards)) }
 
   return (
@@ -179,30 +207,38 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
           <h2>{STUDY_KIND_LABELS[session.kind]}</h2>
           <button type="button" aria-label="Schließen" onClick={close}><X size={17} /></button>
         </header>
-        <div className="lw-body">
+        {session.locked && <p className="lw-error" role="alert">{session.locked}</p>}
+        {session.broken && (
+          <div className="lw-body">
+            <p className="lw-error" role="alert">{session.broken.error}</p>
+            <p className="lw-hint">Der Block wurde nicht verändert. So steht er in der Notiz:</p>
+            <pre className="lw-raw">{session.broken.body}</pre>
+          </div>
+        )}
+        {!session.broken && <fieldset className="lw-fieldset" disabled={Boolean(session.locked)}><div className="lw-body">
           {session.kind === 'key' && <KeyEditor data={session.data as KeyData} onChange={update} onError={setError} />}
           {session.kind === 'sort' && <SortEditor data={session.data as SortData} onChange={update} />}
           {session.kind === 'map' && <MapEditor data={session.data as MapData} onChange={update} />}
           {session.kind === 'plate' && <PlateEditor data={session.data as PlateData} onChange={update} onError={setError} onLearn={learn} />}
           {session.kind === 'term' && <TermEditor data={session.data as TermData} onChange={update} onLearn={learn} />}
-        </div>
+        </div></fieldset>}
         {(error || notice) && <p className={error ? 'lw-error' : 'lw-notice'} role="status">{error || notice}</p>}
         <footer>
-          {exported && (
+          {live && exported && (
             <>
               <button type="button" className="secondary-button" onClick={() => void withPng(async (blob) => { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); setNotice('Bild kopiert. Mit Strg+V auf das Blatt einfügen.') })}><Copy size={14} /> Bild kopieren</button>
               <button type="button" className="secondary-button" onClick={() => void withPng((blob) => downloadBlob(blob, `${exportName}.png`))}><Download size={14} /> PNG</button>
               <button type="button" className="secondary-button" onClick={() => void withPng((blob) => { window.dispatchEvent(new CustomEvent(STUDY_EVENT.placeImage, { detail: { file: new File([blob], `${exportName}.png`, { type: 'image/png' }) } })); setNotice('Als Bild auf das Blatt gelegt.') })}><FileImage size={14} /> Aufs Blatt legen</button>
             </>
           )}
-          {session.kind === 'key' && <button type="button" className="secondary-button" onClick={() => insertAfter(keyTableToMarkdown((session.data as KeyData).table))}><Table2 size={14} /> Tabelle einfügen</button>}
-          {session.kind === 'sort' && (
+          {live && session.kind === 'key' && <button type="button" className="secondary-button" onClick={() => insertAfter(keyTableToMarkdown((session.data as KeyData).table))}><Table2 size={14} /> Tabelle einfügen</button>}
+          {live && session.kind === 'sort' && (
             <>
               <button type="button" className="secondary-button" onClick={() => insertAfter(sortToMarkdown(session.data as SortData, 'table'))}><Table2 size={14} /> Als Tabelle einfügen</button>
               <button type="button" className="secondary-button" onClick={() => insertAfter(sortToMarkdown(session.data as SortData, 'list'))}>Als Liste einfügen</button>
             </>
           )}
-          {(session.kind === 'plate' || session.kind === 'term') && <button type="button" className="secondary-button" onClick={learn}><GraduationCap size={14} /> Karteikarten</button>}
+          {live && (session.kind === 'plate' || session.kind === 'term') && <button type="button" className="secondary-button" onClick={learn}><GraduationCap size={14} /> Karteikarten</button>}
           <span className="lw-spacer" />
           <button type="button" className="primary-button" onClick={close}>Fertig</button>
         </footer>

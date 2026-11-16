@@ -178,14 +178,32 @@ try {
   await page.keyboard.press('Escape')
   ok('flashcards include the image and definition cards')
 
+  // a hand-edited block that does not parse stays visible as source and gets no editor
+  await page.locator('.cm-content').click()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.insertText('\n\n```fanotes-sort\n{ "cards": [ kaputt\n```\n\nSchluss.')
+  await page.waitForTimeout(500)
+  await page.waitForTimeout(500)
+  assert.equal(await page.locator('.cm-lw-broken').count(), 1, 'the broken block is marked and left as source')
+  assert.ok(await page.locator('.cm-content').innerText().then((text) => text.includes('kaputt')), 'its source text is visible')
+  ok('a malformed block is left as source')
+
   // reload: everything is still there
   await page.waitForTimeout(1500)
   await context.close()
   context = await launch()
   page = await boot(context)
+  await page.locator('.cm-content').waitFor({ timeout: 15000 })
+  await page.locator('.cm-content').click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press('Control+Home')
   await page.locator('.cm-lw-shell').first().waitFor({ timeout: 15000 })
-  assert.equal(await page.locator('.cm-lw-shell').count(), 5, 'all five blocks survive a reload')
-  assert.ok((await page.locator('.cm-content').innerText()).includes('hemimetabol'), 'inserted table survives')
+  const kinds = new Set()
+  for (let step = 0; step < 14; step += 1) {
+    for (const name of await page.locator('.cm-lw-shell').evaluateAll((nodes) => nodes.map((node) => [...node.classList].find((cls) => cls.startsWith('lw-kind-'))))) kinds.add(name)
+    await page.keyboard.press('PageDown')
+    await page.waitForTimeout(150)
+  }
+  assert.deepEqual([...kinds].sort(), ['lw-kind-key', 'lw-kind-map', 'lw-kind-plate', 'lw-kind-sort', 'lw-kind-term'], 'all five blocks survive a reload')
   await shot(page, 'note-after-reload')
   ok('all blocks survive a reload')
 

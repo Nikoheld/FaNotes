@@ -77,7 +77,30 @@ export const findStudyBlocks = (markdown: string): StudyBlockRef[] => {
   return blocks
 }
 
-export const serializeStudyBlock = (kind: StudyKind, data: unknown): string => `\`\`\`fanotes-${kind}\n${JSON.stringify(data, null, 1)}\n\`\`\``
+/** JSON text of a block body. Unknown top-level fields the user (or a newer version) added are kept. */
+export const studyBlockBody = (data: unknown, extra: Record<string, unknown> = {}) => JSON.stringify({ ...(data as object), ...extra }, null, 1)
+
+export const serializeStudyBlock = (kind: StudyKind, data: unknown, extra: Record<string, unknown> = {}): string => `\`\`\`fanotes-${kind}\n${studyBlockBody(data, extra)}\n\`\`\``
+
+/** Short fingerprint of a block body, used to recognise the block again after the note changed. */
+export const hashText = (value: string) => {
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${value.length}:${(hash >>> 0).toString(36)}`
+}
+
+/**
+ * Finds the block again by kind and body fingerprint. The offset is only a hint: if the same text appears in
+ * several blocks, only the one at the hint is accepted; if nothing matches, the caller must not write.
+ */
+export const locateStudyBlock = (markdown: string, kind: StudyKind, hash: string, hintFrom: number): StudyBlockRef | null => {
+  const matches = findStudyBlocks(markdown).filter((block) => block.kind === kind && hashText(block.body) === hash)
+  if (matches.length === 1) return matches[0]
+  return matches.find((block) => block.from === hintFrom) ?? null
+}
 
 export const replaceStudyBlock = (markdown: string, ref: Pick<StudyBlockRef, 'from' | 'to'>, kind: StudyKind, data: unknown) => (
   `${markdown.slice(0, ref.from)}${serializeStudyBlock(kind, data)}${markdown.slice(ref.to)}`

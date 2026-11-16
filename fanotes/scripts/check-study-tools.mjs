@@ -318,6 +318,85 @@ try {
   assert.ok(noteMd.startsWith('# Markierungen: Gliederfüsser.pdf\n\n## Seite 2\n\n- __Erste Stelle__ (S. 2)'))
   assert.ok(noteMd.includes('## Seite 5\n\n- ==Zweite Stelle== (S. 5)\n- ==Dritte Stelle== (S. 5)'))
 
+  // -- integrity regressions ----------------------------------------------------------
+  {
+    const fresh = { tasks: [{ id: 'auftrag-1', number: '1', title: 'Neu', minutes: 5, page: 1, done: true, spentSec: 0, manual: false }], removed: [] }
+    const count = (text, marker) => text.split(marker).length - 1
+
+    // (1) a broken or unterminated tasks comment must not be duplicated or lose data silently
+    const brokenClosed = 'Text\n<!-- fanotes-tasks-v1\n{ "tasks": [ oops\n-->\nMehr Text\n'
+    assert.equal(tasks.readTaskList(brokenClosed), null)
+    const repaired = tasks.writeTaskList(brokenClosed, fresh)
+    assert.equal(count(repaired, '<!-- fanotes-tasks-v1\n'), 1, 'exactly one live comment')
+    assert.ok(repaired.includes('<!-- fanotes-tasks-v1-broken\n{ "tasks": [ oops'), 'the broken text is kept, renamed')
+    assert.equal(tasks.readTaskList(repaired).tasks[0].title, 'Neu', 'the new list reads back')
+    assert.equal(tasks.writeTaskList(repaired, { ...fresh, tasks: [{ ...fresh.tasks[0], title: 'Zwei' }] }).split('fanotes-tasks-v1-broken').length, 2, 'a second write does not rename again or duplicate')
+    const twice = '<!-- fanotes-tasks-v1\n{bad\n-->\nx\n<!-- fanotes-tasks-v1\n' + JSON.stringify(fresh) + '\n-->\n'
+    assert.equal(tasks.readTaskList(twice).tasks[0].title, 'Neu', 'a valid later comment is used when the first is broken')
+    const dupValid = `<!-- fanotes-tasks-v1\n${JSON.stringify(fresh)}\n-->\nmid\n<!-- fanotes-tasks-v1\n${JSON.stringify(fresh)}\n-->\n`
+    const merged1 = tasks.writeTaskList(dupValid, fresh)
+    assert.equal(count(merged1, '<!-- fanotes-tasks-v1\n'), 1, 'older duplicates are collapsed into one')
+    assert.ok(merged1.includes('mid'))
+    const open = 'Vor\n<!-- fanotes-tasks-v1\n{ "tasks": [\nNach dem Kommentar steht Text.'
+    assert.equal(tasks.writeTaskList(open, fresh), null, 'an unterminated comment is not written around')
+    assert.equal(tasks.writeTaskList(open, { tasks: [], removed: [] }), null)
+    const swallow = 'Vor\n<!-- fanotes-tasks-v1 {bad\ntext\n<!-- fanotes-tasks-v1\n' + JSON.stringify(fresh) + '\n-->\n'
+    assert.equal(tasks.writeTaskList(swallow, fresh), null, 'a broken comment that runs into the next marker is refused')
+
+    // (2) clearing the list touches only the comment, not blank lines elsewhere
+    const user = 'Zeile\n\n\n\nDrei Leerzeilen davor\n```\ncode\n\n\n\nmehr code\n```\n'
+    const withList = tasks.writeTaskList(user, fresh)
+    assert.equal(tasks.writeTaskList(withList, { tasks: [], removed: [] }), user, 'add then clear gives the note back byte for byte')
+    const middle = 'A\n\n\n\nB\n<!-- fanotes-tasks-v1\n' + JSON.stringify(fresh) + '\n-->\nC\n\n\n\nD\n'
+    assert.equal(tasks.writeTaskList(middle, { tasks: [], removed: [] }), 'A\n\n\n\nB\nC\n\n\n\nD\n', 'blank lines in the user text survive')
+    assert.equal(tasks.writeTaskList(user, { tasks: [], removed: [] }), user, 'clearing with nothing stored changes nothing')
+
+    // (3) a block that cannot be read, or would be cut, is reported and never rewritten
+    assert.equal(registry.readStudyBlock('sort', '{ "cards": [ broken').ok, false)
+    assert.equal(registry.readStudyBlock('sort', '[1,2]').ok, false)
+    assert.equal(registry.readStudyBlock('key', '').ok, true, 'an empty body is the starter block')
+    const tooMany = JSON.stringify({ v: 1, cards: Array.from({ length: 130 }, (_, index) => ({ id: `c${index}`, text: `K${index}` })), groups: [{ id: 'g', title: 'x', cards: [] }] })
+    const capped = registry.readStudyBlock('sort', tooMany)
+    assert.equal(capped.ok, false, 'a list past the cap is refused, not cut')
+    assert.ok(/130/u.test(capped.error))
+    assert.equal(registry.readStudyBlock('term', JSON.stringify({ terms: [{ id: 't', term: 'A', definition: 'x'.repeat(2500) }] })).ok, false, 'long text is refused, not shortened')
+    assert.equal(registry.readStudyBlock('plate', JSON.stringify({ items: [{ id: 'p', label: 'x', img: 'http://evil/x.png' }] })).ok, false, 'a rejected picture is reported')
+    assert.equal(registry.readStudyBlock('key', JSON.stringify({ tree: { root: 'a', nodes: [{ id: 'a', kind: 'leaf', text: 'A' }, { id: 'lost', kind: 'leaf', text: 'unreachable' }] } })).ok, false, 'dropped nodes are reported')
+    const html = registry.renderStudyBlockHtml('sort', '{ "cards": [ broken')
+    assert.ok(html.includes('lw-error') && html.includes('{ &quot;cards&quot;: [ broken'.replace('&quot;', '&quot;')), 'the preview shows the reason and the source')
+    const withExtra = { v: 1, title: 'T', mode: 'groups', cards: [{ id: 'c1', text: 'A' }], groups: [{ id: 'g1', title: 'G', cards: ['c1'] }], futureField: { keep: [1, 2, 3] }, note: 'von Hand' }
+    const readExtra = registry.readStudyBlock('sort', JSON.stringify(withExtra))
+    assert.equal(readExtra.ok, true)
+    assert.deepEqual(readExtra.extra, { futureField: { keep: [1, 2, 3] }, note: 'von Hand' })
+    const written = blocks.studyBlockBody(sort.moveCard(readExtra.data, 'c1', null), readExtra.extra)
+    assert.deepEqual(JSON.parse(written).futureField, { keep: [1, 2, 3] }, 'unknown top-level fields survive a write')
+    assert.equal(JSON.parse(written).note, 'von Hand')
+    for (const [kind, data] of [['key', key.defaultKeyData()], ['sort', board], ['map', cmap], ['plate', plate], ['term', terms]]) {
+      assert.equal(registry.readStudyBlock(kind, blocks.studyBlockBody(data)).ok, true, `${kind} data made by the editors reads back without loss`)
+    }
+    assert.equal(registry.readStudyBlock('key', blocks.studyBlockBody(keyData)).ok, true, 'a skeleton key reads back without loss')
+
+    // (4) the block is found again by its fingerprint, never by position alone
+    const bodyA = blocks.studyBlockBody({ v: 1, title: 'A', mode: 'groups', cards: [], groups: [] })
+    const bodyB = blocks.studyBlockBody({ v: 1, title: 'B', mode: 'groups', cards: [], groups: [] })
+    const docText = `Intro\n\n\`\`\`fanotes-sort\n${bodyA}\n\`\`\`\n\nMitte\n\n\`\`\`fanotes-sort\n${bodyB}\n\`\`\`\n`
+    const refA = blocks.findStudyBlocks(docText)[0]
+    const hashA = blocks.hashText(refA.body)
+    assert.equal(blocks.locateStudyBlock(docText, 'sort', hashA, refA.from).from, refA.from)
+    const shifted = `Neuer Absatz davor.\n${docText}`
+    assert.equal(blocks.locateStudyBlock(shifted, 'sort', hashA, refA.from).body, bodyA, 'block found after text was added before it')
+    const swapped = docText.replace(bodyA, blocks.studyBlockBody({ v: 1, title: 'A geändert', mode: 'groups', cards: [], groups: [] }))
+    assert.equal(blocks.locateStudyBlock(swapped, 'sort', hashA, refA.from), null, 'a block edited meanwhile is not overwritten')
+    const removedFirst = docText.replace(/```fanotes-sort\n[\s\S]*?\n```\n\nMitte\n\n/u, '')
+    const left = blocks.locateStudyBlock(removedFirst, 'sort', hashA, refA.from)
+    assert.equal(left, null, 'when the block is gone, the one that moved into its place is not taken')
+    const twins = `\`\`\`fanotes-sort\n${bodyA}\n\`\`\`\n\nx\n\n\`\`\`fanotes-sort\n${bodyA}\n\`\`\`\n`
+    const second = blocks.findStudyBlocks(twins)[1]
+    assert.equal(blocks.locateStudyBlock(twins, 'sort', hashA, second.from).from, second.from, 'identical twins: the one at the remembered offset')
+    assert.equal(blocks.locateStudyBlock(twins, 'sort', hashA, 9999), null, 'identical twins elsewhere: refuse')
+    assert.equal(blocks.locateStudyBlock(docText, 'map', hashA, refA.from), null, 'kind must match')
+  }
+
   console.log('study tools checks passed')
 } finally {
   await server.close()

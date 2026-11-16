@@ -83,9 +83,9 @@ import { clientYFromTextAnchor, registerPaperTextAnchorProvider, textAnchorFromV
 import { minimalReplacement } from '../lib/textReplacement'
 import { primeSpellingCorrections, rerunSpellingCheck, spellingCorrections } from '../lib/spellingCorrections'
 import type { SpellingLanguage } from '../types'
-import { findStudyBlocks, STUDY_KIND_LABELS, type StudyBlockRef, type StudyKind } from '../lib/study/blocks'
+import { findStudyBlocks, hashText, STUDY_KIND_LABELS, type StudyBlockRef, type StudyKind } from '../lib/study/blocks'
 import { hydrateVaultImages, STUDY_EVENT } from '../lib/study/imageTools'
-import { renderStudyBlockHtml } from '../lib/study/registry'
+import { readStudyBlock, renderStudyBlockHtml } from '../lib/study/registry'
 
 const LazyStudyHost = lazy(() => import('./study/StudyHost'))
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
@@ -573,8 +573,8 @@ class DetailsWidget extends WidgetType {
 }
 
 class StudyBlockWidget extends WidgetType {
-  constructor(readonly kind: StudyKind, readonly body: string, readonly index: number) { super() }
-  eq(other: StudyBlockWidget) { return other.kind === this.kind && other.body === this.body && other.index === this.index }
+  constructor(readonly kind: StudyKind, readonly body: string, readonly from: number) { super() }
+  eq(other: StudyBlockWidget) { return other.kind === this.kind && other.body === this.body && other.from === this.from }
   toDOM(view: EditorView) {
     const shell = document.createElement('div')
     shell.className = `cm-lw-shell lw-block lw-kind-${this.kind}`
@@ -589,12 +589,24 @@ class StudyBlockWidget extends WidgetType {
     edit.addEventListener('click', (event) => {
       event.preventDefault()
       event.stopPropagation()
-      window.dispatchEvent(new CustomEvent(STUDY_EVENT.edit, { detail: { view, index: this.index } }))
+      window.dispatchEvent(new CustomEvent(STUDY_EVENT.edit, { detail: { view, kind: this.kind, from: this.from, hash: hashText(this.body) } }))
     })
     shell.append(content, edit)
     return shell
   }
   ignoreEvent() { return true }
+}
+
+const readableCache = new Map<string, boolean>()
+const studyBlockReadable = (block: StudyBlockRef) => {
+  const key = `${block.kind}\u0000${block.body}`
+  let ok = readableCache.get(key)
+  if (ok === undefined) {
+    ok = readStudyBlock(block.kind, block.body).ok
+    if (readableCache.size > 200) readableCache.clear()
+    readableCache.set(key, ok)
+  }
+  return ok
 }
 
 const studyBlockCache = new WeakMap<object, StudyBlockRef[]>()
@@ -637,13 +649,18 @@ const buildLivePreviewDecorations = (view: EditorView) => {
     }
   }
   const studyLines = new Set<number>()
-  studyBlocksOf(view.state).forEach((block, index) => {
+  studyBlocksOf(view.state).forEach((block) => {
+    // A block that cannot be read safely stays as source text so nothing is hidden or rewritten.
+    if (!studyBlockReadable(block)) {
+      decorations.push(Decoration.line({ attributes: { class: 'cm-lw-broken', title: 'Dieser Lernblock ist beschädigt oder unvollständig lesbar' } }).range(view.state.doc.line(block.startLine).from))
+      return
+    }
     const isEditing = view.state.selection.ranges.some((range) => range.from <= block.to && range.to >= block.from)
     if (isEditing) return
     for (let number = block.startLine; number <= block.endLine; number += 1) studyLines.add(number)
     const hostLine = view.state.doc.line(block.startLine)
     decorations.push(Decoration.line({ attributes: { class: 'cm-lw-host' } }).range(hostLine.from))
-    decorations.push(Decoration.replace({ widget: new StudyBlockWidget(block.kind, block.body, index) }).range(hostLine.from, hostLine.to))
+    decorations.push(Decoration.replace({ widget: new StudyBlockWidget(block.kind, block.body, block.from) }).range(hostLine.from, hostLine.to))
     for (let number = block.startLine + 1; number <= block.endLine; number += 1) {
       const hidden = view.state.doc.line(number)
       decorations.push(Decoration.line({ attributes: { class: 'cm-lw-hidden' } }).range(hidden.from))

@@ -36,7 +36,14 @@ export function StudyPanel({ path, title, content, initialTab = 'tasks', onConte
   const tasks = stored?.tasks ?? []
   const marks = useMemo(() => readPdfMarks(content), [content])
 
-  const commit = useCallback((list: StudyTaskList) => onContentChange(writeTaskList(contentRef.current, list)), [onContentChange])
+  const commit = useCallback((list: StudyTaskList) => {
+    const next = writeTaskList(contentRef.current, list)
+    if (next === null) {
+      onNotice('Die Aufgabenliste in dieser PDF-Notiz ist beschädigt (ein fanotes-tasks-v1-Kommentar ist nicht abgeschlossen). Nichts wurde überschrieben; repariere den Kommentar im Text der Notiz.')
+      return
+    }
+    onContentChange(next)
+  }, [onContentChange, onNotice])
   const update = useCallback((id: string, patch: Partial<StudyTask>) => {
     const list = readTaskList(contentRef.current) ?? { tasks: [], removed: [] }
     commit({ ...list, tasks: list.tasks.map((task) => (task.id === id ? { ...task, ...patch } : task)) })
