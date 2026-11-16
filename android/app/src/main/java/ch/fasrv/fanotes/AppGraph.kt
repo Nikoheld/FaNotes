@@ -209,6 +209,16 @@ class AppGraph(context: Context) {
         prefs.edit().putString("workspace-$vaultId", json).apply()
     }
 
+    /** The running task timer of this vault (see `StudyTimerRecord`), kept so it survives a killed process. */
+    fun readStudyTimer(vaultId: String): String? = prefs.getString("study-timer-$vaultId", null)
+
+    /** Stores the running task timer; null removes it. */
+    fun writeStudyTimer(vaultId: String, json: String?) {
+        val edit = prefs.edit()
+        if (json == null) edit.remove("study-timer-$vaultId") else edit.putString("study-timer-$vaultId", json)
+        edit.apply()
+    }
+
     fun readExpandedFolders(vaultId: String): String? = prefs.getString("fanotes.treeExpanded.v1-$vaultId", null)
 
     fun writeExpandedFolders(vaultId: String, json: String) {

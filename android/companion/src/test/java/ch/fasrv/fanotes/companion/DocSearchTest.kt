@@ -1,5 +1,8 @@
 package ch.fasrv.fanotes.companion
 
+import ch.fasrv.fanotes.desk.desktopPdfOcrPages
+import ch.fasrv.fanotes.desk.desktopPdfOcrSidecar
+import ch.fasrv.fanotes.desk.pdfByteStamp
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*

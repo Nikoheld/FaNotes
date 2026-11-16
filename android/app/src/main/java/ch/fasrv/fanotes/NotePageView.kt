@@ -44,6 +44,13 @@ import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.ink.DraftingKind
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.ink.StrokeStyle
+import ch.fasrv.fanotes.study.liveSeconds
+
+/**
+ * The running task timer as the toolbar chip shows it: the task's name, the seconds already in the note and the
+ * timer itself, whose checkpoint tells how many seconds came on top. It changes when the timer starts, stops or is saved.
+ */
+data class StudyTimerChip(val label: String, val baseSec: Int, val run: ch.fasrv.fanotes.study.StudyTimerRun)
 
 /**
  * The page and its chrome live in one clipped frame. The toolbar is a later
@@ -863,6 +870,42 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var pdfNote = false
     var onPdfKey: (String) -> Unit = {}
 
+    /** The running task timer: a chip beside "Aufträge" that counts up here every second and stops the timer when tapped. */
+    var studyTimerChip: StudyTimerChip? = null
+        set(value) {
+            if (field == value) return
+            field = value
+            removeCallbacks(timerTick)
+            if (value != null) postDelayed(timerTick, 1000)
+        }
+    private var timerChipView: TextView? = null
+    private val timerTick = object : Runnable {
+        override fun run() {
+            val timer = studyTimerChip ?: return
+            timerChipView?.text = timerChipText(timer)
+            postDelayed(this, 1000)
+        }
+    }
+
+    private fun timerChipText(timer: StudyTimerChip): String =
+        "■ ${timer.label} · ${ch.fasrv.fanotes.study.formatClock(timer.baseSec + timer.run.liveSeconds(android.os.SystemClock.elapsedRealtime()))}"
+
+    private fun timerChip(timer: StudyTimerChip): TextView {
+        val view = chip(timerChipText(timer), description = "Timer anhalten") { onToolbarAction("study-timer-stop") }
+        view.setTextColor(ink.accentColor)
+        view.setTypeface(view.typeface, Typeface.BOLD)
+        timerChipView = view
+        removeCallbacks(timerTick)
+        postDelayed(timerTick, 1000)
+        return view
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        removeCallbacks(timerTick)
+        if (studyTimerChip != null) postDelayed(timerTick, 1000)
+    }
+
     init {
         ink.study.onEditLabel = { promptCallout(it) }
         ink.study.onCrop = { page, rect -> onStudyCrop(page, rect) }
@@ -1565,7 +1608,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val inset = ch.fasrv.fanotes.desk.editorSideInsetDp(metricsPx.widthPixels, metricsPx.heightPixels, metricsPx.densityDpi)
         val toolbarPad = ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP + inset
         toolbar.setPadding(dp(toolbarPad), 0, dp(toolbarPad), 0)
-        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$pdfNote|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen|$studyOpen|${ink.study.tool}|${ink.study.selected.hashCode()}|${ink.study.stampId}|${ink.study.numbered}|${ink.study.labelColor}|${ink.study.branchColor}|${ink.study.branchWidth}|$studyCanUndo|$studyCanRedo|${ink.study.crop?.rect}|$compareId"
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$pdfNote|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen|$studyOpen|${ink.study.tool}|${ink.study.selected.hashCode()}|${ink.study.stampId}|${ink.study.numbered}|${ink.study.labelColor}|${ink.study.branchColor}|${ink.study.branchWidth}|$studyCanUndo|$studyCanRedo|${ink.study.crop?.rect}|$compareId|${studyTimerChip != null}"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
@@ -1757,6 +1800,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         ink.onStudyChrome = { post { rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo) } }
         tools.removeAllViews()
+        timerChipView = null
         tools.addView(modeSwitch())
         if (studyOpen && textMode) {
             studyOpen = false
@@ -1846,6 +1890,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("Im PDF suchen") { onToolbarAction("pdf-search") })
         tools.addView(chip("Seiten") { onToolbarAction("pdf-thumbs") })
         tools.addView(chip("Aufträge") { onToolbarAction("study-tasks") })
+        studyTimerChip?.let { tools.addView(timerChip(it)) }
         tools.addView(chip("Markierungen") { onToolbarAction("study-marks") })
         tools.addView(chip("Passwort") { onToolbarAction("pdf-password") })
         tools.addView(chip("Lernen", description = "Lernwerkzeuge") { setStudyOpen(true) })
@@ -2660,6 +2705,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     override fun onDetachedFromWindow() {
+        removeCallbacks(timerTick)
         compareDecoderPool?.shutdownNow()
         compareDecoderPool = null
         tags?.hide()

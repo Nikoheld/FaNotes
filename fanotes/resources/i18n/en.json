@@ -4609,5 +4609,12 @@
   "der Kopie": "the copy",
   "lokale Stifterkennung mit persönlicher Anpassung": "local pen recognition with personal adaptation",
   "und im Papierkorb dieses Computers": "and in this computer’s trash",
-  "und landet auf diesem Computer im Papierkorb": "and ends up in this computer’s trash"
+  "und landet auf diesem Computer im Papierkorb": "and ends up in this computer’s trash",
+  "Auf diesem Gerät fehlt die PDF-Textfunktion. Erkenne die Aufträge am Computer (Sync) oder füge sie von Hand hinzu.": "This device does not have the PDF text feature. Detect the assignments on the computer (sync) or add them by hand.",
+  "Scan ohne Text. Erkenne die Aufträge am Computer (Sync) oder füge sie von Hand hinzu.": "Scan without text. Detect the assignments on the computer (sync) or add them by hand.",
+  "Auf diesem Gerät fehlt die PDF-Textfunktion. Die PDF-Suche braucht Android 15 oder das Systemupdate mit der PDF-Erweiterung.": "This device does not have the PDF text feature. PDF search needs Android 15 or the system update with the PDF extension.",
+  "Dieses PDF ist ein Scan ohne Text. Die Suche findet darin nichts.": "This PDF is a scan without text. Search finds nothing in it.",
+  "Das PDF wird noch geladen …": "The PDF is still loading …",
+  "Aufklappen": "Expand",
+  "Der Timer wurde angehalten, weil er länger als 2 Stunden ohne die App lief. Diese Zeit wurde nicht gezählt.": "The timer was stopped because it ran for more than 2 hours without the app. That time was not counted."
 }

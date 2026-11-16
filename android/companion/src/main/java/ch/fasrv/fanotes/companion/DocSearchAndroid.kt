@@ -19,6 +19,8 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import ch.fasrv.fanotes.desk.desktopPdfOcrPages
+import ch.fasrv.fanotes.desk.desktopPdfOcrSidecar
 import ch.fasrv.fanotes.json.JsonValue
 import ch.fasrv.fanotes.json.parseJson
 import ch.fasrv.fanotes.vault.NoteKind

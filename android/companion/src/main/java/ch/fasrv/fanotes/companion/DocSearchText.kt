@@ -189,16 +189,3 @@ fun scorePage(foldedBody: String, foldedTitle: String, terms: List<String>, sour
     val sourceFactor = source.weight * (if (source == PageSource.Ocr || source == PageSource.DesktopOcr) (0.6 + 0.4 * confidence.coerceIn(0.0, 1.0)) else 1.0)
     return score * sourceFactor
 }
-
-/** Content stamp compatible with the desktop `pdfByteStamp` (FNV-1a over sampled bytes). */
-fun pdfByteStamp(bytes: ByteArray): String {
-    var hash = 0x811c9dc5.toInt()
-    fun mix(value: Int) { hash = hash xor (value and 0xff); hash *= 0x01000193 }
-    val length = bytes.size
-    mix(length); mix(length ushr 8); mix(length ushr 16); mix(length ushr 24)
-    val step = maxOf(1, length / 4096)
-    var index = 0
-    while (index < length) { mix(bytes[index].toInt()); index += step }
-    if (length > 0) mix(bytes[length - 1].toInt())
-    return "%08x".format(hash.toLong() and 0xffffffffL)
-}
