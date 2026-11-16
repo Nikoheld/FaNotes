@@ -329,6 +329,106 @@ test('a resumable upload does not reserve a note it will replace', async () => {
   assert.deepEqual(roomLive.body, roomBody)
 })
 
+test('a resumable replace leaves room for another note that still fits', async () => {
+  const creditEmail = `quota-credit-${randomBytes(4).toString('hex')}@example.com`
+  const credit = await jsonCall('POST', '/api/v1/sync/register', {
+    email: creditEmail,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Quota credit', platform: 'linux' },
+  })
+  assert.equal(credit.status, 201, JSON.stringify(credit.json))
+  const creditToken = credit.json.token
+  const creditAccount = credit.json.accountId
+  const put = (id, bytes, base) => call('PUT', `/api/v1/sync/files/${id}`, {
+    token: creditToken,
+    accountId: creditAccount,
+    body: bytes,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes.length),
+      'If-Match': String(base),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(bytes),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  const open = (id, size, digest, base) => jsonCall('POST', `/api/v1/sync/files/${id}/uploads`, { size }, creditToken, creditAccount, {
+    'If-Match': String(base),
+    'X-FaNotes-Meta': meta,
+    'X-FaNotes-Sha256': digest,
+    'X-FaNotes-Blank': '0',
+  })
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(1500)
+  const created = await put(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const same = await open(id, original.length, sha256(original), revision)
+  assert.equal(same.status, 201, JSON.stringify(same.json))
+  const otherId = randomBytes(32).toString('hex')
+  const other = randomBytes(400)
+  const stored = await put(otherId, other, 0)
+  assert.equal(stored.status, 200, stored.body.toString('utf8'))
+  const smallId = randomBytes(32).toString('hex')
+  const small = await open(smallId, 50, sha256(randomBytes(50)), 0)
+  assert.equal(small.status, 201, JSON.stringify(small.json))
+  const crowded = await open(randomBytes(32).toString('hex'), 200, sha256(randomBytes(200)), 0)
+  assert.equal(crowded.status, 507, JSON.stringify(crowded.json))
+  assert.equal((await call('DELETE', `/api/v1/sync/files/${id}/uploads/${same.json.uploadId}`, { token: creditToken, accountId: creditAccount })).status, 204)
+  assert.equal((await call('DELETE', `/api/v1/sync/files/${smallId}/uploads/${small.json.uploadId}`, { token: creditToken, accountId: creditAccount })).status, 204)
+  assert.deepEqual((await call('GET', `/api/v1/sync/files/${id}`, { token: creditToken, accountId: creditAccount })).body, original)
+  assert.deepEqual((await call('GET', `/api/v1/sync/files/${otherId}`, { token: creditToken, accountId: creditAccount })).body, other)
+
+  const archiveEmail = `quota-archive-${randomBytes(4).toString('hex')}@example.com`
+  const archive = await jsonCall('POST', '/api/v1/sync/register', {
+    email: archiveEmail,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Quota archive', platform: 'linux' },
+  })
+  assert.equal(archive.status, 201, JSON.stringify(archive.json))
+  const archiveToken = archive.json.token
+  const archiveAccount = archive.json.accountId
+  const putArchive = (fileId, bytes, base) => call('PUT', `/api/v1/sync/files/${fileId}`, {
+    token: archiveToken,
+    accountId: archiveAccount,
+    body: bytes,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes.length),
+      'If-Match': String(base),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(bytes),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  const openArchive = (fileId, size, digest, base) => jsonCall('POST', `/api/v1/sync/files/${fileId}/uploads`, { size }, archiveToken, archiveAccount, {
+    'If-Match': String(base),
+    'X-FaNotes-Meta': meta,
+    'X-FaNotes-Sha256': digest,
+    'X-FaNotes-Blank': '0',
+  })
+  const keptId = randomBytes(32).toString('hex')
+  const keptBody = randomBytes(600)
+  const keptPut = await putArchive(keptId, keptBody, 0)
+  assert.equal(keptPut.status, 200, keptPut.body.toString('utf8'))
+  const keptRevision = JSON.parse(keptPut.body.toString('utf8')).revision
+  const replacing = await openArchive(keptId, keptBody.length, sha256(randomBytes(keptBody.length)), keptRevision)
+  assert.equal(replacing.status, 201, JSON.stringify(replacing.json))
+  const blockedId = randomBytes(32).toString('hex')
+  const blocked = await putArchive(blockedId, randomBytes(900), 0)
+  assert.equal(blocked.status, 507, blocked.body.toString('utf8'))
+  assert.equal((await call('DELETE', `/api/v1/sync/files/${keptId}/uploads/${replacing.json.uploadId}`, { token: archiveToken, accountId: archiveAccount })).status, 204)
+  const fits = randomBytes(900)
+  const allowed = await putArchive(blockedId, fits, 0)
+  assert.equal(allowed.status, 200, allowed.body.toString('utf8'))
+  assert.deepEqual((await call('GET', `/api/v1/sync/files/${keptId}`, { token: archiveToken, accountId: archiveAccount })).body, keptBody)
+  assert.deepEqual((await call('GET', `/api/v1/sync/files/${blockedId}`, { token: archiveToken, accountId: archiveAccount })).body, fits)
+})
+
 test.after(() => new Promise((resolve) => {
   server.close(() => {
     rmSync(dataDirectory, { recursive: true, force: true })
