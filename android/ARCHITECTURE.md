@@ -113,6 +113,16 @@ Secrets (`v`, `accountId`, `deviceId`, `token`, `expiresAt`, `email`, `vaultSecr
 
 Skip rules match the desktop: dot paths other than `.fanotes/` children, `.fanotes/history` unless history is included, `.fanotes/trash` (the tablet trash stays on the device), `onboarding.json`, `tree-cache`, `.DS_Store`, `Thumbs.db`, `desktop.ini`, `*.tmp`, `.~lock.*`, `~$*`, the recognition model unless opted in, excluded prefixes, and files over 100 MB.
 
+## Statistik on a big vault
+
+Settings → Statistik reads every note, so its cost is what keeps a 20,000 note SAF vault usable.
+
+- `SafVault` reads by document id. One `buildChildDocumentsUriUsingTree` cursor query lists a directory (name, type, size and time of every child), a listed `VaultEntry` carries its document id in `handle`, and a file opens by that id. A path lookup costs one listing per segment. `DocumentFile.findFile` asks the provider for the name of every sibling it looks at, so it stays only on the write, move and delete paths. The logic lives in `core` (`DocumentTree`) and is tested against a fake provider that counts calls.
+- `VaultStatsLoader` keeps what it read from each note in `filesDir/stats-cache/<vault hash>.jsonl`, keyed by path, size and modification time, with no expiry. The number of cards due is derived from the stored due dates on every run. The file is JSON Lines (format in `StatsCache.kt`): a damaged line costs one note, and another `STATS_CACHE_VERSION` drops the file. Bump the version when `storedFactsFromNote` or `countWords` change.
+- One note cannot take the app down. At most `STATS_MAX_NOTE_BYTES` (4 MiB) of a note is read; a bigger one is counted from its first bytes and shown as partly counted. Notes above 512 KiB are read one at a time, and a note that still does not fit in memory is skipped for that run. `countWords` is a set of linear scans, checked against the old regular expressions on random text.
+- Two runs on one loader never overlap, a cancelled run reports nothing more, and the time zone is read once per run. A day after today never counts as activity.
+- The daily diagnostics check never walks the vault. With both toggles off it does nothing at all. When a report is due it takes notes and bytes from this session's Statistik run, else the summary saved in the first line of the cache file, else the explorer tree's note count.
+
 ## Recognition, math, sections
 
 GlyphenWerk recognition is a Rust/WASM engine in the desktop build. It is not linked into this APK. `HandwritingRecognizer` is the seam: a later NDK build can implement it without changing the stroke JSON. Text → Handschrift uses the local hybrid trajectory engine: ordinary-page style learning, unlabeled joining-motion exemplars, conservative local shape matching, and word/context reuse with a school-script fallback. WorkManager and app-private per-page checkpoints handle incremental updates. See `fanotes/docs/PERSONAL_HANDWRITING.md` for the implemented architecture, validation, and recognition limits. Sections, math checking, and worksheet text boxes are preserved when they already exist in the JSON; this version does not edit those three.
