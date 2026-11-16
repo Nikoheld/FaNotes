@@ -2279,10 +2279,23 @@ export const parseIcs = (text) => {
     const start = value('DTSTART')
     if (!summary || !start) return null
     const icsTime = (raw) => {
-      const compact = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(raw)
-      if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:00`
-      const day = /(\d{4})(\d{2})(\d{2})/.exec(raw)
-      return day ? `${day[1]}-${day[2]}-${day[3]}` : raw
+      const compact = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?/iu.exec(raw)
+      if (!compact) {
+        const day = /(\d{4})(\d{2})(\d{2})/.exec(raw)
+        return day ? `${day[1]}-${day[2]}-${day[3]}` : raw
+      }
+      const stamp = `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:00`
+      if (!compact[7]) return stamp
+      const utcMinutes = Number(compact[4]) * 60 + Number(compact[5])
+      const local = utcMinutes - zurichTimeshift(`${compact[1]}-${compact[2]}-${compact[3]}`)
+      const shifted = new Date(Date.UTC(Number(compact[1]), Number(compact[2]) - 1, Number(compact[3])))
+      shifted.setUTCMinutes(local)
+      const y = shifted.getUTCFullYear()
+      const m = String(shifted.getUTCMonth() + 1).padStart(2, '0')
+      const d = String(shifted.getUTCDate()).padStart(2, '0')
+      const hh = String(shifted.getUTCHours()).padStart(2, '0')
+      const mm = String(shifted.getUTCMinutes()).padStart(2, '0')
+      return `${y}-${m}-${d}T${hh}:${mm}:00`
     }
     const status = /^cancelled$/iu.test(value('STATUS')) ? 'cancelled' : ''
     return {
