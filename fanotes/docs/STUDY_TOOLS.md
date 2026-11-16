@@ -30,10 +30,67 @@ Auftrag, Aufgabe, Task, Exercise or Übung (numbered, or followed by a colon), j
 "(ca. 20 Minuten)" or "1 Lektion". A re-scan keeps ticks, timers and manual edits.
 The highlights overview reads the existing `fanotes-pdf-marks-v1` marks.
 
+## Block safety rules
+
+- Blocks are read strictly. Invalid JSON, a non-object, or a block the sanitiser would cut or rewrite (list caps, over-long text, rejected pictures, dropped nodes) is reported with the reason and shown as plain source in the editor and the preview. The block editor refuses to open such a block for writing, so nothing is silently lost.
+- Unknown top-level fields of a block are kept on write-back; unknown nested fields are not.
+- Block identity: the host remembers the block's offset and a fingerprint of its body, and re-locates it on every write (also for "insert table"). If the body changed meanwhile, or identical twin blocks make the position ambiguous, the editor locks read-only with a message instead of writing into another block.
+- The `fanotes-tasks-v1` comment keeps exactly one live comment per note: the first valid one is replaced in place and valid duplicates are removed. A broken but closed comment is renamed `fanotes-tasks-v1-broken` (text stays recoverable, never wins on read); a later valid comment is read instead. A broken comment that never closes (or runs into the next marker) makes the write refuse with a message, because renaming it would not stop it swallowing the rest of the note. Clearing the list removes only the comment and its own line break.
+
+## Annotations on PDFs and notes
+
+The toolbar button "Lernen" opens the Lernwerkzeuge panel on PDF and plain notes. Unlike the blocks above, annotations are drawn over the page and stored in the `.famd` payload, not in Markdown.
+
+- **Labels** (worksheet "beschrifte"): tap a point, drag a leader line, type the text. The label stays attached; drag the label or the anchor. Numbered mode (1, 2, 3) with renumbering and a legend. The **word bank** ("Begriffe") takes typed words or the current PDF text selection; tap a term and then the drawing, or drag it onto the drawing.
+- **Stamps and legend**: ten stamps (gain, loss, event, red/green/yellow dot, H, V, A, check). A legend box lists the stamps in use with editable meanings. A thick translucent pen ("Ast markieren") marks tree branches.
+- **Reference images**: from a file, the clipboard (Ctrl+V), the camera, or a cropped PDF region ("PDF-Ausschnitt"). Opacity, lock, and a side-by-side compare view.
+- **Measures**: an angle (three points or between two lines) or a distance in cm (based on A4 width). The value stays as a label and follows moved points.
+- The panel has its own undo/redo (panel buttons, Ctrl+Z / Ctrl+Y while it is open). After a sync that changes the note's companion file, the layer adopts the new annotations and clears its undo stack if there are no unsaved local edits; with unsaved edits it keeps the local state.
+- Pen mode on PDFs already offers the ruler and Geodreieck drafting guides.
+
+### `.famd` storage
+
+An optional `annotations` array in the `.famd` payload (v1 and v2 encodings), sanitised by `electron/noteAnnotation.mjs`. Coordinates are page fractions (0..1), like `textFields`. Notes without the key are byte-compatible. Older app versions ignore the key and drop it when they re-save the note. A note with annotations counts as non-blank for sync. Android has the same sanitiser with the same key order.
+
+| `kind` | Main fields |
+| --- | --- |
+| `callout` | `ax`, `ay` (anchor), `lx`, `ly` (label), `text` (max 120), `color`, optional `num` (1..999) |
+| `stamp` | `x`, `y`, `stamp` (one of the ten ids, default `event`), `size` (12..64) |
+| `legend` | `x`, `y`, `names` (stamp id to meaning, max 60 chars) |
+| `image` | `x`, `y`, `w`, `aspect`, `opacity` (0.1..1), `locked`, `title`, `src` (PNG, JPEG or WebP data URL) |
+| `stroke` | `pts` (max 600 points), `color`, `width` (2..60), `opacity` |
+| `measure` | `mode` `angle` (3 points, or 4 for two lines) or `distance` (2 points), `pts`, `color` |
+| `terms` | `list`: the word bank (max 80 terms, 60 chars each); a single entry with id `terms` |
+
+Every item also has `id` and `page`. Unknown kinds are dropped and bad values are clamped. At most 600 annotations and 12 images are kept per note. An item without a valid id gets a stable `an-...` id: FNV-1a 32-bit hash of `kind|index|page|round(x*10000)|round(y*10000)|text`, base36 (the same rule on desktop and Android, pinned by test vectors).
+
+**Image size caps.** New images are re-encoded to about 300 KB (max 1200 px edge; PNG only if small enough, else JPEG with stepped quality). A new image above 450 KB of encoded text is rejected. A note may hold 8 MB of image data in total; inserting beyond that shows a message with the used size and adds nothing. Older images up to 1.6 MB are still read. Images stay data URLs inside the note (no vault files).
+
+### Support matrix
+
+| Feature | Desktop / web | Android tablet |
+| --- | --- | --- |
+| Aufträge panel (detection, timer, edit) | yes | yes; detection needs Android 15, older versions add by hand |
+| Highlights overview | yes | yes |
+| Blocks: draw | all five | all five, read-only except sort and term |
+| Blocks: edit | all five | sorting board and definition cards; key, map and picture sheet are edited on the computer |
+| Labels, numbering, word bank | yes | yes |
+| Stamps, legend, branch pen | yes | yes |
+| Measures (angle, distance) | yes | yes |
+| Reference image from file | yes | yes (system picker) |
+| Reference image from clipboard | yes | no |
+| Reference image from camera | yes (device capture) | not yet (open PR #1220) |
+| PDF crop as image | yes | not yet (open PR #1220) |
+| Compare view | yes | not yet (open PR #1220) |
+| Annotation undo/redo | yes | yes (own stack; ink undo unchanged) |
+
+On Android, study gestures go through the normal ink path, so palm rejection, pen-only and "finger draws" apply; a plain finger still navigates. Android camera capture, PDF crop and the compare view are in the open PR #1220 and not part of the merged app yet.
+
 ## Checks
 
 - `npm run check:study-tools` parses, serialises, detects and lays out (no browser).
 - `scripts/check-study-ui.mjs` is a Playwright smoke test against a web build (see its header).
+- `node scripts/check-study-annotations.cjs` covers annotation geometry, sanitising, numbering, legend, undo, ids, image budget and the `.famd` round trip; `scripts/check-study-annotations-desktop.mjs` is the Electron smoke test (synthetic PDF).
 
 ## Android tablet
 
