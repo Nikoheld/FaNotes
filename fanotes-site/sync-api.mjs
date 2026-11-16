@@ -1757,8 +1757,41 @@ const listPartialMetas = async (accountId) => {
 }
 
 const reservedPartialBytes = async (accountId, exceptUploadId = '') => {
+  const table = await loadTable(accountId)
   const metas = await listPartialMetas(accountId)
-  return metas.reduce((sum, meta) => sum + (meta.uploadId === exceptUploadId ? 0 : (Number(meta.size) || 0)), 0)
+  let reserved = 0
+  for (const meta of metas) {
+    if (meta.uploadId === exceptUploadId) continue
+    const size = Number(meta.size) || 0
+    const current = table.entries.get(meta.fileId) ?? null
+    const archivedSize = current?.deleted
+      ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(accountId, meta.fileId)))
+      : 0
+    const base = Number(meta.base)
+    const decision = evaluateSyncWrite({
+      current,
+      base: Number.isInteger(base) && base >= 0 ? base : -1,
+      nextSize: size,
+      blank: meta.blank === true || meta.blank === false ? meta.blank : null,
+      clear: meta.clear === true,
+      archivedSize,
+    })
+    // An accepted replace reserves only the bytes the finished upload still adds.
+    // Space it would free by dropping an older copy stays reserved until the
+    // upload finishes, because aborting it keeps that copy.
+    const replaces = decision === 'accept' && current && !current.deleted
+    if (!replaces) {
+      reserved += size
+      continue
+    }
+    const previousBytes = Number(current.size) || 0
+    const historyDelta = current.sha256 !== meta.sha256
+      ? await unarchivedBytes(accountId, meta.fileId, current, size)
+      : 0
+    const net = size - previousBytes + historyDelta
+    if (net > 0) reserved += net
+  }
+  return reserved
 }
 
 const copyOnto = async (destination, source, start) => {
@@ -1829,7 +1862,7 @@ const handleCreateUpload = async (request, response, auth, fileId) => {
     const table = await loadTable(auth.account.id)
     const existing = await listPartialMetas(auth.account.id)
     if (existing.length >= MAX_PARTIALS) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
-    const reserved = existing.reduce((sum, meta) => sum + (Number(meta.size) || 0), 0)
+    const reserved = await reservedPartialBytes(auth.account.id)
     const current = table.entries.get(fileId) ?? null
     const archivedSize = current?.deleted
       ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
