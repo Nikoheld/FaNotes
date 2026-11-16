@@ -127,3 +127,55 @@ test('an all-day exam listed twice under different ids is one exam; different co
   const previous = { events: timetable, exams: [first, twin], examWeekFetched: {} }
   assert.equal(diffSnapshots(previous, { ...previous, exams: carryTimetableExams([], [first, twin]) }).filter((change) => change.category === 'exam').length, 0)
 })
+
+// Live shape: scheduler ids are positions in one week's answer ("0", "1", … again every week; the
+// class overview counts separately from the timetable). By id alone, exam 1 of one week replaced exam
+// 1 of every other week, and which one survived depended on the weeks a read refreshed.
+test('exams of different weeks that reuse a scheduler id are all kept', () => {
+  const testA = exam('1', 'Mat_G24a_Holm Test A', '2099-02-10')
+  const testB = exam('1', 'Eng_G24a Test B', '2099-02-17')
+  const inTimetable = { ...exam('1', 'Phy 2.3 Test C', '2099-02-24'), eventType: '1_pru' }
+  const carried = carryTimetableExams([inTimetable], [testA, testB])
+  assert.deepEqual(carried.map((event) => event.text).sort(), ['Eng_G24a Test B', 'Mat_G24a_Holm Test A', 'Phy 2.3 Test C'])
+  // The same entry read twice (same id, same start) is still one exam, the fresher copy.
+  const fresher = { ...testA, room: 'C11' }
+  assert.deepEqual(carryTimetableExams([fresher], [testA]).map((event) => event.room), ['C11'])
+  // An iCal UID or another non-numeric id is the exam's own and still follows it to another day.
+  const moved = { ...exam('uid-7@calendar.example.org', 'Mat_G24a_Holm Test A', '2099-02-11'), eventType: '1_pru' }
+  assert.equal(carryTimetableExams([moved], [exam('uid-7@calendar.example.org', 'Mat_G24a_Holm Test A')]).length, 1)
+})
+
+test('a scrape keeps every own exam when weeks reuse a scheduler id', async () => {
+  const shell = (name) => readFileSync(new URL(`../android/core/src/test/resources/schulnetz/${name}`, import.meta.url), 'utf8')
+  const field = (name, value) => `<${name}>${value}</${name}>`
+  const lessonEvent = (id, code, day) => `<event id="${id}">${field('start_date', `${day} 07:45`)}${field('end_date', `${day} 08:30`)}${field('text', code)}${field('kurskuerzel', code)}${field('kursid', '9001')}${field('event_type', '0_stp')}</event>`
+  const examEvent = (id, title, day, clock = '10:15') => `<event id="${id}">${field('start_date', `${day} ${clock}`)}${field('end_date', `${day} 11:00`)}${field('text', title)}${field('kurskuerzel', title)}${field('event_type', '1_pru')}</event>`
+  const fetchImpl = async (url) => {
+    const target = String(url)
+    const q = Object.fromEntries(new URL(target).searchParams)
+    let body = '<html><body></body></html>'
+    if (target.includes('scheduler_processor')) {
+      body = "<?xml version='1.0' encoding='utf-8' ?><data></data>"
+      // Personal timetable: lesson 0 every week, and in the first week an exam at position 1.
+      if (q.pageid === '22202' && q.min_date === '2026-11-02') body = `<data>${lessonEvent('0', 'Mat_G24a_Holm', '2026-11-02')}${examEvent('1', 'Mat_G24a_Holm Test A', '2026-11-04', '07:45')}</data>`
+      if (q.pageid === '22202' && q.min_date === '2026-11-09') body = `<data>${lessonEvent('0', 'Eng_G24a', '2026-11-09')}</data>`
+      // Class overview: position 1 again in both weeks, each a different exam.
+      if (q.pageid === '21312' && q.min_date === '2026-11-02') body = `<data>${examEvent('1', 'Mat_G24a_Holm Test A', '2026-11-04', '07:45')}</data>`
+      if (q.pageid === '21312' && q.min_date === '2026-11-09') body = `<data>${examEvent('0', 'Chx_2.3_Salt Test', '2026-11-10')}${examEvent('1', 'Eng_G24a Test B', '2026-11-11')}</data>`
+    } else if (q.pageid === '22202') body = shell('stundenplan-5141.html')
+    else if (q.pageid === '21312') body = shell('pruefungsplan-5141.html')
+    return { status: 200, headers: { get: () => '' }, text: async () => body }
+  }
+  const read = await scrapeWithSession('https://www.schulnetz-ag.ch/aksa', { php: 'php', id: 'f1a2b3c4d5e6f708', transid: 'a1b2c3', userAgent: 'test' }, fetchImpl, { today: '2026-11-03', now: '2026-11-03T17:00:00Z' })
+  assert.deepEqual(read.exams.map((event) => event.text).sort(), ['Eng_G24a Test B', 'Mat_G24a_Holm Test A'])
+})
+
+test('two different exams that share a scheduler id on different days are not one moved exam', () => {
+  const before = { ...base, exams: [exam('1', 'Mat_G24a_Holm Test A', '2099-02-10'), exam('1', 'Eng_G24a Test B', '2099-02-17')] }
+  // The same two exams, listed in the other order: nothing changed.
+  assert.deepEqual(titles(before, { ...before, exams: [...before.exams].reverse() }), [])
+  // Test A is gone and only Test B (same position number, another day) is left: that is not a move.
+  assert.deepEqual(titles({ ...base, exams: [exam('1', 'Mat_G24a_Holm Test A', '2099-02-10')] }, { ...base, exams: [exam('1', 'Eng_G24a Test B', '2099-02-17')] }).sort(), ['Neue Prüfung', 'Prüfung entfällt'])
+  // A real time change on the same day keeps the id match.
+  assert.deepEqual(titles({ ...base, exams: [exam('1', 'Mat_G24a_Holm Test A', '2099-02-10')] }, { ...base, exams: [{ ...exam('1', 'Mat_G24a_Holm Test A', '2099-02-10'), start: '2099-02-10T13:05:00', end: '2099-02-10T13:50:00' }] }), ['Prüfung verschoben'])
+})

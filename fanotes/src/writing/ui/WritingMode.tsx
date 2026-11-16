@@ -14,7 +14,7 @@ import { marksAt, runsText } from '../model/runs'
 import type { Align, BinderNode, FontFamilyId, Marks, Scene, StoryLanguage, StoryManifest } from '../model/types'
 import { loadProject, recoverJournal, storageAdapter, storyHost, storyTitleFromPath, writeJournal } from '../storage'
 import { L, formatNumber, styleName } from './i18n'
-import { caretBox, hitTest, move, type Motion } from './navigation'
+import { caretBox, hitTestCaret, move, type Motion } from './navigation'
 import { Assistant, defaultAssistSettings, issueSignature, paragraphLanguage, type AssistSettings } from '../assist/checker'
 import type { Issue } from '../assist/rules'
 import { autocorrectAfterInput, startsSentence } from '../assist/typography'
@@ -297,7 +297,7 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     return () => window.clearInterval(timer)
   }, [state?.selection])
 
-  const caretGeometry = useMemo(() => (layout && state && measurer ? caretBox(layout, state.selection.head, measurer, state.doc.index) : null), [layout, state, measurer])
+  const caretGeometry = useMemo(() => (layout && state && measurer ? caretBox(layout, state.selection.head, measurer, state.doc.index, state.selection.upstream) : null), [layout, state, measurer])
 
   // The scroller's size and position, kept up to date by events. Reading them from the element
   // after every keystroke would force the browser to lay out the page synchronously.
@@ -506,10 +506,11 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
       controller.select(caret(motion === 'left' ? range.from : range.to))
       return
     }
-    const result = move(controller.state.doc, layout, head, motion, measurer, motion === 'up' || motion === 'down' || motion === 'pageUp' || motion === 'pageDown' ? goalX.current : null)
+    const result = move(controller.state.doc, layout, head, motion, measurer, motion === 'up' || motion === 'down' || motion === 'pageUp' || motion === 'pageDown' ? goalX.current : null, current.upstream)
     head = result.pos
     goalX.current = result.goalX
-    controller.select(extend ? { anchor: current.anchor, head } : caret(head))
+    // End, and up/down into the end of a wrapped line, keep the caret at the end of that line.
+    controller.select(extend ? { anchor: current.anchor, head, ...(result.upstream ? { upstream: true as const } : {}) } : caret(head, Boolean(result.upstream)))
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────
@@ -679,9 +680,10 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
   const onPointerDown = (pointer: PagePointer) => {
     if (pointer.pointerType === 'touch') { touchStart.current = { pointer, at: Date.now() }; return }
     if (!controller || !layout || !measurer || pointer.button !== 0) return
-    const pos = hitTest(layout, pointer.page, pointer.x, pointer.y, measurer)
+    const hit = hitTestCaret(layout, pointer.page, pointer.x, pointer.y, measurer)
+    const pos = hit?.pos
     input.current?.focus({ preventScroll: true })
-    if (!pos) return
+    if (!hit || !pos) return
     goalX.current = null
     const block = blockAt(controller.state.doc, pos.block)
     if (pointer.detail >= 3 && block) {
@@ -696,16 +698,17 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
       return
     }
     const anchor = pointer.shift ? controller.state.selection.anchor : pos
-    controller.select({ anchor, head: pos })
+    controller.select({ anchor, head: pos, ...(hit.upstream ? { upstream: true as const } : {}) })
     dragging.current = { anchor, unit: 'char' }
     setPopover(null)
     if (!pointer.shift && pointer.pointerType !== 'pen' && issueAt(pos)) openPopover(pos, true, pointer.page, pointer.x, pointer.y)
   }
   const onContextMenu = (pointer: PagePointer) => {
     if (!controller || !layout || !measurer) return
-    const pos = hitTest(layout, pointer.page, pointer.x, pointer.y, measurer)
-    if (!pos) return
-    controller.select(caret(pos))
+    const hit = hitTestCaret(layout, pointer.page, pointer.x, pointer.y, measurer)
+    if (!hit) return
+    const pos = hit.pos
+    controller.select(caret(pos, hit.upstream))
     openPopover(pos, true, pointer.page, pointer.x, pointer.y)
   }
   const onPointerMove = (pointer: PagePointer) => {
@@ -715,17 +718,18 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
       return
     }
     if (!controller || !layout || !measurer || !dragging.current) return
-    const pos = hitTest(layout, pointer.page, pointer.x, pointer.y, measurer)
-    if (pos) controller.select({ anchor: dragging.current.anchor, head: pos })
+    const hit = hitTestCaret(layout, pointer.page, pointer.x, pointer.y, measurer)
+    if (hit) controller.select({ anchor: dragging.current.anchor, head: hit.pos, ...(hit.upstream ? { upstream: true as const } : {}) })
   }
   const onPointerUp = (pointer?: PagePointer) => {
     dragging.current = null
     const tap = touchStart.current
     touchStart.current = null
     if (pointer?.pointerType !== 'touch' || !tap || Date.now() - tap.at > 600 || !controller || !layout || !measurer) return
-    const pos = hitTest(layout, tap.pointer.page, tap.pointer.x, tap.pointer.y, measurer)
-    if (!pos) return
-    controller.select(caret(pos))
+    const hit = hitTestCaret(layout, tap.pointer.page, tap.pointer.x, tap.pointer.y, measurer)
+    if (!hit) return
+    const pos = hit.pos
+    controller.select(caret(pos, hit.upstream))
     // Focusing on the tap itself opens the on-screen keyboard.
     input.current?.focus({ preventScroll: true })
     setPopover(null)

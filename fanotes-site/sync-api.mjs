@@ -321,6 +321,8 @@ const copyDurable = async (source, destination) => {
 // The original file stays until the live name is durable. Renaming the only
 // name across directories can drop both if the process stops first.
 export const placeDurable = async (source, destination) => {
+  // Tests set this after the previous note was archived. Production leaves it unset.
+  if (process.env.FANOTES_SYNC_PLACE_FAIL === '1') throw new Error('live note was not replaced')
   const directory = dirname(destination)
   const held = await fs.open(source, 'r')
   try {
@@ -440,6 +442,15 @@ const loadTable = async (accountId) => {
   }
   for (const entry of table.entries.values()) if (!entry.deleted) table.bytes += Number(entry.size) || 0
   table.historyBytes = await measureHistory(accountId)
+  // Tests hold the load here so a changes read can finish beside a write.
+  // Production leaves this unset.
+  const hold = process.env.FANOTES_SYNC_LOAD_HOLD === '1' ? globalThis.FANOTES_SYNC_LOAD_HOLD : null
+  if (typeof hold === 'function') await hold(accountId)
+  // A second load must not replace a table this process has already published.
+  // The changes feed does not take the account lock, so it can finish a load
+  // that started earlier and drop a revision the client has already accepted.
+  const published = tables.get(accountId)
+  if (published) return published
   tables.set(accountId, table)
   return table
 }
@@ -474,20 +485,150 @@ const measureHistory = async (accountId) => {
   return total
 }
 
-const appendChange = async (accountId, table, entry) => {
-  const directory = accountDirectory(accountId)
-  const line = `${JSON.stringify(entry)}\n`
-  const handle = await fs.open(safeJoin(directory, 'changes.jsonl'), 'a', 0o600)
-  try {
-    await handle.writeFile(line)
-    await handle.sync()
-  } finally {
-    await handle.close()
+const applyLoggedEntry = (table, entry) => {
+  const previous = table.entries.get(entry.id)
+  const previousBytes = previous && !previous.deleted ? Number(previous.size) || 0 : 0
+  const nextBytes = entry.deleted ? 0 : Number(entry.size) || 0
+  table.entries.set(entry.id, entry)
+  table.revision = Number(entry.revision)
+  table.bytes += nextBytes - previousBytes
+}
+
+// A crash can leave a partial last line. Appending onto it joins the two into
+// one invalid line, so a restart skips the revision that was just accepted.
+const repairLogTail = async (handle) => {
+  let size = (await handle.stat()).size
+  if (size === 0) return 0
+  const last = Buffer.alloc(1)
+  const readLast = await handle.read(last, 0, 1, size - 1)
+  if (readLast.bytesRead === 1 && last[0] === 0x0a) return size
+  const chunk = Buffer.alloc(64 * 1024)
+  let pos = size
+  let newlineAt = -1
+  while (pos > 0) {
+    const start = Math.max(0, pos - chunk.length)
+    const length = pos - start
+    const read = await handle.read(chunk, 0, length, start)
+    if (!read.bytesRead) break
+    for (let index = read.bytesRead - 1; index >= 0; index -= 1) {
+      if (chunk[index] === 0x0a) {
+        newlineAt = start + index
+        break
+      }
+    }
+    if (newlineAt >= 0 || start === 0) break
+    pos = start
   }
-  // The first append creates the log. The file sync does not make that new
-  // name durable, and the response is sent only after this returns.
-  await syncDirectory(directory)
-  table.logBytes += Buffer.byteLength(line)
+  const tailStart = newlineAt + 1
+  const tailLength = size - tailStart
+  let keep = false
+  if (tailLength > 0 && tailLength <= 1024 * 1024) {
+    const tail = Buffer.alloc(tailLength)
+    const readTail = await handle.read(tail, 0, tailLength, tailStart)
+    if (readTail.bytesRead === tailLength) {
+      try {
+        const parsed = JSON.parse(tail.toString('utf8'))
+        const revision = Number(parsed?.revision)
+        keep = Boolean(parsed && FILE_ID_PATTERN.test(parsed.id) && Number.isInteger(revision) && revision >= 0)
+      } catch {
+        keep = false
+      }
+    }
+  }
+  if (keep) {
+    const newline = Buffer.from('\n')
+    const written = await handle.write(newline, 0, 1, size)
+    if (written.bytesWritten !== 1) throw new Error('change log was not written')
+    return size + 1
+  }
+  // A torn log tail must not swallow the next revision.
+  await handle.truncate(tailStart)
+  return tailStart
+}
+
+const writeAt = async (handle, payload, position) => {
+  let written = 0
+  while (written < payload.length) {
+    const result = await handle.write(payload, written, payload.length - written, position + written)
+    if (!result.bytesWritten) throw new Error('change log was not written')
+    written += result.bytesWritten
+  }
+}
+
+// The rollback could not remove this line. Keep the revision it already holds.
+const adoptWrittenLine = async (table, handle, offset, entry, line) => {
+  const size = (await handle.stat()).size
+  if (size < offset + line.length) return false
+  const present = Buffer.alloc(line.length)
+  const read = await handle.read(present, 0, line.length, offset)
+  if (read.bytesRead !== line.length || !present.equals(line)) return false
+  // A log line that stays on disk has to stay in the table. A later compaction
+  // would otherwise drop it, and the next write could reuse its revision number.
+  applyLoggedEntry(table, entry)
+  table.logBytes = size
+  return true
+}
+
+const appendChange = async (accountId, table, entry) => {
+  // Tests set this so a failed log write cannot publish a revision. Production
+  // leaves it unset. A thrown error here must leave the in-memory table as it was.
+  if (process.env.FANOTES_SYNC_APPEND_FAIL === '1') throw new Error('change log was not written')
+  const directory = accountDirectory(accountId)
+  const logPath = safeJoin(directory, 'changes.jsonl')
+  const line = Buffer.from(`${JSON.stringify(entry)}\n`)
+  let handle
+  try {
+    handle = await fs.open(logPath, 'r+')
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    handle = await fs.open(logPath, 'wx', 0o600)
+  }
+  let offset = 0
+  let appended = false
+  try {
+    offset = await repairLogTail(handle)
+    appended = true
+    await writeAt(handle, line, offset)
+    await handle.sync()
+    // The first append creates the log. The file sync does not make that new
+    // name durable, and the response is sent only after this returns.
+    // Tests set this after the bytes are in the file. Production leaves it unset.
+    if (process.env.FANOTES_SYNC_DIRSYNC_FAIL === '1') throw new Error('change log directory was not synced')
+    await syncDirectory(directory)
+    appended = false
+  } catch (error) {
+    if (appended) {
+      // A directory sync that fails takes that log line back. Leaving it in
+      // the file would let a later compaction drop a revision this request
+      // rejects, or let a restart skip the retry that reused its number.
+      try {
+        // Tests set this after the line is in the file. Production leaves it unset.
+        if (process.env.FANOTES_SYNC_TRUNCATE_FAIL === '1') throw new Error('change log was not truncated')
+        await handle.truncate(offset)
+        await handle.sync()
+      } catch {
+        try {
+          await adoptWrittenLine(table, handle, offset, entry, line)
+        } catch {
+          // A partial tail is not this revision. Memory stays as it was.
+        }
+      }
+    }
+    throw error
+  } finally {
+    // A close error must not hide a synced revision. The bytes and the
+    // directory entry are already durable. Tests set this after that sync.
+    // Production leaves it unset.
+    try {
+      if (process.env.FANOTES_SYNC_CLOSE_FAIL === '1') throw new Error('change log handle was not closed')
+      await handle.close()
+    } catch {
+      await handle.close().catch(() => {})
+    }
+  }
+  // The revision becomes visible only after the log line is durable.
+  applyLoggedEntry(table, entry)
+  table.logBytes = offset + line.length
   if (table.logBytes > COMPACT_LOG_BYTES) await compactTable(accountId, table)
 }
 
@@ -1112,6 +1253,34 @@ const restoreLiveBlob = async (accountId, fileId, entry) => {
   return true
 }
 
+const revisionArchiveName = (current, nextSize) => {
+  const currentSize = Number(current.size) || 0
+  const collapse = currentSize >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < currentSize)
+  return `${collapse ? 'c-' : ''}${current.revision}`
+}
+
+// Bytes this replace still has to reserve for the previous note.
+// The oldest archived copies are dropped once eight revisions are kept, so a
+// full window does not reserve those bytes again.
+const unarchivedBytes = async (accountId, fileId, current, nextSize) => {
+  if (!current || current.deleted) return 0
+  const currentSize = Number(current.size) || 0
+  const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
+  const live = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
+  if (!live?.isFile()) return 0
+  const files = await listRevisionFiles(revisionsDirectory(accountId, fileId))
+  const name = revisionArchiveName(current, nextSize)
+  const simulated = files.map((file) => ({ name: file.name, size: file.size, revision: file.revision }))
+  const slot = simulated.find((file) => file.name === name)
+  if (!slot) simulated.push({ name, size: currentSize, revision: Number(current.revision) || 0 })
+  else if (slot.size === currentSize) {
+    // The archived copy of this revision is already counted.
+  } else slot.size = currentSize
+  const before = files.reduce((sum, file) => sum + file.size, 0)
+  const keep = revisionNamesToKeep(simulated, MAX_REVISIONS_KEPT, nextSize)
+  return simulated.reduce((sum, file) => sum + (keep.has(file.name) ? file.size : 0), 0) - before
+}
+
 /** Copy the live blob aside before it is replaced. Returns the byte delta of the archive. */
 const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) => {
   if (!current || current.deleted) return 0
@@ -1122,7 +1291,6 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   // live file can already be the newer body, and the archived name must stay
   // the one written on the first attempt.
   const currentSize = Number(current.size) || 0
-  const collapse = currentSize >= COLLAPSE_OLD_BYTES && (nextSize <= COLLAPSE_NEW_BYTES || nextSize * 4 < currentSize)
   const directory = revisionsDirectory(accountId, fileId)
   await fs.mkdir(directory, { recursive: true, mode: 0o700 })
   // Link the new archive directory before the previous note is copied into it.
@@ -1130,7 +1298,7 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
   await syncDirectory(dirname(dirname(directory)))
   await syncDirectory(dirname(directory))
   const before = (await listRevisionFiles(directory)).reduce((sum, file) => sum + file.size, 0)
-  const name = `${collapse ? 'c-' : ''}${current.revision}`
+  const name = revisionArchiveName(current, nextSize)
   const dest = safeJoin(directory, name)
   const holdsCurrent = async (path, size) => size === currentSize && await hashFile(path) === current.sha256
   // A crash can replace the live blob before the change log records it. The
@@ -1245,9 +1413,6 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
       updatedAt: nowIso(),
       deviceId: incoming.deviceId,
     }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes += stat.size
     await recordLiveBlob(accountId, table, entry)
     return { matchesRequest: true, entry }
   }
@@ -1265,9 +1430,6 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
     updatedAt: nowIso(),
     deviceId: matchesRequest ? incoming.deviceId : current.deviceId,
   }
-  table.revision = entry.revision
-  table.entries.set(fileId, entry)
-  table.bytes += stat.size - currentSize
   await recordLiveBlob(accountId, table, entry)
   return { matchesRequest, entry }
 }
@@ -1323,7 +1485,9 @@ const handlePutFile = async (request, response, auth, fileId) => {
       return guardRejected(request, response, current)
     }
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
-    const historyDelta = current && !current.deleted && (current.sha256 !== declaredSha) ? (Number(current.size) || 0) : 0
+    const historyDelta = current && !current.deleted && current.sha256 !== declaredSha
+      ? await unarchivedBytes(auth.account.id, fileId, current, incoming.size)
+      : 0
     // Partials already reserved their declared size. A direct PUT must not
     // spend that space a second time.
     const reserved = await reservedPartialBytes(auth.account.id)
@@ -1352,9 +1516,6 @@ const handlePutFile = async (request, response, auth, fileId) => {
     }
     committed = true
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: incoming.size, sha256: declaredSha, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes += incoming.size - previousBytes
     await appendChange(auth.account.id, table, entry)
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision }, { ETag: `"${entry.revision}"` })
   })
@@ -1469,7 +1630,7 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     if (settled?.preserved) return preservedConflict(request, response, fileId, current)
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
     const replaces = Boolean(current && !current.deleted && current.sha256 !== digest)
-    const historyDelta = replaces ? previousBytes : 0
+    const historyDelta = replaces ? await unarchivedBytes(auth.account.id, fileId, current, info.size) : 0
     const reserved = await reservedPartialBytes(auth.account.id)
     if (table.bytes - previousBytes + info.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
     const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
@@ -1480,9 +1641,6 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     await ensureBlobDirectory(auth.account.id)
     await copyDurable(source, safeJoin(accountDirectory(auth.account.id), 'blobs', fileId))
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: info.size, sha256: digest, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes += info.size - previousBytes
     await appendChange(auth.account.id, table, entry)
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, size: info.size }, { ETag: `"${entry.revision}"` })
   })
@@ -1545,9 +1703,6 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
     // so a crash leaves the note in the archive and still in the live slot.
     table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, 0, false)
     const entry = { id: fileId, revision: table.revision + 1, deleted: true, size: 0, sha256: null, meta: typeof current.meta === 'string' && current.meta ? current.meta : null, updatedAt: nowIso(), deviceId: auth.deviceId }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes -= Number(current.size) || 0
     await appendChange(auth.account.id, table, entry)
     await fs.rm(blobPath, { force: true })
     await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
@@ -1602,8 +1757,41 @@ const listPartialMetas = async (accountId) => {
 }
 
 const reservedPartialBytes = async (accountId, exceptUploadId = '') => {
+  const table = await loadTable(accountId)
   const metas = await listPartialMetas(accountId)
-  return metas.reduce((sum, meta) => sum + (meta.uploadId === exceptUploadId ? 0 : (Number(meta.size) || 0)), 0)
+  let reserved = 0
+  for (const meta of metas) {
+    if (meta.uploadId === exceptUploadId) continue
+    const size = Number(meta.size) || 0
+    const current = table.entries.get(meta.fileId) ?? null
+    const archivedSize = current?.deleted
+      ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(accountId, meta.fileId)))
+      : 0
+    const base = Number(meta.base)
+    const decision = evaluateSyncWrite({
+      current,
+      base: Number.isInteger(base) && base >= 0 ? base : -1,
+      nextSize: size,
+      blank: meta.blank === true || meta.blank === false ? meta.blank : null,
+      clear: meta.clear === true,
+      archivedSize,
+    })
+    // An accepted replace reserves only the bytes the finished upload still adds.
+    // Space it would free by dropping an older copy stays reserved until the
+    // upload finishes, because aborting it keeps that copy.
+    const replaces = decision === 'accept' && current && !current.deleted
+    if (!replaces) {
+      reserved += size
+      continue
+    }
+    const previousBytes = Number(current.size) || 0
+    const historyDelta = current.sha256 !== meta.sha256
+      ? await unarchivedBytes(accountId, meta.fileId, current, size)
+      : 0
+    const net = size - previousBytes + historyDelta
+    if (net > 0) reserved += net
+  }
+  return reserved
 }
 
 const copyOnto = async (destination, source, start) => {
@@ -1674,8 +1862,20 @@ const handleCreateUpload = async (request, response, auth, fileId) => {
     const table = await loadTable(auth.account.id)
     const existing = await listPartialMetas(auth.account.id)
     if (existing.length >= MAX_PARTIALS) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
-    const reserved = existing.reduce((sum, meta) => sum + (Number(meta.size) || 0), 0)
-    if (table.bytes + (table.historyBytes || 0) + reserved + size > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+    const reserved = await reservedPartialBytes(auth.account.id)
+    const current = table.entries.get(fileId) ?? null
+    const archivedSize = current?.deleted
+      ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
+      : 0
+    const decision = evaluateSyncWrite({ current, base, nextSize: size, blank, clear, archivedSize })
+    // A refused body stays beside the live note, so that note is not free space.
+    // An accepted replace only reserves the archive bytes that are not kept yet.
+    const replaces = decision === 'accept' && current && !current.deleted
+    const previousBytes = replaces ? Number(current.size) || 0 : 0
+    const historyDelta = replaces && current.sha256 !== declaredSha
+      ? await unarchivedBytes(auth.account.id, fileId, current, size)
+      : 0
+    if (table.bytes - previousBytes + (table.historyBytes || 0) + reserved + historyDelta + size > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
     const uploadId = randomBytes(16).toString('hex')
     const meta = {
       fileId,
@@ -1761,8 +1961,6 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
       const reserved = await reservedPartialBytes(auth.account.id)
       if (table.bytes + (table.historyBytes || 0) + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
       const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: stat.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
-      table.revision = entry.revision
-      table.entries.set(fileId, entry)
       await recordLiveBlob(auth.account.id, table, entry)
       sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
       return
@@ -1778,24 +1976,21 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
   const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
   if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
   const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: stat.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
-  table.revision = entry.revision
-  table.entries.set(fileId, entry)
-  table.bytes += stat.size - previousBytes
   await recordLiveBlob(auth.account.id, table, entry)
   sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
 }
 
 const handleUploadComplete = async (request, response, auth, fileId, uploadId) => {
-  const base = parseIfMatch(request)
-  const metaHeader = parseMeta(request)
+  const requestBase = parseIfMatch(request)
+  const requestMeta = parseMeta(request)
   const declaredSha = request.headers['x-fanotes-sha256']
   if (typeof declaredSha !== 'string' || !FILE_ID_PATTERN.test(declaredSha)) fail(400, 'Die Prüfsumme der Datei fehlt.')
-  const blank = headerFlag(request.headers['x-fanotes-blank'])
-  const clear = request.headers['x-fanotes-clear'] === '1'
+  const requestBlank = headerFlag(request.headers['x-fanotes-blank'])
+  const requestClear = request.headers['x-fanotes-clear'] === '1'
   await withAccountLock(auth.account.id, async () => {
     const meta = await readPartial(auth.account.id, uploadId)
     if (!meta || meta.fileId !== fileId) {
-      await finishRenamedUpload(request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear)
+      await finishRenamedUpload(request, response, auth, fileId, uploadId, requestBase, requestMeta, declaredSha, requestBlank, requestClear)
       return
     }
     if (meta.received !== meta.size) fail(409, 'Der Upload ist noch nicht vollständig.', { offset: meta.received, size: meta.size, reason: 'incomplete' })
@@ -1807,17 +2002,23 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       // before the response so a retry cannot reserve its bytes again, then
       // record the revision from the live file.
       await removePartial(auth.account.id, uploadId)
-      await finishRenamedUpload(request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear)
+      await finishRenamedUpload(request, response, auth, fileId, uploadId, requestBase, requestMeta, declaredSha, requestBlank, requestClear)
       return
     }
     const actual = await hashFile(bodyPath)
     if (actual !== declaredSha) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
+    // The bytes were uploaded against the revision and flags stored with the
+    // partial. A later complete cannot aim that body at a newer note.
+    const openedBase = Number(meta.base)
+    const base = Number.isInteger(openedBase) && openedBase >= 0 ? openedBase : requestBase
+    const blank = meta.blank === true || meta.blank === false ? meta.blank : requestBlank
+    const clear = meta.clear === true
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
     const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, {
       size: Number(meta.size) || 0,
       sha256: declaredSha,
-      meta: metaHeader,
+      meta: requestMeta,
       deviceId: auth.deviceId,
     })
     if (settled?.matchesRequest) {
@@ -1840,7 +2041,9 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       return guardRejected(request, response, current)
     }
     const previousBytes = current && !current.deleted ? Number(current.size) || 0 : 0
-    const historyDelta = current && !current.deleted && current.sha256 !== declaredSha ? (Number(current.size) || 0) : 0
+    const historyDelta = current && !current.deleted && current.sha256 !== declaredSha
+      ? await unarchivedBytes(auth.account.id, fileId, current, Number(meta.size) || 0)
+      : 0
     const reserved = await reservedPartialBytes(auth.account.id, uploadId)
     if (table.bytes - previousBytes + meta.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
     const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
@@ -1860,10 +2063,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       await syncDirectory(dirname(bodyPath))
     }
     await removePartial(auth.account.id, uploadId)
-    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes += meta.size - previousBytes
+    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: requestMeta, updatedAt: nowIso(), deviceId: auth.deviceId }
     await appendChange(auth.account.id, table, entry)
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
   })

@@ -144,7 +144,8 @@ const encode = (font: Embedded, text: string) => {
 const filesUsed = (layout: ManuscriptLayout) => {
   const files = new Set<string>([fontFileFor(HEADER_FONT)])
   const addLine = (box: LineBox) => {
-    for (const piece of box.pieces) if (piece.kind !== 'newline') files.add(fontFileFor(piece.font))
+    // Hanging spaces and breaks are not drawn, so their fonts are not needed.
+    for (const piece of box.pieces) if (piece.kind !== 'newline' && !piece.hang) files.add(fontFileFor(piece.font))
   }
   for (const paragraph of layout.layouts) {
     paragraph.lines.forEach(addLine)
@@ -210,7 +211,8 @@ export const writePdf = async (input: PdfInput): Promise<Uint8Array> => {
         writer.rect(writer.background, x, top + box.baseline - own - piece.shift, width, box.height, marks.hl)
       }
       const pieceColor = marks?.color ?? color
-      if (piece.kind === 'space') writer.show(font, piece.font.size, pieceColor, x, baseline, ' ')
+      // One space glyph per typed space, so the text a viewer extracts is the text of the story.
+      if (piece.kind === 'space') writer.show(font, piece.font.size, pieceColor, x, baseline, ' '.repeat(Math.max(1, piece.to - piece.from)))
       else if (piece.display) writer.show(font, piece.font.size, pieceColor, x, baseline, piece.display, piece.kind === 'word' ? piece.width : undefined)
       if (piece.hyphen) writer.show(font, piece.font.size, pieceColor, x + piece.width, baseline, '-')
       if (marks?.u || marks?.link) {

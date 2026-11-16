@@ -122,8 +122,8 @@ export function StudyPanel({ path, title, content, initialTab = 'tasks', onConte
     <aside className="right-inspector lw-panel" aria-label="Lernwerkzeuge für dieses PDF">
       <header>
         <div className="inspector-tabs">
-          <button type="button" className={tab === 'tasks' ? 'active' : ''} onClick={() => setTab('tasks')}><ClipboardList size={15} /> Aufträge</button>
-          <button type="button" className={tab === 'marks' ? 'active' : ''} onClick={() => setTab('marks')}><BookMarked size={15} /> Markierungen</button>
+          <button type="button" className={tab === 'tasks' ? 'active' : ''} aria-pressed={tab === 'tasks'} onClick={() => setTab('tasks')}><ClipboardList size={15} /> Aufträge</button>
+          <button type="button" className={tab === 'marks' ? 'active' : ''} aria-pressed={tab === 'marks'} onClick={() => setTab('marks')}><BookMarked size={15} /> Markierungen</button>
         </div>
         <button type="button" className="lw-icon-btn" aria-label="Schliessen" title="Schliessen" onClick={onClose}><X size={15} /></button>
       </header>

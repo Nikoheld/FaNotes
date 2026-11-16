@@ -3,8 +3,9 @@ import { mkdtemp, readdir, rm, utimes, writeFile, readFile } from 'node:fs/promi
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import test from 'node:test'
-import { createDiagnosticsHandler, createDiagnosticsStore, validateDiagnosticsPayload } from './diagnostics-api.mjs'
+import { clientAddress, createDiagnosticsHandler, createDiagnosticsStore, validateDiagnosticsPayload } from './diagnostics-api.mjs'
 import { aggregate, readRecords } from './scripts/diagnostics-report.mjs'
 
 const ID = 'a'.repeat(32)
@@ -86,7 +87,7 @@ test('preflight allows DELETE and the nginx location mirrors it', async () => {
     assert.match(response.headers.get('access-control-allow-methods'), /DELETE/u)
   } finally { await s.close() }
   const conf = await readFile(new URL('./deploy/fanotes-fasrv.conf', import.meta.url), 'utf8')
-  const block = conf.slice(conf.indexOf('location ~ ^/api/v1/diagnostics'), conf.indexOf('location ~ ^/api/v1/diagnostics') + 2200)
+  const block = conf.slice(conf.indexOf('location ~ "^/api/v1/diagnostics'), conf.indexOf('location ~ "^/api/v1/diagnostics') + 2200)
   assert.match(block, /Access-Control-Allow-Methods "POST, DELETE, OPTIONS"/u)
   assert.match(block, /limit_req zone=fanotes_diagnostics/u)
   assert.match(conf, /geo \$fanotes_from_cf/u, 'CF-Connecting-IP is only trusted from Cloudflare ranges')
@@ -120,4 +121,72 @@ test('comment keeps up to 1000 characters after scrubbing', () => {
   const comment = `Beschreibung ${'wort '.repeat(180)}`
   const ok = validateDiagnosticsPayload(payload({ comment }))
   assert.ok(ok.record.comment.length > 800 && ok.record.comment.length <= 1000)
+})
+
+// -- who a request is limited as ---------------------------------------------------------------
+const peerRequest = (peer, realIp) => ({ headers: realIp === undefined ? {} : { 'x-real-ip': realIp }, socket: { remoteAddress: peer } })
+
+test('X-Real-IP is only honoured from the local nginx peer and only when it is one plain address', () => {
+  // The proxy peer: the header is the real client (Cloudflare-aware, written by nginx).
+  assert.equal(clientAddress(peerRequest('127.0.0.1', '203.0.113.7')), '203.0.113.7')
+  assert.equal(clientAddress(peerRequest('::1', '203.0.113.7')), '203.0.113.7')
+  assert.equal(clientAddress(peerRequest('::ffff:127.0.0.1', ' 203.0.113.7 ')), '203.0.113.7')
+  assert.equal(clientAddress(peerRequest('127.0.0.1', '::ffff:198.51.100.9')), '198.51.100.9', 'IPv4-mapped IPv6 is the IPv4 client')
+  assert.equal(clientAddress(peerRequest('127.0.0.1')), '127.0.0.1', 'no header: the peer itself')
+  // Anyone else is limited by where they connect from, whatever they send.
+  assert.equal(clientAddress(peerRequest('198.51.100.20', '203.0.113.7')), '198.51.100.20')
+  assert.equal(clientAddress(peerRequest('::ffff:198.51.100.20', '203.0.113.7')), '198.51.100.20')
+  assert.equal(clientAddress(peerRequest('10.0.0.5', '127.0.0.1')), '10.0.0.5', 'a forged loopback header does not make a peer local')
+  assert.equal(clientAddress(peerRequest(undefined, '203.0.113.7')), 'unknown')
+  // Junk from the proxy peer is ignored rather than becoming a bucket name.
+  for (const junk of ['not-an-ip', '1.2.3.4, 5.6.7.8', '1.2.3.4:80', 'a'.repeat(100), '', '999.1.1.1']) {
+    assert.equal(clientAddress(peerRequest('127.0.0.1', junk)), '127.0.0.1', `ignored: ${junk.slice(0, 12)}`)
+  }
+})
+
+test('IPv6 clients share one budget per /64 so rotating addresses inside a prefix does not help', () => {
+  const key = (address) => clientAddress(peerRequest('127.0.0.1', address))
+  assert.equal(key('2001:db8:1:2:aaaa:bbbb:cccc:dddd'), '2001:db8:1:2::/64')
+  assert.equal(key('2001:DB8:1:2:0:0:0:1'), '2001:db8:1:2::/64')
+  assert.equal(key('2001:db8:1:2::9'), '2001:db8:1:2::/64')
+  assert.equal(key('2001:db8::5'), '2001:db8:0:0::/64')
+  assert.equal(key('::1'), '0:0:0:0::/64')
+  assert.notEqual(key('2001:db8:1:3::1'), key('2001:db8:1:2::1'))
+  assert.equal(clientAddress(peerRequest('2001:db8:5:6:1:2:3:4', '203.0.113.7')), '2001:db8:5:6::/64')
+})
+
+test('a direct peer cannot rotate X-Real-IP to escape the per-IP limit, the proxy peer gets one budget per client', async () => {
+  const s = await start()
+  try {
+    const handler = createDiagnosticsHandler(s.store)
+    const post = async (peer, realIp, n) => {
+      const body = Buffer.from(JSON.stringify(payload({ installId: n.toString(16).padStart(32, '0') })))
+      const request = Object.assign(Readable.from([body]), peerRequest(peer, realIp), { method: 'POST' })
+      const result = { status: 0 }
+      await handler(request, { writeHead: (status) => { result.status = status }, end: () => {} }, new URL('http://x/api/v1/diagnostics'))
+      return result.status
+    }
+    const direct = []
+    for (let i = 1; i <= 61; i += 1) direct.push(await post('198.51.100.20', `203.0.113.${i}`, i))
+    assert.equal(direct.filter((status) => status === 202).length, 60, 'the per-IP budget is spent by the real peer')
+    assert.equal(direct[60], 429, 'the 61st request is refused although every header named a new address')
+    // Through the proxy each real client has its own budget.
+    assert.equal(await post('127.0.0.1', '203.0.113.200', 1000), 202)
+    const proxied = []
+    for (let i = 1; i <= 61; i += 1) proxied.push(await post('127.0.0.1', '203.0.113.201', 2000 + i))
+    assert.equal(proxied.filter((status) => status === 202).length, 60, 'one client behind the proxy is limited on its own')
+    assert.equal(proxied[60], 429)
+    assert.equal(await post('127.0.0.1', '203.0.113.202', 3000), 202, 'another client is unaffected')
+  } finally { await s.close() }
+})
+
+test('the nginx location overwrites X-Real-IP with the Cloudflare-aware client address', async () => {
+  // The process trusts the header from its local proxy because nginx always replaces whatever the client sent.
+  const conf = await readFile(new URL('./deploy/fanotes-fasrv.conf', import.meta.url), 'utf8')
+  const from = conf.indexOf('location ~ ^/api/v1/diagnostics')
+  assert.ok(from > 0)
+  const block = conf.slice(from, conf.indexOf('proxy_pass', from))
+  assert.match(block, /proxy_set_header X-Real-IP \$fanotes_client_ip;/u)
+  assert.doesNotMatch(block, /proxy_set_header X-Real-IP \$http_/u)
+  assert.match(conf, /proxy_pass http:\/\/127\.0\.0\.1:18185;/u, 'the site process stays loopback-only behind nginx')
 })

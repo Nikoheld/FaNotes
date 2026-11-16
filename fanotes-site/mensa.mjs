@@ -237,7 +237,9 @@ export const createMensa = (options = {}) => {
       loading = (async () => {
         try {
           const value = JSON.parse(await readFile(file, 'utf8'))
-          const known = value && Array.isArray(value.days) && typeof value.fetchedAt === 'string'
+          const plain = (item) => typeof item === 'object' && item !== null && !Array.isArray(item)
+          const dayKnown = (day) => plain(day) && typeof day.date === 'string' && day.date && (day.menus == null || (Array.isArray(day.menus) && day.menus.every(plain)))
+          const known = plain(value) && Array.isArray(value.days) && typeof value.fetchedAt === 'string' && value.days.every(dayKnown)
           // A missing or broken file can start again. A file that is there but not this menu must not look empty, or the next refresh replaces it.
           if (!known) {
             diskBlocked = true

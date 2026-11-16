@@ -34,6 +34,9 @@ fun cropFromCorners(x0: Double, y0: Double, x1: Double, y1: Double): SRect = SRe
 
 fun cropIsUsable(r: SRect): Boolean = r.r - r.l >= CROP_MIN && r.b - r.t >= CROP_MIN
 
+/** Crop rectangle of one page, in page fractions. */
+data class StudyCrop(val page: Int, val rect: SRect)
+
 enum class CropGrip { NONE, MOVE, TL, TR, BL, BR }
 
 /** Which part of [r] a point at (x, y) grabs; corners win over the body. Tolerances are page fractions. */

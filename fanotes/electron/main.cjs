@@ -38,6 +38,7 @@ const { DEFAULT_TABLET_BUTTON_ACTIONS } = require('./tablet-buttons.cjs')
 const { sanitizeSettings: sanitizeStoredSettings } = require('./settings-sanitize.cjs')
 const { channelForPackagedVersion } = require('./releaseVersion.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
+const { installSecurityHeaders } = require('./content-security-policy.cjs')
 const {
   onboardingRequiredFromConfig,
   onboardingRequiredFromVaultStatus,
@@ -1635,8 +1636,11 @@ function ensureVaultWatch(root) {
     scan: scanRoot,
     watch: fs.watch,
     onChange: (diff) => {
-      const visible = (list) => list.filter((entry) => !vaultWatch.isIgnoredWatchPath(entry)).slice(0, 500)
-      const payload = { added: visible(diff.added), removed: visible(diff.removed), changed: visible(diff.changed) }
+      const visible = (list) => list.filter((entry) => !vaultWatch.isIgnoredWatchPath(entry))
+      const cap = (list) => list.slice(0, 500)
+      const lists = [visible(diff.added), visible(diff.removed), visible(diff.changed)]
+      const truncated = lists.some((list) => list.length > 500)
+      const payload = { added: cap(lists[0]), removed: cap(lists[1]), changed: cap(lists[2]), ...(truncated ? { truncated: true } : {}) }
       if (!payload.added.length && !payload.removed.length && !payload.changed.length) return
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.vaultChanged, payload)
     },
@@ -5658,37 +5662,9 @@ function installSecurityPolicy() {
   currentSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   currentSession.setPermissionCheckHandler(() => false)
 
-  currentSession.webRequest.onHeadersReceived((details, callback) => {
-    const isEmbeddedGlyphenWerkResource = /\/glyphenwerk\//iu.test(details.url)
-    const devUrl = trustedDevUrl()
-    const connectSource = devUrl
-      ? "'self' fanotes-model: https://fanotes.fasrv.ch ws://127.0.0.1:* ws://localhost:* ws://[::1]:* http://127.0.0.1:* http://localhost:*"
-      : "'self' fanotes-model: https://fanotes.fasrv.ch"
-    const policy = [
-      "default-src 'self'",
-      "script-src 'self' blob: 'wasm-unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "font-src 'self' data:",
-      "worker-src 'self' blob:",
-      `connect-src ${connectSource}`,
-      "media-src 'self' data: blob:",
-      "frame-src 'self'",
-      "object-src 'none'",
-      "base-uri 'self'",
-      "form-action 'none'",
-      isEmbeddedGlyphenWerkResource ? "frame-ancestors 'self'" : "frame-ancestors 'none'",
-    ].join('; ')
-    callback({
-      responseHeaders: {
-        ...(details.responseHeaders ?? {}),
-        'Content-Security-Policy': [policy],
-        'Cross-Origin-Opener-Policy': ['same-origin'],
-        'Cross-Origin-Embedder-Policy': ['require-corp'],
-        'Cross-Origin-Resource-Policy': ['same-origin'],
-      },
-    })
-  })
+  // The policy and isolation headers live in content-security-policy.cjs (see there for how they reach
+  // file://, dev-server and custom-scheme documents).
+  installSecurityHeaders(currentSession, { isDevServer: () => Boolean(trustedDevUrl()) })
 }
 
 function installModelProtocol() {
@@ -5781,6 +5757,11 @@ async function createWindow() {
   }
   mainWindow.once('ready-to-show', revealWindow)
   mainWindow.on('focus', () => vaultWatcher?.nudge())
+  // No periodic rescans while the window is hidden or minimized; showing it rescans at once.
+  mainWindow.on('minimize', () => vaultWatcher?.setActive(false))
+  mainWindow.on('hide', () => vaultWatcher?.setActive(false))
+  mainWindow.on('restore', () => vaultWatcher?.setActive(true))
+  mainWindow.on('show', () => vaultWatcher?.setActive(true))
   mainWindow.webContents.on('did-fail-load', revealWindow)
 
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())

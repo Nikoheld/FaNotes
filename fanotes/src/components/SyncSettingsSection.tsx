@@ -1,4 +1,4 @@
-import { Check, Cloud, CloudOff, Copy, KeyRound, Laptop, LoaderCircle, LogOut, RefreshCw, ShieldCheck, Smartphone, Trash2, TriangleAlert, UserPlus } from 'lucide-react'
+import { Check, Clock, Cloud, CloudOff, Copy, KeyRound, Laptop, LoaderCircle, LogOut, RefreshCw, ShieldCheck, Smartphone, Trash2, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { getUiLocale } from '../i18n'
 import { MCP_CONNECTOR_NAME, mcpServerUrl, type McpGrantInfo } from '../lib/mcp/client'
@@ -155,7 +155,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
           <div id="settings-sync-account" className={`setting-card sync-status-card is-${syncState.status}`}>
             <div className="setting-card-title"><Cloud size={16} /><span>Konto & Status</span></div>
             <div className="sync-status-hero">
-              <span className="sync-status-icon">{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={20} /> : syncState.status === 'offline' ? <CloudOff size={20} /> : syncState.status === 'error' ? <TriangleAlert size={20} /> : <ShieldCheck size={20} />}</span>
+              <span className="sync-status-icon">{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={20} /> : syncState.status === 'offline' ? <CloudOff size={20} /> : syncState.status === 'error' ? <TriangleAlert size={20} /> : syncState.status === 'paused' ? <Clock size={20} /> : <ShieldCheck size={20} />}</span>
               <div>
                 <strong data-i18n-ignore>{syncState.account.email}</strong>
                 <p>{syncStatusLabel(syncState)} · Zuletzt: {formatWhen(syncState.lastSyncAt)}</p>

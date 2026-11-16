@@ -526,7 +526,10 @@ export const createClassTimetables = (options = {}) => {
   }
   const currentVersion = async () => {
     const pointer = await readJson(join(root, 'current.json'))
-    return pointer && versionDir(pointer.version) ? pointer.version : null
+    // A missing or broken pointer can start again. A pointer that is there but not a version must not look unpublished.
+    if (!pointer) return null
+    if (!versionDir(pointer.version)) throw Object.assign(new Error('timetable pointer'), { code: 'EBADMSG' })
+    return pointer.version
   }
   const readIndex = async () => {
     const at = now().getTime()
@@ -534,6 +537,11 @@ export const createClassTimetables = (options = {}) => {
     if (indexCache && indexCache.generation === generation && at - indexCache.at < 30_000) return indexCache.value
     const version = await currentVersion()
     const index = version ? await readJson(join(versionDir(version), 'index.json')) : null
+    // A missing or broken catalog can start again. A file that is there but not the class and room lists must not look unpublished.
+    if (index != null) {
+      const known = typeof index === 'object' && !Array.isArray(index) && Array.isArray(index.classes) && Array.isArray(index.rooms) && (index.warnings == null || Array.isArray(index.warnings))
+      if (!known) throw Object.assign(new Error('timetable index'), { code: 'EBADMSG' })
+    }
     const value = index ? { ...index, version } : null
     if (generation === indexGeneration) indexCache = { at: now().getTime(), value, generation }
     return value
@@ -575,6 +583,11 @@ export const createClassTimetables = (options = {}) => {
     const version = await currentVersion()
     if (!version) return null
     const rooms = await readJson(join(versionDir(version), 'rooms.json'))
+    // A missing or broken file is absent. A file that is there but not the room map must not look empty.
+    if (rooms != null) {
+      const known = typeof rooms === 'object' && !Array.isArray(rooms) && Object.values(rooms).every((entries) => Array.isArray(entries))
+      if (!known) throw Object.assign(new Error('timetable rooms'), { code: 'EBADMSG' })
+    }
     if (!rooms || !Object.hasOwn(rooms, name)) return null
     return { room: name, entries: rooms[name] }
   }
@@ -587,7 +600,12 @@ export const createClassTimetables = (options = {}) => {
     const dir = versionDir(version)
     const task = (async () => {
       const stored = await readJson(join(dir, 'classes.json'))
-      if (stored) return stored
+      // A missing or broken file can be built again. A file that is there but not the class weeks must not look empty, or this rebuild replaces it.
+      if (stored != null) {
+        const weeks = typeof stored === 'object' && !Array.isArray(stored) && Object.keys(stored).every((code) => CLASS_CODE.test(code))
+        if (!weeks) throw Object.assign(new Error('timetable classes'), { code: 'EBADMSG' })
+        return stored
+      }
       let text
       try { text = (await run('pdftotext', ['-bbox-layout', join(dir, 'source.pdf'), '-'])).stdout } catch { return null }
       const weeks = classWeeksOf(parseTimetableBbox(text))

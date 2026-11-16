@@ -187,6 +187,72 @@ try {
     assert.ok(squash(pages[headerPage].items.map((item) => item.str).join(' ')).includes(layout.pages[headerPage].footer.center.replace(/ /gu, ' ')), 'footer with page fields')
   })
 
+  await test('PDF: draws the layout\'s pieces (a run of spaces keeps its length, indentation after a break is drawn, hanging spaces are not)', async () => {
+    const mini = defaults.newStory({ title: 'Leerzeichen', language: 'de-CH', deviceId: 'dev1', now })
+    const long = 'Eingerückt und danach noch ein sehr langer Satz, der umbrechen muss, weil er nicht auf eine Zeile passt, und noch länger, damit es mehrere Zeilen werden.'
+    const entries = [
+      { text: `Zeile   mit    Lücken.\n      ${long}` },
+      { text: 'Anschrift   \nStrasse 1   \nOrt  ', align: 'center' },
+      { text: 'Rechts   \nbündig  ', align: 'right' },
+      { text: `${long} ${long} Donaudampfschifffahrtsgesellschaft`, align: 'justify' },
+    ]
+    const order = keys.keysBetween(null, null, entries.length)
+    mini.scenes[0].paragraphs = entries.map((entry, index) => ({ id: `para0000000${index + 1}`, key: order[index], v: { dev1: 1 }, style: 'body', runs: [{ text: entry.text }], ...(entry.align ? { align: entry.align } : {}) }))
+    const prepared = prepareModule.prepare(mini)
+    const { layout, measurer } = await exporter.exportLayout(prepared, files, options)
+    const result = await exporter.exportStory(mini, 'pdf', { ...options, layout, measurer })
+    const document = await pdfjs.getDocument({ data: result.bytes.slice(), disableFontFace: true, useSystemFonts: false, verbosity: 0 }).promise
+    // Everything the page draws, in drawing order, as the glyph strings of its text operations.
+    const drawn = []
+    for (let index = 1; index <= document.numPages; index += 1) {
+      const list = await (await document.getPage(index)).getOperatorList()
+      list.fnArray.forEach((fn, position) => {
+        if (fn === pdfjs.OPS.showText) drawn.push(list.argsArray[position][0].filter((glyph) => glyph && typeof glyph === 'object').map((glyph) => glyph.unicode).join(''))
+      })
+    }
+    const expectedSpaces = []
+    let hanging = 0
+    let hyphens = 0
+    const addLine = (box) => {
+      for (const piece of box.pieces) {
+        if (piece.hyphen) hyphens += 1
+        if (piece.kind !== 'space') continue
+        if (piece.hang) hanging += 1
+        else expectedSpaces.push(' '.repeat(piece.to - piece.from))
+      }
+    }
+    for (const page of layout.pages) {
+      for (const placed of page.lines) addLine(layout.layouts[placed.blockIndex].lines[placed.lineIndex])
+      for (const note of page.footnotes) note.layout.lines.forEach(addLine)
+    }
+    assert.ok(hanging >= 6, `${hanging} hanging spaces in the layout (at soft wraps, before breaks, at the end)`)
+    assert.ok(hyphens >= 1, 'a word is hyphenated')
+    const drawnSpaces = drawn.filter((text) => /^ +$/u.test(text))
+    assert.deepEqual(drawnSpaces, expectedSpaces, 'one glyph per typed space, none for hanging spaces')
+    assert.ok(drawnSpaces.includes('   ') && drawnSpaces.includes('    ') && drawnSpaces.includes('      '), 'runs of 3, 4 and the 6 spaces of the indentation')
+    assert.equal(drawn.filter((text) => text === '-').length, hyphens, 'one hyphen glyph per hyphenated line')
+    // Where the lines start: the first glyph of every line is where the layout put its first word (indentation, centred and right-aligned lines included).
+    const { pages } = await pdfText(result.bytes)
+    const PX = 0.75
+    const height = layout.pageHeight * PX
+    let checked = 0
+    layout.pages.forEach((page, pageIndex) => {
+      for (const placed of page.lines) {
+        const box = layout.layouts[placed.blockIndex].lines[placed.lineIndex]
+        const first = box.pieces.find((piece) => piece.kind === 'word')
+        if (!first || layout.layouts[placed.blockIndex].style.listMarker) continue
+        const band = pages[pageIndex].items.filter((item) => {
+          const baseline = (height - item.y) / PX
+          return item.str.trim() && baseline > placed.y + 0.5 && baseline < placed.y + box.height + 0.5 && item.size < box.height * PX
+        })
+        assert.ok(band.length, `page ${pageIndex + 1} line at ${Math.round(placed.y)} has text`)
+        assert.ok(Math.abs(Math.min(...band.map((item) => item.x)) - (placed.x + first.x) * PX) < 1, `x of the line at ${Math.round(placed.y)} on page ${pageIndex + 1}`)
+        checked += 1
+      }
+    })
+    assert.ok(checked >= 12, `${checked} lines checked`)
+  })
+
   await test('PDF: endnotes per chapter and at the end of the book (layout option)', async () => {
     const prepared = prepareModule.prepare(story)
     for (const notes of ['endnotes-chapter', 'endnotes-book']) {
@@ -338,6 +404,30 @@ try {
       assert.ok(!all.includes('GEHEIMER') && !all.includes('PAPIERKORB'))
       if (notes === 'endnotes-book') assert.ok(names.includes('OEBPS/fonts/Literata-Regular.ttf') && names.includes('OEBPS/text/notes.xhtml'))
     }
+  })
+
+  await test('EPUB: language values are escaped even when they never went through the model sanitiser', async () => {
+    const hostile = makeStory()
+    hostile.manifest.language = 'de"><script>alert(1)</script>'
+    const [firstScene] = [...hostile.scenes.values()]
+    firstScene.paragraphs[0].lang = 'en"><b onclick="x">'
+    firstScene.paragraphs[1].runs[0].m = { ...(firstScene.paragraphs[1].runs[0].m ?? {}), lang: 'fr"><i onclick="x">' }
+    const result = await exporter.exportStory(hostile, 'epub', { ...options, notes: 'footnotes' })
+    const zip = await JSZip.loadAsync(result.bytes)
+    let checked = 0
+    for (const name of Object.keys(zip.files).filter((entry) => /\.(xhtml|opf|ncx)$/u.test(entry))) {
+      const xml = await zip.file(name).async('string')
+      assertWellFormed(xml, `hostile language ${name}`)
+      assert.ok(!/<script|<b onclick|<i onclick|"><(?:script|b|i)\b/u.test(xml), `${name}: no injected markup`)
+      checked += 1
+    }
+    assert.ok(checked >= 5, 'every XHTML, OPF and NCX file was inspected')
+    const opf = await zip.file('OEBPS/content.opf').async('string')
+    assert.ok(opf.includes('<dc:language>de&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;</dc:language>'))
+    assert.ok((await zip.file('OEBPS/toc.ncx').async('string')).includes('xml:lang="de&quot;&gt;&lt;script&gt;'))
+    const bodies = (await Promise.all(Object.keys(zip.files).filter((entry) => /^OEBPS\/text\/c\d+\.xhtml$/u.test(entry)).map((entry) => zip.file(entry).async('string')))).join('')
+    assert.ok(bodies.includes('lang="en&quot;&gt;&lt;b onclick=&quot;x&quot;&gt;"'), 'paragraph language is escaped')
+    assert.ok(bodies.includes('lang="fr&quot;&gt;&lt;i onclick=&quot;x&quot;&gt;"'), 'run language is escaped')
   })
 
   // ── Markdown and text ──────────────────────────────────────────────────
