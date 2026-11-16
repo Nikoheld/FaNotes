@@ -58,6 +58,7 @@ import { subscribePdfReveal } from '../lib/docSearch/reveal'
 import { runLocalPdfOcr } from '../lib/pdfOcrRun'
 import { VIEW_ZOOM_MIN, readSharedZoomMax, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
 import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
+import { loadPdfReadingSpot, pdfScrollDeltaForSpot, pdfSpotFromBoxes, savePdfReadingSpot } from '../lib/pdfReadingSpot'
 import { bindHandGestures, pinchFactorFromWheel, shouldTakeSheetZoom } from '../../../src/lib/handGestures'
 import { usePaperView } from './PaperView'
 
@@ -851,7 +852,68 @@ export function PdfNoteView({
     }
     const node = pagesRef.current?.querySelector(`[data-pdf-page="${currentPageRef.current}"]`)
     node?.scrollIntoView({ block: pdfPageScrollIntoViewBlock('center'), behavior: 'auto' })
+    // Book pane: go back to the exact spot inside the page, not its centre.
+    const scroller = viewRef.current
+    const spot = loadPdfReadingSpot(path)
+    if (!scroller || !spot || spot.page !== currentPageRef.current) return undefined
+    let stopped = false
+    let frames = 4
+    let frame = 0
+    const apply = () => {
+      const target = pagesRef.current?.querySelector<HTMLElement>(`[data-pdf-page="${spot.page}"]`)
+      if (!target) return
+      const rect = target.getBoundingClientRect()
+      const delta = pdfScrollDeltaForSpot(scroller.getBoundingClientRect().top, { top: rect.top, height: rect.height }, spot.frac)
+      if (Math.abs(delta) >= 1) scroller.scrollTop += delta
+    }
+    const stop = () => { stopped = true }
+    const tick = () => {
+      frame = 0
+      if (stopped) return
+      apply()
+      frames -= 1
+      if (frames > 0) frame = window.requestAnimationFrame(tick)
+    }
+    apply()
+    frame = window.requestAnimationFrame(tick)
+    scroller.addEventListener('wheel', stop, { passive: true })
+    scroller.addEventListener('pointerdown', stop, { passive: true })
+    scroller.addEventListener('keydown', stop)
+    return () => {
+      stopped = true
+      if (frame) window.cancelAnimationFrame(frame)
+      scroller.removeEventListener('wheel', stop)
+      scroller.removeEventListener('pointerdown', stop)
+      scroller.removeEventListener('keydown', stop)
+    }
   }, [applyCameraZoom, autoFit, measureFit, pdf, path, setCameraMode])
+
+  // Book pane (no sheet camera): remember page + offset inside the page.
+  useEffect(() => {
+    if (cameraHosted || !pdf) return undefined
+    const scroller = viewRef.current
+    if (!scroller) return undefined
+    let timer = 0
+    const save = () => {
+      timer = 0
+      const pages = pagesRef.current
+      if (!pages) return
+      const boxes = Array.from(pages.querySelectorAll<HTMLElement>('[data-pdf-page]')).map((el) => {
+        const rect = el.getBoundingClientRect()
+        return { page: Number(el.dataset.pdfPage) || 1, top: rect.top, height: rect.height }
+      })
+      const spot = pdfSpotFromBoxes(scroller.getBoundingClientRect().top, boxes)
+      if (spot) savePdfReadingSpot(path, spot)
+    }
+    const onScroll = () => {
+      if (!timer) timer = window.setTimeout(save, 250)
+    }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      scroller.removeEventListener('scroll', onScroll)
+      if (timer) { window.clearTimeout(timer); save() }
+    }
+  }, [cameraHosted, pdf, path])
 
   // Fit factors follow the viewport and the page boxes (ratios arrive per page).
   useEffect(() => {
