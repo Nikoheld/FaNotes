@@ -596,3 +596,43 @@ test('a commute file that is not the route list is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a commute state file that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-state-'))
+  const accountId = 'e'.repeat(32)
+  const stateFile = join(root, 'accounts', accountId, 'commute-state.json')
+  const stored = '{"version":2,"alerts":["keep-this-alert"]}\n'
+  const pinned = route({ pins: [{ line: 'S29', stop: 'Knoten', departure: '07:30', days: [5] }] })
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [pinned], settings: { delayThreshold: 3 } })
+    await writeFile(stateFile, stored, { mode: 0o600 })
+    await assert.rejects(() => commute.board(accountId), (error) => error?.code === 'EBADMSG')
+    await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(stateFile, 'utf8'), stored)
+    await writeFile(stateFile, JSON.stringify({ version: 1, kept: true, routes: {} }))
+    await commute.checkAccount(accountId)
+    const kept = JSON.parse(await readFile(stateFile, 'utf8'))
+    assert.equal(kept.kept, true)
+    assert.equal(typeof kept.routes, 'object')
+    assert.equal(Array.isArray(kept.routes), false)
+    await rm(stateFile)
+    const again = createCommute({
+      root,
+      now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+      lessonsFor: async () => [],
+      provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+    })
+    await again.checkAccount(accountId)
+    const fresh = JSON.parse(await readFile(stateFile, 'utf8'))
+    assert.equal(typeof fresh.routes, 'object')
+    assert.equal(Array.isArray(fresh.routes), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
