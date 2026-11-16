@@ -27,6 +27,8 @@ class OkHttpDiagnosticsTransport(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build(),
 ) : DiagnosticsTransport {
     override suspend fun post(url: String, json: String): Boolean = withContext(Dispatchers.IO) {

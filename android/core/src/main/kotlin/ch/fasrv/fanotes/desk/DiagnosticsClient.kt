@@ -35,6 +35,8 @@ class DiagnosticsClient(
     private val clock: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { newInstallId() },
 ) {
+    /** One daily send at a time: a tick and a toggle change must not both post the same report. */
+    private val dailyInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     private var consent = DiagnosticsConsent()
     private var context = DiagnosticsContext()
     private var counters = LinkedHashMap<String, Int>()
@@ -165,6 +167,15 @@ class DiagnosticsClient(
 
     /** Called on start and then now and then; sends at most one report per day and only while a toggle is on. */
     suspend fun sendDailyIfDue(): Boolean {
+        if (!dailyInFlight.compareAndSet(false, true)) return false
+        try {
+            return sendDailyLocked()
+        } finally {
+            dailyInFlight.set(false)
+        }
+    }
+
+    private suspend fun sendDailyLocked(): Boolean {
         val now = clock()
         val payload: JsonValue.Obj
         synchronized(this) {

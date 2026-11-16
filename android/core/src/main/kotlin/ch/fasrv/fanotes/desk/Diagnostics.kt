@@ -70,6 +70,7 @@ private val SCRUB_STEPS: List<Pair<Regex, (MatchResult) -> String>> = listOf(
     rx("$B(secret|password|passwort|passwd|token|key|apikey|api[_-]key|authorization|auth|credentials?)$B[ \\t]*[:=][^\\n]*", true) to { m -> "${m.groupValues[1]}: <redacted>" },
     rx("${B}eyJ[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]{4,}(?:\\.[A-Za-z0-9_-]*)?") to { _ -> "<token>" },
     rx("$B(?:AKIA|ASIA)[0-9A-Z]{12,}$B|${B}sk-[A-Za-z0-9_-]{6,}|$B(?:gh[pousr]_|github_pat_|xox[abprs]-|AIza|glpat-|npm_|pk_live_|sk_live_|rk_live_)[A-Za-z0-9_-]{6,}") to { _ -> "<token>" },
+    rx("${B}content://[^\\n,;<>|\"]*", true) to { _ -> "<url>" },
     rx("$B[a-z][a-z0-9+.-]*://[^$S)\"'<>]+|${B}www\\.[^$S)\"'<>]+", true) to { _ -> "<url>" },
     rx("[A-Za-z0-9._%+-]+@[A-Za-z0-9._-]+") to { _ -> "<email>" },
     rx("\\[[0-9a-f:.]{2,45}\\](?::[0-9]{1,5})?", true) to { _ -> "<ip>" },
@@ -78,7 +79,8 @@ private val SCRUB_STEPS: List<Pair<Regex, (MatchResult) -> String>> = listOf(
     rx("$B[0-9]{3}[- ][0-9]{3}[- ][0-9]{3}$B") to { _ -> "<code>" },
     QUOTES to { _ -> "<quoted>" },
     rx("<dir>(?:[\\\\/][^\\n,;<>|?*\"]*)?") to { _ -> "<path>" },
-    rx("(?:[A-Za-z]:[\\\\/]|\\\\\\\\[^$S\\\\]+\\\\|/(?:home|Users|mnt|media|srv|var|tmp|root|opt|run|Volumes)/)[^\\n,;<>|?*\"]*") to { _ -> "<path>" },
+    rx("(?:[A-Za-z]:[\\\\/]|\\\\\\\\[^$S\\\\]+\\\\|/(?:home|Users|mnt|media|srv|var|tmp|root|opt|run|Volumes|storage|sdcard0?|data)/)[^\\n,;<>|?*\"]*") to { _ -> "<path>" },
+    rx("(?:(?:tree|document)/)?(?:primary|home|[0-9A-F]{4}-[0-9A-F]{4}):[^\\n,;<>|?*\"]*", true) to { _ -> "<path>" },
     rx("[^$S/\\\\<>]+(?:[\\\\/][^$S/\\\\<>]+)+[\\\\/]?|[\\\\/][^$S/\\\\<>]+[\\\\/]") to { _ -> "<path>" },
     rx("[^$S<>]+\\.(?:md|markdown|famd|pdf|png|jpe?g|gif|webp|svg|story|json|txt|docx?|odt|mp3|wav|m4a|mp4|webm|zip|onetoc2|onepkg)$B", true) to { _ -> "<file>" },
     rx("$B[A-Fa-f0-9]{24,}$B") to { _ -> "<hash>" },
@@ -88,7 +90,15 @@ private val SCRUB_STEPS: List<Pair<Regex, (MatchResult) -> String>> = listOf(
 private val WHITESPACE_RUN = rx("[$S]+")
 
 /** Where the app lives, so its own paths and names can be found in free text. */
-data class DiagnosticsContext(val vaultPath: String = "", val homeDir: String = "", val userName: String = "")
+data class DiagnosticsContext(
+    val vaultPath: String = "",
+    val homeDir: String = "",
+    val userName: String = "",
+    /** Further absolute paths or URIs of this install (for example the SAF tree URI), scrubbed as a whole, spaces included. */
+    val extraPaths: List<String> = emptyList(),
+    /** Further names of this install (folder display name, device model, device name), scrubbed as whole phrases. */
+    val extraNames: List<String> = emptyList(),
+)
 
 /** Strict `decodeURIComponent` for a run of `%XX` escapes. A malformed run stays as it is. */
 private fun decodeUriRun(run: String): String {
@@ -115,10 +125,16 @@ private fun dirPattern(dir: String): Regex {
 fun scrubText(input: String?, context: DiagnosticsContext = DiagnosticsContext(), max: Int = 300): String {
     var text = input ?: ""
     repeat(2) { text = PERCENT_RUN.replace(text) { decodeUriRun(it.value) } }
-    val dirs = listOf(context.homeDir, context.vaultPath).filter { it.length >= 3 }.sortedByDescending { it.length }
+    fun decoded(value: String): String {
+        var out = value
+        repeat(2) { out = PERCENT_RUN.replace(out) { decodeUriRun(it.value) } }
+        return out
+    }
+    val extraPaths = context.extraPaths.flatMap { listOf(it, decoded(it)) }
+    val dirs = (listOf(context.homeDir, context.vaultPath) + extraPaths).distinct().filter { it.length >= 3 }.sortedByDescending { it.length }
     for (dir in dirs) text = dirPattern(dir).replace(text) { "<dir>" }
     val words = LinkedHashSet<String>()
-    for (word in listOf(context.userName) + context.vaultPath.split(Regex("[\\\\/]"))) {
+    for (word in listOf(context.userName) + context.extraNames + context.vaultPath.split(Regex("[\\\\/]"))) {
         if (word.length >= 3 && word.lowercase() !in SYSTEM_WORDS) words += word
     }
     for ((pattern, replacement) in SCRUB_STEPS) text = pattern.replace(text, replacement)
