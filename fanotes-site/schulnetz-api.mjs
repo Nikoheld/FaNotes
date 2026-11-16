@@ -325,6 +325,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     // A missing or broken file can start again. A file that is there but not this link, including a push token that is not a token, must not look connected, or the next link drops that token and the next upload replaces the snapshot.
     if (link == null) return null
     const timeKnown = (value) => value == null || value === '' || (typeof value === 'string' && Number.isFinite(Date.parse(value)))
+    const sealKnown = (value) => value == null || value === '' || (plainObject(value) && value.v === 1 && typeof value.iv === 'string' && typeof value.tag === 'string' && typeof value.data === 'string')
     const known = plainObject(link)
       && (link.fcmTokens == null || (Array.isArray(link.fcmTokens) && link.fcmTokens.every(isValidFcmToken)))
       && (link.pushKeys == null || plainObject(link.pushKeys))
@@ -333,6 +334,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       && (link.revision == null || (typeof link.revision === 'number' && Number.isFinite(link.revision)))
       // A saved sign-in time that is not a time must not look expired, or the next poll deletes the session.
       && timeKnown(link.cookiesSavedAt) && timeKnown(link.accessExpiresAt)
+      // A saved sign-in that is not a sealed token must not look signed out, or the next poll drops the session.
+      && sealKnown(link.refresh) && sealKnown(link.access) && sealKnown(link.sso) && sealKnown(link.serverSession)
     if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)
