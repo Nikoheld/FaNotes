@@ -61,8 +61,8 @@ import ch.fasrv.fanotes.study.formatClock
 import ch.fasrv.fanotes.study.groupMarksByPage
 import ch.fasrv.fanotes.study.marksToMarkdown
 import ch.fasrv.fanotes.study.newStudyId
-import ch.fasrv.fanotes.study.parseSortData
-import ch.fasrv.fanotes.study.parseTermData
+import ch.fasrv.fanotes.study.sortEditable
+import ch.fasrv.fanotes.study.termEditable
 import ch.fasrv.fanotes.study.readTaskList
 import ch.fasrv.fanotes.study.removeSortCard
 import ch.fasrv.fanotes.study.sortDataJson
@@ -246,12 +246,15 @@ private fun StudyMarksTab(model: FaNotesViewModel) {
 fun StudyBlockDialog(model: FaNotesViewModel) {
     val edit by model.studyEdit.collectAsStateWithLifecycle()
     val markdown by model.markdown.collectAsStateWithLifecycle()
-    val (kindId, index) = edit ?: return
-    val ref = remember(markdown, index) { model.studyBlockAt(index) }
-    if (ref == null || ref.kind.id != kindId) {
+    val target = edit ?: return
+    val ref = remember(markdown, target) { model.studyBlockFor(target) }
+    if (ref == null) {
         model.closeStudyBlock()
+        model.message.value = "Die Notiz hat sich geändert. Öffne den Block neu."
         return
     }
+    val sort = if (ref.kind == StudyKind.SORT) remember(ref.body) { sortEditable(ref.body) } else null
+    val terms = if (ref.kind == StudyKind.TERM) remember(ref.body) { termEditable(ref.body) } else null
     val title = when (ref.kind) {
         StudyKind.SORT -> "Sortier-Board"
         StudyKind.TERM -> "Definitionskarten"
@@ -265,14 +268,14 @@ fun StudyBlockDialog(model: FaNotesViewModel) {
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
                 when (ref.kind) {
-                    StudyKind.SORT -> SortBoardEditor(parseSortData(ref.body) ?: defaultSortData()) { model.writeStudyBlock(index, sortDataJson(it)) }
-                    StudyKind.TERM -> TermEditor(parseTermData(ref.body) ?: defaultTermData()) { model.writeStudyBlock(index, termDataJson(it)) }
+                    StudyKind.SORT -> if (sort != null) SortBoardEditor(sort) { model.writeStudyBlock(sortDataJson(it)) } else Text(ui("Dieser Block ist nicht lesbar oder zu gross für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."))
+                    StudyKind.TERM -> if (terms != null) TermEditor(terms) { model.writeStudyBlock(termDataJson(it)) } else Text(ui("Dieser Block ist nicht lesbar oder zu gross für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."))
                     else -> Text(ui("Diesen Block bearbeitest du am Computer (am Computer bearbeiten). Hier siehst du ihn in der Notiz; Änderungen vom Computer kommen per Sync."))
                 }
             }
         },
         confirmButton = { TextButton(onClick = { model.closeStudyBlock() }) { Text(ui("Fertig")) } },
-        dismissButton = { TextButton(onClick = { model.showStudySource(index) }) { Text(ui("Quelltext zeigen")) } },
+        dismissButton = { TextButton(onClick = { model.showStudySource() }) { Text(ui("Quelltext zeigen")) } },
     )
 }
 

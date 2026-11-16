@@ -4359,5 +4359,7 @@
   "Begriff hinzufügen": "Add term",
   "Die Auftragserkennung braucht Android 15. Du kannst Aufträge von Hand hinzufügen.": "Assignment detection needs Android 15. You can add assignments by hand.",
   "Lernwerkzeug-Blöcke gehören in eine Markdown-Notiz.": "Study blocks belong in a Markdown note.",
-  "Diesen Block legst du am Computer an. Auf dem Tablet siehst du ihn in der Notiz.": "You create this block on the computer. On the tablet you see it in the note."
+  "Diesen Block legst du am Computer an. Auf dem Tablet siehst du ihn in der Notiz.": "You create this block on the computer. On the tablet you see it in the note.",
+  "Die Notiz hat sich geändert. Öffne den Block neu.": "The note has changed. Open the block again.",
+  "Dieser Block ist nicht lesbar oder zu gross für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“.": "This block cannot be read or is too large for the tablet. It stays unchanged; see and edit it through “Show source”."
 }
