@@ -681,6 +681,60 @@ test('a commute pin the sanitizer would skip is left in place', async () => {
   }
 })
 
+test('a commute weekday or schedule the sanitizer would replace is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-day-'))
+  const accountId = '9'.repeat(32)
+  const routeFile = join(root, 'accounts', accountId, 'commute.json')
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [route()], settings: { delayThreshold: 3 } })
+    const valid = await readFile(routeFile, 'utf8')
+    const keep = async (mutate) => {
+      const parsed = JSON.parse(valid)
+      mutate(parsed.routes[0])
+      const stored = `${JSON.stringify(parsed)}\n`
+      await writeFile(routeFile, stored, { mode: 0o600 })
+      await assert.rejects(() => commute.view(accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(
+        () => commute.save(accountId, { routes: [route()], settings: { delayThreshold: 9 } }),
+        (error) => error?.code === 'EBADMSG',
+      )
+      assert.equal(await readFile(routeFile, 'utf8'), stored)
+    }
+    await keep((item) => { item.schedule = { ...item.schedule, days: [1, 8] } })
+    await keep((item) => { item.schedule = { ...item.schedule, days: [8] } })
+    await keep((item) => { item.schedule = { ...item.schedule, mode: 'weekly' } })
+    await keep((item) => { item.schedule = { ...item.schedule, bufferMinutes: 'slow' } })
+    await keep((item) => { item.pins = [{ days: [1, 9], line: 'S1', stop: 'Testdorf', departure: '07:30' }] })
+    const open = async (mutate) => {
+      const parsed = JSON.parse(valid)
+      mutate(parsed.routes[0])
+      const stored = `${JSON.stringify(parsed)}\n`
+      await writeFile(routeFile, stored, { mode: 0o600 })
+      const opened = await commute.view(accountId)
+      assert.equal(opened.routes[0].id, 'a1b2c3d4e5f6')
+      assert.equal(await readFile(routeFile, 'utf8'), stored)
+      return opened
+    }
+    const textDay = await open((item) => { item.schedule = { ...item.schedule, days: ['1'] } })
+    assert.deepEqual(textDay.routes[0].schedule.days, [1])
+    const emptyDays = await open((item) => { item.schedule = { ...item.schedule, days: [] } })
+    assert.deepEqual(emptyDays.routes[0].schedule.days, [1, 2, 3, 4, 5])
+    const capped = await open((item) => { item.schedule = { ...item.schedule, bufferMinutes: 90 } })
+    assert.equal(capped.routes[0].schedule.bufferMinutes, 60)
+    await writeFile(routeFile, valid, { mode: 0o600 })
+    assert.equal((await commute.view(accountId)).routes[0].schedule.mode, 'firstLesson')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('commute settings that are not the known shape are left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'commute-settings-'))
   const accountId = 'e'.repeat(32)

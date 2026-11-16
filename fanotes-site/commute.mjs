@@ -502,23 +502,33 @@ export const createCommute = (options = {}) => {
       if (!known) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // An entry the sanitizer would skip must not look absent, or the next check deletes its alert state and the next save drops the route.
       if (sanitizeRoutes(stored.routes).length !== stored.routes.length) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      const weekdayKept = (day) => {
+        const number = Number(day)
+        return Number.isInteger(number) && number >= 1 && number <= 7
+      }
       const detailKnown = (route) => {
         const pins = route?.pins
         const vias = route?.vias
         const schedule = route?.schedule
         const times = schedule?.times
         const days = schedule?.days
+        const mode = schedule?.mode
+        const buffer = schedule?.bufferMinutes
         if (pins != null && !Array.isArray(pins)) return false
         if (Array.isArray(pins) && sanitizePins(pins.slice(0, MAX_PINS)).length !== Math.min(pins.length, MAX_PINS)) return false
+        if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin) => Array.isArray(pin?.days) && pin.days.some((day) => !weekdayKept(day)))) return false
         if (vias != null && !Array.isArray(vias)) return false
         if (Array.isArray(vias) && sanitizeVias({ vias: vias.slice(0, MAX_VIAS) }).length !== Math.min(vias.length, MAX_VIAS)) return false
         if (schedule != null && (typeof schedule !== 'object' || Array.isArray(schedule))) return false
         if (days != null && !Array.isArray(days)) return false
+        if (Array.isArray(days) && days.some((day) => !weekdayKept(day))) return false
+        if (mode != null && !['none', 'times', 'firstLesson', 'lastLesson'].includes(mode)) return false
+        if (buffer != null && buffer !== '' && (typeof buffer !== 'number' || !Number.isFinite(buffer))) return false
         if (times != null && !Array.isArray(times)) return false
         if (route?.schedule?.mode === 'times' && Array.isArray(times) && sanitizeSchedule({ mode: 'times', times: times.slice(0, MAX_TIMES) }).times.length !== Math.min(times.length, MAX_TIMES)) return false
         return true
       }
-      // A pin, via, or time the sanitizer would skip must not look absent, or the next save drops it. The caps stay.
+      // A pin, via, time, weekday, or schedule the sanitizer would replace must not look absent, or the next save drops it. The caps stay.
       if (!stored.routes.every(detailKnown)) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // Hidden labels or a threshold that are not the known shape must not look like the defaults, or the next save clears them.
       const settings = stored.settings
