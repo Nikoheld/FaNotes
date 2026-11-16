@@ -708,6 +708,47 @@ test('a timetable class file that is not the known shape is left in place', asyn
   }
 })
 
+test('a class week that is not a week is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-week-'))
+  const runs = []
+  const store = createClassTimetables({
+    root,
+    run: async (tool) => { runs.push(tool); throw new Error('pdf tool') },
+    now: () => new Date('2026-11-15T12:00:00.000Z'),
+  })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const classesFile = join(dir, 'classes.json')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  await writeFile(join(dir, 'index.json'), JSON.stringify({
+    uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+    classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: [], warnings: [],
+  }), { mode: 0o600 })
+  const keep = async (week) => {
+    const stored = `${JSON.stringify({ G26A: week })}\n`
+    await writeFile(classesFile, stored, { mode: 0o600 })
+    await assert.rejects(() => store.classWeek('G26A'), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(classesFile, 'utf8'), stored)
+    assert.deepEqual(runs, [])
+  }
+  try {
+    await keep('kept')
+    await keep(['kept'])
+    await keep({ teacher: 'Tst', semester: 'SJ', entries: 'kept', footnotes: [] })
+    await keep({ teacher: 'Tst', semester: 'SJ', entries: [], footnotes: 'kept' })
+    const good = { teacher: 'Tst', semester: 'SJ', entries: [{ day: 1, subject: 'kept' }], footnotes: [] }
+    await writeFile(classesFile, `${JSON.stringify({ G26A: good })}\n`, { mode: 0o600 })
+    const opened = await store.classWeek('G26A')
+    assert.equal(opened.class, 'G26A')
+    assert.equal(opened.teacher, 'Tst')
+    assert.equal(opened.entries[0].subject, 'kept')
+    assert.deepEqual(runs, [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a timetable room file that is not the known shape is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'timetable-rooms-'))
   const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
