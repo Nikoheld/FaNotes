@@ -222,6 +222,113 @@ test('a replace near the quota reuses the oldest archived note', async () => {
   assert.deepEqual(kept.body, newest)
 })
 
+test('a resumable upload does not reserve a note it will replace', async () => {
+  const uploadEmail = `quota-upload-${randomBytes(4).toString('hex')}@example.com`
+  const upload = await jsonCall('POST', '/api/v1/sync/register', {
+    email: uploadEmail,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Quota upload', platform: 'linux' },
+  })
+  assert.equal(upload.status, 201, JSON.stringify(upload.json))
+  const uploadToken = upload.json.token
+  const uploadAccount = upload.json.accountId
+  const put = (id, bytes, base) => call('PUT', `/api/v1/sync/files/${id}`, {
+    token: uploadToken,
+    accountId: uploadAccount,
+    body: bytes,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes.length),
+      'If-Match': String(base),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(bytes),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  const open = (id, size, digest, base, headers = {}) => jsonCall('POST', `/api/v1/sync/files/${id}/uploads`, { size }, uploadToken, uploadAccount, {
+    'If-Match': String(base),
+    'X-FaNotes-Meta': meta,
+    'X-FaNotes-Sha256': digest,
+    'X-FaNotes-Blank': '0',
+    ...headers,
+  })
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(1500)
+  const created = await put(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const blank = await open(id, 100, sha256(randomBytes(100)), revision, { 'X-FaNotes-Blank': '1' })
+  assert.equal(blank.status, 201, JSON.stringify(blank.json))
+  const otherId = randomBytes(32).toString('hex')
+  const blocked = await open(otherId, 500, sha256(randomBytes(500)), 0)
+  assert.equal(blocked.status, 507, JSON.stringify(blocked.json))
+  const aborted = await call('DELETE', `/api/v1/sync/files/${id}/uploads/${blank.json.uploadId}`, { token: uploadToken, accountId: uploadAccount })
+  assert.equal(aborted.status, 204)
+  const same = await open(id, original.length, sha256(original), revision)
+  assert.equal(same.status, 201, JSON.stringify(same.json))
+  const dropped = await call('DELETE', `/api/v1/sync/files/${id}/uploads/${same.json.uploadId}`, { token: uploadToken, accountId: uploadAccount })
+  assert.equal(dropped.status, 204)
+  const grown = await open(id, original.length, sha256(randomBytes(original.length)), revision)
+  assert.equal(grown.status, 507, JSON.stringify(grown.json))
+  const live = await call('GET', `/api/v1/sync/files/${id}`, { token: uploadToken, accountId: uploadAccount })
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, original)
+
+  const windowEmail = `quota-window-${randomBytes(4).toString('hex')}@example.com`
+  const windowAccount = await jsonCall('POST', '/api/v1/sync/register', {
+    email: windowEmail,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Quota window', platform: 'linux' },
+  })
+  assert.equal(windowAccount.status, 201, JSON.stringify(windowAccount.json))
+  const windowToken = windowAccount.json.token
+  const windowId = windowAccount.json.accountId
+  const putWindow = (fileId, bytes, base) => call('PUT', `/api/v1/sync/files/${fileId}`, {
+    token: windowToken,
+    accountId: windowId,
+    body: bytes,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': String(bytes.length),
+      'If-Match': String(base),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(bytes),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  const openWindow = (fileId, size, digest, base) => jsonCall('POST', `/api/v1/sync/files/${fileId}/uploads`, { size }, windowToken, windowId, {
+    'If-Match': String(base),
+    'X-FaNotes-Meta': meta,
+    'X-FaNotes-Sha256': digest,
+    'X-FaNotes-Blank': '0',
+  })
+  const roomId = randomBytes(32).toString('hex')
+  const first = randomBytes(210)
+  const roomCreated = await putWindow(roomId, first, 0)
+  assert.equal(roomCreated.status, 200, roomCreated.body.toString('utf8'))
+  let roomRevision = JSON.parse(roomCreated.body.toString('utf8')).revision
+  let roomBody = first
+  for (let index = 0; index < 8; index += 1) {
+    roomBody = randomBytes(210)
+    const stored = await putWindow(roomId, roomBody, roomRevision)
+    assert.equal(stored.status, 200, stored.body.toString('utf8'))
+    roomRevision = JSON.parse(stored.body.toString('utf8')).revision
+  }
+  const resumed = await openWindow(roomId, 210, sha256(randomBytes(210)), roomRevision)
+  assert.equal(resumed.status, 201, JSON.stringify(resumed.json))
+  const resumedAbort = await call('DELETE', `/api/v1/sync/files/${roomId}/uploads/${resumed.json.uploadId}`, { token: windowToken, accountId: windowId })
+  assert.equal(resumedAbort.status, 204)
+  const tooBig = await openWindow(roomId, 400, sha256(randomBytes(400)), roomRevision)
+  assert.equal(tooBig.status, 507, JSON.stringify(tooBig.json))
+  const roomLive = await call('GET', `/api/v1/sync/files/${roomId}`, { token: windowToken, accountId: windowId })
+  assert.equal(roomLive.status, 200)
+  assert.deepEqual(roomLive.body, roomBody)
+})
+
 test.after(() => new Promise((resolve) => {
   server.close(() => {
     rmSync(dataDirectory, { recursive: true, force: true })
