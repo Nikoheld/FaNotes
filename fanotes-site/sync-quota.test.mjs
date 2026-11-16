@@ -10,7 +10,9 @@ import test from 'node:test'
 const dataDirectory = mkdtempSync(join(tmpdir(), 'fanotes-sync-quota-'))
 process.env.FANOTES_SYNC_DIR = dataDirectory
 process.env.FANOTES_SYNC_QUOTA_BYTES = '2000'
+process.env.FANOTES_SYNC_FILE_CAP = '1'
 process.env.FANOTES_PUBLIC_ORIGIN = 'http://127.0.0.1'
+globalThis.FANOTES_SYNC_FILE_CAP = {}
 const { handleSyncRequest } = await import('./sync-api.mjs')
 
 const server = createServer(async (request, response) => {
@@ -427,6 +429,142 @@ test('a resumable replace leaves room for another note that still fits', async (
   assert.equal(allowed.status, 200, allowed.body.toString('utf8'))
   assert.deepEqual((await call('GET', `/api/v1/sync/files/${keptId}`, { token: archiveToken, accountId: archiveAccount })).body, keptBody)
   assert.deepEqual((await call('GET', `/api/v1/sync/files/${blockedId}`, { token: archiveToken, accountId: archiveAccount })).body, fits)
+})
+
+test('a new upload does not take the last file slot from an existing note', async () => {
+  const slotEmail = `quota-slot-${randomBytes(4).toString('hex')}@example.com`
+  const slot = await jsonCall('POST', '/api/v1/sync/register', {
+    email: slotEmail,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Quota slot', platform: 'linux' },
+  })
+  assert.equal(slot.status, 201, JSON.stringify(slot.json))
+  const slotToken = slot.json.token
+  const slotAccount = slot.json.accountId
+  globalThis.FANOTES_SYNC_FILE_CAP[slotAccount] = 1
+  try {
+    const put = (id, bytes, base) => call('PUT', `/api/v1/sync/files/${id}`, {
+      token: slotToken,
+      accountId: slotAccount,
+      body: bytes,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(bytes.length),
+        'If-Match': String(base),
+        'X-FaNotes-Meta': meta,
+        'X-FaNotes-Sha256': sha256(bytes),
+        'X-FaNotes-Blank': '0',
+      },
+    })
+    const id = randomBytes(32).toString('hex')
+    const original = randomBytes(1500)
+    const created = await put(id, original, 0)
+    assert.equal(created.status, 200, created.body.toString('utf8'))
+    const revision = JSON.parse(created.body.toString('utf8')).revision
+    const otherId = randomBytes(32).toString('hex')
+    const opened = await jsonCall('POST', `/api/v1/sync/files/${otherId}/uploads`, { size: 400 }, slotToken, slotAccount, {
+      'If-Match': '0',
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(randomBytes(400)),
+      'X-FaNotes-Blank': '0',
+    })
+    assert.equal(opened.status, 507, JSON.stringify(opened.json))
+    const next = randomBytes(200)
+    const replaced = await put(id, next, revision)
+    assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+    const third = await put(randomBytes(32).toString('hex'), randomBytes(100), 0)
+    assert.equal(third.status, 507, third.body.toString('utf8'))
+    const same = await jsonCall('POST', `/api/v1/sync/files/${id}/uploads`, { size: next.length }, slotToken, slotAccount, {
+      'If-Match': String(JSON.parse(replaced.body.toString('utf8')).revision),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(randomBytes(next.length)),
+      'X-FaNotes-Blank': '0',
+    })
+    assert.equal(same.status, 201, JSON.stringify(same.json))
+    assert.equal((await call('DELETE', `/api/v1/sync/files/${id}/uploads/${same.json.uploadId}`, { token: slotToken, accountId: slotAccount })).status, 204)
+    assert.deepEqual((await call('GET', `/api/v1/sync/files/${id}`, { token: slotToken, accountId: slotAccount })).body, next)
+    assert.equal((await call('GET', `/api/v1/sync/files/${otherId}`, { token: slotToken, accountId: slotAccount })).status, 404)
+  } finally {
+    delete globalThis.FANOTES_SYNC_FILE_CAP[slotAccount]
+  }
+})
+
+test('an open upload keeps the file slot it will fill', async () => {
+  const holdEmail = `quota-hold-${randomBytes(4).toString('hex')}@example.com`
+  const hold = await jsonCall('POST', '/api/v1/sync/register', {
+    email: holdEmail,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Quota hold', platform: 'linux' },
+  })
+  assert.equal(hold.status, 201, JSON.stringify(hold.json))
+  const holdToken = hold.json.token
+  const holdAccount = hold.json.accountId
+  globalThis.FANOTES_SYNC_FILE_CAP[holdAccount] = 2
+  try {
+    const put = (id, bytes, base) => call('PUT', `/api/v1/sync/files/${id}`, {
+      token: holdToken,
+      accountId: holdAccount,
+      body: bytes,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(bytes.length),
+        'If-Match': String(base),
+        'X-FaNotes-Meta': meta,
+        'X-FaNotes-Sha256': sha256(bytes),
+        'X-FaNotes-Blank': '0',
+      },
+    })
+    const firstId = randomBytes(32).toString('hex')
+    const first = randomBytes(200)
+    const created = await put(firstId, first, 0)
+    assert.equal(created.status, 200, created.body.toString('utf8'))
+    const secondId = randomBytes(32).toString('hex')
+    const second = randomBytes(200)
+    const opened = await jsonCall('POST', `/api/v1/sync/files/${secondId}/uploads`, { size: second.length }, holdToken, holdAccount, {
+      'If-Match': '0',
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(second),
+      'X-FaNotes-Blank': '0',
+    })
+    assert.equal(opened.status, 201, JSON.stringify(opened.json))
+    const thirdId = randomBytes(32).toString('hex')
+    const blocked = await put(thirdId, randomBytes(200), 0)
+    assert.equal(blocked.status, 507, blocked.body.toString('utf8'))
+    const patched = await call('PATCH', `/api/v1/sync/files/${secondId}/uploads/${opened.json.uploadId}`, {
+      token: holdToken,
+      accountId: holdAccount,
+      body: second,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(second.length),
+        'Upload-Offset': '0',
+      },
+    })
+    assert.equal(patched.status, 200, patched.body.toString('utf8'))
+    const finished = await call('POST', `/api/v1/sync/files/${secondId}/uploads/${opened.json.uploadId}/complete`, {
+      token: holdToken,
+      accountId: holdAccount,
+      headers: {
+        'Content-Length': '0',
+        'If-Match': '0',
+        'X-FaNotes-Meta': meta,
+        'X-FaNotes-Sha256': sha256(second),
+        'X-FaNotes-Blank': '0',
+      },
+    })
+    assert.equal(finished.status, 200, finished.body.toString('utf8'))
+    const again = await put(thirdId, randomBytes(200), 0)
+    assert.equal(again.status, 507, again.body.toString('utf8'))
+    assert.deepEqual((await call('GET', `/api/v1/sync/files/${firstId}`, { token: holdToken, accountId: holdAccount })).body, first)
+    assert.deepEqual((await call('GET', `/api/v1/sync/files/${secondId}`, { token: holdToken, accountId: holdAccount })).body, second)
+    assert.equal((await call('GET', `/api/v1/sync/files/${thirdId}`, { token: holdToken, accountId: holdAccount })).status, 404)
+  } finally {
+    delete globalThis.FANOTES_SYNC_FILE_CAP[holdAccount]
+  }
 })
 
 test.after(() => new Promise((resolve) => {

@@ -85,8 +85,11 @@ const directives = (policy) => new Map(policy.split(';').map((entry) => entry.tr
   assert.deepEqual(frames.map((frame) => frame.file).sort(), ['GlyphenWerkWorkspace.tsx', 'WorksheetLayer.tsx'], 'a new iframe needs a look at frame-src first')
   for (const { file, tag } of frames) {
     assert.doesNotMatch(tag, /\bsrc=\{(?:`|')?(?:data|blob):/u, `${file}: a data: or blob: frame source is refused by frame-src 'self'`)
-    // Known issue, not fixed here: the OneNote page frame still gets a data: URL, which frame-src 'self' refuses.
-    if (file === 'WorksheetLayer.tsx') assert.match(tag, /sandbox=""/u, 'worksheet pages stay in a frame without any permission')
+    if (file === 'WorksheetLayer.tsx') {
+      assert.match(tag, /sandbox=""/u, 'worksheet pages stay in a frame without any permission')
+      assert.match(tag, /\bsrcDoc=\{/u, 'the OneNote page is shown through srcDoc, which frame-src does not cover')
+      assert.doesNotMatch(tag, /\bsrc=/u, 'no src on the worksheet frame')
+    }
     else assert.match(tag, /src=\{`\.\/glyphenwerk\//u, 'GlyphenWerk is loaded from the app itself')
   }
 }

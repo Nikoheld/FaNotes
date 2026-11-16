@@ -366,7 +366,10 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
     setPdf(null)
     const load = initialDocument.kind === 'pdf'
       ? loadVaultPdfBytes(initialDocument.sourceRelativePath).then((bytes) => ({ kind: 'pdf' as const, bytes }))
-      : window.fanotes.readAssetDataUrl(initialDocument.sourceRelativePath).then((dataUrl) => ({ kind: 'asset' as const, dataUrl }))
+      : initialDocument.kind === 'html'
+        // Verified and policy-guarded by the main process; shown through srcdoc, which frame-src does not cover.
+        ? window.fanotes.readWorksheetHtml(initialDocument.id).then((html) => ({ kind: 'asset' as const, dataUrl: html }))
+        : window.fanotes.readAssetDataUrl(initialDocument.sourceRelativePath).then((dataUrl) => ({ kind: 'asset' as const, dataUrl }))
     void load
       .then(async (payload) => {
         if (!alive) return
@@ -607,7 +610,7 @@ export const WorksheetLayer = forwardRef<WorksheetLayerHandle, WorksheetLayerPro
         >
           <iframe
             className="worksheet-onenote-frame"
-            src={source}
+            srcDoc={source}
             title={`Importierte OneNote-Seite ${document.title}`}
             sandbox=""
             referrerPolicy="no-referrer"

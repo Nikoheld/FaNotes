@@ -1,0 +1,26 @@
+retry: 3000
+
+id: 4
+event: progress
+data: {"seq":4,"at":1794833019479,"type":"progress","text":"Tests laufen","percent":70}
+
+id: 5
+event: status
+data: {"seq":5,"at":1794833019575,"type":"status","from":"working","status":"pr_open","pr":{"number":42,"url":"https://github.com/x/y/pull/42","ci":"pending"}}
+
+id: 6
+event: status
+data: {"seq":6,"at":1794833019592,"type":"status","from":"pr_open","status":"waiting_for_you","pr":{"number":42,"url":"https://github.com/x/y/pull/42","ci":"success"}}
+
+id: 7
+event: message
+data: {"seq":7,"at":1794833019622,"type":"message","from":"owner","text":"Bitte auch Hellmodus."}
+
+id: 8
+event: approved
+data: {"seq":8,"at":1794833019634,"type":"approved"}
+
+id: 9
+event: status
+data: {"seq":9,"at":1794833019665,"type":"status","from":"waiting_for_you","status":"merged","pr":{"number":42,"url":"https://github.com/x/y/pull/42","ci":"success"}}
+
