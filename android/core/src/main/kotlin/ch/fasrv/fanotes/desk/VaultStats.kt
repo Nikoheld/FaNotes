@@ -15,14 +15,6 @@ const val STATS_NO_HOMEWORK_SUBJECT = "Ohne Fach"
 
 private val EXAM_WORDS = Regex("klausur|prüfung|pruefung|exam|test|schulaufgabe|probe|lernkontrolle|lk\\b|arbeit", setOf(RegexOption.IGNORE_CASE))
 private val DAY_KEY = Regex("^\\d{4}-\\d{2}-\\d{2}$")
-private val WORD = Regex("[\\p{L}\\p{N}][\\p{L}\\p{N}'’]*")
-private val WORD_STRIP = listOf(
-    Regex("<!--[\\s\\S]*?-->") to " ",
-    Regex("```[\\s\\S]*?```") to " ",
-    Regex("!\\[[^\\]]*\\]\\([^)]*\\)") to " ",
-    Regex("\\[([^\\]]*)\\]\\([^)]*\\)") to "$1",
-    Regex("[#>*_`~|-]+") to " ",
-)
 
 enum class StatKind(val id: String) { MARKDOWN("markdown"), HANDWRITING("handwriting"), PDF("pdf"), STORY("story"), IMAGE("image"), MEDIA("media") }
 
@@ -52,30 +44,123 @@ data class FactStats(
     val createdAtMs: Long = 0,
 )
 
-data class NoteFacts(val words: Int, val ink: Boolean, val cards: CardSummary?, val stats: FactStats?)
+/**
+ * What one note contributes. [partial] is true when it could only be read in part: it was bigger than
+ * the read cap, its payload could not be parsed, or memory ran out. The words are then a lower bound
+ * and [stats] may be missing.
+ */
+data class NoteFacts(val words: Int, val ink: Boolean, val cards: CardSummary?, val stats: FactStats?, val partial: Boolean = false)
 
-/** Words the way a student counts them: markdown syntax and the famd payload do not count. */
+/**
+ * Words the way a student counts them: markdown syntax and the famd payload do not count. The rules
+ * are the desktop ones (`vaultStats.mjs`): comments, fenced code, images and link targets go, link
+ * text stays, a word is a letter or digit followed by letters, digits and apostrophes.
+ *
+ * Every step is one linear scan. The regular expressions this replaces copied the whole text five
+ * times and, with many unclosed `<!--` or fences, rescanned the rest of the note for each one.
+ */
 fun countWords(markdown: String?): Int {
     if (markdown.isNullOrEmpty()) return 0
     var body: String = markdown
-    for ((pattern, replacement) in WORD_STRIP) body = pattern.replace(body, replacement)
-    return WORD.findAll(body).count()
+    body = removeSpans(body, "<!--", "-->")
+    body = removeSpans(body, "```", "```")
+    if (body.indexOf("](") >= 0) {
+        body = removeImages(body)
+        body = unwrapLinks(body)
+    }
+    // The syntax characters `# > * _ ` ~ | -` are neither letters nor digits, so they already end a word.
+    return countWordRuns(body)
 }
 
-fun summarizeCards(cards: List<FlashCard>, today: String): CardSummary? {
-    if (cards.isEmpty()) return null
-    var due = 0
-    var reps = 0
-    var lapses = 0
-    var reviewed = 0
-    for (card in cards) {
-        if (card.due <= today) due += 1
-        if (card.reps > 0) reviewed += 1
-        reps += card.reps.coerceAtLeast(0)
-        lapses += card.lapses.coerceAtLeast(0)
+/** `open[\s\S]*?close` replaced by a space, without rescanning once no closer is left. */
+private fun removeSpans(text: String, open: String, close: String): String {
+    var start = text.indexOf(open)
+    if (start < 0) return text
+    val out = StringBuilder(text.length)
+    var copied = 0
+    while (start >= 0) {
+        val end = text.indexOf(close, start + open.length)
+        if (end < 0) break // No closer after this opener, so none after a later one either.
+        out.append(text, copied, start).append(' ')
+        copied = end + close.length
+        start = text.indexOf(open, copied)
     }
-    return CardSummary(cards.size, due, reviewed, reps, lapses)
+    if (copied == 0) return text
+    return out.append(text, copied, text.length).toString()
 }
+
+/** `!\[[^\]]*\]\([^)]*\)` replaced by a space. */
+private fun removeImages(text: String): String = replaceLinks(text, image = true)
+
+/** `\[([^\]]*)\]\([^)]*\)` replaced by its first group, the link text. */
+private fun unwrapLinks(text: String): String = replaceLinks(text, image = false)
+
+/**
+ * The two link rules share one scan: an opener (`![` or `[`), the first `]` after it, a `(` right behind
+ * it and the first `)` after that. The first `]` and `)` are remembered while later openers still share
+ * them, so a run of unclosed openers costs one scan, not one per opener.
+ */
+private fun replaceLinks(text: String, image: Boolean): String {
+    val opener = if (image) "![" else "["
+    var start = text.indexOf(opener)
+    if (start < 0) return text
+    val out = StringBuilder(text.length)
+    var copied = 0
+    var bracket = NOT_SCANNED // first ']' at or after the current opener's text; -1: there is none
+    var paren = NOT_SCANNED // first ')' at or after bracket + 2; -1: there is none
+    while (start >= 0) {
+        val textStart = start + opener.length
+        if (bracket == NOT_SCANNED || bracket >= 0 && textStart > bracket) {
+            bracket = text.indexOf(']', textStart)
+            paren = NOT_SCANNED
+        }
+        if (bracket < 0) break // No ']' left: no later opener can close either.
+        if (bracket + 1 < text.length && text[bracket + 1] == '(') {
+            if (paren == NOT_SCANNED) paren = text.indexOf(')', bracket + 2)
+            if (paren < 0) break // No ')' left after this point.
+            out.append(text, copied, start)
+            if (image) out.append(' ') else out.append(text, textStart, bracket)
+            copied = paren + 1
+            start = text.indexOf(opener, copied)
+            bracket = NOT_SCANNED
+            paren = NOT_SCANNED
+        } else {
+            start = text.indexOf(opener, start + 1)
+        }
+    }
+    if (copied == 0) return text
+    return out.append(text, copied, text.length).toString()
+}
+
+private const val NOT_SCANNED = -2
+
+private fun isWordChar(codePoint: Int): Boolean = when (Character.getType(codePoint).toByte()) {
+    Character.UPPERCASE_LETTER, Character.LOWERCASE_LETTER, Character.TITLECASE_LETTER, Character.MODIFIER_LETTER, Character.OTHER_LETTER,
+    Character.DECIMAL_DIGIT_NUMBER, Character.LETTER_NUMBER, Character.OTHER_NUMBER,
+    -> true
+    else -> false
+}
+
+/** `[\p{L}\p{N}][\p{L}\p{N}'’]*` matches, counted without building them. */
+private fun countWordRuns(text: String): Int {
+    var count = 0
+    var index = 0
+    val end = text.length
+    while (index < end) {
+        val first = text.codePointAt(index)
+        index += Character.charCount(first)
+        if (!isWordChar(first)) continue
+        count += 1
+        while (index < end) {
+            val next = text.codePointAt(index)
+            if (!isWordChar(next) && next != '\''.code && next != '’'.code) break
+            index += Character.charCount(next)
+        }
+    }
+    return count
+}
+
+fun summarizeCards(cards: List<FlashCard>, today: String): CardSummary? = storedCards(cards)?.summary(today)
 
 fun dayKeyOf(epochMs: Long, zone: ZoneId): String? =
     if (epochMs > 0) Instant.ofEpochMilli(epochMs).atZone(zone).toLocalDate().toString() else null
@@ -140,6 +225,8 @@ data class VaultStats(
     val time: StatTime,
     val cards: StatCards,
     val school: StatSchool?,
+    /** Notes that were read only in part (see [NoteFacts.partial]). */
+    val partialNotes: Int = 0,
 )
 
 data class StatsInput(
@@ -147,8 +234,8 @@ data class StatsInput(
     val folders: Int,
     /** path -> facts, for note files only. */
     val facts: Map<String, NoteFacts> = emptyMap(),
-    /** path -> ISO timestamps of note-history snapshots. */
-    val history: Map<String, List<String>> = emptyMap(),
+    /** path -> epoch ms of note-history snapshots. */
+    val history: Map<String, List<Long>> = emptyMap(),
     /** story path -> day -> words (summed over devices). */
     val stories: Map<String, Map<String, Int>> = emptyMap(),
     val homework: List<HomeworkTask>? = null,
@@ -174,7 +261,8 @@ fun aggregateVault(input: StatsInput): VaultStats {
     val activity = HashMap<String, Cell>()
     val activeDays = HashSet<String>()
     fun bump(day: String?, field: Int, by: Int = 1) {
-        if (day == null) return
+        // A day after today (a clock that runs ahead, a synced file from such a device) is not activity.
+        if (day == null || day > todayKey) return
         val cell = activity.getOrPut(day) { Cell() }
         when (field) {
             0 -> cell.edited += by
@@ -236,7 +324,7 @@ fun aggregateVault(input: StatsInput): VaultStats {
         }
         val modifiedDay = dayKeyOf(file.mtime, zone)
         for (stamp in input.history[file.path].orEmpty()) {
-            val day = runCatching { dayKeyOf(Instant.parse(stamp).toEpochMilli(), zone) }.getOrNull()
+            val day = dayKeyOf(stamp, zone)
             if (day != null && day != modifiedDay) bump(day, 0)
         }
     }
@@ -303,6 +391,7 @@ fun aggregateVault(input: StatsInput): VaultStats {
             if (cardReps > 0) ((cardReps - cardLapses).toDouble() / cardReps).coerceIn(0.0, 1.0) else null,
         ),
         school = school,
+        partialNotes = input.facts.values.count { it.partial },
     )
 }
 

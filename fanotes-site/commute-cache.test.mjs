@@ -236,6 +236,22 @@ test('parallel route queries add up in the daily budget', async () => {
   }
 })
 
+test('a commute budget file that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-budget-shape-'))
+  const budgetFile = join(root, 'commute-budget.json')
+  const budgetText = '{"version":2,"day":"2026-11-16","counts":{"route":800}}\n'
+  await writeFile(budgetFile, budgetText, { mode: 0o600 })
+  const fetchImpl = async () => ok(fixture)
+  try {
+    const provider = createCommuteProvider({ fetchImpl, now: () => new Date(ASK_AT), sleep: async () => {}, budgetFile, log: () => {} })
+    const answer = await provider.trips(query)
+    assert.equal(Array.isArray(answer.trips), true)
+    assert.equal(await readFile(budgetFile, 'utf8'), budgetText)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('an unreadable commute file keeps its previous contents', async () => {
   const root = await mkdtemp(join(tmpdir(), 'commute-unreadable-'))
   const budgetFile = join(root, 'commute-budget.json')

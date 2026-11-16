@@ -1636,8 +1636,11 @@ function ensureVaultWatch(root) {
     scan: scanRoot,
     watch: fs.watch,
     onChange: (diff) => {
-      const visible = (list) => list.filter((entry) => !vaultWatch.isIgnoredWatchPath(entry)).slice(0, 500)
-      const payload = { added: visible(diff.added), removed: visible(diff.removed), changed: visible(diff.changed) }
+      const visible = (list) => list.filter((entry) => !vaultWatch.isIgnoredWatchPath(entry))
+      const cap = (list) => list.slice(0, 500)
+      const lists = [visible(diff.added), visible(diff.removed), visible(diff.changed)]
+      const truncated = lists.some((list) => list.length > 500)
+      const payload = { added: cap(lists[0]), removed: cap(lists[1]), changed: cap(lists[2]), ...(truncated ? { truncated: true } : {}) }
       if (!payload.added.length && !payload.removed.length && !payload.changed.length) return
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.vaultChanged, payload)
     },
@@ -5754,6 +5757,11 @@ async function createWindow() {
   }
   mainWindow.once('ready-to-show', revealWindow)
   mainWindow.on('focus', () => vaultWatcher?.nudge())
+  // No periodic rescans while the window is hidden or minimized; showing it rescans at once.
+  mainWindow.on('minimize', () => vaultWatcher?.setActive(false))
+  mainWindow.on('hide', () => vaultWatcher?.setActive(false))
+  mainWindow.on('restore', () => vaultWatcher?.setActive(true))
+  mainWindow.on('show', () => vaultWatcher?.setActive(true))
   mainWindow.webContents.on('did-fail-load', revealWindow)
 
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())

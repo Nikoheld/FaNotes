@@ -616,6 +616,18 @@ test('a push ledger that is not the known shape is left in place', async () => {
     const sent = await claimPushKeys(file, [grade('grade:new:4')])
     assert.deepEqual(sent.map((change) => change.id), ['grade:new:4'])
     assert.equal(await readFile(file, 'utf8'), ledger)
+    for (const odd of ['{"version":1,"keys":["g:keep",{"kept":true}]}\n', '{"version":1,"keys":[""]}\n', `{"version":1,"keys":["${'g:'.padEnd(201, 'x')}"]}\n`]) {
+      await writeFile(file, odd, { mode: 0o600 })
+      const again = await claimPushKeys(file, [grade('grade:new:5')])
+      assert.deepEqual(again.map((change) => change.id), ['grade:new:5'])
+      assert.equal(await readFile(file, 'utf8'), odd)
+    }
+    await writeFile(file, '{"version":1,"keys":["g:keep"]}\n', { mode: 0o600 })
+    await claimPushKeys(file, [grade('grade:new:6')])
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(parsed.version, 1)
+    assert.equal(parsed.keys.includes('g:keep'), true)
+    assert.equal(parsed.keys.length, 2)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

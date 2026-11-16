@@ -561,3 +561,188 @@ test('an unreadable commute file is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a commute file that is not the route list is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-routes-'))
+  const accountId = 'd'.repeat(32)
+  const routeFile = join(root, 'accounts', accountId, 'commute.json')
+  const stored = '{"version":2,"routes":{"a1b2c3d4e5f6":{"from":"keep"}}}\n'
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [], settings: {} })
+    await writeFile(routeFile, stored, { mode: 0o600 })
+    await assert.rejects(() => commute.view(accountId), (error) => error?.code === 'EBADMSG')
+    await assert.rejects(
+      () => commute.save(accountId, { routes: [], settings: { delayThreshold: 9 } }),
+      (error) => error?.code === 'EBADMSG',
+    )
+    assert.equal(await readFile(routeFile, 'utf8'), stored)
+    await writeFile(routeFile, JSON.stringify({
+      version: 1,
+      routes: [route()],
+      settings: { delayThreshold: 4, hiddenLabels: ['sport'] },
+    }))
+    const legacy = await commute.view(accountId)
+    assert.equal(legacy.routes[0].id, 'a1b2c3d4e5f6')
+    assert.deepEqual(legacy.settings.hiddenLabels, [])
+    await rm(routeFile)
+    assert.deepEqual((await commute.view(accountId)).routes, [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a commute route the sanitizer would skip is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-entry-'))
+  const accountId = 'f'.repeat(32)
+  const routeFile = join(root, 'accounts', accountId, 'commute.json')
+  const stateFile = join(root, 'accounts', accountId, 'commute-state.json')
+  const badId = 'b'.repeat(12)
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [route()], settings: { delayThreshold: 3 } })
+    const valid = await readFile(routeFile, 'utf8')
+    const parsed = JSON.parse(valid)
+    parsed.routes.push({ id: badId, kept: true })
+    const mixed = `${JSON.stringify(parsed)}\n`
+    await writeFile(routeFile, mixed, { mode: 0o600 })
+    const state = `${JSON.stringify({ version: 1, routes: { [badId]: { kept: true }, [route().id]: { kept: true } } })}\n`
+    await writeFile(stateFile, state, { mode: 0o600 })
+    await assert.rejects(() => commute.view(accountId), (error) => error?.code === 'EBADMSG')
+    await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EBADMSG')
+    await assert.rejects(
+      () => commute.save(accountId, { routes: [route()], settings: { delayThreshold: 9 } }),
+      (error) => error?.code === 'EBADMSG',
+    )
+    assert.equal(await readFile(routeFile, 'utf8'), mixed)
+    assert.equal(await readFile(stateFile, 'utf8'), state)
+    await writeFile(routeFile, valid, { mode: 0o600 })
+    await commute.checkAccount(accountId)
+    const updated = JSON.parse(await readFile(stateFile, 'utf8'))
+    assert.equal(Object.hasOwn(updated.routes, badId), false)
+    assert.equal(updated.routes[route().id].kept, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('commute settings that are not the known shape are left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-settings-'))
+  const accountId = 'e'.repeat(32)
+  const routeFile = join(root, 'accounts', accountId, 'commute.json')
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [route()], settings: { delayThreshold: 3, hiddenLabels: ['sport'] } })
+    const valid = await readFile(routeFile, 'utf8')
+    const keep = async (settings) => {
+      const parsed = JSON.parse(valid)
+      parsed.settings = settings
+      const stored = `${JSON.stringify(parsed)}\n`
+      await writeFile(routeFile, stored, { mode: 0o600 })
+      await assert.rejects(() => commute.view(accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(
+        () => commute.save(accountId, { routes: [route()], settings: { delayThreshold: 9 } }),
+        (error) => error?.code === 'EBADMSG',
+      )
+      assert.equal(await readFile(routeFile, 'utf8'), stored)
+    }
+    await keep({ delayThreshold: 3, hiddenLabels: 'kept' })
+    await keep({ delayThreshold: 3, hiddenLabels: ['sport', 1] })
+    await keep({ delayThreshold: 'kept', hiddenLabels: [] })
+    await keep(['kept'])
+    await writeFile(routeFile, valid, { mode: 0o600 })
+    const opened = await commute.view(accountId)
+    assert.equal(opened.settings.delayThreshold, 3)
+    assert.deepEqual(opened.settings.hiddenLabels, ['sport'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a commute alert that is not an alert record is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-state-entry-'))
+  const accountId = 'c'.repeat(32)
+  const stateFile = join(root, 'accounts', accountId, 'commute-state.json')
+  const pinned = route({ pins: [{ line: 'S29', stop: 'Knoten', departure: '07:30', days: [5] }] })
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [pinned], settings: { delayThreshold: 3 } })
+    const keep = async (routes) => {
+      const stored = `${JSON.stringify({ version: 1, routes })}\n`
+      await writeFile(stateFile, stored, { mode: 0o600 })
+      await assert.rejects(() => commute.board(accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EBADMSG')
+      assert.equal(await readFile(stateFile, 'utf8'), stored)
+    }
+    await keep({ [pinned.id]: 'kept' })
+    await keep({ [pinned.id]: ['kept'] })
+    await keep({ [pinned.id]: { kept: true }, extra: 'kept' })
+    await writeFile(stateFile, JSON.stringify({ version: 1, routes: { [pinned.id]: { kept: true } } }), { mode: 0o600 })
+    await commute.checkAccount(accountId)
+    const updated = JSON.parse(await readFile(stateFile, 'utf8'))
+    assert.equal(updated.routes[pinned.id].kept, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a commute state file that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-state-'))
+  const accountId = 'e'.repeat(32)
+  const stateFile = join(root, 'accounts', accountId, 'commute-state.json')
+  const stored = '{"version":2,"alerts":["keep-this-alert"]}\n'
+  const pinned = route({ pins: [{ line: 'S29', stop: 'Knoten', departure: '07:30', days: [5] }] })
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [pinned], settings: { delayThreshold: 3 } })
+    await writeFile(stateFile, stored, { mode: 0o600 })
+    await assert.rejects(() => commute.board(accountId), (error) => error?.code === 'EBADMSG')
+    await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(stateFile, 'utf8'), stored)
+    await writeFile(stateFile, JSON.stringify({ version: 1, kept: true, routes: {} }))
+    await commute.checkAccount(accountId)
+    const kept = JSON.parse(await readFile(stateFile, 'utf8'))
+    assert.equal(kept.kept, true)
+    assert.equal(typeof kept.routes, 'object')
+    assert.equal(Array.isArray(kept.routes), false)
+    await rm(stateFile)
+    const again = createCommute({
+      root,
+      now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+      lessonsFor: async () => [],
+      provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+    })
+    await again.checkAccount(accountId)
+    const fresh = JSON.parse(await readFile(stateFile, 'utf8'))
+    assert.equal(typeof fresh.routes, 'object')
+    assert.equal(Array.isArray(fresh.routes), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

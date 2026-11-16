@@ -44,6 +44,7 @@ import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.ink.DraftingKind
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.ink.StrokeStyle
+import ch.fasrv.fanotes.study.encode
 
 /**
  * The page and its chrome live in one clipped frame. The toolbar is a later
@@ -2014,36 +2015,40 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
 
-    private fun promptTerms() {
+    private fun promptTerms(draft: String? = null) {
         val terms = ch.fasrv.fanotes.study.termsOf(ink.study.items)
         textDialog(
             title = "Begriffe",
             hint = "Begriffe, mit Komma getrennt",
-            initial = terms.joinToString(", "),
+            initial = draft ?: terms.joinToString(", "),
             max = 4000,
             multiline = true,
+            track = ch.fasrv.fanotes.study.StudyDialogState(ch.fasrv.fanotes.study.StudyDialogKind.TERMS),
         ) { raw -> ink.study.setTerms(ch.fasrv.fanotes.study.termsFromText(raw)) }
     }
 
-    private fun promptCallout(callout: ch.fasrv.fanotes.study.StudyCallout) {
+    /** [draft] is the text typed before the screen was recreated. */
+    private fun promptCallout(callout: ch.fasrv.fanotes.study.StudyCallout, draft: String? = null) {
         val terms = ch.fasrv.fanotes.study.termsOf(ink.study.items)
         textDialog(
             title = if (callout.num != null) "Bedeutung" else "Beschriftung",
             hint = if (callout.num != null) "Bedeutung" else "Beschriftung",
-            initial = callout.text,
+            initial = draft ?: callout.text,
             max = 120,
             multiline = false,
             terms = terms,
             onDelete = { ink.study.selectedId = callout.id; ink.study.deleteSelected() },
+            track = ch.fasrv.fanotes.study.StudyDialogState(ch.fasrv.fanotes.study.StudyDialogKind.CALLOUT, id = callout.id),
         ) { value ->
             val current = ink.study.items.firstOrNull { it.id == callout.id } as? ch.fasrv.fanotes.study.StudyCallout ?: return@textDialog
             if (current.text != value) ink.study.replace(current.copy(text = value))
         }
     }
 
-    private fun promptLegendRow(legend: ch.fasrv.fanotes.study.StudyLegend, key: String) {
+    private fun promptLegendRow(legend: ch.fasrv.fanotes.study.StudyLegend, key: String, draft: String? = null) {
         val def = ch.fasrv.fanotes.study.stampById(key) ?: return
-        textDialog("${def.glyph} ${ch.fasrv.fanotes.desk.ChromeText.ui("Legende")}", def.label, legend.names[key].orEmpty().ifEmpty { def.label }, 60, false) { value ->
+        val track = ch.fasrv.fanotes.study.StudyDialogState(ch.fasrv.fanotes.study.StudyDialogKind.LEGEND_ROW, id = legend.id, key = key)
+        textDialog("${def.glyph} ${ch.fasrv.fanotes.desk.ChromeText.ui("Legende")}", def.label, draft ?: legend.names[key].orEmpty().ifEmpty { def.label }, 60, false, track = track) { value ->
             val current = ink.study.items.firstOrNull { it.id == legend.id } as? ch.fasrv.fanotes.study.StudyLegend ?: return@textDialog
             val names = LinkedHashMap(current.names)
             if (value.isBlank() || value == def.label) names.remove(key) else names[key] = value.take(60)
@@ -2060,12 +2065,25 @@ class NotePageView(context: Context) : FrameLayout(context) {
         multiline: Boolean,
         terms: List<String> = emptyList(),
         onDelete: (() -> Unit)? = null,
+        track: ch.fasrv.fanotes.study.StudyDialogState? = null,
         onOk: (String) -> Unit,
     ) {
         val ui = ch.fasrv.fanotes.desk.ChromeText::ui
+        studyDialog?.dismiss()
         val field = android.widget.EditText(context)
         field.setText(initial)
         field.setSelection(initial.length)
+        if (track != null) {
+            // Rotation recreates the screen: keep what is typed so the editor can reopen with it.
+            ink.study.openDialog = track.copy(text = initial)
+            field.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(s: android.text.Editable?) {
+                    ink.study.openDialog = ink.study.openDialog?.copy(text = s?.toString().orEmpty())
+                }
+            })
+        }
         field.hint = ui(hint)
         field.filters = arrayOf(android.text.InputFilter.LengthFilter(max))
         field.inputType = android.text.InputType.TYPE_CLASS_TEXT or
@@ -2095,8 +2113,48 @@ class NotePageView(context: Context) : FrameLayout(context) {
         if (onDelete != null) builder.setNeutralButton(ui("Löschen")) { _, _ -> onDelete() }
         val dialog = builder.create()
         dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE)
+        dialog.setOnDismissListener {
+            if (studyDialog === dialog) studyDialog = null
+            // Leaving the window (rotation) keeps the state for the recreated screen; any other dismissal ends the editor.
+            if (!leavingWindow && track != null) ink.study.openDialog = null
+        }
+        studyDialog = dialog
         dialog.show()
         field.requestFocus()
+    }
+
+    private var studyDialog: android.app.AlertDialog? = null
+    private var leavingWindow = false
+
+    /**
+     * Reopens the label editor that was open when the screen was recreated, with the text typed so far.
+     * Called once the note's annotations are set; a dialog whose callout or legend is gone is dropped.
+     */
+    fun resumeStudyDialog() {
+        val saved = ink.study.openDialog ?: return
+        if (studyDialog != null) return
+        val items = ink.study.items
+        when (saved.kind) {
+            ch.fasrv.fanotes.study.StudyDialogKind.TERMS -> promptTerms(saved.text)
+            ch.fasrv.fanotes.study.StudyDialogKind.CALLOUT -> {
+                val callout = items.firstOrNull { it.id == saved.id } as? ch.fasrv.fanotes.study.StudyCallout
+                if (callout != null) promptCallout(callout, saved.text) else if (items.isNotEmpty()) ink.study.openDialog = null
+            }
+            ch.fasrv.fanotes.study.StudyDialogKind.LEGEND_ROW -> {
+                val legend = items.firstOrNull { it.id == saved.id } as? ch.fasrv.fanotes.study.StudyLegend
+                if (legend != null) promptLegendRow(legend, saved.key, saved.text) else if (items.isNotEmpty()) ink.study.openDialog = null
+            }
+        }
+    }
+
+    /** The study tools' transient state as text, for the activity's saved instance state. */
+    fun studyStateSnapshot(): String = ink.study.snapshot().encode()
+
+    /** Puts [studyStateSnapshot] text back; the toolbar rebuilds on the next sync. */
+    fun restoreStudyState(raw: String?) {
+        val state = ch.fasrv.fanotes.study.decodeStudyUiState(raw) ?: return
+        ink.study.restore(state)
+        studyOpen = state.tool != null
     }
 
     private fun addLinkTools() {
@@ -2663,6 +2721,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         compareDecoderPool?.shutdownNow()
         compareDecoderPool = null
         tags?.hide()
+        // A showing dialog would leak its window when the activity is recreated; its text lives in the study state.
+        leavingWindow = true
+        studyDialog?.dismiss()
+        leavingWindow = false
         super.onDetachedFromWindow()
     }
 

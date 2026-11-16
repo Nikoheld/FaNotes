@@ -26,6 +26,7 @@ import {
   eventQueryWindow,
   hasFetchedWeeks,
   keepLoadedGrades,
+  preserveExplicitZeroWeight,
   trustedGradeRead,
   parseWeekSpan,
   prepareGradeNotifications,
@@ -279,6 +280,18 @@ export const createSchulnetzRuntime = (options = {}) => {
     }
   }
 
+  const readSnapshotFile = async (accountId) => {
+    const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    // A missing or broken file can start again. A file that is there but whose saved lists or week maps are not the known shape must not look empty, or the next save replaces them.
+    if (stored == null) return null
+    const lists = ['grades', 'events', 'exams', 'absences', 'homework', 'messages', 'vacations', 'konto', 'startMessages']
+    const maps = ['weekFetched', 'weekRead', 'examWeekFetched']
+    const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && maps.every((name) => stored[name] == null || plain(stored[name]))
+    if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
+    return stored
+  }
+
   const stripLegacyPush = (link) => {
     if (!link || typeof link !== 'object') return link
     delete link.topic
@@ -286,10 +299,17 @@ export const createSchulnetzRuntime = (options = {}) => {
     return link
   }
 
+  const plainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
   const readLink = async (accountId) => {
     const file = resolve(accountDir(accountId), 'link.json')
     const link = await readJson(file)
-    if (!link) return null
+    // A missing or broken file can start again. A file that is there but not this link, including a push token that is not a token, must not look connected, or the next link drops that token and the next upload replaces the snapshot.
+    if (link == null) return null
+    const known = plainObject(link)
+      && (link.fcmTokens == null || (Array.isArray(link.fcmTokens) && link.fcmTokens.every(isValidFcmToken)))
+      && (link.pushKeys == null || plainObject(link.pushKeys))
+      && (link.settings == null || plainObject(link.settings))
+    if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)
       await writeJson(file, link)
@@ -428,9 +448,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     const link = await readLink(accountId)
     if (!link) fail(404, 'Schulnetz ist noch nicht verbunden.')
     if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Der Schnappschuss ist ungültig.')
-    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const previous = await readSnapshotFile(accountId)
     const snapshot = { ...keepServerLessons(previous, body), revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
-    snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
+    snapshot.grades = preserveExplicitZeroWeight(previous?.grades, keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot)))
     // The app reads every grade row; an upload whose grades were kept is stored as a complete list.
     snapshot.gradeParser = snapshot.grades === previous?.grades ? (Number(previous?.gradeParser) || 0) : GRADE_PARSER_VERSION
     // The phone's own read errors describe its read, not what the server holds: when the server reads
@@ -470,15 +490,23 @@ export const createSchulnetzRuntime = (options = {}) => {
   })
 
   const revealsPath = (accountId) => resolve(accountDir(accountId), 'reveals.json')
-  const readReveals = async (accountId) => mergeRevealLedger(await readJson(revealsPath(accountId)))
+  const readRevealFile = async (accountId) => {
+    const stored = await readJson(revealsPath(accountId))
+    // A missing or broken file can start again. A file that is there but not this ledger must not look empty, or the next reveal replaces the hidden grades.
+    if (stored && (stored.version !== 1 || !Array.isArray(stored.hidden) || !Array.isArray(stored.revealed))) {
+      throw Object.assign(new Error('reveal ledger'), { code: 'EBADMSG' })
+    }
+    return stored
+  }
+  const readReveals = async (accountId) => mergeRevealLedger(await readRevealFile(accountId))
   const mergeReveals = async (accountId, incoming) => withAccount(accountId, async () => {
-    const merged = mergeRevealLedger(await readJson(revealsPath(accountId)), incoming || {})
+    const merged = mergeRevealLedger(await readRevealFile(accountId), incoming || {})
     await writeJson(revealsPath(accountId), merged)
     return merged
   })
   const addHiddenGrades = async (accountId, ids) => {
     if (!ids.length) return
-    const merged = mergeRevealLedger(await readJson(revealsPath(accountId)), { hidden: ids })
+    const merged = mergeRevealLedger(await readRevealFile(accountId), { hidden: ids })
     await writeJson(revealsPath(accountId), merged)
   }
 
@@ -962,10 +990,11 @@ export const createSchulnetzRuntime = (options = {}) => {
   /** Missing file means "not migrated yet". A present file is the durable ledger. */
   const readGradeLedger = async (accountId) => {
     const parsed = await readJson(resolve(accountDir(accountId), 'notified-grades.json'))
-    // A missing or broken file can start again. A file that is there but not this ledger must not look missing, or the next publish replaces it and a failed change log deletes it.
+    // A missing or broken file can start again. A file that is there but not this ledger, including a key that is not text, must not look missing, or the next publish drops that key.
     if (!parsed) return null
-    if (parsed.version !== 1 || !Array.isArray(parsed.keys)) throw Object.assign(new Error('grade ledger'), { code: 'EBADMSG' })
-    return parsed.keys.filter((key) => typeof key === 'string' && key)
+    const keysKnown = parsed.version === 1 && Array.isArray(parsed.keys) && parsed.keys.every((key) => typeof key === 'string' && key)
+    if (!keysKnown) throw Object.assign(new Error('grade ledger'), { code: 'EBADMSG' })
+    return parsed.keys
   }
 
   const writeGradeLedger = async (accountId, keys) => {
@@ -1048,7 +1077,14 @@ export const createSchulnetzRuntime = (options = {}) => {
   // The grade promise (a new grade on the phone within 10 minutes): when each account's grades page
   // was last read, and how long each push took from detection. Counts and times only.
   const monitorPath = (accountId) => resolve(accountDir(accountId), 'monitor.json')
-  const readMonitor = async (accountId) => (await readJson(monitorPath(accountId))) || {}
+  const readMonitor = async (accountId) => {
+    const stored = await readJson(monitorPath(accountId))
+    // A missing or broken file can start again. A file that is there but not this monitor must not look empty, or the next check replaces it.
+    if (stored == null) return {}
+    const known = typeof stored === 'object' && !Array.isArray(stored) && (stored.pushes == null || Array.isArray(stored.pushes))
+    if (!known) throw Object.assign(new Error('grade monitor'), { code: 'EBADMSG' })
+    return stored
+  }
   const recordGradeCheck = async (accountId, ok, ms, kind) => {
     const monitor = await readMonitor(accountId)
     const at = now().toISOString()
@@ -1200,7 +1236,7 @@ export const createSchulnetzRuntime = (options = {}) => {
       }
       await storeRefresh(tokens)
     }
-    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const previous = await readSnapshotFile(accountId)
     const span = { start: String(previous?.weekSpanStart || ''), end: String(previous?.weekSpanEnd || '') }
     const needPlan = !(span.start && span.end) && !hasFetchedWeeks(previous?.weekFetched)
     const raw = {}
@@ -1318,7 +1354,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     try { serverSession = JSON.parse(openToken(material, link.serverSession)) } catch { serverSession = null }
     const baseUrl = link.baseUrl
     const scrape = async (session) => {
-      const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+      const stored = await readSnapshotFile(accountId)
       return scrapeWithSession(baseUrl, { ...session, userAgent }, fetchImpl, {
         gradesOnly,
         previousEvents: stored?.events || [],
@@ -1366,7 +1402,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         return { needsReauth: true }
       }
     }
-    const previous = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+    const previous = await readSnapshotFile(accountId)
     const failed = Boolean(scraped.problem)
     // The Absenzen page with points, quota and open reports. An unread page keeps the stored statement.
     const statement = failed ? null : readAbsenceStatement(scraped.absencesHtml || '')
@@ -1754,7 +1790,7 @@ export const createSchulnetzRuntime = (options = {}) => {
         return true
       }
       if (route === '/snapshot' && method === 'GET') {
-        const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
+        const stored = await readSnapshotFile(accountId)
         // Apps that handle every timetable week say so; older ones get this week only.
         const weeks = String(request.headers?.[TIMETABLE_WEEKS_HEADER] || '') === 'weeks' ? stored : legacySnapshotView(stored, zurichToday(now()))
         // Apps before the points parser get the absences their own reader produces, so their diff stays quiet.

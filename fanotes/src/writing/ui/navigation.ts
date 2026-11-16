@@ -1,7 +1,7 @@
 // Caret movement and hit-testing over the laid-out manuscript.
 import { graphemeStep, wordStep } from '../editor/commands'
 import { blockLength, type Doc, type Pos } from '../editor/doc'
-import { caretX, lineAt, offsetAtX } from '../layout/linebreak'
+import { caretAtX, caretX, lineAt, lineEnd } from '../layout/linebreak'
 import type { TextMeasurer } from '../layout/measure'
 import type { ManuscriptLayout, Page, PlacedLine } from '../layout/paginate'
 import { runsText } from '../model/runs'
@@ -30,20 +30,26 @@ export const placedLine = (layout: ManuscriptLayout, blockIndex: number, line: n
   return null
 }
 
-/** `index` is the document's block index (the layout's blocks are the document's flow). */
-export const caretBox = (layout: ManuscriptLayout, pos: Pos, measurer: TextMeasurer, index?: Map<string, number>): CaretBox | null => {
+/**
+ * `index` is the document's block index (the layout's blocks are the document's flow). An `upstream` caret is drawn
+ * at the end of its line where its offset also starts the next one (see `Selection.upstream`).
+ */
+export const caretBox = (layout: ManuscriptLayout, pos: Pos, measurer: TextMeasurer, index?: Map<string, number>, upstream = false): CaretBox | null => {
   const blockIndex = index?.get(pos.block) ?? blockIndexOf(layout, pos.block)
   if (blockIndex < 0) return null
   const paragraph = layout.layouts[blockIndex]
-  const line = lineAt(paragraph, pos.offset, true)
+  const line = lineAt(paragraph, pos.offset, !upstream)
   const where = placedLine(layout, blockIndex, line)
   if (!where) return null
   const box = paragraph.lines[line]
   return { page: where.page.index, x: where.placed.x + caretX(paragraph, line, pos.offset, measurer), y: where.placed.y, height: box.height }
 }
 
-/** The position under a point on a page (page-local px). */
-export const hitTest = (layout: ManuscriptLayout, pageIndex: number, x: number, y: number, measurer: TextMeasurer): Pos | null => {
+/** A caret position, and whether it is drawn at the end of its line (`Selection.upstream`). */
+export type Caret = { pos: Pos; upstream: boolean }
+
+/** The caret under a point on a page (page-local px): a click right of a wrapped line ends that line. */
+export const hitTestCaret = (layout: ManuscriptLayout, pageIndex: number, x: number, y: number, measurer: TextMeasurer): Caret | null => {
   const page = layout.pages[pageIndex]
   if (!page) return null
   const candidates = page.lines.filter((placed) => layout.blocks[placed.blockIndex].editable || true)
@@ -56,7 +62,7 @@ export const hitTest = (layout: ManuscriptLayout, pageIndex: number, x: number, 
         return endOfLine(layout, last)
       }
       const after = layout.pages[pageIndex + distance]
-      if (after?.lines.length) return startOfLine(layout, after.lines[0])
+      if (after?.lines.length) return { pos: startOfLine(layout, after.lines[0]), upstream: false }
     }
     return null
   }
@@ -76,17 +82,26 @@ export const hitTest = (layout: ManuscriptLayout, pageIndex: number, x: number, 
   if (!block.editable) {
     // A click on a scene break goes to the start of the next paragraph.
     const next = layout.blocks.slice(best.blockIndex + 1).find((candidate) => candidate.editable)
-    return next ? { block: next.key, offset: 0 } : null
+    return next ? { pos: { block: next.key, offset: 0 }, upstream: false } : null
   }
-  return { block: block.key, offset: offsetAtX(paragraph, best.lineIndex, x - best.x, measurer) }
+  const hit = caretAtX(paragraph, best.lineIndex, x - best.x, measurer)
+  return { pos: { block: block.key, offset: hit.offset }, upstream: hit.upstream }
 }
 
+/** The position under a point on a page (page-local px). */
+export const hitTest = (layout: ManuscriptLayout, pageIndex: number, x: number, y: number, measurer: TextMeasurer): Pos | null => hitTestCaret(layout, pageIndex, x, y, measurer)?.pos ?? null
+
 const startOfLine = (layout: ManuscriptLayout, placed: PlacedLine): Pos => ({ block: layout.blocks[placed.blockIndex].key, offset: layout.layouts[placed.blockIndex].lines[placed.lineIndex].from })
-const endOfLine = (layout: ManuscriptLayout, placed: PlacedLine): Pos => {
-  const line = layout.layouts[placed.blockIndex].lines[placed.lineIndex]
-  const lastPiece = line.pieces[line.pieces.length - 1]
-  return { block: layout.blocks[placed.blockIndex].key, offset: lastPiece?.kind === 'newline' ? lastPiece.from : line.to }
+/** The end of a line as the End key sees it: before the spaces that hang at a soft wrap, after those typed before a break. */
+const endOfLine = (layout: ManuscriptLayout, placed: PlacedLine): Caret => {
+  const end = lineEnd(layout.layouts[placed.blockIndex], placed.lineIndex)
+  return { pos: { block: layout.blocks[placed.blockIndex].key, offset: end.offset }, upstream: end.upstream }
 }
+
+/** A motion's result; `upstream` is there only when the caret ends at the end of its line. */
+export type MoveResult = { pos: Pos; goalX: number | null; upstream?: true }
+
+const withUpstream = (result: { pos: Pos; goalX: number | null }, upstream: boolean): MoveResult => (upstream ? { ...result, upstream: true } : result)
 
 export type Motion = 'left' | 'right' | 'wordLeft' | 'wordRight' | 'up' | 'down' | 'lineStart' | 'lineEnd' | 'docStart' | 'docEnd' | 'pageUp' | 'pageDown' | 'paragraphUp' | 'paragraphDown'
 
@@ -105,9 +120,11 @@ const linesOf = (layout: ManuscriptLayout) => {
 
 /**
  * Moves the caret. `goalX` keeps the column during repeated up/down
- * (page-local px); the returned goalX is to be passed back.
+ * (page-local px); the returned goalX is to be passed back. `upstream` says the
+ * caret is drawn at the end of its line (see `Selection.upstream`); the result
+ * has it set when the motion ends there.
  */
-export const move = (doc: Doc, layout: ManuscriptLayout, pos: Pos, motion: Motion, measurer: TextMeasurer, goalX: number | null): { pos: Pos; goalX: number | null } => {
+export const move = (doc: Doc, layout: ManuscriptLayout, pos: Pos, motion: Motion, measurer: TextMeasurer, goalX: number | null, upstream = false): MoveResult => {
   const blockIndex = doc.index.get(pos.block) ?? 0
   const block = doc.flow[blockIndex]
   const text = runsText(block.runs)
@@ -156,23 +173,34 @@ export const move = (doc: Doc, layout: ManuscriptLayout, pos: Pos, motion: Motio
   }
   const paragraph = layout.layouts[blockIndex]
   if (!paragraph) return { pos, goalX }
-  const line = lineAt(paragraph, pos.offset, true)
+  const line = lineAt(paragraph, pos.offset, !upstream)
   const all = linesOf(layout)
   const current = all.findIndex((entry) => entry.blockIndex === blockIndex && entry.lineIndex === line)
   if (current < 0) return { pos, goalX }
   const here = all[current]
   const x = goalX ?? here.placed.x + caretX(paragraph, line, pos.offset, measurer)
-  const at = (entry: (typeof all)[number]) => {
-    const target = layout.layouts[entry.blockIndex]
-    return { block: layout.blocks[entry.blockIndex].key, offset: offsetAtX(target, entry.lineIndex, x - entry.placed.x, measurer) }
+  const at = (entry: (typeof all)[number]): Caret => {
+    const hit = caretAtX(layout.layouts[entry.blockIndex], entry.lineIndex, x - entry.placed.x, measurer)
+    return { pos: { block: layout.blocks[entry.blockIndex].key, offset: hit.offset }, upstream: hit.upstream }
   }
   if (motion === 'lineStart') return { pos: startOfLine(layout, here.placed), goalX: null }
-  if (motion === 'lineEnd') return { pos: endOfLine(layout, here.placed), goalX: null }
-  if (motion === 'up') return current > 0 ? { pos: at(all[current - 1]), goalX: x } : { pos: { block: block.key, offset: 0 }, goalX: null }
-  if (motion === 'down') return current < all.length - 1 ? { pos: at(all[current + 1]), goalX: x } : { pos: { block: block.key, offset: text.length }, goalX: null }
+  if (motion === 'lineEnd') {
+    const end = endOfLine(layout, here.placed)
+    return withUpstream({ pos: end.pos, goalX: null }, end.upstream)
+  }
+  if (motion === 'up') {
+    if (current <= 0) return { pos: { block: block.key, offset: 0 }, goalX: null }
+    const target = at(all[current - 1])
+    return withUpstream({ pos: target.pos, goalX: x }, target.upstream)
+  }
+  if (motion === 'down') {
+    if (current >= all.length - 1) return { pos: { block: block.key, offset: text.length }, goalX: null }
+    const target = at(all[current + 1])
+    return withUpstream({ pos: target.pos, goalX: x }, target.upstream)
+  }
   // Page up/down: the line at the same height on the previous/next page.
   const pageIndex = here.page + (motion === 'pageUp' ? -1 : 1)
   const page = layout.pages[Math.max(0, Math.min(layout.pages.length - 1, pageIndex))]
-  const hit = hitTest(layout, page.index, x, here.placed.y, measurer)
-  return { pos: hit ?? pos, goalX: x }
+  const hit = hitTestCaret(layout, page.index, x, here.placed.y, measurer)
+  return withUpstream({ pos: hit?.pos ?? pos, goalX: x }, hit ? hit.upstream : upstream)
 }

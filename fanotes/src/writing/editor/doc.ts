@@ -15,7 +15,11 @@ export type Doc = {
 }
 
 export type Pos = { block: string; offset: number }
-export type Selection = { anchor: Pos; head: Pos }
+/**
+ * `upstream`: the head sits at the end of its line, not at the start of the next one. It only matters where the
+ * two are the same offset (a soft wrap after a hyphen or inside a word), and only until the selection changes.
+ */
+export type Selection = { anchor: Pos; head: Pos; upstream?: true }
 
 export const makeDoc = (manifest: StoryManifest, scenes: Map<string, Scene>): Doc => {
   const flow = buildFlow(manifest, scenes)
@@ -29,7 +33,7 @@ export const blockAt = (doc: Doc, key: string) => {
 export const blockLength = (block: FlowBlock) => runsLength(block.runs)
 export const samePos = (a: Pos, b: Pos) => a.block === b.block && a.offset === b.offset
 export const isCollapsed = (selection: Selection) => samePos(selection.anchor, selection.head)
-export const caret = (pos: Pos): Selection => ({ anchor: pos, head: pos })
+export const caret = (pos: Pos, upstream = false): Selection => (upstream ? { anchor: pos, head: pos, upstream: true } : { anchor: pos, head: pos })
 
 export const comparePos = (doc: Doc, a: Pos, b: Pos) => {
   const left = doc.index.get(a.block) ?? -1

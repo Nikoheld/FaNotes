@@ -215,7 +215,9 @@ try {
       const spaced = linebreak.layoutParagraph({ runs: [{ text: 'Es war einmal ' }], style: resolved({ align, indentFirst: 0 }), width: 400, measurer })
       const before = linebreak.caretX(spaced, 0, 13, measurer)
       const after = linebreak.caretX(spaced, linebreak.lineAt(spaced, 14), 14, measurer)
-      assert.ok(after > before + 1, `${align}: the caret moved past the space (${before} → ${after})`)
+      // On a right-aligned line the text ends at the margin: the caret stays in the box instead of leaving it.
+      if (align === 'right') assert.ok(after <= spaced.lines[0].available + 0.001 && after >= before, `${align}: the caret stays inside the box (${before} → ${after})`)
+      else assert.ok(after > before + 1, `${align}: the caret moved past the space (${before} → ${after})`)
       assert.equal(spaced.lines[0].width, plain.lines[0].width, `${align}: the hanging space does not change the alignment`)
       assert.equal(spaced.lines[0].pieces.at(-1).hang, true)
     }
@@ -223,7 +225,7 @@ try {
     assert.ok(linebreak.caretX(only, 0, 1, measurer) > linebreak.caretX(only, 0, 0, measurer), 'a space in an empty paragraph moves the caret')
     const leading = linebreak.layoutParagraph({ runs: [{ text: ' Hallo' }], style: resolved({ indentFirst: 0 }), width: 400, measurer })
     assert.ok(linebreak.caretX(leading, 0, 1, measurer) > 0, 'a leading space is kept')
-    // Spaces at a soft wrap still vanish: the next line starts with its word.
+    // Spaces at a soft wrap hang at the end of their line: the next line starts with its word.
     const wrapped = linebreak.layoutParagraph({ runs: [{ text: lorem }], style: resolved({ indentFirst: 0, align: 'left' }), width: 300, measurer })
     for (const line of wrapped.lines.slice(1)) assert.notEqual(line.pieces[0].kind, 'space')
     for (const line of wrapped.lines) assert.ok(line.width <= line.available + 0.5)
@@ -254,6 +256,273 @@ try {
       const line = linebreak.lineAt(layout, offset)
       const x = linebreak.caretX(layout, line, offset, measurer)
       assert.equal(linebreak.offsetAtX(layout, line, x, measurer), offset, `offset ${offset}`)
+    }
+  })
+
+  // ── Soft wraps and line ends ─────────────────────────────────────────────
+  const ALIGNS = ['left', 'justify', 'center', 'right']
+  const fontOf = (style) => ({ family: style.font, bold: false, italic: false, size: style.size })
+  const widthOf = (style, text) => measurer.width(text, fontOf(style))
+  /** Every caret position a line offers (what the keyboard and the mouse can reach), with its x. */
+  const stopsOf = (layout, index) => {
+    const end = linebreak.lineEnd(layout, index)
+    const line = layout.lines[index]
+    const out = []
+    for (let offset = index === 0 && layout.dropCap ? 0 : line.from; offset <= end.offset; offset += 1) out.push({ offset, x: linebreak.caretX(layout, index, offset, measurer) })
+    return out
+  }
+
+  await test('a soft wrap: the spaces hang at the end of their line, so both the line end and the next line start are caret positions', () => {
+    for (const align of ALIGNS) {
+      const style = resolved({ align, indentFirst: 0 })
+      const width = widthOf(style, 'hello wor') // holds "hello" but not "hello world"
+      const layout = linebreak.layoutParagraph({ runs: [{ text: 'hello world again' }], style, width, measurer })
+      assert.deepEqual(layout.lines.map((line) => [line.from, line.to]), [[0, 6], [6, 12], [12, 17]], align)
+      const [first, second, third] = layout.lines
+      assert.equal(first.pieces.at(-1).hang, true, `${align}: the space hangs`)
+      assert.equal(second.pieces[0].text, 'world', `${align}: the next line starts with its word`)
+      // Alignment ignores the hanging space.
+      const alone = linebreak.layoutParagraph({ runs: [{ text: 'hello' }], style, width, measurer })
+      assert.equal(first.pieces[0].x, alone.lines[0].pieces[0].x, `${align}: x`)
+      assert.equal(first.width, alone.lines[0].width, `${align}: width`)
+      // Offset 5 is the end of "hello": on line 0, right after the word, even when the caret moves forward.
+      const hello = first.pieces[0]
+      assert.equal(linebreak.lineAt(layout, 5, true), 0, `${align}: the end of "hello" is on its own line`)
+      assert.ok(Math.abs(linebreak.caretX(layout, 0, 5, measurer) - Math.min(hello.x + hello.width, first.available)) < 0.001, `${align}: right after "hello"`)
+      // Offset 6 is the start of the next line; one Right from 5 moves to another place.
+      assert.equal(linebreak.lineAt(layout, 6, true), 1, `${align}: after the space the caret is on the next line`)
+      assert.equal(linebreak.caretX(layout, 1, 6, measurer), second.pieces[0].x, `${align}: at its first word`)
+      assert.notDeepEqual([linebreak.lineAt(layout, 5, true), linebreak.caretX(layout, 0, 5, measurer)], [linebreak.lineAt(layout, 6, true), linebreak.caretX(layout, 1, 6, measurer)], `${align}: Right from 5 to 6 shows`)
+      // End and clicks: the line end stays on the line; left of the next line is its start.
+      assert.deepEqual(linebreak.lineEnd(layout, 0), { offset: 5, upstream: false }, align)
+      assert.deepEqual(linebreak.caretAtX(layout, 0, 9999, measurer), { offset: 5, upstream: false }, `${align}: a click right of line 0`)
+      assert.deepEqual(linebreak.caretAtX(layout, 1, -9999, measurer), { offset: 6, upstream: false }, `${align}: a click left of line 1`)
+      assert.deepEqual(linebreak.lineEnd(layout, 2), { offset: 17, upstream: false }, `${align}: the paragraph ends the last line`)
+      assert.equal(linebreak.offsetAtX(layout, 1, 9999, measurer), 11, `${align}: a click right of line 1`)
+      // No caret leaves the line's box, and x never goes back within a line.
+      layout.lines.forEach((line, index) => {
+        let previous = -Infinity
+        for (let offset = line.from; offset <= line.to; offset += 1) {
+          const x = linebreak.caretX(layout, index, offset, measurer)
+          assert.ok(x <= line.available + 0.001, `${align}: line ${index} offset ${offset} inside the box (${x} > ${line.available})`)
+          assert.ok(x >= previous - 0.001, `${align}: line ${index} offset ${offset} does not go back`)
+          previous = x
+        }
+      })
+      assert.equal(third.pieces.at(-1).hang, undefined)
+      // Several typed spaces at the wrap all hang on the first line; the caret passes them, End stays before them.
+      const spaced = linebreak.layoutParagraph({ runs: [{ text: 'hello   world again' }], style, width, measurer })
+      assert.deepEqual(spaced.lines.map((line) => [line.from, line.to]), [[0, 8], [8, 14], [14, 19]], `${align}: three spaces`)
+      assert.deepEqual(linebreak.lineEnd(spaced, 0), { offset: 5, upstream: false })
+      for (const offset of [5, 6, 7]) assert.equal(linebreak.lineAt(spaced, offset, true), 0, `${align}: offset ${offset} is on line 0`)
+      assert.equal(linebreak.lineAt(spaced, 8, true), 1)
+      assert.ok(linebreak.caretX(spaced, 0, 7, measurer) >= linebreak.caretX(spaced, 0, 5, measurer), `${align}: x does not go back`)
+      assert.equal(linebreak.offsetAtX(spaced, 0, 9999, measurer), 5, `${align}: a click right of the wrapped line goes before the spaces`)
+    }
+  })
+
+  await test('a soft wrap with a space: justified lines stay full, the hanging space is not drawn into the width', () => {
+    const style = resolved({ align: 'justify', indentFirst: 0 })
+    const layout = linebreak.layoutParagraph({ runs: [{ text: lorem }], style, width: 300, measurer })
+    layout.lines.slice(0, -1).forEach((line, index) => {
+      assert.ok(Math.abs(line.width - line.available) < 0.5, `line ${index} fills the measure`)
+      assert.equal(line.pieces.at(-1).hang, true, `line ${index} ends in a hanging space`)
+      assert.equal(line.to, layout.lines[index + 1].from)
+      assert.ok(linebreak.caretX(layout, index, line.to, measurer) <= line.available + 0.001, `line ${index}: the caret after the hanging space stays in the box`)
+    })
+  })
+
+  await test('a wrap without a space (hyphen, dash, inside a long word): the line end is an upstream caret of that line', async () => {
+    const hyphenator = await measure.loadHyphenator('de')
+    const text = 'Am Ufer stand die Donaudampfschifffahrtsgesellschaft mit ihren Kapitänen.'
+    for (const align of ALIGNS) {
+      const layout = linebreak.layoutParagraph({ runs: [{ text }], style: resolved({ indentFirst: 0, align }), width: 260, measurer, hyphenator, hyphenate: true })
+      const hyphenated = layout.lines.map((line, index) => ({ line, index })).filter(({ line }) => line.pieces.at(-1)?.hyphen)
+      assert.ok(hyphenated.length >= 1, `${align}: a line ends in a hyphen`)
+      for (const { line, index } of hyphenated) {
+        assert.deepEqual(linebreak.lineEnd(layout, index), { offset: line.to, upstream: true }, `${align}: End`)
+        assert.equal(linebreak.lineAt(layout, line.to, true), index + 1, `${align}: as a plain offset it is the start of the next line`)
+        assert.equal(linebreak.lineAt(layout, line.to, false), index, `${align}: upstream it is the end of this line`)
+        const piece = line.pieces.at(-1)
+        assert.ok(Math.abs(linebreak.caretX(layout, index, line.to, measurer) - Math.min(piece.x + piece.width + measurer.width('-', piece.font), line.available)) < 0.001, `${align}: the end caret sits after the hyphen`)
+        assert.deepEqual(linebreak.caretAtX(layout, index, 9999, measurer), { offset: line.to, upstream: true }, `${align}: a click right of the line`)
+        assert.deepEqual(linebreak.caretAtX(layout, index + 1, -9999, measurer), { offset: line.to, upstream: false }, `${align}: a click left of the next line`)
+      }
+    }
+    // A break after a dash.
+    const style = resolved({ indentFirst: 0, align: 'left' })
+    const dash = linebreak.layoutParagraph({ runs: [{ text: 'Der selbst-bewusste Wärter' }], style, width: widthOf(style, 'Der selbst-') + 2, measurer })
+    assert.equal(dash.lines[0].pieces.at(-1).text, 'selbst-')
+    assert.deepEqual(linebreak.lineEnd(dash, 0), { offset: 11, upstream: true })
+    assert.equal(linebreak.lineAt(dash, 11, true), 1)
+    assert.equal(linebreak.lineAt(dash, 11, false), 0)
+    // A word wider than the line, broken by characters.
+    const long = linebreak.layoutParagraph({ runs: [{ text: 'x'.repeat(60) }], style, width: 100, measurer })
+    assert.ok(long.lines.length > 2)
+    long.lines.forEach((line, index) => {
+      const last = index === long.lines.length - 1
+      assert.deepEqual(linebreak.lineEnd(long, index), { offset: line.to, upstream: !last }, `line ${index}`)
+      assert.equal(linebreak.lineAt(long, line.to, !linebreak.lineEnd(long, index).upstream), index)
+    })
+  })
+
+  await test('spaces after a forced break (Shift+Enter) are typed text: they keep their width and the caret passes them', () => {
+    for (const align of ALIGNS) {
+      const style = resolved({ align, indentFirst: 0 })
+      const indented = linebreak.layoutParagraph({ runs: [{ text: 'a\n   b' }], style, width: 400, measurer })
+      const second = indented.lines[1]
+      assert.deepEqual([second.from, second.to], [2, 6], align)
+      assert.equal(second.pieces[0].kind, 'space', `${align}: the line starts with the spaces`)
+      assert.equal(second.pieces[0].hang, undefined, `${align}: they do not hang`)
+      assert.ok(Math.abs(second.pieces[1].x - second.pieces[0].x - widthOf(style, '   ')) < 0.001, `${align}: the word is shifted by three spaces`)
+      const xs = stopsOf(indented, 1).map((stop) => stop.x)
+      assert.equal(xs.length, 5, `${align}: offsets 2 to 6`)
+      for (let index = 1; index < xs.length; index += 1) assert.ok(xs[index] > xs[index - 1] + 1, `${align}: the caret passes space ${index} (${xs.join(', ')})`)
+      assert.equal(linebreak.offsetAtX(indented, 1, xs[2], measurer), 4, `${align}: a click in the spaces`)
+      // Only spaces after the break: they hang, but the caret still passes them (as at the end of a paragraph).
+      const only = linebreak.layoutParagraph({ runs: [{ text: 'a\n   ' }], style, width: 400, measurer })
+      assert.deepEqual([only.lines[1].from, only.lines[1].to], [2, 5], align)
+      assert.equal(only.lines[1].pieces.length, 1, `${align}: the spaces are a piece`)
+      const onlyXs = stopsOf(only, 1).map((stop) => stop.x)
+      assert.equal(onlyXs.length, 4, align)
+      if (align !== 'right') for (let index = 1; index < onlyXs.length; index += 1) assert.ok(onlyXs[index] > onlyXs[index - 1] + 1, `${align}: the caret passes space ${index} of an empty line`)
+      assert.equal(linebreak.offsetAtX(only, 1, 9999, measurer), 5, `${align}: a click right of the spaces`)
+      assert.deepEqual(linebreak.lineEnd(only, 1), { offset: 5, upstream: false }, align)
+    }
+    // Spaces after a forced break and a word that does not fit after them: the spaces stay, the word moves down.
+    const style = resolved({ align: 'left', indentFirst: 0 })
+    const tight = linebreak.layoutParagraph({ runs: [{ text: `a\n${' '.repeat(12)}wordwordword` }], style, width: widthOf(style, 'wordwordword') + 10, measurer })
+    assert.equal(tight.lines.map((line) => linebreak.lineEnd(tight, tight.lines.indexOf(line)).offset).length, tight.lines.length)
+    assert.equal(tight.lines.map((line) => line.pieces.filter((piece) => piece.kind !== 'newline').map((piece) => piece.text).join('')).join('|'), `a|${' '.repeat(12)}|wordwordword`)
+    for (const line of tight.lines) assert.ok(line.width <= line.available + 0.5)
+  })
+
+  await test('alignment ignores the spaces before a forced break just like those at the end of the paragraph', () => {
+    for (const align of ALIGNS) {
+      const style = resolved({ align, indentFirst: 0 })
+      const broken = linebreak.layoutParagraph({ runs: [{ text: 'ab   \ncd' }], style, width: 200, measurer })
+      const ended = linebreak.layoutParagraph({ runs: [{ text: 'ab   ' }], style, width: 200, measurer })
+      const [line] = broken.lines
+      assert.equal(line.pieces[0].x, ended.lines[0].pieces[0].x, `${align}: "ab" sits where it does at the paragraph end`)
+      assert.equal(line.width, ended.lines[0].width, `${align}: width`)
+      assert.deepEqual(line.pieces.map((piece) => piece.kind), ['word', 'space', 'newline'], `${align}: the break stays last`)
+      assert.equal(line.pieces[1].hang, true, `${align}: the spaces hang`)
+      assert.equal(line.pieces[2].x, line.pieces[1].x + line.pieces[1].width, `${align}: the break comes after the hanging spaces`)
+      assert.equal(line.last, true)
+      // The caret before the break is after the spaces; End goes there, and so does a click right of the line.
+      assert.deepEqual(linebreak.lineEnd(broken, 0), { offset: 5, upstream: false }, align)
+      assert.equal(linebreak.offsetAtX(broken, 0, 9999, measurer), 5, align)
+      assert.equal(linebreak.lineAt(broken, 5, true), 0, align)
+      assert.ok(linebreak.caretX(broken, 0, 5, measurer) >= linebreak.caretX(broken, 0, 2, measurer), align)
+      assert.ok(linebreak.caretX(broken, 0, 5, measurer) <= line.available + 0.001, align)
+      assert.equal(broken.lines[1].from, 6, align)
+    }
+  })
+
+  await test('a drop cap has caret positions of its own: Home then Right moves, and a click on the cap lands before or after it', () => {
+    const style = linebreak.resolveStyle({ ...story.manifest.styles.first, dropCap: 3 }, { afterBreak: true })
+    for (const text of [lorem, `„${lorem}`]) {
+      const layout = linebreak.layoutParagraph({ runs: [{ text }], style, width: 300, measurer })
+      const cap = layout.dropCap
+      const xs = []
+      for (let offset = 0; offset <= cap.text.length; offset += 1) xs.push(linebreak.caretX(layout, 0, offset, measurer))
+      assert.ok(Math.abs(xs[0] + cap.width) < 0.001, `${cap.text}: offset 0 is the cap's left edge`)
+      assert.ok(Math.abs(xs.at(-1) - layout.lines[0].pieces[0].x) < 0.001, `${cap.text}: after the cap the text starts`)
+      for (let index = 1; index < xs.length; index += 1) assert.ok(xs[index] > xs[index - 1] + 1, `${cap.text}: offset ${index} is right of offset ${index - 1}`)
+      xs.forEach((x, offset) => assert.equal(linebreak.offsetAtX(layout, 0, x, measurer), offset, `${cap.text}: x ${x}`))
+      assert.equal(linebreak.offsetAtX(layout, 0, -cap.width - 20, measurer), 0, 'left of the cap')
+      assert.equal(linebreak.offsetAtX(layout, 0, -1, measurer), cap.text.length, 'right of the cap')
+      assert.equal(linebreak.offsetAtX(layout, 1, -cap.width, measurer), layout.lines[1].from, 'beside the cap on a later line: the line start')
+    }
+    // A paragraph that is only the cap letter.
+    const only = linebreak.layoutParagraph({ runs: [{ text: 'D' }], style, width: 300, measurer })
+    assert.ok(linebreak.caretX(only, 0, 1, measurer) > linebreak.caretX(only, 0, 0, measurer) + 1)
+    assert.equal(linebreak.offsetAtX(only, 0, -1, measurer), 1)
+  })
+
+  await test('a hyphen is measured in the font it is drawn in (bold, larger or smaller last piece)', async () => {
+    const hyphenator = await measure.loadHyphenator('de')
+    const style = resolved({ indentFirst: 0, align: 'justify' })
+    for (const marks of [{ b: true }, { size: 16 }, { i: true, size: 8 }]) {
+      const runsIn = [{ text: 'Am Ufer stand die ' }, { text: 'Donaudampfschifffahrtsgesellschaft', m: marks }, { text: ' mit ihren Kapitänen.' }]
+      const layout = linebreak.layoutParagraph({ runs: runsIn, style, width: 260, measurer, hyphenator, hyphenate: true })
+      const hyphenated = layout.lines.filter((line) => line.pieces.at(-1)?.hyphen)
+      assert.ok(hyphenated.length >= 1, `${JSON.stringify(marks)}: a line ends in a hyphen`)
+      for (const line of hyphenated) {
+        const piece = line.pieces.at(-1)
+        assert.ok(Math.abs(line.width - (piece.x + piece.width + measurer.width('-', piece.font))) < 0.001, `${JSON.stringify(marks)}: the line ends where its hyphen does`)
+        assert.ok(line.width <= line.available + 0.5, `${JSON.stringify(marks)}: the hyphen stays inside the line`)
+      }
+      // A line that holds only the base font's hyphen still fits when the hyphen is narrower.
+      assert.equal(layout.lines.map((line) => line.pieces.filter((piece) => piece.kind === 'word').map((piece) => piece.text).join('')).join(''), runsIn.map((run) => run.text).join('').replace(/ /gu, ''), 'the text is all there')
+    }
+  })
+
+  await test('soft wraps keep every invariant for random paragraphs (spaces, tabs, breaks, hyphens, drop caps, marks)', async () => {
+    const hyphenator = await measure.loadHyphenator('de')
+    let seed = 20261116
+    const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32 }
+    const pick = (list) => list[Math.floor(random() * list.length)]
+    const words = ['Der', 'alte', 'Leuchtturmwärter', 'stieg', 'Donaudampfschifffahrtsgesellschaft', 'a', 'selbst-bewusst', 'x/y', 'hundertzwölf', 'Wind', 'über', 'MMMM', 'ß']
+    const separators = [' ', ' ', ' ', '  ', '   ', '\t', ' \n', '\n', '\n  ', '  \n  ']
+    let stops = 0
+    for (let round = 0; round < 500; round += 1) {
+      let text = ''
+      const count = 1 + Math.floor(random() * 14)
+      if (random() < 0.15) text += pick(['  ', ' ', '\n', '   '])
+      for (let index = 0; index < count; index += 1) text += pick(words) + (index < count - 1 || random() < 0.4 ? pick(separators) : '')
+      const align = pick(ALIGNS)
+      const width = pick([40, 60, 90, 130, 200, 300])
+      const marked = random() < 0.3 && text.length > 9
+      const runsIn = marked ? [{ text: text.slice(0, 4) }, { text: text.slice(4, 9), m: { b: true } }, { text: text.slice(9) }] : [{ text }]
+      const style = linebreak.resolveStyle({ ...story.manifest.styles.first, size: 10, align, indentFirst: pick([0, 5]), dropCap: random() < 0.15 ? 3 : 0 }, { afterBreak: true })
+      const layout = linebreak.layoutParagraph({ runs: runsIn, style, width, measurer, hyphenator, hyphenate: random() < 0.6 })
+      const where = JSON.stringify({ text, align, width, dropCap: style.dropCap })
+      const lines = layout.lines
+      const capLength = layout.dropCap ? layout.dropCap.text.length : 0
+      assert.equal(lines[0].from, 0, where)
+      assert.equal(lines.at(-1).to, text.length, where)
+      lines.forEach((line, index) => {
+        if (index) assert.equal(line.from, lines[index - 1].to, `lines are contiguous: ${where}`)
+        // Every typed character is in a piece of its line (nothing vanishes), in order.
+        assert.equal(line.pieces.filter((piece) => piece.kind !== 'marker' && piece.kind !== 'anchor').map((piece) => piece.text).join(''), text.slice(index === 0 ? capLength : line.from, line.to), `pieces cover line ${index}: ${where}`)
+        const end = linebreak.lineEnd(layout, index)
+        assert.ok(end.offset >= line.from && end.offset <= line.to, `End is in its line: ${where}`)
+        assert.equal(linebreak.lineAt(layout, end.offset, !end.upstream), index, `End stays on line ${index}: ${where}`)
+        const all = stopsOf(layout, index)
+        all.forEach((stop, position) => {
+          if (index === 0 && stop.offset < capLength) return
+          assert.equal(linebreak.lineAt(layout, stop.offset, !(stop.offset === end.offset && end.upstream)), index, `offset ${stop.offset} belongs to line ${index}: ${where}`)
+          assert.ok(stop.x <= line.available + 0.001, `the caret is inside the box (${stop.x} > ${line.available}): ${where}`)
+          if (position) assert.ok(stop.x >= all[position - 1].x - 0.01, `x does not go back at offset ${stop.offset} of line ${index}: ${where}`)
+          // The offset nearest to a caret's x is that caret (unless another caret shares its x).
+          if (!all.some((other) => other.offset !== stop.offset && Math.abs(other.x - stop.x) < 0.01)) {
+            assert.deepEqual(linebreak.caretAtX(layout, index, stop.x, measurer), { offset: stop.offset, upstream: stop.offset === end.offset && end.upstream }, `a click on the caret of offset ${stop.offset} (line ${index}): ${where}`)
+          }
+          stops += 1
+        })
+        for (const x of [-999, -3, 0, 3, 17, 50, 130, 999]) {
+          const hit = linebreak.caretAtX(layout, index, x, measurer)
+          assert.ok(hit.offset >= (index === 0 ? 0 : line.from) && hit.offset <= end.offset, `a click at ${x} stays in line ${index}: ${where}`)
+          assert.equal(linebreak.lineAt(layout, hit.offset, !hit.upstream), index, `a click at ${x} lands on line ${index}: ${where}`)
+        }
+      })
+    }
+    assert.ok(stops > 10_000, `${stops} caret positions checked`)
+  })
+
+  await test('React keys of a line are unique: a list marker and its first word, footnote anchors at one offset', async () => {
+    const pageView = await load('/src/writing/ui/PageView.tsx')
+    const listStyle = linebreak.resolveStyle(story.manifest.styles.list)
+    const list = linebreak.layoutParagraph({ runs: [{ text: lorem }], style: listStyle, width: 300, measurer })
+    assert.deepEqual(list.lines[0].pieces.slice(0, 2).map((piece) => [piece.kind, piece.from]), [['marker', 0], ['word', 0]], 'both start at offset 0')
+    const anchored = linebreak.layoutParagraph({ runs: [{ text: 'Satz' }, { text: '', m: { fn: 'note0000001' } }, { text: '', m: { fn: 'note0000002' } }, { text: ' weiter.' }], style: resolved({ indentFirst: 0 }), width: 300, measurer })
+    assert.equal(anchored.lines[0].pieces.filter((piece) => piece.kind === 'anchor').length, 2)
+    for (const layout of [list, anchored]) {
+      for (const line of layout.lines) {
+        const keys = line.pieces.map((piece, index) => pageView.pieceKey(piece, index))
+        assert.equal(new Set(keys).size, keys.length, keys.join(' '))
+      }
     }
   })
 
@@ -541,6 +810,92 @@ try {
     assert.deepEqual(texts(state.doc), ['title:Kapitel 1', 'para:Anf', 'title:Kapitel 2', 'para:ang. ', 'para:Mitte.', 'break:* * *', 'para: Ende.'])
     assert.equal(state.doc.manifest.binder.length, 2)
     assert.equal(state.doc.manifest.binder[1].children.length, 2, 'the later scene moved into the new chapter')
+  })
+
+  const navigation = await load('/src/writing/ui/navigation.ts')
+  await test('End, Home, a click and Up/Down at a soft wrap stay on the line: the drawn caret is on the line, not on the next one', async () => {
+    const hyphenator = await measure.loadHyphenator('de')
+    const sentence = 'Der alte Leuchtturmwärter stieg jeden Abend die hundertzwölf Stufen hinauf, zündete das Licht an und sah hinaus auf das dunkle Wasser, über dem der Wind die Wolken jagte. Die Donaudampfschifffahrtsgesellschaft fuhr vorbei.'
+    const seen = { hung: 0, upstream: 0, lines: 0 }
+    for (const align of ALIGNS) {
+      let state = type(freshState(), `${sentence} ${sentence}`)
+      state = commands.setAlign(state, align)
+      const key = state.doc.flow[1].key
+      const layout = paginate.layoutManuscript(state.doc.manifest, state.doc.flow, new paginate.LayoutCache(), { measurer, hyphenators: { de: hyphenator } })
+      const blockIndex = layout.blocks.findIndex((block) => block.key === key)
+      const paragraph = layout.layouts[blockIndex]
+      assert.ok(paragraph.lines.length >= 6, `${align}: ${paragraph.lines.length} lines`)
+      const placed = (index) => navigation.placedLine(layout, blockIndex, index)
+      /** Where the caret is drawn: page and top of its line. */
+      const drawn = (pos, upstream) => {
+        const box = navigation.caretBox(layout, pos, measurer, state.doc.index, upstream)
+        return [box.page, box.y]
+      }
+      const lineBox = (index) => [placed(index).page.index, placed(index).placed.y]
+      paragraph.lines.forEach((line, index) => {
+        const start = { block: key, offset: Math.min(line.to, line.from + 2) }
+        // End: the caret is on this line.
+        const end = navigation.move(state.doc, layout, start, 'lineEnd', measurer, null)
+        assert.deepEqual(drawn(end.pos, Boolean(end.upstream)), lineBox(index), `${align}: End on line ${index}`)
+        if (index < paragraph.lines.length - 1) {
+          assert.ok(end.pos.offset <= line.to, `${align}: line ${index}`)
+          if (end.upstream) seen.upstream += 1
+          else if (end.pos.offset < line.to) seen.hung += 1
+        } else assert.equal(end.pos.offset, line.to, `${align}: the last line ends the paragraph`)
+        seen.lines += 1
+        // End again changes nothing; the caret is where the End key left it.
+        const again = navigation.move(state.doc, layout, end.pos, 'lineEnd', measurer, null, Boolean(end.upstream))
+        assert.deepEqual([again.pos, Boolean(again.upstream)], [end.pos, Boolean(end.upstream)], `${align}: End twice on line ${index}`)
+        // Home from the end: the start of this line.
+        const home = navigation.move(state.doc, layout, end.pos, 'lineStart', measurer, null, Boolean(end.upstream))
+        assert.equal(home.pos.offset, line.from, `${align}: Home on line ${index}`)
+        assert.deepEqual(drawn(home.pos, false), lineBox(index), `${align}: Home on line ${index} is drawn there`)
+        // A click right of the line, and one left of it.
+        const here = placed(index)
+        const right = navigation.hitTestCaret(layout, here.page.index, here.placed.x + line.available + 30, here.placed.y + 1, measurer)
+        assert.deepEqual([right.pos.offset, right.upstream], [end.pos.offset, Boolean(end.upstream)], `${align}: a click right of line ${index} is End`)
+        assert.deepEqual(drawn(right.pos, right.upstream), lineBox(index), `${align}: a click right of line ${index} is drawn there`)
+        const left = navigation.hitTestCaret(layout, here.page.index, here.placed.x - 30, here.placed.y + 1, measurer)
+        assert.deepEqual([left.pos.offset, left.upstream], [index === 0 ? 0 : line.from, false], `${align}: a click left of line ${index} is Home`)
+        assert.equal(navigation.hitTest(layout, here.page.index, here.placed.x + line.available + 30, here.placed.y + 1, measurer).offset, right.pos.offset, 'hitTest agrees')
+        // Down and Up from the end of the line move by one line, whatever the line is like.
+        if (index < paragraph.lines.length - 1) {
+          const down = navigation.move(state.doc, layout, end.pos, 'down', measurer, null, Boolean(end.upstream))
+          assert.deepEqual(drawn(down.pos, Boolean(down.upstream)), lineBox(index + 1), `${align}: Down from the end of line ${index}`)
+          // Right from the end moves to the next line (after its first word's start for a wrap without spaces).
+          const next = navigation.move(state.doc, layout, end.pos, 'right', measurer, null, Boolean(end.upstream))
+          assert.deepEqual(drawn(next.pos, Boolean(next.upstream)), lineBox(index + 1), `${align}: Right from the end of line ${index}`)
+        }
+        if (index > 0) {
+          const up = navigation.move(state.doc, layout, end.pos, 'up', measurer, null, Boolean(end.upstream))
+          assert.deepEqual(drawn(up.pos, Boolean(up.upstream)), lineBox(index - 1), `${align}: Up from the end of line ${index}`)
+          // Left from the start of the line moves back onto the previous line.
+          const back = navigation.move(state.doc, layout, { block: key, offset: line.from }, 'left', measurer, null)
+          assert.deepEqual(drawn(back.pos, false), lineBox(index - 1), `${align}: Left from the start of line ${index}`)
+        }
+      })
+    }
+    assert.ok(seen.hung >= 6 && seen.upstream >= 1, `lines ended at a space: ${seen.hung}, without one: ${seen.upstream}`)
+  })
+
+  await test('Shift+Enter indentation: Home, Right and a click pass the spaces; the caret flag is only set where it matters', () => {
+    let state = type(commands.insertLineBreak(type(freshState(), 'Vers eins')), '      eingerückt')
+    const key = state.doc.flow[1].key
+    const layout = paginate.layoutManuscript(state.doc.manifest, state.doc.flow, new paginate.LayoutCache(), { measurer })
+    const blockIndex = layout.blocks.findIndex((block) => block.key === key)
+    const second = layout.layouts[blockIndex].lines[1]
+    assert.equal(second.from, 10)
+    const x = (offset) => navigation.caretBox(layout, { block: key, offset }, measurer, state.doc.index).x
+    for (let offset = 10; offset < 16; offset += 1) assert.ok(x(offset + 1) > x(offset) + 1, `Right moves the caret from offset ${offset}`)
+    const home = navigation.move(state.doc, layout, { block: key, offset: 20 }, 'lineStart', measurer, null)
+    assert.equal(home.pos.offset, 10)
+    const placed = navigation.placedLine(layout, blockIndex, 1)
+    const hit = navigation.hitTest(layout, placed.page.index, placed.placed.x + (x(13) - placed.placed.x), placed.placed.y + 1, measurer)
+    assert.equal(hit.offset, 13, 'a click in the indentation')
+    // The flag is only there when asked for.
+    assert.deepEqual(docMod.caret({ block: key, offset: 3 }), { anchor: { block: key, offset: 3 }, head: { block: key, offset: 3 } })
+    assert.equal(docMod.caret({ block: key, offset: 3 }, true).upstream, true)
+    assert.equal(navigation.move(state.doc, layout, { block: key, offset: 3 }, 'right', measurer, null).upstream, undefined)
   })
 
   await test('undo groups typing by word, redo restores, and saving writes only changed scenes with stamps', async () => {

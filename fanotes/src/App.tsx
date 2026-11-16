@@ -1658,7 +1658,7 @@ export default function App({ startupBootstrap }: AppProps) {
       const known = new Set(collectTreePaths(treeRef.current))
       const ownRecently = Date.now() - lastOwnTreeRefreshRef.current < 4000
       const active = activePathRef.current
-      const onlyActiveChanged = !change.added.length && !change.removed.length &&
+      const onlyActiveChanged = !change.truncated && !change.added.length && !change.removed.length &&
         change.changed.every((entryPath) => entryPath === active)
       // The open note's own autosave also shows up as a change: nothing to do then.
       if (onlyActiveChanged) return
@@ -1670,7 +1670,9 @@ export default function App({ startupBootstrap }: AppProps) {
         setTree(nextTree)
         syncEngine.notifyLocalChange()
         const present = new Set(collectTreePaths(nextTree))
-        const arrived = change.added.filter((entryPath) => !known.has(entryPath) && present.has(entryPath) && !tabsRef.current.some((tab) => tab.path === entryPath))
+        // A truncated change list must not silently drop entries: derive arrivals from the full tree.
+        const addedPaths = change.truncated ? [...present] : change.added
+        const arrived = addedPaths.filter((entryPath) => !known.has(entryPath) && present.has(entryPath) && !tabsRef.current.some((tab) => tab.path === entryPath))
         const fileSet = new Set(collectTreePaths(nextTree, true))
         const files = arrived.filter((entryPath) => fileSet.has(entryPath))
         setNewArrivals((current) => {
@@ -5809,7 +5811,7 @@ export default function App({ startupBootstrap }: AppProps) {
           {updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={12} /> Update {Math.round(updateState.progress * 100)} %</span>}
           {addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}
           {addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={12} /> {addonState.panels.length}</button>}
-          {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings(syncState.openConflicts > 0 ? 'conflicts' : 'sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : 'Synchron'}{syncState.openConflicts > 0 && <em title={`${syncState.openConflicts} Konflikt(e)`}>{syncState.openConflicts}</em>}</button>}
+          {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings(syncState.openConflicts > 0 ? 'conflicts' : 'sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : syncState.status === 'paused' ? <Clock size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : syncState.status === 'paused' ? 'Sync pausiert' : 'Synchron'}{syncState.openConflicts > 0 && <em title={`${syncState.openConflicts} Konflikt(e)`}>{syncState.openConflicts}</em>}</button>}
           <button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-label="Jetzt speichern" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={12} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={12} /> : <CircleAlert size={12} />}<span>{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</span></button>
         </div>
         <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={14} /><span className="ribbon-label">Einstellungen</span></button>

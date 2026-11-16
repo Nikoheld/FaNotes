@@ -469,6 +469,50 @@ test('an unreadable poller lock and change log are left in place', async () => {
   }
 })
 
+test('a grade ledger key that is not text is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-ledger-key-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.89')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const file = join(root, 'accounts', guest.accountId, 'notified-grades.json')
+    const call = async () => {
+      const request = {
+        method: 'PUT',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.89' },
+        async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+      return status
+    }
+    const keep = async (keys) => {
+      const stored = `${JSON.stringify({ version: 1, keys })}\n`
+      await writeFile(file, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep(['c:keep', { kept: true }])
+    await keep(['c:keep', ''])
+    await keep(['c:keep', 1])
+    await writeFile(file, `${JSON.stringify({ version: 1, keys: ['c:keep'] })}\n`, { mode: 0o600 })
+    assert.equal(await call(), 200)
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).keys.includes('c:keep'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a grade ledger that is not the known shape is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'grade-ledger-'))
   const runtime = createSchulnetzRuntime({
@@ -541,6 +585,364 @@ test('an agenda baseline that is not the known shape is left in place', async ()
     assert.equal(await readFile(file, 'utf8'), baseline)
     assert.deepEqual(await readFile(linkFile), linkBefore)
     await assert.rejects(readFile(join(dir, 'snapshot.json')), (error) => error?.code === 'ENOENT')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a reveal ledger that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-reveal-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  const ledger = '{"version":2,"hidden":["c-keep"],"revealed":["c-old"]}\n'
+  try {
+    const guest = await runtime.createGuest('203.0.113.83')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const dir = join(root, 'accounts', guest.accountId)
+    const file = join(dir, 'reveals.json')
+    await writeFile(file, ledger, { mode: 0o600 })
+    const request = {
+      method: 'PUT',
+      headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+      socket: { remoteAddress: '203.0.113.83' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from('{"hidden":["c-new"]}') },
+    }
+    let status = 0
+    await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/reveals'))
+    assert.equal(status, 500)
+    assert.equal(await readFile(file, 'utf8'), ledger)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a grade monitor that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-monitor-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    autostart: false,
+    now: () => new Date('2026-11-16T08:00:00.000Z'),
+    fetch: async (url) => {
+      const target = String(url)
+      const body = target.endsWith('/token.php')
+        ? { access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 }
+        : []
+      return { status: 200, text: async () => JSON.stringify(body) }
+    },
+    fcmSend: async () => ({ status: 200 }),
+  })
+  const accountId = 'f'.repeat(32)
+  const file = join(root, 'accounts', accountId, 'monitor.json')
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    await runtime.pollAccount(accountId)
+    const list = '["keep-this-check"]\n'
+    await writeFile(file, list, { mode: 0o600 })
+    await assert.rejects(() => runtime.pollAccount(accountId), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(file, 'utf8'), list)
+    const pushes = '{"pushes":"keep-this"}\n'
+    await writeFile(file, pushes, { mode: 0o600 })
+    await assert.rejects(() => runtime.pollAccount(accountId), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(file, 'utf8'), pushes)
+    await rm(file)
+    await runtime.pollAccount(accountId)
+    const fresh = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(typeof fresh.gradeCheckAt, 'string')
+    assert.equal(Array.isArray(fresh.pushes) || fresh.pushes == null, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a snapshot whose grades are not a list is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-snapshot-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  const stored = '{"fetchedAt":"2026-11-16T08:00:00.000Z","grades":{"kept":true},"events":[]}\n'
+  try {
+    const guest = await runtime.createGuest('203.0.113.84')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const dir = join(root, 'accounts', guest.accountId)
+    const file = join(dir, 'snapshot.json')
+    await writeFile(file, stored, { mode: 0o600 })
+    const call = async (method, body) => {
+      const request = {
+        method,
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.84' },
+        async *[Symbol.asyncIterator]() { if (body) yield Buffer.from(body) },
+      }
+      let status = 0
+      const chunks = []
+      await runtime.handle(request, {
+        writeHead(code) { status = code },
+        end(payload) { if (payload) chunks.push(Buffer.from(payload)) },
+      }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+      return status
+    }
+    assert.equal(await call('GET'), 500)
+    assert.equal(await call('PUT', '{"grades":[]}'), 500)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    const kept = '{"fetchedAt":"2026-11-16T08:00:00.000Z","grades":[{"id":"g-keep"}],"events":[]}\n'
+    await writeFile(file, kept, { mode: 0o600 })
+    assert.equal(await call('PUT', '{"grades":[]}'), 200)
+    const saved = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(saved.grades.some((grade) => grade.id === 'g-keep'), true)
+    await rm(file)
+    assert.equal(await call('PUT', '{"grades":[],"fetchedAt":"2026-11-16T09:00:00.000Z"}'), 200)
+    assert.equal(Array.isArray(JSON.parse(await readFile(file, 'utf8')).grades), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a snapshot whose exams are not a list is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-exams-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  const stored = '{"fetchedAt":"2026-11-16T08:00:00.000Z","grades":[{"id":"g-keep"}],"events":[],"exams":{"kept":true}}\n'
+  try {
+    const guest = await runtime.createGuest('203.0.113.85')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const file = join(root, 'accounts', guest.accountId, 'snapshot.json')
+    await writeFile(file, stored, { mode: 0o600 })
+    const request = {
+      method: 'PUT',
+      headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+      socket: { remoteAddress: '203.0.113.85' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+    }
+    let status = 0
+    await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+    assert.equal(status, 500)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    await writeFile(file, '{"fetchedAt":"2026-11-16T08:00:00.000Z","grades":[{"id":"g-keep"}],"events":[],"exams":[]}\n', { mode: 0o600 })
+    const again = {
+      method: 'PUT',
+      headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+      socket: { remoteAddress: '203.0.113.85' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+    }
+    status = 0
+    await runtime.handle(again, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+    assert.equal(status, 200)
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).grades.some((grade) => grade.id === 'g-keep'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a snapshot whose week map is not an object is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-weeks-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  const stored = '{"fetchedAt":"2026-11-16T08:00:00.000Z","grades":[{"id":"g-keep"}],"events":[],"weekFetched":["2026-11-09"]}\n'
+  try {
+    const guest = await runtime.createGuest('203.0.113.86')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const file = join(root, 'accounts', guest.accountId, 'snapshot.json')
+    await writeFile(file, stored, { mode: 0o600 })
+    const call = async (body) => {
+      const request = {
+        method: 'PUT',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.86' },
+        async *[Symbol.asyncIterator]() { yield Buffer.from(body) },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+      return status
+    }
+    assert.equal(await call('{"grades":[]}'), 500)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    await writeFile(file, '{"fetchedAt":"2026-11-16T08:00:00.000Z","grades":[{"id":"g-keep"}],"events":[],"weekFetched":{}}\n', { mode: 0o600 })
+    assert.equal(await call('{"grades":[]}'), 200)
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).grades.some((grade) => grade.id === 'g-keep'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a push token that is not a token is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-token-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.88')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const dir = join(root, 'accounts', guest.accountId)
+    const linkFile = join(dir, 'link.json')
+    const snapshot = join(dir, 'snapshot.json')
+    const keptSnapshot = '{"grades":[{"id":"g-keep"}]}\n'
+    await writeFile(snapshot, keptSnapshot, { mode: 0o600 })
+    const token = `${'a'.repeat(20)}:APA91b${'b'.repeat(20)}`
+    const call = async (method, path, body) => {
+      const request = {
+        method,
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.88' },
+        async *[Symbol.asyncIterator]() { if (body != null) yield Buffer.from(body) },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL(`http://127.0.0.1/api/v1/schulnetz${path}`))
+      return status
+    }
+    const keep = async (tokens) => {
+      const parsed = JSON.parse(await readFile(linkFile, 'utf8'))
+      parsed.fcmTokens = tokens
+      const stored = `${JSON.stringify(parsed)}\n`
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call('GET', '/status'), 500)
+      assert.equal(await call('PUT', '/snapshot', '{"grades":[]}'), 500)
+      await assert.rejects(() => runtime.pollAccount(guest.accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(() => runtime.linkAccount(guest.accountId, {
+        baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+        deviceId: '0123456789abcdef01234567',
+        refreshToken: 'synthetic-refresh-token-long-enough',
+      }), (error) => error?.code === 'EBADMSG')
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await keep(['kept'])
+    await keep([{ kept: true }])
+    await keep([token, ''])
+    const parsed = JSON.parse(await readFile(linkFile, 'utf8'))
+    parsed.fcmTokens = [token]
+    await writeFile(linkFile, JSON.stringify(parsed), { mode: 0o600 })
+    assert.equal(await call('GET', '/status'), 200)
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    assert.deepEqual(JSON.parse(await readFile(linkFile, 'utf8')).fcmTokens, [token])
+    assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a link that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-link-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.87')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const dir = join(root, 'accounts', guest.accountId)
+    const linkFile = join(dir, 'link.json')
+    const snapshot = join(dir, 'snapshot.json')
+    const baseline = join(dir, 'notification-baseline.json')
+    const ledger = join(dir, 'notified-grades.json')
+    const keptSnapshot = '{"grades":[{"id":"g-keep"}]}\n'
+    const keptBaseline = '{"version":1,"weeks":{"2026-11-16":{"keep":true}}}\n'
+    const keptLedger = '{"version":1,"keys":["g:keep"]}\n'
+    await writeFile(snapshot, keptSnapshot, { mode: 0o600 })
+    await writeFile(baseline, keptBaseline, { mode: 0o600 })
+    await writeFile(ledger, keptLedger, { mode: 0o600 })
+    const call = async (method, path, body) => {
+      const request = {
+        method,
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.87' },
+        async *[Symbol.asyncIterator]() { if (body != null) yield Buffer.from(body) },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL(`http://127.0.0.1/api/v1/schulnetz${path}`))
+      return status
+    }
+    const live = JSON.parse(await readFile(linkFile, 'utf8'))
+    live.fcmTokens = [`${'a'.repeat(20)}:APA91b${'b'.repeat(80)}`]
+    live.pushKeys = { abcdef0123456789abcdef01: { sealed: true } }
+    live.settings = { grades: true }
+    live.topic = 'old-topic'
+    live.pushEndpoints = ['old-endpoint']
+    await writeFile(linkFile, JSON.stringify(live), { mode: 0o600 })
+    assert.equal(await call('GET', '/status'), 200)
+    const stripped = JSON.parse(await readFile(linkFile, 'utf8'))
+    assert.equal(Object.hasOwn(stripped, 'topic'), false)
+    assert.equal(Object.hasOwn(stripped, 'pushEndpoints'), false)
+    assert.equal(stripped.pushKeys.abcdef0123456789abcdef01.sealed, true)
+    const unchanged = async (stored) => {
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+      assert.equal(await readFile(baseline, 'utf8'), keptBaseline)
+      assert.equal(await readFile(ledger, 'utf8'), keptLedger)
+    }
+    for (const bad of ['["keep-link"]\n', '"keep-link"\n', 'true\n', '{"mode":"rest","fcmTokens":"keep-tokens"}\n', '{"mode":"rest","pushKeys":["keep-keys"]}\n', '{"mode":"web","settings":["keep-settings"]}\n']) {
+      await writeFile(linkFile, bad, { mode: 0o600 })
+      assert.equal(await call('GET', '/status'), 500)
+      assert.equal(await call('PUT', '/snapshot', '{"grades":[]}'), 500)
+      await assert.rejects(() => runtime.pollAccount(guest.accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(() => runtime.linkAccount(guest.accountId, {
+        baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+        deviceId: '0123456789abcdef01234567',
+        refreshToken: 'synthetic-refresh-token-long-enough',
+      }), (error) => error?.code === 'EBADMSG')
+      await unchanged(bad)
+    }
+    await writeFile(linkFile, 'null\n', { mode: 0o600 })
+    assert.equal(await call('PUT', '/snapshot', '{"grades":[]}'), 404)
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    assert.equal(JSON.parse(await readFile(linkFile, 'utf8')).baseUrl, 'https://www.schulnetz-ag.ch/aksa')
+    assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
