@@ -672,3 +672,47 @@ test('a snapshot whose grades are not a list is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a snapshot whose exams are not a list is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-exams-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  const stored = '{"fetchedAt":"2026-11-16T08:00:00.000Z","grades":[{"id":"g-keep"}],"events":[],"exams":{"kept":true}}\n'
+  try {
+    const guest = await runtime.createGuest('203.0.113.85')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const file = join(root, 'accounts', guest.accountId, 'snapshot.json')
+    await writeFile(file, stored, { mode: 0o600 })
+    const request = {
+      method: 'PUT',
+      headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+      socket: { remoteAddress: '203.0.113.85' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+    }
+    let status = 0
+    await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+    assert.equal(status, 500)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    await writeFile(file, '{"fetchedAt":"2026-11-16T08:00:00.000Z","grades":[{"id":"g-keep"}],"events":[],"exams":[]}\n', { mode: 0o600 })
+    const again = {
+      method: 'PUT',
+      headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+      socket: { remoteAddress: '203.0.113.85' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+    }
+    status = 0
+    await runtime.handle(again, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+    assert.equal(status, 200)
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).grades.some((grade) => grade.id === 'g-keep'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
