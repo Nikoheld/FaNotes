@@ -9,7 +9,7 @@ plugins {
     id("com.google.gms.google-services") apply false
 }
 
-val fanotesVersion = providers.gradleProperty("fanotes.version").orElse("2026.11.3-beta.1")
+val fanotesVersion = providers.gradleProperty("fanotes.version").orElse("2026.11.3-beta.2")
 
 android {
     namespace = "ch.fasrv.fanotes.companion"
@@ -20,7 +20,7 @@ android {
         minSdk = 29
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = 37
-        versionCode = 51000251
+        versionCode = 51000252
         versionName = fanotesVersion.get()
     }
 
