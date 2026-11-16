@@ -470,15 +470,23 @@ export const createSchulnetzRuntime = (options = {}) => {
   })
 
   const revealsPath = (accountId) => resolve(accountDir(accountId), 'reveals.json')
-  const readReveals = async (accountId) => mergeRevealLedger(await readJson(revealsPath(accountId)))
+  const readRevealFile = async (accountId) => {
+    const stored = await readJson(revealsPath(accountId))
+    // A missing or broken file can start again. A file that is there but not this ledger must not look empty, or the next reveal replaces the hidden grades.
+    if (stored && (stored.version !== 1 || !Array.isArray(stored.hidden) || !Array.isArray(stored.revealed))) {
+      throw Object.assign(new Error('reveal ledger'), { code: 'EBADMSG' })
+    }
+    return stored
+  }
+  const readReveals = async (accountId) => mergeRevealLedger(await readRevealFile(accountId))
   const mergeReveals = async (accountId, incoming) => withAccount(accountId, async () => {
-    const merged = mergeRevealLedger(await readJson(revealsPath(accountId)), incoming || {})
+    const merged = mergeRevealLedger(await readRevealFile(accountId), incoming || {})
     await writeJson(revealsPath(accountId), merged)
     return merged
   })
   const addHiddenGrades = async (accountId, ids) => {
     if (!ids.length) return
-    const merged = mergeRevealLedger(await readJson(revealsPath(accountId)), { hidden: ids })
+    const merged = mergeRevealLedger(await readRevealFile(accountId), { hidden: ids })
     await writeJson(revealsPath(accountId), merged)
   }
 
