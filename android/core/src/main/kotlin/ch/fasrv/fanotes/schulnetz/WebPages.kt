@@ -537,9 +537,13 @@ fun parseSchedulerXml(xml: String): List<AgendaEvent> {
         val course = field("kurskuerzel").ifBlank { field("fachkuerzel") }.ifBlank { text }
         val room = field("zimmerkuerzel").ifBlank { field("zimmer") }
         val teacher = field("lehrerkuerzelname")
-        val comment = field("kommentar")
+        val note = field("kommentar")
+        val rawMark = field("markierung")
         val kind = field("event_type")
-        val marker = lessonMarker(kind, field("markierung"), field("textdeco"))
+        val marker = lessonMarker(kind, rawMark, field("textdeco"))
+        // On an exam the same field is the exam material, not a lesson mark. "none" is an empty mark.
+        val material = if (canonicalEventType(kind) == "exam" && rawMark.isNotBlank() && !rawMark.equals("none", true) && !rawMark.matches(Regex("""(?i)keine(?:\s+markierung)?"""))) rawMark else ""
+        val comment = if (note.isNotBlank() && material.isNotBlank() && note != material) "$note · $material" else note.ifBlank { material }
         val idAttr = Regex("""\bid\s*=\s*["']([^"']+)["']""").find(attrs)?.groupValues?.get(1).orEmpty()
         AgendaEvent(
             id = idAttr.ifBlank { field("identity") }.ifBlank { stableId("sched", start, text, course) },
@@ -551,7 +555,7 @@ fun parseSchedulerXml(xml: String): List<AgendaEvent> {
             teachers = listOf(teacher).filter { it.isNotBlank() },
             courseId = field("kursid"),
             courseName = course.ifBlank { text },
-            status = if (marker == "cancelled" || comment.lowercase().contains("fällt") || comment.lowercase().contains("faellt")) "cancelled" else "",
+            status = if (marker == "cancelled" || note.lowercase().contains("fällt") || note.lowercase().contains("faellt")) "cancelled" else "",
             eventType = canonicalEventType(kind),
             color = field("color"),
             timetableText = text,

@@ -61,6 +61,7 @@ class LessonMarksTest {
         val exam = parseSchedulerXml(xml(kind = "1_pru", mark = "Kapitel 4", deco = "line-through")).single()
         assertEquals("", exam.marker)
         assertEquals("", exam.status)
+        assertEquals("Kapitel 4", exam.comment)
     }
 
     @Test
