@@ -1658,7 +1658,7 @@ export default function App({ startupBootstrap }: AppProps) {
       const known = new Set(collectTreePaths(treeRef.current))
       const ownRecently = Date.now() - lastOwnTreeRefreshRef.current < 4000
       const active = activePathRef.current
-      const onlyActiveChanged = !change.added.length && !change.removed.length &&
+      const onlyActiveChanged = !change.truncated && !change.added.length && !change.removed.length &&
         change.changed.every((entryPath) => entryPath === active)
       // The open note's own autosave also shows up as a change: nothing to do then.
       if (onlyActiveChanged) return
@@ -1670,7 +1670,9 @@ export default function App({ startupBootstrap }: AppProps) {
         setTree(nextTree)
         syncEngine.notifyLocalChange()
         const present = new Set(collectTreePaths(nextTree))
-        const arrived = change.added.filter((entryPath) => !known.has(entryPath) && present.has(entryPath) && !tabsRef.current.some((tab) => tab.path === entryPath))
+        // A truncated change list must not silently drop entries: derive arrivals from the full tree.
+        const addedPaths = change.truncated ? [...present] : change.added
+        const arrived = addedPaths.filter((entryPath) => !known.has(entryPath) && present.has(entryPath) && !tabsRef.current.some((tab) => tab.path === entryPath))
         const fileSet = new Set(collectTreePaths(nextTree, true))
         const files = arrived.filter((entryPath) => fileSet.has(entryPath))
         setNewArrivals((current) => {
