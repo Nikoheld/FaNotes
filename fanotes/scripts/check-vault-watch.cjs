@@ -1,8 +1,10 @@
-// Unit checks for the external-change detection of the vault (electron/vault-watch.cjs).
+// Unit checks for the external-change detection of the vault (electron/vault-watch.cjs)
+// and for what the app does with open notes when their files change (src/lib/externalTabs.mjs).
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const { pathToFileURL } = require('node:url')
 const { isIgnoredWatchPath, flattenTree, diffSignatures, createVaultWatcher } = require('../electron/vault-watch.cjs')
 
 // Ignore rules
@@ -89,6 +91,225 @@ async function main() {
   console.log('vault watch checks passed')
 }
 
+// Open notes whose files change outside FaNotes: the pure decisions, then a run against real files and the real watcher diffs.
+async function reconcileChecks() {
+  const tabs = await import(pathToFileURL(path.join(__dirname, '..', 'src', 'lib', 'externalTabs.mjs')).href)
+  const {
+    OWN_WRITE_MEMORY, sameNoteText, rememberOwnWrite, isOwnWrite, normalizeVaultChange, tabVaultPaths, implicatedTabPaths,
+    decideTabReconcile, renameCandidates, companionToFollow, conflictCopyBase, conflictDeviceName,
+  } = tabs
+
+  // Texts are compared without line endings and trailing whitespace, nothing else.
+  assert.equal(sameNoteText('a\r\nb\n\n', 'a\nb'), true)
+  assert.equal(sameNoteText('a b', 'a  b'), false)
+  assert.equal(sameNoteText(undefined, ''), true)
+
+  // Own writes: newest first, bounded, matched by content.
+  let own = []
+  for (const body of ['1', '2', '3', '4', '5', '3']) own = rememberOwnWrite(own, body)
+  assert.equal(own.length, OWN_WRITE_MEMORY)
+  assert.equal(isOwnWrite(own, '3\n'), true)
+  assert.equal(isOwnWrite(own, '2'), true)
+  assert.equal(isOwnWrite(own, '1'), false, 'aged out')
+  assert.equal(isOwnWrite(own, '33'), false)
+
+  // The IPC payload is not trusted; a full list may be incomplete.
+  assert.deepEqual(normalizeVaultChange({ added: ['a.md', 5, ''], removed: 'x', changed: ['b.md'] }), { added: ['a.md'], removed: [], changed: ['b.md'], unreliable: false })
+  assert.equal(normalizeVaultChange({ added: Array.from({ length: 500 }, (_, i) => `n${i}.md`), removed: [], changed: [] }).unreliable, true)
+  assert.equal(normalizeVaultChange({ added: [], removed: [], changed: [], truncated: true }).unreliable, true)
+  assert.equal(normalizeVaultChange(null).unreliable, true)
+  assert.deepEqual(normalizeVaultChange(undefined).added, [])
+
+  // Which open notes a change is about: the note and its .famd companion.
+  assert.deepEqual(tabVaultPaths('Physik/a.md'), ['Physik/a.md', 'Physik/a.famd'])
+  assert.deepEqual(tabVaultPaths('Physik/a.famd'), ['Physik/a.famd'])
+  assert.deepEqual(tabVaultPaths('x.pdf'), ['x.pdf', 'x.famd'])
+  const open = ['a.md', 'b.md', 'Doc/c.famd', 'p.pdf']
+  const change = (parts) => normalizeVaultChange({ added: [], removed: [], changed: [], ...parts })
+  assert.deepEqual(implicatedTabPaths(open, change({ changed: ['b.md'] })), ['b.md'])
+  assert.deepEqual(implicatedTabPaths(open, change({ removed: ['p.famd'] })), ['p.pdf'])
+  assert.deepEqual(implicatedTabPaths(open, change({ added: ['other.md'] })), [])
+  assert.deepEqual(implicatedTabPaths(open, change({ truncated: true })), open)
+  assert.deepEqual(implicatedTabPaths(open, null), open)
+
+  // Decisions. Neither the typed text nor the file is ever overwritten by one of them.
+  const there = (content) => ({ exists: true, content })
+  const decide = (facts) => decideTabReconcile({ content: 'one', savedContent: 'one', ownWrites: [], ...facts })
+  assert.deepEqual(decide({ disk: there('one\n') }), { action: 'none' }, 'unchanged')
+  assert.deepEqual(decide({ disk: null }), { action: 'none' }, 'unreadable: leave alone')
+  assert.deepEqual(decide({ disk: there('two') }), { action: 'reload', content: 'two' }, 'clean tab, outside edit: reload')
+  assert.deepEqual(decide({ content: 'one!', disk: there('two') }), { action: 'conflict', external: 'two' }, 'dirty tab, outside edit: conflict')
+  assert.deepEqual(decide({ content: 'one!', disk: there('one') }), { action: 'none' }, 'dirty tab, file untouched')
+  assert.deepEqual(decide({ content: 'one!', ownWrites: rememberOwnWrite([], 'one!'), disk: there('one!') }), { action: 'none' }, 'own autosave seen before the tab was updated')
+  assert.deepEqual(decide({ content: 'one!!', ownWrites: rememberOwnWrite([], 'one!'), disk: there('one!') }), { action: 'none' }, 'own autosave while typing on')
+  assert.deepEqual(decide({ content: 'same', disk: there('same\n') }), { action: 'adopt' }, 'the typed text already is the file')
+  assert.deepEqual(decide({ disk: { exists: false } }), { action: 'deleted' }, 'deleted outside, clean or not')
+  assert.deepEqual(decide({ content: 'one!', disk: { exists: false } }), { action: 'deleted' })
+  assert.deepEqual(decide({ hold: 'deleted', disk: { exists: false } }), { action: 'none' }, 'already on hold')
+  assert.deepEqual(decide({ hold: 'conflict', content: 'one!', disk: { exists: false } }), { action: 'deleted' }, 'a conflicting file that then vanished')
+  assert.deepEqual(decide({ hold: 'deleted', disk: there('one') }), { action: 'release' }, 'the file came back unchanged')
+  assert.deepEqual(decide({ hold: 'deleted', disk: there('two') }), { action: 'reload', content: 'two' }, 'the file came back changed, nothing typed')
+  assert.deepEqual(decide({ hold: 'deleted', content: 'one!', disk: there('two') }), { action: 'conflict', external: 'two' }, 'the file came back changed, text typed meanwhile')
+  assert.deepEqual(decide({ hold: 'conflict', content: 'one!', heldExternal: 'two', disk: there('two') }), { action: 'none' }, 'conflict already announced')
+  assert.deepEqual(decide({ hold: 'conflict', content: 'one!', heldExternal: 'two', disk: there('three') }), { action: 'conflict', external: 'three' }, 'edited again outside')
+  assert.deepEqual(decide({ hold: 'conflict', content: 'one!', heldExternal: 'two', disk: there('one') }), { action: 'release' }, 'outside edit reverted')
+  assert.deepEqual(decide({ content: 'a\nb', savedContent: 'a\nb', disk: there('a\r\nb\r\n') }), { action: 'none' }, 'line endings only')
+
+  // Where a vanished note may have gone.
+  const sig = (modifiedAt, size) => ({ modifiedAt, size })
+  const after = new Map([['m.md', sig('t1', 5)], ['n.famd', sig('t9', 70)], ['z.md', sig('t2', 5)]])
+  assert.deepEqual(renameCandidates({ from: 'n.md', added: ['m.md', 'n.famd', 'z.md'], before: sig('t1', 5), after }), ['m.md'], 'same signature')
+  assert.deepEqual(renameCandidates({ from: 'n.md', added: ['m.md', 'n.famd', 'z.md'], before: sig('t8', 5), after }), ['m.md', 'z.md'], 'no signature match: a few of the same kind, the text decides')
+  assert.deepEqual(renameCandidates({ from: 'n.md', added: ['m.md'], before: sig('t1', 5), after, taken: ['m.md'] }), [], 'already open as another tab')
+  assert.deepEqual(renameCandidates({ from: 'n.md', added: Array.from({ length: 7 }, (_, i) => `f${i}.md`), before: null }), [], 'too many to read blindly')
+  assert.deepEqual(renameCandidates({ from: 'n.md', added: ['n.famd'] }), [], 'the orphaned companion is not the note')
+  assert.deepEqual(renameCandidates({ from: 'n.md', added: ['n.markdown'], before: sig('t1', 5), after: new Map([['n.markdown', sig('t1', 5)]]) }), ['n.markdown'], 'extension change')
+  assert.deepEqual(renameCandidates({ from: 'x.pdf', added: ['y.pdf'], before: sig('t', 9), after: new Map([['y.pdf', sig('t', 9)]]) }), ['y.pdf'])
+  assert.deepEqual(renameCandidates({ from: 'x.pdf', added: ['y.pdf'], before: sig('t', 9), after: new Map([['y.pdf', sig('t2', 9)]]) }), [], 'a PDF has no text to compare: signature or nothing')
+  assert.deepEqual(companionToFollow({ from: 'a/n.md', to: 'a/m.md' }), { from: 'a/n.famd', to: 'a/m.famd' })
+  assert.deepEqual(companionToFollow({ from: 'a/n.md', to: 'b/n.md' }), { from: 'a/n.famd', to: 'b/n.famd' })
+  assert.equal(companionToFollow({ from: 'a/n.md', to: 'a/n.markdown' }), null, 'same stem: nothing to move')
+  assert.equal(companionToFollow({ from: 'a.famd', to: 'b.famd' }), null, 'a handwriting note is its own companion')
+
+  // Conflict copies keep the sync convention; only Markdown keeps its extension.
+  assert.equal(conflictCopyBase('Physik/a.md'), 'Physik/a.md')
+  assert.equal(conflictCopyBase('Physik/a.famd'), 'Physik/a.md')
+  assert.equal(conflictCopyBase('x.pdf'), 'x.md')
+  assert.equal(conflictDeviceName(' Laptop ', 'linux'), 'Laptop')
+  assert.equal(conflictDeviceName('', 'win32'), 'Windows-Gerät')
+  assert.equal(conflictDeviceName(undefined, 'something'), 'Gerät')
+
+  // The decisions against real files and the diffs the real watcher produces.
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'fanotes-tabs-'))
+  try {
+    let clock = 1_700_000_000_000
+    const put = (name, text) => {
+      fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true })
+      fs.writeFileSync(path.join(dir, name), text)
+      clock += 5000
+      fs.utimesSync(path.join(dir, name), clock / 1000, clock / 1000)
+    }
+    const stat = (name) => { const info = fs.statSync(path.join(dir, name)); return { modifiedAt: String(info.mtimeMs), size: info.size } }
+    const NOTE = /\.(md|markdown|pdf)$/iu
+    // Like the app's tree: a `.famd` next to a note of the same name is that note's companion and stays out of the list.
+    const scan = async () => {
+      const names = fs.readdirSync(dir).filter((name) => !isIgnoredWatchPath(name))
+      const stems = new Set(names.filter((name) => NOTE.test(name)).map((name) => name.replace(NOTE, '')))
+      return names
+        .filter((name) => !(name.endsWith('.famd') && stems.has(name.slice(0, -5))))
+        .map((name) => ({ name, relativePath: name, kind: 'file', ...stat(name) }))
+    }
+    const events = []
+    const watcher = createVaultWatcher({ getRoots: () => [dir], scan, onChange: (d) => events.push(d), debounceMs: 5, intervalMs: 3600000 })
+    put('a.md', 'one')
+    put('a.famd', 'one\n<!-- ink payload -->')
+    await watcher.rescan()
+
+    const tab = { path: 'a.md', content: 'one', savedContent: 'one', ownWrites: [], hold: null, heldExternal: null }
+    const diskOf = (name) => (fs.existsSync(path.join(dir, name)) ? { exists: true, content: fs.readFileSync(path.join(dir, name), 'utf8') } : { exists: false })
+    const step = async (model = tab) => {
+      const seen = events.length
+      await watcher.rescan()
+      const raw = events.length > seen ? events.at(-1) : null
+      if (!raw) return { action: 'none', change: null }
+      const change = normalizeVaultChange(raw)
+      if (!implicatedTabPaths([model.path], change).length) return { action: 'none', change }
+      const decision = decideTabReconcile({ content: model.content, savedContent: model.savedContent, ownWrites: model.ownWrites, disk: diskOf(model.path), hold: model.hold, heldExternal: model.heldExternal })
+      return { ...decision, change }
+    }
+
+    // The app's own autosave comes back as an event and is no outside edit, even before the tab is updated.
+    tab.content = 'one, then typing'
+    tab.ownWrites = rememberOwnWrite(tab.ownWrites, tab.content)
+    put('a.md', tab.content)
+    assert.equal((await step()).action, 'none', 'own autosave')
+    tab.savedContent = tab.content
+
+    // An outside edit of an idle note (the active note too): the tab reloads.
+    put('a.md', 'edited outside')
+    let result = await step()
+    assert.deepEqual([result.action, result.content], ['reload', 'edited outside'])
+    tab.content = tab.savedContent = result.content
+
+    // The same while the user has unsaved text: both sides survive, saving pauses.
+    tab.content = 'edited outside, plus my words'
+    put('a.md', 'edited outside, and again')
+    result = await step()
+    assert.deepEqual([result.action, result.external], ['conflict', 'edited outside, and again'])
+    tab.hold = 'conflict'
+    tab.heldExternal = result.external
+    assert.equal(fs.readFileSync(path.join(dir, 'a.md'), 'utf8'), 'edited outside, and again', 'the file still holds the outside version')
+    assert.equal(tab.content, 'edited outside, plus my words', 'the typed text is still in the tab')
+    assert.equal((await step()).action, 'none', 'nothing new')
+    put('a.md', 'a third version')
+    result = await step()
+    assert.deepEqual([result.action, result.external], ['conflict', 'a third version'])
+
+    // Deleted outside: the text stays, nothing is written back, and the orphaned companion is no rename target.
+    fs.unlinkSync(path.join(dir, 'a.md'))
+    result = await step()
+    assert.equal(result.action, 'deleted')
+    assert.deepEqual(result.change.removed, ['a.md'])
+    assert.deepEqual(result.change.added, ['a.famd'], 'the companion shows up as a note of its own')
+    assert.deepEqual(renameCandidates({ from: 'a.md', added: result.change.added }), [])
+    tab.hold = 'deleted'
+    tab.heldExternal = null
+    assert.equal(decideTabReconcile({ ...tab, disk: diskOf('a.md') }).action, 'none')
+    // It comes back (restored from the trash) with the text the tab was based on: the pause lifts.
+    put('a.md', tab.savedContent)
+    result = await step()
+    assert.equal(result.action, 'release')
+    tab.hold = null
+
+    // Renamed outside (only the note, as Explorer does): same signature, same text, and the companion is left behind.
+    put('n.md', 'rename me')
+    put('n.famd', 'rename me\n<!-- ink payload -->')
+    await watcher.rescan()
+    const second = { path: 'n.md', content: 'rename me, typed', savedContent: 'rename me', ownWrites: [], hold: null, heldExternal: null }
+    const beforeSignature = stat('n.md')
+    fs.renameSync(path.join(dir, 'n.md'), path.join(dir, 'm.md'))
+    result = await step(second)
+    assert.equal(result.action, 'deleted')
+    assert.deepEqual([...result.change.added].sort(), ['m.md', 'n.famd'])
+    const afterSignatures = new Map((await scan()).map((entry) => [entry.relativePath, { modifiedAt: entry.modifiedAt, size: entry.size }]))
+    const candidates = renameCandidates({ from: 'n.md', added: result.change.added, before: beforeSignature, after: afterSignatures })
+    assert.deepEqual(candidates, ['m.md'])
+    assert.equal(sameNoteText(diskOf('m.md').content, second.savedContent), true, 'the text decides before a tab follows')
+    assert.deepEqual(companionToFollow({ from: 'n.md', to: 'm.md' }), { from: 'n.famd', to: 'm.famd' })
+    assert.equal(diskOf('n.famd').exists, true, 'the companion is still there, as a note of its own')
+
+    // Two identical copies are no safe rename: the caller sees two candidates and keeps the tab on hold.
+    put('twin1.md', 'same text')
+    await watcher.rescan()
+    const twin = { path: 'twin1.md', content: 'same text', savedContent: 'same text', ownWrites: [], hold: null, heldExternal: null }
+    const twinBefore = stat('twin1.md')
+    fs.copyFileSync(path.join(dir, 'twin1.md'), path.join(dir, 'twin2.md'))
+    fs.copyFileSync(path.join(dir, 'twin1.md'), path.join(dir, 'twin3.md'))
+    fs.utimesSync(path.join(dir, 'twin2.md'), fs.statSync(path.join(dir, 'twin1.md')).atime, fs.statSync(path.join(dir, 'twin1.md')).mtime)
+    fs.utimesSync(path.join(dir, 'twin3.md'), fs.statSync(path.join(dir, 'twin1.md')).atime, fs.statSync(path.join(dir, 'twin1.md')).mtime)
+    fs.unlinkSync(path.join(dir, 'twin1.md'))
+    result = await step(twin)
+    assert.equal(result.action, 'deleted')
+    const twinAfter = new Map((await scan()).map((entry) => [entry.relativePath, { modifiedAt: entry.modifiedAt, size: entry.size }]))
+    assert.equal(renameCandidates({ from: 'twin1.md', added: result.change.added, before: twinBefore, after: twinAfter }).length, 2)
+
+    // A PDF note: removal and rename are detected by signature; the file itself is never read.
+    put('x.pdf', '%PDF-1.4 not really')
+    await watcher.rescan()
+    const pdfBefore = stat('x.pdf')
+    fs.renameSync(path.join(dir, 'x.pdf'), path.join(dir, 'y.pdf'))
+    await watcher.rescan()
+    const pdfChange = normalizeVaultChange(events.at(-1))
+    assert.deepEqual(implicatedTabPaths(['x.pdf'], pdfChange), ['x.pdf'])
+    const pdfAfter = new Map((await scan()).map((entry) => [entry.relativePath, { modifiedAt: entry.modifiedAt, size: entry.size }]))
+    assert.deepEqual(renameCandidates({ from: 'x.pdf', added: pdfChange.added, before: pdfBefore, after: pdfAfter }), ['y.pdf'])
+    watcher.stop()
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+  console.log('open note reconciliation checks passed')
+}
+
 // Real recursive fs.watch (the periodic rescan is disabled, so only the OS watcher can report).
 async function realWatch() {
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'fanotes-watch-real-'))
@@ -157,4 +378,4 @@ async function newArrivalStore() {
   assert.deepEqual(externalArrivals({ ...base, ownRecently: true }), [])
   console.log('new-arrival store checks passed')
 }
-main().then(newArrivalStore).then(intervalPolicy).then(realWatch).catch((error) => { console.error(error); process.exit(1) })
+main().then(newArrivalStore).then(reconcileChecks).then(intervalPolicy).then(realWatch).catch((error) => { console.error(error); process.exit(1) })

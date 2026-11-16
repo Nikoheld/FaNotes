@@ -179,7 +179,7 @@ export function StatisticsPage({ settings, update, syncState }: {
         {stats ? (
           <>
             <Tile icon={<FileText size={15} />} value={fmt.n(stats.totals.notes)} label="Notizen" />
-            <Tile icon={<HardDrive size={15} />} value={fmt.bytes(stats.totals.bytes)} label="Grösse des Vaults" />
+            <Tile icon={<HardDrive size={15} />} value={fmt.bytes(stats.totals.bytes)} label="Größe des Vaults" />
             <Tile icon={<PenLine size={15} />} value={fmt.n(stats.writing.wordsTyped + stats.writing.storyWords)} label="Wörter getippt" />
             <Tile icon={<Flame size={15} />} value={fmt.n(stats.activity.streak.current)} label="Tage in Folge" hint={`${fmt.en ? 'best' : 'Rekord'} ${stats.activity.streak.longest}`} />
             <Tile icon={<Timer size={15} />} value={fmt.duration(stats.time.dwellMs)} label="Zeit in Notizen" />
@@ -238,7 +238,7 @@ export function StatisticsPage({ settings, update, syncState }: {
               </ul>
             ) : <Empty>Noch keine Ordner.</Empty>}
             <div className="stat-three">
-              <div><h4>Grösste Notizen</h4><FileList rows={stats.largest} fmt={fmt} value={(row) => fmt.bytes(row.size)} /></div>
+              <div><h4>Größte Notizen</h4><FileList rows={stats.largest} fmt={fmt} value={(row) => fmt.bytes(row.size)} /></div>
               <div><h4>Zuletzt bearbeitet</h4><FileList rows={stats.recent} fmt={fmt} value={(row) => fmt.dateTime(row.mtime)} /></div>
               <div><h4>Neueste Notizen</h4><FileList rows={stats.newest} fmt={fmt} value={(row) => fmt.date(row.ctime || row.mtime)} /></div>
             </div>

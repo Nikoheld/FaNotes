@@ -936,6 +936,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .note-tab.drop-before::before, .note-tab.drop-after::before { content: ''; position: absolute; top: 5px; bottom: 5px; width: 2px; border-radius: 2px; background: var(--accent); z-index: 2; }
 .note-tab.drop-before::before { left: -1px; }
 .note-tab.drop-after::before { right: -1px; }
+/* A note whose file was deleted or edited outside FaNotes: paused until the user decides. */
+.note-tab-main > span.tab-hold-mark { flex: none; overflow: visible; display: inline-grid; place-items: center; color: var(--warning); }
+.note-tab.is-deleted .note-tab-main > span:not(.tab-hold-mark) { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--warning) 75%, transparent); }
+.external-banner { flex: none; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; border-bottom: 1px solid color-mix(in srgb, var(--warning) 50%, var(--border)); border-left: 3px solid var(--warning); color: var(--text); background: color-mix(in srgb, var(--warning) 12%, var(--bg)); font-size: 12px; }
+.external-banner > svg { flex: none; color: var(--warning); }
+.external-banner__text { min-width: min(100%, 220px); flex: 1 1 280px; display: grid; gap: 2px; line-height: 1.4; }
+.external-banner__text strong { font-weight: 650; }
+.external-banner__text span { color: var(--text-soft); }
+.external-banner__actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.external-banner__form input { width: min(260px, 60vw); min-height: 31px; padding: 0 9px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--bg); font: inherit; }
+.external-banner__form input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.external-banner button:disabled { opacity: .55; cursor: default; }
+@media (pointer: coarse) { .external-banner .primary-button, .external-banner .secondary-button, .external-banner__form input { min-height: 40px; } }
 .tabs-menu { width: 30px; flex: none; display: grid; place-items: center; border: 0; border-left: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; }
 .tabs-menu:hover { background: var(--panel-hover); color: var(--text); }
 

@@ -7,6 +7,8 @@ type Props = {
   update: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void
 }
 
+const REVEAL_MS = 15_000
+
 type Launch = { command: string; args: string[]; env: Record<string, string> }
 
 /** How a client starts the stdio server for this installation. */
@@ -38,7 +40,7 @@ export const mcpSnippets = (info: LocalMcpInfo, token: string) => {
   return { stdioJson, claudeCode, httpJson, claudeCodeHttp }
 }
 
-function Snippet({ label, text, display }: { label: string; text: string; display: string }) {
+function Snippet({ label, text, display, getText }: { label: string; text: string; display: string; getText?: () => Promise<string> }) {
   const [copied, setCopied] = useState(false)
   const id = useId()
   return (
@@ -52,7 +54,11 @@ function Snippet({ label, text, display }: { label: string; text: string; displa
           className="secondary-button"
           aria-labelledby={`${id}-copy ${id}-label`}
           onClick={() => {
-            void navigator.clipboard?.writeText(text).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500) }).catch(() => undefined)
+            // A snippet with a token fetches it for this one copy only.
+            void (getText ? getText() : Promise.resolve(text))
+              .then((value) => navigator.clipboard?.writeText(value))
+              .then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500) })
+              .catch(() => undefined)
           }}
         >
           {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Kopiert' : 'Kopieren'}
@@ -66,15 +72,28 @@ function Snippet({ label, text, display }: { label: string; text: string; displa
 export function McpSettingsSection({ settings, update }: Props) {
   const api = typeof window !== 'undefined' ? window.fanotes : undefined
   const [info, setInfo] = useState<LocalMcpInfo | null>(null)
-  const [reveal, setReveal] = useState(false)
+  // The token is held only while the user keeps it visible and is dropped after REVEAL_MS.
+  const [revealed, setRevealed] = useState('')
   const [tokenCopied, setTokenCopied] = useState(false)
   const tokenId = useId()
   const [error, setError] = useState('')
   const available = typeof api?.mcpLocal === 'function'
 
+  const fetchToken = useCallback(async () => {
+    if (!api?.mcpLocal) throw new Error('unavailable')
+    return (await api.mcpLocal({ action: 'reveal' })).token
+  }, [api])
+
+  useEffect(() => {
+    if (!revealed) return undefined
+    const timer = window.setTimeout(() => setRevealed(''), REVEAL_MS)
+    return () => { window.clearTimeout(timer); setRevealed('') }
+  }, [revealed])
+
   const load = useCallback(async (action: 'info' | 'regenerate') => {
     if (!api?.mcpLocal) return
     try {
+      if (action === 'regenerate') setRevealed('')
       setInfo(await api.mcpLocal({ action }))
       setError('')
     } catch {
@@ -89,7 +108,7 @@ export function McpSettingsSection({ settings, update }: Props) {
     return () => window.clearTimeout(timer)
   }, [load, settings.mcpEnabled, settings.mcpHttpEnabled])
 
-  const snippets = useMemo(() => (info ? mcpSnippets(info, info.httpToken) : null), [info])
+  const snippets = useMemo(() => (info ? mcpSnippets(info, revealed || '<TOKEN>') : null), [info, revealed])
   const masked = useMemo(() => (info ? mcpSnippets(info, '<TOKEN>') : null), [info])
 
   if (!available) {
@@ -131,9 +150,9 @@ export function McpSettingsSection({ settings, update }: Props) {
         {info?.stdio.appImage && !info.stdio.copied && <div className="setting-callout">Dieser Befehl startet die komplette App und braucht eine Bildschirmsitzung (DISPLAY). Ohne Anzeige, etwa per SSH, funktioniert er nicht.</div>}
         {snippets && masked && (
           <>
-            <Snippet label="Claude Desktop (claude_desktop_config.json)" text={snippets.stdioJson} display={masked.stdioJson} />
-            <Snippet label="Claude Code" text={snippets.claudeCode} display={masked.claudeCode} />
-            <Snippet label="Cursor, ChatGPT Desktop, Grok Build und andere (mcpServers-JSON)" text={snippets.stdioJson} display={masked.stdioJson} />
+            <Snippet label="Claude Desktop (claude_desktop_config.json)" text={masked.stdioJson} display={masked.stdioJson} />
+            <Snippet label="Claude Code" text={masked.claudeCode} display={masked.claudeCode} />
+            <Snippet label="Cursor, ChatGPT Desktop, Grok Build und andere (mcpServers-JSON)" text={masked.stdioJson} display={masked.stdioJson} />
           </>
         )}
       </div>
@@ -153,17 +172,17 @@ export function McpSettingsSection({ settings, update }: Props) {
             <div className="setting-row">
               <div className="setting-copy"><span id={`${tokenId}-label`}>Token</span><small>Wie ein Passwort behandeln. Neu erzeugen sperrt alle Programme, die das alte Token nutzen.</small></div>
               <div className="setting-control">
-                <input id={tokenId} data-i18n-ignore readOnly type={reveal ? 'text' : 'password'} value={info.httpToken} aria-label="Token" />
-                <button type="button" className="secondary-button" aria-controls={tokenId} onClick={() => setReveal((value) => !value)}>{reveal ? <EyeOff size={14} /> : <Eye size={14} />} {reveal ? 'Verbergen' : 'Anzeigen'}</button>
-                <button type="button" id={`${tokenId}-copy`} className="secondary-button" aria-labelledby={`${tokenId}-copy ${tokenId}-label`} onClick={() => void navigator.clipboard?.writeText(info.httpToken).then(() => { setTokenCopied(true); window.setTimeout(() => setTokenCopied(false), 1500) }).catch(() => undefined)}>{tokenCopied ? <Check size={14} /> : <Copy size={14} />} {tokenCopied ? 'Kopiert' : 'Kopieren'}</button>
+                <input id={tokenId} data-i18n-ignore readOnly type={revealed ? 'text' : 'password'} value={revealed || info.httpTokenHint} aria-label="Token" />
+                <button type="button" className="secondary-button" aria-controls={tokenId} onClick={() => { if (revealed) setRevealed(''); else void fetchToken().then(setRevealed).catch(() => setError('Das Token konnte nicht geladen werden.')) }}>{revealed ? <EyeOff size={14} /> : <Eye size={14} />} {revealed ? 'Token verbergen' : 'Token anzeigen'}</button>
+                <button type="button" id={`${tokenId}-copy`} className="secondary-button" aria-labelledby={`${tokenId}-copy ${tokenId}-label`} onClick={() => void fetchToken().then((token) => navigator.clipboard?.writeText(token)).then(() => { setTokenCopied(true); window.setTimeout(() => setTokenCopied(false), 1500) }).catch(() => undefined)}>{tokenCopied ? <Check size={14} /> : <Copy size={14} />} {tokenCopied ? 'Kopiert' : 'Token kopieren'}</button>
                 <span className="sr-only" role="status">{tokenCopied ? 'Kopiert' : ''}</span>
                 <button type="button" className="secondary-button" onClick={() => void load('regenerate')}><RefreshCw size={14} /> Neu erzeugen</button>
               </div>
             </div>
             {snippets && masked && (
               <>
-                <Snippet label="Claude Code (HTTP)" text={snippets.claudeCodeHttp} display={reveal ? snippets.claudeCodeHttp : masked.claudeCodeHttp} />
-                <Snippet label="Generisches mcpServers-JSON (HTTP)" text={snippets.httpJson} display={reveal ? snippets.httpJson : masked.httpJson} />
+                <Snippet label="Claude Code (HTTP)" text={snippets.claudeCodeHttp} display={revealed ? snippets.claudeCodeHttp : masked.claudeCodeHttp} getText={async () => mcpSnippets(info, await fetchToken()).claudeCodeHttp} />
+                <Snippet label="Generisches mcpServers-JSON (HTTP)" text={snippets.httpJson} display={revealed ? snippets.httpJson : masked.httpJson} getText={async () => mcpSnippets(info, await fetchToken()).httpJson} />
               </>
             )}
           </>

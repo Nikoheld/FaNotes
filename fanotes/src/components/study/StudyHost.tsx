@@ -66,7 +66,7 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
     if (!view || current.locked || current.broken) return current
     const ref = locateStudyBlock(view.state.doc.toString(), current.kind, current.hash, current.from)
     if (!ref) {
-      return { ...current, locked: 'Die Notiz wurde inzwischen geändert und der Block ist nicht mehr eindeutig zu finden. Es wurde nichts überschrieben. Schliesse den Editor und öffne den Block neu.' }
+      return { ...current, locked: 'Die Notiz wurde inzwischen geändert und der Block ist nicht mehr eindeutig zu finden. Es wurde nichts überschrieben. Schließe den Editor und öffne den Block neu.' }
     }
     // The editor can hold states the block format cannot (a result that still has branches, an arrow from a box to
     // itself, a list past its cap). They are cleaned up here, before anything is written: a block the reader would
@@ -162,7 +162,7 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
     const view = viewRef.current
     if (!current || !view || current.locked || current.broken) return
     const ref = locateStudyBlock(view.state.doc.toString(), current.kind, current.hash, current.from)
-    if (!ref) { setSession({ ...current, locked: 'Die Notiz wurde inzwischen geändert. Es wurde nichts eingefügt. Schliesse den Editor und öffne den Block neu.' }); return }
+    if (!ref) { setSession({ ...current, locked: 'Die Notiz wurde inzwischen geändert. Es wurde nichts eingefügt. Schließe den Editor und öffne den Block neu.' }); return }
     view.dispatch({ changes: { from: ref.to, insert: `\n\n${markdown}\n` } })
     setNotice('In die Notiz eingefügt.')
   }

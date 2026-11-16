@@ -36,7 +36,7 @@ export const fileToSmallDataUrl = async (file: Blob, maxEdge = 420): Promise<str
     if (data.length <= IMAGE_DATA_LIMIT) return data
     edge = Math.round(edge * 0.75)
   }
-  throw new Error('Das Bild ist zu gross für die Notiz.')
+  throw new Error('Das Bild ist zu groß für die Notiz.')
 }
 
 /**

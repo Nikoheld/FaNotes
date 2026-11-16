@@ -2352,14 +2352,17 @@ export const parseIcs = (text) => {
     const start = value('DTSTART')
     if (!summary || !start) return null
     const icsTime = (raw) => {
-      const compact = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?/iu.exec(raw)
+      const compact = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(?:(\d{2}))?(Z|([+-])(\d{2}):?(\d{2}))?/iu.exec(raw)
       if (!compact) {
         const day = /(\d{4})(\d{2})(\d{2})/.exec(raw)
         return day ? `${day[1]}-${day[2]}-${day[3]}` : raw
       }
       const stamp = `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:00`
+      // A trailing Z or numeric offset is that zone's clock, not Zurich local time.
       if (!compact[7]) return stamp
-      const utcMinutes = Number(compact[4]) * 60 + Number(compact[5])
+      const sign = compact[8] === '-' ? -1 : 1
+      const offset = /^z$/iu.test(compact[7]) ? 0 : sign * (Number(compact[9]) * 60 + Number(compact[10]))
+      const utcMinutes = Number(compact[4]) * 60 + Number(compact[5]) - offset
       const local = utcMinutes - zurichTimeshift(`${compact[1]}-${compact[2]}-${compact[3]}`)
       const shifted = new Date(Date.UTC(Number(compact[1]), Number(compact[2]) - 1, Number(compact[3])))
       shifted.setUTCMinutes(local)

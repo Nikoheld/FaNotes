@@ -17,6 +17,7 @@ fun deskShortcut(ctrl: Boolean, shift: Boolean, alt: Boolean, meta: Boolean, key
     if (mod && !shift && !alt && key == "s") return "save"
     if (mod && !shift && !alt && key == "p") return "palette"
     if (mod && shift && !alt && key == "f") return "vault-search"
+    if (mod && shift && !alt && key == "b") return "work-requests"
     if (mod && shift && !alt && key == "a") return "ai"
     if (mod && shift && !alt && key == "i") return "worksheet"
     if (mod && !shift && !alt && key == "n") return "new-note"

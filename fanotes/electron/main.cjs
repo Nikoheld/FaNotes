@@ -241,6 +241,7 @@ const IPC = Object.freeze({
   importPdfNote: 'fanotes:import-pdf-note',
   importOneNote: 'fanotes:import-onenote',
   readWorksheet: 'fanotes:read-worksheet',
+  readWorksheetHtml: 'fanotes:read-worksheet-html',
   saveWorksheet: 'fanotes:save-worksheet',
   deleteWorksheet: 'fanotes:delete-worksheet',
   listNoteHistory: 'fanotes:list-note-history',
@@ -2927,9 +2928,26 @@ function validateWorksheetDocument(candidate, expectedId) {
     createdAt: new Date(created).toISOString(),
     updatedAt: new Date(updated).toISOString(),
     ...(candidate.kind === 'html' ? { pageWidth: Math.round(pageWidth), pageHeight: Math.round(pageHeight) } : {}),
+    ...(candidate.kind === 'html' && /^[a-f0-9]{64}$/u.test(candidate.htmlSha256 ?? '') ? { htmlSha256: candidate.htmlSha256 } : {}),
     textBoxes,
     highlights,
   }
+}
+
+/**
+ * The OneNote page of a worksheet document, verified and guarded. The marker alone is forgeable, so the
+ * stored SHA-256 must match (documents from before the hash existed fall back to the strict guard-prefix check).
+ */
+async function readVerifiedOneNotePage(document, worksheetsDirectory) {
+  const format = WORKSHEET_FORMATS.get('.html')
+  const sourcePath = path.join(worksheetsDirectory, path.basename(document.sourceRelativePath))
+  const html = (await readRegularFileNoFollow(sourcePath, format.maxBytes)).toString('utf8')
+  const { guardedPageHtml, hasImporterGuard, pageSha256 } = require('./onenote-page-guard.cjs')
+  const intact = document.htmlSha256
+    ? pageSha256(html) === document.htmlSha256
+    : hasImporterGuard(html)
+  if (!intact || !hasImporterGuard(html)) throw new Error('Die importierte OneNote-Seite hat ihre Sicherheitsmarkierung verloren.')
+  return guardedPageHtml(html)
 }
 
 function decodePngDataUrl(imageData) {
@@ -5226,10 +5244,7 @@ function registerIpcHandlers() {
       const format = WORKSHEET_FORMATS.get(path.extname(document.sourceRelativePath).toLocaleLowerCase('en-US'))
       const sourcePath = path.join(worksheetsDirectory, path.basename(document.sourceRelativePath))
       await statRegularFileNoFollow(sourcePath, format.maxBytes)
-      if (document.kind === 'html') {
-        const header = (await readRegularFilePrefixNoFollow(sourcePath, format.maxBytes)).toString('utf8')
-        if (!header.includes('fanotes-onenote-safe-v1')) throw new Error('Die importierte OneNote-Seite hat ihre Sicherheitsmarkierung verloren.')
-      }
+      if (document.kind === 'html') await readVerifiedOneNotePage(document, worksheetsDirectory)
       return document
     } catch (error) {
       if (error?.code === 'ENOENT') throw new Error('Das Arbeitsblatt wurde nicht gefunden.')
@@ -5237,10 +5252,26 @@ function registerIpcHandlers() {
     }
   })
 
+  handle(IPC.readWorksheetHtml, async (_event, rawId) => {
+    await ensureBootstrap()
+    const id = assertWorksheetId(rawId)
+    const { worksheetsDirectory } = await ensureInternalWorksheetsDirectory()
+    const raw = (await readRegularFileNoFollow(path.join(worksheetsDirectory, `${id}.json`), MAX_WORKSHEET_JSON_BYTES)).toString('utf8')
+    const document = validateWorksheetDocument(JSON.parse(raw), id)
+    if (document.kind !== 'html') throw new Error('Dieses Arbeitsblatt ist keine OneNote-Seite.')
+    return readVerifiedOneNotePage(document, worksheetsDirectory)
+  })
+
   handle(IPC.saveWorksheet, async (_event, candidate) => {
     await ensureBootstrap()
     const id = assertWorksheetId(candidate?.id)
-    const document = validateWorksheetDocument({ ...candidate, updatedAt: new Date().toISOString() }, id)
+    const { worksheetsDirectory: savedDirectory } = await ensureInternalWorksheetsDirectory()
+    let storedHash
+    try {
+      storedHash = JSON.parse((await readRegularFileNoFollow(path.join(savedDirectory, `${id}.json`), MAX_WORKSHEET_JSON_BYTES)).toString('utf8'))?.htmlSha256
+    } catch { storedHash = undefined }
+    // The page hash is never taken from the renderer.
+    const document = validateWorksheetDocument({ ...candidate, htmlSha256: storedHash, updatedAt: new Date().toISOString() }, id)
     const serialized = `${JSON.stringify(document, null, 2)}\n`
     if (Buffer.byteLength(serialized, 'utf8') > MAX_WORKSHEET_JSON_BYTES) throw new Error('Die Arbeitsblattdaten sind zu groß.')
     const { worksheetsDirectory } = await ensureInternalWorksheetsDirectory()
@@ -5288,8 +5319,9 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Bildpfad.')
     const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
     const worksheetFormat = WORKSHEET_FORMATS.get(extension)
-    const mimeType = IMAGE_MIME_TYPES.get(extension) ?? worksheetFormat?.mimeType
+    const mimeType = IMAGE_MIME_TYPES.get(extension) ?? (worksheetFormat?.kind === 'html' ? undefined : worksheetFormat?.mimeType)
     if (!mimeType) throw new Error('Dieser Bildtyp ist für die Vorschau nicht erlaubt.')
+    if (extension === '.svg' && /^\.?fanotes\//iu.test(relativePath.replaceAll('\\', '/'))) throw new Error('Dieser Bildtyp ist für die Vorschau nicht erlaubt.')
     const { target } = await resolveVaultPath(relativePath, { allowInternal: true, expected: 'file' })
     const image = await readRegularFileNoFollow(target, worksheetFormat?.maxBytes ?? MAX_IMAGE_BYTES)
     return `data:${mimeType};base64,${image.toString('base64')}`
@@ -5300,8 +5332,9 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Dateipfad.')
     const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
     const worksheetFormat = WORKSHEET_FORMATS.get(extension)
-    const mimeType = IMAGE_MIME_TYPES.get(extension) ?? worksheetFormat?.mimeType
+    const mimeType = IMAGE_MIME_TYPES.get(extension) ?? (worksheetFormat?.kind === 'html' ? undefined : worksheetFormat?.mimeType)
     if (!mimeType) throw new Error('Dieser Dateityp ist für die Vorschau nicht erlaubt.')
+    if (extension === '.svg' && /^\.?fanotes\//iu.test(relativePath.replaceAll('\\', '/'))) throw new Error('Dieser Dateityp ist für die Vorschau nicht erlaubt.')
     const { target } = await resolveVaultPath(relativePath, { allowInternal: true, expected: 'file' })
     return readRegularFileNoFollow(target, worksheetFormat?.maxBytes ?? MAX_IMAGE_BYTES)
   })
@@ -5508,6 +5541,7 @@ function registerIpcHandlers() {
   handle(IPC.mcpLocal, async (_event, request) => {
     const host = localMcpHost()
     if (request?.action === 'regenerate') return host.regenerate()
+    if (request?.action === 'reveal') return host.revealToken()
     return host.info()
   })
 

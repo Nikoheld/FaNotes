@@ -85,6 +85,13 @@ async function verifyImport(inputPath, suffix) {
 
   const html = await fsp.readFile(path.join(vault, '.fanotes', 'worksheets', `${worksheetId}.html`), 'utf8')
   assert.match(html, /fanotes-onenote-safe-v1/u)
+  {
+    const guard = require('../electron/onenote-page-guard.cjs')
+    assert.equal(worksheet.htmlSha256, guard.pageSha256(html), 'the worksheet document stores the page hash')
+    assert.ok(guard.hasImporterGuard(html), 'the imported page carries the importer guard in its head')
+    assert.ok(!guard.hasImporterGuard(`<p>x</p><!-- fanotes-onenote-safe-v1 -->`), 'a comment with the marker string is not a guard')
+    assert.ok(guard.guardedPageHtml('<p>x</p>').startsWith('<meta http-equiv="Content-Security-Policy"'), 'the policy precedes any page markup when served')
+  }
   assert.match(html, /Content-Security-Policy/u)
   assert.match(html, /<math\b/u)
   assert.match(html, /<svg\b/u)

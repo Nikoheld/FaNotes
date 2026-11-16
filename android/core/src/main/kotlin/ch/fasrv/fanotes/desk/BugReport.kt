@@ -306,7 +306,7 @@ fun bugReportJson(payload: BugReportPayload): String {
     }
 }
 
-private fun eventJson(event: BugReportEvent): String = buildString {
+internal fun eventJson(event: BugReportEvent): String = buildString {
     append("{\"at\":")
     append(event.at)
     append(",\"kind\":")
