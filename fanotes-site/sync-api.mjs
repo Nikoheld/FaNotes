@@ -1067,6 +1067,19 @@ const handleGetFile = async (request, response, auth, fileId) => {
               throw error
             }
           }
+        } else if (await restoreLiveBlob(auth.account.id, fileId, entry)) {
+          const reopened = await fs.open(blobPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+          try {
+            const again = await reopened.stat()
+            if (!again.isFile() || again.size !== (Number(entry.size) || 0)) {
+              await reopened.close()
+              return { entry, handle: null, size: again.size, mismatch: true }
+            }
+            return { entry, handle: reopened, size: again.size }
+          } catch (error) {
+            await reopened.close()
+            throw error
+          }
         }
         return { entry, handle: null, size: info.size, mismatch: true }
       }
@@ -1242,7 +1255,9 @@ const restoreLiveBlob = async (accountId, fileId, entry) => {
   const blobDirectory = safeJoin(accountDirectory(accountId), 'blobs')
   const blobPath = safeJoin(blobDirectory, fileId)
   const live = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
-  if (live) return false
+  // A short remnant must not hide the archived note. It is not a ciphertext.
+  // A full live file stays where it is, and a symlink is not followed.
+  if (live && !(live.isFile() && live.size < EMPTY_CIPHERTEXT_BYTES)) return false
   const directory = revisionsDirectory(accountId, fileId)
   const candidates = (await listRevisionFiles(directory)).filter((file) => file.size === expectedSize)
   const revision = Number(entry.revision)
