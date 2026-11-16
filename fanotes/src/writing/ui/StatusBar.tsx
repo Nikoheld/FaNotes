@@ -25,10 +25,10 @@ export const StatusBar = memo(function StatusBar({ pageNumber, pageCount, words,
       <span>{formatNumber(words)} {L('Wörter', 'words')}{selectedWords !== null ? ` (${formatNumber(selectedWords)} ${L('markiert', 'selected')})` : ''}</span>
       <span title={L(`${formatNumber(chars)} Zeichen mit Leerzeichen`, `${formatNumber(chars)} characters with spaces`)}>{formatNumber(charsNoSpaces)} {L('Zeichen', 'characters')}</span>
       <span>{L(`${minutes} Min. Lesezeit`, `${minutes} min read`)}</span>
-      {dailyGoal ? <button type="button" className="wm-status-goal" onClick={onOpenGoals}>{L('Heute', 'Today')} {formatNumber(todayWords)} / {formatNumber(dailyGoal)}</button> : null}
+      {dailyGoal ? <button type="button" className="wm-status-goal" aria-label={`${L('Heute', 'Today')} ${formatNumber(todayWords)} / ${formatNumber(dailyGoal)}, ${L('Ziele öffnen', 'open goals')}`} onClick={onOpenGoals}>{L('Heute', 'Today')} {formatNumber(todayWords)} / {formatNumber(dailyGoal)}</button> : null}
       <span className="wm-grow" />
       <span>{styleLabel}</span>
-      <span className={`wm-save is-${saveState}`}>{saveState === 'saved' ? L('Gespeichert', 'Saved') : saveState === 'saving' ? L('Speichert …', 'Saving …') : L('Nicht gespeichert', 'Not saved')}{saveState === 'error' && saveError ? `: ${saveError}` : ''}</span>
+      <span className={`wm-save is-${saveState}`} role={saveState === 'error' ? 'alert' : 'status'}>{saveState === 'saved' ? L('Gespeichert', 'Saved') : saveState === 'saving' ? L('Speichert …', 'Saving …') : L('Nicht gespeichert', 'Not saved')}{saveState === 'error' && saveError ? `: ${saveError}` : ''}</span>
     </footer>
   )
 })
