@@ -85,10 +85,15 @@ private fun agendaReadFailed(error: String): Boolean {
 
 private fun agendaStamp(value: String?): Instant? = runCatching { Instant.parse(value) }.getOrNull()
 
-/** Full calendar UIDs and their scheduler local part are one identity, never a subject/day guess. */
+/**
+ * Full calendar UIDs and their scheduler local part are one identity, never a subject/day guess. A
+ * scheduler id ([positionalScheduleId]) names the same exam only on the same day; any other id
+ * follows its exam to another day. Server mirror: sameExamId (schulnetz-logic.mjs).
+ */
 internal fun sameExamId(left: AgendaEvent, right: AgendaEvent): Boolean {
     fun key(event: AgendaEvent) = cleanSchulnetzText(event.id).substringBefore('@')
-    return key(left).isNotBlank() && key(left) == key(right)
+    if (key(left).isBlank() || key(left) != key(right)) return false
+    return !positionalScheduleId(left) || (eventDay(left).isNotBlank() && eventDay(left) == eventDay(right))
 }
 
 internal fun sameExamSlot(left: AgendaEvent, right: AgendaEvent): Boolean {

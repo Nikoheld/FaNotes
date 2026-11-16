@@ -121,4 +121,29 @@ class OwnExamsTest {
         val none = base.copy(events = emptyList())
         assertEquals(listOf("Neue Prüfung"), titles(none, none.copy(exams = listOf(exam("e2", "Chx_2.3_Salt Test 2")))))
     }
+
+    // Live shape: scheduler ids are positions in one week's answer ("0", "1", ... again every week).
+    @Test
+    fun `exams of different weeks that reuse a scheduler id are all kept`() {
+        val testA = exam("1", "Mat_G24a_Holm Test A", "2099-02-10")
+        val testB = exam("1", "Eng_G24a Test B", "2099-02-17")
+        val inTimetable = exam("1", "Phy 2.3 Test C", "2099-02-24").copy(eventType = "1_pru")
+        assertEquals(listOf("Eng_G24a Test B", "Mat_G24a_Holm Test A", "Phy 2.3 Test C"), dedupeExams(mergeExamsById(listOf(testA, testB), listOf(inTimetable))).map { it.text }.sorted())
+        assertEquals(listOf("C11"), mergeExamsById(listOf(testA), listOf(testA.copy(room = "C11"))).map { it.room })
+        val uid = "uid-7@calendar.example.org"
+        assertEquals(1, mergeExamsById(listOf(exam(uid, "Mat_G24a_Holm Test A")), listOf(exam(uid, "Mat_G24a_Holm Test A", "2099-02-11"))).size)
+        assertTrue(positionalScheduleId(testA))
+        assertFalse(positionalScheduleId(exam(uid, "x")))
+        assertFalse(positionalScheduleId(exam("tt-1", "x")))
+    }
+
+    @Test
+    fun `two different exams that share a scheduler id on different days are not one moved exam`() {
+        val a = exam("1", "Mat_G24a_Holm Test A", "2099-02-10")
+        val b = exam("1", "Eng_G24a Test B", "2099-02-17")
+        assertEquals(emptyList(), titles(base.copy(exams = listOf(a, b)), base.copy(exams = listOf(b, a))))
+        assertEquals(listOf("Neue Prüfung", "Prüfung entfällt"), titles(base.copy(exams = listOf(a)), base.copy(exams = listOf(b))).sorted())
+        val later = a.copy(start = "2099-02-10T13:05:00", end = "2099-02-10T13:50:00")
+        assertEquals(listOf("Prüfung verschoben"), titles(base.copy(exams = listOf(a)), base.copy(exams = listOf(later))))
+    }
 }
