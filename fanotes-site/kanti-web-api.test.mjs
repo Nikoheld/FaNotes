@@ -1062,6 +1062,32 @@ test('a browser session whose expiry is not a time is left in place', async () =
   }
 })
 
+test('a claimed pairing does not keep a connection id from the code', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const offer = await env.store.createOffer()
+    const pairings = join(env.store.root, 'pairings')
+    const [name] = await readdir(pairings)
+    const file = join(pairings, name)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    const accountId = 'a'.repeat(32)
+    parsed.finished = true
+    parsed.connections = [{ accountId, id: 'not-a-connection', provider: 'tam', label: '  TAM  ', baseUrl: 'https://school.example' }]
+    await writeFile(file, JSON.stringify(parsed))
+    const claimed = await env.store.claimOffer(offer.code, 'Browser', null)
+    assert.equal(claimed.added, 1)
+    const [connection] = claimed.session.connections
+    assert.match(connection.id, /^[a-f0-9]{12}$/u)
+    assert.equal(connection.provider, 'tam')
+    assert.equal(connection.label, 'TAM')
+    assert.equal(connection.baseUrl, 'https://school.example')
+    assert.equal(connection.source, 'pair')
+    await assert.rejects(readFile(file), (error) => error?.code === 'ENOENT')
+  } finally {
+    await env.close()
+  }
+})
+
 test('a pairing code whose connections are not a list is left in place', async () => {
   const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
   try {
