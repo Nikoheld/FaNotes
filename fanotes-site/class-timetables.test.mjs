@@ -708,6 +708,28 @@ test('a timetable class file that is not the known shape is left in place', asyn
   }
 })
 
+test('a timetable room file that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-rooms-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const roomsFile = join(dir, 'rooms.json')
+  const stored = '{"rooms":{"T01":[{"subject":"kept"}]}}\n'
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  await writeFile(roomsFile, stored, { mode: 0o600 })
+  try {
+    await assert.rejects(() => store.room('T01'), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(roomsFile, 'utf8'), stored)
+    await writeFile(roomsFile, '{"T01":[{"subject":"mat"}]}\n', { mode: 0o600 })
+    assert.deepEqual(await store.room('T01'), { room: 'T01', entries: [{ subject: 'mat' }] })
+    await rm(roomsFile)
+    assert.equal(await store.room('T01'), null)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('an unreadable timetable page is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'timetable-page-'))
   const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
