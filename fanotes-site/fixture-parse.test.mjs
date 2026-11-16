@@ -72,7 +72,10 @@ test('a stored scheduler week keeps a cancellation on the lesson and not on the 
   assert.equal(cancelled.text, 'Mathematik')
   assert.equal(exam.eventType, 'exam')
   assert.equal(exam.status, '')
+  assert.equal(exam.comment, 'Stoichiometrie')
   assert.equal(exam.room, 'C11')
+  assert.equal(lesson.comment, '')
+  assert.equal(cancelled.comment, '')
   assert.equal(exam.start, '2026-11-18T10:15:00')
 })
 

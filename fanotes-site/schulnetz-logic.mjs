@@ -1934,8 +1934,13 @@ export const parseSchedulerXml = (xml) => {
     const start = schedulerStamp(field('start_date'), field('vdatum'), field('vzeit'))
     if (!start) continue
     const end = schedulerStamp(field('end_date'), field('bdatum'), field('bzeit')) || start
-    const comment = field('kommentar')
-    const marker = lessonMarker(field('event_type'), field('markierung'), field('textdeco'))
+    const note = field('kommentar')
+    const rawMark = field('markierung')
+    const marker = lessonMarker(field('event_type'), rawMark, field('textdeco'))
+    // On an exam the same field is the exam material, not a lesson mark. "none" is an empty mark.
+    const kind = canonicalEventType(field('event_type'))
+    const material = kind === 'exam' && rawMark && !/^none$/iu.test(rawMark) && !/^keine(?:\s+markierung)?$/iu.test(rawMark) ? rawMark : ''
+    const comment = note && material && note !== material ? `${note} · ${material}` : (note || material)
     const named = ['fachbezeichnung', 'kursbezeichnung', 'bezeichnung', 'fach'].map((name) => field(name)).find((value) => value && !looksLikeCourseCode(value)) || ''
     const rawText = field('text')
     const text = named && (!rawText || looksLikeCourseCode(rawText)) ? named : rawText
@@ -1952,7 +1957,7 @@ export const parseSchedulerXml = (xml) => {
       teachers: field('lehrerkuerzelname') ? [field('lehrerkuerzelname')] : [],
       courseId: field('kursid'),
       courseName: course,
-      status: marker === 'cancelled' || /fällt|faellt/iu.test(comment) ? 'cancelled' : '',
+      status: marker === 'cancelled' || /fällt|faellt/iu.test(note) ? 'cancelled' : '',
       eventType: canonicalEventType(field('event_type')),
       color: field('color'),
       timetableText: text,
