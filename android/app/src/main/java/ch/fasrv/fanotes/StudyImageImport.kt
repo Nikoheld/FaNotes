@@ -8,6 +8,9 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import android.util.Base64
 import ch.fasrv.fanotes.study.ANNOTATION_IMAGE_MAX_CHARS
+import ch.fasrv.fanotes.study.fitWithin
+import ch.fasrv.fanotes.study.shrunkEdge
+import ch.fasrv.fanotes.study.studyImageEdge
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
@@ -27,11 +30,9 @@ object StudyImageImport {
         while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 2400) sample *= 2
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
         val upright = rotated(decoded, orientation(bytes))
-        var edge = if (png) 1400 else 1600
+        var edge = studyImageEdge(png)
         for (attempt in 0 until 4) {
-            val scale = minOf(1.0, edge.toDouble() / maxOf(upright.width, upright.height))
-            val w = maxOf(1, Math.round(upright.width * scale).toInt())
-            val h = maxOf(1, Math.round(upright.height * scale).toInt())
+            val (w, h) = fitWithin(upright.width, upright.height, edge)
             val flat = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             Canvas(flat).apply {
                 drawColor(Color.WHITE)
@@ -43,7 +44,7 @@ object StudyImageImport {
             val url = (if (usePng) "data:image/png;base64," else "data:image/jpeg;base64,") + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
             flat.recycle()
             if (url.length <= FIT_CHARS && url.length <= ANNOTATION_IMAGE_MAX_CHARS) return StudyImagePayload(url, w.toDouble() / h)
-            edge = (edge * 0.7).toInt()
+            edge = shrunkEdge(edge)
         }
         return null
     }

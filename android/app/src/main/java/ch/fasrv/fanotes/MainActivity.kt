@@ -3140,6 +3140,18 @@ private fun PageSurface(
         val target = studyPageRef[0]
         if (uri != null && target != null) model.importStudyImage(uri, target.ink.study.visiblePage())
     }
+    val appContext = androidx.compose.ui.platform.LocalContext.current
+    val cameraTarget = remember { arrayOfNulls<Pair<java.io.File, Int>>(1) }
+    val takeStudyPhoto = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        val (file, pageNumber) = cameraTarget[0] ?: return@rememberLauncherForActivityResult
+        cameraTarget[0] = null
+        if (!saved) {
+            file.delete()
+            return@rememberLauncherForActivityResult
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(appContext, "${appContext.packageName}.files", file)
+        model.importStudyImage(uri, pageNumber, "Foto") { file.delete() }
+    }
     val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
     val sheetReset by model.sheetReset.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
@@ -3297,6 +3309,20 @@ private fun PageSurface(
             page.studyCanRedo = studyHistory.canRedo
             page.onStudyUndo = { model.undoStudy() }
             page.onStudyRedo = { model.redoStudy() }
+            page.onStudyCamera = {
+                val dir = java.io.File(appContext.cacheDir, "study-camera").apply { mkdirs() }
+                val file = java.io.File(dir, "photo-${System.currentTimeMillis()}.jpg")
+                cameraTarget[0] = file to page.ink.study.visiblePage()
+                try {
+                    takeStudyPhoto.launch(androidx.core.content.FileProvider.getUriForFile(appContext, "${appContext.packageName}.files", file))
+                } catch (_: Exception) {
+                    cameraTarget[0] = null
+                    file.delete()
+                    model.message.value = "Keine Kamera-App gefunden."
+                }
+            }
+            page.onStudyCrop = { pageNumber, rect -> model.cropStudyPdfRegion(pageNumber, rect) }
+            page.syncCompare()
             page.onStudyImage = { pickStudyImage.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
             page.ink.noteTextFields = noteFields
             page.ink.onPlaceTextField = { model.storePlacedTextField(it) }

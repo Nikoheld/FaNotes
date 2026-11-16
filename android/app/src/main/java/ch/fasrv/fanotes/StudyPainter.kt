@@ -50,6 +50,8 @@ data class StudyPending(val tool: StudyTool, val page: Int, val pts: List<SPoint
 sealed class StudyLive {
     data class Branch(val page: Int, val pts: List<SPoint>, val color: String, val width: Double) : StudyLive()
     data class Leader(val page: Int, val a: SPoint, val b: SPoint, val color: String) : StudyLive()
+    /** The PDF-Ausschnitt rectangle, in page fractions. */
+    data class Crop(val page: Int, val rect: SRect) : StudyLive()
 }
 
 /**
@@ -345,6 +347,7 @@ class StudyPainter(private val images: StudyImageCache, private val accent: () -
             is StudyLive.Leader -> boxFor(live.page)?.let { box ->
                 line(canvas, SPoint(box.px(live.a.x), box.py(live.a.y)), SPoint(box.px(live.b.x), box.py(live.b.y)), parse(live.color), 2f * box.k.toFloat(), dashed = true)
             }
+            is StudyLive.Crop -> boxFor(live.page)?.let { box -> drawCrop(canvas, live.rect, box) }
             null -> Unit
         }
         if (pending != null) {
@@ -363,6 +366,27 @@ class StudyPainter(private val images: StudyImageCache, private val accent: () -
             for ((a, b) in segments) line(canvas, dots[a], dots[b], red, 1.5f * k, dashed = true)
             for (d in dots) dot(canvas, d.x, d.y, 5f * k, red, red, 1f)
         }
+    }
+
+    /** Dims the page outside the rectangle, outlines it dashed in the accent colour and puts a handle on each corner. */
+    private fun drawCrop(canvas: Canvas, r: SRect, box: PageBox) {
+        val l = box.px(r.l).toFloat(); val t = box.py(r.t).toFloat()
+        val rr = box.px(r.r).toFloat(); val b = box.py(r.b).toFloat()
+        val bl = box.left.toFloat(); val bt = box.top.toFloat()
+        val br = (box.left + box.width).toFloat(); val bb = (box.top + box.height).toFloat()
+        paint.reset()
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb(90, 0, 0, 0)
+        canvas.drawRect(bl, bt, br, t, paint)
+        canvas.drawRect(bl, b, br, bb, paint)
+        canvas.drawRect(bl, t, l, b, paint)
+        canvas.drawRect(rr, t, br, b, paint)
+        val k = box.k.toFloat().coerceAtLeast(0.5f)
+        line(canvas, SPoint(l.toDouble(), t.toDouble()), SPoint(rr.toDouble(), t.toDouble()), accent(), 2f * k, dashed = true)
+        line(canvas, SPoint(rr.toDouble(), t.toDouble()), SPoint(rr.toDouble(), b.toDouble()), accent(), 2f * k, dashed = true)
+        line(canvas, SPoint(rr.toDouble(), b.toDouble()), SPoint(l.toDouble(), b.toDouble()), accent(), 2f * k, dashed = true)
+        line(canvas, SPoint(l.toDouble(), b.toDouble()), SPoint(l.toDouble(), t.toDouble()), accent(), 2f * k, dashed = true)
+        for ((x, y) in listOf(l to t, rr to t, l to b, rr to b)) dot(canvas, x.toDouble(), y.toDouble(), 6f * k, Color.WHITE, accent(), 2f * k)
     }
 
     private companion object {

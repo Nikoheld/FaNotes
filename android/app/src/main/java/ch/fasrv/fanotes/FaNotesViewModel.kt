@@ -3124,14 +3124,20 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Adds a reference image (already downscaled to a data URL) on [page]; false when a cap stops it. */
-    fun addStudyImage(page: Int, dataUrl: String, aspect: Double, title: String): Boolean {
+    fun addStudyImage(
+        page: Int,
+        dataUrl: String,
+        aspect: Double,
+        title: String,
+        at: ch.fasrv.fanotes.study.CropPlacement? = null,
+    ): Boolean {
         val before = studyAnnotations.value
         if (before.count { it is ch.fasrv.fanotes.study.StudyImage } >= ch.fasrv.fanotes.study.ANNOTATION_IMAGE_LIMIT) {
             message.value = "Maximal 12 Bilder pro Notiz."
             return false
         }
         val image = ch.fasrv.fanotes.study.StudyImage(
-            ch.fasrv.fanotes.study.newAnnotationId(), page, 0.06, 0.06, 0.4, aspect, 1.0, false, dataUrl, title.take(80),
+            ch.fasrv.fanotes.study.newAnnotationId(), page, at?.x ?: 0.06, at?.y ?: 0.06, at?.w ?: 0.4, aspect, 1.0, false, dataUrl, title.take(80),
         )
         val next = ch.fasrv.fanotes.study.addItem(before, image)
         if (next == before) {
@@ -3144,7 +3150,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Reads a picked image off the main thread, shrinks it to the note's budget and adds it to [page]. */
-    fun importStudyImage(uri: Uri, page: Int) {
+    fun importStudyImage(uri: Uri, page: Int, title: String? = null, afterRead: () -> Unit = {}) {
         val resolver = getApplication<Application>().contentResolver
         viewModelScope.launch {
             val payload = withContext(Dispatchers.IO) {
@@ -3153,14 +3159,68 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     StudyImageImport.encode(bytes, resolver.getType(uri).orEmpty())
                 } catch (_: Exception) {
                     null
+                } finally {
+                    afterRead()
                 }
             }
             if (payload == null) {
                 message.value = "Das Bild konnte nicht gelesen werden."
                 return@launch
             }
-            val title = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.').orEmpty()
-            addStudyImage(page, payload.dataUrl, payload.aspect, title)
+            val name = title ?: uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.').orEmpty()
+            addStudyImage(page, payload.dataUrl, payload.aspect, name)
+        }
+    }
+
+    /**
+     * "PDF-Ausschnitt": renders [crop] of PDF page [page] (1-based) straight from the PDF at a
+     * higher resolution than the on-screen backdrop and stores it as a reference image beside the cut-out.
+     */
+    fun cropStudyPdfRegion(page: Int, crop: ch.fasrv.fanotes.study.SRect) {
+        val note = open.value ?: return
+        if (note.kind != NoteKind.PDF) return
+        viewModelScope.launch {
+            val payload = withContext(Dispatchers.IO) {
+                try { renderPdfCrop(note, page, crop) } catch (_: Exception) { null }
+            }
+            if (payload == null) {
+                message.value = "Der Ausschnitt konnte nicht gerendert werden."
+                return@launch
+            }
+            addStudyImage(page, payload.dataUrl, payload.aspect, "Abb. S. $page", ch.fasrv.fanotes.study.cropPlacement(crop))
+        }
+    }
+
+    private fun renderPdfCrop(note: OpenNote, pageNumber: Int, crop: ch.fasrv.fanotes.study.SRect): StudyImagePayload? {
+        val bytes = graph.vault.read(note.path) ?: return null
+        val file = File.createTempFile("fanotes-pdf-crop", ".pdf")
+        try {
+            file.writeBytes(bytes)
+            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                openNotePdf(descriptor).use { renderer ->
+                    if (renderer.pageCount == 0) return null
+                    renderer.openPage((pageNumber - 1).coerceIn(0, renderer.pageCount - 1)).use { page ->
+                        val aspect = page.height.toDouble() / page.width.coerceAtLeast(1)
+                        val (w, h) = ch.fasrv.fanotes.study.cropRenderSize(crop, aspect)
+                        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                        bitmap.eraseColor(android.graphics.Color.WHITE)
+                        val sx = w / ((crop.r - crop.l) * page.width).toFloat()
+                        val sy = h / ((crop.b - crop.t) * page.height).toFloat()
+                        val matrix = android.graphics.Matrix().apply {
+                            setScale(sx, sy)
+                            postTranslate(-(crop.l * page.width).toFloat() * sx, -(crop.t * page.height).toFloat() * sy)
+                        }
+                        page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        val out = java.io.ByteArrayOutputStream()
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        bitmap.recycle()
+                        // Same budget and PNG rules as a picked image (long edge 1400, shrinks to fit).
+                        return StudyImageImport.encode(out.toByteArray(), "image/png")
+                    }
+                }
+            }
+        } finally {
+            file.delete()
         }
     }
 

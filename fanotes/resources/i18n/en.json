@@ -4359,5 +4359,9 @@
   "Begriff hinzufügen": "Add term",
   "Die Auftragserkennung braucht Android 15. Du kannst Aufträge von Hand hinzufügen.": "Assignment detection needs Android 15. You can add assignments by hand.",
   "Lernwerkzeug-Blöcke gehören in eine Markdown-Notiz.": "Study blocks belong in a Markdown note.",
-  "Diesen Block legst du am Computer an. Auf dem Tablet siehst du ihn in der Notiz.": "You create this block on the computer. On the tablet you see it in the note."
+  "Diesen Block legst du am Computer an. Auf dem Tablet siehst du ihn in der Notiz.": "You create this block on the computer. On the tablet you see it in the note.",
+  "Ausschnitt übernehmen": "Use crop",
+  "Keine Kamera-App gefunden.": "No camera app found.",
+  "Foto als Referenzbild aufnehmen": "Take a photo as a reference image",
+  "Der Ausschnitt konnte nicht gerendert werden.": "The crop could not be rendered."
 }
