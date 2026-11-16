@@ -86,7 +86,7 @@ test('preflight allows DELETE and the nginx location mirrors it', async () => {
     assert.match(response.headers.get('access-control-allow-methods'), /DELETE/u)
   } finally { await s.close() }
   const conf = await readFile(new URL('./deploy/fanotes-fasrv.conf', import.meta.url), 'utf8')
-  const block = conf.slice(conf.indexOf('location ~ ^/api/v1/diagnostics'), conf.indexOf('location ~ ^/api/v1/diagnostics') + 2200)
+  const block = conf.slice(conf.indexOf('location ~ "^/api/v1/diagnostics'), conf.indexOf('location ~ "^/api/v1/diagnostics') + 2200)
   assert.match(block, /Access-Control-Allow-Methods "POST, DELETE, OPTIONS"/u)
   assert.match(block, /limit_req zone=fanotes_diagnostics/u)
   assert.match(conf, /geo \$fanotes_from_cf/u, 'CF-Connecting-IP is only trusted from Cloudflare ranges')
