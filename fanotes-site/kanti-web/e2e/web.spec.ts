@@ -17,6 +17,8 @@ const watch = (page: Page) => {
 /** The first-run tour covers the page until it is skipped (once per browser profile). */
 const skipTour = async (page: Page) => {
   const tour = page.getByRole('dialog', { name: /Kanti\+ auf dem grossen Bildschirm/ })
+  // The tour mounts together with the first real screen: wait until the boot logo and the static intro are gone.
+  await expect(page.locator('#root .boot, #root .kp-intro')).toHaveCount(0, { timeout: 15_000 })
   if (await tour.isVisible().catch(() => false)) await tour.getByRole('button').first().click()
   await expect(tour).toHaveCount(0)
 }

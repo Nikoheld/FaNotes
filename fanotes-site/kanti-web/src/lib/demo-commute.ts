@@ -95,6 +95,24 @@ export const demoStopsFor = (leg: Leg): LegStop[] => {
   })
 }
 
+/**
+ * The demo trip a detail link names. Demo boards are rebuilt from the clock on every load, so a link
+ * opened a minute later names times that moved by a minute: then the same lines nearest to the link's
+ * planned departure (at most 2 minutes off) count as the same trip.
+ */
+export const demoFindTrip = (known: (Trip | null | undefined)[], tripId: string, at: string): Trip | null => {
+  const trips = known.filter((candidate): candidate is Trip => Boolean(candidate))
+  const exact = trips.find((candidate) => candidate.id === tripId)
+  if (exact) return exact
+  const wanted = timeMs(at)
+  if (!wanted) return null
+  // Demo trip ids start with the first line ("IR16-<planned departure>-<planned arrival>").
+  const sameLine = (trip: Trip) => tripId.startsWith(`${trip.legs[0]?.line || ''}-`)
+  const off = (trip: Trip) => Math.abs(timeMs(trip.plannedDeparture) - wanted)
+  const near = trips.filter((candidate) => sameLine(candidate) && off(candidate) <= 2 * MIN)
+  return near.sort((left, right) => off(left) - off(right))[0] || null
+}
+
 /** Demo version of the connection detail: the board trip with its stops and a position from the clock. */
 export const demoTripDetail = (trip: Trip, now: number): TripDetail => {
   const full: Trip = { ...trip, legs: trip.legs.map((leg) => (leg.kind === 'ride' ? { ...leg, stops: demoStopsFor(leg) } : leg)) }

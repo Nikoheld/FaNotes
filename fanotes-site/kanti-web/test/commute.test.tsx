@@ -8,7 +8,7 @@ import {
   clockOf, createStopSearcher, delayClass, durationLabel, emptyRoute, focusDue, isoZurich, lessonChange, mergeTrips, moveRoute,
   newRouteId, nextTrip, normalizeRoute, pollDue, relevantRoute, upsertRoute, validateRoute, MAX_ROUTES, emptySchedule, transferRequired, transferShown,
 } from '../src/lib/commute'
-import { demoCommute, demoConnections } from '../src/lib/demo-commute'
+import { demoCommute, demoConnections, demoFindTrip } from '../src/lib/demo-commute'
 import { STRINGS } from '../src/lib/i18n'
 import { BoardBody, PinnedFocus, DelayBadge, LessonChangeBanner, LineChip, TripCard } from '../src/components/commute'
 import { KantiProvider } from '../src/state'
@@ -187,6 +187,30 @@ describe('stop autocomplete', () => {
     failing.searcher.input('Zu')
     await vi.runAllTimersAsync()
     expect(failing.events.errors).toBe(1)
+  })
+})
+
+describe('demo connection links', () => {
+  // Demo boards are rebuilt from the clock: a link opened a minute later must still find its trip.
+  const fixedId = demo.routes[2].id
+  const board = (now: number) => demoCommute(now).boards[fixedId]
+  const known = (now: number) => [...board(now).trips, ...board(now).alternatives, board(now).pinned?.trip]
+
+  const pinnedOf = (now: number): Trip => {
+    const trip = board(now).pinned?.trip
+    if (!trip) throw new Error('the demo fixed route has no pinned trip')
+    return trip
+  }
+
+  it('finds the same trip after the board moved by a minute, and nothing that is too far off', () => {
+    const linked = pinnedOf(NOW)
+    const later = pinnedOf(NOW + 60_000)
+    expect(later.id).not.toBe(linked.id)
+    expect(demoFindTrip(known(NOW), linked.id, linked.plannedDeparture)?.id).toBe(linked.id)
+    expect(demoFindTrip(known(NOW + 60_000), linked.id, linked.plannedDeparture)?.id).toBe(later.id)
+    expect(demoFindTrip(known(NOW + 10 * 60_000), linked.id, linked.plannedDeparture)).toBeNull()
+    expect(demoFindTrip(known(NOW + 60_000), linked.id.replace(/^IR16-/u, 'S29-'), linked.plannedDeparture)).toBeNull()
+    expect(demoFindTrip(known(NOW + 60_000), linked.id, '')).toBeNull()
   })
 })
 
