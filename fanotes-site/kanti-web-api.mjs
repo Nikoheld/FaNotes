@@ -151,6 +151,15 @@ const cleanLabel = (raw, fallback) => {
   return text || fallback
 }
 
+// Only the fields a session connection is allowed to keep. A saved id or addedAt must not replace the new ones.
+const pairedConnection = (connection) => ({
+  accountId: connection.accountId,
+  provider: connection.provider === 'tam' ? 'tam' : 'schulnetz',
+  label: cleanLabel(connection.label, connection.provider === 'tam' ? 'TAM' : 'Schulnetz'),
+  baseUrl: typeof connection.baseUrl === 'string' ? connection.baseUrl.slice(0, 200) : '',
+  source: 'pair',
+})
+
 export const parseCookies = (header) => {
   const out = {}
   for (const part of String(header || '').split(';')) {
@@ -449,7 +458,7 @@ export const createKantiWebStore = (options = {}) => {
       if (!fresh || fresh.record.offer !== true) return null
       if (!fresh.record.finished) return { waiting: true }
       await deletePairing(fresh)
-      const incoming = fresh.record.connections.map((connection) => ({ ...connection, source: 'pair' }))
+      const incoming = fresh.record.connections.map(pairedConnection)
       if (!incoming.length) return null
       if (current) {
         const updated = await updateSession(current.hash, (session) => ({ ...session, connections: mergeConnections(session, incoming) }))
@@ -465,7 +474,7 @@ export const createKantiWebStore = (options = {}) => {
     const fresh = await readPairing(found.code)
     if (!fresh || !fresh.record.finished || !sameText(fresh.record.secretHash, found.record.secretHash)) return null
     await deletePairing(fresh)
-    const incoming = fresh.record.connections.map((connection) => ({ ...connection, source: 'pair' }))
+    const incoming = fresh.record.connections.map(pairedConnection)
     if (!incoming.length) return null
     if (current) {
       const updated = await updateSession(current.hash, (session) => ({ ...session, connections: mergeConnections(session, incoming) }))
