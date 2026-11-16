@@ -474,7 +474,19 @@ const measureHistory = async (accountId) => {
   return total
 }
 
+const applyLoggedEntry = (table, entry) => {
+  const previous = table.entries.get(entry.id)
+  const previousBytes = previous && !previous.deleted ? Number(previous.size) || 0 : 0
+  const nextBytes = entry.deleted ? 0 : Number(entry.size) || 0
+  table.entries.set(entry.id, entry)
+  table.revision = Number(entry.revision)
+  table.bytes += nextBytes - previousBytes
+}
+
 const appendChange = async (accountId, table, entry) => {
+  // Tests set this so a failed log write cannot publish a revision. Production
+  // leaves it unset. A thrown error here must leave the in-memory table as it was.
+  if (process.env.FANOTES_SYNC_APPEND_FAIL === '1') throw new Error('change log was not written')
   const directory = accountDirectory(accountId)
   const line = `${JSON.stringify(entry)}\n`
   const handle = await fs.open(safeJoin(directory, 'changes.jsonl'), 'a', 0o600)
@@ -487,6 +499,8 @@ const appendChange = async (accountId, table, entry) => {
   // The first append creates the log. The file sync does not make that new
   // name durable, and the response is sent only after this returns.
   await syncDirectory(directory)
+  // The revision becomes visible only after the log line is durable.
+  applyLoggedEntry(table, entry)
   table.logBytes += Buffer.byteLength(line)
   if (table.logBytes > COMPACT_LOG_BYTES) await compactTable(accountId, table)
 }
@@ -1245,9 +1259,6 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
       updatedAt: nowIso(),
       deviceId: incoming.deviceId,
     }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes += stat.size
     await recordLiveBlob(accountId, table, entry)
     return { matchesRequest: true, entry }
   }
@@ -1265,9 +1276,6 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
     updatedAt: nowIso(),
     deviceId: matchesRequest ? incoming.deviceId : current.deviceId,
   }
-  table.revision = entry.revision
-  table.entries.set(fileId, entry)
-  table.bytes += stat.size - currentSize
   await recordLiveBlob(accountId, table, entry)
   return { matchesRequest, entry }
 }
@@ -1352,9 +1360,6 @@ const handlePutFile = async (request, response, auth, fileId) => {
     }
     committed = true
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: incoming.size, sha256: declaredSha, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes += incoming.size - previousBytes
     await appendChange(auth.account.id, table, entry)
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision }, { ETag: `"${entry.revision}"` })
   })
@@ -1480,9 +1485,6 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     await ensureBlobDirectory(auth.account.id)
     await copyDurable(source, safeJoin(accountDirectory(auth.account.id), 'blobs', fileId))
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: info.size, sha256: digest, meta, updatedAt: nowIso(), deviceId: auth.deviceId }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes += info.size - previousBytes
     await appendChange(auth.account.id, table, entry)
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, size: info.size }, { ETag: `"${entry.revision}"` })
   })
@@ -1545,9 +1547,6 @@ const handleDeleteFile = async (request, response, auth, fileId) => {
     // so a crash leaves the note in the archive and still in the live slot.
     table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, 0, false)
     const entry = { id: fileId, revision: table.revision + 1, deleted: true, size: 0, sha256: null, meta: typeof current.meta === 'string' && current.meta ? current.meta : null, updatedAt: nowIso(), deviceId: auth.deviceId }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes -= Number(current.size) || 0
     await appendChange(auth.account.id, table, entry)
     await fs.rm(blobPath, { force: true })
     await syncDirectory(safeJoin(accountDirectory(auth.account.id), 'blobs'))
@@ -1761,8 +1760,6 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
       const reserved = await reservedPartialBytes(auth.account.id)
       if (table.bytes + (table.historyBytes || 0) + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
       const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: stat.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
-      table.revision = entry.revision
-      table.entries.set(fileId, entry)
       await recordLiveBlob(auth.account.id, table, entry)
       sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
       return
@@ -1778,9 +1775,6 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
   const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
   if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
   const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: stat.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
-  table.revision = entry.revision
-  table.entries.set(fileId, entry)
-  table.bytes += stat.size - previousBytes
   await recordLiveBlob(auth.account.id, table, entry)
   sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
 }
@@ -1867,9 +1861,6 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     }
     await removePartial(auth.account.id, uploadId)
     const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: requestMeta, updatedAt: nowIso(), deviceId: auth.deviceId }
-    table.revision = entry.revision
-    table.entries.set(fileId, entry)
-    table.bytes += meta.size - previousBytes
     await appendChange(auth.account.id, table, entry)
     sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
   })
