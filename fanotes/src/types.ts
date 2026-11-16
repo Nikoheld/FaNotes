@@ -80,7 +80,7 @@ export type LocalMcpInfo = {
   httpUrl: string
   httpToken: string
   httpError: string
-  stdio: { packaged: boolean; appImage: string; execPath: string; entryPath: string; platform: string; userData: string }
+  stdio: { packaged: boolean; appImage: string; execPath: string; entryPath: string; copied?: boolean; platform: string; userData: string }
 }
 
 export type AppSettings = {
