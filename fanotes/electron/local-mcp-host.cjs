@@ -68,7 +68,8 @@ const createLocalMcpHost = ({ userData, getState, packaged = false, execPath = p
     return {
       httpRunning: running !== null,
       httpUrl: `http://127.0.0.1:${running ?? store.port}/mcp`,
-      httpToken: store.token,
+      // The token itself never leaves the main process through info(); see revealToken().
+      httpTokenHint: store.token ? `${store.token.slice(0, 6)}…${store.token.slice(-4)}` : '',
       httpError: lastError,
       stdio: {
         packaged,
@@ -83,7 +84,10 @@ const createLocalMcpHost = ({ userData, getState, packaged = false, execPath = p
 
   const regenerate = () => { regenerateToken(userData); return info() }
 
-  return { apply, info, regenerate, stop }
+  /** One-shot reveal for an explicit "show / copy token" action. */
+  const revealToken = () => ({ token: loadTokenStore(userData).token })
+
+  return { apply, info, regenerate, revealToken, stop }
 }
 
 module.exports = { createLocalMcpHost }

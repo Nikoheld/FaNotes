@@ -4697,5 +4697,9 @@
   "Farbe Orange": "Color orange",
   "Farbe Hellgrün": "Color light green",
   "Farbe Hellblau": "Color light blue",
-  "Farbe Pink": "Color pink"
+  "Farbe Pink": "Color pink",
+  "Token anzeigen": "Show token",
+  "Token verbergen": "Hide token",
+  "Token kopieren": "Copy token",
+  "Das Token konnte nicht geladen werden.": "The token could not be loaded."
 }
