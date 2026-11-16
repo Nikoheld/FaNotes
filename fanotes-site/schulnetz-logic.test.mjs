@@ -1342,6 +1342,11 @@ test('week range follows the page span and stays quiet for a new week', () => {
   assert.equal(icsEscaped[0].text, 'Raum A12, B4; C')
   assert.equal(icsEscaped[0].comment, 'Zeile\nZwei')
   assert.equal(icsEscaped[0].room, 'C:\\Temp')
+  const utcLesson = (start) => parseIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-utc\nDTSTART:${start}\nDTEND:${start}\nSUMMARY:Physik\nEND:VEVENT\nEND:VCALENDAR`)[0].start
+  assert.equal(utcLesson('20261116T070000Z'), '2026-11-16T08:00:00')
+  assert.equal(utcLesson('20260715T070000Z'), '2026-07-15T09:00:00')
+  assert.equal(utcLesson('20261116T233000Z'), '2026-11-17T00:30:00')
+  assert.equal(utcLesson('20261116T080000'), '2026-11-16T08:00:00')
   const narrow = eventQueryWindow({ spanStart: '', spanEnd: '', weekFetched: {}, icalFetchedAt: '', today: '2026-11-04', now: '2026-11-04T12:00:00Z' })
   assert.equal(narrow.wide, false)
   assert.equal(narrow.min, '2026-10-28')
