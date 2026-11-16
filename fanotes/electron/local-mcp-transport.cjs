@@ -85,12 +85,23 @@ const regenerateToken = (userData) => {
 
 // ── stdio ───────────────────────────────────────────────────────────────────
 
-const runStdio = ({ server, input = process.stdin, output = process.stdout }) => new Promise((resolve) => {
+const runStdio = ({ server, input = process.stdin, output = process.stdout, pollMs = 2000 }) => new Promise((resolve) => {
   let buffer = ''
   let pending = 0
   let ended = false
-  const finish = () => { if (ended && pending === 0) resolve() }
+  const finish = () => { if (ended && pending === 0) { if (watcher) clearInterval(watcher); resolve() } }
+  // A closed pipe must not crash the process with an uncaught EPIPE.
+  output.on?.('error', () => {})
   const send = (value) => { output.write(`${JSON.stringify(value)}\n`) }
+  // Tell the client when the tool list changed (settings toggled after it connected).
+  const watcher = typeof server.pollListChanged === 'function' && pollMs > 0
+    ? setInterval(() => {
+      server.pollListChanged().then((changed) => {
+        if (changed && !ended) send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' })
+      }, () => {})
+    }, pollMs)
+    : null
+  watcher?.unref?.()
   const process_ = async (line) => {
     pending += 1
     try {

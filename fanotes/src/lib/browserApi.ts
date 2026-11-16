@@ -1905,6 +1905,9 @@ export function createBrowserApi(): FaNotesApi {
     importOneNote: async () => {
       throw new Error('Binäre OneNote-Notizbücher werden sicher in der Linux- oder Windows-App importiert.')
     },
+    readWorksheetHtml: async () => {
+      throw new Error('Importierte OneNote-Seiten gibt es nur in der Desktop-App.')
+    },
     readWorksheet: async (id) => {
       await ready
       const document = worksheets.get(id)

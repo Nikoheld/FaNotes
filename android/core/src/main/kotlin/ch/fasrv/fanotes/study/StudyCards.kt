@@ -85,7 +85,7 @@ fun termDataJson(data: TermData): JsonValue = jsonObject(
 /** A card derived from a study block. Not stored: the schedule is kept by id in the note's card store. */
 data class StudyCardSource(val id: String, val front: String, val back: String, val frontImage: String? = null)
 
-const val PLATE_PROMPT = "Wie heisst das?"
+const val PLATE_PROMPT = "Wie heißt das?"
 
 fun isStudyCardId(id: String) = id.startsWith("term:") || id.startsWith("plate:")
 

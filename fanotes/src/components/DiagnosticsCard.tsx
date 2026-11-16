@@ -21,7 +21,7 @@ export function DiagnosticsCard({ settings, update }: { settings: AppSettings; u
     setBusy(true)
     const ok = await sendLogsNow(comment)
     setBusy(false)
-    if (ok) { setComment(''); say('Gesendet. Danke!', 'Sent. Thank you!') } else say('Senden nicht möglich. Es wurde nichts gespeichert.', 'Could not send. Nothing was stored.')
+    if (ok) { setComment(''); say('Gesendet. Danke!', 'Sent. Thank you!') } else say('Senden fehlgeschlagen. Prüfe deine Internetverbindung und versuche es später noch einmal.', 'Sending failed. Check your internet connection and try again later.')
   }
   const erase = async () => {
     setBusy(true)
@@ -29,17 +29,17 @@ export function DiagnosticsCard({ settings, update }: { settings: AppSettings; u
     setBusy(false)
     setPreview(null)
     if (ok) say('Deine Daten auf dem Server sind gelöscht. Es gibt eine neue Installations-ID.', 'Your data on the server is deleted. A new install ID was created.')
-    else say('Der Server war nicht erreichbar. Lokale Zähler sind gelöscht; versuche das Löschen später noch einmal.', 'The server was unreachable. Local counters are deleted; try deleting again later.')
+    else say('Der Server war nicht erreichbar. Auf diesem Gerät sind die gesammelten Nutzungszahlen und Fehlerlogs gelöscht, die schon gesendeten Daten liegen aber noch auf dem Server. Wähle später noch einmal „Meine Daten löschen“.', 'The server could not be reached. The usage numbers and error logs collected on this device are deleted, but the data already sent is still on the server. Choose “Delete my data” again later.')
   }
 
   return (
     <div id="settings-diagnostics" className="setting-card diagnostics-card">
       <div className="setting-card-title"><ShieldCheck size={16} /><span>Diagnose &amp; Verbesserung</span></div>
       <p className="diagnostics-privacy">
-        Hilf mit, FaNotes zu verbessern. Beides ist standardmässig aus. Es werden nie Notiztexte, Titel, Dateinamen, Pfade, E-Mail-Adressen, Sync-Schlüssel oder Vault-Inhalte gesendet. Gesendet wird höchstens einmal am Tag an fanotes.fasrv.ch, mit einer zufälligen Installations-ID, die nicht mit deinem Sync-Konto verbunden ist.
+        Hilf mit, FaNotes zu verbessern. Beides ist standardmäßig aus. Es werden nie Notiztexte, Titel, Dateinamen, Pfade, E-Mail-Adressen, Sync-Schlüssel oder Vault-Inhalte gesendet. Gesendet wird höchstens einmal am Tag an fanotes.fasrv.ch, mit einer zufälligen Installations-ID, die nicht mit deinem Sync-Konto verbunden ist.
       </p>
       <div className="setting-row">
-        <div className="setting-copy"><span>Anonyme Nutzungsstatistik senden</span><small>Version, Betriebssystem, wie oft Werkzeuge und Ansichten genutzt werden, Fehlerzahlen, Startzeit und ungefähre Vault-Grösse in Stufen.</small></div>
+        <div className="setting-copy"><span>Anonyme Nutzungsstatistik senden</span><small>Version, Betriebssystem, wie oft Werkzeuge und Ansichten genutzt werden, Fehlerzahlen, Startzeit und ungefähre Vault-Größe in Stufen.</small></div>
         <div className="setting-control"><Switch checked={settings.diagnosticsUsage} onChange={(value) => update('diagnosticsUsage', value)} label="Anonyme Nutzungsstatistik senden" /></div>
       </div>
       <div className="setting-row">
@@ -55,7 +55,7 @@ export function DiagnosticsCard({ settings, update }: { settings: AppSettings; u
       <div className="setting-row">
         <div className="setting-copy"><span>Vorschau</span><small>Zeigt genau das JSON, das gesendet würde, wenn beide Schalter an sind.</small></div>
         <div className="setting-control diagnostics-actions">
-          <button type="button" className="secondary-button" onClick={() => setPreview(preview ? null : JSON.stringify({ daily: previewDiagnostics({ assumeConsent: true }), report: previewDiagnostics({ manual: true, comment }) }, null, 2))}>{preview ? 'Vorschau schliessen' : 'Vorschau'}</button>
+          <button type="button" className="secondary-button" onClick={() => setPreview(preview ? null : JSON.stringify({ daily: previewDiagnostics({ assumeConsent: true }), report: previewDiagnostics({ manual: true, comment }) }, null, 2))}>{preview ? 'Vorschau schließen' : 'Vorschau'}</button>
         </div>
       </div>
       {preview && <pre className="diagnostics-preview" tabIndex={0} aria-label="Vorschau der Daten" data-i18n-ignore>{preview}</pre>}

@@ -176,6 +176,7 @@ fun paletteCommands(
     splitRows: Boolean = false,
     focus: Boolean = false,
     dailyFolder: String = "",
+    workRequests: Boolean = true,
 ): List<PaletteCommand> {
     val commands = listOf(
         PaletteCommand("new-note", "Neue Notiz", "Dateien", "Markdown-Datei im Standardordner", "Ctrl N"),
@@ -264,7 +265,7 @@ fun paletteCommands(
             keywords = "vorlage template ${template.profile} ${template.title}",
         )
     }
-    return commands + templates
+    return commands.filter { workRequests || it.id != "work-requests" } + templates
 }
 
 /** Every typed word must appear in the label, detail, group, or keywords. */

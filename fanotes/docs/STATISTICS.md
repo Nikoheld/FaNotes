@@ -19,9 +19,9 @@ Shown:
 
 Not shown, because the data does not exist: data uploaded (the sync engine does not expose it), and per-day app time (only per-note totals are kept; no new tracking was added).
 
-How it is computed: in the renderer in small slices (four file reads in flight, yielding about every 10 ms), cached per file mtime and size, and aborted when the page is closed. A progress bar and skeletons show while it loads. On Android it runs on `Dispatchers.IO` with the same limits and is cancelled when the page is left. The charts are plain SVG/CSS with theme tokens, dark mode and aria labels. Everything is derived from the vault and local stats; no request is made.
+How it is computed: in the renderer in small slices (four file reads in flight, yielding about every 10 ms), cached per file mtime and size, and aborted when the page is closed. A progress bar and skeletons show while it loads. On Android it runs on `Dispatchers.IO` with the same limits and is cancelled when the page is left. The charts are plain SVG/CSS with theme tokens, dark mode and aria labels. Everything is derived from the vault and local stats; no request is made. Numbers and dates follow the UI language on both platforms (Android: `StatFormat.kt`, `StatFormatTest`).
 
-Checks: `node fanotes/scripts/check-vault-stats.mjs`; Android `:core:test` (`VaultStatsTest`).
+Checks: `node fanotes/scripts/check-vault-stats.mjs`; Android `:core:test` (`VaultStatsTest`, `StatFormatTest`).
 
 ## 2. Opt-in diagnostics
 

@@ -79,9 +79,10 @@ export type HandwritingRecognitionResources = {
 export type LocalMcpInfo = {
   httpRunning: boolean
   httpUrl: string
-  httpToken: string
+  /** Masked hint such as `fnmcp_…ab12`; the token itself is only returned by the one-shot `reveal` action. */
+  httpTokenHint: string
   httpError: string
-  stdio: { packaged: boolean; appImage: string; execPath: string; entryPath: string; platform: string; userData: string }
+  stdio: { packaged: boolean; appImage: string; execPath: string; entryPath: string; copied?: boolean; platform: string; userData: string }
 }
 
 export type AppSettings = {
@@ -690,6 +691,8 @@ export type FaNotesApi = {
   importPdfNote: (parentPath?: string) => Promise<CreateResult | null>
   importOneNote: () => Promise<OneNoteImportResult | null>
   readWorksheet: (id: string) => Promise<WorksheetDocument>
+  /** The verified, policy-guarded OneNote page of a worksheet, for a sandboxed srcdoc frame. */
+  readWorksheetHtml: (id: string) => Promise<string>
   saveWorksheet: (document: WorksheetDocument) => Promise<WorksheetDocument>
   deleteWorksheet: (id: string) => Promise<{ id: string }>
   listNoteHistory?: (relativePath: string) => Promise<NoteHistorySnapshot[]>
@@ -735,7 +738,10 @@ export type FaNotesApi = {
     rotated?: boolean
   } | null>
   /** Local MCP server (Electron only): connection info for Settings → KI-Zugriff (MCP). */
-  mcpLocal?: (request: { action: 'info' | 'regenerate' }) => Promise<LocalMcpInfo>
+  mcpLocal?: {
+    (request: { action: 'info' | 'regenerate' }): Promise<LocalMcpInfo>
+    (request: { action: 'reveal' }): Promise<{ token: string }>
+  }
   loadSecureSettings?: () => Promise<Partial<AppSettings>>
   saveSettings: (settings: AppSettings, options?: { clearProtectedSecrets?: boolean }) => Promise<AppSettings>
   getServerBackupState?: () => Promise<ServerBackupState>

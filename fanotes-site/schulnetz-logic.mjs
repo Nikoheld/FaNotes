@@ -1934,8 +1934,13 @@ export const parseSchedulerXml = (xml) => {
     const start = schedulerStamp(field('start_date'), field('vdatum'), field('vzeit'))
     if (!start) continue
     const end = schedulerStamp(field('end_date'), field('bdatum'), field('bzeit')) || start
-    const comment = field('kommentar')
-    const marker = lessonMarker(field('event_type'), field('markierung'), field('textdeco'))
+    const note = field('kommentar')
+    const rawMark = field('markierung')
+    const marker = lessonMarker(field('event_type'), rawMark, field('textdeco'))
+    // On an exam the same field is the exam material, not a lesson mark. "none" is an empty mark.
+    const kind = canonicalEventType(field('event_type'))
+    const material = kind === 'exam' && rawMark && !/^none$/iu.test(rawMark) && !/^keine(?:\s+markierung)?$/iu.test(rawMark) ? rawMark : ''
+    const comment = note && material && note !== material ? `${note} · ${material}` : (note || material)
     const named = ['fachbezeichnung', 'kursbezeichnung', 'bezeichnung', 'fach'].map((name) => field(name)).find((value) => value && !looksLikeCourseCode(value)) || ''
     const rawText = field('text')
     const text = named && (!rawText || looksLikeCourseCode(rawText)) ? named : rawText
@@ -1952,7 +1957,7 @@ export const parseSchedulerXml = (xml) => {
       teachers: field('lehrerkuerzelname') ? [field('lehrerkuerzelname')] : [],
       courseId: field('kursid'),
       courseName: course,
-      status: marker === 'cancelled' || /fällt|faellt/iu.test(comment) ? 'cancelled' : '',
+      status: marker === 'cancelled' || /fällt|faellt/iu.test(note) ? 'cancelled' : '',
       eventType: canonicalEventType(field('event_type')),
       color: field('color'),
       timetableText: text,
@@ -2347,14 +2352,17 @@ export const parseIcs = (text) => {
     const start = value('DTSTART')
     if (!summary || !start) return null
     const icsTime = (raw) => {
-      const compact = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?/iu.exec(raw)
+      const compact = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(?:(\d{2}))?(Z|([+-])(\d{2}):?(\d{2}))?/iu.exec(raw)
       if (!compact) {
         const day = /(\d{4})(\d{2})(\d{2})/.exec(raw)
         return day ? `${day[1]}-${day[2]}-${day[3]}` : raw
       }
       const stamp = `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:00`
+      // A trailing Z or numeric offset is that zone's clock, not Zurich local time.
       if (!compact[7]) return stamp
-      const utcMinutes = Number(compact[4]) * 60 + Number(compact[5])
+      const sign = compact[8] === '-' ? -1 : 1
+      const offset = /^z$/iu.test(compact[7]) ? 0 : sign * (Number(compact[9]) * 60 + Number(compact[10]))
+      const utcMinutes = Number(compact[4]) * 60 + Number(compact[5]) - offset
       const local = utcMinutes - zurichTimeshift(`${compact[1]}-${compact[2]}-${compact[3]}`)
       const shifted = new Date(Date.UTC(Number(compact[1]), Number(compact[2]) - 1, Number(compact[3])))
       shifted.setUTCMinutes(local)

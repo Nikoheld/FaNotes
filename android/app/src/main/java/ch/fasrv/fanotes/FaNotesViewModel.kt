@@ -162,6 +162,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -245,6 +246,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var previewImageTicket = 0
     private var splitImageTicket = 0
     val sync = graph.engine.state.stateIn(viewModelScope, SharingStarted.Eagerly, graph.engine.state.value)
+    val workRequestsOpen = MutableStateFlow(false)
+    /** True only when the server says the signed-in sync account may send work requests. */
+    val workRequestsAllowed = MutableStateFlow(false)
+    val workRequests = ch.fasrv.fanotes.desk.WorkRequestsClient(OkHttpWorkRequestsTransport(), { graph.engine.currentSession() })
+
+    init {
+        viewModelScope.launch {
+            sync.map { it.account?.accountId }.distinctUntilChanged().collect { account ->
+                workRequestsAllowed.value = false
+                if (account != null) workRequestsAllowed.value = withContext(Dispatchers.IO) { workRequests.capabilities() }
+            }
+        }
+    }
     private val _vaultLabel = MutableStateFlow(graph.initialVaultLabel)
     val vaultLabel = _vaultLabel.asStateFlow()
     val canvasToken = MutableStateFlow(0)
@@ -796,7 +810,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             studyScanning.value = false
             if (open.value?.path != note.path) return@launch
             if (pages.isEmpty()) {
-                message.value = "Der PDF-Text konnte nicht gelesen werden."
+                message.value = "Das PDF konnte nicht gelesen werden. Es ist vielleicht beschädigt oder passwortgeschützt. Du kannst Aufträge von Hand hinzufügen."
+                return@launch
+            }
+            if (pages.all { it.lines.isEmpty() }) {
+                message.value = "Das PDF enthält keinen auslesbaren Text (z. B. ein Scan). Du kannst Aufträge von Hand hinzufügen."
                 return@launch
             }
             val detected = ch.fasrv.fanotes.study.detectTasks(pages)
@@ -905,7 +923,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val ref = studyBlockFor(target)
         if (ref == null) {
             studyEdit.value = null
-            message.value = "Die Notiz hat sich geändert. Öffne den Block neu."
+            message.value = "Deine Änderung wurde nicht gespeichert, weil sich die Notiz geändert hat. Öffne den Block neu."
             return
         }
         val next = ch.fasrv.fanotes.study.writeStudyBlockMerged(markdown.value, ref, data)
@@ -922,8 +940,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun insertStudyTemplate(kind: ch.fasrv.fanotes.study.StudyKind) {
-        if (open.value == null || open.value?.kind == NoteKind.PDF) {
-            message.value = "Lernwerkzeug-Blöcke gehören in eine Markdown-Notiz."
+        if (open.value == null) {
+            message.value = "Öffne zuerst eine Notiz."
+            return
+        }
+        if (open.value?.kind == NoteKind.PDF) {
+            message.value = "In ein PDF lassen sich keine Lernwerkzeuge einfügen. Öffne eine Textnotiz."
             return
         }
         val data = when (kind) {
@@ -2446,6 +2468,18 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         bugReportMessage.value = null
     }
 
+    /** Same entry point as the desktop shortcut: the panel for the owner account, else the anonymous bug report. */
+    fun openWorkRequests() {
+        if (workRequestsAllowed.value) workRequestsOpen.value = true else openBugReport()
+    }
+
+    fun closeWorkRequests() {
+        workRequestsOpen.value = false
+    }
+
+    /** Logs and version for a new request; the same five-minute buffer as the bug report. */
+    fun workRequestLogs(): List<ch.fasrv.fanotes.desk.BugReportEvent> = bugLog.snapshot(System.currentTimeMillis())
+
     fun closeBugReport() {
         bugReportOpen.value = false
     }
@@ -3222,7 +3256,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             if (payload == null) {
-                message.value = if (tooLarge) "Das Bild ist zu groß." else "Das Bild konnte nicht gelesen werden."
+                message.value = if (tooLarge) "Das Bild ist zu groß." else "Das Bild konnte nicht gelesen werden. Wähle eine andere Bilddatei."
                 return@launch
             }
             val name = title ?: uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.').orEmpty()
@@ -3243,7 +3277,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 try { renderPdfCrop(note, page, crop) } catch (_: StudyImageTooLarge) { tooLarge = true; null } catch (_: OutOfMemoryError) { tooLarge = true; null } catch (_: Exception) { null }
             }
             if (payload == null) {
-                message.value = if (tooLarge) "Das Bild ist zu groß." else "Der Ausschnitt konnte nicht gerendert werden."
+                message.value = if (tooLarge) "Der Ausschnitt ist zu groß. Wähle einen kleineren Bereich." else "Der Ausschnitt konnte nicht erstellt werden. Wähle einen kleineren Bereich."
                 return@launch
             }
             addStudyImage(page, payload.dataUrl, payload.aspect, "Abb. S. $page", ch.fasrv.fanotes.study.cropPlacement(crop))
@@ -5067,6 +5101,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 after.installedAddons.lastOrNull()?.let { rememberAddon(it) }
             }
             "bug-report" -> openBugReport()
+            "work-requests" -> openWorkRequests()
             "trash" -> openTrash()
             "pin-tab" -> togglePinTab()
             "close-others" -> closeTabs("others")

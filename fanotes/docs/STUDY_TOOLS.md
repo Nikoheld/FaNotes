@@ -28,7 +28,7 @@ cards get the ids `plate:<item id>` and `term:<term id>`, and the review schedul
 The companion note of a PDF carries `<!-- fanotes-tasks-v1 {...} -->` with the detected and edited assignments
 (number, text, minutes, page, done, seconds spent). Detection reads the PDF text layer for lines starting with
 Auftrag, Aufgabe, Task, Exercise or Übung (numbered, or followed by a colon), joins hyphenated line ends and reads time hints such as
-"(ca. 20 Minuten)" or "1 Lektion". A re-scan keeps ticks, timers and manual edits.
+"(ca. 20 Minuten)" or "1 Lektion". A re-scan keeps ticks, timers and manual edits. A PDF without a text layer (a scan) or one that cannot be opened gets a notice that says so and points to adding assignments by hand.
 The highlights overview reads the existing `fanotes-pdf-marks-v1` marks.
 
 ## Block safety rules
