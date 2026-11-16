@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ch.fasrv.fanotes.desk.ChromeText
 import ch.fasrv.fanotes.desk.StatKind
+import ch.fasrv.fanotes.desk.StatsProgress
 import ch.fasrv.fanotes.desk.VaultStats
 import kotlinx.coroutines.launch
 
@@ -102,7 +103,7 @@ internal fun StatisticsSection(model: FaNotesViewModel, viewportWidth: Int, anch
             Text(
                 when {
                     failed -> t("Statistik konnte nicht gelesen werden. Tippe auf „Neu berechnen“.")
-                    busy && status != null -> t(status) + " …"
+                    busy && status != null -> t(status) + " …" + progressCount(progress)
                     else -> t("Nur auf diesem Gerät berechnet")
                 },
                 fontSize = 12.sp,
@@ -173,6 +174,13 @@ private fun Empty(text: String) {
 }
 
 private fun count(value: Int) = ch.fasrv.fanotes.desk.statCount(value, ChromeText.language)
+
+/** " 1’234 / 20’000" while the loader reports how far it is, else nothing. */
+private fun progressCount(progress: StatsProgress?): String = when {
+    progress == null || progress.done <= 0 -> ""
+    progress.total > 0 -> " ${count(progress.done)} / ${count(progress.total)}"
+    else -> " ${count(progress.done)}"
+}
 
 @Composable
 private fun VaultCards(data: VaultStats, anchorY: MutableMap<String, Int>) {
@@ -278,7 +286,10 @@ private fun ActivityCard(data: VaultStats, anchorY: MutableMap<String, Int>) {
 private fun WritingCard(data: VaultStats) {
     val w = data.writing
     SettingCard("Schreiben", Icons.Filled.Edit) {
-        StatLine("Wörter in Notizen", count(w.wordsInNotes))
+        StatLine(
+            "Wörter in Notizen", count(w.wordsInNotes),
+            if (data.partialNotes > 0) "${count(data.partialNotes)} " + t("Notizen nur teilweise gezählt (sehr gross)") else null,
+        )
         StatLine("Wörter getippt", count(w.wordsTyped))
         StatLine("Wörter in Geschichten", count(w.storyWords))
         StatLine("Handschrift-Striche", count(w.strokes))

@@ -285,9 +285,13 @@ export const createSchulnetzRuntime = (options = {}) => {
     // A missing or broken file can start again. A file that is there but whose saved lists or week maps are not the known shape must not look empty, or the next save replaces them.
     if (stored == null) return null
     const lists = ['grades', 'events', 'exams', 'absences', 'homework', 'messages', 'vacations', 'konto', 'startMessages']
+    // Start-page lines are text. The other lists are records; a string there is dropped on the next upload.
+    const records = ['grades', 'events', 'exams', 'absences', 'homework', 'messages', 'vacations', 'konto']
     const maps = ['weekFetched', 'weekRead', 'examWeekFetched']
     const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
-    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && maps.every((name) => stored[name] == null || plain(stored[name]))
+    const rowsKnown = (list) => list.every(plain)
+    // A saved row that is not a record must not be dropped, or the next upload replaces the snapshot.
+    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && maps.every((name) => stored[name] == null || plain(stored[name]))
     if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
     return stored
   }

@@ -166,6 +166,13 @@ class AppGraph(context: Context) {
         handwritingLearning.attach()
     }
 
+    /**
+     * Where the Statistik page keeps what it read from each note of the open vault, so opening it again
+     * (or after the app restarted) does not read the vault again. One file per vault, in private storage.
+     */
+    fun statsCache(): ch.fasrv.fanotes.desk.StatsCacheStore =
+        ch.fasrv.fanotes.desk.FileStatsCacheStore(File(File(appContext.filesDir, "stats-cache"), fingerprint(vaultId) + ".jsonl"))
+
     fun rememberTree(uri: String?) {
         prefs.edit().putString("vault-uri", uri).apply()
     }
@@ -207,6 +214,16 @@ class AppGraph(context: Context) {
 
     fun writeWorkspace(vaultId: String, json: String) {
         prefs.edit().putString("workspace-$vaultId", json).apply()
+    }
+
+    /** The running task timer of this vault (see `StudyTimerRecord`), kept so it survives a killed process. */
+    fun readStudyTimer(vaultId: String): String? = prefs.getString("study-timer-$vaultId", null)
+
+    /** Stores the running task timer; null removes it. */
+    fun writeStudyTimer(vaultId: String, json: String?) {
+        val edit = prefs.edit()
+        if (json == null) edit.remove("study-timer-$vaultId") else edit.putString("study-timer-$vaultId", json)
+        edit.apply()
     }
 
     fun readExpandedFolders(vaultId: String): String? = prefs.getString("fanotes.treeExpanded.v1-$vaultId", null)
