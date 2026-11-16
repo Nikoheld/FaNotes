@@ -1016,6 +1016,63 @@ test('a snapshot read time or balance that is not the known shape is left in pla
   }
 })
 
+test('a snapshot parser version that is not a version is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-snapshot-parser-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.96')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const file = join(root, 'accounts', guest.accountId, 'snapshot.json')
+    const call = async () => {
+      const request = {
+        method: 'PUT',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.96' },
+        async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+      return status
+    }
+    const dated = { id: 'e-keep', start: '2026-11-16T08:00:00', eventType: 'lesson' }
+    const base = { fetchedAt: '2026-11-16T08:00:00.000Z', grades: [{ id: 'g-keep' }], events: [dated], absences: [{ id: 'a-keep' }] }
+    const keep = async (extra) => {
+      const stored = `${JSON.stringify({ ...base, ...extra })}\n`
+      await writeFile(file, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ absenceParser: 'two' })
+    await keep({ absenceParser: { version: 2 } })
+    await keep({ absenceParser: [] })
+    await keep({ absenceParser: true })
+    await keep({ gradeParser: 'two' })
+    await keep({ gradeParser: { version: 2 } })
+    await keep({ gradeParser: false })
+    await writeFile(file, `${JSON.stringify({ ...base, absenceParser: '2', gradeParser: 2, lessonsFetchedAt: '', icalFetchedAt: '' })}\n`, { mode: 0o600 })
+    assert.equal(await call(), 200)
+    const saved = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(saved.grades.some((grade) => grade.id === 'g-keep'), true)
+    assert.equal(saved.events.some((event) => event.id === 'e-keep'), true)
+    assert.equal(saved.absences.some((absence) => absence.id === 'a-keep'), true)
+    await writeFile(file, `${JSON.stringify({ ...base, absenceParser: '', lessonsFetchedAt: '', icalFetchedAt: '' })}\n`, { mode: 0o600 })
+    assert.equal(await call(), 200)
+    const again = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(again.absences.some((absence) => absence.id === 'a-keep'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a snapshot whose exams are not a list is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'grade-exams-'))
   const runtime = createSchulnetzRuntime({
