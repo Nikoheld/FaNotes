@@ -135,6 +135,23 @@ const installDom = () => {
   }
 }
 
+// JSON.parse keeps the last of two equal keys, so a duplicate silently drops one translation. Scan the text instead.
+const assertCatalogHasNoDuplicateKeys = () => {
+  const text = readFileSync(new URL('../resources/i18n/en.json', import.meta.url), 'utf8')
+  const firstLine = new Map()
+  const duplicates = []
+  text.split('\n').forEach((line, index) => {
+    const match = /^\s*("(?:[^"\\]|\\.)*")\s*:/u.exec(line)
+    if (!match) return
+    const key = JSON.parse(match[1])
+    if (firstLine.has(key)) duplicates.push(`${JSON.stringify(key.slice(0, 60))} (lines ${firstLine.get(key)} and ${index + 1})`)
+    else firstLine.set(key, index + 1)
+  })
+  assert.equal(firstLine.size, Object.keys(JSON.parse(text)).length, 'every catalog entry sits on its own line')
+  assert.deepEqual(duplicates, [], `duplicate keys in en.json: ${duplicates.join('; ')}`)
+}
+assertCatalogHasNoDuplicateKeys()
+
 const server = await createServer({
   root: appRoot,
   appType: 'custom',

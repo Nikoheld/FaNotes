@@ -212,7 +212,7 @@ type SettingsSearchItem = {
 
 const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'KI-Zugriff (MCP)', detail: 'KI-Zugriff', section: 'mcp', target: 'settings-mcp-local', keywords: 'mcp ki ai claude cursor chatgpt grok server stdio http token lokal notizen aufgaben schreibzugriff' },
-  { label: 'Statistik', detail: 'Statistik', section: 'statistics', target: 'settings-stat-activity', keywords: 'statistik aktivität kalender heatmap serie streak wörter notizen grösse fächer lernzeit hausaufgaben karteikarten sync' },
+  { label: 'Statistik', detail: 'Statistik', section: 'statistics', target: 'settings-stat-activity', keywords: 'statistik aktivität kalender heatmap serie streak wörter notizen größe fächer lernzeit hausaufgaben karteikarten sync' },
   { label: 'Diagnose & Verbesserung', detail: 'Statistik', section: 'statistics', target: 'settings-diagnostics', keywords: 'diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz' },
   { label: 'Grok-Connector', detail: 'Sync', section: 'sync', target: 'settings-grok-connector', keywords: 'grok mcp connector server url notizen prüfung klausur hausaufgaben oauth' },
   { label: 'Sync-Konto', detail: 'Sync', section: 'sync', target: 'settings-sync-account', keywords: 'sync konto anmelden registrieren account login passwort e-mail cloud server geräte' },
