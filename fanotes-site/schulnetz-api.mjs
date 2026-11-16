@@ -281,10 +281,12 @@ export const createSchulnetzRuntime = (options = {}) => {
 
   const readSnapshotFile = async (accountId) => {
     const stored = await readJson(resolve(accountDir(accountId), 'snapshot.json'))
-    // A missing or broken file can start again. A file that is there but whose saved lists are not arrays must not look empty, or the next save replaces them.
+    // A missing or broken file can start again. A file that is there but whose saved lists or week maps are not the known shape must not look empty, or the next save replaces them.
     if (stored == null) return null
     const lists = ['grades', 'events', 'exams', 'absences', 'homework', 'messages', 'vacations', 'konto', 'startMessages']
-    const known = typeof stored === 'object' && !Array.isArray(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name]))
+    const maps = ['weekFetched', 'weekRead', 'examWeekFetched']
+    const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && maps.every((name) => stored[name] == null || plain(stored[name]))
     if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
     return stored
   }
