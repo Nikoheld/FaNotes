@@ -594,7 +594,15 @@ const appendChange = async (accountId, table, entry) => {
     }
     throw error
   } finally {
-    await handle.close()
+    // A close error must not hide a synced revision. The bytes and the
+    // directory entry are already durable. Tests set this after that sync.
+    // Production leaves it unset.
+    try {
+      if (process.env.FANOTES_SYNC_CLOSE_FAIL === '1') throw new Error('change log handle was not closed')
+      await handle.close()
+    } catch {
+      await handle.close().catch(() => {})
+    }
   }
   // The revision becomes visible only after the log line is durable.
   applyLoggedEntry(table, entry)

@@ -279,6 +279,39 @@ test('a changes read cannot replace the table a write already published', async 
   }
 })
 
+test('a close error does not hide a synced revision', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(120)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const createdJson = JSON.parse(created.body.toString('utf8'))
+  const revision = createdJson.revision
+  const newer = randomBytes(180)
+  process.env.FANOTES_SYNC_CLOSE_FAIL = '1'
+  let savedJson
+  try {
+    const saved = await putFile(id, newer, revision)
+    assert.equal(saved.status, 200, saved.body.toString('utf8'))
+    savedJson = JSON.parse(saved.body.toString('utf8'))
+    assert.ok(savedJson.revision > revision)
+    const feed = JSON.parse((await call('GET', '/api/v1/sync/changes?since=0', { token, accountId })).body.toString('utf8'))
+    const listed = feed.entries.find((entry) => entry.id === id)
+    assert.equal(listed.revision, savedJson.revision)
+    assert.equal(listed.sha256, sha256(newer))
+    assert.equal(feed.revision, savedJson.tableRevision)
+  } finally {
+    delete process.env.FANOTES_SYNC_CLOSE_FAIL
+  }
+  const otherId = randomBytes(32).toString('hex')
+  const other = await putFile(otherId, randomBytes(90), 0)
+  assert.equal(other.status, 200, other.body.toString('utf8'))
+  const otherJson = JSON.parse(other.body.toString('utf8'))
+  assert.ok(otherJson.revision > savedJson.revision)
+  const live = await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, newer)
+})
+
 test.after(() => new Promise((resolve) => {
   server.close(() => {
     rmSync(dataDirectory, { recursive: true, force: true })
