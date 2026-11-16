@@ -597,6 +597,45 @@ test('a commute file that is not the route list is left in place', async () => {
   }
 })
 
+test('a commute route the sanitizer would skip is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-entry-'))
+  const accountId = 'f'.repeat(32)
+  const routeFile = join(root, 'accounts', accountId, 'commute.json')
+  const stateFile = join(root, 'accounts', accountId, 'commute-state.json')
+  const badId = 'b'.repeat(12)
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  try {
+    await commute.save(accountId, { routes: [route()], settings: { delayThreshold: 3 } })
+    const valid = await readFile(routeFile, 'utf8')
+    const parsed = JSON.parse(valid)
+    parsed.routes.push({ id: badId, kept: true })
+    const mixed = `${JSON.stringify(parsed)}\n`
+    await writeFile(routeFile, mixed, { mode: 0o600 })
+    const state = `${JSON.stringify({ version: 1, routes: { [badId]: { kept: true }, [route().id]: { kept: true } } })}\n`
+    await writeFile(stateFile, state, { mode: 0o600 })
+    await assert.rejects(() => commute.view(accountId), (error) => error?.code === 'EBADMSG')
+    await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EBADMSG')
+    await assert.rejects(
+      () => commute.save(accountId, { routes: [route()], settings: { delayThreshold: 9 } }),
+      (error) => error?.code === 'EBADMSG',
+    )
+    assert.equal(await readFile(routeFile, 'utf8'), mixed)
+    assert.equal(await readFile(stateFile, 'utf8'), state)
+    await writeFile(routeFile, valid, { mode: 0o600 })
+    await commute.checkAccount(accountId)
+    const updated = JSON.parse(await readFile(stateFile, 'utf8'))
+    assert.equal(Object.hasOwn(updated.routes, badId), false)
+    assert.equal(updated.routes[route().id].kept, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a commute state file that is not the known shape is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'commute-state-'))
   const accountId = 'e'.repeat(32)

@@ -498,6 +498,8 @@ export const createCommute = (options = {}) => {
     if (stored != null) {
       const known = typeof stored === 'object' && !Array.isArray(stored) && Array.isArray(stored.routes)
       if (!known) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      // An entry the sanitizer would skip must not look absent, or the next check deletes its alert state and the next save drops the route.
+      if (sanitizeRoutes(stored.routes).length !== stored.routes.length) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
     }
     const settings = sanitizeSettings(stored?.settings)
     // Version 1 hidden labels mixed half-class choices (removed) with hidden lessons; the app sends
