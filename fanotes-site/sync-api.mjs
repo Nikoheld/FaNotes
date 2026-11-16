@@ -979,17 +979,36 @@ const handleDeleteAccount = async (request, response, auth) => {
   sendEmpty(request, response, 204)
 }
 
+// A caught-up cursor still has to notice a revision the table number has not reached.
+// A consistent table has none, so that poll does not copy or sort every note.
+// A shared revision must stay on one changes page, or the cursor would skip the note left on the next page.
+export const changesSince = (entries, since, tableRevision) => {
+  const tableRevisionNumber = Number(tableRevision) || 0
+  const list = []
+  for (const entry of entries) {
+    if (Number(entry?.revision) > since) list.push(entry)
+  }
+  if (!list.length) return { entries: [], more: false, nextSince: tableRevisionNumber }
+  list.sort((left, right) => left.revision - right.revision || String(left.id).localeCompare(String(right.id)))
+  let end = Math.min(CHANGES_PAGE, list.length)
+  if (end < list.length && list[end].revision === list[end - 1].revision) {
+    const shared = list[end - 1].revision
+    while (end < list.length && list[end].revision === shared) end += 1
+  }
+  const page = list.slice(0, end)
+  return { entries: page, more: end < list.length, nextSince: page[page.length - 1].revision }
+}
+
 const handleChanges = async (request, response, auth, url) => {
   const table = await loadTable(auth.account.id)
   const since = Number(url.searchParams.get('since') || 0)
   if (!Number.isInteger(since) || since < 0) fail(400, 'Der Parameter „since“ muss eine Revisionsnummer sein.')
-  const entries = [...table.entries.values()].filter((entry) => entry.revision > since).sort((a, b) => a.revision - b.revision)
-  const page = entries.slice(0, CHANGES_PAGE)
+  const page = changesSince(table.entries.values(), since, table.revision)
   sendJson(request, response, 200, {
     revision: table.revision,
-    entries: page.map(publicEntry),
-    more: entries.length > page.length,
-    nextSince: page.length ? page[page.length - 1].revision : table.revision,
+    entries: page.entries.map(publicEntry),
+    more: page.more,
+    nextSince: page.nextSince,
   })
 }
 
