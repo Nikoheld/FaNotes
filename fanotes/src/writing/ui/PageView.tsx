@@ -1,5 +1,5 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { caretX, type LineBox, type ParagraphLayout } from '../layout/linebreak'
+import { caretX, type LineBox, type ParagraphLayout, type Piece } from '../layout/linebreak'
 import { cssFont, type TextMeasurer } from '../layout/measure'
 import type { ManuscriptLayout, Page } from '../layout/paginate'
 import type { Doc, Pos } from '../editor/doc'
@@ -93,15 +93,21 @@ const pieceStyle = (measurer: TextMeasurer, box: LineBox, piece: LineBox['pieces
   }
 }
 
+/**
+ * The React key of a piece: its place in the line. Offsets are not unique: a list marker and the first word both
+ * start at 0, and footnote anchors share the offset they sit at.
+ */
+export const pieceKey = (piece: Piece, index: number) => `${index}:${piece.kind}`
+
 /** One line; re-renders only when its layout object changes. */
 const LineView = memo(function LineView({ box, x, y, measurer, dimmed, conflict }: { box: LineBox; x: number; y: number; measurer: TextMeasurer; dimmed: boolean; conflict: boolean }) {
   return (
     <div className={`wm-line${dimmed ? ' is-dimmed' : ''}${conflict ? ' is-conflict' : ''}`} style={{ left: x, top: y, height: box.height, width: box.available }}>
-      {box.pieces.map((piece) => {
+      {box.pieces.map((piece, index) => {
         if (piece.kind === 'newline' || piece.hang) return null
         if (piece.kind === 'space' && !(piece.marks?.u || piece.marks?.s || piece.marks?.hl || piece.marks?.link)) return null
         return (
-          <span key={piece.from * 4 + (piece.kind === 'anchor' ? 1 : 0)} className={piece.kind === 'anchor' ? 'wm-fn-ref' : undefined} style={pieceStyle(measurer, box, piece)}>
+          <span key={pieceKey(piece, index)} className={piece.kind === 'anchor' ? 'wm-fn-ref' : undefined} style={pieceStyle(measurer, box, piece)}>
             {piece.kind === 'space' ? ' ' : piece.display}{piece.hyphen ? '-' : ''}
           </span>
         )

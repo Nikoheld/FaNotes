@@ -764,7 +764,7 @@ export type FaNotesApi = {
   sync?: SyncHostApi
   /** An editable share opened from fanotes://share/<id>. Missing until the desktop build that registers the protocol. */
   /** Files added, changed or removed outside FaNotes. Desktop only. */
-  onVaultChanged?: (callback: (change: { added: string[]; removed: string[]; changed: string[] }) => void) => () => void
+  onVaultChanged?: (callback: (change: { added: string[]; removed: string[]; changed: string[]; truncated?: boolean }) => void) => () => void
   onShareOpen?: (callback: (id: string) => void) => () => void
   platform: string
 }

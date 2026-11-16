@@ -212,6 +212,23 @@ export const createKantiWebStore = (options = {}) => {
   }
   const nowMs = () => now().getTime()
   const alive = (session) => Boolean(session && session.v === 1 && Date.parse(session.expiresAt) > nowMs() && Date.parse(session.maxUntil) > nowMs())
+  // A missing version can go. Any other version, including one that is not a number, must not look dead.
+  const otherVersion = (session) => Boolean(session) && Object.hasOwn(session, 'v') && session.v != null && session.v !== 1
+  const plainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+  const ACCOUNT_ID = /^[a-f0-9]{32}$/u
+  const connectionKnown = (item) => plainObject(item)
+    && typeof item.id === 'string' && CONNECTION_ID.test(item.id)
+    && typeof item.accountId === 'string' && ACCOUNT_ID.test(item.accountId)
+    && typeof item.source === 'string' && item.source.length > 0 && item.source.length <= 32
+  // An empty list is a real session with nothing left in it. A list or sign-in of another shape is not.
+  const sessionShapeKnown = (session) => plainObject(session)
+    && Array.isArray(session.connections)
+    && session.connections.every(connectionKnown)
+    && (session.fanotes == null || (
+      plainObject(session.fanotes)
+      && typeof session.fanotes.accountId === 'string' && ACCOUNT_ID.test(session.fanotes.accountId)
+      && typeof session.fanotes.stamp === 'string' && session.fanotes.stamp.length > 0 && session.fanotes.stamp.length <= 200
+    ))
 
   // Which sessions read which identity, so the app's status call does not scan the directory.
   let index = null
@@ -233,7 +250,8 @@ export const createKantiWebStore = (options = {}) => {
         // Leave an unreadable session out of this pass. The file stays, and a later start can read it.
         continue
       }
-      if (alive(session)) built.set(name.slice(0, 64), indexEntry(session))
+      // A version 1 session whose connections are not connections stays on disk and out of this index.
+      if (alive(session) && sessionShapeKnown(session)) built.set(name.slice(0, 64), indexEntry(session))
     }
     index ??= built
     return index
@@ -242,7 +260,9 @@ export const createKantiWebStore = (options = {}) => {
   const readSession = async (hash) => {
     const session = await readJson(sessionPath(hash))
     // A missing, broken, or expired session can go. A file of another version must not look dead, or the next request deletes it.
-    if (session && typeof session.v === 'number' && session.v !== 1) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
+    if (otherVersion(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
+    // A connection list or sign-in that is not the known shape must not look empty, or the next request deletes the session or drops that field.
+    if (session && session.v === 1 && !sessionShapeKnown(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
     return alive(session) ? session : null
   }
   const saveSession = async (hash, session) => {
@@ -316,12 +336,16 @@ export const createKantiWebStore = (options = {}) => {
 
   // ── Pairing codes ─────────────────────────────────────────────────────────
 
+  // A missing version can go. Any other version must not look unused, or the sweep deletes it once its old expiry has passed.
+  const otherPairingVersion = (record) => Boolean(record) && typeof record === 'object' && Object.hasOwn(record, 'v') && record.v != null && record.v !== 1
   const readPairing = async (rawCode) => {
     const code = normalizePairingCode(rawCode)
     if (!code) return null
     const file = pairingPath(sha256(`code:${code}`))
     const record = await readJson(file)
-    if (!record || record.v !== 1) return null
+    if (!record) return null
+    if (otherPairingVersion(record)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
+    if (record.v !== 1) return null
     if (Date.parse(record.expiresAt) <= nowMs()) {
       await fs.rm(file, { force: true })
       return null
@@ -502,6 +526,7 @@ export const createKantiWebStore = (options = {}) => {
       } catch {
         continue
       }
+      if (otherPairingVersion(record)) continue
       if (!record || Date.parse(record.expiresAt) <= nowMs()) await fs.rm(resolve(pairingsDir, name), { force: true })
     }
     for (const name of await fs.readdir(sessionsDir).catch(() => [])) {
@@ -514,7 +539,7 @@ export const createKantiWebStore = (options = {}) => {
         continue
       }
       // A session of another version stays. Sweep only removes a missing, broken, or expired version 1 file.
-      if (session && typeof session.v === 'number' && session.v !== 1) continue
+      if (otherVersion(session)) continue
       if (!alive(session)) await locked(`session:${hash}`, () => deleteSession(hash))
     }
   }

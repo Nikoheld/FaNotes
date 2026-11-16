@@ -45,8 +45,10 @@ export const parseMark = (raw) => {
 }
 
 export const parseWeight = (raw) => {
-  const value = Number(String(raw ?? '').trim().replace(',', '.'))
-  if (!Number.isFinite(value) || value <= 0 || value > 100) return 1
+  const text = String(raw ?? '').trim().replace(',', '.')
+  if (!text) return 1
+  const value = Number(text)
+  if (!Number.isFinite(value) || value < 0 || value > 100) return 1
   return value
 }
 
@@ -431,20 +433,20 @@ export const isLesson = (event) => {
 // alone would keep only the first week's lesson and drop every later one.
 const mergeKey = (event) => (isLesson(event) ? `lesson|${event.id}|${event.start}` : event.id)
 
-export const mergeEventsById = (base, incoming) => {
+export const mergeEventsById = (base, incoming, keyOf = mergeKey) => {
   const extra = incoming || []
   if (!extra.length) return base || []
-  const incomingById = new Map(extra.map((event) => [mergeKey(event), event]))
+  const incomingById = new Map(extra.map((event) => [keyOf(event), event]))
   const seen = new Set()
   const out = []
   for (const event of base || []) {
-    const key = mergeKey(event)
+    const key = keyOf(event)
     if (seen.has(key)) continue
     seen.add(key)
     out.push(incomingById.get(key) || event)
   }
   for (const event of extra) {
-    const key = mergeKey(event)
+    const key = keyOf(event)
     if (seen.has(key)) continue
     seen.add(key)
     out.push(event)
@@ -452,9 +454,19 @@ export const mergeEventsById = (base, incoming) => {
   return out
 }
 
+/**
+ * A bare number is a scheduler id: the entry's position in one week's answer (0, 1, 2… again every
+ * week, and the class overview counts separately from the timetable; the live feed had 43 ids for 786
+ * entries). It names an exam only together with its time. Any other id (an iCal UID, a REST id) is
+ * the exam's own. Kotlin mirror: positionalScheduleId (WeekRange.kt).
+ */
+export const positionalScheduleId = (event) => /^\d+$/u.test(cleanSchulnetzText(event?.id || ''))
+const examMergeKey = (event) => (positionalScheduleId(event) ? `${cleanSchulnetzText(event.id)}|${event.start}` : event.id)
+
 /** Exams found inside the timetable feed stay on the exam list after lesson overlay drops them. */
 // An exam listed both in the timetable and in the overview (same slot, same label) is one exam.
-export const carryTimetableExams = (events, exams) => distinctExams(mergeEventsById(exams || [], (events || []).filter(isExamLike)))
+// Merged by id and start: by id alone, exam 1 of one week replaced exam 1 of every other week.
+export const carryTimetableExams = (events, exams) => distinctExams(mergeEventsById(exams || [], (events || []).filter(isExamLike), examMergeKey))
 
 /**
  * Course identity of a Schulnetz course label. A label starts with the subject, then a group part
@@ -879,6 +891,40 @@ export const keepLoadedGrades = (previousGrades, nextGrades, complete = true) =>
   const prev = Array.isArray(previousGrades) ? previousGrades : []
   if (!complete || next.length === 0 || next.some((grade) => placeholderCourse(grade.course || grade.subject || grade.courseId))) return prev
   return next
+}
+
+/**
+ * The phone still reads an explicit weight of 0 as 1. An upload of that list must not
+ * replace the server's 0, or every upload and the next Schulnetz read announce each other.
+ * A different mark, title, day or course is left alone, and a weight other than 1 is kept.
+ */
+export const preserveExplicitZeroWeight = (previousGrades, nextGrades) => {
+  const next = Array.isArray(nextGrades) ? nextGrades : []
+  const zeros = new Map()
+  for (const grade of Array.isArray(previousGrades) ? previousGrades : []) {
+    if (Number(grade?.weight) !== 0 || grade?.mark == null) continue
+    zeros.set([
+      normalizeGradeText(grade.courseId || grade.course || grade.subject || ''),
+      normalizeGradeDate(grade.date),
+      normalizeGradeText(grade.title),
+      numKey(grade.mark),
+    ].join('\u0000'), grade)
+  }
+  if (!zeros.size) return next
+  let changed = false
+  const kept = next.map((grade) => {
+    if (Number(grade?.weight) !== 1 || grade?.mark == null) return grade
+    const key = [
+      normalizeGradeText(grade.courseId || grade.course || grade.subject || ''),
+      normalizeGradeDate(grade.date),
+      normalizeGradeText(grade.title),
+      numKey(grade.mark),
+    ].join('\u0000')
+    if (!zeros.has(key)) return grade
+    changed = true
+    return { ...grade, weight: 0 }
+  })
+  return changed ? kept : next
 }
 export const eventLabel = (event) => cleanSchulnetzText(event.courseName) || cleanSchulnetzText(event.text) || cleanSchulnetzText(event.timetableText) || 'Lektion'
 const noticeClock = (raw) => {
@@ -1721,7 +1767,12 @@ export const stripPhpSession = (cookieHeader) => String(cookieHeader || '')
   .filter((part) => part && !/^PHPSESSID=/i.test(part))
   .join('; ')
 
-const clean = (value) => String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+const clean = (value) => String(value || '')
+  .replace(/<[^>]+>/g, ' ')
+  // Schulnetz pads cells with a non-breaking space. The entity is not a mark.
+  .replace(/&nbsp;|&#0*160;|&#x0*a0;/giu, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
 
 /** Read own table rows/cells only; descendant exam tables never supply a course label. */
 const gradeTables = (html) => {
@@ -1730,6 +1781,7 @@ const gradeTables = (html) => {
   // Schulnetz puts an info icon and a hidden .mdl-tooltip (with more numbers) after some marks.
   // Its text is not part of the cell; the mark is the cell's own text.
   let tooltipDepth = 0
+  let boldDepth = 0
   for (const token of String(html || '').matchAll(/<!--[\s\S]*?-->|<script\b[^>]*>[\s\S]*?<\/script\s*>|<[^>]+>|[^<]+/gi)) {
     const part = token[0]
     const div = /^<(\/)?div\b/i.exec(part)
@@ -1757,16 +1809,26 @@ const gradeTables = (html) => {
         const table = stack.at(-1)
         if (name === 'tr') {
           table.cell = null
+          boldDepth = 0
           table.row = close ? null : { cells: [], nested: [] }
           if (table.row) table.rows.push(table.row)
-        } else if (close) table.cell = null
-        else if (table.row) {
-          table.cell = { text: '', header: name === 'th' }
+        } else if (close) {
+          table.cell = null
+          boldDepth = 0
+        } else if (table.row) {
+          boldDepth = 0
+          table.cell = { text: '', bold: '', header: name === 'th' }
           table.row.cells.push(table.cell)
         }
       }
-    } else if (stack.length && stack.at(-1).cell && !part.startsWith('<')) {
-      stack.at(-1).cell.text += part + ' '
+    } else if (stack.length && stack.at(-1).cell) {
+      const emphasis = /^<(\/)?(?:b|strong)\b/i.exec(part)
+      if (emphasis) boldDepth = Math.max(0, boldDepth + (emphasis[1] ? -1 : 1))
+      else if (!part.startsWith('<')) {
+        const cell = stack.at(-1).cell
+        cell.text += part + ' '
+        if (boldDepth > 0) cell.bold += part + ' '
+      }
     }
   }
   return tables
@@ -1775,6 +1837,7 @@ const gradeTables = (html) => {
 export const parseGradesHtml = (html) => {
   if (sessionProblem('', html)) return []
   const grades = []
+  const seenIds = new Map()
   const tokenPattern = /^[A-Za-zÄÖÜäöü0-9 ()]+-[A-Za-z0-9]+-[A-Za-zÄÖÜäöü0-9]+/u
   const tables = gradeTables(html)
   const expected = tables.flatMap((table) => table.rows).filter((row) => {
@@ -1803,8 +1866,11 @@ export const parseGradesHtml = (html) => {
           if ((!undated && !/^\d{2}\.\d{2}\.\d{4}$/u.test(date || '')) || !topic || isSummaryGradeTitle(topic)) continue
           // A row still waiting for its mark is kept with mark null, as the app reads it.
           const mark = parseMark(markText || '')
+          const baseId = `web:${courseId}:${undated ? '' : date}:${topic}:${numKey(mark)}`
+          const occurrence = (seenIds.get(baseId) || 0) + 1
+          seenIds.set(baseId, occurrence)
           grades.push({
-            id: `web:${courseId}:${date}:${topic}:${numKey(mark)}`,
+            id: occurrence === 1 ? baseId : `${baseId}:${occurrence}`,
             course, courseId, subject: course, title: topic,
             date: undated ? '' : `${date.slice(6, 10)}-${date.slice(3, 5)}-${date.slice(0, 2)}`,
             mark, weight: parseWeight(weight || '1'), confirmed: true, courseGrade: average, comment: '',
@@ -1820,7 +1886,9 @@ export const parseGradesHtml = (html) => {
       const token = tokenPattern.exec(name)?.[0]
       if (!token && !courseTable) continue
       course = token ? name.slice(token.length).trim() || token : name
-      courseId = token || name.split(' ')[0]
+      // The bold label is the course code (`Kurs 2.1 (GF)`). The first word alone is `Kurs` for every such course.
+      const bold = clean(row.cells[0]?.bold || '')
+      courseId = token || bold || name.split(' ')[0]
       average = parseMark(cells[1] || '')
     }
   }
@@ -2279,10 +2347,23 @@ export const parseIcs = (text) => {
     const start = value('DTSTART')
     if (!summary || !start) return null
     const icsTime = (raw) => {
-      const compact = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(raw)
-      if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:00`
-      const day = /(\d{4})(\d{2})(\d{2})/.exec(raw)
-      return day ? `${day[1]}-${day[2]}-${day[3]}` : raw
+      const compact = /(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?/iu.exec(raw)
+      if (!compact) {
+        const day = /(\d{4})(\d{2})(\d{2})/.exec(raw)
+        return day ? `${day[1]}-${day[2]}-${day[3]}` : raw
+      }
+      const stamp = `${compact[1]}-${compact[2]}-${compact[3]}T${compact[4]}:${compact[5]}:00`
+      if (!compact[7]) return stamp
+      const utcMinutes = Number(compact[4]) * 60 + Number(compact[5])
+      const local = utcMinutes - zurichTimeshift(`${compact[1]}-${compact[2]}-${compact[3]}`)
+      const shifted = new Date(Date.UTC(Number(compact[1]), Number(compact[2]) - 1, Number(compact[3])))
+      shifted.setUTCMinutes(local)
+      const y = shifted.getUTCFullYear()
+      const m = String(shifted.getUTCMonth() + 1).padStart(2, '0')
+      const d = String(shifted.getUTCDate()).padStart(2, '0')
+      const hh = String(shifted.getUTCHours()).padStart(2, '0')
+      const mm = String(shifted.getUTCMinutes()).padStart(2, '0')
+      return `${y}-${m}-${d}T${hh}:${mm}:00`
     }
     const status = /^cancelled$/iu.test(value('STATUS')) ? 'cancelled' : ''
     return {
@@ -2369,9 +2450,12 @@ export const prepareAgendaRead = (stored = {}, next = {}) => {
   return { before: { ...next, events: distinct(beforeEvents), exams: distinct(beforeExams) }, weeks }
 }
 
+// A scheduler id (see positionalScheduleId) names the same exam only on the same day; any other id
+// follows its exam to another day. Kotlin mirror: sameExamId (AgendaBaseline.kt).
 const sameExamId = (left, right) => {
   const key = (event) => cleanSchulnetzText(event.id || '').split('@')[0]
-  return Boolean(key(left)) && key(left) === key(right)
+  if (!key(left) || key(left) !== key(right)) return false
+  return !positionalScheduleId(left) || (Boolean(eventDay(left)) && eventDay(left) === eventDay(right))
 }
 const examLabel = (event) => [event.text, event.timetableText, event.courseName].map((text) => cleanSchulnetzText(text).toLowerCase()).find(Boolean) || ''
 const schoolStamp = (raw) => {
@@ -2450,17 +2534,29 @@ const CLOCK_RANGE = /\b(\d{1,2}):(\d{2})\s*[–-]\s*(\d{1,2}):(\d{2})\b/u
 export const zurichClock = (now = new Date()) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now)
 export const changeDay = (change) => eventDate(change?.date) ||
   ((change?.category === 'exam' || change?.category === 'timetable') ? eventDate(String(change?.body || '').slice(0, 12)) : '')
+const clockText = (hour, minute) => `${String(hour).padStart(2, '0')}:${minute}`
+
 /** A notice about a lesson, exam or appointment that has already ended. Grades, absences, messages and probes never are. */
 export const changeIsOver = (change, now = new Date()) => {
   if (!DATED_CATEGORIES.has(change?.category) || isNotificationProbe(change?.id)) return false
   const day = changeDay(change)
   if (!day) return false
   const today = zurichToday(now)
-  if (day < today) return true
   if (day > today) return false
   const range = String(change.body || '').match(CLOCK_RANGE)
-  if (!range) return false
-  return zurichClock(now) > `${range[3].padStart(2, '0')}:${range[4]}`
+  const start = range ? clockText(range[1], range[2]) : ''
+  const end = range ? clockText(range[3], range[4]) : ''
+  // 23:00–00:30 ends the next morning. Text order would call that over at 22:00.
+  const crossesMidnight = Boolean(start && end && end < start)
+  if (day < today) {
+    if (!crossesMidnight) return true
+    const next = addDays(day, 1)
+    if (today > next) return true
+    if (today < next) return false
+    return zurichClock(now) > end
+  }
+  if (!end || crossesMidnight) return false
+  return zurichClock(now) > end
 }
 /** More new appointments than this in one read is the list growing, not news. */
 export const APPOINTMENT_BURST = 8

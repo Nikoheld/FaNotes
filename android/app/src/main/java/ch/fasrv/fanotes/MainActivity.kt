@@ -595,13 +595,17 @@ fun FaNotesScreen(
         if (desk["update-check"] != "off") model.checkUpdate()
     }
 
-    // New files from outside: look again on resume and every 20 s while the app is in front.
+    // New files from outside: look again on resume and every 60 s while the app is in front (slow
+    // rescans back off, see RescanPolicy).
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, model) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            // Every resume rescans once; after a slow scan the timer stays off until the next resume.
+            model.rescanTree()
             while (true) {
+                kotlinx.coroutines.delay(model.rescanPolicy.intervalMs)
+                if (model.rescanPolicy.resumeOnly) break
                 model.rescanTree()
-                kotlinx.coroutines.delay(20_000)
             }
         }
     }
@@ -3137,6 +3141,8 @@ private fun PageSurface(
     val studyItems by model.studyAnnotations.collectAsStateWithLifecycle()
     val studyHistory by model.studyHistory.collectAsStateWithLifecycle()
     val studyPageRef = remember { arrayOfNulls<NotePageView>(1) }
+    // Tool, selection, measure points, crop and open label editor of the Lernen menu survive a recreated activity.
+    val studyState = androidx.compose.runtime.saveable.rememberSaveable(saver = StudyStateBox.Saver) { StudyStateBox() }
     val pickStudyImage = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val target = studyPageRef[0]
         if (uri != null && target != null) model.importStudyImage(uri, target.ink.study.visiblePage())
@@ -3178,6 +3184,8 @@ private fun PageSurface(
         modifier = Modifier.matchParentSize(),
         factory = { context ->
             NotePageView(context).apply {
+                restoreStudyState(studyState.raw)
+                studyState.provider = { studyStateSnapshot() }
                 attachSession(model.session)
                 ink.onChanged = { model.noteChanged() }
                 ink.onStroke = { model.recordFinishedStroke(it) }
@@ -3316,6 +3324,7 @@ private fun PageSurface(
             page.ink.onPlaceLink = { linkPage, x, y -> model.placeNoteLink(linkPage, x, y, page.ink.noteLinkStyle) }
             studyPageRef[0] = page
             if (page.ink.study.items != studyItems) page.ink.study.items = studyItems
+            if (page.ink.study.openDialog != null) page.resumeStudyDialog()
             page.ink.study.onChange = { before, next -> model.commitStudy(before, next) }
             page.studyCanUndo = studyHistory.canUndo
             page.studyCanRedo = studyHistory.canRedo

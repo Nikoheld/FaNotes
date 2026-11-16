@@ -105,6 +105,71 @@ try {
   assert.equal(await page.locator('.cm-lw-shell.lw-kind-key').count(), 1)
   ok('key block created and rendered in the note')
 
+  // 1b. key editor: restructure with the keyboard, long branch labels with real fonts, question -> result with its confirmation
+  {
+    const reopen = async () => { await page.locator('.cm-lw-shell.lw-kind-key .cm-lw-edit').click(); await page.locator('[data-lw-modal]').waitFor() }
+    await reopen()
+    await page.getByRole('tab', { name: 'Bestimmungsschlüssel' }).click()
+    const tree = page.locator('.lw-tree-editor')
+    const results = tree.getByLabel('Ergebnis', { exact: true })
+    assert.equal(await results.count(), 2, 'the skeleton has two results')
+    await results.first().click()
+    await page.keyboard.press('Enter')
+    assert.equal(await results.count(), 3, 'Enter adds a result beside this one')
+    assert.equal(await page.evaluate(() => `${document.activeElement?.getAttribute('aria-label')}|${document.activeElement?.value}`), 'Ergebnis|', 'and the cursor is in it')
+    await page.keyboard.type('Läuse')
+    await page.keyboard.press('Alt+ArrowUp')
+    assert.equal(await page.evaluate(() => document.activeElement?.value), 'Läuse', 'Alt+Arrow moves the branch and keeps the cursor on it')
+    const branchLabels = tree.getByLabel('Zweig', { exact: true })
+    const longLabels = ['Vorderflügel zu harten Flügeldecken (Elytren) umgebildet, Hinterflügel häutig', 'Mundwerkzeuge stechend-saugend, Rüssel gegliedert, Flügel fehlen', 'FLÜGEL HÄUTIG, DICHT NETZARTIG GEÄDERT, ZWEI PAAR']
+    for (let index = 0; index < 3; index += 1) await branchLabels.nth(index).fill(longLabels[index])
+    await shot(page, 'key-long-labels')
+    const spill = await page.evaluate(() => {
+      const svg = document.querySelector('.lw-preview svg')
+      const box = (element) => { const { x, y, width, height } = element.getBBox(); return { x, y, w: width, h: height } }
+      const meet = (a, b) => a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5
+      const labelRects = [...svg.querySelectorAll('rect.lw-key-label')].map(box)
+      const labelTexts = [...svg.querySelectorAll('text.lw-key-label')].map(box)
+      const boxes = [...svg.querySelectorAll('rect:not(.lw-key-label)')].map(box)
+      const texts = [...svg.querySelectorAll('text:not(.lw-key-label)')].map(box)
+      const inside = (small, big) => small.x >= big.x - 0.5 && small.y >= big.y - 0.5 && small.x + small.w <= big.x + big.w + 0.5 && small.y + small.h <= big.y + big.h + 0.5
+      const problems = []
+      labelTexts.forEach((text, index) => { if (!labelRects.some((rect) => inside(text, rect))) problems.push(`label text ${index} spills out of its box`) })
+      labelRects.forEach((rect, i) => {
+        labelRects.slice(i + 1).forEach((other, j) => { if (meet(rect, other)) problems.push(`labels ${i} and ${i + 1 + j} overlap`) })
+        boxes.forEach((node, j) => { if (meet(rect, node)) problems.push(`label ${i} overlaps box ${j}`) })
+      })
+      const [width, height] = svg.getAttribute('viewBox').split(' ').slice(2).map(Number)
+      for (const item of [...labelRects, ...boxes, ...labelTexts, ...texts]) if (item.x < 0 || item.y < 0 || item.x + item.w > width || item.y + item.h > height) problems.push('something is clipped at the edge of the drawing')
+      return { problems, labels: labelRects.length }
+    })
+    assert.ok(spill.labels >= 3, 'three labelled branches')
+    assert.deepEqual(spill.problems, [], 'long branch labels fit their boxes and never meet')
+    // Question -> result asks first, Escape answers "no" without closing the editor, "yes" removes everything below.
+    const kind = tree.getByLabel('Art des Knotens').first()
+    await kind.selectOption('leaf')
+    await page.locator('.lw-node-confirm').waitFor()
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Abbrechen', 'focus rests on the safe answer')
+    await page.keyboard.press('Escape')
+    await page.locator('.lw-node-confirm').waitFor({ state: 'detached' })
+    assert.equal(await page.locator('[data-lw-modal]').count(), 1, 'Escape answers the question, the editor stays open')
+    assert.equal(await kind.inputValue(), 'question', 'and nothing changed')
+    await kind.selectOption('leaf')
+    await page.getByRole('button', { name: 'Zum Ergebnis machen' }).click()
+    assert.equal(await tree.getByLabel('Ergebnis', { exact: true }).count(), 1, 'the root is a single result now')
+    assert.equal(await page.getByRole('button', { name: 'Zweig hinzufügen' }).count(), 0, 'a result takes no branches')
+    await kind.selectOption('question')
+    await page.getByRole('button', { name: 'Zweig hinzufügen' }).click()
+    await shot(page, 'key-after-toggle')
+    await finish()
+    assert.equal(await page.locator('.cm-lw-broken').count(), 0, 'the note shows no broken block')
+    await reopen()
+    assert.equal(await page.locator('.lw-modal .lw-error').count(), 0, 'the block opens in the editor again instead of as read-only source')
+    assert.ok(await page.getByRole('tab', { name: 'Tabelle' }).count(), 'with all its tabs')
+    await finish()
+    ok('key editor: Enter and Alt+Arrow, long labels fit, question -> result keeps the block editable')
+  }
+
   // 2. sort board
   await insertTool('Sortier-Board')
   await page.getByLabel('Karten hinzufügen').fill('Libellen\nKäfer\nSilberfischchen\nFlöhe')

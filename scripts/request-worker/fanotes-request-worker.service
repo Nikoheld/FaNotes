@@ -1,0 +1,24 @@
+# Template for a systemd USER unit. Copy to ~/.config/systemd/user/fanotes-request-worker.service
+# and adjust the paths. Do not enable it before the owner approves (see README.md).
+[Unit]
+Description=FaNotes work-request worker (Claude Code)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/agents/fanotes/chats/writing-mode/repo
+# Non-secret settings live in this file (see env.example); the token does not.
+EnvironmentFile=%h/.config/fanotes-request-worker/env
+# The token is fetched from agent-vault at start and exists only in this process environment.
+ExecStart=/bin/bash -c 'FANOTES_AGENT_TOKEN="$(agent-vault get fanotes-agent-token)" exec node /srv/agents/fanotes/chats/writing-mode/repo/scripts/request-worker/index.mjs'
+Restart=on-failure
+RestartSec=30
+# Give a running request time to persist its state on stop; it resumes on the next start.
+TimeoutStopSec=30
+KillMode=mixed
+NoNewPrivileges=true
+PrivateTmp=false
+
+[Install]
+WantedBy=default.target

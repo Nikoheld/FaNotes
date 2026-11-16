@@ -241,7 +241,7 @@ export function MarkdownPreview({
           rehypeRaw,
           rehypeHeadingIds,
           [rehypeSanitize, markdownSanitizeSchema],
-          [rehypeKatex, { output: 'htmlAndMathml', strict: false, trust: false }],
+          [rehypeKatex, { output: 'htmlAndMathml', strict: false, trust: false, maxExpand: 1000 }],
         ]}
         remarkPlugins={[remarkGfm, remarkMath]}
         urlTransform={secureUrlTransform}

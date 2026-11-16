@@ -100,16 +100,25 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   const inflight = new Map()
   let budget = { day: '', route: 0, completion: 0, fallback: 0, detail: 0 }
   let budgetLoaded = false
+  let budgetBlocked = false
   let budgetQueue = Promise.resolve()
   const withBudget = (task) => {
     const run = budgetQueue.then(task, task)
     budgetQueue = run.then(() => undefined, () => undefined)
     return run
   }
+  const budgetCounts = ['route', 'completion', 'fallback', 'detail']
   const loadBudget = async () => {
     if (budgetLoaded || !budgetFile) return
     try {
-      budget = { ...budget, ...JSON.parse(await fs.readFile(budgetFile, 'utf8')) }
+      const parsed = JSON.parse(await fs.readFile(budgetFile, 'utf8'))
+      // A missing or broken file can start again. A file that is there but not today's counts must not look empty, or the next lookup replaces it with zeros.
+      if (!parsed || typeof parsed.day !== 'string' || budgetCounts.some((key) => !Number.isFinite(parsed[key]))) {
+        budgetBlocked = true
+        return
+      }
+      budget = { ...budget, ...parsed }
+      budgetBlocked = false
     } catch (error) {
       // A missing or broken file can start again. A read error must not replace today's count with zeros.
       if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
@@ -134,6 +143,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   // Check and increment under one lock. Two requests must not both pass the daily cap.
   const reserve = (kind, limit) => withBudget(async () => {
     await loadBudget()
+    if (budgetBlocked) return false
     rollBudget()
     if (budget[kind] >= limit) return false
     budget[kind] += 1
@@ -142,6 +152,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   })
   const spend = (kind) => withBudget(async () => {
     await loadBudget()
+    if (budgetBlocked) return
     rollBudget()
     budget[kind] += 1
     await writeBudget()
@@ -471,9 +482,37 @@ export const createCommute = (options = {}) => {
       throw error
     }
   }
+  const readState = async (accountId) => {
+    const stored = await readJson(stateFile(accountId))
+    // A missing or broken file can start again. A file that is there but not this alert state must not look empty, or the next check replaces it.
+    if (stored == null) return null
+    const routes = stored.routes
+    const plainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+    // An entry that is not an alert record must not look absent, or the next check replaces it.
+    const known = plainObject(stored) && plainObject(routes) && Object.values(routes).every(plainObject)
+    if (!known) throw Object.assign(new Error('commute state'), { code: 'EBADMSG' })
+    return stored
+  }
 
   const read = async (accountId) => {
     const stored = await readJson(file(accountId))
+    // A missing or broken file can start again. A file that is there but not this route list must not look empty, or the next save replaces it.
+    if (stored != null) {
+      const known = typeof stored === 'object' && !Array.isArray(stored) && Array.isArray(stored.routes)
+      if (!known) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      // An entry the sanitizer would skip must not look absent, or the next check deletes its alert state and the next save drops the route.
+      if (sanitizeRoutes(stored.routes).length !== stored.routes.length) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      // Hidden labels or a threshold that are not the known shape must not look like the defaults, or the next save clears them.
+      const settings = stored.settings
+      if (settings != null) {
+        const labels = settings.hiddenLabels
+        const threshold = settings.delayThreshold
+        const settingsKnown = typeof settings === 'object' && !Array.isArray(settings)
+          && (labels == null || (Array.isArray(labels) && labels.every((label) => typeof label === 'string')))
+          && (threshold == null || (typeof threshold === 'number' && Number.isFinite(threshold)))
+        if (!settingsKnown) throw Object.assign(new Error('commute settings'), { code: 'EBADMSG' })
+      }
+    }
     const settings = sanitizeSettings(stored?.settings)
     // Version 1 hidden labels mixed half-class choices (removed) with hidden lessons; the app sends
     // the hidden lessons again, so no lesson stays left out of the first/last lesson.
@@ -589,7 +628,7 @@ export const createCommute = (options = {}) => {
     const { routes, settings } = await read(accountId)
     const events = await lessonsFor(accountId).catch(() => [])
     const chosen = routeId ? routes.filter((route) => route.id === routeId) : routes
-    const state = chosen.some((route) => route.pins.length) ? (await readJson(stateFile(accountId))) : null
+    const state = chosen.some((route) => route.pins.length) ? await readState(accountId) : null
     const boards = []
     for (const route of chosen) boards.push(await routeBoard(route, settings, events, state?.routes?.[route.id]?.pinSeen || null))
     return { boards, provider: PROVIDERS['search.ch'] }
@@ -635,7 +674,7 @@ export const createCommute = (options = {}) => {
     const { routes, settings } = await read(accountId)
     if (!routes.length) { due.set(accountId, at + 15 * 60_000); return { checked: 0 } }
     const events = await lessonsFor(accountId).catch(() => [])
-    const state = (await readJson(stateFile(accountId))) || { version: 1, routes: {} }
+    const state = (await readState(accountId)) || { version: 1, routes: {} }
     let next = Number.POSITIVE_INFINITY
     let checked = 0
     const alerts = []

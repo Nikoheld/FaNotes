@@ -86,6 +86,30 @@ fun touchPalmState(state: PalmState, sample: PointerSample): PalmState {
 }
 
 /**
+ * Palm state after a contact left the screen (`UP`, `POINTER_UP` or `CANCEL`).
+ *
+ * Every pen contact [touchPalmState] counted when it landed has to be released when it ends, whether or not
+ * it started ink. A mapped tablet button (undo, redo, pan, none), a tap tool, a mouse that already owns the
+ * ink pointer and a cancelled gesture all return before an ink pointer exists. Releasing only together with
+ * the ink pointer left [PalmState.stylusDown] set, so finger pan and zoom stayed dead until a later hover,
+ * and a pen without hover never recovered.
+ *
+ * [endedTool] is the tool of the pointer that went up. A cancel ends the whole touch stream, so any pen in
+ * [streamTools] (the tools of every pointer of that event) releases the state. A finger or mouse ending
+ * never touches it: the pen may still be down, and a finger must not start the post-pen window.
+ */
+fun palmAfterContactEnd(
+    state: PalmState,
+    endedTool: PointerTool,
+    cancel: Boolean,
+    streamTools: List<PointerTool>,
+    now: Long,
+): PalmState {
+    val penEnded = if (cancel) streamTools.any { isPenTool(it) } else isPenTool(endedTool)
+    return if (penEnded) state.copy(stylusDown = false, lastStylusAt = now) else state
+}
+
+/**
  * Android reports tilt as an angle off the screen normal plus a direction.
  * Pointer Events store the same pose as tiltX / tiltY in degrees. See the
  * mapping notes in `android/ARCHITECTURE.md`.

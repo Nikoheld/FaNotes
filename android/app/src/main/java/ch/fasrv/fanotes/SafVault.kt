@@ -73,24 +73,46 @@ class SafVault(private val context: Context, private val tree: Uri) : VaultIo {
     override fun list(directory: String): List<VaultEntry> {
         val dir = if (directory.isBlank()) root else locate(normalize(directory), create = false) ?: return emptyList()
         if (!dir.isDirectory) return emptyList()
-        val prefix = directory.trim('/')
-        val children = dir.listFiles() ?: throw java.io.IOException("Der Ordner konnte nicht gelesen werden.")
-        return children.map { child ->
-            val name = child.name ?: return@map child.let { VaultEntry("", false, 0, 0) }
-            val path = if (prefix.isEmpty()) name else "$prefix/$name"
-            VaultEntry(path, child.isDirectory, if (child.isFile) child.length() else 0L, child.lastModified())
-        }.filter { it.path.isNotEmpty() }
+        return queryChildren(DocumentsContract.getDocumentId(dir.uri), directory.trim('/')).map { it.entry }
+    }
+
+    private class Child(val entry: VaultEntry, val documentId: String)
+
+    /** One cursor query per directory instead of several binder calls per child. */
+    private fun queryChildren(documentId: String, prefix: String): List<Child> {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(tree, documentId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        )
+        val cursor = context.contentResolver.query(childrenUri, projection, null, null, null)
+            ?: throw java.io.IOException("Der Ordner konnte nicht gelesen werden.")
+        val result = ArrayList<Child>()
+        cursor.use {
+            while (it.moveToNext()) {
+                val name = it.getString(1)?.takeIf { n -> n.isNotEmpty() } ?: continue
+                val isDir = it.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR
+                val size = if (isDir || it.isNull(3)) 0L else it.getLong(3)
+                val modified = if (it.isNull(4)) 0L else it.getLong(4)
+                val path = if (prefix.isEmpty()) name else "$prefix/$name"
+                result += Child(VaultEntry(path, isDir, size, modified), it.getString(0))
+            }
+        }
+        return result
     }
 
     override fun walkFiles(): List<VaultEntry> {
         if (!root.exists() || !root.isDirectory) throw java.io.IOException("Der Ordner konnte nicht gelesen werden.")
         val found = mutableListOf<VaultEntry>()
-        fun visit(directory: String) {
-            for (entry in list(directory)) {
-                if (entry.directory) visit(entry.path) else found += entry
+        fun visit(documentId: String, prefix: String) {
+            for (child in queryChildren(documentId, prefix)) {
+                if (child.entry.directory) visit(child.documentId, child.entry.path) else found += child.entry
             }
         }
-        visit("")
+        visit(DocumentsContract.getDocumentId(root.uri), "")
         return found
     }
 

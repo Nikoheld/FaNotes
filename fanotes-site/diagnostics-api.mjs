@@ -4,6 +4,7 @@
 //   DELETE /api/v1/diagnostics/<install>  delete everything stored for an install id
 import { promises as fs } from 'node:fs'
 import { randomBytes } from 'node:crypto'
+import { isIP } from 'node:net'
 import { join, resolve } from 'node:path'
 
 export const DIAGNOSTICS_MAX_BODY_BYTES = 64 * 1024
@@ -234,9 +235,43 @@ const readJson = async (request) => {
     throw Object.assign(new Error('Ungültiges JSON.'), { status: 400 })
   }
 }
-const clientAddress = (request) => {
-  const forwarded = request.headers['x-real-ip']
-  return typeof forwarded === 'string' && forwarded.length <= 64 ? forwarded : request.socket.remoteAddress || 'unknown'
+const isLoopbackAddress = (address) => {
+  const value = String(address ?? '').toLowerCase().split('%')[0]
+  if (value === '::1') return true
+  const v4 = value.startsWith('::ffff:') ? value.slice(7) : value
+  return isIP(v4) === 4 && v4.startsWith('127.')
+}
+
+/** The key one client is rate limited by: IPv4-mapped IPv6 collapses to IPv4, other IPv6 addresses share their /64. */
+const addressKey = (address) => {
+  const value = String(address).toLowerCase().split('%')[0]
+  const kind = isIP(value)
+  if (kind === 4) return value
+  if (kind !== 6) return 'unknown'
+  if (value.startsWith('::ffff:') && isIP(value.slice(7)) === 4) return value.slice(7)
+  const [head, tail] = value.split('::')
+  const headGroups = head ? head.split(':') : []
+  const tailGroups = tail === undefined ? [] : tail ? tail.split(':') : []
+  const groups = tail === undefined ? headGroups : [...headGroups, ...Array(Math.max(0, 8 - headGroups.length - tailGroups.length)).fill('0'), ...tailGroups]
+  return `${groups.slice(0, 4).map((group) => group.replace(/^0+(?=.)/u, '') || '0').join(':')}::/64`
+}
+
+/**
+ * The address a request is limited by. `X-Real-IP` is honoured only when the TCP peer is this
+ * machine, i.e. the nginx in front of the site, which always overwrites the header with the
+ * Cloudflare-aware `$fanotes_client_ip`. Anyone reaching the process another way is limited by the
+ * address they connect from, whatever they send, and a header that is not one plain IP is ignored.
+ */
+export const clientAddress = (request) => {
+  const peer = String(request.socket?.remoteAddress ?? '')
+  if (isLoopbackAddress(peer)) {
+    const forwarded = request.headers?.['x-real-ip']
+    if (typeof forwarded === 'string') {
+      const candidate = forwarded.trim()
+      if (candidate.length <= 45 && isIP(candidate.split('%')[0])) return addressKey(candidate)
+    }
+  }
+  return addressKey(peer)
 }
 
 export const createDiagnosticsHandler = (store) => {

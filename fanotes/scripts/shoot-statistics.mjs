@@ -75,6 +75,7 @@ for (const scheme of ['light', 'dark']) {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3500)
   await page.keyboard.press('Control+,').catch(() => undefined)
+  await page.locator('.settings-content').first().waitFor({ timeout: 8000 }).catch(() => undefined)
   if (!(await page.locator('.settings-content').count())) await page.locator('button[aria-label*="Einstellungen"], button[title*="Einstellungen"]').first().click()
   await page.locator('.settings-backdrop aside button', { hasText: 'Statistik' }).first().click()
   await page.waitForFunction(() => !document.querySelector('.stat-progress') && document.querySelector('.stat-heatmap'), null, { timeout: 60000 })

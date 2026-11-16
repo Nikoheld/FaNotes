@@ -11,31 +11,34 @@ import ch.fasrv.fanotes.study.cropIsUsable
 import ch.fasrv.fanotes.study.SPoint
 import ch.fasrv.fanotes.study.StudyAnnotation
 import ch.fasrv.fanotes.study.StudyCallout
+import ch.fasrv.fanotes.study.StudyCrop
+import ch.fasrv.fanotes.study.StudyDialogState
 import ch.fasrv.fanotes.study.StudyHit
 import ch.fasrv.fanotes.study.StudyLegend
 import ch.fasrv.fanotes.study.StudyPart
-import ch.fasrv.fanotes.study.StudyStamp
+import ch.fasrv.fanotes.study.StudyPending
+import ch.fasrv.fanotes.study.StudyTap
 import ch.fasrv.fanotes.study.StudyTool
+import ch.fasrv.fanotes.study.StudyUiState
 import ch.fasrv.fanotes.study.addItem
+import ch.fasrv.fanotes.study.applyStudyTap
 import ch.fasrv.fanotes.study.dragged
 import ch.fasrv.fanotes.study.hitTest
-import ch.fasrv.fanotes.study.measurePointsNeeded
+import ch.fasrv.fanotes.study.isTapTool
 import ch.fasrv.fanotes.study.newBranchStroke
 import ch.fasrv.fanotes.study.newCallout
-import ch.fasrv.fanotes.study.newMeasure
 import ch.fasrv.fanotes.study.pageOrNull
 import ch.fasrv.fanotes.study.removeItem
 import ch.fasrv.fanotes.study.replaceItem
 import ch.fasrv.fanotes.study.renumberCallouts
 import kotlin.math.hypot
 
-/** Crop rectangle of one page, in page fractions. */
-data class StudyCrop(val page: Int, val rect: SRect)
-
 /**
  * Pointer logic of the "Lernen" tools. The ink surface hands it the pen/mouse (or finger, when
  * "finger draws" is on) gestures that `PalmPolicy` already let through, so palm rejection and
  * pen-only mode behave exactly as for ink. One gesture is one undo step in the annotation history.
+ * Stamp, legend and measure points are taps: they place their item when the contact lifts without
+ * having moved or been cancelled, never when it lands.
  */
 class StudyController(
     private val host: Host,
@@ -103,6 +106,33 @@ class StudyController(
     private var draft: List<StudyAnnotation>? = null
     private var gesture: Gesture? = null
 
+    /** The label editor that is open, with the text typed so far; the view keeps it current so a recreated screen can reopen it. */
+    var openDialog: StudyDialogState? = null
+
+    /** Everything that is not committed to the note yet, for [restore] after the screen is recreated. */
+    fun snapshot() = StudyUiState(tool, selectedId, stampId, numbered, labelColor, branchColor, branchWidth, pending, crop, openDialog)
+
+    /**
+     * Puts a [snapshot] back after a rotation or a restart. A gesture that was under way is gone; the tool,
+     * selection, collected measure points, unconfirmed crop and choices come back. [openDialog] is only
+     * handed over: the view reopens the editor once the note's annotations are loaded.
+     */
+    fun restore(state: StudyUiState) {
+        stampId = state.stampId
+        numbered = state.numbered
+        labelColor = state.labelColor
+        branchColor = state.branchColor
+        branchWidth = state.branchWidth
+        // The tool setter clears gesture, pending and crop, so it goes first.
+        tool = state.tool
+        selectedId = state.selectedId
+        pending = state.pending
+        crop = state.crop
+        openDialog = state.dialog
+        host.studyChrome()
+        host.studyRedraw()
+    }
+
     val active get() = tool != null
     val dragging get() = gesture != null
     val selected: StudyAnnotation? get() = items.firstOrNull { it.id == selectedId }
@@ -112,6 +142,8 @@ class StudyController(
         abstract val box: PageBox
         class Drag(override val page: Int, override val box: PageBox, val hit: StudyHit, val original: StudyAnnotation, val startX: Double, val startY: Double, val startPx: Double, val startPy: Double, var moved: Boolean = false) : Gesture()
         class Place(override val page: Int, override val box: PageBox, val start: SPoint) : Gesture()
+        /** Stamp, legend or one measure point: placed by [StudyController.up] when the [tap] qualifies. */
+        class Tap(override val page: Int, override val box: PageBox, val tool: StudyTool, val start: SPoint, val tap: StudyTap) : Gesture()
         class Branch(override val page: Int, override val box: PageBox, val pts: MutableList<SPoint>) : Gesture()
         /** [grip] NONE means a new rectangle spanned from [start]; otherwise [original] is moved or resized. */
         class Crop(override val page: Int, override val box: PageBox, val grip: CropGrip, val original: SRect, val start: SPoint) : Gesture()
@@ -121,8 +153,10 @@ class StudyController(
 
     private fun effective() = draft ?: items
 
+    private val boxFor: (Int) -> PageBox? = { host.studyBox(it) }
+
     fun draw(canvas: Canvas) {
-        painter.draw(canvas, effective(), { host.studyBox(it) }, selectedId, pending, live ?: crop?.let { StudyLive.Crop(it.page, it.rect) })
+        painter.draw(canvas, effective(), boxFor, selectedId, pending, live ?: crop?.let { StudyLive.Crop(it.page, it.rect) })
     }
 
     private fun pageAt(x: Double, y: Double): Pair<Int, PageBox>? =
@@ -145,21 +179,12 @@ class StudyController(
         }
         val (page, box) = pageAt(x, y) ?: return false
         val p = SPoint(box.fx(x), box.fy(y))
+        if (isTapTool(current)) {
+            // Nothing is committed yet: a palm the system rejects, or a contact that drags, must leave no item behind.
+            gesture = Gesture.Tap(page, box, current, p, StudyTap(x, y, slop()))
+            return true
+        }
         when (current) {
-            StudyTool.STAMP -> {
-                val stamp = StudyStamp(ch.fasrv.fanotes.study.newAnnotationId(), page, p.x, p.y, stampId, 26.0)
-                commit(addItem(items, stamp))
-                select(stamp.id)
-                return false
-            }
-            StudyTool.LEGEND -> {
-                val old = items.filterIsInstance<StudyLegend>().firstOrNull { it.page == page }
-                val next = if (old != null) replaceItem(items, old.copy(x = p.x, y = p.y))
-                else addItem(items, StudyLegend(ch.fasrv.fanotes.study.newAnnotationId(), page, minOf(p.x, 0.7), p.y))
-                commit(next)
-                tool = StudyTool.SELECT
-                return false
-            }
             StudyTool.CALLOUT -> {
                 gesture = Gesture.Place(page, box, p)
                 return true
@@ -173,20 +198,6 @@ class StudyController(
             StudyTool.BRANCH -> {
                 gesture = Gesture.Branch(page, box, mutableListOf(p))
                 return true
-            }
-            StudyTool.ANGLE, StudyTool.ANGLE_LINES, StudyTool.DISTANCE -> {
-                val base = pending?.takeIf { it.page == page && it.tool == current }?.pts.orEmpty()
-                val pts = base + p
-                if (pts.size >= measurePointsNeeded(current)) {
-                    val measure = newMeasure(current, page, pts)
-                    pending = null
-                    commit(addItem(items, measure))
-                    select(measure.id)
-                } else {
-                    pending = StudyPending(current, page, pts)
-                    host.studyRedraw()
-                }
-                return false
             }
             else -> return false
         }
@@ -209,9 +220,14 @@ class StudyController(
                 crop = StudyCrop(g.page, rect)
             }
             is Gesture.Place -> live = StudyLive.Leader(g.page, g.start, SPoint(g.box.fx(x), g.box.fy(y)), labelColor)
+            is Gesture.Tap -> {
+                g.tap.move(x, y)
+                return
+            }
             is Gesture.Branch -> {
                 g.pts += SPoint(g.box.fx(x), g.box.fy(y))
-                live = StudyLive.Branch(g.page, g.pts.toList(), branchColor, branchWidth)
+                // The painter appends the new points to its path; handing it a copy per move made every frame O(n).
+                live = StudyLive.Branch(g.page, g.pts, branchColor, branchWidth)
             }
         }
         host.studyRedraw()
@@ -224,7 +240,9 @@ class StudyController(
         val next = draft
         draft = null
         live = null
-        if (!cancel) {
+        if (g is Gesture.Tap) {
+            if (g.tap.release(x, y, cancel)) commitTap(g)
+        } else if (!cancel) {
             when (g) {
                 is Gesture.Drag -> when {
                     g.moved && next != null -> commit(next)
@@ -241,12 +259,22 @@ class StudyController(
                     // A tap or a sliver is not a crop; a bare tap outside keeps the previous rectangle.
                     if (crop?.rect?.let { cropIsUsable(it) } != true) crop = if (g.grip == CropGrip.NONE) null else StudyCrop(g.page, g.original)
                 }
+                is Gesture.Tap -> Unit
             }
         } else if (g is Gesture.Crop) {
             crop = if (g.grip == CropGrip.NONE) null else StudyCrop(g.page, g.original)
         }
         if (g is Gesture.Crop) host.studyChrome()
         host.studyRedraw()
+    }
+
+    /** Places the item of a tap that qualified on release (see [applyStudyTap]). */
+    private fun commitTap(g: Gesture.Tap) {
+        val effect = applyStudyTap(g.tool, g.page, g.start, items, stampId, pending) ?: return
+        pending = effect.pending
+        commit(effect.items)
+        effect.select?.let { select(it) }
+        effect.tool?.let { tool = it }
     }
 
     private fun tap(g: Gesture.Drag) {
