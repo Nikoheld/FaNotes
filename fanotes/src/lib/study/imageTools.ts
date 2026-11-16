@@ -67,13 +67,17 @@ export const hydrateVaultImages = (root: ParentNode) => {
   }
 }
 
+/** Longest edge of an exported picture: a wide key or a big map would otherwise exceed what a canvas can hold. */
+const MAX_EXPORT_EDGE = 8192
+
 export const svgToPngBlob = async (svg: string, width: number, height: number, scale = 2): Promise<Blob> => {
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }))
   try {
     const image = await loadImage(url)
     const canvas = document.createElement('canvas')
-    canvas.width = Math.round(width * scale)
-    canvas.height = Math.round(height * scale)
+    const fit = Math.min(scale, MAX_EXPORT_EDGE / Math.max(width, height, 1))
+    canvas.width = Math.max(1, Math.round(width * fit))
+    canvas.height = Math.max(1, Math.round(height * fit))
     const context = canvas.getContext('2d')
     if (!context) throw new Error('Bild konnte nicht erzeugt werden.')
     context.fillStyle = '#ffffff'

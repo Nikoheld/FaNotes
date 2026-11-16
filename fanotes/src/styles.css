@@ -4155,11 +4155,23 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .lw-grid input { width: 120px; }
 .lw-grid th { font-weight: 600; white-space: nowrap; }
 .lw-tree-editor, .lw-tree-editor ul { margin: 0; padding: 0; list-style: none; }
-.lw-tree-editor ul { margin-left: 10px; border-left: 2px solid var(--border); padding-left: 6px; }
+.lw-tree-editor ul { margin-left: 8px; border-left: 2px solid var(--border); padding-left: 6px; }
+.lw-tree-editor ul.is-flat { margin-left: 0; padding-left: 0; }
+.lw-tree-pane { min-width: 0; }
 .lw-node { margin: 4px 0; }
-.lw-node-row { display: flex; align-items: center; gap: 4px; }
-.lw-node-row input:not(.lw-branch-label) { flex: 1; min-width: 0; }
-.lw-branch-label { width: 62px; flex: none; }
+.lw-node-row { display: grid; gap: 3px; }
+.lw-node-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.lw-node-line input { flex: 1; min-width: 0; }
+.lw-node-root { flex: 1; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.lw-node-tools { display: inline-flex; flex: none; gap: 2px; margin-left: auto; }
+.lw-icon-btn:disabled { opacity: .35; cursor: default; }
+.lw-icon-btn:disabled:hover { background: transparent; color: var(--text-muted); }
+.lw-node-confirm { margin: 4px 0; }
+.lw-skeleton-note { position: relative; padding: 8px 34px 8px 11px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--panel-strong); font-size: 12.5px; }
+.lw-skeleton-note p { margin: 0 0 4px; }
+.lw-skeleton-note ul { margin: 0 0 6px; padding-left: 18px; }
+.lw-skeleton-note .lw-icon-btn { position: absolute; top: 6px; right: 6px; }
+.lw-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .lw-paste { display: grid; gap: 6px; }
 .lw-paste p, .lw-paste label { margin: 0; color: var(--text-muted); font-size: 12px; }
 .lw-compare-view { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
