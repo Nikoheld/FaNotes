@@ -298,12 +298,15 @@ export const createSchulnetzRuntime = (options = {}) => {
     const timesKnown = ['lessonsFetchedAt', 'gradesFetchedAt', 'icalFetchedAt'].every((name) => timeKnown(stored[name]))
     const spansKnown = ['weekSpanStart', 'weekSpanEnd'].every((name) => dayKnown(stored[name]))
     const saldoKnown = stored.kontoSaldo == null || typeof stored.kontoSaldo === 'string'
+    const versionKnown = (value) => value == null || value === '' || (typeof value === 'number' && Number.isFinite(value)) || (typeof value === 'string' && Number.isFinite(Number(value)))
+    const parsersKnown = ['absenceParser', 'gradeParser'].every((name) => versionKnown(stored[name]))
     // A saved row that is not a record must not be dropped, or the next upload replaces the snapshot.
     // A saved lesson with no week must not be dropped, or the next upload keeps the dated lessons and replaces the snapshot.
     // A saved week stamp that is not a time must not look unread, or the next read fetches that week again.
     // A saved read time or week span that is not a time must not look unread, or the next read uses the near window again.
     // A saved balance that is not text must not look blank, or the next read stores an empty balance.
-    const known = plain(stored) && readTimeKnown && timesKnown && spansKnown && saldoKnown && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && (stored.events == null || stored.events.every(lessonWeekKnown)) && maps.every((name) => stored[name] == null || (plain(stored[name]) && stampKnown(stored[name])))
+    // A saved parser version that is not a version must not look old, or the next upload replaces the statement or hides grade news.
+    const known = plain(stored) && readTimeKnown && timesKnown && spansKnown && saldoKnown && parsersKnown && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && (stored.events == null || stored.events.every(lessonWeekKnown)) && maps.every((name) => stored[name] == null || (plain(stored[name]) && stampKnown(stored[name])))
     if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
     return stored
   }
