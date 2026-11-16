@@ -1830,7 +1830,19 @@ const handleCreateUpload = async (request, response, auth, fileId) => {
     const existing = await listPartialMetas(auth.account.id)
     if (existing.length >= MAX_PARTIALS) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
     const reserved = existing.reduce((sum, meta) => sum + (Number(meta.size) || 0), 0)
-    if (table.bytes + (table.historyBytes || 0) + reserved + size > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+    const current = table.entries.get(fileId) ?? null
+    const archivedSize = current?.deleted
+      ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
+      : 0
+    const decision = evaluateSyncWrite({ current, base, nextSize: size, blank, clear, archivedSize })
+    // A refused body stays beside the live note, so that note is not free space.
+    // An accepted replace only reserves the archive bytes that are not kept yet.
+    const replaces = decision === 'accept' && current && !current.deleted
+    const previousBytes = replaces ? Number(current.size) || 0 : 0
+    const historyDelta = replaces && current.sha256 !== declaredSha
+      ? await unarchivedBytes(auth.account.id, fileId, current, size)
+      : 0
+    if (table.bytes - previousBytes + (table.historyBytes || 0) + reserved + historyDelta + size > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
     const uploadId = randomBytes(16).toString('hex')
     const meta = {
       fileId,
