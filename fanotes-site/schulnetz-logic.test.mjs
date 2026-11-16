@@ -165,6 +165,19 @@ test('course average rows are not grades and drop silently', () => {
   assert.deepEqual(parseGradesHtml(html).map((grade) => grade.title), ['1. Prüfung'])
 })
 
+test('a non-breaking space entity does not hide a mark or a weight', () => {
+  const html = '<table><tr><td><b>CHE-K26A-1</b></td><td>5.0</td></tr><tr><td colspan="2"><table>' +
+    '<tr><td>03.03.2026</td><td>Labor</td><td>5.5&nbsp;</td><td>0.5&nbsp;</td></tr>' +
+    '<tr><td>04.03.2026</td><td>Test</td><td>&#160;4,5</td><td>2</td></tr>' +
+    '<tr><td>05.03.2026</td><td>Offen</td><td>&nbsp;</td><td>1</td></tr>' +
+    '</table></td></tr></table>'
+  const grades = parseGradesHtml(html)
+  assert.equal(grades.find((grade) => grade.title === 'Labor').mark, 5.5)
+  assert.equal(grades.find((grade) => grade.title === 'Labor').weight, 0.5)
+  assert.equal(grades.find((grade) => grade.title === 'Test').mark, 4.5)
+  assert.equal(grades.find((grade) => grade.title === 'Offen').mark, null)
+})
+
 test('an excuse deadline is pushed once and only inside the window', () => {
   const open = { id: 'a', dateFrom: '2026-11-01', subject: 'Deutsch', reason: 'Arzt', excused: false, excuseUntil: '04.11.2026' }
   const previous = { grades: [], events: [], exams: [], absences: [], messages: [] }

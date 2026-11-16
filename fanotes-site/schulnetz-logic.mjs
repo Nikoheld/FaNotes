@@ -1723,7 +1723,12 @@ export const stripPhpSession = (cookieHeader) => String(cookieHeader || '')
   .filter((part) => part && !/^PHPSESSID=/i.test(part))
   .join('; ')
 
-const clean = (value) => String(value || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+const clean = (value) => String(value || '')
+  .replace(/<[^>]+>/g, ' ')
+  // Schulnetz pads cells with a non-breaking space. The entity is not a mark.
+  .replace(/&nbsp;|&#0*160;|&#x0*a0;/giu, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
 
 /** Read own table rows/cells only; descendant exam tables never supply a course label. */
 const gradeTables = (html) => {
