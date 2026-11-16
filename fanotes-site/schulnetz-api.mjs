@@ -290,8 +290,10 @@ export const createSchulnetzRuntime = (options = {}) => {
     const maps = ['weekFetched', 'weekRead', 'examWeekFetched']
     const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
     const rowsKnown = (list) => list.every(plain)
+    const lessonWeekKnown = (event) => !isLesson(event) || Boolean(weekMondayKey(event.start))
     // A saved row that is not a record must not be dropped, or the next upload replaces the snapshot.
-    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && maps.every((name) => stored[name] == null || plain(stored[name]))
+    // A saved lesson with no week must not be dropped, or the next upload keeps the dated lessons and replaces the snapshot.
+    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && (stored.events == null || stored.events.every(lessonWeekKnown)) && maps.every((name) => stored[name] == null || plain(stored[name]))
     if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
     return stored
   }
