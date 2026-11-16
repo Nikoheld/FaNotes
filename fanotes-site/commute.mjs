@@ -100,16 +100,25 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   const inflight = new Map()
   let budget = { day: '', route: 0, completion: 0, fallback: 0, detail: 0 }
   let budgetLoaded = false
+  let budgetBlocked = false
   let budgetQueue = Promise.resolve()
   const withBudget = (task) => {
     const run = budgetQueue.then(task, task)
     budgetQueue = run.then(() => undefined, () => undefined)
     return run
   }
+  const budgetCounts = ['route', 'completion', 'fallback', 'detail']
   const loadBudget = async () => {
     if (budgetLoaded || !budgetFile) return
     try {
-      budget = { ...budget, ...JSON.parse(await fs.readFile(budgetFile, 'utf8')) }
+      const parsed = JSON.parse(await fs.readFile(budgetFile, 'utf8'))
+      // A missing or broken file can start again. A file that is there but not today's counts must not look empty, or the next lookup replaces it with zeros.
+      if (!parsed || typeof parsed.day !== 'string' || budgetCounts.some((key) => !Number.isFinite(parsed[key]))) {
+        budgetBlocked = true
+        return
+      }
+      budget = { ...budget, ...parsed }
+      budgetBlocked = false
     } catch (error) {
       // A missing or broken file can start again. A read error must not replace today's count with zeros.
       if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
@@ -134,6 +143,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   // Check and increment under one lock. Two requests must not both pass the daily cap.
   const reserve = (kind, limit) => withBudget(async () => {
     await loadBudget()
+    if (budgetBlocked) return false
     rollBudget()
     if (budget[kind] >= limit) return false
     budget[kind] += 1
@@ -142,6 +152,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   })
   const spend = (kind) => withBudget(async () => {
     await loadBudget()
+    if (budgetBlocked) return
     rollBudget()
     budget[kind] += 1
     await writeBudget()
