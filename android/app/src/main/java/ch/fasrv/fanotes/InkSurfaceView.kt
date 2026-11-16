@@ -92,6 +92,7 @@ import ch.fasrv.fanotes.input.PointerAction
 import ch.fasrv.fanotes.input.PointerSample
 import ch.fasrv.fanotes.input.PointerTool
 import ch.fasrv.fanotes.input.fingerMayNavigate
+import ch.fasrv.fanotes.input.palmAfterContactEnd
 import ch.fasrv.fanotes.input.isPenTool
 import ch.fasrv.fanotes.input.shouldRejectFinger
 import ch.fasrv.fanotes.input.shouldRejectNonPenInk
@@ -901,20 +902,32 @@ class InkSurfaceView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
-                if (id == tabletPanId || action == MotionEvent.ACTION_CANCEL) tabletPanId = MotionEvent.INVALID_POINTER_ID
-                if (guideDrag?.pointerId == id || action == MotionEvent.ACTION_CANCEL) guideDrag = null
-                val endingInk = id == inkPointer || action == MotionEvent.ACTION_CANCEL
+                val cancelled = action == MotionEvent.ACTION_CANCEL
+                // A pointer the system rejected after delivering it (palm rejection, API 33+) comes up flagged
+                // instead of cancelled. It must not commit a stamp, a link tap or a stroke either.
+                val revoked = cancelled || (Build.VERSION.SDK_INT >= 33 && (event.flags and MotionEvent.FLAG_CANCELED) != 0)
+                // The pen is released whether or not it started ink: mapped tablet buttons, tap tools and a
+                // second pointer all return before an ink pointer exists, and a stuck lock blocks finger pan and zoom.
+                palm = palmAfterContactEnd(
+                    palm,
+                    tool,
+                    cancelled,
+                    if (cancelled) List(event.pointerCount) { toolOf(event, it) } else emptyList(),
+                    event.eventTime,
+                )
+                if (id == tabletPanId || cancelled) tabletPanId = MotionEvent.INVALID_POINTER_ID
+                if (guideDrag?.pointerId == id || cancelled) guideDrag = null
+                val endingInk = id == inkPointer || cancelled
                 if (endingInk && inkPointer != MotionEvent.INVALID_POINTER_ID) {
                     val inkIndex = event.findPointerIndex(inkPointer).coerceAtLeast(0)
-                    if (action != MotionEvent.ACTION_CANCEL && inkIndex < event.pointerCount) {
+                    if (!revoked && inkIndex < event.pointerCount) {
                         moveInk(event, inkIndex)
                     }
-                    finishInk(action == MotionEvent.ACTION_CANCEL)
-                    palm = touchPalmState(palm, sample(event, inkIndex.coerceAtMost(event.pointerCount - 1), PointerAction.UP))
+                    finishInk(revoked)
                     inkPointer = MotionEvent.INVALID_POINTER_ID
                 }
-                val taskTap = navTap && fingers.size == 1 && fingers.containsKey(id) && action != MotionEvent.ACTION_CANCEL
-                if (fingers.remove(id) != null && fingers.size < 2 && action != MotionEvent.ACTION_CANCEL) {
+                val taskTap = navTap && fingers.size == 1 && fingers.containsKey(id) && !revoked
+                if (fingers.remove(id) != null && fingers.size < 2 && !revoked) {
                     if (taskTap && tryTogglePaperTask(event.getX(index), event.getY(index))) navTap = false
                     else if (taskTap && tryFollowPaperLink(event.getX(index), event.getY(index))) navTap = false
                     else if (taskTap && tryOpenStudyBlock(event.getX(index), event.getY(index))) navTap = false
