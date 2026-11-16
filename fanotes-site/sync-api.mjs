@@ -74,6 +74,17 @@ export const revisionNamesToKeep = (files, keep = MAX_REVISIONS_KEPT, nextSize =
   return names
 }
 const MAX_FILES = Number(process.env.FANOTES_SYNC_MAX_FILES || 50_000)
+
+// Tests set FANOTES_SYNC_FILE_CAP=1 and a per-account cap on globalThis.
+// Production leaves the variable unset, so the account cap stays MAX_FILES.
+const fileCap = (accountId) => {
+  if (process.env.FANOTES_SYNC_FILE_CAP === '1') {
+    const override = globalThis.FANOTES_SYNC_FILE_CAP
+    const value = override && typeof override === 'object' ? Number(override[accountId]) : NaN
+    if (Number.isInteger(value) && value > 0) return value
+  }
+  return MAX_FILES
+}
 const MAX_DEVICES = 20
 const MAX_SESSIONS = 40
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000
@@ -1492,8 +1503,8 @@ const handlePutFile = async (request, response, auth, fileId) => {
     // spend that space a second time.
     const reserved = await reservedPartialBytes(auth.account.id)
     if (table.bytes - previousBytes + incoming.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
-    const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
-    if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+    // A partial that will become a different note already holds that slot.
+    if (!await anotherFileFits(auth.account.id, table, current ?? null, fileId)) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
     if (current && !current.deleted && current.sha256 !== declaredSha) {
       table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, incoming.size, false)
     }
@@ -1633,8 +1644,7 @@ const handleRestoreFile = async (request, response, auth, fileId) => {
     const historyDelta = replaces ? await unarchivedBytes(auth.account.id, fileId, current, info.size) : 0
     const reserved = await reservedPartialBytes(auth.account.id)
     if (table.bytes - previousBytes + info.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
-    const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
-    if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+    if (!await anotherFileFits(auth.account.id, table, current ?? null, fileId)) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
     if (replaces) {
       table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, info.size, false)
     }
@@ -1756,26 +1766,51 @@ const listPartialMetas = async (accountId) => {
   return metas
 }
 
+const partialDecision = async (accountId, table, meta) => {
+  const size = Number(meta.size) || 0
+  const current = table.entries.get(meta.fileId) ?? null
+  const archivedSize = current?.deleted
+    ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(accountId, meta.fileId)))
+    : 0
+  const base = Number(meta.base)
+  const decision = evaluateSyncWrite({
+    current,
+    base: Number.isInteger(base) && base >= 0 ? base : -1,
+    nextSize: size,
+    blank: meta.blank === true || meta.blank === false ? meta.blank : null,
+    clear: meta.clear === true,
+    archivedSize,
+  })
+  return { decision, current, size }
+}
+
+// An upload that will become a new note already holds that slot. Another
+// partial of the same note does not take a second one.
+const pendingNewFileCount = async (accountId, table, exceptFileId = '') => {
+  const metas = await listPartialMetas(accountId)
+  const ids = new Set()
+  for (const meta of metas) {
+    if (meta.fileId === exceptFileId) continue
+    const { decision, current } = await partialDecision(accountId, table, meta)
+    if (decision === 'accept' && (!current || current.deleted)) ids.add(meta.fileId)
+  }
+  return ids.size
+}
+
+const anotherFileFits = async (accountId, table, current, exceptFileId = '') => {
+  if (current && !current.deleted) return true
+  const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
+  const pending = await pendingNewFileCount(accountId, table, exceptFileId)
+  return liveFiles + pending < fileCap(accountId)
+}
+
 const reservedPartialBytes = async (accountId, exceptUploadId = '') => {
   const table = await loadTable(accountId)
   const metas = await listPartialMetas(accountId)
   let reserved = 0
   for (const meta of metas) {
     if (meta.uploadId === exceptUploadId) continue
-    const size = Number(meta.size) || 0
-    const current = table.entries.get(meta.fileId) ?? null
-    const archivedSize = current?.deleted
-      ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(accountId, meta.fileId)))
-      : 0
-    const base = Number(meta.base)
-    const decision = evaluateSyncWrite({
-      current,
-      base: Number.isInteger(base) && base >= 0 ? base : -1,
-      nextSize: size,
-      blank: meta.blank === true || meta.blank === false ? meta.blank : null,
-      clear: meta.clear === true,
-      archivedSize,
-    })
+    const { decision, current, size } = await partialDecision(accountId, table, meta)
     // An accepted replace reserves only the bytes the finished upload still adds.
     // Space it would free by dropping an older copy stays reserved until the
     // upload finishes, because aborting it keeps that copy.
@@ -1876,6 +1911,8 @@ const handleCreateUpload = async (request, response, auth, fileId) => {
       ? await unarchivedBytes(auth.account.id, fileId, current, size)
       : 0
     if (table.bytes - previousBytes + (table.historyBytes || 0) + reserved + historyDelta + size > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
+    // A refused upload is not stored, so it cannot reserve bytes the notes still need.
+    if (decision === 'accept' && !await anotherFileFits(auth.account.id, table, current, fileId)) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
     const uploadId = randomBytes(16).toString('hex')
     const meta = {
       fileId,
@@ -1973,8 +2010,7 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
   // would reserve the previous note twice.
   const reserved = await reservedPartialBytes(auth.account.id)
   if (table.bytes - previousBytes + stat.size + (table.historyBytes || 0) + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
-  const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
-  if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+  if (!await anotherFileFits(auth.account.id, table, current, fileId)) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
   const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: stat.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
   await recordLiveBlob(auth.account.id, table, entry)
   sendJson(request, response, 200, { revision: entry.revision, tableRevision: table.revision, uploadId }, { ETag: `"${entry.revision}"` })
@@ -2046,8 +2082,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       : 0
     const reserved = await reservedPartialBytes(auth.account.id, uploadId)
     if (table.bytes - previousBytes + meta.size + (table.historyBytes || 0) + historyDelta + reserved > QUOTA_BYTES) fail(507, 'Der Speicherplatz dieses Kontos ist voll.')
-    const liveFiles = [...table.entries.values()].filter((entry) => !entry.deleted).length
-    if ((!current || current.deleted) && liveFiles >= MAX_FILES) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
+    if (!await anotherFileFits(auth.account.id, table, current ?? null, fileId)) fail(507, 'Dieses Konto hat die maximale Anzahl an Dateien erreicht.')
     if (current && !current.deleted && current.sha256 !== declaredSha) {
       table.historyBytes = (table.historyBytes || 0) + await retainPreviousBlob(auth.account.id, fileId, current, meta.size, false)
     }
