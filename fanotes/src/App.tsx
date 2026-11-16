@@ -75,7 +75,7 @@ import { FileTree } from './components/FileTree'
 import { EditorExportControls } from './components/EditorExportControls'
 import { FormattingToolbar } from './components/FormattingToolbar'
 import { NoteLinkLayer } from './components/NoteLinkLayer'
-import { NoteTextFieldLayer } from './components/NoteTextFieldLayer'
+import { NoteTextFieldLayer, NoteTextFieldToolbar } from './components/NoteTextFieldLayer'
 import { StudyAnnotationLayer } from './components/StudyAnnotationLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
@@ -875,6 +875,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteTextFields, setNoteTextFields] = useState<NoteTextField[]>([])
   const [noteLinkPlacing, setNoteLinkPlacing] = useState(false)
   const [textFieldPlacing, setTextFieldPlacing] = useState(false)
+  const [selectedTextFieldId, setSelectedTextFieldId] = useState<string | null>(null)
   const [studyToolsOpen, setStudyToolsOpen] = useState(false)
   const [textFieldFocusId, setTextFieldFocusId] = useState<string | null>(null)
   const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
@@ -6305,6 +6306,8 @@ export default function App({ startupBootstrap }: AppProps) {
             </div>
             <div className="toolbar-context">
               {(() => {
+                const selectedTextField = selectedTextFieldId ? noteTextFields.find((field) => field.id === selectedTextFieldId) : undefined
+                if (selectedTextField) return <NoteTextFieldToolbar field={selectedTextField} onStyle={changeTextFieldStyle} onRemove={removePlacedTextField} />
                 const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
                 if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
                 if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
@@ -6688,6 +6691,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     onFinish={finishTextFieldEdit}
                     onRemove={removePlacedTextField}
                     onFocusHandled={clearTextFieldFocus}
+                    onSelectedChange={setSelectedTextFieldId}
                   />
                   <StudyAnnotationLayer
                     path={activeTab.path}

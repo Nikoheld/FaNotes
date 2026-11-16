@@ -790,10 +790,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .note-text-field.is-selected .note-text-field-resize,
 .note-text-field:hover .note-text-field-resize { display: grid; }
 .note-text-field-toolbar {
-  position: absolute;
-  z-index: 3;
-  bottom: calc(100% + 10px * var(--tf-inv, 1));
-  left: 0;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -802,15 +798,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border-radius: 10px;
   color: var(--text, #20222b);
   background: var(--panel-strong, #fff);
-  box-shadow: var(--shadow, 0 8px 24px rgba(0, 0, 0, .2));
   white-space: nowrap;
-  transform: scale(var(--tf-inv, 1));
-  transform-origin: left bottom;
   touch-action: none;
 }
-.note-text-field-toolbar.is-right { left: auto; right: 0; transform-origin: right bottom; }
-.note-text-field-toolbar.is-below { bottom: auto; top: calc(100% + 10px * var(--tf-inv, 1)); transform-origin: left top; }
-.note-text-field-toolbar.is-below.is-right { transform-origin: right top; }
 .note-text-field-toolbar button {
   width: 28px;
   height: 28px;
