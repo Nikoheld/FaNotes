@@ -590,7 +590,12 @@ export const createClassTimetables = (options = {}) => {
     const dir = versionDir(version)
     const task = (async () => {
       const stored = await readJson(join(dir, 'classes.json'))
-      if (stored) return stored
+      // A missing or broken file can be built again. A file that is there but not the class weeks must not look empty, or this rebuild replaces it.
+      if (stored != null) {
+        const weeks = typeof stored === 'object' && !Array.isArray(stored) && Object.keys(stored).every((code) => CLASS_CODE.test(code))
+        if (!weeks) throw Object.assign(new Error('timetable classes'), { code: 'EBADMSG' })
+        return stored
+      }
       let text
       try { text = (await run('pdftotext', ['-bbox-layout', join(dir, 'source.pdf'), '-'])).stdout } catch { return null }
       const weeks = classWeeksOf(parseTimetableBbox(text))
