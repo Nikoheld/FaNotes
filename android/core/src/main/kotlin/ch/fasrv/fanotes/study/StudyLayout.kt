@@ -294,7 +294,7 @@ fun measurePointsNeeded(mode: StudyTool): Int = when (mode) {
 fun newMeasure(tool: StudyTool, page: Int, pts: List<SPoint>): StudyMeasure =
     StudyMeasure(newAnnotationId(), page, if (tool == StudyTool.DISTANCE) MEASURE_DISTANCE else MEASURE_ANGLE, pts, "#dc2626")
 
-enum class StudyTool { SELECT, CALLOUT, STAMP, LEGEND, BRANCH, ANGLE, ANGLE_LINES, DISTANCE }
+enum class StudyTool { SELECT, CALLOUT, STAMP, LEGEND, BRANCH, ANGLE, ANGLE_LINES, DISTANCE, CROP }
 
 /**
  * Screen box of annotation page [page]. PDF pages come from [frames] (same lookup as note text

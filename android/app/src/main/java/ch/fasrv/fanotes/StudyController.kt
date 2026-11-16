@@ -1,7 +1,13 @@
 package ch.fasrv.fanotes
 
 import android.graphics.Canvas
+import ch.fasrv.fanotes.study.CropGrip
 import ch.fasrv.fanotes.study.PageBox
+import ch.fasrv.fanotes.study.SRect
+import ch.fasrv.fanotes.study.cropDragged
+import ch.fasrv.fanotes.study.cropFromCorners
+import ch.fasrv.fanotes.study.cropGripAt
+import ch.fasrv.fanotes.study.cropIsUsable
 import ch.fasrv.fanotes.study.SPoint
 import ch.fasrv.fanotes.study.StudyAnnotation
 import ch.fasrv.fanotes.study.StudyCallout
@@ -22,6 +28,9 @@ import ch.fasrv.fanotes.study.removeItem
 import ch.fasrv.fanotes.study.replaceItem
 import ch.fasrv.fanotes.study.renumberCallouts
 import kotlin.math.hypot
+
+/** Crop rectangle of one page, in page fractions. */
+data class StudyCrop(val page: Int, val rect: SRect)
 
 /**
  * Pointer logic of the "Lernen" tools. The ink surface hands it the pen/mouse (or finger, when
@@ -61,9 +70,13 @@ class StudyController(
             gesture = null
             draft = null
             live = null
+            crop = null
             host.studyChrome()
             host.studyRedraw()
         }
+    /** The PDF-Ausschnitt rectangle (page fractions) waiting for "Ausschnitt übernehmen". */
+    var crop: StudyCrop? = null
+        private set
     var stampId = "gain"
     var numbered = false
     var labelColor = "#1d4ed8"
@@ -82,6 +95,8 @@ class StudyController(
     var onEditLabel: (StudyCallout) -> Unit = {}
     var onEditLegendRow: (StudyLegend, String) -> Unit = { _, _ -> }
     var onNotice: (String) -> Unit = {}
+    /** Confirmed crop: (page, rectangle in page fractions). */
+    var onCrop: (Int, SRect) -> Unit = { _, _ -> }
 
     private var pending: StudyPending? = null
     private var live: StudyLive? = null
@@ -98,6 +113,8 @@ class StudyController(
         class Drag(override val page: Int, override val box: PageBox, val hit: StudyHit, val original: StudyAnnotation, val startX: Double, val startY: Double, val startPx: Double, val startPy: Double, var moved: Boolean = false) : Gesture()
         class Place(override val page: Int, override val box: PageBox, val start: SPoint) : Gesture()
         class Branch(override val page: Int, override val box: PageBox, val pts: MutableList<SPoint>) : Gesture()
+        /** [grip] NONE means a new rectangle spanned from [start]; otherwise [original] is moved or resized. */
+        class Crop(override val page: Int, override val box: PageBox, val grip: CropGrip, val original: SRect, val start: SPoint) : Gesture()
     }
 
     private fun slop() = 12.0 * host.studyDensity()
@@ -105,7 +122,7 @@ class StudyController(
     private fun effective() = draft ?: items
 
     fun draw(canvas: Canvas) {
-        painter.draw(canvas, effective(), { host.studyBox(it) }, selectedId, pending, live)
+        painter.draw(canvas, effective(), { host.studyBox(it) }, selectedId, pending, live ?: crop?.let { StudyLive.Crop(it.page, it.rect) })
     }
 
     private fun pageAt(x: Double, y: Double): Pair<Int, PageBox>? =
@@ -147,6 +164,12 @@ class StudyController(
                 gesture = Gesture.Place(page, box, p)
                 return true
             }
+            StudyTool.CROP -> {
+                val old = crop?.takeIf { it.page == page }
+                val grip = old?.let { cropGripAt(it.rect, p.x, p.y, 22.0 * host.studyDensity() / box.width, 22.0 * host.studyDensity() / box.height) } ?: CropGrip.NONE
+                gesture = Gesture.Crop(page, box, grip, if (grip == CropGrip.NONE) SRect(p.x, p.y, p.x, p.y) else old!!.rect, p)
+                return true
+            }
             StudyTool.BRANCH -> {
                 gesture = Gesture.Branch(page, box, mutableListOf(p))
                 return true
@@ -179,6 +202,12 @@ class StudyController(
                 val next = dragged(g.original, g.hit.part, g.hit.index, dx, dy, g.box.fx(x), g.box.fy(y))
                 draft = replaceItem(items, next)
             }
+            is Gesture.Crop -> {
+                val at = SPoint(g.box.fx(x), g.box.fy(y))
+                val rect = if (g.grip == CropGrip.NONE) cropFromCorners(g.start.x, g.start.y, at.x, at.y)
+                else cropDragged(g.original, g.grip, at.x - g.start.x, at.y - g.start.y)
+                crop = StudyCrop(g.page, rect)
+            }
             is Gesture.Place -> live = StudyLive.Leader(g.page, g.start, SPoint(g.box.fx(x), g.box.fy(y)), labelColor)
             is Gesture.Branch -> {
                 g.pts += SPoint(g.box.fx(x), g.box.fy(y))
@@ -208,8 +237,15 @@ class StudyController(
                     onEditLabel(callout)
                 }
                 is Gesture.Branch -> commit(addItem(items, newBranchStroke(g.page, g.pts + end, branchColor, branchWidth)))
+                is Gesture.Crop -> {
+                    // A tap or a sliver is not a crop; a bare tap outside keeps the previous rectangle.
+                    if (crop?.rect?.let { cropIsUsable(it) } != true) crop = if (g.grip == CropGrip.NONE) null else StudyCrop(g.page, g.original)
+                }
             }
+        } else if (g is Gesture.Crop) {
+            crop = if (g.grip == CropGrip.NONE) null else StudyCrop(g.page, g.original)
         }
+        if (g is Gesture.Crop) host.studyChrome()
         host.studyRedraw()
     }
 
@@ -246,6 +282,22 @@ class StudyController(
     fun visiblePage() = host.studyVisiblePage()
 
     fun renumber() = commit(renumberCallouts(items))
+
+    /** Hands the rectangle to [onCrop] and leaves the crop tool. */
+    fun confirmCrop() {
+        val c = crop ?: return
+        if (!cropIsUsable(c.rect)) return
+        crop = null
+        tool = StudyTool.SELECT
+        onCrop(c.page, c.rect)
+    }
+
+    fun cancelCrop() {
+        if (crop == null) return
+        crop = null
+        host.studyChrome()
+        host.studyRedraw()
+    }
 
     fun cancelPending() {
         if (pending != null) {

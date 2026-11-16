@@ -3141,6 +3141,29 @@ private fun PageSurface(
         val target = studyPageRef[0]
         if (uri != null && target != null) model.importStudyImage(uri, target.ink.study.visiblePage())
     }
+    val appContext = androidx.compose.ui.platform.LocalContext.current
+    // "path|page" of a photo being taken; saved so a recreated activity can still import it.
+    var cameraTarget by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        // Drop photos left by an interrupted capture (the pending one is kept).
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val keep = cameraTarget.substringBeforeLast('|', "")
+            java.io.File(appContext.cacheDir, "study-camera").listFiles()?.forEach { if (it.path != keep) it.delete() }
+        }
+    }
+    val takeStudyPhoto = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        val target = cameraTarget
+        cameraTarget = ""
+        val file = java.io.File(target.substringBeforeLast('|', ""))
+        val pageNumber = target.substringAfterLast('|', "").toIntOrNull() ?: return@rememberLauncherForActivityResult
+        if (file.path.isEmpty() || file.parentFile?.name != "study-camera") return@rememberLauncherForActivityResult
+        if (!saved) {
+            file.delete()
+            return@rememberLauncherForActivityResult
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(appContext, "${appContext.packageName}.files", file)
+        model.importStudyImage(uri, pageNumber, "Foto") { file.delete() }
+    }
     val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
     val sheetReset by model.sheetReset.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
@@ -3298,6 +3321,20 @@ private fun PageSurface(
             page.studyCanRedo = studyHistory.canRedo
             page.onStudyUndo = { model.undoStudy() }
             page.onStudyRedo = { model.redoStudy() }
+            page.onStudyCamera = {
+                val dir = java.io.File(appContext.cacheDir, "study-camera").apply { mkdirs() }
+                val file = java.io.File(dir, "photo-${System.currentTimeMillis()}.jpg")
+                cameraTarget = "${file.path}|${page.ink.study.visiblePage()}"
+                try {
+                    takeStudyPhoto.launch(androidx.core.content.FileProvider.getUriForFile(appContext, "${appContext.packageName}.files", file))
+                } catch (_: Exception) {
+                    cameraTarget = ""
+                    file.delete()
+                    model.message.value = "Keine Kamera-App gefunden."
+                }
+            }
+            page.onStudyCrop = { pageNumber, rect -> model.cropStudyPdfRegion(pageNumber, rect) }
+            page.syncCompare()
             page.onStudyImage = { pickStudyImage.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
             page.ink.noteTextFields = noteFields
             page.ink.onPlaceTextField = { model.storePlacedTextField(it) }

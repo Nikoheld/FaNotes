@@ -23,6 +23,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -802,7 +803,54 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onStudyUndo: () -> Unit = {}
     var onStudyRedo: () -> Unit = {}
     var onStudyImage: () -> Unit = {}
+    var onStudyCamera: () -> Unit = {}
+    var onStudyCrop: (Int, ch.fasrv.fanotes.study.SRect) -> Unit = { _, _ -> }
     private var studyOpen = false
+
+    // ---- compare view: the reference next to the live sketch ---------------------------------
+    private var compareId: String? = null
+    private var compareSrcKey = ""
+    private var compareDock: ch.fasrv.fanotes.study.CompareDock? = null
+    private var comparePanelPx = -1
+    private val comparePanel = LinearLayout(context)
+    private val compareSpacer = android.view.View(context)
+    private val compareTitle = TextView(context)
+    private val compareClose = TextView(context)
+    private val compareImage = ImageView(context)
+    private var compareDecoderPool: java.util.concurrent.ExecutorService? = null
+    private val compareDecoder: java.util.concurrent.ExecutorService
+        get() = compareDecoderPool?.takeUnless { it.isShutdown }
+            ?: java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "study-compare").apply { isDaemon = true } }.also { compareDecoderPool = it }
+
+    init {
+        comparePanel.orientation = LinearLayout.VERTICAL
+        comparePanel.visibility = GONE
+        comparePanel.elevation = 6f
+        comparePanel.isClickable = true
+        val header = LinearLayout(context)
+        header.orientation = LinearLayout.HORIZONTAL
+        header.gravity = Gravity.CENTER_VERTICAL
+        header.setPadding(dp(12), dp(4), dp(4), dp(4))
+        compareTitle.textSize = 13f
+        compareTitle.maxLines = 1
+        compareTitle.ellipsize = android.text.TextUtils.TruncateAt.END
+        compareClose.text = "✕"
+        compareClose.textSize = 16f
+        compareClose.gravity = Gravity.CENTER
+        compareClose.minWidth = dp(48)
+        compareClose.minHeight = dp(48)
+        compareClose.contentDescription = ch.fasrv.fanotes.desk.ChromeText.ui("Vergleich schließen")
+        compareClose.setOnClickListener { closeCompare() }
+        header.addView(compareTitle, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(compareClose, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        compareImage.scaleType = ImageView.ScaleType.FIT_CENTER
+        compareImage.setBackgroundColor(android.graphics.Color.WHITE)
+        compareImage.setPadding(dp(6), dp(6), dp(6), dp(6))
+        comparePanel.addView(compareSpacer, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0))
+        comparePanel.addView(header, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        comparePanel.addView(compareImage, LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f))
+        addView(comparePanel, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+    }
     private var pendingCursor: Int? = null
     var onPdfPage: (Int) -> Unit = {}
     var onSymbolSize: (Double) -> Unit = {}
@@ -817,6 +865,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     init {
         ink.study.onEditLabel = { promptCallout(it) }
+        ink.study.onCrop = { page, rect -> onStudyCrop(page, rect) }
         ink.study.onEditLegendRow = { legend, key -> promptLegendRow(legend, key) }
         isFocusable = true
         isFocusableInTouchMode = true
@@ -1516,7 +1565,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val inset = ch.fasrv.fanotes.desk.editorSideInsetDp(metricsPx.widthPixels, metricsPx.heightPixels, metricsPx.densityDpi)
         val toolbarPad = ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP + inset
         toolbar.setPadding(dp(toolbarPad), 0, dp(toolbarPad), 0)
-        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$pdfNote|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen|$studyOpen|${ink.study.tool}|${ink.study.selected.hashCode()}|${ink.study.stampId}|${ink.study.numbered}|${ink.study.labelColor}|${ink.study.branchColor}|${ink.study.branchWidth}|$studyCanUndo|$studyCanRedo"
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$pdfNote|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen|$studyOpen|${ink.study.tool}|${ink.study.selected.hashCode()}|${ink.study.stampId}|${ink.study.numbered}|${ink.study.labelColor}|${ink.study.branchColor}|${ink.study.branchWidth}|$studyCanUndo|$studyCanRedo|${ink.study.crop?.rect}|$compareId"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
@@ -1804,6 +1853,71 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     // ---- "Lernen" menu: study annotations -------------------------------------------------
 
+    /** Shows [image] beside the page (landscape: left, portrait: bottom); the sketch stays live. */
+    private fun openCompare(image: ch.fasrv.fanotes.study.StudyImage) {
+        compareId = image.id
+        compareTitle.text = image.title.ifBlank { ch.fasrv.fanotes.desk.ChromeText.ui("Referenz") }
+        loadCompareBitmap(image)
+        applyCompare(force = true)
+        rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo)
+    }
+
+    private fun closeCompare() {
+        if (compareId == null) return
+        compareId = null
+        compareSrcKey = ""
+        compareImage.setImageDrawable(null)
+        applyCompare(force = true)
+        rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo)
+    }
+
+    private fun loadCompareBitmap(image: ch.fasrv.fanotes.study.StudyImage) {
+        val key = "${image.id}|${image.src.length}|${image.src.hashCode()}"
+        if (key == compareSrcKey) return
+        compareSrcKey = key
+        val src = image.src
+        compareDecoder.execute {
+            val bitmap = try { StudyImageCache.decode(src, 1600) } catch (_: Throwable) { null }
+            post { if (compareSrcKey == key) compareImage.setImageBitmap(bitmap) }
+        }
+    }
+
+    /** Called when the annotations change: closes the panel when its image is gone, refreshes it when edited. */
+    fun syncCompare() {
+        val id = compareId ?: return
+        val image = ink.study.items.firstOrNull { it.id == id } as? ch.fasrv.fanotes.study.StudyImage
+        if (image == null) closeCompare() else loadCompareBitmap(image)
+    }
+
+    private fun applyCompare(force: Boolean = false) {
+        val ps = ink.layoutParams as? LayoutParams ?: return
+        val dock = if (compareId == null || width <= 0) null else ch.fasrv.fanotes.study.compareLayout(width, height)
+        if (!force && dock?.dock == compareDock && (dock?.panelPx ?: -1) == comparePanelPx) return
+        compareDock = dock?.dock
+        comparePanelPx = dock?.panelPx ?: -1
+        ps.leftMargin = 0; ps.bottomMargin = 0
+        if (dock == null) {
+            comparePanel.visibility = GONE
+        } else {
+            val left = dock.dock == ch.fasrv.fanotes.study.CompareDock.LEFT
+            val lp = if (left) LayoutParams(dock.panelPx, LayoutParams.MATCH_PARENT, Gravity.START) else LayoutParams(LayoutParams.MATCH_PARENT, dock.panelPx, Gravity.BOTTOM)
+            comparePanel.layoutParams = lp
+            // Left panel starts under the toolbar; the bottom one has no toolbar above it.
+            compareSpacer.layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, if (left) dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP) else 0)
+            if (left) ps.leftMargin = dock.panelPx else ps.bottomMargin = dock.panelPx
+            comparePanel.setBackgroundColor(if (dark) 0xFF1B1D23.toInt() else 0xFFF1F3F8.toInt())
+            compareTitle.setTextColor(if (dark) 0xFFE6E8EE.toInt() else 0xFF1B1D23.toInt())
+            compareClose.setTextColor(if (dark) 0xFFE6E8EE.toInt() else 0xFF1B1D23.toInt())
+            comparePanel.visibility = VISIBLE
+        }
+        ink.layoutParams = ps
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (compareId != null) post { applyCompare() }
+    }
+
     private fun setStudyOpen(open: Boolean) {
         studyOpen = open
         ink.study.tool = if (open) ch.fasrv.fanotes.study.StudyTool.SELECT else null
@@ -1869,12 +1983,24 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(studyToolChip("Winkel zw. 2 Linien", ch.fasrv.fanotes.study.StudyTool.ANGLE_LINES))
         tools.addView(studyToolChip("Strecke", ch.fasrv.fanotes.study.StudyTool.DISTANCE))
         tools.addView(studyChip("Bild einfügen") { onStudyImage() })
+        tools.addView(studyChip("Kamera", description = "Foto als Referenzbild aufnehmen") { onStudyCamera() })
+        if (pdfNote) {
+            tools.addView(studyToolChip("PDF-Ausschnitt", ch.fasrv.fanotes.study.StudyTool.CROP, "Bereich einer PDF-Seite als Bild übernehmen (z. B. Abbildung)"))
+            val crop = ink.study.crop
+            if (ink.study.tool == ch.fasrv.fanotes.study.StudyTool.CROP && crop != null && ch.fasrv.fanotes.study.cropIsUsable(crop.rect)) {
+                tools.addView(studyChip("Ausschnitt übernehmen") { ink.study.confirmCrop() })
+                tools.addView(studyChip("Abbrechen") { ink.study.cancelCrop() })
+            }
+        }
         tools.addView(studyChip("Begriffe") { promptTerms() })
         tools.addView(studyChip("↶", enabled = studyCanUndo, description = "Rückgängig") { onStudyUndo() })
         tools.addView(studyChip("↷", enabled = studyCanRedo, description = "Wiederholen") { onStudyRedo() })
         val selected = study.selected
         if (selected != null && selected !is ch.fasrv.fanotes.study.StudyTerms) {
             if (selected is ch.fasrv.fanotes.study.StudyImage) {
+                tools.addView(studyChip("Vergleich", active = compareId == selected.id, description = "Vergleichsansicht") {
+                    if (compareId == selected.id) closeCompare() else openCompare(selected)
+                })
                 tools.addView(studyChip("Deckkraft ${Math.round(selected.opacity * 100)} %", description = "Deckkraft") {
                     val steps = listOf(1.0, 0.7, 0.5, 0.35, 0.2)
                     val next = steps.firstOrNull { it < selected.opacity - 0.001 } ?: steps.first()
@@ -2534,6 +2660,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     }
 
     override fun onDetachedFromWindow() {
+        compareDecoderPool?.shutdownNow()
+        compareDecoderPool = null
         tags?.hide()
         super.onDetachedFromWindow()
     }
