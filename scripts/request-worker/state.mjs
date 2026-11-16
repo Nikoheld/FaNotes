@@ -28,15 +28,19 @@ export function transition(state, to, patch = {}) {
 
 export const emptyState = () => ({ phase: 'idle' })
 
-export function loadState(file) {
+// The state file holds {jobs: {<requestId>: jobState}}. Requests parked in pr_open/waiting
+// keep being served while the next request is claimed, so several jobs can exist at once.
+export function loadJobs(file) {
   try {
     const s = JSON.parse(fs.readFileSync(file, 'utf8'))
-    if (s && PHASES.includes(s.phase)) return s
-  } catch { /* missing or corrupt: start clean */ }
-  return emptyState()
+    const jobs = {}
+    for (const [id, j] of Object.entries(s?.jobs || {})) if (j && PHASES.includes(j.phase)) jobs[id] = j
+    return jobs
+  } catch { return {} /* missing or corrupt: start clean */ }
 }
 
-export function saveState(file, state) {
+export function saveJobs(file, jobs) {
+  const state = { jobs }
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   const tmp = `${file}.${process.pid}.tmp`
   fs.writeFileSync(tmp, JSON.stringify(state, null, 2), { mode: 0o600 })

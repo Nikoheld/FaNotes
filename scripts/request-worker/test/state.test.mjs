@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { canTransition, transition, loadState, saveState, emptyState } from '../state.mjs'
+import { canTransition, transition, loadJobs, saveJobs, emptyState } from '../state.mjs'
 import { loadConfig, childEnv } from '../config.mjs'
 import { createLogger } from '../log.mjs'
 import { parseControl } from '../api.mjs'
@@ -29,11 +29,13 @@ test('follow-up loops and illegal moves', () => {
 test('state file round trip and corrupt file fallback', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rw-state-'))
   const f = path.join(dir, 'sub', 'state.json')
-  assert.equal(loadState(f).phase, 'idle')
-  saveState(f, { phase: 'running', requestId: 'r1' })
-  assert.deepEqual(loadState(f), { phase: 'running', requestId: 'r1' })
+  assert.deepEqual(loadJobs(f), {})
+  saveJobs(f, { r1: { phase: 'running', requestId: 'r1' }, r2: { phase: 'waiting', requestId: 'r2' } })
+  assert.deepEqual(Object.keys(loadJobs(f)), ['r1', 'r2'])
+  fs.writeFileSync(f, JSON.stringify({ jobs: { r1: { phase: 'bogus' }, r2: { phase: 'done' } } }))
+  assert.deepEqual(Object.keys(loadJobs(f)), ['r2'])
   fs.writeFileSync(f, '{oops')
-  assert.equal(loadState(f).phase, 'idle')
+  assert.deepEqual(loadJobs(f), {})
   fs.rmSync(dir, { recursive: true })
 })
 
@@ -56,12 +58,13 @@ test('logger redacts the token', () => {
   assert.ok(!lines[0].includes('sekrit-token'))
 })
 
-test('control parsing', () => {
-  const c = parseControl({ status: 'waiting_for_you', approved: true, messages: [{ id: 1, from: 'owner', text: 'hi' }, { id: 2, from: 'claude', text: 'x' }] })
+test('control parsing (server shape)', () => {
+  const c = parseControl({ status: 'waiting_for_you', approved: true, cancelled: false, lastSeq: 9, messages: [{ seq: 4, at: 1, text: 'hi' }, { seq: 5, at: 2, text: '' }] })
   assert.ok(c.approved && !c.cancelled)
-  assert.deepEqual(c.messages, [{ id: '1', text: 'hi' }])
-  assert.ok(parseControl({ status: 'cancelled' }).cancelled)
-  assert.ok(parseControl({ cancelRequested: true }).cancelled)
+  assert.deepEqual(c.messages, [{ id: '4', text: 'hi' }])
+  assert.equal(c.lastSeq, 9)
+  assert.ok(parseControl({ status: 'rejected', cancelled: true }).cancelled)
+  assert.ok(parseControl({ status: 'rejected' }).cancelled)
 })
 
 test('prompt contains request, rules and hard rules; resume prompt is short', () => {

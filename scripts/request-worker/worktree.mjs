@@ -42,31 +42,20 @@ export function linkNodeModules(config, dir) {
   }
 }
 
-// Saves attachments (base64 or text) into the scratch dir. Returns [{path,label}].
-export function saveAttachments(dir, request) {
+// Saves fetched attachments into the scratch dir. items: [{name, mime, buffer}]. Returns [{path,label}].
+export function saveAttachments(dir, items) {
   const out = []
   const scratch = path.join(dir, SCRATCH_DIR)
-  const items = [...(Array.isArray(request.attachments) ? request.attachments : [])]
-  if (typeof request.screenshot === 'string') items.push({ name: 'screenshot.png', data: request.screenshot })
-  if (typeof request.logs === 'string') items.push({ name: 'logs.txt', text: request.logs })
+  fs.mkdirSync(scratch, { recursive: true })
   const used = new Set()
   for (const a of items) {
-    if (!a || typeof a !== 'object') continue
-    let name = safeName(a.name || a.filename)
+    if (!a?.buffer?.length || a.buffer.length > 4 * 1024 * 1024) continue
+    let name = safeName(a.name)
     while (used.has(name)) name = '_' + name
     used.add(name)
-    const file = path.join(scratch, name)
     try {
-      if (typeof a.text === 'string') fs.writeFileSync(file, a.text.slice(0, 512 * 1024))
-      else {
-        const raw = a.dataBase64 || a.data || a.content
-        if (typeof raw !== 'string') continue
-        const b64 = raw.replace(/^data:[^,]*,/, '')
-        const buf = Buffer.from(b64, 'base64')
-        if (!buf.length || buf.length > 4 * 1024 * 1024) continue
-        fs.writeFileSync(file, buf)
-      }
-      out.push({ path: `${SCRATCH_DIR}/${name}`, label: String(a.mime || a.type || a.kind || 'file') })
+      fs.writeFileSync(path.join(scratch, name), a.buffer)
+      out.push({ path: `${SCRATCH_DIR}/${name}`, label: String(a.mime || 'file') })
     } catch { /* skip unwritable attachment */ }
   }
   return out

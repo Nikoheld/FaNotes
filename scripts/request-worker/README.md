@@ -3,10 +3,10 @@
 Node worker (no dependencies) that serves the "Fehler & Wünsche" work requests
 (see `docs/work-requests-design.md`). It runs on the agent host, one request at a time:
 
-claim -> `picked` -> worktree `request/<id>` from fresh `origin/main` -> `claude -p` headless
+claim (`picked`) -> `working` -> worktree `request/<id>` from fresh `origin/main` -> `claude -p` headless
 -> German progress events -> `pr_open` -> poll CI -> `waiting_for_you` -> owner approves
 -> `gh pr merge --merge` (only with green CI) -> verify main (tsc + Android `:core:test :app:compileDebugKotlin`)
--> `merged`; otherwise `failed` with a reason. Cancel kills the child and posts `failed: abgebrochen`.
+-> `merged`; otherwise `failed` with a reason. Cancel (server: `rejected`) kills the child and cleans up.
 
 Hard rules given to Claude: open a PR, never merge, never push to main, never deploy/release, no secrets.
 The agent token is read from the environment only, redacted in logs, and removed from the child environment.
@@ -32,16 +32,19 @@ The agent token is read from the environment only, redacted in logs, and removed
 
 Flags: `--once` (exit after one request), `--dry-run` (no node_modules linking, no verification; use with fake binaries).
 
-## Server API assumed
+## Server API (fanotes-site/work-requests-api.mjs)
 
-All under `/api/v1/requests`, `Authorization: Bearer <token>`:
+Worker routes live under `/api/v1/worker`, `Authorization: Bearer <FANOTES_AGENT_TOKEN>`:
 
-- `POST /worker/claim` -> `{request: {id, type: "bug"|"feature", title, description, priority, attachments: [{name, mime, dataBase64 | text}], messages: [{id, text}]}}` or `{request: null}` / 204
-- `POST /worker/requests/:id/events` body `{type: "progress", text, percent}`
-- `POST /worker/requests/:id/status` body `{status: picked|working|pr_open|waiting_for_you|merged|failed, prNumber?, prUrl?, ci?: pending|green|red, reason?}`
-- `GET /worker/requests/:id/messages` -> `{status, approved?, cancelled?, messages: [{id, from: "owner", text}]}`. Approval is `approved: true` or `status: "approved"`; cancel is `cancelled: true`, `cancelRequested: true` or `status: "cancelled"`; `status: "rejected"` stops the work without merging.
+- `POST /claim` -> `{request, busy}`; the server already sets `picked`. It refuses (`busy: true`) while another request is `picked`/`working`; `pr_open` and `waiting_for_you` requests do not block.
+- `POST /requests/:id/events` `{text, percent}`; `POST /requests/:id/status` `{status, prNumber, prUrl, ci: pending|success|failure, reason}`
+- `GET /requests/:id/messages?after=<seq>` -> `{messages:[{seq,text}], status, approved, cancelled, lastSeq}`
+- `GET /requests/:id/attachments/(screenshot|logs)` (saved to the worktree's `.request-scratch/`)
 
-`api.mjs` (`parseControl`) is the single place to adapt if the server differs.
+Status flow used: `picked` (claim) -> `working` -> `pr_open` (with PR number) -> `waiting_for_you` (CI green) -> `merged` (only after the owner approved) or `failed` with a reason. Follow-ups and CI-fix runs go back to `working`.
+Owner cancel moves the request to `rejected` on the server; the worker then kills Claude, cleans up and posts nothing more (the transition is already terminal).
+Because requests in `pr_open`/`waiting_for_you` do not block the next claim, the worker serves them concurrently (one job each: CI watch, messages, approval, merge) while at most one job runs Claude.
+`api.mjs` is the only place that knows the wire format.
 
 ## Behaviour notes
 
@@ -49,8 +52,8 @@ All under `/api/v1/requests`, `Authorization: Bearer <token>`:
   `.request-scratch/NOTES.md` in the worktree and passed to the next run through `claude --resume <session>`.
   The scratch dir is excluded from git; attachments are saved there too.
 - CI red: Claude gets up to two fix runs, then `failed`.
-- State is written atomically to the state file after each transition. After a crash or restart the worker resumes
-  the same request (reusing the worktree and the session id). On SIGTERM it stops without failing the request.
+- State (all jobs) is written atomically to the state file after each transition. After a crash or restart the worker resumes
+  every job (reusing the worktree and the session id). On SIGTERM it stops without failing the request.
 - Worktrees are removed after merge or failure; the local branch is deleted only after a merge.
 - The prompt is sent via stdin to `claude -p` (same as passing it as argument, but not visible in `ps`).
 
@@ -67,4 +70,4 @@ Make sure `claude` and `gh` are authenticated for the service user and that `log
 ## Tests
 
 `node --test scripts/request-worker/test/*.test.mjs` covers the stream-json to progress mapping, the state machine, config/prompt/CLI args,
-and end-to-end dry runs against a fake server, a fake `claude`, a fake `gh` and a temporary git repo (happy path, cancel, no PR, follow-up, red CI, crash recovery).
+and end-to-end dry runs against a fake server, a fake `claude`, a fake `gh` and a temporary git repo (happy path, cancel, no PR, follow-up, red CI, crash recovery), plus `integration.test.mjs`, which runs the worker against the real server module in-process.
