@@ -1,5 +1,5 @@
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist'
+import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 
 export const MAX_PDF_NOTE_PAGES = 2_000
 
@@ -533,15 +533,31 @@ export const pdfJsDocumentOptions = (baseUri?: string) => {
   }
 }
 
+let viewerWorker: PDFWorker | null = null
+
+/**
+ * Without a `worker`, every getDocument boots its own pdf.js worker (about
+ * 250 ms) and its task's destroy() ends it again, so each PDF open showed the
+ * loading state that long. The viewer keeps one worker for all of its documents.
+ * Background readers (search index, study) keep their own: a long extraction
+ * must not queue in front of the page the user just opened.
+ */
+const sharedViewerWorker = (PdfWorker: typeof PDFWorker) => {
+  if (!viewerWorker || viewerWorker.destroyed) viewerWorker = new PdfWorker()
+  return viewerWorker
+}
+
 export const openPdfDocument = async (
   bytes: Uint8Array,
   password?: string,
+  options: { viewer?: boolean } = {},
 ): Promise<{ pdf: PDFDocumentProxy; task: PDFDocumentLoadingTask }> => {
-  const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist')
+  const { getDocument, GlobalWorkerOptions, PDFWorker: PdfWorker } = await import('pdfjs-dist')
   GlobalWorkerOptions.workerSrc = pdfWorkerUrl
   const copy = bytes.buffer.byteLength === bytes.byteLength ? bytes : bytes.slice()
   const task = getDocument({
     data: copy,
+    ...(options.viewer ? { worker: sharedViewerWorker(PdfWorker) } : {}),
     password: password || undefined,
     disableAutoFetch: true,
     disableStream: true,
