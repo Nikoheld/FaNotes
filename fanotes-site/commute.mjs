@@ -487,7 +487,9 @@ export const createCommute = (options = {}) => {
     // A missing or broken file can start again. A file that is there but not this alert state must not look empty, or the next check replaces it.
     if (stored == null) return null
     const routes = stored.routes
-    const known = typeof stored === 'object' && !Array.isArray(stored) && typeof routes === 'object' && routes != null && !Array.isArray(routes)
+    const plainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+    // An entry that is not an alert record must not look absent, or the next check replaces it.
+    const known = plainObject(stored) && plainObject(routes) && Object.values(routes).every(plainObject)
     if (!known) throw Object.assign(new Error('commute state'), { code: 'EBADMSG' })
     return stored
   }
