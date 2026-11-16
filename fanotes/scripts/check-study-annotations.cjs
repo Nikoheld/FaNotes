@@ -119,7 +119,9 @@ assert.equal(new Set(run1.map((i) => i.id)).size, 4, 'identical items at differe
 assert.equal(A.stableAnnotationId('callout', 0, 2, 0.25, 0.5, 'Caput'), run1[0].id)
 // pinned value: Android must produce the same id for the same input
 assert.equal(A.stableAnnotationId('stamp', 2, 1, 0.1, 0.2, 'gain'), run1[2].id)
-console.log('pinned id', A.stableAnnotationId('callout', 0, 2, 0.25, 0.5, 'Caput'))
+// fixed vectors shared with Android
+assert.equal(A.stableAnnotationId('stamp', 2, 1, 0.1, 0.2, 'gain'), 'an-vvszon')
+assert.equal(A.stableAnnotationId('callout', 0, 2, 0.25, 0.5, 'Caput'), 'an-1x0dli2')
 const once = famd.serializeFamd('', { ...famd.emptyFamdPayload(), annotations: run1 }, 'v2')
 const twice = famd.serializeFamd('', { ...famd.parseFamd(once).payload }, 'v2')
 assert.deepEqual(famd.parseFamd(twice).payload.annotations.map((i) => i.id), run1.map((i) => i.id))
