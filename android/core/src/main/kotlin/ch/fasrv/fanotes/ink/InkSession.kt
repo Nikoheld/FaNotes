@@ -45,6 +45,14 @@ class InkSession(document: InkDocument) {
     private val undo = ArrayDeque<List<InkStroke>>()
     private val redo = ArrayDeque<List<InkStroke>>()
     private var eraseCheckpoint = false
+    /** Where the previous [eraseSamples] call of this gesture ended; see [eraserSweep]. */
+    private var eraseCarry: EraserCarry? = null
+    /**
+     * Box [left, top, right, bottom] in page px that the ink changed by the latest [eraseSamples] call lies in,
+     * for repainting the tiles under it. Only meaningful right after a call that returned true; null before the first.
+     */
+    var erasedBounds: DoubleArray? = null
+        private set
     val canUndo get() = undo.isNotEmpty()
     val canRedo get() = redo.isNotEmpty()
 
@@ -55,6 +63,7 @@ class InkSession(document: InkDocument) {
         undo.clear()
         redo.clear()
         eraseCheckpoint = false
+        eraseCarry = null
     }
 
     fun beginStroke() {
@@ -234,10 +243,12 @@ class InkSession(document: InkDocument) {
     /** Marks an eraser gesture so every sample shares one undo step. */
     fun beginErase() {
         eraseCheckpoint = false
+        eraseCarry = null
     }
 
     fun endErase() {
         eraseCheckpoint = false
+        eraseCarry = null
     }
 
     /** Object eraser: drops or splits strokes the nib passes through. */
@@ -260,27 +271,45 @@ class InkSession(document: InkDocument) {
         return changed
     }
 
+    /**
+     * One frame of an eraser gesture. The nib is swept from where the previous call of the gesture ended
+     * through [samples], so the stretch between two frames is erased too. Strokes whose box cannot reach the
+     * swept box are skipped without being walked; [splitStroke] decides where the others are cut.
+     */
     fun eraseSamples(samples: List<StrokePoint>, radiusPagePx: Double, now: String): Boolean {
         if (samples.isEmpty() || radiusPagePx <= 0) return false
         val width = document.sourceWidth
         val height = document.sourceHeight
-        var changed = false
-        val next = mutableListOf<InkStroke>()
-        for (stroke in document.strokes) {
-            val pieces = splitStroke(stroke, samples, radiusPagePx, width, height)
-            if (pieces == null) next += stroke
-            else {
-                changed = true
-                next += pieces
+        val path = eraserSweep(eraseCarry, samples, width, height)
+        eraseCarry = eraserCarryOf(samples, width, height) ?: eraseCarry
+        val sweep = sweepBounds(path, width, height) ?: return false
+        val strokes = document.strokes
+        // The new list is only built once a stroke is actually cut; a frame that touches nothing allocates nothing.
+        var next: MutableList<InkStroke>? = null
+        var widest = 0.0
+        for (index in strokes.indices) {
+            val stroke = strokes[index]
+            val pieces = if (strokeMayBeTouched(stroke, sweep, radiusPagePx, width, height)) {
+                splitStroke(stroke, path, radiusPagePx, width, height)
+            } else {
+                null
             }
+            if (pieces == null) {
+                next?.add(stroke)
+                continue
+            }
+            if (next == null) next = ArrayList<InkStroke>(strokes.size + pieces.size).also { it.addAll(strokes.subList(0, index)) }
+            widest = max(widest, maxRibbonHalfWidth(stroke))
+            next.addAll(pieces)
         }
-        if (!changed) return false
+        if (next == null) return false
         if (!eraseCheckpoint) {
             pushUndo()
             eraseCheckpoint = true
         }
         selection = emptySet()
         document = document.copy(strokes = next, updatedAt = now)
+        erasedBounds = erasedBox(sweep, radiusPagePx, widest)
         return true
     }
 
@@ -369,6 +398,7 @@ class InkSession(document: InkDocument) {
         redo.addLast(document.strokes)
         document = document.copy(strokes = previous)
         selection = emptySet()
+        eraseCarry = null
         return true
     }
 
@@ -377,6 +407,7 @@ class InkSession(document: InkDocument) {
         undo.addLast(document.strokes)
         document = document.copy(strokes = next)
         selection = emptySet()
+        eraseCarry = null
         return true
     }
 

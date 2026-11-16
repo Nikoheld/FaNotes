@@ -64,13 +64,13 @@ Growing the page uses the desktop margins: 108×144, the same step, caps at 20×
 
 The corridor filter (`inkSampleMap.ts`) drops a sample that jumps more than 0.08 in y or 0.12 in normalized distance, and treats a slam back into the top band as a leap. Stylus samples are dense, so a real stroke is a chain of short segments. A one-point ghost near y≈0 can be replaced by the next in-band sample.
 
-Undo stores the stroke list before a gesture. An eraser gesture is one undo step: the first sample that hits pushes the checkpoint, later samples in that gesture do not. The eraser splits a stroke at points inside the nib radius and keeps the remaining pieces.
+Undo stores the stroke list before a gesture. An eraser gesture is one undo step: the first sample that hits pushes the checkpoint, later samples in that gesture do not. The eraser splits a stroke at points inside the nib radius and keeps the remaining pieces. Each frame of the gesture is swept from where the previous frame ended, so a fast stroke leaves no gap between frames, and a stroke whose bounding box cannot reach the swept box is skipped without being walked (`EraserSweep.kt`). The carried position is dropped when the gesture ends, on undo or redo, and when the page changes size.
 
 ## Pointers
 
 `MotionEvent.TOOL_TYPE_STYLUS` writes. `TOOL_TYPE_ERASER`, or a stylus with `BUTTON_STYLUS_PRIMARY` / `BUTTON_STYLUS_SECONDARY`, erases. A mouse may ink so an emulator or a Bluetooth mouse still works. A finger never inks unless **Finger zeichnet** is on.
 
-Palm rejection matches `inkPointerPolicy.ts`: while a stylus is down, and for 850 ms after it lifts, finger contacts are ignored for both ink and navigation. Outside that window, fingers scroll, pinch-zoom (0.5–4 around the centroid), long-press to select a stroke, and fling horizontally between notes when zoom is at most 1.15.
+Palm rejection matches `inkPointerPolicy.ts`: while a stylus is down, and for 850 ms after it lifts, finger contacts are ignored for both ink and navigation. Every pen contact is released when it lifts or is cancelled, also when it only pressed a mapped tablet button or tapped a tool and never started ink (`palmAfterContactEnd`); otherwise finger pan and zoom would stay locked. A pointer that comes up with `FLAG_CANCELED` (API 33+) is a cancel, like `ACTION_CANCEL`. Outside that window, fingers scroll, pinch-zoom (0.5–4 around the centroid), long-press to select a stroke, and fling horizontally between notes when zoom is at most 1.15.
 
 Android reports tilt as radians off the screen normal (`AXIS_TILT`) plus a direction (`AXIS_ORIENTATION`). Pointer Events, and therefore the stored stroke, use degrees:
 
@@ -83,7 +83,7 @@ Hover paints a ring and is not committed. On API 34+, `MotionPredictor.predict(u
 
 The page scale is `(view width − padding) / 900 * zoom`. Growing `sourceWidth` lengthens the page; it does not shrink existing ink.
 
-Committed ink is cached in fixed page-pixel tiles (192×192, rasterized at most at 1.75×). A pinch only changes the destination rectangle. Tiles are rebuilt when the zoom settles, and an eraser drops only the tiles under the nib. Ruling is drawn for the visible window. Typed Markdown is a `StaticLayout` under the ink, in the desktop column (72×78 padding inside the 900-wide sheet), rebuilt when the zoom changes so the glyphs are not a stretched bitmap. The tool bar is a sibling drawn above the page and hides while the pen is down.
+Committed ink is cached in fixed page-pixel tiles (192×192, rasterized at most at 1.75×). A pinch only changes the destination rectangle. Tiles are rebuilt when the zoom settles, and an eraser drops only the tiles under the box it swept. Ruling is drawn for the visible window. Typed Markdown is a `StaticLayout` under the ink, in the desktop column (72×78 padding inside the 900-wide sheet), rebuilt when the zoom changes so the glyphs are not a stretched bitmap. The tool bar is a sibling drawn above the page and hides while the pen is down.
 
 ## Sync
 
