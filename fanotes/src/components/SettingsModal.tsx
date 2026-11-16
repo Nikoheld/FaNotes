@@ -893,6 +893,12 @@ export function SettingsModal({
                   <SettingRow title="Rechtschreibprüfung" description="Unterstreicht Tippfehler lokal rot und erkennt Deutsch oder Englisch automatisch. Mathematik und Code bleiben unberührt."><Toggle label="Rechtschreibprüfung" checked={settings.spellcheck} onChange={(value) => update('spellcheck', value)} /></SettingRow>
                   <SettingRow title="Autokorrektur" description="Ersetzt einen eindeutigen Tippfehler, sobald du das Wort mit Leerzeichen, Satzzeichen oder Enter abschliesst. Rückschritt direkt danach stellt dein Wort wieder her; Rechtsklick oder Strg+. auf ein unterstrichenes Wort zeigt Vorschläge, „Ignorieren“ und „Zum Wörterbuch hinzufügen“."><Toggle label="Autokorrektur" checked={settings.autocorrect} onChange={(value) => update('autocorrect', value)} disabled={!settings.spellcheck} /></SettingRow>
                   <SettingRow title="Wortzahl in Statusleiste"><Toggle label="Wortzahl" checked={settings.showWordCount} onChange={(value) => update('showWordCount', value)} /></SettingRow>
+                  <SettingRow title="Werkzeugleiste" description="Legt die Werkzeugleiste des Editors oben (horizontal) oder am linken Rand (vertikal) ab.">
+                    <select aria-label="Werkzeugleiste" value={settings.toolbarPosition === 'side' ? 'side' : 'top'} onChange={(event) => update('toolbarPosition', event.target.value === 'side' ? 'side' : 'top')}>
+                      <option value="top">Oben (horizontal)</option>
+                      <option value="side">Seitlich (vertikal)</option>
+                    </select>
+                  </SettingRow>
                   <SettingRow title="Gliederung anzeigen"><Toggle label="Gliederung" checked={settings.showOutline} onChange={(value) => update('showOutline', value)} /></SettingRow>
                 </div>
               </>

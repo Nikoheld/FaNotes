@@ -141,6 +141,8 @@ export type AppSettings = {
   /** Show the invisible handwriting transcript in the margin. */
   marginTranscript: boolean
   showWordCount: boolean
+  /** Editor toolbar placement: horizontal bar on top or vertical bar at the left edge. */
+  toolbarPosition: 'top' | 'side'
   showOutline: boolean
   defaultFolder: string
   dailyNotesFolder: string

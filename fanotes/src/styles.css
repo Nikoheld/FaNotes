@@ -4418,3 +4418,108 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .wr-message textarea { min-height: 70px; }
 .wr-note { font: 500 12.5px/1.4 var(--ui-font, system-ui); color: var(--text-muted); }
 .markdown-editor.paper-mode .cm-lw-broken { border-left: 3px solid var(--danger); padding-left: 6px; }
+
+/* Vertical editor toolbar (setting toolbarPosition = 'side'): a left rail next to the editor stage. */
+.workspace.has-side-toolbar { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+.workspace.has-side-toolbar > .tabs-bar { grid-column: 1 / -1; grid-row: 1; }
+.workspace.has-side-toolbar > .editor-toolbar { grid-column: 1; grid-row: 2; }
+.workspace.has-side-toolbar > .editor-stage { grid-column: 2; grid-row: 2; }
+.editor-toolbar.is-vertical,
+.editor-toolbar.is-vertical.is-type {
+  width: 44px;
+  height: auto;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0;
+  gap: 6px;
+  border-bottom: 0;
+  border-right: 1px solid var(--border);
+}
+.editor-toolbar.is-vertical .mode-switch { flex-direction: column; height: auto; }
+.editor-toolbar.is-vertical .mode-switch button { width: 22px; height: 22px; }
+.editor-toolbar.is-vertical .toolbar-context {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden auto;
+  scrollbar-width: none;
+}
+.editor-toolbar.is-vertical .toolbar-context::-webkit-scrollbar { display: none; }
+.editor-toolbar.is-vertical .ink-toolbar-slot,
+.editor-toolbar.is-vertical .pdf-toolbar-slot {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden auto;
+}
+.editor-toolbar.is-vertical.is-type .formatting-toolbar {
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 1px;
+  overflow: visible;
+  mask-image: none;
+}
+.editor-toolbar.is-vertical .formatting-toolbar button.has-divider { margin-left: 0; margin-top: 5px; }
+.editor-toolbar.is-vertical .formatting-toolbar button.has-divider::before { left: 4px; top: -4px; width: 16px; height: 1px; }
+.editor-toolbar.is-vertical .simple-latex-tools { flex-direction: column; margin: 4px 0 0; padding: 4px 0 0; border-left: 0; }
+.editor-toolbar.is-vertical .simple-latex-tools input { width: 36px; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome {
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  max-height: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  overflow: visible;
+}
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-toolgroup,
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-colors,
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-history,
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-ink-actions,
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-view-controls,
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip {
+  flex-direction: column;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
+}
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-colors { max-width: 36px; flex-direction: row; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-range { flex-direction: column; min-width: 0; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-range input { width: 32px; height: 56px; writing-mode: vertical-lr; direction: rtl; }
+.editor-toolbar.is-vertical .toolbar-context .pdf-note-toolbar { flex-direction: column; flex: 0 0 auto; padding: 0; overflow: visible; }
+.editor-toolbar.is-vertical .toolbar-context .pdf-note-search { margin: 4px 0 0; flex-direction: column; }
+.editor-toolbar.is-vertical .toolbar-end {
+  flex: none;
+  width: 100%;
+  height: auto;
+  flex-direction: column;
+  padding: 6px 0 0;
+  border-left: 0;
+  border-top: 1px solid var(--border);
+  gap: 2px;
+}
+.editor-toolbar.is-vertical .toolbar-end > *,
+.editor-toolbar.is-vertical .toolbar-end .toolbar-group { flex-direction: column; align-items: center; }
+.editor-toolbar.is-vertical .daily-nav { flex-direction: column; }
+/* Popovers open to the right of the rail instead of below the trigger. */
+.editor-toolbar.is-vertical :is(.paper-picker__menu, .note-tags-popover, .editor-more-menu, .note-backup-menu) {
+  top: auto;
+  right: auto;
+  bottom: 0;
+  left: calc(100% + 8px);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+.editor-toolbar.is-vertical.is-type .toolbar-end { height: auto; }
