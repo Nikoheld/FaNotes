@@ -276,6 +276,7 @@ import { templatesToSeed, templatePath, NOTE_TEMPLATES, type NoteProfileId } fro
 import { backlinksFor } from './lib/backlinks'
 import { highlightPdfImportantMarks } from './lib/pdfImportantMarks'
 import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
+import { createPdfMarkEraseHost, unmarkPdfNote } from './lib/pdfMarkEraseHost'
 import { getHandwritingSamples, getMathLayoutExamples, getImportedLabels, putHandwritingSamples, putMathLayoutExamples, putHandwritingLabels } from './lib/handwritingDb'
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
@@ -2493,6 +2494,20 @@ export default function App({ startupBootstrap }: AppProps) {
   const updateContent = useCallback((content: string) => {
     if (activePath) updateContentFor(activePath, content)
   }, [activePath, updateContentFor])
+
+  // The eraser in pen mode also takes PDF text highlights off, undoable with the ink.
+  const updateContentForRef = useRef(updateContentFor)
+  updateContentForRef.current = updateContentFor
+  const latestNoteContent = useCallback((path: string) => (
+    pendingWrites.current.get(path) ?? tabsRef.current.find((tab) => tab.path === path)?.content ?? null
+  ), [])
+  const pdfMarkEraseHost = useMemo(() => createPdfMarkEraseHost({
+    notePath: () => activePathRef.current || null,
+    pages: () => document.querySelector('.unified-note-view.is-main-pane .unified-paper.is-pdf-note')
+      ?? document.querySelector('.unified-paper.is-pdf-note'),
+    read: latestNoteContent,
+    write: (path, content) => updateContentForRef.current(path, content),
+  }), [latestNoteContent])
 
   const closeTab = useCallback(async (path: string) => {
     const session = pageStatsRef.current.get(path)
@@ -6532,6 +6547,11 @@ export default function App({ startupBootstrap }: AppProps) {
                             const marks = addPdfMark(readPdfMarks(activeTab.content), { page, quote, kind: 'highlight' })
                             updateContentFor(activeTab.path, writePdfMarks(activeTab.content, marks))
                           }}
+                          onUnmarkSpans={(hit) => {
+                            const content = latestNoteContent(activeTab.path)
+                            const result = content === null ? null : unmarkPdfNote(content, [hit])
+                            if (result) updateContentFor(activeTab.path, result.content)
+                          }}
                         />
                       </SafeBoundary>
                     </Suspense>
@@ -6584,6 +6604,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         onTextFieldsExtent={remapPlacedTextFields}
                         onInkActivity={handleInkActivity}
                         onTrainingChanged={handleTrainingChanged}
+                        foreignErase={isPdfActive ? pdfMarkEraseHost : undefined}
                         onOpenGlyphenWerk={openGlyphenWerk}
                         onSectionFold={(index, collapsed) => {
                           const line = headingLineForSection(activeTab.content, index)
