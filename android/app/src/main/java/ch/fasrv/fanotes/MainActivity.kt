@@ -353,6 +353,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        model.flushStudyTimer()
         try {
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeout(4_000) { model.saveNow() }
@@ -3229,7 +3230,7 @@ private fun PageSurface(
             )
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
-            page.onStudyBlock = { kind, index -> model.openStudyBlock(kind, index) }
+            page.onStudyBlock = { kind, from, hash -> model.openStudyBlock(kind, from, hash) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
             val pendingStamp = model.stampRequest.value
             if (!pendingStamp.isNullOrEmpty()) {

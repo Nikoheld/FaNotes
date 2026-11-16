@@ -756,7 +756,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onPasteImage: (String, ByteArray, String) -> Unit = { _, _, _ -> }
     var onFollowLink: (String, Boolean, String?) -> Unit = { _, _, _ -> }
     /** A tap on a drawn study block: kind id and the block's position in the note. */
-    var onStudyBlock: (String, Int) -> Unit = { _, _ -> }
+    var onStudyBlock: (String, Int, Int) -> Unit = { _, _, _ -> }
     var onVisibleMarkdown: (String, String) -> Unit = { _, next -> onMarkdown(next) }
     var onRememberCamera: (
         String,
@@ -1136,7 +1136,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
             }
         }
         ink.onFollowMarkdown = { target, web, anchor -> onFollowLink(target, web, anchor) }
-        ink.onStudyBlock = { kind, index -> onStudyBlock(kind, index) }
+        ink.onStudyBlock = { kind, index ->
+            val visible = ink.markdown
+            ch.fasrv.fanotes.study.findStudyBlocks(visible).getOrNull(index)?.let { reportStudyBlock(kind, visible, it) }
+        }
     }
 
     /** A tap on a rendered link opens the note or the web address. */
@@ -1205,10 +1208,16 @@ class NotePageView(context: Context) : FrameLayout(context) {
         if (editable.isEmpty()) return false
         val offset = editor.getOffsetForPosition(x, y).coerceIn(0, editable.length)
         val span = editable.getSpans((offset - 1).coerceAtLeast(0), (offset + 1).coerceAtMost(editable.length), StudyBlockSpan::class.java).firstOrNull() ?: return false
-        val index = ch.fasrv.fanotes.study.findStudyBlocks(editable.toString()).indexOfFirst { offset >= it.from && offset <= it.to }
-        if (index < 0) return false
-        onStudyBlock(span.kindId, index)
+        val visible = editable.toString()
+        val ref = ch.fasrv.fanotes.study.findStudyBlocks(visible).firstOrNull { offset >= it.from && offset <= it.to } ?: return false
+        reportStudyBlock(span.kindId, visible, ref)
         return true
+    }
+
+    /** What is shown has folded sections cut out; the block is named by its offset in the whole note and its JSON. */
+    private fun reportStudyBlock(kind: String, visible: String, ref: ch.fasrv.fanotes.study.StudyBlockRef) {
+        val full = ch.fasrv.fanotes.desk.sourceOffsetForVisible(sourceMarkdown, foldedLines, ref.from)
+        onStudyBlock(kind, full, ch.fasrv.fanotes.study.studyBodyHash(ref.body))
     }
 
     /** A tap on the task box writes `[x]` or `[ ]`, and leaves the cursor where it was. */
