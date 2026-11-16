@@ -14,10 +14,15 @@ export type LegendRow = { key: string; glyph: string; color: string; label: stri
 export const ANNOTATION_LIMIT: number
 export const ANNOTATION_IMAGE_LIMIT: number
 export const ANNOTATION_IMAGE_MAX_CHARS: number
+export const ANNOTATION_IMAGE_TARGET_CHARS: number
+export const ANNOTATION_IMAGE_NEW_MAX_CHARS: number
+export const ANNOTATION_IMAGE_BUDGET_CHARS: number
+export function annotationImageChars(list: readonly NoteAnnotation[] | null | undefined): number
+export function stableAnnotationId(kind: string, index: number, page: number, x: unknown, y: unknown, text: string): string
 export const STAMPS: StampDef[]
 export function stampById(id: string): StampDef | null
 export function newAnnotationId(): string
-export function sanitizeAnnotation(value: unknown): NoteAnnotation | null
+export function sanitizeAnnotation(value: unknown, index?: number): NoteAnnotation | null
 export function parseAnnotations(value: unknown): NoteAnnotation[]
 export function annotationsHaveContent(list: readonly NoteAnnotation[] | null | undefined): boolean
 export function angleAt(vertex: readonly number[], a: readonly number[], b: readonly number[]): number
