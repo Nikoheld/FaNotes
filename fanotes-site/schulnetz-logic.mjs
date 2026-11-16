@@ -1775,6 +1775,7 @@ const gradeTables = (html) => {
 export const parseGradesHtml = (html) => {
   if (sessionProblem('', html)) return []
   const grades = []
+  const seenIds = new Map()
   const tokenPattern = /^[A-Za-zÄÖÜäöü0-9 ()]+-[A-Za-z0-9]+-[A-Za-zÄÖÜäöü0-9]+/u
   const tables = gradeTables(html)
   const expected = tables.flatMap((table) => table.rows).filter((row) => {
@@ -1803,8 +1804,11 @@ export const parseGradesHtml = (html) => {
           if ((!undated && !/^\d{2}\.\d{2}\.\d{4}$/u.test(date || '')) || !topic || isSummaryGradeTitle(topic)) continue
           // A row still waiting for its mark is kept with mark null, as the app reads it.
           const mark = parseMark(markText || '')
+          const baseId = `web:${courseId}:${undated ? '' : date}:${topic}:${numKey(mark)}`
+          const occurrence = (seenIds.get(baseId) || 0) + 1
+          seenIds.set(baseId, occurrence)
           grades.push({
-            id: `web:${courseId}:${date}:${topic}:${numKey(mark)}`,
+            id: occurrence === 1 ? baseId : `${baseId}:${occurrence}`,
             course, courseId, subject: course, title: topic,
             date: undated ? '' : `${date.slice(6, 10)}-${date.slice(3, 5)}-${date.slice(0, 2)}`,
             mark, weight: parseWeight(weight || '1'), confirmed: true, courseGrade: average, comment: '',
