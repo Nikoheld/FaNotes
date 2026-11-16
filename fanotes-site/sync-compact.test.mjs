@@ -217,6 +217,68 @@ test('a failed directory sync takes the log line back', async () => {
   assert.equal(published.sha256, sha256(newer))
 })
 
+test('a changes read cannot replace the table a write already published', async () => {
+  const raceEmail = `race-${randomBytes(4).toString('hex')}@example.com`
+  const race = await jsonCall('POST', '/api/v1/sync/register', {
+    email: raceEmail,
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Race', platform: 'linux' },
+  })
+  assert.equal(race.status, 201, JSON.stringify(race.json))
+  const raceToken = race.json.token
+  const raceAccount = race.json.accountId
+  const id = randomBytes(32).toString('hex')
+  const body = randomBytes(80)
+  const releases = []
+  const waitFor = async (count) => {
+    const started = Date.now()
+    while (releases.length < count) {
+      if (Date.now() - started > 5000) throw new Error(`load hold stopped at ${releases.length}`)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+  }
+  globalThis.FANOTES_SYNC_LOAD_HOLD = (account) => {
+    if (account !== raceAccount) return undefined
+    return new Promise((resolve) => { releases.push(resolve) })
+  }
+  process.env.FANOTES_SYNC_LOAD_HOLD = '1'
+  try {
+    const putPromise = call('PUT', `/api/v1/sync/files/${id}`, {
+      token: raceToken,
+      accountId: raceAccount,
+      body,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(body.length),
+        'If-Match': '0',
+        'X-FaNotes-Meta': meta,
+        'X-FaNotes-Sha256': sha256(body),
+        'X-FaNotes-Blank': '0',
+      },
+    })
+    await waitFor(1)
+    const changesPromise = call('GET', '/api/v1/sync/changes?since=0', { token: raceToken, accountId: raceAccount })
+    await waitFor(2)
+    releases[0]()
+    const created = await putPromise
+    assert.equal(created.status, 200, created.body.toString('utf8'))
+    releases[1]()
+    const during = JSON.parse((await changesPromise).body.toString('utf8'))
+    const seen = during.entries.find((entry) => entry.id === id)
+    assert.equal(seen?.sha256, sha256(body))
+    const after = JSON.parse((await call('GET', '/api/v1/sync/changes?since=0', { token: raceToken, accountId: raceAccount })).body.toString('utf8'))
+    const kept = after.entries.find((entry) => entry.id === id)
+    assert.equal(kept?.sha256, sha256(body))
+    assert.equal(kept.revision, seen.revision)
+  } finally {
+    delete process.env.FANOTES_SYNC_LOAD_HOLD
+    delete globalThis.FANOTES_SYNC_LOAD_HOLD
+    for (const release of releases) release()
+  }
+})
+
 test.after(() => new Promise((resolve) => {
   server.close(() => {
     rmSync(dataDirectory, { recursive: true, force: true })
