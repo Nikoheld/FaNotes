@@ -2342,6 +2342,10 @@ export const handleSyncRequest = async (request, response, url) => {
     }
     fail(404, 'Diesen Sync-Endpunkt gibt es nicht.')
   } catch (error) {
+    if (response.headersSent || response.writableEnded) {
+      // The client already has this response. A cleanup error must not start a second one.
+      return true
+    }
     if (error instanceof SyncApiError) {
       sendJson(request, response, error.status, { error: error.publicMessage, ...error.extra }, error.status === 429 && error.extra?.retryAfter ? { 'Retry-After': String(error.extra.retryAfter) } : {})
     } else {
