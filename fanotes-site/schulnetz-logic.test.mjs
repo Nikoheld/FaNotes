@@ -2392,6 +2392,14 @@ test('notices about lessons, exams and appointments that already ended are dropp
   assert.equal(changeIsOver({ id: 'absence:a', category: 'absence', title: 'Neue Absenz', body: 'x', date: '2026-10-01' }, at), false)
   assert.equal(changeIsOver({ id: 'event:m1', category: 'event', title: 'Elternabend', body: 'Freitag 19 Uhr' }, at), false)
   assert.equal(changeIsOver({ id: 'probe:1', category: 'exam', title: 'Test', body: '01.01.2026' }, at), false)
+  // An end clock before the start clock is the next morning, not "already over" this evening.
+  const late = { id: 'ev:late', category: 'event', title: 'Neuer Termin', body: '16.11.2026 · Abend · 23:00–00:30', date: '2026-11-16' }
+  assert.equal(changeIsOver(late, new Date('2026-11-16T21:00:00Z')), false) // 22:00 Zurich
+  assert.equal(changeIsOver(late, new Date('2026-11-16T22:15:00Z')), false) // 23:15 Zurich
+  assert.equal(changeIsOver(late, new Date('2026-11-16T23:15:00Z')), false) // 00:15 the next day
+  assert.equal(changeIsOver(late, new Date('2026-11-16T23:45:00Z')), true) // 00:45 the next day
+  assert.equal(changeIsOver({ ...late, date: '2026-11-15', body: '15.11.2026 · Abend · 23:00–00:30' }, new Date('2026-11-16T21:00:00Z')), true)
+  assert.equal(changeIsOver({ id: 'tt:u', category: 'timetable', title: 'Zeit geändert', body: '09.11.2026 · Deutsch · 9:00–10:00', date: '2026-11-09' }, new Date('2026-11-09T08:30:00Z')), false)
 
   const blank = { grades: [], events: [], exams: [], absences: [], messages: [] }
   const past = { id: 'p1', start: '2026-10-29T10:00:00', end: '2026-10-29T10:45:00', text: 'Biologie', room: 'R1', teachers: [], courseName: 'Biologie', status: '', eventType: '1_pru' }

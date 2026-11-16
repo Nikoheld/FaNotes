@@ -2469,17 +2469,29 @@ const CLOCK_RANGE = /\b(\d{1,2}):(\d{2})\s*[–-]\s*(\d{1,2}):(\d{2})\b/u
 export const zurichClock = (now = new Date()) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now)
 export const changeDay = (change) => eventDate(change?.date) ||
   ((change?.category === 'exam' || change?.category === 'timetable') ? eventDate(String(change?.body || '').slice(0, 12)) : '')
+const clockText = (hour, minute) => `${String(hour).padStart(2, '0')}:${minute}`
+
 /** A notice about a lesson, exam or appointment that has already ended. Grades, absences, messages and probes never are. */
 export const changeIsOver = (change, now = new Date()) => {
   if (!DATED_CATEGORIES.has(change?.category) || isNotificationProbe(change?.id)) return false
   const day = changeDay(change)
   if (!day) return false
   const today = zurichToday(now)
-  if (day < today) return true
   if (day > today) return false
   const range = String(change.body || '').match(CLOCK_RANGE)
-  if (!range) return false
-  return zurichClock(now) > `${range[3].padStart(2, '0')}:${range[4]}`
+  const start = range ? clockText(range[1], range[2]) : ''
+  const end = range ? clockText(range[3], range[4]) : ''
+  // 23:00–00:30 ends the next morning. Text order would call that over at 22:00.
+  const crossesMidnight = Boolean(start && end && end < start)
+  if (day < today) {
+    if (!crossesMidnight) return true
+    const next = addDays(day, 1)
+    if (today > next) return true
+    if (today < next) return false
+    return zurichClock(now) > end
+  }
+  if (!end || crossesMidnight) return false
+  return zurichClock(now) > end
 }
 /** More new appointments than this in one read is the list growing, not news. */
 export const APPOINTMENT_BURST = 8
