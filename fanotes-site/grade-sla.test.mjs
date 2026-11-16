@@ -579,3 +579,46 @@ test('a reveal ledger that is not the known shape is left in place', async () =>
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a grade monitor that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-monitor-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    autostart: false,
+    now: () => new Date('2026-11-16T08:00:00.000Z'),
+    fetch: async (url) => {
+      const target = String(url)
+      const body = target.endsWith('/token.php')
+        ? { access_token: 'access-token-value', refresh_token: 'rotated-refresh-token-value-123456', expires_in: 3600 }
+        : []
+      return { status: 200, text: async () => JSON.stringify(body) }
+    },
+    fcmSend: async () => ({ status: 200 }),
+  })
+  const accountId = 'f'.repeat(32)
+  const file = join(root, 'accounts', accountId, 'monitor.json')
+  try {
+    await runtime.linkAccount(accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    await runtime.pollAccount(accountId)
+    const list = '["keep-this-check"]\n'
+    await writeFile(file, list, { mode: 0o600 })
+    await assert.rejects(() => runtime.pollAccount(accountId), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(file, 'utf8'), list)
+    const pushes = '{"pushes":"keep-this"}\n'
+    await writeFile(file, pushes, { mode: 0o600 })
+    await assert.rejects(() => runtime.pollAccount(accountId), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(file, 'utf8'), pushes)
+    await rm(file)
+    await runtime.pollAccount(accountId)
+    const fresh = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(typeof fresh.gradeCheckAt, 'string')
+    assert.equal(Array.isArray(fresh.pushes) || fresh.pushes == null, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
