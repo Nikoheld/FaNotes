@@ -620,9 +620,20 @@ try {
   await check('regression: the HTTP host falls back to another port when the stored port is busy', async () => {
     const hostData = join(base, 'hostData')
     mkdirSync(hostData, { recursive: true })
-    const stored = loadTokenStore(hostData)
-    const blocker = net.createServer()
-    await new Promise((resolve, reject) => { blocker.once('error', reject); blocker.listen(stored.port, '127.0.0.1', resolve) })
+    // The stored port is random; on Windows it can fall into an OS-reserved range (EACCES), so draw another one.
+    let stored
+    let blocker
+    for (let attempt = 0; ; attempt += 1) {
+      stored = loadTokenStore(hostData)
+      blocker = net.createServer()
+      try {
+        await new Promise((resolve, reject) => { blocker.once('error', reject); blocker.listen(stored.port, '127.0.0.1', resolve) })
+        break
+      } catch (error) {
+        if (error?.code !== 'EACCES' || attempt >= 20) throw error
+        rmSync(join(hostData, 'mcp-local.json'), { force: true })
+      }
+    }
     const host = createLocalMcpHost({ userData: hostData, getState: () => ({ settings: { ...SETTINGS, mcpWriteAccess: false }, vaultPath: vault }) })
     try {
       await host.apply({ mcpEnabled: true, mcpHttpEnabled: true })
