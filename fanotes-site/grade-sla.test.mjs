@@ -552,6 +552,53 @@ test('a grade ledger that is not the known shape is left in place', async () => 
   }
 })
 
+test('an agenda week that is not a week is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-agenda-week-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.90')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const dir = join(root, 'accounts', guest.accountId)
+    const file = join(dir, 'notification-baseline.json')
+    const call = async () => {
+      const request = {
+        method: 'PUT',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.90' },
+        async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+      return status
+    }
+    const keep = async (week) => {
+      const stored = `${JSON.stringify({ version: 1, weeks: { '2026-11-16': week } })}\n`
+      await writeFile(file, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep('kept')
+    await keep({ events: 'kept', exams: [], weekFetched: {}, examWeekFetched: {} })
+    await keep({ events: [], exams: 'kept', weekFetched: {}, examWeekFetched: {} })
+    await keep({ events: [], exams: [], weekFetched: ['kept'], examWeekFetched: {} })
+    const good = { keep: true, events: [], exams: [], weekFetched: {}, examWeekFetched: {}, fetchedAt: '2026-11-16T08:00:00.000Z' }
+    await writeFile(file, JSON.stringify({ version: 1, weeks: { '2026-11-16': good } }), { mode: 0o600 })
+    assert.equal(await call(), 200)
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).weeks['2026-11-16'].keep, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('an agenda baseline that is not the known shape is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'grade-agenda-'))
   const runtime = createSchulnetzRuntime({
