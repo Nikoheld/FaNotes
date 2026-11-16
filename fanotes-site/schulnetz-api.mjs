@@ -326,6 +326,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (link == null) return null
     const timeKnown = (value) => value == null || value === '' || (typeof value === 'string' && Number.isFinite(Date.parse(value)))
     const sealKnown = (value) => value == null || value === '' || (plainObject(value) && value.v === 1 && typeof value.iv === 'string' && typeof value.tag === 'string' && typeof value.data === 'string')
+    const modeKnown = (value) => value == null || value === '' || value === 'web' || value === 'rest' || value === 'device'
     const known = plainObject(link)
       && (link.fcmTokens == null || (Array.isArray(link.fcmTokens) && link.fcmTokens.every(isValidFcmToken)))
       && (link.pushKeys == null || plainObject(link.pushKeys))
@@ -336,6 +337,8 @@ export const createSchulnetzRuntime = (options = {}) => {
       && timeKnown(link.cookiesSavedAt) && timeKnown(link.accessExpiresAt)
       // A saved sign-in that is not a sealed token must not look signed out, or the next poll drops the session.
       && sealKnown(link.refresh) && sealKnown(link.access) && sealKnown(link.sso) && sealKnown(link.serverSession)
+      // A saved mode that is not a mode must not look like a token sign-in, or the next poll marks the account signed out.
+      && modeKnown(link.mode)
     if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)
