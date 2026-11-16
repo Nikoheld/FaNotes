@@ -73,7 +73,7 @@ try {
   // 1. loader result
   const updates = []
   let final
-  await loadVaultStats(host, new AbortController().signal, (value, progress) => { updates.push(progress.phase); final = value })
+  await loadVaultStats(host, new AbortController().signal, (value, progress) => { updates.push(progress.phase); final = value }, { now })
   assert.ok(updates.includes('tree') && updates.at(-1) === 'done', 'tree first, done last')
   assert.equal(final.kinds.markdown.count, 4, 'Algebra, Geometrie, Eingang and Hausaufgaben are plain markdown')
   assert.equal(final.kinds.handwriting.count, 1)
@@ -106,7 +106,7 @@ try {
 
   // 2. cache: unchanged files are not read again (only Hausaufgaben.md)
   reads = 0
-  await loadVaultStats(host, new AbortController().signal, () => {})
+  await loadVaultStats(host, new AbortController().signal, () => {}, { now })
   assert.equal(reads, 1, 'second run reads only the homework file (statistics come from the short-lived cache)')
 
   // 3. cancel: an aborted run stops reading
@@ -114,7 +114,7 @@ try {
   const many = Array.from({ length: 400 }, (_, index) => ({ name: `n${index}.md`, relativePath: `Viele/n${index}.md`, kind: 'file', extension: 'md', size: 10, modifiedAt: day(-1).toISOString() }))
   let manyReads = 0
   const slow = { getTree: async () => [{ name: 'Viele', relativePath: 'Viele', kind: 'folder', children: many }], readFile: async () => { manyReads += 1; if (manyReads === 5) controller.abort(); return 'x' } }
-  await loadVaultStats(slow, controller.signal, () => {})
+  await loadVaultStats(slow, controller.signal, () => {}, { now })
   assert.ok(manyReads < 40, `aborted run stopped early (${manyReads} reads)`)
 
   // 4. UI-thread friendliness: 5000 synthetic files aggregate quickly and loading yields to the event loop
