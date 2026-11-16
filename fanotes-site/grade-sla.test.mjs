@@ -1571,3 +1571,72 @@ test('a link mode that is not a mode is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a link device id that is not an id is left in place', async () => {
+  let calls = 0
+  const root = await mkdtemp(join(tmpdir(), 'grade-link-device-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { calls += 1; throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.73')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const linkFile = join(root, 'accounts', guest.accountId, 'link.json')
+    const snapshot = join(root, 'accounts', guest.accountId, 'snapshot.json')
+    const keptSnapshot = '{"grades":[{"id":"g-keep"}]}\n'
+    await writeFile(snapshot, keptSnapshot, { mode: 0o600 })
+    const live = JSON.parse(await readFile(linkFile, 'utf8'))
+    const call = async () => {
+      const request = {
+        method: 'GET',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.73' },
+        async *[Symbol.asyncIterator]() {},
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/status'))
+      return status
+    }
+    const keep = async (deviceId) => {
+      const stored = JSON.stringify({ ...live, deviceId })
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      await assert.rejects(() => runtime.pollAccount(guest.accountId), (error) => error?.code === 'EBADMSG')
+      assert.equal(calls, 0)
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await keep('0123456789abcdef0123456')
+    await keep('0123456789ABCDEF01234567')
+    await keep(true)
+    await keep(1)
+    const open = async (deviceId) => {
+      const next = { ...live }
+      if (deviceId === undefined) delete next.deviceId
+      else next.deviceId = deviceId
+      const stored = JSON.stringify(next)
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call(), 200)
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await open('0123456789abcdef01234567')
+    await open('')
+    await open(undefined)
+    const blank = JSON.stringify({ ...live, mode: 'device', deviceId: '' })
+    await writeFile(linkFile, blank, { mode: 0o600 })
+    const skipped = await runtime.pollAccount(guest.accountId)
+    assert.equal(skipped.skipped, true)
+    assert.equal(calls, 0)
+    assert.equal(await readFile(linkFile, 'utf8'), blank)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
