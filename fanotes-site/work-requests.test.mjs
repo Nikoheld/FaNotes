@@ -231,3 +231,21 @@ test('SSE connections are capped per account', async () => {
     for (const controller of controllers) controller.abort()
   } finally { await s.close() }
 })
+
+test('auto-approve marks a request approved when it reaches waiting_for_you', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'fanotes-req-'))
+  try {
+    for (const autoApprove of [false, true]) {
+      const store = createWorkRequestsStore(join(dir, String(autoApprove)), { autoApprove })
+      const created = await store.create(OWNER, { type: 'bug', title: 'T', description: 'D', priority: 'normal' })
+      await store.claim()
+      await store.workerStatus(created.id, { status: 'working' })
+      await store.workerStatus(created.id, { status: 'pr_open', pr: { number: 1 } })
+      const { request } = await store.workerStatus(created.id, { status: 'waiting_for_you' })
+      assert.equal(request.approved, autoApprove)
+      const events = await store.readEvents(created.id)
+      assert.equal(events.some((event) => event.type === 'approved' && event.by === 'auto'), autoApprove)
+      if (autoApprove) assert.equal((await store.workerStatus(created.id, { status: 'merged' })).request.status, 'merged')
+    }
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
