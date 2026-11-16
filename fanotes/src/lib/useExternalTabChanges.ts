@@ -528,5 +528,13 @@ export function useExternalTabChanges(deps: ExternalTabChangeDeps) {
     }
   })
 
-  return { busyPath, parkHeldTab, keepMine, loadExternal, restoreTab, saveTabAs }
+  /**
+   * Look at one open note right now (a save failed, or the first keystroke
+   * after a save): the file may have been deleted or edited outside FaNotes.
+   */
+  const checkPath = useCallback((path: string): Promise<void> => (
+    enqueue({ change: { added: [], removed: [], changed: [path], unreliable: false }, before: new Map() })
+  ), [enqueue])
+
+  return { busyPath, checkPath, parkHeldTab, keepMine, loadExternal, restoreTab, saveTabAs }
 }

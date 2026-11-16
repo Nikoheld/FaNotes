@@ -951,6 +951,7 @@ export default function App({ startupBootstrap }: AppProps) {
   // Tabs whose file was deleted or edited outside FaNotes are paused: nothing is saved over either side until the user decides.
   const { holds: tabHolds, holdsRef: tabHoldsRef, ownWritesRef: tabOwnWritesRef, setHold: setTabHold, noteOwnWrite, moveTabState, pruneTabState } = useTabHolds()
   const parkHeldTabRef = useRef<(path: string) => Promise<boolean>>(async () => true)
+  const checkTabPathRef = useRef<(path: string) => Promise<void>>(async () => undefined)
   const settingsTimer = useRef<number | null>(null)
   const pageStatsRef = useRef(new Map<string, PageStatsSession>())
   /** A failed page-stats read. Saving must not invent a fresh session over the companion. */
@@ -2182,6 +2183,8 @@ export default function App({ startupBootstrap }: AppProps) {
     } catch (error) {
       setSaveState('error')
       toast(error instanceof Error ? error.message : 'Speichern fehlgeschlagen.', 'error')
+      // The note may have been deleted, renamed or replaced outside FaNotes: reconcile the tab with its file.
+      void checkTabPathRef.current?.(path)
       return false
     }
   }, [flushPageStats, noteOwnWrite, pushEditableShare, tabHoldsRef, toast])
@@ -2421,7 +2424,10 @@ export default function App({ startupBootstrap }: AppProps) {
     if (session) pageStatsRef.current.set(path, touchPageModified(session, now))
     setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content } : tab))
     setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
+    // First keystroke after a save: the file may have changed outside FaNotes since; check before autosave can win.
+    const firstKeystroke = !pendingWrites.current.has(path) && !tabHoldsRef.current[path]
     pendingWrites.current.set(path, content)
+    if (firstKeystroke) void checkTabPathRef.current?.(path)
     addonNoteChangedRef.current?.(path, content)
     // A paused tab (its file was deleted or edited outside FaNotes) keeps what is typed but saves nothing.
     if (tabHoldsRef.current[path]) return
@@ -3690,6 +3696,7 @@ export default function App({ startupBootstrap }: AppProps) {
     deviceName: () => settingsRef.current.syncDeviceName ?? '',
   })
   parkHeldTabRef.current = externalTabs.parkHeldTab
+  checkTabPathRef.current = externalTabs.checkPath
 
   const moveEntry = useCallback(async (path: string, destFolder = '') => {
     const session = vaultSessionGenerationRef.current
