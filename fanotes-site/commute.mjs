@@ -506,6 +506,23 @@ export const createCommute = (options = {}) => {
         const number = Number(day)
         return Number.isInteger(number) && number >= 1 && number <= 7
       }
+      const STOP_TYPES = ['train', 'bus', 'tram', 'ship', 'cableway', 'other']
+      const stopTypeKnown = (stop) => stop == null || typeof stop !== 'object' || Array.isArray(stop) || stop.type == null || STOP_TYPES.includes(stop.type)
+      const thresholdKept = (value) => {
+        if (value == null) return true
+        const number = Number(value)
+        return Number.isFinite(number) && number >= 1 && number <= 30
+      }
+      const transfersKept = (value) => {
+        if (value == null) return true
+        const number = Number(value)
+        return Number.isInteger(number) && number >= 0 && number <= 9
+      }
+      const stopIdKept = (value) => {
+        if (value == null || value === '') return true
+        const stopId = String(value).replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 32)
+        return /^[A-Za-z0-9:_.-]{1,32}$/u.test(stopId)
+      }
       const detailKnown = (route) => {
         const pins = route?.pins
         const vias = route?.vias
@@ -517,8 +534,13 @@ export const createCommute = (options = {}) => {
         if (pins != null && !Array.isArray(pins)) return false
         if (Array.isArray(pins) && sanitizePins(pins.slice(0, MAX_PINS)).length !== Math.min(pins.length, MAX_PINS)) return false
         if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin) => Array.isArray(pin?.days) && pin.days.some((day) => !weekdayKept(day)))) return false
+        if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin) => pin && typeof pin === 'object' && (!transfersKept(pin.transfers) || !stopIdKept(pin.stopId)))) return false
         if (vias != null && !Array.isArray(vias)) return false
         if (Array.isArray(vias) && sanitizeVias({ vias: vias.slice(0, MAX_VIAS) }).length !== Math.min(vias.length, MAX_VIAS)) return false
+        if (Array.isArray(vias) && vias.slice(0, MAX_VIAS).some((via) => !stopTypeKnown(via))) return false
+        if (!stopTypeKnown(route?.from) || !stopTypeKnown(route?.to)) return false
+        if (route?.notify != null && typeof route.notify !== 'boolean') return false
+        if (!thresholdKept(route?.delayThreshold)) return false
         if (schedule != null && (typeof schedule !== 'object' || Array.isArray(schedule))) return false
         if (days != null && !Array.isArray(days)) return false
         if (Array.isArray(days) && days.some((day) => !weekdayKept(day))) return false
@@ -528,7 +550,7 @@ export const createCommute = (options = {}) => {
         if (route?.schedule?.mode === 'times' && Array.isArray(times) && sanitizeSchedule({ mode: 'times', times: times.slice(0, MAX_TIMES) }).times.length !== Math.min(times.length, MAX_TIMES)) return false
         return true
       }
-      // A pin, via, time, weekday, or schedule the sanitizer would replace must not look absent, or the next save drops it. The caps stay.
+      // A pin, via, time, weekday, schedule, stop type, threshold, or notify flag the sanitizer would replace must not look absent, or the next save drops it. The caps stay.
       if (!stored.routes.every(detailKnown)) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // Hidden labels or a threshold that are not the known shape must not look like the defaults, or the next save clears them.
       const settings = stored.settings
@@ -537,7 +559,7 @@ export const createCommute = (options = {}) => {
         const threshold = settings.delayThreshold
         const settingsKnown = typeof settings === 'object' && !Array.isArray(settings)
           && (labels == null || (Array.isArray(labels) && labels.every((label) => typeof label === 'string')))
-          && (threshold == null || (typeof threshold === 'number' && Number.isFinite(threshold)))
+          && (threshold == null || (typeof threshold === 'number' && Number.isFinite(threshold) && threshold >= 1 && threshold <= 30))
         if (!settingsKnown) throw Object.assign(new Error('commute settings'), { code: 'EBADMSG' })
       }
     }
