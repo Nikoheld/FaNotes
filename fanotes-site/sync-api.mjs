@@ -440,6 +440,15 @@ const loadTable = async (accountId) => {
   }
   for (const entry of table.entries.values()) if (!entry.deleted) table.bytes += Number(entry.size) || 0
   table.historyBytes = await measureHistory(accountId)
+  // Tests hold the load here so a changes read can finish beside a write.
+  // Production leaves this unset.
+  const hold = process.env.FANOTES_SYNC_LOAD_HOLD === '1' ? globalThis.FANOTES_SYNC_LOAD_HOLD : null
+  if (typeof hold === 'function') await hold(accountId)
+  // A second load must not replace a table this process has already published.
+  // The changes feed does not take the account lock, so it can finish a load
+  // that started earlier and drop a revision the client has already accepted.
+  const published = tables.get(accountId)
+  if (published) return published
   tables.set(accountId, table)
   return table
 }
