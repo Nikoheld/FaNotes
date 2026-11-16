@@ -5,8 +5,8 @@ import { promises as fs } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
-  CHAIN_TRANSFER_MIN, CHECK_IMMINENT_MS, MAX_VIAS, chainSegments, hasViaLoop, passesVias, sameViaStop, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
-  parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizeRoutes,
+  CHAIN_TRANSFER_MIN, CHECK_IMMINENT_MS, MAX_PINS, MAX_TIMES, MAX_VIAS, chainSegments, hasViaLoop, passesVias, sameViaStop, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
+  parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizePins, sanitizeRoutes, sanitizeSchedule, sanitizeVias,
   sanitizeSettings, sanitizeStop, tripAlerts, usable, zurichWall,
 } from './commute-logic.mjs'
 import { createServiceLog, routeOf } from './service-log.mjs'
@@ -502,6 +502,24 @@ export const createCommute = (options = {}) => {
       if (!known) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // An entry the sanitizer would skip must not look absent, or the next check deletes its alert state and the next save drops the route.
       if (sanitizeRoutes(stored.routes).length !== stored.routes.length) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      const detailKnown = (route) => {
+        const pins = route?.pins
+        const vias = route?.vias
+        const schedule = route?.schedule
+        const times = schedule?.times
+        const days = schedule?.days
+        if (pins != null && !Array.isArray(pins)) return false
+        if (Array.isArray(pins) && sanitizePins(pins.slice(0, MAX_PINS)).length !== Math.min(pins.length, MAX_PINS)) return false
+        if (vias != null && !Array.isArray(vias)) return false
+        if (Array.isArray(vias) && sanitizeVias({ vias: vias.slice(0, MAX_VIAS) }).length !== Math.min(vias.length, MAX_VIAS)) return false
+        if (schedule != null && (typeof schedule !== 'object' || Array.isArray(schedule))) return false
+        if (days != null && !Array.isArray(days)) return false
+        if (times != null && !Array.isArray(times)) return false
+        if (route?.schedule?.mode === 'times' && Array.isArray(times) && sanitizeSchedule({ mode: 'times', times: times.slice(0, MAX_TIMES) }).times.length !== Math.min(times.length, MAX_TIMES)) return false
+        return true
+      }
+      // A pin, via, or time the sanitizer would skip must not look absent, or the next save drops it. The caps stay.
+      if (!stored.routes.every(detailKnown)) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // Hidden labels or a threshold that are not the known shape must not look like the defaults, or the next save clears them.
       const settings = stored.settings
       if (settings != null) {
