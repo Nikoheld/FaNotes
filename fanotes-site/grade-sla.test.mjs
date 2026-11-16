@@ -816,6 +816,56 @@ test('a snapshot whose grades are not a list is left in place', async () => {
   }
 })
 
+test('a snapshot row that is not a record is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-snapshot-row-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.91')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const file = join(root, 'accounts', guest.accountId, 'snapshot.json')
+    const call = async () => {
+      const request = {
+        method: 'PUT',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.91' },
+        async *[Symbol.asyncIterator]() { yield Buffer.from('{"grades":[]}') },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/snapshot'))
+      return status
+    }
+    const keep = async (snapshot) => {
+      const stored = `${JSON.stringify({ fetchedAt: '2026-11-16T08:00:00.000Z', ...snapshot })}\n`
+      await writeFile(file, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ events: ['kept'] })
+    await keep({ events: [1] })
+    await keep({ events: [null] })
+    await keep({ grades: ['kept'] })
+    await keep({ exams: [[]] })
+    await keep({ absences: ['kept'] })
+    const lesson = { id: 'e-keep', start: '2026-11-16T08:00:00', eventType: 'lesson' }
+    await writeFile(file, `${JSON.stringify({ fetchedAt: '2026-11-16T08:00:00.000Z', grades: [{ id: 'g-keep' }], events: [lesson] })}\n`, { mode: 0o600 })
+    assert.equal(await call(), 200)
+    const saved = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(saved.grades.some((grade) => grade.id === 'g-keep'), true)
+    assert.equal(saved.events.some((event) => event.id === 'e-keep'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a snapshot whose exams are not a list is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'grade-exams-'))
   const runtime = createSchulnetzRuntime({

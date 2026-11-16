@@ -287,7 +287,9 @@ export const createSchulnetzRuntime = (options = {}) => {
     const lists = ['grades', 'events', 'exams', 'absences', 'homework', 'messages', 'vacations', 'konto', 'startMessages']
     const maps = ['weekFetched', 'weekRead', 'examWeekFetched']
     const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
-    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && maps.every((name) => stored[name] == null || plain(stored[name]))
+    const rowsKnown = (list) => list.every(plain)
+    // A saved row that is not a record must not be dropped, or the next upload replaces the snapshot.
+    const known = plain(stored) && lists.every((name) => stored[name] == null || (Array.isArray(stored[name]) && rowsKnown(stored[name]))) && maps.every((name) => stored[name] == null || plain(stored[name]))
     if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
     return stored
   }
