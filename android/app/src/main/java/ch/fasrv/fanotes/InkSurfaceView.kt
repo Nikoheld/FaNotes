@@ -2265,7 +2265,7 @@ class InkSurfaceView @JvmOverloads constructor(
                     canvas.save()
                     canvas.translate(0f, 6f * scale)
                     canvas.scale(block.unit, block.unit)
-                    studyPainterFor(accentColor).draw(canvas, block.scene, paperImages)
+                    blockPainterFor(accentColor).draw(canvas, block.scene, paperImages)
                     canvas.restore()
                     canvas.translate(0f, block.height)
                 }
@@ -2310,15 +2310,15 @@ class InkSurfaceView @JvmOverloads constructor(
         return built
     }
 
-    private var studyPainter: StudyPainter? = null
-    private var studyPainterAccent = 0
+    private var blockPainter: LwBlockPainter? = null
+    private var blockPainterAccent = 0
 
-    private fun studyPainterFor(accent: Int): StudyPainter {
-        val current = studyPainter
-        if (current != null && studyPainterAccent == accent) return current
-        return StudyPainter(accent).also {
-            studyPainter = it
-            studyPainterAccent = accent
+    private fun blockPainterFor(accent: Int): LwBlockPainter {
+        val current = blockPainter
+        if (current != null && blockPainterAccent == accent) return current
+        return LwBlockPainter(accent).also {
+            blockPainter = it
+            blockPainterAccent = accent
         }
     }
 

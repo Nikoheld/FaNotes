@@ -20,7 +20,7 @@ import ch.fasrv.fanotes.study.Tone
 import ch.fasrv.fanotes.study.buildStudyScene
 
 /** Paints a [StudyScene] (read-only table, diagram, cards) on the paper. Units are dp. */
-internal class StudyPainter(private val accent: Int) {
+internal class LwBlockPainter(private val accent: Int) {
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND; strokeCap = Paint.Cap.ROUND }
     private val text = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -161,7 +161,7 @@ internal class StudyBlockSpan(
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
     private val density = android.content.res.Resources.getSystem().displayMetrics.density
     private val widthDp = (if (columnPx > 0f) columnPx else 640f * density) / density
-    private val painter = StudyPainter(accent)
+    private val painter = LwBlockPainter(accent)
     private val scene: StudyScene? by lazy { cachedStudyScene(kindId, body, widthDp.toDouble()) }
     private val margin get() = 6f * density
 
