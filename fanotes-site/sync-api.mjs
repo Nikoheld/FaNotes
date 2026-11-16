@@ -1786,16 +1786,16 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
 }
 
 const handleUploadComplete = async (request, response, auth, fileId, uploadId) => {
-  const base = parseIfMatch(request)
-  const metaHeader = parseMeta(request)
+  const requestBase = parseIfMatch(request)
+  const requestMeta = parseMeta(request)
   const declaredSha = request.headers['x-fanotes-sha256']
   if (typeof declaredSha !== 'string' || !FILE_ID_PATTERN.test(declaredSha)) fail(400, 'Die Prüfsumme der Datei fehlt.')
-  const blank = headerFlag(request.headers['x-fanotes-blank'])
-  const clear = request.headers['x-fanotes-clear'] === '1'
+  const requestBlank = headerFlag(request.headers['x-fanotes-blank'])
+  const requestClear = request.headers['x-fanotes-clear'] === '1'
   await withAccountLock(auth.account.id, async () => {
     const meta = await readPartial(auth.account.id, uploadId)
     if (!meta || meta.fileId !== fileId) {
-      await finishRenamedUpload(request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear)
+      await finishRenamedUpload(request, response, auth, fileId, uploadId, requestBase, requestMeta, declaredSha, requestBlank, requestClear)
       return
     }
     if (meta.received !== meta.size) fail(409, 'Der Upload ist noch nicht vollständig.', { offset: meta.received, size: meta.size, reason: 'incomplete' })
@@ -1807,17 +1807,23 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       // before the response so a retry cannot reserve its bytes again, then
       // record the revision from the live file.
       await removePartial(auth.account.id, uploadId)
-      await finishRenamedUpload(request, response, auth, fileId, uploadId, base, metaHeader, declaredSha, blank, clear)
+      await finishRenamedUpload(request, response, auth, fileId, uploadId, requestBase, requestMeta, declaredSha, requestBlank, requestClear)
       return
     }
     const actual = await hashFile(bodyPath)
     if (actual !== declaredSha) fail(400, 'Die Datei kam beschädigt an. Bitte erneut versuchen.')
+    // The bytes were uploaded against the revision and flags stored with the
+    // partial. A later complete cannot aim that body at a newer note.
+    const openedBase = Number(meta.base)
+    const base = Number.isInteger(openedBase) && openedBase >= 0 ? openedBase : requestBase
+    const blank = meta.blank === true || meta.blank === false ? meta.blank : requestBlank
+    const clear = meta.clear === true
     const table = await loadTable(auth.account.id)
     const current = table.entries.get(fileId)
     const settled = await settleDivergentLiveBlob(auth.account.id, table, fileId, current, {
       size: Number(meta.size) || 0,
       sha256: declaredSha,
-      meta: metaHeader,
+      meta: requestMeta,
       deviceId: auth.deviceId,
     })
     if (settled?.matchesRequest) {
@@ -1860,7 +1866,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
       await syncDirectory(dirname(bodyPath))
     }
     await removePartial(auth.account.id, uploadId)
-    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: metaHeader, updatedAt: nowIso(), deviceId: auth.deviceId }
+    const entry = { id: fileId, revision: table.revision + 1, deleted: false, size: meta.size, sha256: declaredSha, meta: requestMeta, updatedAt: nowIso(), deviceId: auth.deviceId }
     table.revision = entry.revision
     table.entries.set(fileId, entry)
     table.bytes += meta.size - previousBytes
