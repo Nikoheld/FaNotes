@@ -990,10 +990,11 @@ export const createSchulnetzRuntime = (options = {}) => {
   /** Missing file means "not migrated yet". A present file is the durable ledger. */
   const readGradeLedger = async (accountId) => {
     const parsed = await readJson(resolve(accountDir(accountId), 'notified-grades.json'))
-    // A missing or broken file can start again. A file that is there but not this ledger must not look missing, or the next publish replaces it and a failed change log deletes it.
+    // A missing or broken file can start again. A file that is there but not this ledger, including a key that is not text, must not look missing, or the next publish drops that key.
     if (!parsed) return null
-    if (parsed.version !== 1 || !Array.isArray(parsed.keys)) throw Object.assign(new Error('grade ledger'), { code: 'EBADMSG' })
-    return parsed.keys.filter((key) => typeof key === 'string' && key)
+    const keysKnown = parsed.version === 1 && Array.isArray(parsed.keys) && parsed.keys.every((key) => typeof key === 'string' && key)
+    if (!keysKnown) throw Object.assign(new Error('grade ledger'), { code: 'EBADMSG' })
+    return parsed.keys
   }
 
   const writeGradeLedger = async (accountId, keys) => {
