@@ -508,11 +508,8 @@ export const createCommute = (options = {}) => {
       }
       const STOP_TYPES = ['train', 'bus', 'tram', 'ship', 'cableway', 'other']
       const stopTypeKnown = (stop) => stop == null || typeof stop !== 'object' || Array.isArray(stop) || stop.type == null || STOP_TYPES.includes(stop.type)
-      const thresholdKept = (value) => {
-        if (value == null) return true
-        const number = Number(value)
-        return Number.isFinite(number) && number >= 1 && number <= 30
-      }
+      const thresholdKept = (value) => value == null || (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 30)
+      const minutesKept = (value, min, max) => typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
       const transfersKept = (value) => {
         if (value == null) return true
         const number = Number(value)
@@ -550,12 +547,12 @@ export const createCommute = (options = {}) => {
         if (days != null && !Array.isArray(days)) return false
         if (Array.isArray(days) && days.some((day) => !weekdayKept(day))) return false
         if (mode != null && !['none', 'times', 'firstLesson', 'lastLesson'].includes(mode)) return false
-        if (buffer != null && buffer !== '' && (typeof buffer !== 'number' || !Number.isFinite(buffer))) return false
+        if (buffer != null && buffer !== '' && !minutesKept(buffer, 0, 60)) return false
         if (times != null && !Array.isArray(times)) return false
         if (route?.schedule?.mode === 'times' && Array.isArray(times) && sanitizeSchedule({ mode: 'times', times: times.slice(0, MAX_TIMES) }).times.length !== Math.min(times.length, MAX_TIMES)) return false
         return true
       }
-      // A pin, via, time, weekday, schedule, stop type, threshold, notify flag, or arrival the sanitizer would replace must not look absent, or the next save drops it. The caps stay.
+      // A pin, via, time, weekday, walking time, schedule, stop type, threshold, notify flag, or arrival the sanitizer would replace must not look absent, or the next save drops it. The caps stay.
       if (!stored.routes.every(detailKnown)) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // Hidden labels or a threshold that are not the known shape must not look like the defaults, or the next save clears them.
       const settings = stored.settings
@@ -564,7 +561,7 @@ export const createCommute = (options = {}) => {
         const threshold = settings.delayThreshold
         const settingsKnown = typeof settings === 'object' && !Array.isArray(settings)
           && (labels == null || (Array.isArray(labels) && labels.every((label) => typeof label === 'string')))
-          && (threshold == null || (typeof threshold === 'number' && Number.isFinite(threshold) && threshold >= 1 && threshold <= 30))
+          && (threshold == null || minutesKept(threshold, 1, 30))
         if (!settingsKnown) throw Object.assign(new Error('commute settings'), { code: 'EBADMSG' })
       }
     }
