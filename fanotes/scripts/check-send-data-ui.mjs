@@ -8,6 +8,7 @@ const settingsSource = readFileSync(new URL('../src/components/SettingsModal.tsx
 const defaultsSource = readFileSync(new URL('../src/defaults.ts', import.meta.url), 'utf8')
 const typesSource = readFileSync(new URL('../src/types.ts', import.meta.url), 'utf8')
 const mainSource = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8')
+const sanitizeSource = readFileSync(new URL('../electron/settings-sanitize.cjs', import.meta.url), 'utf8')
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 
 const server = await createServer({
@@ -27,7 +28,7 @@ const runOnce = () => {
   assert.match(settingsSource, /experimentalSendData/)
   assert.match(defaultsSource, /experimentalSendData: false/)
   assert.match(typesSource, /experimentalSendData: boolean/)
-  assert.match(mainSource, /experimentalSendData: \{ type: 'boolean' \}/)
+  assert.match(sanitizeSource, /experimentalSendData: \{ type: 'boolean' \}/)
   assert.equal(defaultSettingsForPlatform('linux').experimentalSendData, false)
   assert.equal(defaultSettingsForPlatform('win32').experimentalSendData, false)
   assert.equal(sendDataPolicy(defaultSettingsForPlatform('linux').experimentalSendData).enabled, false)
