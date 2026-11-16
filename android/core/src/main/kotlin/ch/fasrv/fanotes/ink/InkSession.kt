@@ -7,9 +7,13 @@ import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.recognition.recognizeSchoolScript
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.round
+import kotlin.math.sqrt
 
 /** Corridor filter from `inkSampleMap.ts`. A leap is not a real stroke. */
 const val INK_JUMP_DY = 0.08
@@ -493,9 +497,321 @@ fun brushWidthScale(brush: String?): Double = when (brush) {
 private fun strokeHitsRect(stroke: InkStroke, rect: NormalizedRect): Boolean =
     stroke.points.any { it.x >= rect.x && it.x <= rect.right && it.y >= rect.y && it.y <= rect.bottom }
 
+/*
+ * Erasing. The eraser is a disk swept along the samples of one gesture, and a
+ * stroke's ink is its centre line thickened by half the stroke width. So a
+ * point of a stroke is erased when it lies within `reach` (eraser radius plus
+ * half the stroke width) of the eraser path. The cut is closed-form geometry,
+ * the same as `cutPageStroke` in `inkPieces.ts` on the desktop: the circle and
+ * slab intersections are solved on each stroke segment, so cut points sit
+ * exactly on the rim of the eraser however sparse the stroke is, and a sweep
+ * that crosses a long segment between two vertices still cuts it.
+ */
+
+/** Rounding level: squared px for a segment length, px for a change along an axis. */
+private const val ERASE_EPSILON = 1e-12
+
+/** A stretch shorter than this many px is the rim of an earlier cut met again through rounding. */
+private const val ERASE_MIN_CUT_LENGTH = 1e-3
+
+/** A cut this close (in "vertex index + fraction") to a vertex is that vertex. */
+private const val ERASE_VERTEX_SNAP = 1e-9
+
 /**
- * Returns null when the stroke is untouched, or the remaining pieces
- * (possibly empty) when the eraser crossed it.
+ * Shortest piece worth keeping after a cut, in px. A shorter remainder is a
+ * crumb: a dot as wide as the stroke that nobody drew and nobody can erase.
+ */
+private fun eraseCrumbLength(baseWidth: Double) = max(0.5, (if (baseWidth.isFinite()) baseWidth else 0.0) / 4.0)
+
+/** Narrows [span] (from, to as t along a segment) to where `start + rate * t` lies between [low] and [high]. */
+private fun eraseClipSpan(span: DoubleArray, start: Double, rate: Double, low: Double, high: Double): Boolean {
+    if (rate > -ERASE_EPSILON && rate < ERASE_EPSILON) return start >= low && start <= high
+    var enter = (low - start) / rate
+    var leave = (high - start) / rate
+    if (enter > leave) {
+        val swap = enter
+        enter = leave
+        leave = swap
+    }
+    if (enter > span[0]) span[0] = enter
+    if (leave < span[1]) span[1] = leave
+    return span[0] <= span[1]
+}
+
+/** Where the segment a + t * d (t in 0..1) is inside the disk of radius [reach] around (cx, cy). */
+private fun eraseDiskSpan(
+    ax: Double,
+    ay: Double,
+    dx: Double,
+    dy: Double,
+    cx: Double,
+    cy: Double,
+    reach: Double,
+    span: DoubleArray,
+): Boolean {
+    val fx = ax - cx
+    val fy = ay - cy
+    val squared = dx * dx + dy * dy
+    if (squared < ERASE_EPSILON) {
+        // The segment is a point (a repeated sample).
+        if (!(fx * fx + fy * fy <= reach * reach)) return false
+        span[0] = 0.0
+        span[1] = 1.0
+        return true
+    }
+    val length = sqrt(squared)
+    // The closest approach to the centre, and how far the line passes from it.
+    val closest = -(fx * dx + fy * dy) / squared
+    val offset = (fx * dy - fy * dx) / length
+    val rest = reach * reach - offset * offset
+    if (!(rest >= 0.0)) return false
+    val half = sqrt(rest) / length
+    val enter = max(0.0, closest - half)
+    val leave = min(1.0, closest + half)
+    if (!(enter <= leave)) return false
+    span[0] = enter
+    span[1] = leave
+    return true
+}
+
+/**
+ * Where the segment a + t * d (t in 0..1) is inside the straight part of a
+ * swept disk: the rectangle [reach] to either side of the line from q to e.
+ */
+private fun eraseSlabSpan(
+    ax: Double,
+    ay: Double,
+    dx: Double,
+    dy: Double,
+    qx: Double,
+    qy: Double,
+    ex: Double,
+    ey: Double,
+    reach: Double,
+    span: DoubleArray,
+): Boolean {
+    val length = hypot(ex - qx, ey - qy)
+    if (!(length > ERASE_EPSILON)) return false
+    val ux = (ex - qx) / length
+    val uy = (ey - qy) / length
+    val rx = ax - qx
+    val ry = ay - qy
+    span[0] = 0.0
+    span[1] = 1.0
+    return eraseClipSpan(span, rx * ux + ry * uy, dx * ux + dy * uy, 0.0, length) &&
+        eraseClipSpan(span, ux * ry - uy * rx, ux * dy - uy * dx, -reach, reach)
+}
+
+/** Sorts the first [used] numbers of [spans] (from, to pairs) by `from` and joins the pairs that touch. */
+private fun eraseMergeSpans(spans: DoubleArray, used: Int): DoubleArray {
+    if (used <= 2) return spans.copyOf(used)
+    var index = 2
+    while (index < used) {
+        val from = spans[index]
+        val to = spans[index + 1]
+        var before = index - 2
+        while (before >= 0 && spans[before] > from) {
+            spans[before + 2] = spans[before]
+            spans[before + 3] = spans[before + 1]
+            before -= 2
+        }
+        spans[before + 2] = from
+        spans[before + 3] = to
+        index += 2
+    }
+    var merged = 2
+    index = 2
+    while (index < used) {
+        if (spans[index] <= spans[merged - 1] + ERASE_EPSILON) {
+            if (spans[index + 1] > spans[merged - 1]) spans[merged - 1] = spans[index + 1]
+        } else {
+            spans[merged] = spans[index]
+            spans[merged + 1] = spans[index + 1]
+            merged += 2
+        }
+        index += 2
+    }
+    return spans.copyOf(merged)
+}
+
+/**
+ * The parts of the stroke segment (ax, ay) to (bx, by) that lie within [reach]
+ * of the eraser path, as ascending, disjoint (from, to) pairs of t in 0..1; null
+ * when the segment stays clear. The swept disk is the union of one disk per path
+ * vertex and one rectangle per path segment.
+ */
+private fun eraseSegmentSpans(
+    ax: Double,
+    ay: Double,
+    bx: Double,
+    by: Double,
+    pathX: DoubleArray,
+    pathY: DoubleArray,
+    reach: Double,
+): DoubleArray? {
+    val dx = bx - ax
+    val dy = by - ay
+    val left = min(ax, bx)
+    val right = max(ax, bx)
+    val top = min(ay, by)
+    val bottom = max(ay, by)
+    val span = DoubleArray(2)
+    var found: DoubleArray? = null
+    var used = 0
+    for (index in pathX.indices) {
+        val fromX = pathX[index]
+        val fromY = pathY[index]
+        if (fromX + reach >= left && fromX - reach <= right && fromY + reach >= top && fromY - reach <= bottom &&
+            eraseDiskSpan(ax, ay, dx, dy, fromX, fromY, reach, span)
+        ) {
+            val spans = found ?: DoubleArray(4 * pathX.size).also { found = it }
+            spans[used++] = span[0]
+            spans[used++] = span[1]
+        }
+        if (index + 1 >= pathX.size) continue
+        val toX = pathX[index + 1]
+        val toY = pathY[index + 1]
+        if (max(fromX, toX) + reach >= left && min(fromX, toX) - reach <= right &&
+            max(fromY, toY) + reach >= top && min(fromY, toY) - reach <= bottom &&
+            eraseSlabSpan(ax, ay, dx, dy, fromX, fromY, toX, toY, reach, span)
+        ) {
+            val spans = found ?: DoubleArray(4 * pathX.size).also { found = it }
+            spans[used++] = span[0]
+            spans[used++] = span[1]
+        }
+    }
+    return found?.let { eraseMergeSpans(it, used) }
+}
+
+private class EraseStretch(
+    /** First and last erased position, as "vertex index + fraction of the next segment". */
+    var from: Double,
+    var to: Double,
+    /** Length of ink the stretch covers, in px. */
+    var ink: Double,
+)
+
+/** Every stretch of the stroke the eraser path reaches, in order and apart. */
+private fun erasedStretches(
+    points: List<StrokePoint>,
+    sourceWidth: Double,
+    sourceHeight: Double,
+    pathX: DoubleArray,
+    pathY: DoubleArray,
+    reach: Double,
+): List<EraseStretch> {
+    var pathLeft = Double.POSITIVE_INFINITY
+    var pathTop = Double.POSITIVE_INFINITY
+    var pathRight = Double.NEGATIVE_INFINITY
+    var pathBottom = Double.NEGATIVE_INFINITY
+    for (index in pathX.indices) {
+        if (pathX[index] < pathLeft) pathLeft = pathX[index]
+        if (pathX[index] > pathRight) pathRight = pathX[index]
+        if (pathY[index] < pathTop) pathTop = pathY[index]
+        if (pathY[index] > pathBottom) pathBottom = pathY[index]
+    }
+    pathLeft -= reach
+    pathTop -= reach
+    pathRight += reach
+    pathBottom += reach
+
+    val stretches = ArrayList<EraseStretch>()
+    var ax = points[0].x * sourceWidth
+    var ay = points[0].y * sourceHeight
+    for (index in 1 until points.size) {
+        val bx = points[index].x * sourceWidth
+        val by = points[index].y * sourceHeight
+        // Comparisons are written so that a NaN coordinate never passes.
+        val spans = if (
+            max(ax, bx) >= pathLeft && min(ax, bx) <= pathRight &&
+            max(ay, by) >= pathTop && min(ay, by) <= pathBottom
+        ) {
+            eraseSegmentSpans(ax, ay, bx, by, pathX, pathY, reach)
+        } else {
+            null
+        }
+        if (spans != null) {
+            val length = hypot(bx - ax, by - ay)
+            var at = 0
+            while (at < spans.size) {
+                val from = index - 1 + spans[at]
+                val to = index - 1 + spans[at + 1]
+                // A segment covered end to end counts even when it is a repeated sample.
+                val ink = if (spans[at] <= 0.0 && spans[at + 1] >= 1.0) {
+                    max(length, ERASE_MIN_CUT_LENGTH)
+                } else {
+                    (spans[at + 1] - spans[at]) * length
+                }
+                val previous = stretches.lastOrNull()
+                if (previous != null && from <= previous.to + ERASE_VERTEX_SNAP) {
+                    if (to > previous.to) previous.to = to
+                    previous.ink += ink
+                } else {
+                    stretches += EraseStretch(from, to, ink)
+                }
+                at += 2
+            }
+        }
+        ax = bx
+        ay = by
+    }
+    return stretches.filter { it.ink >= ERASE_MIN_CUT_LENGTH }
+}
+
+/** The ink between the stretches, with new end points exactly where the cuts are. */
+private fun keptPieces(
+    stroke: InkStroke,
+    sourceWidth: Double,
+    sourceHeight: Double,
+    stretches: List<EraseStretch>,
+): List<InkStroke> {
+    val points = stroke.points
+    val minLength = eraseCrumbLength(stroke.baseWidth)
+    val pieces = ArrayList<InkStroke>()
+    fun vertexAt(position: Double): Int {
+        val nearest = round(position)
+        return if (abs(position - nearest) <= ERASE_VERTEX_SNAP) nearest.toInt() else -1
+    }
+    fun pointAt(position: Double): StrokePoint {
+        val index = floor(position).toInt()
+        return lerpPoint(points[index], points[index + 1], position - index)
+    }
+    fun keep(from: Double, to: Double) {
+        if (!(to - from > ERASE_VERTEX_SNAP)) return
+        val firstVertex = vertexAt(from)
+        val lastVertex = vertexAt(to)
+        val kept = ArrayList<StrokePoint>()
+        if (firstVertex < 0) kept += pointAt(from)
+        val inner = if (lastVertex < 0) floor(to).toInt() else lastVertex
+        var index = if (firstVertex < 0) ceil(from).toInt() else firstVertex
+        while (index <= inner) {
+            kept += points[index]
+            index += 1
+        }
+        if (lastVertex < 0) kept += pointAt(to)
+        if (kept.size < 2) return
+        var length = 0.0
+        for (at in 1 until kept.size) {
+            length += hypot((kept[at].x - kept[at - 1].x) * sourceWidth, (kept[at].y - kept[at - 1].y) * sourceHeight)
+        }
+        if (length < minLength) return
+        pieces += stroke.copy(points = kept)
+    }
+    var start = 0.0
+    for (stretch in stretches) {
+        keep(start, stretch.from)
+        start = stretch.to
+    }
+    keep(start, points.lastIndex.toDouble())
+    return pieces
+}
+
+/**
+ * Cuts out the ink of [stroke] that lies within the eraser's reach (radius plus
+ * half the stroke width) of the path through [samples]. Returns null when the
+ * stroke is untouched, or the remaining pieces (possibly none) when the eraser
+ * crossed it. A remainder shorter than a crumb (a quarter of the stroke width,
+ * at least half a pixel) is dropped.
  */
 fun splitStroke(
     stroke: InkStroke,
@@ -504,56 +820,23 @@ fun splitStroke(
     sourceWidth: Double,
     sourceHeight: Double,
 ): List<InkStroke>? {
-    if (stroke.points.isEmpty() || samples.isEmpty()) return null
+    val points = stroke.points
+    if (points.isEmpty() || samples.isEmpty()) return null
     val reach = radiusPagePx + stroke.baseWidth / 2.0
-    val path = samples.map { it.x * sourceWidth to it.y * sourceHeight }
-    fun near(x: Double, y: Double): Boolean {
-        if (path.size == 1) return hypot(x - path[0].first, y - path[0].second) <= reach
-        for (i in 1 until path.size) {
-            if (pointToSegment(x, y, path[i - 1].first, path[i - 1].second, path[i].first, path[i].second) <= reach) return true
+    val pathX = DoubleArray(samples.size) { samples[it].x * sourceWidth }
+    val pathY = DoubleArray(samples.size) { samples[it].y * sourceHeight }
+    if (points.size == 1) {
+        val x = points[0].x * sourceWidth
+        val y = points[0].y * sourceHeight
+        var nearest = hypot(x - pathX[0], y - pathY[0])
+        for (index in 1 until pathX.size) {
+            nearest = min(nearest, pointToSegment(x, y, pathX[index - 1], pathY[index - 1], pathX[index], pathY[index]))
         }
-        return false
+        return if (nearest <= reach) emptyList() else null
     }
-    // Dense walk along the stroke: original vertices plus interpolated probes
-    // so a long segment is cut where the eraser crosses it, not at its far vertices.
-    val dense = ArrayList<StrokePoint>()
-    val original = ArrayList<Boolean>()
-    val hit = ArrayList<Boolean>()
-    val step = (radiusPagePx / 3.0).coerceAtLeast(1.0)
-    stroke.points.forEachIndexed { index, point ->
-        if (index > 0) {
-            val previous = stroke.points[index - 1]
-            val length = hypot((point.x - previous.x) * sourceWidth, (point.y - previous.y) * sourceHeight)
-            val parts = kotlin.math.ceil(length / step).toInt().coerceAtMost(512)
-            for (k in 1 until parts) {
-                val t = k.toDouble() / parts
-                val probe = lerpPoint(previous, point, t)
-                dense += probe
-                original += false
-                hit += near(probe.x * sourceWidth, probe.y * sourceHeight)
-            }
-        }
-        dense += point
-        original += true
-        hit += near(point.x * sourceWidth, point.y * sourceHeight)
-    }
-    if (hit.none { it }) return null
-    val pieces = mutableListOf<InkStroke>()
-    var current = mutableListOf<StrokePoint>()
-    fun flush() {
-        if (current.isNotEmpty()) pieces += stroke.copy(points = current.toList())
-        current = mutableListOf()
-    }
-    for (index in dense.indices) {
-        if (hit[index]) {
-            flush()
-            continue
-        }
-        val boundary = (index > 0 && hit[index - 1]) || (index < dense.lastIndex && hit[index + 1])
-        if (original[index] || boundary) current += dense[index]
-    }
-    flush()
-    return pieces
+    val stretches = erasedStretches(points, sourceWidth, sourceHeight, pathX, pathY, reach)
+    if (stretches.isEmpty()) return null
+    return keptPieces(stroke, sourceWidth, sourceHeight, stretches)
 }
 
 private fun pointToSegment(px: Double, py: Double, ax: Double, ay: Double, bx: Double, by: Double): Double {
