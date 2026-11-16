@@ -1056,7 +1056,14 @@ export const createSchulnetzRuntime = (options = {}) => {
   // The grade promise (a new grade on the phone within 10 minutes): when each account's grades page
   // was last read, and how long each push took from detection. Counts and times only.
   const monitorPath = (accountId) => resolve(accountDir(accountId), 'monitor.json')
-  const readMonitor = async (accountId) => (await readJson(monitorPath(accountId))) || {}
+  const readMonitor = async (accountId) => {
+    const stored = await readJson(monitorPath(accountId))
+    // A missing or broken file can start again. A file that is there but not this monitor must not look empty, or the next check replaces it.
+    if (stored == null) return {}
+    const known = typeof stored === 'object' && !Array.isArray(stored) && (stored.pushes == null || Array.isArray(stored.pushes))
+    if (!known) throw Object.assign(new Error('grade monitor'), { code: 'EBADMSG' })
+    return stored
+  }
   const recordGradeCheck = async (accountId, ok, ms, kind) => {
     const monitor = await readMonitor(accountId)
     const at = now().toISOString()
