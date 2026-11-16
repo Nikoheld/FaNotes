@@ -1609,6 +1609,23 @@ test('seal round trip uses aes-256-gcm', () => {
 })
 
 
+test('two exams on the same day with the same mark stay distinct and are not announced again', () => {
+  const html = `<table><tr><td>Chemie-K26A-1 Chemie</td><td>5.0</td></tr><tr><td><table>
+    <tr><td>01.03.2026</td><td>Test</td><td>5.5</td><td>1</td></tr>
+    <tr><td>01.03.2026</td><td>Test</td><td>5.5</td><td>2</td></tr>
+  </table></td></tr></table>`
+  const grades = parseGradesHtml(html)
+  assert.equal(grades.length, 2)
+  assert.equal(grades[0].weight, 1)
+  assert.equal(grades[1].weight, 2)
+  assert.notEqual(grades[0].id, grades[1].id)
+  assert.equal(grades[0].id.endsWith(':2'), false)
+  const fresh = diffSnapshots({ grades: [] }, { grades }).filter((change) => change.category === 'grade')
+  assert.equal(fresh.length, 2)
+  const again = diffSnapshots({ grades }, { grades }).filter((change) => change.category === 'grade')
+  assert.equal(again.length, 0)
+})
+
 test('synthetic nested tables keep three courses and eighteen individual marks separate', async () => {
   const html = await readFile(new URL('../android/core/src/test/resources/schulnetz/noten-multi-course.html', import.meta.url), 'utf8')
   const grades = parseGradesHtml(html)
