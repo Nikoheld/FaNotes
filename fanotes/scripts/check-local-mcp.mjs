@@ -551,12 +551,89 @@ try {
     const search = await httpPost(port, { body: rpc('tools/call', { name: 'search_notes', arguments: { query: 'Zebrastreifen' } }, 74), headers: auth() })
     assert.equal(JSON.parse(search.json.result.content[0].text).matches.length, 0)
   })
+  if (process.platform === 'win32') {
+    await check('windows: real reserved names, NTFS streams, junctions, 8.3 names and case variants stay blocked', async () => {
+      const { execFileSync } = require('node:child_process')
+      const callTool = async (name, args, id) => (await httpPost(port, { body: rpc('tools/call', { name, arguments: args }, id), headers: auth() })).text
+      const denied = async (name, args, label) => {
+        const text = await callTool(name, args, 90)
+        const parsed = JSON.parse(text)
+        assert.equal(parsed.result.isError, true, `${name} ${label}: ${text.slice(0, 200)}`)
+        assert.ok(!/Zebrastreifen|ADS-SECRET|internal-secret-value|OUTSIDE-SECRET/u.test(text), `leak ${label}`)
+      }
+      writeConfig({ ...SETTINGS, mcpWriteAccess: true })
+      // Reserved device names (a real open of CON/NUL would hit the device, not a file).
+      for (const path of ['CON.md', 'con', 'NUL.md', 'Mathe/NUL', 'Mathe/aux.md', 'Mathe/COM1.md', 'Mathe/lpt1.txt.md', 'PRN.md']) {
+        await denied('read_note', { path }, path)
+        await denied('create_note', { path: path.endsWith('.md') ? path : `${path}.md`, content: 'x' }, `create ${path}`)
+      }
+      // A real alternate data stream next to a visible note and inside the excluded folder.
+      writeFileSync(`${join(vault, 'Mathe', 'Analysis.md')}:secret`, 'ADS-SECRET')
+      writeFileSync(`${join(vault, 'Privat', 'Tagebuch.md')}:secret`, 'ADS-SECRET')
+      assert.equal(readFileSync(`${join(vault, 'Mathe', 'Analysis.md')}:secret`, 'utf8'), 'ADS-SECRET', 'NTFS streams must be available on the runner')
+      for (const path of ['Mathe/Analysis.md:secret', 'Mathe/Analysis.md:secret:$DATA', 'Privat/Tagebuch.md:secret', 'Mathe/note.md:secret']) {
+        await denied('read_note', { path }, path)
+        await denied('append_to_note', { path, text: 'x' }, `append ${path}`)
+        await denied('create_note', { path, content: 'x' }, `create ${path}`)
+      }
+      assert.equal(readFileSync(`${join(vault, 'Mathe', 'Analysis.md')}:secret`, 'utf8'), 'ADS-SECRET')
+      // A directory junction (mklink /J) into the excluded folder and into .fanotes.
+      mkdirSync(join(vault, 'WinPub'), { recursive: true })
+      execFileSync('cmd', ['/c', 'mklink', '/J', join(vault, 'WinPub', 'jp'), join(vault, 'Privat')], { stdio: 'pipe' })
+      execFileSync('cmd', ['/c', 'mklink', '/J', join(vault, 'WinPub', 'jf'), join(vault, '.fanotes')], { stdio: 'pipe' })
+      for (const path of ['WinPub/jp/Tagebuch.md', 'WinPub/jf/secret.json']) {
+        await denied('read_note', { path }, path)
+        await denied('append_to_note', { path, text: 'pwned' }, `append ${path}`)
+      }
+      await denied('create_note', { path: 'WinPub/jp/neu.md', content: 'x' }, 'create via junction')
+      assert.ok(!existsSync(join(vault, 'Privat', 'neu.md')))
+      const listed = JSON.parse(JSON.parse(await callTool('list_notes', { folder: 'WinPub' }, 91)).result.content[0].text)
+      assert.equal(listed.notes.length, 0, 'junction contents must not be listed')
+      const found = JSON.parse(JSON.parse(await callTool('search_notes', { query: 'Zebrastreifen' }, 92)).result.content[0].text)
+      assert.equal(found.matches.length, 0, 'junction contents must not be searchable')
+      // Case variants (NTFS is case-insensitive).
+      for (const path of ['PRIVAT/Tagebuch.md', 'privat/tagebuch.md', 'Privat/TAGEBUCH.MD', '.FANOTES/secret.json', '.Fanotes/secret.json', 'Mathe/../PRIVAT/Tagebuch.md']) {
+        await denied('read_note', { path }, path)
+      }
+      await denied('create_note', { path: 'pRiVaT/neu.md', content: 'x' }, 'create case variant')
+      assert.ok(!existsSync(join(vault, 'Privat', 'neu.md')))
+      // 8.3 short name of a long excluded folder (skipped when the volume has 8.3 names disabled).
+      const longName = 'Geheimordner-lang'
+      put(`${longName}/Wichtig.md`, '# Wichtig\n\nZebrastreifen im Geheimordner\n')
+      writeConfig({ ...SETTINGS, mcpWriteAccess: true, mcpExcludedFolders: `Privat, ${longName}` })
+      const listing = execFileSync('cmd', ['/c', 'dir', '/x', '/ad', vault], { encoding: 'utf8' })
+      const line = listing.split(/\r?\n/u).find((entry) => entry.includes(longName))
+      const short = line && /\s([A-Z0-9_$~!#%&'()@^`{}-]+~\d+)\s+Geheimordner-lang/u.exec(line)?.[1]
+      if (short) {
+        await denied('read_note', { path: `${short}/Wichtig.md` }, `8.3 ${short}`)
+        await denied('create_note', { path: `${short}/neu.md`, content: 'x' }, `create 8.3 ${short}`)
+        await denied('read_note', { path: `${short.toLowerCase()}/Wichtig.md` }, `8.3 lower ${short}`)
+        assert.ok(!existsSync(join(vault, longName, 'neu.md')))
+      } else {
+        console.error('note: 8.3 short names are disabled on this volume; short-name case skipped')
+      }
+      await denied('read_note', { path: `${longName}/Wichtig.md` }, 'long excluded name')
+      await denied('read_note', { path: `${longName.toUpperCase()}/Wichtig.md` }, 'long excluded name uppercase')
+      writeConfig({ ...SETTINGS, mcpWriteAccess: true })
+    })
+  }
   await check('regression: the HTTP host falls back to another port when the stored port is busy', async () => {
     const hostData = join(base, 'hostData')
     mkdirSync(hostData, { recursive: true })
-    const stored = loadTokenStore(hostData)
-    const blocker = net.createServer()
-    await new Promise((resolve, reject) => { blocker.once('error', reject); blocker.listen(stored.port, '127.0.0.1', resolve) })
+    // The stored port is random; on Windows it can fall into an OS-reserved range (EACCES), so draw another one.
+    let stored
+    let blocker
+    for (let attempt = 0; ; attempt += 1) {
+      stored = loadTokenStore(hostData)
+      blocker = net.createServer()
+      try {
+        await new Promise((resolve, reject) => { blocker.once('error', reject); blocker.listen(stored.port, '127.0.0.1', resolve) })
+        break
+      } catch (error) {
+        if (error?.code !== 'EACCES' || attempt >= 20) throw error
+        rmSync(join(hostData, 'mcp-local.json'), { force: true })
+      }
+    }
     const host = createLocalMcpHost({ userData: hostData, getState: () => ({ settings: { ...SETTINGS, mcpWriteAccess: false }, vaultPath: vault }) })
     try {
       await host.apply({ mcpEnabled: true, mcpHttpEnabled: true })
