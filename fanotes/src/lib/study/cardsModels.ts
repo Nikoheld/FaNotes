@@ -75,7 +75,7 @@ export const parseTermData = (body: string): TermData => {
 /** A card derived from a study block. Not stored: the schedule is kept by id in the note's card store. */
 export type StudyCardSource = { id: string; front: string; back: string; frontImage?: string }
 
-export const PLATE_PROMPT = 'Wie heisst das?'
+export const PLATE_PROMPT = 'Wie heißt das?'
 
 export const studyCardSources = (markdown: string): StudyCardSource[] => {
   const cards: StudyCardSource[] = []

@@ -1089,12 +1089,12 @@ fun FaNotesScreen(
             }
             if (!toast.isNullOrBlank()) {
                 FaNotesToast(
-                    toast,
+                    ch.fasrv.fanotes.desk.ChromeText.ui(toast),
                 onDismiss = {
                     model.undoTrash.value = null
                     model.message.value = null
                 },
-                actionLabel = if (undoTrash != null && toast == ch.fasrv.fanotes.vault.TRASH_NOTICE) ch.fasrv.fanotes.vault.TRASH_UNDO else null,
+                actionLabel = if (undoTrash != null && toast == ch.fasrv.fanotes.vault.TRASH_NOTICE) ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.vault.TRASH_UNDO) else null,
                 onAction = { model.undoLastTrash() },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
