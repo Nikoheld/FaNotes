@@ -671,6 +671,58 @@ test('a reveal ledger that is not the known shape is left in place', async () =>
   }
 })
 
+test('a reveal ledger id that is not a token is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-reveal-id-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.90')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const file = join(root, 'accounts', guest.accountId, 'reveals.json')
+    const call = async () => {
+      const request = {
+        method: 'PUT',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.90' },
+        async *[Symbol.asyncIterator]() { yield Buffer.from('{"hidden":["c-new"]}') },
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/reveals'))
+      return status
+    }
+    const keep = async (ledger) => {
+      const stored = `${JSON.stringify(ledger)}\n`
+      await writeFile(file, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ version: 1, hidden: ['c-keep', { kept: true }], revealed: ['c-old'] })
+    await keep({ version: 1, hidden: ['c-keep', ''], revealed: ['c-old'] })
+    await keep({ version: 1, hidden: ['c-keep', 1], revealed: ['c-old'] })
+    await keep({ version: 1, hidden: ['c-keep'], revealed: ['c-old', 'has space'] })
+    await keep({ version: 1, hidden: [' c-keep'], revealed: ['c-old'] })
+    await keep({ version: 1, hidden: ['c-keep', 'x'.repeat(65)], revealed: ['c-old'] })
+    const longId = 'a'.repeat(64)
+    await writeFile(file, `${JSON.stringify({ version: 1, hidden: ['c-keep', longId], revealed: ['c-old'] })}\n`, { mode: 0o600 })
+    assert.equal(await call(), 200)
+    const saved = JSON.parse(await readFile(file, 'utf8'))
+    assert.equal(saved.hidden.includes('c-keep'), true)
+    assert.equal(saved.hidden.includes(longId), true)
+    assert.equal(saved.hidden.includes('c-new'), true)
+    assert.equal(saved.revealed.includes('c-old'), true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a grade monitor that is not the known shape is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'grade-monitor-'))
   const runtime = createSchulnetzRuntime({

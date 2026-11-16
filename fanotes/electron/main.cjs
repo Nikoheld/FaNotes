@@ -3,7 +3,8 @@
 // `FaNotes --mcp` is the stdio MCP server for AI clients. It must run before
 // any app startup (windows, single-instance lock, profile migration).
 if (process.argv.slice(1).includes('--mcp')) {
-  require('./fanotes-mcp.cjs').runCli(process.argv.slice(1)).then(() => process.exit(0), () => process.exit(1))
+  const mcp = require('./fanotes-mcp.cjs')
+  mcp.runCli(process.argv.slice(1)).then(() => mcp.exitAfterDrain(0), () => mcp.exitAfterDrain(1))
   return
 }
 
@@ -965,6 +966,7 @@ function localMcpHost() {
     packaged: app.isPackaged,
     execPath: process.execPath,
     appImage: process.env.APPIMAGE || '',
+    version: app.getVersion(),
   })
   return localMcpHostInstance
 }

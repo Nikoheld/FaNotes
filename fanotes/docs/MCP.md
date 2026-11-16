@@ -48,7 +48,7 @@ It is off by default. Turn it on under Settings → KI-Zugriff (MCP). The settin
 ## Starting it
 
 - stdio, packaged app: `ELECTRON_RUN_AS_NODE=1 <FaNotes executable> <install dir>/resources/app.asar/electron/fanotes-mcp.cjs`. Settings shows the exact command and paths.
-- stdio, AppImage: `<FaNotes.AppImage> --mcp`. This starts the Electron binary, which needs a display session like the app itself.
+- stdio, AppImage (Linux): FaNotes copies the server files to `<app data>/mcp/` (`~/.config/FaNotes/mcp/`) each time Settings is opened, and Settings then shows `ELECTRON_RUN_AS_NODE=1 <FaNotes.AppImage> <app data>/mcp/fanotes-mcp.cjs`. This runs as plain Node: no display, no sandbox flags, so it also works over SSH or in a container (FUSE 2 is still needed to run an AppImage, or use `--appimage-extract-and-run`). Open Settings once after installing or updating so the copy exists. The fallback `<FaNotes.AppImage> --mcp` starts the whole Electron app and needs a display session (`DISPLAY`).
 - stdio, from a checkout: `node electron/fanotes-mcp.cjs`.
 - Streamable HTTP: Settings → KI-Zugriff (MCP) → Lokalen HTTP-Server starten. The server listens on `http://127.0.0.1:<port>/mcp` while FaNotes is open and needs `Authorization: Bearer <token>`. The port and token are stored in `mcp-local.json` in the app data folder (file mode 0600) and can be regenerated in Settings.
 
@@ -59,11 +59,15 @@ Examples:
 ```
 
 ```text
-claude mcp add fanotes -e ELECTRON_RUN_AS_NODE=1 -- /path/to/FaNotes /path/to/resources/app.asar/electron/fanotes-mcp.cjs
+claude mcp add --scope user -e ELECTRON_RUN_AS_NODE=1 fanotes -- /path/to/FaNotes /path/to/resources/app.asar/electron/fanotes-mcp.cjs
 claude mcp add --transport http fanotes http://127.0.0.1:<port>/mcp --header "Authorization: Bearer <token>"
 ```
 
-`--user-data <dir>` (or `FANOTES_USER_DATA`) selects another app data folder. The server re-reads the settings on every request, so the toggles apply at once and no restart is needed.
+`--user-data <dir>` (or `FANOTES_USER_DATA`) selects another app data folder. The server re-reads the settings on every request, so the toggles apply at once and no restart of the server is needed. The read tools are always listed (while the feature is off, calls answer that AI access is switched off), so a client that connected early still discovers them. Write tools appear when write access is turned on; the stdio server checks `config.json` every 2 seconds and sends `notifications/tools/list_changed`, which clients that support it pick up. Others need a reconnect to see the write tools. The HTTP transport is stateless and cannot push that notification.
+
+Client config files: Claude Desktop reads `claude_desktop_config.json` (Windows `%APPDATA%\Claude\`, the Microsoft Store build uses a folder under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\`, macOS `~/Library/Application Support/Claude/`, Linux `~/.config/Claude/`); restart Claude Desktop after editing it. That file takes stdio entries only; the HTTP JSON is for Cursor, Claude Code and similar. If the app data folder is not the default (`~/.config/FaNotes`, `%APPDATA%\FaNotes`), add `"--user-data", "<path>"` to `args`, because most clients do not forward `XDG_CONFIG_HOME`.
+
+Parallel calls queue (8 run at once, 64 may wait up to 30 seconds); beyond that a tool call returns an error result asking the client to retry. Tool results are capped at about 60,000 characters; a larger result is returned as `{"truncated": true, ...}`. `resources/list` pages with `nextCursor`.
 
 ## Tools
 

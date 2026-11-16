@@ -81,7 +81,7 @@ export type LocalMcpInfo = {
   /** Masked hint such as `fnmcp_…ab12`; the token itself is only returned by the one-shot `reveal` action. */
   httpTokenHint: string
   httpError: string
-  stdio: { packaged: boolean; appImage: string; execPath: string; entryPath: string; platform: string; userData: string }
+  stdio: { packaged: boolean; appImage: string; execPath: string; entryPath: string; copied?: boolean; platform: string; userData: string }
 }
 
 export type AppSettings = {

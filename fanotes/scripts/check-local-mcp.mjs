@@ -32,7 +32,7 @@ const famd = require('../electron/famd.cjs')
 const { createLocalMcpServer } = require('../electron/local-mcp.cjs')
 const { contextFromConfigFile, createHttpTransport, loadTokenStore, regenerateToken } = require('../electron/local-mcp-transport.cjs')
 const { createVault } = require('../electron/local-mcp-vault.cjs')
-const { createLocalMcpHost } = require('../electron/local-mcp-host.cjs')
+const { createLocalMcpHost, syncMcpRuntime } = require('../electron/local-mcp-host.cjs')
 const net = require('node:net')
 
 const put = (relative, content) => {
@@ -113,6 +113,7 @@ class StdioClient {
     this.next = 1
     this.waiting = new Map()
     this.stderr = ''
+    this.notifications = []
     let buffer = ''
     this.child.stdout.setEncoding('utf8')
     this.child.stdout.on('data', (chunk) => {
@@ -121,6 +122,7 @@ class StdioClient {
         const line = buffer.slice(0, index)
         buffer = buffer.slice(index + 1)
         const message = JSON.parse(line)
+        if (message.id === undefined) this.notifications.push(message)
         this.waiting.get(message.id)?.(message)
       }
     })
@@ -344,6 +346,11 @@ try {
 
   // ── write access on ──
   writeConfig({ ...SETTINGS, mcpWriteAccess: true })
+  await check('stdio sends notifications/tools/list_changed when write access is switched on', async () => {
+    const deadline = Date.now() + 8000
+    while (!client.notifications.some((entry) => entry.method === 'notifications/tools/list_changed') && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100))
+    assert.ok(client.notifications.some((entry) => entry.method === 'notifications/tools/list_changed'))
+  })
   await check('write tools appear and work when write access is on', async () => {
     const names = (await client.request('tools/list')).result.tools.map((tool) => tool.name)
     for (const name of ['create_note', 'append_to_note', 'add_task', 'complete_task']) assert.ok(names.includes(name))
@@ -397,8 +404,10 @@ try {
   })
 
   writeConfig({ ...SETTINGS, mcpEnabled: false })
-  await check('switching the feature off empties tools and refuses calls', async () => {
-    assert.deepEqual((await client.request('tools/list')).result.tools, [])
+  await check('switching the feature off keeps the read tools listed and refuses calls', async () => {
+    const names = (await client.request('tools/list')).result.tools.map((tool) => tool.name)
+    assert.ok(names.includes('read_note') && names.includes('search_notes'), 'read tools stay discoverable')
+    assert.ok(!names.includes('create_note'), 'write tools stay hidden while the feature is off')
     assert.match(toolError(await call('list_notes')), /switched off/u)
     assert.deepEqual((await client.request('resources/list')).result.resources, [])
   })
@@ -511,14 +520,13 @@ try {
     assert.ok(direct.cacheBytes() <= 32 * 1024 * 1024, `cache is bounded (${direct.cacheBytes()})`)
     rmSync(join(vault, 'Huge'), { recursive: true })
   })
-  await check('regression: batches are capped and concurrent calls are limited', async () => {
+  await check('regression: batches are capped and concurrent calls are queued', async () => {
     const tooBig = await httpPost(port, { body: Array.from({ length: 11 }, (_, index) => rpc('ping', {}, 100 + index)), headers: auth() })
     assert.equal(tooBig.json.error.code, -32600)
     const ok = await httpPost(port, { body: Array.from({ length: 10 }, (_, index) => rpc('ping', {}, 200 + index)), headers: auth() })
     assert.equal(ok.json.length, 10)
     const replies = await Promise.all(Array.from({ length: 10 }, (_, index) => server.handleOne(rpc('tools/call', { name: 'list_notes', arguments: {} }, 300 + index))))
-    assert.ok(replies.some((reply) => reply.error?.code === -32000), 'excess in-flight calls are refused')
-    assert.ok(replies.some((reply) => reply.result), 'and the rest still run')
+    assert.ok(replies.every((reply) => reply.result && !reply.result.isError), 'excess calls wait in the queue and still succeed')
   })
   await check('regression: Windows-style names cannot reach excluded folders', async () => {
     for (const path of ['Privat::$I30:$INDEX_ALLOCATION/Tagebuch.md', 'Privat./Tagebuch.md', 'Privat /Tagebuch.md', 'PRIVAT~1/Tagebuch.md', 'CON.md', 'Mathe/nul', 'Mathe/aux.txt.md', 'Mathe/LPT1.md', 'Privat:x/y.md', 'Mathe/Analysis.md:stream']) {
@@ -663,6 +671,56 @@ try {
     } finally {
       await stdio.close()
     }
+  })
+  await check('parallel requests queue instead of being rejected', async () => {
+    const slow = createLocalMcpServer({
+      context: async () => { await new Promise((resolve) => setTimeout(resolve, 25)); return { enabled: true, writeAccess: false, vaultPath: vault, excludedFolders: [] } },
+      maxRunning: 2,
+    })
+    const call12 = Array.from({ length: 12 }, (_, index) => slow.handle(rpc('tools/call', { name: 'vault_stats', arguments: {} }, index + 1)))
+    for (const reply of await Promise.all(call12)) assert.ok(!reply.error && !reply.result.isError, JSON.stringify(reply))
+  })
+  await check('a full queue or a long wait answers a tool call with an isError retry hint', async () => {
+    const make = (options) => createLocalMcpServer({
+      context: async () => { await new Promise((resolve) => setTimeout(resolve, 150)); return { enabled: true, writeAccess: false, vaultPath: vault, excludedFolders: [] } },
+      ...options,
+    })
+    const full = make({ maxRunning: 1, maxQueued: 1 })
+    const replies = await Promise.all([1, 2, 3].map((id) => full.handle(rpc('tools/call', { name: 'vault_stats', arguments: {} }, id))))
+    assert.equal(replies[2].result.isError, true)
+    assert.match(replies[2].result.content[0].text, /busy/u)
+    assert.ok(!replies[0].result.isError && !replies[1].result.isError)
+    const timed = make({ maxRunning: 1, queueTimeoutMs: 20 })
+    const late = await Promise.all([1, 2].map((id) => timed.handle(rpc('tools/call', { name: 'vault_stats', arguments: {} }, id))))
+    assert.equal(late[1].result.isError, true)
+    assert.deepEqual((await timed.handle(rpc('ping', {}, 9))).result, {}, 'ping is never queued')
+  })
+  await check('tools/list reflects the current settings on every call and advertises listChanged on stdio', async () => {
+    let enabled = false
+    const dynamic = createLocalMcpServer({ context: () => ({ enabled, writeAccess: enabled, vaultPath: vault, excludedFolders: [] }), listChanged: true })
+    assert.equal((await dynamic.handle(rpc('initialize', { protocolVersion: '2025-06-18' }))).result.capabilities.tools.listChanged, true)
+    assert.ok((await dynamic.handle(rpc('tools/list', {}, 2))).result.tools.length > 5, 'read tools are listed before enabling')
+    assert.equal(await dynamic.pollListChanged(), false)
+    enabled = true
+    assert.equal(await dynamic.pollListChanged(), true)
+    assert.equal(await dynamic.pollListChanged(), false)
+    assert.ok((await dynamic.handle(rpc('tools/list', {}, 3))).result.tools.some((tool) => tool.name === 'create_note'))
+  })
+  await check('the AppImage runtime copy starts headless as plain Node', async () => {
+    const copyRoot = join(base, 'appimage-userdata')
+    mkdirSync(copyRoot, { recursive: true })
+    const entry = syncMcpRuntime(copyRoot)
+    assert.ok(entry && existsSync(entry))
+    const host = createLocalMcpHost({ userData: copyRoot, getState: () => ({ settings: SETTINGS, vaultPath: vault }), packaged: true, appImage: '/opt/FaNotes.AppImage', execPath: '/opt/FaNotes.AppImage' })
+    const info = host.info()
+    assert.equal(info.stdio.copied, true)
+    assert.equal(info.stdio.entryPath, entry)
+    const child = spawn(process.execPath, [entry, '--user-data', userData], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, DISPLAY: '', WAYLAND_DISPLAY: '' } })
+    let out = ''
+    child.stdout.on('data', (chunk) => { out += chunk })
+    child.stdin.end(`${JSON.stringify(rpc('tools/list', {}, 1))}\n`)
+    await new Promise((resolve) => child.once('exit', resolve))
+    assert.ok(JSON.parse(out.trim()).result.tools.length > 5)
   })
   await check('http: repeated bad tokens are throttled', async () => {
     let last = 0

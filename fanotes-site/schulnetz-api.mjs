@@ -492,8 +492,10 @@ export const createSchulnetzRuntime = (options = {}) => {
   const revealsPath = (accountId) => resolve(accountDir(accountId), 'reveals.json')
   const readRevealFile = async (accountId) => {
     const stored = await readJson(revealsPath(accountId))
+    const revealIdKnown = (id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/u.test(id)
     // A missing or broken file can start again. A file that is there but not this ledger must not look empty, or the next reveal replaces the hidden grades.
-    if (stored && (stored.version !== 1 || !Array.isArray(stored.hidden) || !Array.isArray(stored.revealed))) {
+    // An id that is not a short token must not be dropped, or the next reveal replaces the hidden grades.
+    if (stored && (stored.version !== 1 || !Array.isArray(stored.hidden) || !Array.isArray(stored.revealed) || !stored.hidden.every(revealIdKnown) || !stored.revealed.every(revealIdKnown))) {
       throw Object.assign(new Error('reveal ledger'), { code: 'EBADMSG' })
     }
     return stored

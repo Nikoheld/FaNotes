@@ -14,10 +14,16 @@ const { createVault, McpError } = require('./local-mcp-vault.cjs')
 
 const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']
 const SERVER_INFO = { name: 'fanotes', title: 'FaNotes', version: '1.0.0' }
-const MAX_RESULT_CHARS = 120_000
+// About 15k tokens: under Claude Code's default MAX_MCP_OUTPUT_TOKENS (25k).
+const MAX_RESULT_CHARS = 60_000
+const RESOURCE_PAGE = 500
 const TOOL_TIMEOUT_MS = 30_000
 const MAX_BATCH = 10
-const MAX_IN_FLIGHT = 4
+// Requests beyond MAX_RUNNING wait in a bounded queue (clients routinely fire
+// 5 to 10 parallel tool calls); only a full queue or a long wait is refused.
+const MAX_RUNNING = 8
+const MAX_QUEUED = 64
+const QUEUE_TIMEOUT_MS = 30_000
 const NOTE_URI = 'fanotes://note/'
 
 const INSTRUCTIONS = [
@@ -189,7 +195,12 @@ const rpcResult = (id, result) => ({ jsonrpc: '2.0', id, result })
 
 const textResult = (value, isError = false) => {
   let text = typeof value === 'string' ? value : JSON.stringify(value)
-  if (text.length > MAX_RESULT_CHARS) text = `${text.slice(0, MAX_RESULT_CHARS)}\n[truncated]`
+  if (text.length > MAX_RESULT_CHARS) {
+    // Keep the payload valid JSON for structured values; flag the cut instead of slicing mid-token.
+    text = typeof value === 'string'
+      ? `${text.slice(0, MAX_RESULT_CHARS)}\n[truncated]`
+      : JSON.stringify({ truncated: true, note: 'The result was too large and was cut. Narrow the request (folder, limit, offset, maxChars).', partial: text.slice(0, MAX_RESULT_CHARS - 300) })
+  }
   return { content: [{ type: 'text', text }], isError }
 }
 
@@ -213,9 +224,38 @@ const num = (value, fallback, min, max) => (Number.isFinite(value) ? Math.min(ma
 /**
  * @param {{ context: () => Promise<object>|object, log?: (line: string) => void }} options
  */
-const createLocalMcpServer = ({ context, log = () => {} }) => {
+const createLocalMcpServer = ({
+  context, log = () => {}, listChanged = false, version = SERVER_INFO.version,
+  maxRunning = MAX_RUNNING, maxQueued = MAX_QUEUED, queueTimeoutMs = QUEUE_TIMEOUT_MS,
+}) => {
   const state = { vault: null, key: '' }
-  let inFlight = 0
+  let running = 0
+  const queue = []
+  let listedSignature = null
+
+  /** Resolves true once a slot is held, false when the queue is full or the wait timed out. */
+  const acquire = () => {
+    if (running < maxRunning) { running += 1; return Promise.resolve(true) }
+    if (queue.length >= maxQueued) return Promise.resolve(false)
+    return new Promise((resolve) => {
+      const entry = { resolve, timer: null }
+      entry.timer = setTimeout(() => {
+        const index = queue.indexOf(entry)
+        if (index >= 0) queue.splice(index, 1)
+        resolve(false)
+      }, queueTimeoutMs)
+      queue.push(entry)
+    })
+  }
+  const release = () => {
+    const next = queue.shift()
+    if (next) { clearTimeout(next.timer); next.resolve(true) } // the slot passes on
+    else running -= 1
+  }
+
+  /** Tools a client may see right now. Read tools are always listed; write tools only with write access. */
+  const visibleTools = (ctx) => (ctx?.enabled && ctx.writeAccess ? [...TOOLS, ...WRITE_TOOLS] : TOOLS)
+  const signatureOf = (ctx) => (ctx?.enabled && ctx.writeAccess ? 'rw' : 'r')
 
   const current = async () => {
     const ctx = await context()
@@ -279,8 +319,8 @@ const createLocalMcpServer = ({ context, log = () => {} }) => {
       const requested = typeof params.protocolVersion === 'string' ? params.protocolVersion : ''
       return rpcResult(id, {
         protocolVersion: SUPPORTED_VERSIONS.includes(requested) ? requested : SUPPORTED_VERSIONS[0],
-        capabilities: { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false }, prompts: { listChanged: false } },
-        serverInfo: SERVER_INFO,
+        capabilities: { tools: { listChanged }, resources: { listChanged: false, subscribe: false }, prompts: { listChanged: false } },
+        serverInfo: { ...SERVER_INFO, version },
         instructions: INSTRUCTIONS,
       })
     }
@@ -288,8 +328,10 @@ const createLocalMcpServer = ({ context, log = () => {} }) => {
 
     const { ctx, vault } = await current()
     if (method === 'tools/list') {
-      if (!vault) return rpcResult(id, { tools: [] })
-      return rpcResult(id, { tools: ctx.writeAccess ? [...TOOLS, ...WRITE_TOOLS] : TOOLS })
+      // Always list the read tools: a client that connected before the feature was switched on
+      // keeps its cached list, and calls answer with the "switched off" hint until it is on.
+      listedSignature = signatureOf(ctx)
+      return rpcResult(id, { tools: visibleTools(ctx) })
     }
     if (method === 'tools/call') {
       if (typeof params.name !== 'string') return rpcError(id, -32602, 'Missing tool name.')
@@ -309,8 +351,11 @@ const createLocalMcpServer = ({ context, log = () => {} }) => {
     }
     if (method === 'resources/list') {
       if (!vault) return rpcResult(id, { resources: [] })
-      const listing = await vault.listNotes({ limit: 500, sort: 'modified' })
+      const offset = /^\d{1,7}$/u.test(String(params.cursor ?? '')) ? Number(params.cursor) : 0
+      const listing = await vault.listNotes({ limit: RESOURCE_PAGE, offset, sort: 'modified' })
+      const next = offset + RESOURCE_PAGE < listing.total ? { nextCursor: String(offset + RESOURCE_PAGE) } : {}
       return rpcResult(id, {
+        ...next,
         resources: listing.notes.filter((note) => note.kind !== 'story').map((note) => ({
           uri: noteUri(note.path),
           name: note.path,
@@ -351,17 +396,21 @@ const createLocalMcpServer = ({ context, log = () => {} }) => {
     if (typeof message.method !== 'string') return null // a response from the client: nothing to do
     if (message.id === undefined || message.id === null) return null // notification
     if (typeof message.id !== 'string' && typeof message.id !== 'number') return rpcError(null, -32600, 'Invalid request id.')
-    if (message.method !== 'initialize' && message.method !== 'ping' && inFlight >= MAX_IN_FLIGHT) {
+    const exempt = message.method === 'initialize' || message.method === 'ping'
+    if (!exempt && !(await acquire())) {
+      log('request refused: queue full or timed out')
+      if (message.method === 'tools/call') {
+        return rpcResult(message.id, textResult('FaNotes is busy with other requests. Please retry this call in a few seconds.', true))
+      }
       return rpcError(message.id, -32000, 'The server is busy. Try again in a moment.')
     }
-    inFlight += 1
     try {
       return await handleRequest(message)
     } catch (error) {
       log(`request ${String(message.method).slice(0, 40)} failed`)
       return rpcError(message.id, -32603, error instanceof McpError ? error.message : 'Internal error.')
     } finally {
-      inFlight -= 1
+      if (!exempt) release()
     }
   }
 
@@ -379,7 +428,18 @@ const createLocalMcpServer = ({ context, log = () => {} }) => {
     return handleOne(payload)
   }
 
-  return { handle, handleOne, tools: () => [...TOOLS, ...WRITE_TOOLS], SUPPORTED_VERSIONS }
+  /** True when the tool list a client already fetched is out of date (stdio sends list_changed). */
+  const pollListChanged = async () => {
+    if (listedSignature === null) return false
+    let ctx = null
+    try { ctx = await context() } catch { return false }
+    const signature = signatureOf(ctx)
+    if (signature === listedSignature) return false
+    listedSignature = signature
+    return true
+  }
+
+  return { handle, handleOne, pollListChanged, tools: () => [...TOOLS, ...WRITE_TOOLS], SUPPORTED_VERSIONS }
 }
 
 module.exports = { createLocalMcpServer, SUPPORTED_VERSIONS, TOOLS, WRITE_TOOLS, rpcError }
