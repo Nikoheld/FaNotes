@@ -482,6 +482,15 @@ export const createCommute = (options = {}) => {
       throw error
     }
   }
+  const readState = async (accountId) => {
+    const stored = await readJson(stateFile(accountId))
+    // A missing or broken file can start again. A file that is there but not this alert state must not look empty, or the next check replaces it.
+    if (stored == null) return null
+    const routes = stored.routes
+    const known = typeof stored === 'object' && !Array.isArray(stored) && typeof routes === 'object' && routes != null && !Array.isArray(routes)
+    if (!known) throw Object.assign(new Error('commute state'), { code: 'EBADMSG' })
+    return stored
+  }
 
   const read = async (accountId) => {
     const stored = await readJson(file(accountId))
@@ -605,7 +614,7 @@ export const createCommute = (options = {}) => {
     const { routes, settings } = await read(accountId)
     const events = await lessonsFor(accountId).catch(() => [])
     const chosen = routeId ? routes.filter((route) => route.id === routeId) : routes
-    const state = chosen.some((route) => route.pins.length) ? (await readJson(stateFile(accountId))) : null
+    const state = chosen.some((route) => route.pins.length) ? await readState(accountId) : null
     const boards = []
     for (const route of chosen) boards.push(await routeBoard(route, settings, events, state?.routes?.[route.id]?.pinSeen || null))
     return { boards, provider: PROVIDERS['search.ch'] }
@@ -651,7 +660,7 @@ export const createCommute = (options = {}) => {
     const { routes, settings } = await read(accountId)
     if (!routes.length) { due.set(accountId, at + 15 * 60_000); return { checked: 0 } }
     const events = await lessonsFor(accountId).catch(() => [])
-    const state = (await readJson(stateFile(accountId))) || { version: 1, routes: {} }
+    const state = (await readState(accountId)) || { version: 1, routes: {} }
     let next = Number.POSITIVE_INFINITY
     let checked = 0
     const alerts = []
