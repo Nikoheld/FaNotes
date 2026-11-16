@@ -536,6 +536,11 @@ export const createCommute = (options = {}) => {
         if (pins != null && !Array.isArray(pins)) return false
         if (Array.isArray(pins) && sanitizePins(pins.slice(0, MAX_PINS)).length !== Math.min(pins.length, MAX_PINS)) return false
         if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin) => Array.isArray(pin?.days) && pin.days.some((day) => !weekdayKept(day)))) return false
+        if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin, index, list) => {
+          if (!Array.isArray(pin?.days)) return false
+          const earlier = new Set(list.slice(0, index).flatMap((item) => Array.isArray(item?.days) ? item.days.map(Number) : []))
+          return pin.days.some((day) => earlier.has(Number(day)))
+        })) return false
         if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin) => pin && typeof pin === 'object' && (!transfersKept(pin.transfers) || !stopIdKept(pin.stopId) || !arrivalKept(pin.arrival)))) return false
         if (vias != null && !Array.isArray(vias)) return false
         if (Array.isArray(vias) && sanitizeVias({ vias: vias.slice(0, MAX_VIAS) }).length !== Math.min(vias.length, MAX_VIAS)) return false
@@ -547,12 +552,13 @@ export const createCommute = (options = {}) => {
         if (days != null && !Array.isArray(days)) return false
         if (Array.isArray(days) && days.some((day) => !weekdayKept(day))) return false
         if (mode != null && !['none', 'times', 'firstLesson', 'lastLesson'].includes(mode)) return false
+        if (mode === 'times' && sanitizeSchedule({ mode: 'times', times: Array.isArray(times) ? times : [] }).times.length === 0) return false
         if (buffer != null && buffer !== '' && !minutesKept(buffer, 0, 60)) return false
         if (times != null && !Array.isArray(times)) return false
         if (route?.schedule?.mode === 'times' && Array.isArray(times) && sanitizeSchedule({ mode: 'times', times: times.slice(0, MAX_TIMES) }).times.length !== Math.min(times.length, MAX_TIMES)) return false
         return true
       }
-      // A pin, via, time, weekday, walking time, schedule, stop type, threshold, notify flag, or arrival the sanitizer would replace must not look absent, or the next save drops it. The caps stay.
+      // A pin, via, time, weekday, shared pin day, walking time, schedule, stop type, threshold, notify flag, or arrival the sanitizer would replace must not look absent, or the next save drops it. The caps stay.
       if (!stored.routes.every(detailKnown)) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // Hidden labels or a threshold that are not the known shape must not look like the defaults, or the next save clears them.
       const settings = stored.settings

@@ -718,6 +718,13 @@ test('a commute weekday or schedule the sanitizer would replace is left in place
     await keep((item) => { item.delayThreshold = 0 })
     await keep((item) => { item.delayThreshold = 3.5 })
     await keep((item) => { item.pins = [{ days: [1, 9], line: 'S1', stop: 'Testdorf', departure: '07:30' }] })
+    await keep((item) => { item.schedule = { mode: 'times', times: [], days: [1] } })
+    await keep((item) => {
+      item.pins = [
+        { days: [1, 2], line: 'S1', stop: 'Testdorf', departure: '07:30' },
+        { days: [2, 3], line: 'S2', stop: 'Testdorf', departure: '08:30' },
+      ]
+    })
     const open = async (mutate) => {
       const parsed = JSON.parse(valid)
       mutate(parsed.routes[0])
@@ -732,6 +739,15 @@ test('a commute weekday or schedule the sanitizer would replace is left in place
     assert.deepEqual(textDay.routes[0].schedule.days, [1])
     const emptyDays = await open((item) => { item.schedule = { ...item.schedule, days: [] } })
     assert.deepEqual(emptyDays.routes[0].schedule.days, [1, 2, 3, 4, 5])
+    const timed = await open((item) => { item.schedule = { mode: 'times', times: ['07:30'], days: [1] } })
+    assert.equal(timed.routes[0].schedule.mode, 'times')
+    const split = await open((item) => {
+      item.pins = [
+        { days: [1], line: 'S1', stop: 'Testdorf', departure: '07:30' },
+        { days: [2], line: 'S2', stop: 'Testdorf', departure: '08:30' },
+      ]
+    })
+    assert.equal(split.routes[0].pins.length, 2)
     const edge = await open((item) => { item.schedule = { ...item.schedule, bufferMinutes: 60 }; item.delayThreshold = 30 })
     assert.equal(edge.routes[0].schedule.bufferMinutes, 60)
     assert.equal(edge.routes[0].delayThreshold, 30)
