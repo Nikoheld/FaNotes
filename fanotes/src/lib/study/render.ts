@@ -3,11 +3,11 @@
  * result can be set as innerHTML in the editor widget and in the Markdown preview.
  */
 
-import { escapeHtml as esc, isVaultImageRef, type StudyKind } from './blocks'
-import { layoutKeyTree, type KeyData } from './keyTree'
+import { asImage, escapeHtml as esc, isVaultImageRef, type StudyKind } from './blocks'
+import { LABEL_METRICS, layoutKeyTree, type KeyData } from './keyTree'
 import { layoutMap, type MapData } from './conceptMap'
 import { unsortedCards, type SortData } from './sortBoard'
-import type { PlateData, TermData } from './cardsModels'
+import { plateColumns, type PlateData, type TermData } from './cardsModels'
 
 export type Palette = { text: string; muted: string; line: string; fill: string; accent: string; leaf: string; bg: string }
 
@@ -24,10 +24,17 @@ export const THEME_PALETTE: Palette = {
 /** Exported images are always light so they read on a worksheet. */
 export const EXPORT_PALETTE: Palette = { text: '#1b1d23', muted: '#4b5565', line: '#667085', fill: '#ffffff', accent: '#2f4bd0', leaf: '#e8edfb', bg: '#ffffff' }
 
-/** `<img>` for a stored picture: vault files are filled in later by hydrateVaultImages. */
-export const imgTag = (ref: string, alt: string, extra = '') => (
-  isVaultImageRef(ref) ? `<img data-vault-src="${esc(ref)}" alt="${esc(alt)}"${extra}/>` : `<img alt="${esc(alt)}" src="${esc(ref)}"${extra}/>`
-)
+/**
+ * `<img>` for a stored picture: vault files are filled in later by hydrateVaultImages. Only what `asImage`
+ * accepts is rendered (a worksheet file of the vault, or a small base64 png/jpeg/webp/gif data URL); any
+ * other reference gives an empty string, so a caller that skipped the block normalisation cannot turn a
+ * block into a remote tracking pixel, a `javascript:` URL or a `data:text/html` / SVG sink.
+ */
+export const imgTag = (ref: string, alt: string) => {
+  const safe = asImage(ref)
+  if (!safe) return ''
+  return isVaultImageRef(safe) ? `<img data-vault-src="${esc(safe)}" alt="${esc(alt)}"/>` : `<img alt="${esc(alt)}" src="${esc(safe)}"/>`
+}
 
 const FONT = "font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif"
 
@@ -41,14 +48,13 @@ export const renderKeyTreeSvg = (data: KeyData, palette: Palette = THEME_PALETTE
   const layout = layoutKeyTree(data.tree)
   const title = data.title.trim()
   const offset = title ? 26 : 0
-  const parts = layout.edges.map((edge) => {
-    const midY = (edge.y1 + edge.y2) / 2 + offset
-    const path = `M${edge.x1} ${edge.y1 + offset} V${midY} H${edge.x2} V${edge.y2 + offset}`
-    const label = edge.label
-      ? `<rect x="${(edge.x1 + edge.x2) / 2 - edge.label.length * 3 - 4}" y="${midY - 9}" width="${edge.label.length * 6 + 8}" height="16" rx="4" style="fill:${palette.fill === 'transparent' ? '#fff' : palette.fill}"/><text x="${(edge.x1 + edge.x2) / 2}" y="${midY + 3}" text-anchor="middle" style="${FONT};font-size:11px;fill:${palette.muted}">${esc(edge.label)}</text>`
-      : ''
-    return `<path d="${path}" style="fill:none;stroke:${palette.line};stroke-width:1.4"/>${label}`
-  })
+  // Lines first, then the labels on top of them (a label hides the drop line behind it), then the boxes.
+  const parts: string[] = layout.edges.map((edge) => `<path d="M${edge.x1} ${edge.y1 + offset} V${edge.busY + offset} H${edge.x2} V${edge.y2 + offset}" style="fill:none;stroke:${palette.line};stroke-width:1.4"/>`)
+  for (const { labelBox: box } of layout.edges) {
+    if (!box) continue
+    parts.push(`<rect class="lw-key-label" x="${box.x}" y="${box.y + offset}" width="${box.w}" height="${box.h}" rx="4" style="fill:${palette.fill}"/>`)
+    parts.push(box.lines.map((line, index) => `<text class="lw-key-label" x="${box.x + box.w / 2}" y="${box.y + offset + LABEL_METRICS.padY + LABEL_METRICS.ascent + index * LABEL_METRICS.lineHeight}" text-anchor="middle" style="${FONT};font-size:${LABEL_METRICS.font}px;fill:${palette.muted}">${esc(line)}</text>`).join(''))
+  }
   for (const node of layout.nodes) {
     const leaf = node.kind === 'leaf'
     parts.push(`<rect x="${node.x}" y="${node.y + offset}" width="${node.w}" height="${node.h}" rx="${leaf ? node.h / 2 > 18 ? 10 : node.h / 2 : 8}" style="fill:${leaf ? palette.leaf : palette.fill};stroke:${leaf ? palette.line : palette.accent};stroke-width:${leaf ? 1.2 : 1.6}"/>`)
@@ -61,17 +67,22 @@ export const renderKeyTreeSvg = (data: KeyData, palette: Palette = THEME_PALETTE
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="${esc(title || 'Bestimmungsschlüssel')}">${background}${heading}${parts.join('')}</svg>`, width, height }
 }
 
+let markerSeq = 0
+
 export const renderMapSvg = (data: MapData, palette: Palette = THEME_PALETTE): SvgImage => {
   const layout = layoutMap(data)
   const title = data.title.trim()
   const offset = title ? 28 : 0
-  const parts: string[] = [`<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:${palette.accent}"/></marker></defs>`]
+  // Every map has its own arrowhead id: with one shared id, a map in a hidden container (a closed editor tab, a collapsed
+  // section) would be the one every other map's arrows refer to, and their heads would vanish.
+  const arrow = `lw-arrow-${(markerSeq += 1)}`
+  const parts: string[] = [`<defs><marker id="${arrow}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" style="fill:${palette.accent}"/></marker></defs>`]
   const shifted = (path: string) => path.replace(/([MC])([^MC]*)/gu, (_all, cmd: string, rest: string) => `${cmd}${rest.trim().split(/\s+/u).map((value, index) => (index % 2 ? String(Number(value) + offset) : value)).join(' ')}`)
   for (const edge of layout.edges) {
-    parts.push(`<path d="${shifted(edge.path)}" marker-end="url(#arr)" style="fill:none;stroke:${palette.accent};stroke-width:1.6"/>`)
+    parts.push(`<path d="${shifted(edge.path)}" marker-end="url(#${arrow})" style="fill:none;stroke:${palette.accent};stroke-width:1.6"/>`)
     if (edge.label) {
       const width = edge.label.length * 6 + 10
-      parts.push(`<rect x="${edge.lx - width / 2}" y="${edge.ly + offset - 9}" width="${width}" height="17" rx="5" style="fill:${palette.bg === 'transparent' ? '#fff' : palette.bg};opacity:.92"/><text x="${edge.lx}" y="${edge.ly + offset + 4}" text-anchor="middle" style="${FONT};font-size:11px;font-style:italic;fill:${palette.muted}">${esc(edge.label)}</text>`)
+      parts.push(`<rect x="${edge.lx - width / 2}" y="${edge.ly + offset - 9}" width="${width}" height="17" rx="5" style="fill:${palette.fill};opacity:.92"/><text x="${edge.lx}" y="${edge.ly + offset + 4}" text-anchor="middle" style="${FONT};font-size:11px;font-style:italic;fill:${palette.muted}">${esc(edge.label)}</text>`)
     }
   }
   for (const node of layout.nodes) {
@@ -95,7 +106,8 @@ const tableHtml = (data: KeyData) => {
 
 const renderKeyHtml = (data: KeyData) => {
   const tree = renderKeyTreeSvg(data)
-  const compare = data.compareImage ? `<figure class="lw-compare">${imgTag(data.compareImage, data.compareLabel || 'Vergleichsbaum')}<figcaption>${esc(data.compareLabel || 'Vergleich')}</figcaption></figure>` : ''
+  const compareImage = data.compareImage ? imgTag(data.compareImage, data.compareLabel || 'Vergleichsbaum') : ''
+  const compare = compareImage ? `<figure class="lw-compare">${compareImage}<figcaption>${esc(data.compareLabel || 'Vergleich')}</figcaption></figure>` : ''
   return `${data.title ? `<div class="lw-title">${esc(data.title)}</div>` : ''}${tableHtml(data)}<div class="lw-key-views${compare ? ' is-compare' : ''}"><div class="lw-svg">${data.tree.nodes.length ? tree.svg : ''}</div>${compare}</div>`
 }
 
@@ -108,8 +120,9 @@ const renderSortHtml = (data: SortData) => {
 }
 
 const renderPlateHtml = (data: PlateData) => {
-  const cells = data.items.map((item) => `<figure class="lw-plate-item">${item.img ? imgTag(item.img, item.label) : '<div class="lw-plate-empty"></div>'}${data.showLabels ? `<figcaption>${esc(item.label)}</figcaption>` : ''}</figure>`).join('')
-  return `${data.title ? `<div class="lw-title">${esc(data.title)}</div>` : ''}<div class="lw-plate" style="grid-template-columns:repeat(${data.cols},minmax(0,1fr))">${cells}</div>`
+  const cells = data.items.map((item) => `<figure class="lw-plate-item">${(item.img && imgTag(item.img, item.label)) || '<div class="lw-plate-empty"></div>'}${data.showLabels ? `<figcaption>${esc(item.label)}</figcaption>` : ''}</figure>`).join('')
+  // The column count goes into a style attribute: clamp it here too, not only when the block is read.
+  return `${data.title ? `<div class="lw-title">${esc(data.title)}</div>` : ''}<div class="lw-plate" style="grid-template-columns:repeat(${plateColumns(data.cols)},minmax(0,1fr))">${cells}</div>`
 }
 
 const renderTermHtml = (data: TermData) => data.terms.map((entry) => (

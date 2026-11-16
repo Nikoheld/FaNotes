@@ -2,8 +2,6 @@ import { strokePointBounds } from './strokeBounds'
 import {
   cutPageStroke,
   distanceToSegment,
-  pixelsOf,
-  rangeHitsPath,
   type InkPieceStroke,
 } from './inkPieces'
 
@@ -116,8 +114,9 @@ export const applyToolErase = <T extends ToolEraseStroke>(
     pathBottom = Math.max(pathBottom, point.y)
   }
 
-  // Cached bounds per stroke: building a pixel array for every stroke on each
-  // eraser move cost about 0.3 s per drag on a 320k-sample note.
+  // Cached bounds per stroke: reading every sample of every stroke on each
+  // eraser move cost about 0.3 s per drag on a 320k-sample note. A stroke
+  // whose bounds, grown by the eraser's reach, miss the path is not read at all.
   const near: T[] = []
   for (const stroke of strokes) {
     if (!stroke.points.length) continue
@@ -126,7 +125,7 @@ export const applyToolErase = <T extends ToolEraseStroke>(
     const top = bounds.minY * sourceHeight
     const right = bounds.maxX * sourceWidth
     const bottom = bounds.maxY * sourceHeight
-    const pad = radius + visibleHalfWidth(stroke) + 96
+    const pad = radius + visibleHalfWidth(stroke) + 1
     if (boundsOverlap(left, top, right, bottom, pathLeft - pad, pathTop - pad, pathRight + pad, pathBottom + pad)) {
       near.push(stroke)
     }
@@ -143,14 +142,14 @@ export const applyToolErase = <T extends ToolEraseStroke>(
       next.push(stroke)
       continue
     }
-    const pixels = pixelsOf(stroke.points, sourceWidth, sourceHeight)
     const reach = radius + visibleHalfWidth(stroke)
-    if (!rangeHitsPath(pixels, 0, pixels.length - 1, reach, path)) {
+    const pieces = cutPageStroke(stroke, sourceWidth, sourceHeight, path, reach)
+    if (!pieces) {
       next.push(stroke)
       continue
     }
     changed = true
-    next.push(...cutPageStroke(stroke, pixels, path, reach, 0, 0, pixels.length - 1))
+    next.push(...pieces)
   }
   return changed ? next : strokes
 }

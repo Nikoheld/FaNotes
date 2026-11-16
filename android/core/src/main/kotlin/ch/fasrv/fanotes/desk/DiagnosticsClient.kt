@@ -35,6 +35,8 @@ class DiagnosticsClient(
     private val clock: () -> Long = System::currentTimeMillis,
     private val newId: () -> String = { newInstallId() },
 ) {
+    /** One daily send at a time: a tick and a toggle change must not both post the same report. */
+    private val dailyInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     private var consent = DiagnosticsConsent()
     private var context = DiagnosticsContext()
     private var counters = LinkedHashMap<String, Int>()
@@ -98,6 +100,20 @@ class DiagnosticsClient(
     @Synchronized
     fun setVault(notes: Long, bytes: Long) {
         vaultNotes = notes; vaultBytes = bytes
+    }
+
+    /** True while a toggle is on. With both off there is nothing to collect, count or send, so callers can skip all work. */
+    @Synchronized
+    fun enabled(): Boolean = consent.usage || consent.logs
+
+    /**
+     * True when a toggle is on and the last report is a day old: a daily report may go out now. One small
+     * preference read and no other I/O, so a periodic check can ask before it collects anything.
+     */
+    @Synchronized
+    fun dailyDue(): Boolean {
+        if (!consent.usage && !consent.logs) return false
+        return dailySendDue(consent, storage.get(DIAGNOSTICS_KEY_LAST)?.toLongOrNull() ?: 0L, clock())
     }
 
     @Synchronized
@@ -165,6 +181,15 @@ class DiagnosticsClient(
 
     /** Called on start and then now and then; sends at most one report per day and only while a toggle is on. */
     suspend fun sendDailyIfDue(): Boolean {
+        if (!dailyInFlight.compareAndSet(false, true)) return false
+        try {
+            return sendDailyLocked()
+        } finally {
+            dailyInFlight.set(false)
+        }
+    }
+
+    private suspend fun sendDailyLocked(): Boolean {
         val now = clock()
         val payload: JsonValue.Obj
         synchronized(this) {
@@ -209,4 +234,31 @@ class DiagnosticsClient(
         }
         return ok
     }
+}
+
+/** What a diagnostics report says about the vault: grouped notes and all bytes. */
+class VaultFigures(val notes: Long, val bytes: Long)
+
+/**
+ * The vault size for a report from what is already known: the statistics of this session, else the
+ * saved ones of the last run, else the note count of the open tree (no size then). Null when none of
+ * them knows anything. Nothing here reads the vault.
+ */
+fun diagnosticsFigures(current: StatsSummary?, saved: StatsSummary?, treeNotes: Int): VaultFigures? = when {
+    current != null -> VaultFigures(current.notes, current.bytes)
+    saved != null -> VaultFigures(saved.notes, saved.bytes)
+    treeNotes > 0 -> VaultFigures(treeNotes.toLong(), 0L)
+    else -> null
+}
+
+/**
+ * The periodic check, run now and then and whenever a toggle changes. While both toggles are off, or
+ * the last report is less than a day old, it returns at once and never calls [figures], so nothing is
+ * collected and the vault is not touched. Only when a report is due does it ask [figures], which has to
+ * answer from data that is already there (see [diagnosticsFigures]) and must never walk the vault.
+ */
+suspend fun DiagnosticsClient.runDailyCheck(figures: () -> VaultFigures?): Boolean {
+    if (!enabled() || !dailyDue()) return false
+    figures()?.let { setVault(it.notes, it.bytes) }
+    return sendDailyIfDue()
 }

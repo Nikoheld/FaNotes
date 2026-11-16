@@ -149,7 +149,17 @@ function translateComposedChrome(source: string): string | null {
     const phase = syncing[1] === 'Holt' ? 'Fetching' : syncing[1] === 'Lädt hoch' ? 'Uploading' : 'Checking'
     return `${phase} ${syncing[2]}/${syncing[3]}`
   }
-  const idShape = /^"id" \((.+)\) darf nur Kleinbuchstaben, Ziffern und Bindestriche enthalten \(2-64 Zeichen\)\.$/u.exec(source)
+  // Sync status (src/lib/sync/status.ts): the pause the server asked for, and changes that wait for a note.
+  const syncPaused = /^Sync pausiert – geht um (\d{2}:\d{2}) weiter$/u.exec(source)
+  if (syncPaused) return `Sync paused – resumes at ${syncPaused[1]}`
+  const syncHeld = /^(Synchron|Sync pausiert|Sync pausiert – geht um \d{2}:\d{2} weiter) · (\d+) Änderung(?:en)? von (?:einem anderen Gerät|anderen Geräten) wart(?:et|en)$/u.exec(source)
+  if (syncHeld) {
+    const count = Number(syncHeld[2])
+    return `${translateCore(syncHeld[1])} · ${count} ${count === 1 ? 'change from another device is' : 'changes from other devices are'} waiting`
+  }
+  const syncTitle = /^Sync · (\S+@\S+) · (.+)$/u.exec(source)
+  if (syncTitle) return `Sync · ${syncTitle[1]} · ${translateCore(syncTitle[2])}`
+  const idShape =/^"id" \((.+)\) darf nur Kleinbuchstaben, Ziffern und Bindestriche enthalten \(2-64 Zeichen\)\.$/u.exec(source)
   if (idShape) return `"id" (${idShape[1]}) may only contain lowercase letters, digits, and hyphens (2-64 characters).`
   const idFolder = /^"id" \((.+)\) muss dem Ordnernamen \((.+)\) entsprechen\.$/u.exec(source)
   if (idFolder) return `"id" (${idFolder[1]}) must match the folder name (${idFolder[2]}).`

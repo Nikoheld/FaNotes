@@ -24,6 +24,38 @@ assert.deepEqual(diffSignatures(a, a), { added: [], removed: [], changed: [] })
 const renamed = diffSignatures(flattenTree(tree([['x.md', 'm', 1]])), flattenTree(tree([['y.md', 'm', 1]])))
 assert.deepEqual([renamed.added, renamed.removed], [['y.md'], ['x.md']])
 
+// Interval policy: fast while fs.watch fails, slow when healthy, paused while hidden.
+async function intervalPolicy() {
+  const makeFake = () => {
+    const f = { intervals: [], cleared: 0 }
+    f.setIntervalFn = (fn, ms) => { const h = { fn, ms, unref() {} }; f.intervals.push(h); return h }
+    f.clearIntervalFn = () => { f.cleared += 1 }
+    return f
+  }
+  const base = { getRoots: () => ['/x'], scan: async () => [], onChange() {}, debounceMs: 1, intervalMs: 20000, healthyIntervalMs: 120000 }
+  const fakeWatcher = () => ({ close() {}, on() {} })
+  const broken = makeFake()
+  const w1 = createVaultWatcher({ ...base, ...broken, watch: () => { throw new Error('ENOSPC') } })
+  w1.start(); await w1.rescan()
+  assert.equal(w1.currentIntervalMs(), 20000, 'failing fs.watch keeps 20 s')
+  w1.stop()
+  const ok = makeFake()
+  const w2 = createVaultWatcher({ ...base, ...ok, watch: fakeWatcher })
+  w2.start(); await w2.rescan()
+  assert.equal(w2.currentIntervalMs(), 120000, 'healthy watchers back off to 120 s')
+  w2.setActive(false)
+  assert.equal(w2.currentIntervalMs(), 0, 'paused while hidden')
+  w2.setActive(true)
+  assert.equal(w2.currentIntervalMs(), 120000, 'resumes')
+  w2.stop()
+  const noWatch = makeFake()
+  const w3 = createVaultWatcher({ ...base, ...noWatch })
+  w3.start(); await w3.rescan()
+  assert.equal(w3.currentIntervalMs(), 20000, 'no fs.watch: 20 s')
+  w3.stop()
+  console.log('vault watch interval checks passed')
+}
+
 // Watcher against a real temp directory (rescan path, no fs.watch dependency).
 async function main() {
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'fanotes-watch-'))
@@ -320,4 +352,4 @@ async function realWatch() {
   }
   console.log('real recursive fs.watch checks passed')
 }
-main().then(reconcileChecks).then(realWatch).catch((error) => { console.error(error); process.exit(1) })
+main().then(reconcileChecks).then(intervalPolicy).then(realWatch).catch((error) => { console.error(error); process.exit(1) })

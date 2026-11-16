@@ -1,5 +1,5 @@
 import { Bot, Check, Copy, Eye, EyeOff, KeyRound, RefreshCw, ShieldCheck, TerminalSquare } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import type { AppSettings, LocalMcpInfo } from '../types'
 
 type Props = {
@@ -32,20 +32,24 @@ export const mcpSnippets = (info: LocalMcpInfo, token: string) => {
 
 function Snippet({ label, text, display }: { label: string; text: string; display: string }) {
   const [copied, setCopied] = useState(false)
+  const id = useId()
   return (
     <div className="setting-row">
-      <div className="setting-copy"><span>{label}</span></div>
+      <div className="setting-copy"><span id={`${id}-label`}>{label}</span></div>
       <div className="setting-control" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
         <textarea data-i18n-ignore readOnly rows={Math.min(10, display.split('\n').length + 1)} value={display} aria-label={label} style={{ fontFamily: 'var(--mono-font, monospace)', fontSize: 12 }} />
         <button
           type="button"
+          id={`${id}-copy`}
           className="secondary-button"
+          aria-labelledby={`${id}-copy ${id}-label`}
           onClick={() => {
             void navigator.clipboard?.writeText(text).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500) }).catch(() => undefined)
           }}
         >
           {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Kopiert' : 'Kopieren'}
         </button>
+        <span className="sr-only" role="status">{copied ? 'Kopiert' : ''}</span>
       </div>
     </div>
   )
@@ -55,6 +59,8 @@ export function McpSettingsSection({ settings, update }: Props) {
   const api = typeof window !== 'undefined' ? window.fanotes : undefined
   const [info, setInfo] = useState<LocalMcpInfo | null>(null)
   const [reveal, setReveal] = useState(false)
+  const [tokenCopied, setTokenCopied] = useState(false)
+  const tokenId = useId()
   const [error, setError] = useState('')
   const available = typeof api?.mcpLocal === 'function'
 
@@ -112,7 +118,7 @@ export function McpSettingsSection({ settings, update }: Props) {
 
       <div className="setting-card">
         <div className="setting-card-title"><TerminalSquare size={16} /><span>Verbinden über stdio</span></div>
-        {error && <div className="setting-callout">{error}</div>}
+        {error && <div className="setting-callout" role="alert">{error}</div>}
         {snippets && masked && (
           <>
             <Snippet label="Claude Desktop (claude_desktop_config.json)" text={snippets.stdioJson} display={masked.stdioJson} />
@@ -131,15 +137,16 @@ export function McpSettingsSection({ settings, update }: Props) {
         {info && settings.mcpEnabled && settings.mcpHttpEnabled && (
           <>
             <div className="setting-row">
-              <div className="setting-copy"><span>Adresse</span><small>{info.httpRunning ? 'Der Server läuft.' : info.httpError ? 'Der Server konnte nicht starten.' : 'Der Server startet …'}</small></div>
+              <div className="setting-copy"><span>Adresse</span><small role="status">{info.httpRunning ? 'Der Server läuft.' : info.httpError ? 'Der Server konnte nicht starten.' : 'Der Server startet …'}</small></div>
               <div className="setting-control"><input data-i18n-ignore readOnly value={info.httpUrl} aria-label="Adresse" /></div>
             </div>
             <div className="setting-row">
-              <div className="setting-copy"><span>Token</span><small>Wie ein Passwort behandeln. Neu erzeugen sperrt alle Programme, die das alte Token nutzen.</small></div>
+              <div className="setting-copy"><span id={`${tokenId}-label`}>Token</span><small>Wie ein Passwort behandeln. Neu erzeugen sperrt alle Programme, die das alte Token nutzen.</small></div>
               <div className="setting-control">
-                <input data-i18n-ignore readOnly type={reveal ? 'text' : 'password'} value={info.httpToken} aria-label="Token" />
-                <button type="button" className="secondary-button" onClick={() => setReveal((value) => !value)}>{reveal ? <EyeOff size={14} /> : <Eye size={14} />} {reveal ? 'Verbergen' : 'Anzeigen'}</button>
-                <button type="button" className="secondary-button" onClick={() => void navigator.clipboard?.writeText(info.httpToken).catch(() => undefined)}><Copy size={14} /> Kopieren</button>
+                <input id={tokenId} data-i18n-ignore readOnly type={reveal ? 'text' : 'password'} value={info.httpToken} aria-label="Token" />
+                <button type="button" className="secondary-button" aria-controls={tokenId} onClick={() => setReveal((value) => !value)}>{reveal ? <EyeOff size={14} /> : <Eye size={14} />} {reveal ? 'Verbergen' : 'Anzeigen'}</button>
+                <button type="button" id={`${tokenId}-copy`} className="secondary-button" aria-labelledby={`${tokenId}-copy ${tokenId}-label`} onClick={() => void navigator.clipboard?.writeText(info.httpToken).then(() => { setTokenCopied(true); window.setTimeout(() => setTokenCopied(false), 1500) }).catch(() => undefined)}>{tokenCopied ? <Check size={14} /> : <Copy size={14} />} {tokenCopied ? 'Kopiert' : 'Kopieren'}</button>
+                <span className="sr-only" role="status">{tokenCopied ? 'Kopiert' : ''}</span>
                 <button type="button" className="secondary-button" onClick={() => void load('regenerate')}><RefreshCw size={14} /> Neu erzeugen</button>
               </div>
             </div>

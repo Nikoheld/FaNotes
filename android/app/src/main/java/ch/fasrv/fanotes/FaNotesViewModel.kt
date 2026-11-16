@@ -412,6 +412,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var lastOwnTreeLoadMs = 0L
     private var treeLoaded = false
     private val rescanMutex = Mutex()
+    val rescanPolicy = ch.fasrv.fanotes.vault.RescanPolicy()
 
     /**
      * Cheap rescan for resume and the foreground timer. Replaces only the tree state, so an
@@ -421,9 +422,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             if (!treeLoaded || !rescanMutex.tryLock()) return@launch
             try {
+                val startedAt = android.os.SystemClock.elapsedRealtime()
                 val loaded = withContext(Dispatchers.IO) {
                     runCatching { graph.store.tree() }.getOrNull()
-                } ?: return@launch
+                }
+                rescanPolicy.record(android.os.SystemClock.elapsedRealtime() - startedAt)
+                if (loaded == null) return@launch
                 val change = ch.fasrv.fanotes.vault.diffTrees(tree.value, loaded)
                 if (change.isEmpty) return@launch
                 val own = System.currentTimeMillis() - lastOwnTreeLoadMs < 4000

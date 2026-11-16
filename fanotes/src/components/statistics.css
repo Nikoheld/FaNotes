@@ -1,7 +1,21 @@
 /* Settings → Statistik. Plain SVG/CSS charts on the app's tokens. */
 .statistics-page { --stat-2: #d19a3f; --stat-3: #4fa36f; --stat-4: #9b7fd9; --stat-5: #d9728c; display: grid; gap: 12px; }
+/* The pastel category colours are 2.4:1 to 3.3:1 on the light cards, so those themes use darker steps of the same hues (3.5:1 and up).
+   Dark themes keep them (4.1:1 and up). Graphics need 3:1 (WCAG 1.4.11); scripts/check-graphics-contrast.mjs checks every theme. */
+.app-shell.theme-light .statistics-page, .app-shell.theme-sepia .statistics-page, .app-shell.theme-snow .statistics-page { --stat-2: #a97d33; --stat-3: #489465; --stat-4: #9277cc; --stat-5: #c5687f; }
+/* Heatmap steps. The top level is the readable accent pulled toward the text colour (lighter on dark cards, darker on light ones);
+   levels 1 to 3 mix it into the surface. Level 1 is 3.1:1 or more against the card in every theme and accent preset, each step about 1.2x or more. */
+.statistics-page {
+  --stat-heat: color-mix(in srgb, var(--accent-readable) 55%, var(--text));
+  --stat-lvl-0: color-mix(in srgb, var(--text-muted) 16%, var(--panel-strong));
+  --stat-lvl-1: color-mix(in srgb, var(--stat-heat) 65%, var(--panel-strong));
+  --stat-lvl-2: color-mix(in srgb, var(--stat-heat) 78%, var(--panel-strong));
+  --stat-lvl-3: color-mix(in srgb, var(--stat-heat) 89%, var(--panel-strong));
+  --stat-lvl-4: var(--stat-heat);
+}
 .statistics-page .setting-card { margin-bottom: 0; }
 .stat-card-body { display: grid; gap: 14px; padding: 14px 15px 16px; }
+.stat-card .setting-card-title h3 { margin: 0; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
 .stat-card h4 { margin: 4px 0 0; color: var(--text-muted); font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
 .stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 8px; }
 .stat-tile { position: relative; display: grid; gap: 2px; min-height: 76px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--panel-strong) 70%, transparent); }
@@ -12,8 +26,9 @@
 .stat-tiles.small .stat-tile { min-height: 64px; }
 .stat-tiles.small strong { font-size: 17px; }
 .stat-progress { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-soft); font-size: 12.5px; }
-.stat-progress progress { flex: 1; height: 6px; accent-color: var(--accent); }
+.stat-progress progress { flex: 1; height: 6px; accent-color: var(--accent-readable); }
 .stat-refresh { display: flex; justify-content: flex-end; }
+.stat-refresh button[aria-disabled="true"] { opacity: .45; cursor: progress; }
 .stat-skeleton { display: grid; gap: 8px; width: 100%; }
 .stat-skeleton i { display: block; height: 14px; border-radius: 6px; background: linear-gradient(90deg, var(--panel-strong), var(--panel-hover), var(--panel-strong)); background-size: 200% 100%; animation: stat-shimmer 1.4s linear infinite; }
 .stat-skeleton i:first-child { width: 60%; }
@@ -28,19 +43,20 @@
 .stat-heatmap { margin: 0; display: grid; gap: 6px; overflow-x: auto; }
 .stat-heatmap svg { width: 100%; min-width: 560px; height: auto; display: block; }
 .stat-axis { fill: var(--text-muted); font-size: 8.5px; }
-.stat-cell { fill: color-mix(in srgb, var(--text-muted) 16%, var(--panel-strong)); }
-i.stat-cell { display: inline-block; width: 11px; height: 11px; border-radius: 3px; background: color-mix(in srgb, var(--text-muted) 16%, var(--panel-strong)); }
-.stat-cell.level-1 { fill: color-mix(in srgb, var(--accent) 28%, var(--panel-strong)); } i.stat-cell.level-1 { background: color-mix(in srgb, var(--accent) 28%, var(--panel-strong)); }
-.stat-cell.level-2 { fill: color-mix(in srgb, var(--accent) 52%, var(--panel-strong)); } i.stat-cell.level-2 { background: color-mix(in srgb, var(--accent) 52%, var(--panel-strong)); }
-.stat-cell.level-3 { fill: color-mix(in srgb, var(--accent) 76%, var(--panel-strong)); } i.stat-cell.level-3 { background: color-mix(in srgb, var(--accent) 76%, var(--panel-strong)); }
-.stat-cell.level-4 { fill: var(--accent); } i.stat-cell.level-4 { background: var(--accent); }
-.stat-cell.is-future { fill: transparent; }
+/* Level 0 (no activity) is an outlined cell, the other levels are filled: the difference does not rely on colour alone. */
+.stat-cell { fill: var(--stat-lvl-0); stroke: var(--border-strong); stroke-width: 1; }
+i.stat-cell { display: inline-block; width: 11px; height: 11px; border-radius: 3px; background: var(--stat-lvl-0); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.stat-cell.level-1 { fill: var(--stat-lvl-1); background: var(--stat-lvl-1); stroke: none; box-shadow: none; }
+.stat-cell.level-2 { fill: var(--stat-lvl-2); background: var(--stat-lvl-2); stroke: none; box-shadow: none; }
+.stat-cell.level-3 { fill: var(--stat-lvl-3); background: var(--stat-lvl-3); stroke: none; box-shadow: none; }
+.stat-cell.level-4 { fill: var(--stat-lvl-4); background: var(--stat-lvl-4); stroke: none; box-shadow: none; }
+.stat-cell.is-future { fill: transparent; stroke: none; }
 .stat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: var(--text-muted); font-size: 11px; }
 .stat-legend span:first-child { margin-right: 3px; } .stat-legend span:last-child { margin-left: 3px; }
 
 .stat-bars { display: flex; align-items: stretch; gap: 5px; height: 128px; }
 .stat-bar-col { flex: 1; min-width: 0; display: grid; grid-template-rows: 1fr auto; gap: 4px; align-items: end; }
-.stat-bar { display: block; width: 100%; align-self: end; border-radius: 5px 5px 2px 2px; background: var(--accent); min-height: 0; }
+.stat-bar { display: block; width: 100%; align-self: end; border-radius: 5px 5px 2px 2px; background: var(--accent-readable); min-height: 0; }
 .stat-bar-col small { color: var(--text-muted); font-size: 10px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .stat-facts { display: grid; gap: 6px; margin: 0; }
@@ -49,7 +65,7 @@ i.stat-cell { display: inline-block; width: 11px; height: 11px; border-radius: 3
 .stat-facts div { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .stat-facts dt { color: var(--text-muted); } .stat-facts dd { margin: 0; font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
-.stat-kinds { display: flex; height: 12px; overflow: hidden; border-radius: 6px; background: var(--panel-strong); }
+.stat-kinds { display: flex; gap: 2px; height: 12px; overflow: hidden; border-radius: 6px; background: var(--panel-strong); }
 .stat-kinds span { display: block; min-width: 0; }
 .stat-kind-list, .stat-subjects, .stat-files { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .stat-kind-list { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; }
@@ -61,7 +77,12 @@ i.stat-cell { display: inline-block; width: 11px; height: 11px; border-radius: 3
 .stat-subjects small, .stat-kind-list small, .stat-files small { color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .stat-meter { display: flex; height: 8px; overflow: hidden; border-radius: 4px; background: var(--panel-strong); }
 .stat-meter > span { display: block; border-radius: 4px; }
+.stat-meter.stacked { gap: 2px; }
 .stat-meter.stacked > span { border-radius: 0; flex-basis: 0; }
+.stat-meter-key { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0; color: var(--text-muted); font-size: 12px; }
+.stat-meter-key span { display: inline-flex; align-items: center; gap: 6px; }
+.stat-meter-key i { width: 10px; height: 10px; border-radius: 3px; background: var(--success); }
+.stat-meter-key .open i { background: var(--warning); } .stat-meter-key .late i { background: var(--danger); }
 .stat-meter.stacked .done { background: var(--success); } .stat-meter.stacked .open { background: var(--warning); } .stat-meter.stacked .late { background: var(--danger); }
 .stat-subjects li:has(.stacked) { grid-template-columns: minmax(70px, 1fr) minmax(60px, 1.6fr) auto; }
 .stat-files li { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }

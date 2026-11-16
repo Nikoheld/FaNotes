@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { createServer } from 'vite'
 
 const server = await createServer({
@@ -306,6 +307,106 @@ try {
   assert.ok(render.renderMapSvg(cmap, render.EXPORT_PALETTE).svg.includes('marker-end'))
   assert.equal(registry.renderStudyBlockHtml('map', '{}').includes('<svg'), true, 'broken data falls back to the starter map')
 
+  // -- hostile block data ---------------------------------------------------------------
+  // Whatever a note, a shared note or a synced file puts into a block must come out as inert markup.
+  {
+    const ALLOWED_TAGS = new Set(['div', 'span', 'p', 'b', 'pre', 'figure', 'figcaption', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'svg', 'rect', 'path', 'text', 'defs', 'marker'])
+    const SAFE_SRC = /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/u
+    /** Every tag and attribute of rendered markup: no scripts, handlers, links, styles that load things, or odd pictures. */
+    const inert = (html, label) => {
+      for (const [tag, closing, name, rest] of [...html.matchAll(/<(\/?)([A-Za-z][A-Za-z0-9-]*)([^>]*)>/gu)].map((match) => match.slice(0, 4))) {
+        assert.ok(ALLOWED_TAGS.has(name.toLowerCase()), `${label}: unexpected tag ${tag.slice(0, 60)}`)
+        if (closing) continue
+        const attributes = [...rest.matchAll(/\s([A-Za-z][\w:-]*)="([^"]*)"/gu)]
+        const leftover = rest.replace(/\s([A-Za-z][\w:-]*)="([^"]*)"/gu, '').replace(/\s*\/?\s*$/u, '')
+        assert.equal(leftover, '', `${label}: attribute syntax in ${tag.slice(0, 80)}`)
+        for (const [, attribute, value] of attributes) {
+          const lower = attribute.toLowerCase()
+          assert.ok(!lower.startsWith('on'), `${label}: event handler ${attribute}`)
+          assert.ok(!['href', 'xlink:href', 'srcset', 'action', 'formaction', 'poster', 'background'].includes(lower), `${label}: link attribute ${attribute}`)
+          if (lower === 'src') assert.ok(SAFE_SRC.test(value), `${label}: src ${value.slice(0, 60)}`)
+          if (lower === 'data-vault-src') assert.ok(blocks.isVaultImageRef(value.replaceAll('&amp;', '&')), `${label}: data-vault-src ${value.slice(0, 60)}`)
+          if (lower === 'style') assert.ok(!/url\s*\(|@import|expression\s*\(|javascript:|behavior|-moz-binding/iu.test(value), `${label}: style ${value.slice(0, 80)}`)
+        }
+      }
+    }
+    const texts = [
+      '<img src=x onerror=alert(1)>', '"><svg onload=alert(1)>', "' onmouseover='alert(1)", '</text><script>alert(1)</script>',
+      '&lt;b&gt; & &amp;', 'javascript:alert(1)', '<style>*{background:url(//tracker.example/p.png)}</style>', 'x\u2028<!--', '`${alert(1)}`',
+    ]
+    const hostileRefs = [
+      'javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
+      'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=', 'data:image/svg+xml,<svg onload=alert(1)>', 'data:image/png;base64,AAAA" onerror="alert(1)',
+      'https://tracker.example/pixel.gif', '//tracker.example/p.png', 'http://127.0.0.1:1234/x.png', 'file:///etc/passwd', 'blob:https://x/uuid',
+      '.fanotes/worksheets/abcdefgh.svg', '.fanotes/worksheets/../../secret.png', '.fanotes/worksheets/abcdefgh.png" onerror="alert(1)',
+      '.fanotes/worksheets/abcdefgh.png\n', ' .fanotes/worksheets/abcdefgh.png', 'x', '',
+    ]
+    const vaultRef = '.fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.png'
+    const dataRef = 'data:image/png;base64,iVBORw0KGgo='
+    const keyData = (text, ref = '') => ({
+      v: 1, title: text, compareImage: ref, compareLabel: text,
+      table: { features: [text], items: [{ id: 'a', name: text, values: [text] }] },
+      tree: { root: 'n1', nodes: [{ id: 'n1', kind: 'question', text, branches: [{ label: text, to: 'n2' }, { label: 'x', to: 'n3' }] }, { id: 'n2', kind: 'leaf', text }, { id: 'n3', kind: 'leaf', text }] },
+    })
+    const plateData = (text, ref = '', cols = 4) => ({ v: 1, title: text, cols, showLabels: true, items: [{ id: 'p1', label: text, note: text, img: ref }] })
+    const mapData = (text) => ({ v: 1, title: text, nodes: [{ id: 'a', text }, { id: 'b', text }], edges: [{ id: 'e1', from: 'a', to: 'b', label: text }] })
+    const sortData = (text) => ({ v: 1, title: text, mode: 'groups', cards: [{ id: 'c1', text }, { id: 'c2', text: `${text}2` }], groups: [{ id: 'g1', title: text, cards: ['c1'] }] })
+    const termData = (text) => ({ v: 1, terms: [{ id: 't1', term: text, definition: text, example: text, source: text }] })
+    const render1 = (kind, data) => registry.renderStudyBlockHtml(kind, JSON.stringify(data))
+
+    // 1. Hostile text in every slot: the block renders (it is valid data) and nothing becomes markup.
+    for (const text of texts) {
+      for (const [kind, data] of [['key', keyData(text)], ['plate', plateData(text)], ['map', mapData(text)], ['sort', sortData(text)], ['term', termData(text)]]) {
+        const html = render1(kind, data)
+        assert.ok(!html.includes('lw-error'), `${kind} with hostile text still renders: ${text.slice(0, 16)}`)
+        inert(html, `${kind} text=${text.slice(0, 16)}`)
+      }
+      // A block that is not valid JSON, or that FaNotes would not read completely, shows its source as escaped text.
+      inert(registry.renderStudyBlockHtml('map', `{ ${text}`), `broken block ${text.slice(0, 16)}`)
+      inert(registry.renderStudyBlockHtml('key', JSON.stringify({ ...keyData(text), extra: text })), `lossy block ${text.slice(0, 16)}`)
+    }
+    // 2. Hostile picture references and column counts through the whole pipeline: refused or shown as source, never rendered.
+    for (const ref of hostileRefs) {
+      inert(render1('plate', plateData('x', ref)), `plate ref=${ref.slice(0, 24)}`)
+      inert(render1('key', keyData('x', ref)), `key ref=${ref.slice(0, 24)}`)
+    }
+    for (const cols of ['4;background:url(//tracker.example/p.png)', '4" onclick="alert(1)', 1.5, -3, 9, 1e9, '0x2', {}, [3], null, true]) inert(render1('plate', plateData('x', '', cols)), `cols ${JSON.stringify(cols)}`)
+    // Allowed pictures still render.
+    assert.match(render1('plate', plateData('x', vaultRef)), /<img data-vault-src="\.fanotes\/worksheets\/0b3e4f5a-1111-4222-8333-444455556666\.png" alt="x"\/>/u)
+    assert.match(render1('plate', plateData('x', dataRef)), /<img alt="x" src="data:image\/png;base64,iVBORw0KGgo="\/>/u)
+    assert.ok(render1('key', keyData('x', vaultRef)).includes('lw-compare'), 'a vault picture next to the key still renders')
+
+    // 3. The renderer on its own, as a future caller that does not read the block through the normaliser would use it.
+    const rawPlate = (img, cols = 4) => ({ v: 1, title: 't', cols, showLabels: true, items: [{ id: 'p', label: 'l', note: '', img }] })
+    const rawKey = (ref) => ({ ...key.normaliseKeyData(keyData('k')), compareImage: ref })
+    for (const ref of hostileRefs) {
+      assert.equal(render.imgTag(ref, 'alt'), '', `imgTag refuses ${JSON.stringify(ref.slice(0, 30))}`)
+      const plate = render.renderStudyHtml('plate', rawPlate(ref))
+      inert(plate, `renderStudyHtml plate ref=${ref.slice(0, 24)}`)
+      assert.ok(plate.includes('lw-plate-empty') && !plate.includes('<img'), `a refused picture leaves the placeholder: ${ref.slice(0, 24)}`)
+      const keyHtml = render.renderStudyHtml('key', rawKey(ref))
+      inert(keyHtml, `renderStudyHtml key ref=${ref.slice(0, 24)}`)
+      assert.ok(!keyHtml.includes('lw-compare'), `a refused comparison picture drops the whole figure: ${ref.slice(0, 24)}`)
+    }
+    assert.equal(render.imgTag(vaultRef, 'a"b'), `<img data-vault-src="${vaultRef}" alt="a&quot;b"/>`)
+    assert.equal(render.imgTag(dataRef, '<b>'), `<img alt="&lt;b&gt;" src="${dataRef}"/>`)
+    assert.equal(render.imgTag(`data:image/png;base64,${'A'.repeat(blocks.IMAGE_DATA_LIMIT)}`, 'big'), '', 'oversized data URLs are refused')
+    assert.equal(render.imgTag(undefined, 'x'), '')
+    for (const cols of ['4;background:url(//tracker.example/p.png)', '4" onclick="alert(1)', 1.5, -3, 0, 9, 1e9, {}, null, undefined, NaN, Infinity, '', ' ', 'x']) {
+      const html = render.renderStudyHtml('plate', rawPlate('', cols))
+      inert(html, `renderStudyHtml cols ${JSON.stringify(cols)}`)
+      assert.match(html, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/u, `cols ${String(cols).slice(0, 12)} falls back to the default`)
+    }
+    // Values the reader has always coerced with Number() (hex strings, one-element arrays, booleans) still come out as one integer 1..8.
+    for (const cols of ['0x2', [3], true, '5', ' 6 ']) {
+      const html = render.renderStudyHtml('plate', rawPlate('', cols))
+      inert(html, `renderStudyHtml coerced cols ${JSON.stringify(cols)}`)
+      assert.match(html, /grid-template-columns:repeat\([1-8],minmax\(0,1fr\)\)"/u, `cols ${JSON.stringify(cols)} stays one integer 1..8`)
+    }
+    for (const [cols, expected] of [[1, 1], [8, 8], [3, 3], ['5', 5]]) assert.match(render.renderStudyHtml('plate', rawPlate('', cols)), new RegExp(`repeat\\(${expected},minmax`, 'u'), `cols ${cols}`)
+    assert.deepEqual([1.5, '4;x', 9, 0, 3].map(cards.plateColumns), [4, 4, 4, 4, 3], 'the reader and the renderer share one rule')
+  }
+
   // -- highlights overview -------------------------------------------------------------
   const sample = [
     { id: 'm2', page: 5, quote: 'Zweite Stelle', kind: 'highlight' },
@@ -395,6 +496,356 @@ try {
     assert.equal(blocks.locateStudyBlock(twins, 'sort', hashA, second.from).from, second.from, 'identical twins: the one at the remembered offset')
     assert.equal(blocks.locateStudyBlock(twins, 'sort', hashA, 9999), null, 'identical twins elsewhere: refuse')
     assert.equal(blocks.locateStudyBlock(docText, 'map', hashA, refA.from), null, 'kind must match')
+  }
+
+  // -- editor states are written in a form the reader accepts again (the editors used to lock out their own author) --
+  {
+    const read = (kind, data) => registry.readStudyBlock(kind, blocks.studyBlockBody(data))
+    const keyed = { ...key.defaultKeyData(), table, tree: key.skeletonFromTable(table) }
+    const inner = keyed.tree.nodes.find((node) => node.kind === 'question' && node.id !== keyed.tree.root)
+    const below = key.descendantIds(keyed.tree, inner.id)
+    assert.ok(below.length > 0, 'fixture: a question with something below it')
+
+    // Question -> "Ergebnis" used to patch only the kind: the branches stayed in the written JSON, the reader cut them, and the block was refused.
+    const stale = { ...keyed, tree: { ...keyed.tree, nodes: keyed.tree.nodes.map((node) => (node.id === inner.id ? { ...node, kind: 'leaf' } : node)) } }
+    assert.equal(read('key', stale).ok, false, 'the old editor state is exactly what the reader refuses')
+    assert.equal(read('key', registry.normaliseStudyData('key', stale)).ok, true, 'normalising before the write keeps the block readable')
+
+    // The toggle itself: a result has no branches, so everything below goes with it ...
+    const asLeaf = key.setNodeKind(keyed.tree, inner.id, 'leaf')
+    assert.equal(asLeaf.nodes.length, keyed.tree.nodes.length - below.length)
+    assert.ok(below.every((id) => !asLeaf.nodes.some((node) => node.id === id)), 'no orphans are left behind')
+    assert.deepEqual(asLeaf.nodes.find((node) => node.id === inner.id), { id: inner.id, kind: 'leaf', text: inner.text, branches: [] })
+    assert.deepEqual(key.normaliseKeyTree(asLeaf), asLeaf, 'nothing is left for the normaliser to cut')
+    assert.equal(read('key', { ...keyed, tree: asLeaf }).ok, true, 'question -> result reads back whole')
+    // ... and back: an empty question that reads back too and takes branches again.
+    const asQuestion = key.setNodeKind(asLeaf, inner.id, 'question')
+    assert.equal(asQuestion.nodes.find((node) => node.id === inner.id).kind, 'question')
+    assert.deepEqual(asQuestion.nodes.find((node) => node.id === inner.id).branches, [])
+    assert.equal(read('key', { ...keyed, tree: asQuestion }).ok, true, 'result -> question reads back whole')
+    const regrown = key.addChild(asQuestion, inner.id, 'leaf', 'ja')
+    assert.equal(regrown.nodes.length, asQuestion.nodes.length + 1)
+    assert.equal(read('key', { ...keyed, tree: regrown }).ok, true)
+    assert.equal(key.setNodeKind(asLeaf, inner.id, 'leaf'), asLeaf, 'the same kind changes nothing')
+    // Round trip through the real write path (normalise, serialise, read): the data comes back as it went in.
+    const written = blocks.serializeStudyBlock('key', registry.normaliseStudyData('key', { ...keyed, tree: regrown }))
+    const again = registry.readStudyBlock('key', blocks.findStudyBlocks(written)[0].body)
+    assert.equal(again.ok, true)
+    assert.deepEqual(again.data.tree, key.normaliseKeyTree(regrown), 'toggle round trip: question -> result -> question -> new branch survives a save and a reopen')
+    assert.equal(again.data.tree.nodes.length, regrown.nodes.length, 'and nothing is dropped on the way')
+    // The root can be switched as well.
+    const rootLeaf = key.setNodeKind(keyed.tree, keyed.tree.root, 'leaf')
+    assert.equal(rootLeaf.nodes.length, 1)
+    assert.equal(read('key', { ...keyed, tree: rootLeaf }).ok, true)
+
+    // Every other editor state the models cannot hold is cut down before it is written, not after.
+    const many = (count, make) => Array.from({ length: count }, (_, index) => make(index))
+    const bad = {
+      key: { ...keyed, table: { features: many(25, (i) => `M${i}`), items: many(61, (i) => ({ id: `i${i}`, name: `A${i}`, values: many(25, () => 'x') })) }, title: 'x'.repeat(130), tree: { root: 'a', nodes: [{ id: 'a', kind: 'question', text: 'y'.repeat(310), branches: many(9, (i) => ({ label: 'l', to: `c${i}` })) }, ...many(9, (i) => ({ id: `c${i}`, kind: 'leaf', text: `c${i}`, branches: [] }))] } },
+      sort: { v: 1, title: 'S', mode: 'groups', cards: many(125, (i) => ({ id: `c${i}`, text: `K${i}` })), groups: [{ id: 'g1', title: 'x', cards: ['c1', 'ghost'] }, { id: 'g2', title: 'y', cards: ['c1'] }] },
+      map: { v: 1, title: 'M', dir: 'TB', nodes: many(81, (i) => ({ id: `n${i}`, text: `B${i}` })), edges: [{ id: 'e1', from: 'n1', to: 'n2', label: 'x' }, { id: 'e2', from: 'n1', to: 'n2', label: 'x' }, { id: 'e3', from: 'n3', to: 'n3', label: '' }, { id: 'e4', from: 'n3', to: 'ghost', label: '' }] },
+      plate: { v: 1, title: 'P', cols: 4, showLabels: true, items: many(41, (i) => ({ id: `p${i}`, label: `L${i}`, note: '', img: '' })) },
+      term: { v: 1, terms: [{ id: 'long', term: 'x', definition: 'z'.repeat(2100), example: '', source: '' }, ...many(30, (i) => ({ id: `t${i}`, term: `T${i}`, definition: 'd', example: '', source: '' }))] },
+    }
+    for (const [kind, data] of Object.entries(bad)) {
+      assert.equal(read(kind, data).ok, false, `${kind}: fixture is beyond what the reader accepts`)
+      const fixed = registry.normaliseStudyData(kind, data)
+      assert.equal(read(kind, fixed).ok, true, `${kind}: a normalised editor state reads back whole`)
+      assert.deepEqual(registry.normaliseStudyData(kind, fixed), fixed, `${kind}: normalising twice changes nothing`)
+      assert.ok(registry.findLoss(data, fixed), `${kind}: the host can tell that something was cut`)
+    }
+    assert.equal(registry.findLoss(keyed, registry.normaliseStudyData('key', keyed)), null, 'a clean state reports no loss')
+    assert.equal(registry.findLoss(asLeaf, registry.normaliseStudyData('key', { ...keyed, tree: asLeaf }).tree), null)
+
+    // The editors stop short of the caps instead of being cut.
+    const wide = { ...key.emptyKeyTree(), nodes: key.emptyKeyTree().nodes.map((node) => (node.id === 'n1' ? { ...node, branches: many(8, (i) => ({ label: '', to: `n${i + 2}` })) } : node)).concat(many(6, (i) => ({ id: `n${i + 4}`, kind: 'leaf', text: '', branches: [] }))) }
+    assert.equal(key.canAddChild(wide, 'n1'), false, 'a question takes at most 8 branches')
+    assert.equal(key.addChild(wide, 'n1', 'leaf', 'x'), wide)
+    assert.equal(key.canAddChild(key.emptyKeyTree(), 'n2'), false, 'a result takes no branches')
+    assert.equal(key.addChild(key.emptyKeyTree(), 'n2', 'leaf', 'x').nodes.length, 3, 'and no orphan node is created for it')
+    const full = { root: 'r', nodes: [{ id: 'r', kind: 'question', text: 'r', branches: [{ label: '', to: 'x0' }] }, ...many(199, (i) => ({ id: `x${i}`, kind: 'leaf', text: '', branches: [] }))] }
+    assert.equal(key.canAddChild(full, 'r'), false, 'a key holds at most 200 nodes')
+    assert.equal(key.wrapInQuestion(full, 'x0'), full)
+    let net = map.defaultMapData()
+    for (let step = 0; step < 100; step += 1) net = map.addMapNode(net)
+    assert.equal(net.nodes.length, map.MAP_LIMITS.nodes, 'the "+ Box" button stops at the cap')
+    assert.equal(map.addMapNode(net), net)
+    let small = { ...map.defaultMapData(), edges: [] }
+    small = map.addMapNode(small)
+    for (let step = 0; step < 20; step += 1) small = map.addMapEdge(small)
+    assert.equal(small.edges.length, 6, '"+ Pfeil" fills the three boxes with all six possible arrows and then stops')
+    assert.equal(new Set(small.edges.map((edge) => `${edge.from}>${edge.to}`)).size, 6, 'every new arrow joins a pair that had none')
+    assert.equal(map.freeMapPair(small), null)
+    assert.deepEqual(map.normaliseMapData(small), small, 'the arrows added by the editor survive the normaliser')
+    const [first] = small.edges
+    assert.equal(map.patchMapEdge(small, first.id, { to: first.from }), 'loop', 'an arrow cannot return to its own box')
+    const other = small.edges.find((edge) => edge.from === first.from && edge.to !== first.to)
+    assert.equal(map.patchMapEdge(small, other.id, { to: first.to, label: first.label }), 'copy', 'nor repeat another arrow')
+    assert.equal(map.patchMapEdge(small, other.id, { label: 'neu' }).edges.find((edge) => edge.id === other.id).label, 'neu')
+    // Quick entry: a chain makes one arrow per step, and a repeated line makes none.
+    const chain = map.mapFromText({ ...map.defaultMapData(), nodes: [], edges: [] }, 'Licht -> Photosynthese -> Zucker -> Wachstum\nLicht -> Photosynthese')
+    assert.deepEqual(chain.edges.map((edge) => [chain.nodes.find((node) => node.id === edge.from).text, chain.nodes.find((node) => node.id === edge.to).text]), [['Licht', 'Photosynthese'], ['Photosynthese', 'Zucker'], ['Zucker', 'Wachstum']])
+    // Pasted cards that do not fit stay with the caller.
+    const pile = sort.parseCardList(many(130, (i) => `Karte ${i}`).join('\n'))
+    assert.equal(pile.length, 130, 'parsing keeps every line')
+    const filled = sort.addCards(sort.defaultSortData(), pile)
+    assert.equal(filled.cards.length, sort.SORT_LIMITS.cards)
+    assert.equal(pile.slice(sort.cardRoom(sort.defaultSortData())).length, 10, 'the ten that did not fit are known')
+    assert.equal(sort.cardRoom(filled), 0)
+    assert.equal(sort.addCards(filled, ['mehr']).cards.length, sort.SORT_LIMITS.cards)
+    // A deleted card comes back where it was.
+    const withCards = sort.addCards(sort.defaultSortData(), ['A', 'B', 'C'])
+    const [cardA, cardB, cardC] = withCards.cards.map((card) => card.id)
+    const arranged = sort.moveCard(sort.moveCard(sort.moveCard(withCards, cardA, 'g1'), cardB, 'g1'), cardC, 'g2')
+    const taken = sort.takeCard(arranged, cardB)
+    assert.deepEqual(taken.data.groups[0].cards, [cardA])
+    assert.equal(taken.data.cards.length, 2)
+    assert.deepEqual(sort.restoreCard(taken.data, taken.removed), arranged, 'undo puts the card back in place')
+    assert.equal(sort.restoreCard(arranged, taken.removed), arranged, 'a card that is already there is not duplicated')
+    assert.equal(sort.takeCard(arranged, 'nope'), null)
+
+    // The numbers named in the editors' texts follow the caps.
+    const source = (name) => readFileSync(new URL(`../src/components/study/${name}.tsx`, import.meta.url), 'utf8')
+    const numberIn = (text, pattern) => Number(pattern.exec(text)?.[1])
+    assert.equal(numberIn(source('KeyEditor'), /höchstens (\d+) Arten/u), key.KEY_LIMITS.items)
+    assert.equal(numberIn(source('KeyEditor'), /höchstens (\d+) Merkmale/u), key.KEY_LIMITS.features)
+    assert.equal(numberIn(source('KeyEditor'), /mehr als (\d+) verschiedene Werte/u), key.MAX_SPLIT)
+    assert.equal(numberIn(source('MapEditor'), /höchstens (\d+) Boxen/u), map.MAP_LIMITS.nodes)
+    assert.equal(numberIn(source('MapEditor'), /höchstens (\d+) Pfeile/u), map.MAP_LIMITS.edges)
+    assert.equal(numberIn(source('SortEditor'), /höchstens (\d+) Karten/u), sort.SORT_LIMITS.cards)
+    assert.equal(numberIn(source('SortEditor'), /höchstens (\d+) Gruppen/u), sort.SORT_LIMITS.groups)
+    assert.equal(numberIn(source('PlateEditor'), /höchstens (\d+) Bilder/u), cards.PLATE_LIMITS.items)
+    assert.equal(numberIn(source('TermEditor'), /höchstens (\d+) Begriffe/u), cards.TERM_LIMITS.terms)
+  }
+
+  // -- key layout: descriptive branch labels never collide ----------------------------------------------------------
+  {
+    const rng = (seed) => () => {
+      seed = (seed + 0x6d2b79f5) | 0
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+    }
+    const words = ['Flügel', 'häutig', 'Hinterflügel', 'Vorderflügel', 'Mundwerkzeuge', 'stechend-saugend', 'beißend', 'Flügeldecken', 'harten', 'umgebildet', 'Schmetterlingsschuppen', 'fehlen', 'Fühler', 'fadenförmig', 'geknickt', 'Hinterleibsende', 'Schwanzfäden', 'Springgabel', 'Körperanhänge', 'Insektenordnung', 'Zweiflügler', 'Hautflügler', 'Schnabelkerfe', 'Geradflügler', 'dicht', 'netzartig', 'Larven', 'aquatisch', 'wasserlebend', 'Rüssel', 'gegliedert', 'zu', 'mit', 'und', 'oder', 'ohne', 'kleiner', 'als', 'die', 'der', 'Metamorphose', 'Hinterflügelgeäderdiagnosemerkmal']
+    const phrase = (random, min, max) => {
+      let out = ''
+      const target = min + Math.floor(random() * (max - min + 1))
+      while (out.length < target) out += `${out ? ' ' : ''}${words[Math.floor(random() * words.length)]}`
+      return out.slice(0, max).trim()
+    }
+    const longLabel = (random) => (random() < 0.12 ? '' : random() < 0.2 ? (random() < 0.5 ? 'ja' : 'nein') : phrase(random, 24, 80))
+    /** A random key: `ladder` hangs each next question under the previous one, `any` grows at random places. */
+    const randomKey = (random, shape, size) => {
+      const nodes = [{ id: 'n1', kind: 'question', text: phrase(random, 3, 60), branches: [] }]
+      const open = [nodes[0]]
+      while (nodes.length < size && open.length) {
+        const parent = shape === 'ladder' ? open[open.length - 1] : open[Math.floor(random() * open.length)]
+        if (parent.branches.length >= 8) { open.splice(open.indexOf(parent), 1); continue }
+        const id = `n${nodes.length + 1}`
+        const kind = shape === 'ladder' ? (parent.branches.length === 0 ? 'leaf' : 'question') : random() < 0.4 ? 'question' : 'leaf'
+        const node = { id, kind, text: phrase(random, 2, kind === 'leaf' ? 40 : 60), branches: [] }
+        parent.branches.push({ label: longLabel(random), to: id })
+        nodes.push(node)
+        if (kind === 'question') open.push(node)
+        if (shape === 'ladder' && parent.branches.length >= 2) open.splice(open.indexOf(parent), 1)
+      }
+      return key.normaliseKeyTree({ root: 'n1', nodes })
+    }
+    const segments = (edge) => [
+      { part: 'stem', x: edge.x1 - 0.5, y: edge.y1, w: 1, h: edge.busY - edge.y1 },
+      { part: 'bus', x: Math.min(edge.x1, edge.x2), y: edge.busY - 0.5, w: Math.max(1, Math.abs(edge.x2 - edge.x1)), h: 1 },
+      { part: 'drop', x: edge.x2 - 0.5, y: edge.busY, w: 1, h: edge.y2 - edge.busY },
+    ]
+    const checkLayout = (tree, name) => {
+      const placedLayout = key.layoutKeyTree(tree)
+      assert.equal(placedLayout.nodes.length, tree.nodes.length, `${name}: every node is placed once`)
+      const boxes = placedLayout.nodes.map((node) => ({ what: `box ${node.id}`, ...node }))
+      const labels = placedLayout.edges.filter((edge) => edge.labelBox).map((edge) => ({ what: `label ${edge.from}>${edge.to}`, edge, ...edge.labelBox }))
+      const all = [...boxes, ...labels]
+      for (let i = 0; i < all.length; i += 1) {
+        const item = all[i]
+        assert.ok(item.x >= 0 && item.y >= 0 && item.x + item.w <= placedLayout.width && item.y + item.h <= placedLayout.height, `${name}: ${item.what} lies outside the drawing`)
+        for (let j = i + 1; j < all.length; j += 1) assert.ok(!overlap(item, all[j]), `${name}: ${item.what} overlaps ${all[j].what}`)
+      }
+      for (const edge of placedLayout.edges) {
+        const child = placedLayout.nodes.find((node) => node.id === edge.to)
+        for (const line of segments(edge)) {
+          for (const item of all) {
+            const own = item.edge === edge
+            if (own && line.part === 'drop') continue // a label sits on the line of its own branch, that is the idea
+            assert.ok(!overlap(line, item), `${name}: the ${line.part} of ${edge.from}>${edge.to} runs through ${item.what}`)
+          }
+        }
+        if (edge.labelBox) {
+          assert.ok(edge.labelBox.y >= edge.busY && edge.labelBox.y + edge.labelBox.h < child.y, `${name}: the label of ${edge.to} sits between the run and its box, with line left below`)
+          assert.ok(Math.abs(edge.labelBox.x + edge.labelBox.w / 2 - (child.x + child.w / 2)) <= 1, `${name}: the label of ${edge.to} is centred on its branch`)
+        }
+      }
+      return placedLayout
+    }
+
+    let checked = 0
+    let longest = 0
+    for (let seed = 1; seed <= 120; seed += 1) {
+      const random = rng(seed)
+      const shape = seed % 3 === 0 ? 'ladder' : 'any'
+      const tree = randomKey(random, shape, 4 + Math.floor(random() * (shape === 'ladder' ? 30 : 56)))
+      checkLayout(tree, `${shape} ${seed}`)
+      longest = Math.max(longest, ...tree.nodes.flatMap((node) => node.branches.map((branch) => branch.label.length)))
+      checked += 1
+    }
+    assert.ok(checked === 120 && longest >= 70, 'the generated keys really carry long descriptive labels')
+
+    // Fixed shapes that hurt: a 15-order ladder, one question with eight long branches, a tall chain, odd glyphs.
+    const lab = 'Vorderflügel zu harten Flügeldecken (Elytren) umgebildet, Hinterflügel häutig, 2 Paar'
+    assert.ok(lab.length > 80)
+    const ladderNodes = []
+    for (let i = 1; i <= 15; i += 1) {
+      ladderNodes.push({ id: `q${i}`, kind: 'question', text: `Merkmal ${i} vorhanden?`, branches: [{ label: lab.slice(0, 80), to: `o${i}` }, ...(i < 15 ? [{ label: 'Mundwerkzeuge stechend-saugend, Rüssel gegliedert', to: `q${i + 1}` }] : [{ label: 'ja', to: 'o16' }])] })
+      ladderNodes.push({ id: `o${i}`, kind: 'leaf', text: `Ordnung ${i} (Insecta)`, branches: [] })
+    }
+    ladderNodes.push({ id: 'o16', kind: 'leaf', text: 'Restgruppe', branches: [] })
+    const ladder = key.normaliseKeyTree({ root: 'q1', nodes: ladderNodes })
+    assert.equal(ladder.nodes.length, 31, 'fixture: a 15-order ladder, 31 nodes')
+    const ladderLayout = checkLayout(ladder, '15-order ladder')
+    const star = key.normaliseKeyTree({ root: 'r', nodes: [{ id: 'r', kind: 'question', text: 'Frage', branches: Array.from({ length: 8 }, (_, i) => ({ label: `${lab.slice(i, 80)}`, to: `k${i}` })) }, ...Array.from({ length: 8 }, (_, i) => ({ id: `k${i}`, kind: 'leaf', text: `K${i}`, branches: [] }))] })
+    checkLayout(star, 'eight long branches')
+    const chainNodes = Array.from({ length: 30 }, (_, i) => ({ id: `c${i}`, kind: 'question', text: 'Weiter?', branches: [{ label: lab, to: `c${i + 1}` }] }))
+    chainNodes.push({ id: 'c30', kind: 'leaf', text: 'Ende', branches: [] })
+    checkLayout(key.normaliseKeyTree({ root: 'c0', nodes: chainNodes }), 'chain of 30')
+    for (const [name, label] of [['one long word', 'Ä'.repeat(80)], ['capitals', 'FLÜGEL HÄUTIG MUNDWERKZEUGE STECHEND SAUGEND ÜBERSEITE DICHT BEHAART']] ) {
+      checkLayout(key.normaliseKeyTree({ root: 'a', nodes: [{ id: 'a', kind: 'question', text: 'X?', branches: [{ label, to: 'b' }, { label, to: 'c' }] }, { id: 'b', kind: 'leaf', text: 'B', branches: [] }, { id: 'c', kind: 'leaf', text: 'C', branches: [] }] }), name)
+    }
+    checkLayout(key.normaliseKeyTree({ root: 'a', nodes: [{ id: 'a', kind: 'question', text: 'X?', branches: [{ label: '翅は膜質で、後翅は小さい昆虫類の分類群を示す形質', to: 'b' }, { label: '🪲🪲🪲🪲🪲🪲🪲🪲🪲🪲🪲🪲🪲🪲🪲🪲', to: 'c' }] }, { id: 'b', kind: 'leaf', text: 'B', branches: [] }, { id: 'c', kind: 'leaf', text: 'C', branches: [] }] }), 'wide glyphs')
+    // A single leaf, an empty tree and a damaged tree (cycle, shared child) still lay out.
+    assert.equal(key.layoutKeyTree({ root: 'x', nodes: [{ id: 'x', kind: 'leaf', text: 'Nur ein Ergebnis', branches: [] }] }).edges.length, 0)
+    assert.equal(key.layoutKeyTree({ root: 'none', nodes: [] }).nodes.length, 0)
+    const cyc = key.layoutKeyTree({ root: 'a', nodes: [{ id: 'a', kind: 'question', text: 'A', branches: [{ label: 'x', to: 'b' }, { label: 'y', to: 'b' }] }, { id: 'b', kind: 'question', text: 'B', branches: [{ label: 'back', to: 'a' }] }] })
+    assert.equal(cyc.nodes.length, 2, 'a cycle or a shared child does not loop or place a node twice')
+    // A result that still carries branches (raw editor state) has none in the picture.
+    assert.equal(key.layoutKeyTree({ root: 'a', nodes: [{ id: 'a', kind: 'leaf', text: 'A', branches: [{ label: 'x', to: 'b' }] }, { id: 'b', kind: 'leaf', text: 'B', branches: [] }] }).nodes.length, 1)
+    // Short labels keep the usual gap between two rows; labels with several lines give their row the room they need.
+    const rowGaps = (placedLayout) => {
+      const tops = [...new Set(placedLayout.nodes.map((node) => node.y))].sort((a, b) => a - b)
+      return tops.slice(1).map((top, index) => top - (tops[index] + Math.max(...placedLayout.nodes.filter((node) => node.y === tops[index]).map((node) => node.h))))
+    }
+    assert.deepEqual([...new Set(rowGaps(checkLayout(tree, 'skeleton from the table')))], [54], 'one-line labels fit the usual gap')
+    assert.ok(Math.max(...rowGaps(ladderLayout)) > 54, 'long labels widen the gap between two rows')
+
+    // The picture: wrapped label lines are drawn, nothing is drawn outside the viewBox.
+    const drawing = render.renderKeyTreeSvg({ ...key.defaultKeyData(), title: 'Insektenordnungen', tree: ladder })
+    const view = /viewBox="0 0 (\d+) (\d+)"/u.exec(drawing.svg)
+    assert.deepEqual([Number(view[1]), Number(view[2])], [drawing.width, drawing.height])
+    for (const [, x, y, w, h] of drawing.svg.matchAll(/<rect x="(-?[\d.]+)" y="(-?[\d.]+)" width="([\d.]+)" height="([\d.]+)"/gu)) {
+      assert.ok(Number(x) >= 0 && Number(y) >= 0 && Number(x) + Number(w) <= drawing.width && Number(y) + Number(h) <= drawing.height, 'every box and label is inside the viewBox')
+    }
+    const wrapped = key.wrapText(lab.slice(0, 80), key.LABEL_METRICS.wrap)
+    assert.ok(wrapped.length >= 3 && wrapped.every((line) => line.length <= key.LABEL_METRICS.wrap + 6), 'a long label is wrapped to narrow lines')
+    for (const line of wrapped) assert.ok(drawing.svg.includes(`>${blocks.escapeHtml(line)}</text>`), `label line "${line}" is drawn`)
+    assert.ok(!drawing.svg.includes(lab.slice(0, 80)), 'the label is never one long line')
+    assert.ok(render.renderKeyTreeSvg(keyData, render.EXPORT_PALETTE).svg.includes('>ja</text>'), 'short labels are still drawn on one line')
+  }
+
+  // -- concept map drawing -------------------------------------------------------------------------------------------
+  {
+    const labelled = { ...map.defaultMapData(), nodes: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], edges: [{ id: 'e', from: 'a', to: 'b', label: 'führt zu' }] }
+    const themed = render.renderMapSvg(labelled).svg
+    assert.ok(!/fill:#fff[;"]/u.test(themed), 'the live drawing has no white patches behind the labels in the dark theme')
+    assert.ok(themed.includes('fill:var(--panel'), 'label backgrounds follow the panel colour')
+    assert.ok(render.renderMapSvg(labelled, render.EXPORT_PALETTE).svg.includes('fill:#ffffff;opacity:.92'), 'the export stays on white')
+    const [one, two] = [render.renderMapSvg(labelled).svg, render.renderMapSvg(labelled).svg]
+    const marker = (svg) => /<marker id="([^"]+)"/u.exec(svg)[1]
+    assert.notEqual(marker(one), marker(two), 'every map has its own arrowhead id')
+    assert.ok(one.includes(`marker-end="url(#${marker(one)})"`) && two.includes(`marker-end="url(#${marker(two)})"`), 'and uses it')
+  }
+
+  // -- building a key from a table, pasting a table, restructuring a key -----------------------------------------------
+  {
+    // A free-text column is skipped, and the editor is told which one and which items stayed together.
+    const freeText = {
+      features: ['Flügel', 'Beschreibung'],
+      items: [
+        { id: '1', name: 'Käfer', values: ['ja', 'Flügeldecken hart, Hinterflügel häutig'] },
+        { id: '2', name: 'Wanzen', values: ['ja', 'Halbflügeldecken, Stinkdrüsen'] },
+        { id: '3', name: 'Libellen', values: ['ja', 'zwei Paar netzartig geädert'] },
+        { id: '4', name: 'Schmetterlinge', values: ['ja', 'beschuppt, Rollrüssel'] },
+        { id: '5', name: 'Bienen', values: ['ja', 'häutig, Stechapparat'] },
+        { id: '6', name: 'Silberfischchen', values: ['nein', 'Körper beschuppt'] },
+      ],
+    }
+    const report = key.skeletonReport(freeText)
+    assert.deepEqual(report.unusable, ['Beschreibung'], 'the column with five different texts is named as skipped')
+    assert.deepEqual(report.merged.map((names) => [...names].sort()), [['Bienen', 'Käfer', 'Libellen', 'Schmetterlinge', 'Wanzen']], 'and so are the items that stayed together in one result')
+    assert.deepEqual(report.tree, key.skeletonFromTable(freeText))
+    const clean = key.skeletonReport(table)
+    assert.deepEqual([clean.unusable, clean.merged], [[], []], 'a table the skeleton can fully split reports nothing')
+    assert.deepEqual(key.skeletonReport({ features: [], items: [] }).merged, [])
+
+    // Spreadsheet paste: an empty top-left cell keeps its place, quoted cells keep line breaks, quotes and the other separators.
+    assert.deepEqual(key.parseTablePaste('\tFlügel\tBeine\nKäfer\tja\t6\r\nFloh\tnein\t6\r\n'), [['', 'Flügel', 'Beine'], ['Käfer', 'ja', '6'], ['Floh', 'nein', '6']])
+    assert.deepEqual(key.tableFromGrid(key.parseTablePaste('\tFlügel\tBeine\nKäfer\tja\t6')).features, ['Flügel', 'Beine'], 'no column is lost or shifted')
+    assert.deepEqual(key.parseTablePaste('Art\tNotiz\n"Käfer"\t"Flügel: häutig,\n2 Paar, ""hart"""\nFloh\tein Semikolon; hier\n'), [['Art', 'Notiz'], ['Käfer', 'Flügel: häutig,\n2 Paar, "hart"'], ['Floh', 'ein Semikolon; hier']])
+    assert.deepEqual(key.parseTablePaste('Art\tA\tB\t\nx\t1\t2\t\n'), [['Art', 'A', 'B'], ['x', '1', '2']], 'columns a spreadsheet pads on the right are dropped')
+    assert.deepEqual(key.parseTablePaste('Art;Flügel\nKäfer;ja\n\nFloh;nein'), [['Art', 'Flügel'], ['Käfer', 'ja'], ['Floh', 'nein']])
+    assert.deepEqual(key.parseTablePaste('| Art | X |\n| :--- | ---: |\n| a \\| b | c |'), [['Art', 'X'], ['a | b', 'c']], 'an escaped pipe stays in its cell')
+    assert.deepEqual(key.parseTablePaste(key.keyTableToMarkdown({ features: ['A|B'], items: [{ id: 'x', name: 'Käfer', values: ['ja | nein'] }] })), [['Art', 'A|B'], ['Käfer', 'ja | nein']], 'the table we export can be pasted back')
+    assert.deepEqual(key.parseTablePaste('  \n\n'), [])
+
+    // Restructuring.
+    const base = key.skeletonFromTable(table)
+    const q = base.nodes.find((node) => node.id === base.root)
+    const [firstBranch, secondBranch] = q.branches
+    const swapped = key.moveNode(base, secondBranch.to, -1)
+    assert.deepEqual(swapped.nodes.find((node) => node.id === base.root).branches.map((branch) => branch.to), [secondBranch.to, firstBranch.to], 'a branch moves up with its label')
+    assert.equal(key.moveNode(base, firstBranch.to, -1), base, 'the first branch cannot move up')
+    assert.equal(key.moveNode(base, base.root, 1), base, 'the root has no siblings')
+    assert.deepEqual(key.normaliseKeyTree(swapped).nodes.length, base.nodes.length)
+    const beside = key.addSibling(base, firstBranch.to)
+    const order = beside.nodes.find((node) => node.id === base.root).branches.map((branch) => branch.to)
+    assert.equal(order.length, q.branches.length + 1)
+    assert.equal(order[1], key.nextNodeId(base), 'a sibling goes in right after the node, not at the end')
+    assert.equal(key.addSibling(base, base.root), base)
+    const wrapped = key.wrapInQuestion(base, secondBranch.to)
+    const wrapper = wrapped.nodes.find((node) => node.id === key.nextNodeId(base))
+    assert.deepEqual([wrapper.kind, wrapper.text, wrapper.branches.map((branch) => branch.to)[0]], ['question', '', secondBranch.to])
+    assert.equal(wrapped.nodes.find((node) => node.id === base.root).branches[1].to, wrapper.id, 'the new question takes the place of the node')
+    assert.equal(wrapped.nodes.length, base.nodes.length + 2)
+    assert.equal(key.wrapInQuestion(base, base.root).root, key.nextNodeId(base), 'wrapping the root puts the new question on top')
+    for (const tree of [swapped, beside, wrapped, key.wrapInQuestion(base, base.root)]) assert.deepEqual(key.normaliseKeyTree(tree).nodes.length, tree.nodes.length, 'restructuring never leaves anything for the normaliser to cut')
+    assert.equal(registry.readStudyBlock('key', blocks.studyBlockBody({ ...key.defaultKeyData(), tree: wrapped })).ok, true)
+
+    // The key as numbered couplets, for the note.
+    assert.equal(key.keyToCoupletsMarkdown({ root: 'a', nodes: [
+      { id: 'a', kind: 'question', text: 'Flügel vorhanden?', branches: [{ label: 'ja', to: 'b' }, { label: 'nein', to: 'c' }] },
+      { id: 'b', kind: 'question', text: 'Mundwerkzeuge saugend?', branches: [{ label: 'ja', to: 'd' }, { label: 'nein', to: 'e' }] },
+      { id: 'c', kind: 'leaf', text: 'Silberfischchen', branches: [] },
+      { id: 'd', kind: 'leaf', text: 'Wanzen', branches: [] },
+      { id: 'e', kind: 'leaf', text: 'Käfer', branches: [] },
+    ] }), '1. Flügel vorhanden?\n   - a) ja → 2\n   - b) nein → Silberfischchen\n2. Mundwerkzeuge saugend?\n   - a) ja → Wanzen\n   - b) nein → Käfer')
+    assert.equal(key.keyToCoupletsMarkdown({ root: 'a', nodes: [{ id: 'a', kind: 'leaf', text: 'Nur Käfer', branches: [] }] }), 'Nur Käfer')
+    assert.equal(key.keyToCoupletsMarkdown(key.emptyKeyTree()).split('\n').length, 3, 'the starter key is one question with two branches')
+  }
+
+  // -- cards keep their schedule: ids do not change from read to read ----------------------------------------------------
+  {
+    const idless = JSON.stringify({ v: 1, terms: [{ term: 'Mimikry', definition: 'Nachahmung.' }, { term: 'Mimese', definition: 'Tarnung.' }, { term: 'Mimikry', definition: 'Nachahmung.' }] })
+    const [first, second] = [cards.parseTermData(idless), cards.parseTermData(idless)]
+    assert.deepEqual(first.terms.map((term) => term.id), second.terms.map((term) => term.id), 'terms without ids get the same ids on every read')
+    assert.equal(new Set(first.terms.map((term) => term.id)).size, 3, 'also when two entries say the same')
+    const sheet = JSON.stringify({ v: 1, title: 'T', items: [{ label: 'Admiral', img: 'data:image/jpeg;base64,AAAA' }, { label: 'Admiral', img: 'data:image/jpeg;base64,AAAA' }] })
+    assert.deepEqual(cards.parsePlateData(sheet).items.map((item) => item.id), cards.parsePlateData(sheet).items.map((item) => item.id))
+    const noteOf = (...bodies) => bodies.map((body) => `\`\`\`fanotes-term\n${body}\n\`\`\``).join('\n\n')
+    const ids = (note) => cards.studyCardSources(note).map((card) => card.id)
+    assert.deepEqual(ids(noteOf(idless)), ids(noteOf(idless)), 'the same note yields the same card ids twice, so a stored schedule is found again')
+    assert.equal(new Set(ids(noteOf(idless))).size, 3, 'and an entry written twice in one block stays two cards')
+    // A block copied within a note shares its ids: an exact copy adds nothing, an edited copy adds its own cards, and the first keeps its plain id.
+    const original = JSON.stringify({ v: 1, terms: [{ id: 't1', term: 'Mimikry', definition: 'Nachahmung.' }] })
+    const edited = JSON.stringify({ v: 1, terms: [{ id: 't1', term: 'Mimikry', definition: 'Nachahmung einer wehrhaften Art.' }] })
+    assert.deepEqual(ids(noteOf(original, original)), ['term:t1'], 'an exact copy is not a second card')
+    const both = ids(noteOf(original, edited))
+    assert.equal(both.length, 2, 'an edited copy is its own card')
+    assert.equal(both[0], 'term:t1', 'the first block keeps the id its schedule is stored under')
+    assert.equal(ids(noteOf(edited, original))[0], 'term:t1', 'whichever block comes first keeps the plain id')
   }
 
   console.log('study tools checks passed')

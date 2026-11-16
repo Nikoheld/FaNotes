@@ -447,3 +447,115 @@ test('an idempotent delete removes a leftover that matches the larger archive', 
   assert.equal(fetched.status, 204)
   assert.equal(fetched.headers['x-fanotes-deleted'], '1')
 })
+
+test('a complete cannot aim an older upload at a newer note', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(5000)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const older = randomBytes(4800)
+  const opened = await jsonCall('POST', `/api/v1/sync/files/${id}/uploads`, { size: older.length }, token, accountId, {
+    'If-Match': String(revision),
+    'X-FaNotes-Meta': meta,
+    'X-FaNotes-Sha256': sha256(older),
+    'X-FaNotes-Blank': '0',
+  })
+  assert.equal(opened.status, 201, JSON.stringify(opened.json))
+  assert.equal((await patchUpload(id, opened.json.uploadId, older, 0)).status, 200)
+  const newer = randomBytes(5100)
+  const replaced = await putFile(id, newer, revision)
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  const newerRevision = JSON.parse(replaced.body.toString('utf8')).revision
+  const lied = await call('POST', `/api/v1/sync/files/${id}/uploads/${opened.json.uploadId}/complete`, {
+    token,
+    accountId,
+    headers: {
+      'Content-Length': '0',
+      'If-Match': String(newerRevision),
+      'X-FaNotes-Meta': b64(32),
+      'X-FaNotes-Sha256': sha256(older),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(lied.status, 409, lied.body.toString('utf8'))
+  const conflict = JSON.parse(lied.body.toString('utf8'))
+  assert.equal(conflict.reason, 'stale')
+  assert.equal(conflict.entry.revision, newerRevision)
+  const live = await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, newer)
+  assert.equal(live.headers['x-fanotes-meta'], meta)
+  assert.equal((await call('GET', `/api/v1/sync/files/${id}/uploads/${opened.json.uploadId}`, { token, accountId })).status, 200)
+})
+
+test('a complete cannot drop the blank flag stored with the upload', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(800)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const blankBody = randomBytes(200)
+  const opened = await jsonCall('POST', `/api/v1/sync/files/${id}/uploads`, { size: blankBody.length }, token, accountId, {
+    'If-Match': String(revision),
+    'X-FaNotes-Meta': meta,
+    'X-FaNotes-Sha256': sha256(blankBody),
+    'X-FaNotes-Blank': '1',
+  })
+  assert.equal(opened.status, 201, JSON.stringify(opened.json))
+  assert.equal((await patchUpload(id, opened.json.uploadId, blankBody, 0)).status, 200)
+  const finished = await call('POST', `/api/v1/sync/files/${id}/uploads/${opened.json.uploadId}/complete`, {
+    token,
+    accountId,
+    headers: {
+      'Content-Length': '0',
+      'If-Match': String(revision),
+      'X-FaNotes-Meta': meta,
+      'X-FaNotes-Sha256': sha256(blankBody),
+      'X-FaNotes-Clear': '1',
+    },
+  })
+  assert.equal(finished.status, 409, finished.body.toString('utf8'))
+  assert.equal(JSON.parse(finished.body.toString('utf8')).reason, 'guard')
+  assert.equal(finished.headers['x-fanotes-rejected'], 'guard')
+  const live = await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, original)
+})
+
+test('a torn log tail does not swallow the next revision', async () => {
+  const firstId = randomBytes(32).toString('hex')
+  const secondId = randomBytes(32).toString('hex')
+  const original = randomBytes(140)
+  const created = await putFile(firstId, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const logPath = join(dataDirectory, 'accounts', accountId, 'changes.jsonl')
+  const before = readFileSync(logPath)
+  assert.equal(before[before.length - 1], 0x0a)
+  writeFileSync(logPath, before.subarray(0, before.length - 1))
+  const second = randomBytes(160)
+  const added = await putFile(secondId, second, 0)
+  assert.equal(added.status, 200, added.body.toString('utf8'))
+  const kept = readFileSync(logPath, 'utf8')
+  assert.equal(kept.endsWith('\n'), true)
+  assert.equal(kept.includes(sha256(original)), true)
+  assert.equal(kept.includes(sha256(second)), true)
+  for (const line of kept.split('\n')) if (line) JSON.parse(line)
+  writeFileSync(logPath, '{"torn":', { flag: 'a' })
+  const newer = randomBytes(180)
+  const revision = JSON.parse(added.body.toString('utf8')).revision
+  const replaced = await putFile(secondId, newer, revision)
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  const after = readFileSync(logPath, 'utf8')
+  assert.equal(after.includes('{"torn":'), false)
+  assert.equal(after.includes(sha256(original)), true)
+  assert.equal(after.includes(sha256(newer)), true)
+  assert.equal(after.endsWith('\n'), true)
+  for (const line of after.split('\n')) if (line) JSON.parse(line)
+  const live = await call('GET', `/api/v1/sync/files/${secondId}`, { token, accountId })
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, newer)
+  const feed = JSON.parse((await call('GET', '/api/v1/sync/changes?since=0', { token, accountId })).body.toString('utf8'))
+  const listed = feed.entries.find((entry) => entry.id === secondId)
+  assert.equal(listed.sha256, sha256(newer))
+})

@@ -61,15 +61,34 @@ class AppGraph(context: Context) {
             )
         },
     )
-    private val diagnosticsContext = ch.fasrv.fanotes.desk.DiagnosticsContext(
-        vaultPath = File(context.filesDir, "vault").absolutePath,
-        homeDir = context.filesDir.parent.orEmpty(),
-    )
+    private val appContext = context.applicationContext
+
+    /** The real vault path, the SAF tree URI and its display name, the device model and the device name, so none of them survives scrubbing. */
+    private fun diagnosticsContext(): ch.fasrv.fanotes.desk.DiagnosticsContext {
+        val tree = prefs.getString("vault-uri", null)?.takeIf { it.isNotBlank() }
+        val treeName = tree?.let { treeDisplayName(it) }
+        val deviceName = runCatching { android.provider.Settings.Global.getString(appContext.contentResolver, "device_name") }.getOrNull()
+        return ch.fasrv.fanotes.desk.DiagnosticsContext(
+            vaultPath = defaultRoot.absolutePath,
+            homeDir = appContext.filesDir.parent.orEmpty(),
+            extraPaths = listOfNotNull(tree),
+            extraNames = listOfNotNull(treeName, Build.MODEL, Build.DEVICE, deviceName, prefs.getString("device-name", null))
+                .map { it.trim() }.filter { it.length >= 3 },
+        )
+    }
+
+    private fun treeDisplayName(tree: String): String? = runCatching {
+        val uri = android.net.Uri.parse(tree)
+        val doc = android.provider.DocumentsContract.buildDocumentUriUsingTree(uri, android.provider.DocumentsContract.getTreeDocumentId(uri))
+        appContext.contentResolver.query(doc, arrayOf(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    }.getOrNull()
 
     fun configureDiagnostics(settings: Map<String, String> = readDesk()) {
         diagnostics.configure(
             ch.fasrv.fanotes.desk.DiagnosticsConsent(usage = settings["diagnostics-usage"] == "on", logs = settings["diagnostics-logs"] == "on"),
-            diagnosticsContext,
+            diagnosticsContext(),
         )
     }
 

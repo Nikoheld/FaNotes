@@ -558,6 +558,36 @@ test('a mensa cache that is not the known shape is left in place', async () => {
   }
 })
 
+test('a mensa day that is not a day is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mensa-day-'))
+  const file = join(root, 'mensa.json')
+  const mensa = createMensa({ fetch: makeFetch([], [], { api: true }), now: () => new Date('2026-11-15T10:00:00Z'), root, log: () => {} })
+  try {
+    for (const stored of [
+      '{"fetchedAt":"2026-11-15T08:00:00.000Z","days":["kept-day"]}\n',
+      '{"fetchedAt":"2026-11-15T08:00:00.000Z","days":[{"note":"kept"}]}\n',
+      '{"fetchedAt":"2026-11-15T08:00:00.000Z","days":[{"date":"2026-12-01","menus":"kept"}]}\n',
+      '{"fetchedAt":"2026-11-15T08:00:00.000Z","days":[{"date":"2026-12-01","menus":["kept"]}]}\n',
+    ]) {
+      await fs.writeFile(file, stored, { mode: 0o600 })
+      const live = await mensa.get()
+      await mensa.idle()
+      assert.ok(live.days.length > 0)
+      assert.equal(await fs.readFile(file, 'utf8'), stored)
+    }
+    const good = '{"fetchedAt":"2026-11-15T08:00:00.000Z","days":[{"date":"2026-12-01","menus":[{"name":"kept"}]}]}\n'
+    await fs.writeFile(file, good, { mode: 0o600 })
+    const fresh = createMensa({ fetch: makeFetch([], [], { api: true }), now: () => new Date('2026-11-16T10:00:00Z'), root, log: () => {} })
+    await fresh.get()
+    await fresh.idle()
+    const saved = JSON.parse(await fs.readFile(file, 'utf8'))
+    assert.equal(saved.days.some((day) => day.date === '2026-12-01' && day.menus.some((menu) => menu.name === 'kept')), true)
+    assert.ok(saved.days.length > 1)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('a broken mensa cache can be replaced by a fresh menu', async () => {
   const root = await mkdtemp(join(tmpdir(), 'mensa-broken-'))
   const file = join(root, 'mensa.json')

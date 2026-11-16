@@ -397,6 +397,7 @@ export const editorMathKatexOptions = (display: boolean, throwOnError: boolean) 
   strict: false as const,
   throwOnError,
   trust: false as const,
+  maxExpand: 1000,
 })
 
 /** The math span the live editor would hand to KaTeX, taken from stored note text. */
