@@ -298,10 +298,17 @@ export const createSchulnetzRuntime = (options = {}) => {
     return link
   }
 
+  const plainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
   const readLink = async (accountId) => {
     const file = resolve(accountDir(accountId), 'link.json')
     const link = await readJson(file)
-    if (!link) return null
+    // A missing or broken file can start again. A file that is there but not this link must not look connected, or the next upload replaces the snapshot and the grade ledger.
+    if (link == null) return null
+    const known = plainObject(link)
+      && (link.fcmTokens == null || Array.isArray(link.fcmTokens))
+      && (link.pushKeys == null || plainObject(link.pushKeys))
+      && (link.settings == null || plainObject(link.settings))
+    if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)
       await writeJson(file, link)
