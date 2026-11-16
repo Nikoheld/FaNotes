@@ -1617,14 +1617,20 @@ function folderLocationStoreNow() {
 // Notices files added, changed or removed from outside FaNotes (Explorer, other
 // programs, other sync tools) in the vault and its linked folder locations.
 let vaultWatcher = null
+/** Latest watcher walk (with colors). Reusable once, for the getTree call that follows a change event. */
+let watcherTreeScan = null
 let vaultWatcherRoot = null
 function ensureVaultWatch(root) {
   if (vaultWatcher && vaultWatcherRoot === root) return
   vaultWatcher?.stop()
   vaultWatcherRoot = root
+  // The scan is the same walk getTree does. Keep the latest one so the renderer's
+  // refresh after a change event can reuse it once instead of walking the vault again.
   const scanRoot = async () => {
     if (currentVaultPath !== root) throw new Error('vault changed')
-    return readTreeDirectory(root, root, 0, new Map())
+    const entries = applyFileColors(await readTreeDirectory(root, root, 0, await readFolderColors(root)), await readFileColorsForTree(root))
+    watcherTreeScan = { root, entries, at: Date.now(), reusable: false }
+    return entries
   }
   const getRoots = () => {
     const roots = [root]
@@ -1645,6 +1651,7 @@ function ensureVaultWatch(root) {
       const truncated = lists.some((list) => list.length > 500)
       const payload = { added: cap(lists[0]), removed: cap(lists[1]), changed: cap(lists[2]), ...(truncated ? { truncated: true } : {}) }
       if (!payload.added.length && !payload.removed.length && !payload.changed.length) return
+      if (watcherTreeScan?.root === root) watcherTreeScan.reusable = true
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.vaultChanged, payload)
     },
   })
@@ -1821,6 +1828,9 @@ function invalidateFamdCompanion(famdRelativePath) {
   }
   famdCompanionInflight.delete(famdRelativePath)
 }
+
+/** relative .famd path -> { signature: mtime:size, pageStats } for the statistics page. */
+const pageStatsByCompanion = new Map()
 
 async function loadFamdCompanion(notePath) {
   const famdRelative = companionNotePath(notePath, '.famd')
@@ -3731,10 +3741,14 @@ function registerIpcHandlers() {
     return entries
   })
 
-  handle(IPC.getTree, async () => {
+  handle(IPC.getTree, async (_event, options) => {
     const { vaultPath } = await ensureBootstrap()
     const root = await assertCurrentVaultRoot()
     if (vaultPath !== root) throw new Error('Der Vault wurde während des Ladens verändert.')
+    // Only the refresh that answers a watcher event may reuse its walk (once, and only while fresh).
+    const scan = watcherTreeScan
+    watcherTreeScan = null
+    if (options?.fromWatcher === true && scan?.reusable && scan.root === root && Date.now() - scan.at < 5000) return scan.entries
     const folderColors = await readFolderColors(root)
     const entries = applyFileColors(await readTreeDirectory(root, root, 0, folderColors), await readFileColorsForTree(root))
     // The verified local cache makes subsequent starts independent of a full
@@ -4744,8 +4758,24 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
+    // The statistics page asks for every note. A stat is cheap; parsing a companion with ink is not.
+    const famdRelative = companionNotePath(notePath, '.famd')
+    let signature = null
+    try {
+      const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
+      const info = await statRegularFileNoFollow(target, MAX_FAMD_BYTES)
+      signature = `${info.mtimeMs}:${info.size}`
+    } catch { signature = null }
+    const known = signature ? pageStatsByCompanion.get(famdRelative) : null
+    if (known && known.signature === signature) return known.pageStats
     const loaded = await loadFamdCompanion(notePath)
-    return loaded?.pageStats ?? null
+    const pageStats = loaded?.pageStats ?? null
+    if (signature) {
+      pageStatsByCompanion.delete(famdRelative)
+      pageStatsByCompanion.set(famdRelative, { signature, pageStats })
+      while (pageStatsByCompanion.size > 20000) pageStatsByCompanion.delete(pageStatsByCompanion.keys().next().value)
+    }
+    return pageStats
   })
 
   handle(IPC.readNotePaperStyle, async (_event, relativePath) => {

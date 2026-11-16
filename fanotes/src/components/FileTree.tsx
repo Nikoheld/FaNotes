@@ -759,6 +759,7 @@ export const FileTree = memo(function FileTree({
                   )}
                 </span>
                 <span className="file-tree__name">{displayName(entry)}</span>
+                {newPaths?.has(entry.relativePath) && <span className="sr-only">{isFolder ? ', enthält neue Dateien' : ', neu'}</span>}
                 {isFolder && entry.locations && entry.locations.length > 0 && (
                   <FolderInput className="file-tree__location-mark" aria-hidden="true" size={12} />
                 )}

@@ -93,6 +93,7 @@ import { parseAddonSource } from './lib/addons/registry'
 import { addonRuntime } from './lib/addons/runtime'
 import { startMcpBridge } from './lib/mcp/bridge'
 import { syncEngine } from './lib/sync/engine'
+import { externalArrivals, loadArrivals, saveArrivals } from './lib/newArrivals.mjs'
 import { useExternalTabChanges, useTabHolds } from './lib/useExternalTabChanges'
 import { WorkRequestsClient } from './lib/workRequests'
 import { syncStatusLabel } from './lib/sync/status'
@@ -937,10 +938,15 @@ export default function App({ startupBootstrap }: AppProps) {
   const focusRestoreRef = useRef({ sidebar: true, inspector: true })
   const treeRef = useRef(tree)
   const lastOwnTreeRefreshRef = useRef(0)
-  const [newArrivals, setNewArrivals] = useState<Set<string>>(() => new Set())
+  // path -> arrival time. Persisted per vault (localStorage) so the dots survive a restart.
+  const [newArrivals, setNewArrivals] = useState<Map<string, number>>(() => new Map())
+  const arrivalsVaultRef = useRef<string | null>(null)
+  /** Paths the sync engine wrote and when; those are never "new from outside". */
+  const syncWrittenRef = useRef(new Map<string, number>())
+  const syncEndedAtRef = useRef(0)
   const newMarkedPaths = useMemo(() => {
-    const marked = new Set(newArrivals)
-    for (const entryPath of newArrivals) {
+    const marked = new Set(newArrivals.keys())
+    for (const entryPath of newArrivals.keys()) {
       let cut = entryPath.lastIndexOf('/')
       while (cut > 0) { marked.add(entryPath.slice(0, cut)); cut = entryPath.lastIndexOf('/', cut - 1) }
     }
@@ -1688,7 +1694,7 @@ export default function App({ startupBootstrap }: AppProps) {
         change.changed.every((entryPath) => entryPath === active)
       // The open note's own autosave also shows up as a change: nothing to do then.
       if (onlyActiveChanged) return
-      void window.fanotes.getTree().then((nextTree) => {
+      void window.fanotes.getTree({ fromWatcher: true }).then((nextTree) => {
         // Only the tree is swapped. Open tabs, unsaved edits, selection, expanded
         // folders and scroll position live elsewhere and stay untouched.
         if (session !== vaultSessionGenerationRef.current) return
@@ -1700,13 +1706,22 @@ export default function App({ startupBootstrap }: AppProps) {
         const addedPaths = change.truncated ? [...present] : change.added
         const arrived = addedPaths.filter((entryPath) => !known.has(entryPath) && present.has(entryPath) && !tabsRef.current.some((tab) => tab.path === entryPath))
         const fileSet = new Set(collectTreePaths(nextTree, true))
-        const files = arrived.filter((entryPath) => fileSet.has(entryPath))
-        setNewArrivals((current) => {
-          const next = new Set([...current].filter((entryPath) => present.has(entryPath)))
-          if (!ownRecently) for (const entryPath of files) next.add(entryPath)
-          return next.size === current.size && [...next].every((entryPath) => current.has(entryPath)) ? current : next
+        const now = Date.now()
+        // Sync-pulled files and our own writes are not "from outside": only the rest gets a dot and a toast.
+        const files = externalArrivals({
+          files: arrived.filter((entryPath) => fileSet.has(entryPath)),
+          now,
+          syncBusy: syncEngine.getState().status === 'syncing',
+          syncEndedAt: syncEndedAtRef.current,
+          syncWritten: syncWrittenRef.current,
+          ownRecently,
         })
-        if (!ownRecently && files.length) {
+        setNewArrivals((current) => {
+          const next = new Map([...current].filter(([entryPath]) => present.has(entryPath)))
+          for (const entryPath of files) next.set(entryPath, now)
+          return next.size === current.size && [...next.keys()].every((entryPath) => current.has(entryPath)) ? current : next
+        })
+        if (files.length) {
           const folder = files[0].includes('/') ? files[0].slice(0, files[0].lastIndexOf('/')).split('/').pop() : ''
           const sameFolder = files.every((entryPath) => entryPath.slice(0, Math.max(0, entryPath.lastIndexOf('/'))) === files[0].slice(0, Math.max(0, files[0].lastIndexOf('/'))))
           const where = sameFolder && folder ? ` in ${folder}` : ''
@@ -1718,15 +1733,52 @@ export default function App({ startupBootstrap }: AppProps) {
     })
   }, [toast])
 
+  // Opening a note in either pane clears its mark.
   useEffect(() => {
-    if (!activePath) return
+    const opened = [activePath, splitPath].filter((entryPath): entryPath is string => Boolean(entryPath))
+    if (!opened.length) return
     setNewArrivals((current) => {
-      if (!current.has(activePath)) return current
-      const next = new Set(current)
-      next.delete(activePath)
+      if (!opened.some((entryPath) => current.has(entryPath))) return current
+      const next = new Map(current)
+      for (const entryPath of opened) next.delete(entryPath)
       return next
     })
-  }, [activePath])
+  }, [activePath, splitPath])
+
+  // Load the stored marks for the vault, and save every change back.
+  const arrivalsVaultPath = bootstrap?.vaultPath ?? null
+  useEffect(() => {
+    if (!arrivalsVaultPath || arrivalsVaultRef.current === arrivalsVaultPath) return
+    arrivalsVaultRef.current = arrivalsVaultPath
+    syncWrittenRef.current = new Map()
+    const stored = loadArrivals(typeof localStorage === 'undefined' ? null : localStorage, arrivalsVaultPath)
+    if (treeRef.current.length) {
+      const present = new Set(collectTreePaths(treeRef.current))
+      for (const entryPath of [...stored.keys()]) if (!present.has(entryPath)) stored.delete(entryPath)
+    }
+    setNewArrivals(stored)
+  }, [arrivalsVaultPath])
+  useEffect(() => {
+    if (!arrivalsVaultPath || arrivalsVaultRef.current !== arrivalsVaultPath) return
+    saveArrivals(typeof localStorage === 'undefined' ? null : localStorage, arrivalsVaultPath, newArrivals)
+  }, [arrivalsVaultPath, newArrivals])
+  // Marks for files that vanished while the app was closed go away once the tree is known.
+  useEffect(() => {
+    if (!tree.length) return
+    const present = new Set(collectTreePaths(tree))
+    setNewArrivals((current) => {
+      const next = new Map([...current].filter(([entryPath]) => present.has(entryPath)))
+      return next.size === current.size ? current : next
+    })
+  }, [tree])
+
+  // Remember when a sync run ends: its last file writes can surface in a watcher event a moment later.
+  const syncBusyNow = syncState.status === 'syncing'
+  const syncWasBusyRef = useRef(false)
+  useEffect(() => {
+    if (!syncBusyNow && syncWasBusyRef.current) syncEndedAtRef.current = Date.now()
+    syncWasBusyRef.current = syncBusyNow
+  }, [syncBusyNow])
 
   const rememberLastOpenNote = useCallback((path: string) => {
     if (!path || settingsRef.current.lastOpenNotePath === path) return
@@ -2551,6 +2603,8 @@ export default function App({ startupBootstrap }: AppProps) {
   /** Files another device changed: refresh the tree, reload clean open tabs, drop tabs of deleted notes. */
   const applyRemoteChanges = useCallback(async ({ written, removed }: { written: string[]; removed: string[] }) => {
     if (writingPathRef.current) notifyStoryWritten(writingPathRef.current, written)
+    const writtenAt = Date.now()
+    for (const entryPath of written) syncWrittenRef.current.set(entryPath, writtenAt)
     await refreshTree()
     const stories = new Set([...written, ...removed].flatMap((path) => /^(.+?\.story)\//iu.exec(path)?.[1] ?? []))
     if (stories.size) void import('./lib/docSearch/service').then(({ docSearch }) => { for (const story of stories) docSearch.notifyStoryChanged(story) })

@@ -67,19 +67,24 @@ export const flattenVault = (tree) => {
   return { files, folders }
 }
 
+const countDueOn = (dueDays, today) => { let n = 0; for (const day of dueDays) if (day <= today) n += 1; return n }
+
 export const summarizeCards = (cards, today) => {
   if (!Array.isArray(cards) || !cards.length) return null
   let due = 0
+  const dueDays = []
   let reps = 0
   let lapses = 0
   let reviewed = 0
   for (const card of cards) {
     if (card.due <= today) due += 1
+    if (typeof card.due === 'string') dueDays.push(card.due)
     if (card.reps > 0) reviewed += 1
     reps += Math.max(0, card.reps || 0)
     lapses += Math.max(0, card.lapses || 0)
   }
-  return { total: cards.length, due, reviewed, reps, lapses }
+  // dueDays lets the aggregate recount "due" for a later day without re-reading the note.
+  return { total: cards.length, due, dueDays, reviewed, reps, lapses }
 }
 
 const level = (count, max) => (count <= 0 ? 0 : max <= 1 ? 4 : Math.min(4, 1 + Math.floor(((count - 1) / max) * 4)))
@@ -155,7 +160,7 @@ export const aggregateVault = (input) => {
       writing.wordsInNotes += fact.words || 0
       subject.words += fact.words || 0
       if (fact.cards) {
-        cards.total += fact.cards.total; cards.due += fact.cards.due; cards.reviewed += fact.cards.reviewed
+        cards.total += fact.cards.total; cards.due += Array.isArray(fact.cards.dueDays) ? countDueOn(fact.cards.dueDays, today) : fact.cards.due; cards.reviewed += fact.cards.reviewed
         cards.reps += fact.cards.reps; cards.lapses += fact.cards.lapses; cards.notes += 1
       }
       const stats = fact.stats

@@ -352,4 +352,30 @@ async function realWatch() {
   }
   console.log('real recursive fs.watch checks passed')
 }
-main().then(reconcileChecks).then(intervalPolicy).then(realWatch).catch((error) => { console.error(error); process.exit(1) })
+async function newArrivalStore() {
+  const { loadArrivals, saveArrivals, externalArrivals, ARRIVAL_CAP, ARRIVAL_TTL_MS, SYNC_GRACE_MS } = await import('../src/lib/newArrivals.mjs')
+  const mem = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => { m.set(k, v) }, removeItem: (k) => { m.delete(k) } } }
+  const now = 1_800_000_000_000
+  const storage = mem()
+  saveArrivals(storage, '/v1', new Map([['a.md', now - 1000], ['old.md', now - ARRIVAL_TTL_MS - 1]]))
+  assert.deepEqual([...loadArrivals(storage, '/v1', now).keys()], ['a.md'], 'persisted across restart, expired dropped')
+  assert.equal(loadArrivals(storage, '/v2', now).size, 0, 'per vault')
+  const many = new Map(Array.from({ length: ARRIVAL_CAP + 50 }, (_, i) => [`f${i}.md`, now - i]))
+  saveArrivals(storage, '/v1', many)
+  assert.equal(loadArrivals(storage, '/v1', now).size, ARRIVAL_CAP, 'capped')
+  saveArrivals(storage, '/v1', new Map())
+  assert.equal(loadArrivals(storage, '/v1', now).size, 0, 'cleared')
+  storage.setItem('fanotes.newArrivals.v1:/v3', '{broken')
+  assert.equal(loadArrivals(storage, '/v3', now).size, 0, 'corrupt store tolerated')
+  assert.equal(loadArrivals(null, '/v1', now).size, 0)
+  // Only files from outside count: not during/after sync, not sync-written, not our own.
+  const base = { files: ['a.md', 'b.md'], now, syncBusy: false, syncEndedAt: 0, syncWritten: new Map(), ownRecently: false }
+  assert.deepEqual(externalArrivals(base), ['a.md', 'b.md'])
+  assert.deepEqual(externalArrivals({ ...base, syncBusy: true }), [], 'mid-pull rescan')
+  assert.deepEqual(externalArrivals({ ...base, syncEndedAt: now - SYNC_GRACE_MS + 1 }), [], 'just after sync')
+  assert.deepEqual(externalArrivals({ ...base, syncEndedAt: now - SYNC_GRACE_MS - 1 }), ['a.md', 'b.md'])
+  assert.deepEqual(externalArrivals({ ...base, syncWritten: new Map([['a.md', now - 60_000]]) }), ['b.md'], 'sync-written path')
+  assert.deepEqual(externalArrivals({ ...base, ownRecently: true }), [])
+  console.log('new-arrival store checks passed')
+}
+main().then(newArrivalStore).then(reconcileChecks).then(intervalPolicy).then(realWatch).catch((error) => { console.error(error); process.exit(1) })
