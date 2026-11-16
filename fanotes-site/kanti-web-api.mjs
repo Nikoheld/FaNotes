@@ -345,6 +345,11 @@ export const createKantiWebStore = (options = {}) => {
   const otherPairingVersion = (record) => Boolean(record) && typeof record === 'object' && Object.hasOwn(record, 'v') && record.v != null && record.v !== 1
   // A missing or unreadable expiry must not look still open, or the code never expires.
   const pairingExpiryKnown = (value) => typeof value === 'string' && value !== '' && Number.isFinite(Date.parse(value))
+  // A connection list that is not a list must not be claimed, or the claim deletes the code and then fails.
+  const pairingShapeKnown = (record) => Array.isArray(record?.connections)
+    && record.connections.every((item) => item && typeof item === 'object' && !Array.isArray(item) && typeof item.accountId === 'string' && ACCOUNT_ID.test(item.accountId))
+    && (record.finished == null || typeof record.finished === 'boolean')
+    && (record.offer == null || typeof record.offer === 'boolean')
   const readPairing = async (rawCode) => {
     const code = normalizePairingCode(rawCode)
     if (!code) return null
@@ -354,6 +359,7 @@ export const createKantiWebStore = (options = {}) => {
     if (otherPairingVersion(record)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
     if (record.v !== 1) return null
     if (!pairingExpiryKnown(record.expiresAt)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
+    if (!pairingShapeKnown(record)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
     if (Date.parse(record.expiresAt) <= nowMs()) {
       await fs.rm(file, { force: true })
       return null
@@ -535,8 +541,8 @@ export const createKantiWebStore = (options = {}) => {
         continue
       }
       if (otherPairingVersion(record)) continue
-      // A version 1 expiry that is not a time stays. Sweep only removes a missing, broken, or expired code.
-      if (record?.v === 1 && !pairingExpiryKnown(record.expiresAt)) continue
+      // A version 1 expiry that is not a time, or a connection list that is not a list, stays. Sweep only removes a missing, broken, or expired code.
+      if (record?.v === 1 && (!pairingExpiryKnown(record.expiresAt) || !pairingShapeKnown(record))) continue
       if (!record || Date.parse(record.expiresAt) <= nowMs()) await fs.rm(resolve(pairingsDir, name), { force: true })
     }
     for (const name of await fs.readdir(sessionsDir).catch(() => [])) {
