@@ -4343,5 +4343,21 @@
   "Senden nicht möglich. Es wurde nichts gespeichert.": "Could not send. Nothing was stored.",
   "Deine Daten auf dem Server sind gelöscht. Es gibt eine neue Installations-ID.": "Your data on the server is deleted. A new install ID was created.",
   "Der Server war nicht erreichbar. Lokale Zähler sind gelöscht; versuche das Löschen später noch einmal.": "The server was unreachable. Local counters are deleted; try deleting again later.",
-  "Neue Installations-ID erzeugt.": "New install ID created."
+  "Neue Installations-ID erzeugt.": "New install ID created.",
+  "Suche …": "Searching …",
+  "Auftrag hinzufügen": "Add assignment",
+  "S.": "p.",
+  "Diesen Block bearbeitest du am Computer (am Computer bearbeiten). Hier siehst du ihn in der Notiz; Änderungen vom Computer kommen per Sync.": "You edit this block on the computer. Here you see it in the note; changes from the computer arrive through sync.",
+  "Quelltext zeigen": "Show source",
+  "Karten mit dem Finger oder Stift in eine Gruppe ziehen. Oder eine Karte antippen und unten die Gruppe wählen.": "Drag cards into a group with a finger or the pen. Or tap a card and choose the group below.",
+  "Noch nicht eingeordnet": "Not sorted yet",
+  "Verschieben nach:": "Move to:",
+  "Zurück zu „Noch nicht eingeordnet“": "Back to “Not sorted yet”",
+  "Karte löschen": "Delete card",
+  "Neue Karte": "New card",
+  "Definition": "Definition",
+  "Begriff hinzufügen": "Add term",
+  "Die Auftragserkennung braucht Android 15. Du kannst Aufträge von Hand hinzufügen.": "Assignment detection needs Android 15. You can add assignments by hand.",
+  "Lernwerkzeug-Blöcke gehören in eine Markdown-Notiz.": "Study blocks belong in a Markdown note.",
+  "Diesen Block legst du am Computer an. Auf dem Tablet siehst du ihn in der Notiz.": "You create this block on the computer. On the tablet you see it in the note."
 }

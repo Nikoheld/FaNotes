@@ -4348,7 +4348,11 @@ fun CardsScreen(model: FaNotesViewModel) {
         if (card == null) {
             Text("In dieser Notiz sind keine Karten fällig.")
         } else {
+            val picture by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, card.frontImage) {
+                value = card.frontImage?.let { model.readStudyBitmap(it) }?.asImageBitmap()
+            }
             Text(if (showBack) card.back.ifBlank { "Keine Antwort" } else card.front, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.clickable { showBack = !showBack }.padding(vertical = 24.dp))
+            picture?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) }
             Row {
                 listOf("again" to "Nochmal", "hard" to "Schwer", "good" to "Gut", "easy" to "Leicht").forEach { (grade, label) ->
                     TextButton(onClick = {

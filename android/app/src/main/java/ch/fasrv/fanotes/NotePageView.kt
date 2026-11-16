@@ -189,7 +189,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 MotionEvent.ACTION_MOVE -> followPreviewLinkPointer(linkPointer, event, true)
                 MotionEvent.ACTION_UP -> {
                     val tapped = kotlin.math.abs(event.x - detailsDownX) < 24f && kotlin.math.abs(event.y - detailsDownY) < 24f
-                    val handled = tapped && (followRenderedLink(event.x, event.y) || toggleDetailsSummary(event.x, event.y) || toggleTaskBox(event.x, event.y))
+                    val handled = tapped && (followRenderedLink(event.x, event.y) || toggleDetailsSummary(event.x, event.y) || toggleTaskBox(event.x, event.y) || openStudyBlock(event.x, event.y))
                     followPreviewLinkPointer(linkPointer, event, false)
                     if (handled) return true
                 }
@@ -755,6 +755,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onMarkdown: (String) -> Unit = {}
     var onPasteImage: (String, ByteArray, String) -> Unit = { _, _, _ -> }
     var onFollowLink: (String, Boolean, String?) -> Unit = { _, _, _ -> }
+    /** A tap on a drawn study block: kind id and the block's position in the note. */
+    var onStudyBlock: (String, Int) -> Unit = { _, _ -> }
     var onVisibleMarkdown: (String, String) -> Unit = { _, next -> onMarkdown(next) }
     var onRememberCamera: (
         String,
@@ -1134,6 +1136,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             }
         }
         ink.onFollowMarkdown = { target, web, anchor -> onFollowLink(target, web, anchor) }
+        ink.onStudyBlock = { kind, index -> onStudyBlock(kind, index) }
     }
 
     /** A tap on a rendered link opens the note or the web address. */
@@ -1193,6 +1196,18 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.rememberChange(before, next, caret)
         paintLivePreview()
         onVisibleMarkdown(before, next)
+        return true
+    }
+
+    /** A tap on a drawn study block opens its editor; the source stays reachable through the caret. */
+    private fun openStudyBlock(x: Float, y: Float): Boolean {
+        val editable = editor.text ?: return false
+        if (editable.isEmpty()) return false
+        val offset = editor.getOffsetForPosition(x, y).coerceIn(0, editable.length)
+        val span = editable.getSpans((offset - 1).coerceAtLeast(0), (offset + 1).coerceAtMost(editable.length), StudyBlockSpan::class.java).firstOrNull() ?: return false
+        val index = ch.fasrv.fanotes.study.findStudyBlocks(editable.toString()).indexOfFirst { offset >= it.from && offset <= it.to }
+        if (index < 0) return false
+        onStudyBlock(span.kindId, index)
         return true
     }
 
@@ -1772,6 +1787,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("Nächste Seite") { onToolbarAction("pdf-next") })
         tools.addView(chip("Im PDF suchen") { onToolbarAction("pdf-search") })
         tools.addView(chip("Seiten") { onToolbarAction("pdf-thumbs") })
+        tools.addView(chip("Aufträge") { onToolbarAction("study-tasks") })
+        tools.addView(chip("Markierungen") { onToolbarAction("study-marks") })
         tools.addView(chip("Passwort") { onToolbarAction("pdf-password") })
         tools.addView(chip("Lernen", description = "Lernwerkzeuge") { setStudyOpen(true) })
     }
