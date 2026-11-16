@@ -9,6 +9,7 @@ package ch.fasrv.fanotes.desk
 data class EscapeLayer(
     val confirm: Boolean = false,
     val bugReport: Boolean = false,
+    val workRequests: Boolean = false,
     val history: Boolean = false,
     val gotoLine: Boolean = false,
     val math: Boolean = false,
@@ -38,6 +39,7 @@ data class EscapeLayer(
 fun escapeDismisses(layer: EscapeLayer): String? {
     if (layer.confirm) return "confirm"
     if (layer.bugReport) return "bug-report"
+    if (layer.workRequests) return "work-requests"
     if (layer.history) return "history"
     if (layer.gotoLine) return "goto-line"
     if (layer.math) return "math"

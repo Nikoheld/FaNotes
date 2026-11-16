@@ -9366,12 +9366,13 @@ fun CommandPalette(
     reduceMotion: Boolean = false,
     penOpen: Boolean = false,
     bookOpen: Boolean = false,
+    workRequests: Boolean = false,
     onRun: (String) -> Unit,
 ) {
     var query by remember(notesOnly) { mutableStateOf("") }
     var selected by remember { mutableIntStateOf(0) }
     val notes = if (notesOnly) rankNotes(query, 40) else if (query.isBlank()) emptyList() else rankNotes(query, 6)
-    val actions = ch.fasrv.fanotes.desk.paletteCommands(penOpen, bookOpen, splitOpen, splitRows, focus, dailyFolder)
+    val actions = ch.fasrv.fanotes.desk.paletteCommands(penOpen, bookOpen, splitOpen, splitRows, focus, dailyFolder, workRequests)
     val commands = if (notesOnly) emptyList() else actions.filter { ch.fasrv.fanotes.desk.paletteCommandMatches(it, query) }
     val rows = commands.map { PaletteRow.Command(it) } + notes.map { PaletteRow.Note(it.path, it.title, it.folder) }
     androidx.compose.runtime.LaunchedEffect(query, notesOnly) { selected = 0 }

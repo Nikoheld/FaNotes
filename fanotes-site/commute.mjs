@@ -167,12 +167,12 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
       diskLoading = (async () => {
         try {
           const parsed = JSON.parse(await fs.readFile(routeFile, 'utf8'))
+          const entryKnown = (entry) => Boolean(entry) && typeof entry.key === 'string' && entry.key.startsWith('route:') && entry.key.length <= 300
+            && Number.isFinite(entry.at) && entry.value && Array.isArray(entry.value.trips)
           // A missing or broken file can start again. A file that is there but not this timetable must not look empty, or the next route replaces it.
-          if (parsed?.version === 1 && Array.isArray(parsed.entries)) {
-            disk.entries = parsed.entries.filter((entry) => (
-              entry && typeof entry.key === 'string' && entry.key.startsWith('route:') && entry.key.length <= 300
-              && Number.isFinite(entry.at) && entry.value && Array.isArray(entry.value.trips)
-            )).slice(-DISK_LIMIT)
+          // An entry that is not a stored trip must not be dropped, or the next route replaces the timetable.
+          if (parsed?.version === 1 && Array.isArray(parsed.entries) && parsed.entries.every(entryKnown)) {
+            disk.entries = parsed.entries.slice(-DISK_LIMIT)
             diskBlocked = false
           } else {
             diskBlocked = true

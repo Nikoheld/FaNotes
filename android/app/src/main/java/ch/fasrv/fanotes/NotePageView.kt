@@ -2026,7 +2026,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo)
         })
         tools.addView(studyToolChip("Winkel (3 Punkte)", ch.fasrv.fanotes.study.StudyTool.ANGLE))
-        tools.addView(studyToolChip("Winkel zw. 2 Linien", ch.fasrv.fanotes.study.StudyTool.ANGLE_LINES))
+        tools.addView(studyToolChip("Winkel (2 Linien)", ch.fasrv.fanotes.study.StudyTool.ANGLE_LINES))
         tools.addView(studyToolChip("Strecke", ch.fasrv.fanotes.study.StudyTool.DISTANCE))
         tools.addView(studyChip("Bild einfügen") { onStudyImage() })
         tools.addView(studyChip("Kamera", description = "Foto als Referenzbild aufnehmen") { onStudyCamera() })

@@ -183,7 +183,7 @@ test('a direct peer cannot rotate X-Real-IP to escape the per-IP limit, the prox
 test('the nginx location overwrites X-Real-IP with the Cloudflare-aware client address', async () => {
   // The process trusts the header from its local proxy because nginx always replaces whatever the client sent.
   const conf = await readFile(new URL('./deploy/fanotes-fasrv.conf', import.meta.url), 'utf8')
-  const from = conf.indexOf('location ~ ^/api/v1/diagnostics')
+  const from = conf.indexOf('location ~ "^/api/v1/diagnostics')
   assert.ok(from > 0)
   const block = conf.slice(from, conf.indexOf('proxy_pass', from))
   assert.match(block, /proxy_set_header X-Real-IP \$fanotes_client_ip;/u)

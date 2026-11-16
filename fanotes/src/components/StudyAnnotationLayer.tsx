@@ -383,7 +383,7 @@ export function StudyAnnotationLayer({ path, pdf, open, onClose }: StudyAnnotati
     const used = annotationImageChars(itemsRef.current)
     if (used + url.length > ANNOTATION_IMAGE_BUDGET_CHARS) {
       const mb = (chars: number) => (chars / 1_000_000).toFixed(1).replace('.', ',')
-      setStatus(`Bildspeicher dieser Notiz voll (${mb(used)} von ${mb(ANNOTATION_IMAGE_BUDGET_CHARS)} MB). Entferne zuerst ein Bild.`)
+      setStatus(`Der Bildspeicher dieser Notiz ist voll (${mb(used)} von ${mb(ANNOTATION_IMAGE_BUDGET_CHARS)} MB). Entferne zuerst ein Bild.`)
       return
     }
     const page = at?.page ?? visiblePage()
@@ -895,7 +895,7 @@ export function StudyAnnotationLayer({ path, pdf, open, onClose }: StudyAnnotati
             {tab === 'measure' && <>
               <div className="study-row">
                 {toolButton('angle', 'Winkel (3 Punkte)', 'Schenkel, Scheitel, Schenkel antippen')}
-                {toolButton('angle2', 'Winkel zw. 2 Linien', 'Zwei Linien mit je zwei Punkten markieren')}
+                {toolButton('angle2', 'Winkel (2 Linien)', 'Zwei Linien mit je zwei Punkten markieren')}
                 {toolButton('distance', 'Strecke', 'Zwei Punkte, Angabe in cm (A4-Seitenbreite 21 cm)')}
               </div>
               <small>{tool === 'angle' ? 'Tippe: Punkt auf dem ersten Schenkel, Scheitel, Punkt auf dem zweiten Schenkel.' : tool === 'angle2' ? 'Tippe je zwei Punkte auf Linie 1 und Linie 2.' : tool === 'distance' ? 'Tippe Anfang und Ende. Die Punkte lassen sich danach verschieben.' : 'Der Messwert bleibt als Beschriftung stehen und folgt verschobenen Punkten.'}</small>

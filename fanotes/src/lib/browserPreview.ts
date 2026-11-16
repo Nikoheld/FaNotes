@@ -564,6 +564,9 @@ export function createBrowserPreviewApi(): FaNotesApi {
       return { ...document, textBoxes: [] }
     },
     importOneNote: async () => null,
+    readWorksheetHtml: async () => {
+      throw new Error('Importierte OneNote-Seiten gibt es nur in der Desktop-App.')
+    },
     readWorksheet: async (id) => {
       const document = worksheets.get(id)
       if (!document) throw new Error('Arbeitsblatt nicht gefunden.')

@@ -328,7 +328,7 @@ fun StudyBlockDialog(model: FaNotesViewModel) {
     val ref = remember(markdown, target) { model.studyBlockFor(target) }
     if (ref == null) {
         model.closeStudyBlock()
-        model.message.value = "Die Notiz hat sich geändert. Öffne den Block neu."
+        model.message.value = "Deine Änderung wurde nicht gespeichert, weil sich die Notiz geändert hat. Öffne den Block neu."
         return
     }
     val sort = if (ref.kind == StudyKind.SORT) remember(ref.body) { sortEditable(ref.body) } else null
@@ -346,9 +346,9 @@ fun StudyBlockDialog(model: FaNotesViewModel) {
         text = {
             Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
                 when (ref.kind) {
-                    StudyKind.SORT -> if (sort != null) SortBoardEditor(sort) { model.writeStudyBlock(sortDataJson(it)) } else Text(ui("Dieser Block ist nicht lesbar oder zu gross für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."))
-                    StudyKind.TERM -> if (terms != null) TermEditor(terms) { model.writeStudyBlock(termDataJson(it)) } else Text(ui("Dieser Block ist nicht lesbar oder zu gross für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."))
-                    else -> Text(ui("Diesen Block bearbeitest du am Computer (am Computer bearbeiten). Hier siehst du ihn in der Notiz; Änderungen vom Computer kommen per Sync."))
+                    StudyKind.SORT -> if (sort != null) SortBoardEditor(sort) { model.writeStudyBlock(sortDataJson(it)) } else Text(ui("Dieser Block ist nicht lesbar oder zu groß für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."))
+                    StudyKind.TERM -> if (terms != null) TermEditor(terms) { model.writeStudyBlock(termDataJson(it)) } else Text(ui("Dieser Block ist nicht lesbar oder zu groß für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."))
+                    else -> Text(ui("Diesen Block bearbeitest du am Computer. Hier siehst du ihn in der Notiz; Änderungen vom Computer kommen per Sync."))
                 }
             }
         },

@@ -539,7 +539,14 @@ export const createClassTimetables = (options = {}) => {
     const index = version ? await readJson(join(versionDir(version), 'index.json')) : null
     // A missing or broken catalog can start again. A file that is there but not the class and room lists must not look unpublished.
     if (index != null) {
-      const known = typeof index === 'object' && !Array.isArray(index) && Array.isArray(index.classes) && Array.isArray(index.rooms) && (index.warnings == null || Array.isArray(index.warnings))
+      const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+      const classKnown = (item) => plain(item) && typeof item.code === 'string' && CLASS_CODE.test(item.code) && typeof item.teacher === 'string'
+      const roomKnown = (room) => typeof room === 'string' && ROOM_NAME.test(room)
+      const known = typeof index === 'object' && !Array.isArray(index)
+        && Array.isArray(index.classes) && index.classes.every(classKnown)
+        && Array.isArray(index.rooms) && index.rooms.every(roomKnown)
+        && (index.warnings == null || Array.isArray(index.warnings))
+      // A class or room that is not a catalog entry must not be listed as blank.
       if (!known) throw Object.assign(new Error('timetable index'), { code: 'EBADMSG' })
     }
     const value = index ? { ...index, version } : null
@@ -602,8 +609,11 @@ export const createClassTimetables = (options = {}) => {
       const stored = await readJson(join(dir, 'classes.json'))
       // A missing or broken file can be built again. A file that is there but not the class weeks must not look empty, or this rebuild replaces it.
       if (stored != null) {
+        const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+        const weekKnown = (week) => plain(week) && Array.isArray(week.entries) && Array.isArray(week.footnotes)
         const weeks = typeof stored === 'object' && !Array.isArray(stored) && Object.keys(stored).every((code) => CLASS_CODE.test(code))
-        if (!weeks) throw Object.assign(new Error('timetable classes'), { code: 'EBADMSG' })
+        // A saved week that is not a week must not be returned as an empty week.
+        if (!weeks || !Object.values(stored).every(weekKnown)) throw Object.assign(new Error('timetable classes'), { code: 'EBADMSG' })
         return stored
       }
       let text

@@ -55,12 +55,17 @@ export function StudyPanel({ path, title, content, initialTab = 'tasks', onConte
   const scan = useCallback(async () => {
     setScanning(true)
     try {
-      const detected = detectTasks(await readPdfPageLines(path))
+      const pages = await readPdfPageLines(path)
+      if (pages.every((page) => page.lines.length === 0)) {
+        onNotice('Das PDF enthält keinen auslesbaren Text (z. B. ein Scan). Du kannst Aufträge von Hand hinzufügen.')
+        return
+      }
+      const detected = detectTasks(pages)
       const merged = mergeDetected(readTaskList(contentRef.current), detected)
       if (merged.tasks.length || readTaskList(contentRef.current)) commit(merged)
       onNotice(detected.length ? `${detected.length} Aufträge erkannt.` : 'Keine Aufträge im Text gefunden. Du kannst sie von Hand hinzufügen.')
     } catch {
-      onNotice('Der PDF-Text konnte nicht gelesen werden.')
+      onNotice('Das PDF konnte nicht gelesen werden. Es ist vielleicht beschädigt oder passwortgeschützt. Du kannst Aufträge von Hand hinzufügen.')
     } finally {
       setScanning(false)
     }
@@ -125,7 +130,7 @@ export function StudyPanel({ path, title, content, initialTab = 'tasks', onConte
           <button type="button" className={tab === 'tasks' ? 'active' : ''} aria-pressed={tab === 'tasks'} onClick={() => setTab('tasks')}><ClipboardList size={15} /> Aufträge</button>
           <button type="button" className={tab === 'marks' ? 'active' : ''} aria-pressed={tab === 'marks'} onClick={() => setTab('marks')}><BookMarked size={15} /> Markierungen</button>
         </div>
-        <button type="button" className="lw-icon-btn" aria-label="Schliessen" title="Schliessen" onClick={onClose}><X size={15} /></button>
+        <button type="button" className="lw-icon-btn" aria-label="Schließen" title="Schließen" onClick={onClose}><X size={15} /></button>
       </header>
       <div className="inspector-scroll">
         {tab === 'tasks' && (

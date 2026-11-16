@@ -48,6 +48,6 @@ class StudyImageBudgetTest {
     }
 
     @Test fun messageIsGermanWithUsedSize() {
-        assertEquals("Bildspeicher dieser Notiz voll (7,9 von 8,0 MB). Entferne zuerst ein Bild.", imageBudgetMessage(7_900_000))
+        assertEquals("Der Bildspeicher dieser Notiz ist voll (7,9 von 8,0 MB). Entferne zuerst ein Bild.", imageBudgetMessage(7_900_000))
     }
 }

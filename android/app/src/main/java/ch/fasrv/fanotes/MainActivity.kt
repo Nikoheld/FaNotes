@@ -557,6 +557,7 @@ fun FaNotesScreen(
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
     val paletteNotes by model.paletteNotes.collectAsStateWithLifecycle()
     val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
+    val workRequestsOpen by model.workRequestsOpen.collectAsStateWithLifecycle()
     val historyOpen by model.historyOpen.collectAsStateWithLifecycle()
     val aiOpen by model.aiOpen.collectAsStateWithLifecycle()
     val settingsOpen by model.settingsOpen.collectAsStateWithLifecycle()
@@ -731,6 +732,7 @@ fun FaNotesScreen(
                         ch.fasrv.fanotes.desk.EscapeLayer(
                             confirm = confirm != null,
                             bugReport = bugReportOpen,
+                            workRequests = workRequestsOpen,
                             history = historyOpen,
                             gotoLine = gotoLine != null,
                             math = mathOpen,
@@ -760,6 +762,7 @@ fun FaNotesScreen(
                     when (target) {
                         "confirm" -> model.dismissConfirm()
                         "bug-report" -> model.closeBugReport()
+                        "work-requests" -> model.closeWorkRequests()
                         "history" -> model.closeHistory()
                         "goto-line" -> model.closeGotoLine()
                         "math" -> mathOpen = false
@@ -816,6 +819,7 @@ fun FaNotesScreen(
                     Key.P -> "p"
                     Key.F -> "f"
                     Key.A -> "a"
+                    Key.B -> "b"
                     Key.I -> "i"
                     Key.N -> "n"
                     Key.Comma -> ","
@@ -1095,12 +1099,12 @@ fun FaNotesScreen(
             }
             if (!toast.isNullOrBlank()) {
                 FaNotesToast(
-                    toast,
+                    ch.fasrv.fanotes.desk.ChromeText.ui(toast),
                 onDismiss = {
                     model.undoTrash.value = null
                     model.message.value = null
                 },
-                actionLabel = if (undoTrash != null && toast == ch.fasrv.fanotes.vault.TRASH_NOTICE) ch.fasrv.fanotes.vault.TRASH_UNDO else null,
+                actionLabel = if (undoTrash != null && toast == ch.fasrv.fanotes.vault.TRASH_NOTICE) ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.vault.TRASH_UNDO) else null,
                 onAction = { model.undoLastTrash() },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -1184,6 +1188,7 @@ fun FaNotesScreen(
                 dailyFolder = desk["daily-folder"].orEmpty(),
                 penOpen = !showText,
                 bookOpen = model.bookOpen.collectAsStateWithLifecycle().value,
+                workRequests = model.workRequestsAllowed.collectAsStateWithLifecycle().value,
             ) { id ->
                 val outcome = model.performDesktopCommand(id)
                 dispatchCommandPlatform(context, model, outcome, onImportPdf, onImportSheet, onExportPdf, onDownload, ::revealOpenNote)
@@ -1195,6 +1200,7 @@ fun FaNotesScreen(
     if (aiOpen) AiScreen(model)
     if (settingsOpen) SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
     if (bugReportOpen) BugReportDialog(model)
+    if (workRequestsOpen) WorkRequestsDialog(model)
     if (historyOpen) HistoryDialog(
         model,
         themeId = ch.fasrv.fanotes.desk.themePalette(desk["theme"], androidx.compose.foundation.isSystemInDarkTheme()).id,
