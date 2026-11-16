@@ -4363,5 +4363,6 @@
   "Ausschnitt übernehmen": "Use crop",
   "Keine Kamera-App gefunden.": "No camera app found.",
   "Foto als Referenzbild aufnehmen": "Take a photo as a reference image",
-  "Der Ausschnitt konnte nicht gerendert werden.": "The crop could not be rendered."
+  "Der Ausschnitt konnte nicht gerendert werden.": "The crop could not be rendered.",
+  "Bildspeicher dieser Notiz voll (%s von %s MB). Entferne zuerst ein Bild.": "Image storage of this note is full (%s of %s MB). Remove an image first."
 }

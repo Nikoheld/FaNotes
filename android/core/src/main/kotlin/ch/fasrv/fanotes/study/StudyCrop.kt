@@ -14,18 +14,15 @@ const val CROP_MIN = 0.02
 /** Page width in pixels a crop is rendered against (about twice the on-screen backdrop). */
 const val CROP_PAGE_BASE_PX = 2400
 
-/** Longest edge of a freshly rendered crop before it is encoded. */
-const val CROP_RENDER_MAX_EDGE = 1800
-
-/** Longest edge of a stored reference image, as on desktop `encodeImage`: PNG 1400, JPEG 1600. */
-fun studyImageEdge(png: Boolean): Int = if (png) 1400 else 1600
-
-/** Each retry shrinks the edge by 30 % until the data URL fits the budget. */
-fun shrunkEdge(edge: Int): Int = max(1, (edge * 0.7).toInt())
+/**
+ * Longest edge of a freshly rendered crop. Kept at the stored-image edge: rendering larger would
+ * only be thrown away by the encoder, and a figure that needs more detail would not fit the 300 KB cap anyway.
+ */
+const val CROP_RENDER_MAX_EDGE = STUDY_IMAGE_MAX_EDGE
 
 /** [w] x [h] scaled down (never up) so the long edge is at most [edge]; at least 1 px each. */
-fun fitWithin(w: Int, h: Int, edge: Int): Pair<Int, Int> {
-    val scale = min(1.0, edge.toDouble() / max(max(w, h), 1))
+fun fitWithin(w: Int, h: Int, edge: Double): Pair<Int, Int> {
+    val scale = min(1.0, edge / max(max(w, h), 1))
     return max(1, (w * scale).roundToInt()) to max(1, (h * scale).roundToInt())
 }
 
@@ -79,7 +76,7 @@ fun cropDragged(r: SRect, grip: CropGrip, dx: Double, dy: Double): SRect = when 
 fun cropRenderSize(r: SRect, pageAspect: Double): Pair<Int, Int> {
     val w = (r.r - r.l) * CROP_PAGE_BASE_PX
     val h = (r.b - r.t) * CROP_PAGE_BASE_PX * pageAspect
-    return fitWithin(max(1, w.roundToInt()), max(1, h.roundToInt()), CROP_RENDER_MAX_EDGE)
+    return fitWithin(max(1, w.roundToInt()), max(1, h.roundToInt()), CROP_RENDER_MAX_EDGE.toDouble())
 }
 
 /** Where the cut-out lands on the page, as on desktop: beside the crop if there is room, else the right edge. */

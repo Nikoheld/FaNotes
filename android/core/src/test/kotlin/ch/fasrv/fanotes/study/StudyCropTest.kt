@@ -44,10 +44,10 @@ class StudyCropTest {
     }
 
     @Test fun renderSizeIsCapped() {
-        // Whole A4 page: 2400 x 3394 would exceed the cap, so the long edge is 1800.
+        // Whole A4 page: 2400 x 3394 would exceed the cap, so the long edge is 1200.
         val (w, h) = cropRenderSize(SRect(0.0, 0.0, 1.0, 1.0), 1.414)
-        assertEquals(1800, h)
-        assertEquals(1273, w)
+        assertEquals(1200, h)
+        assertEquals(849, w)
         // A small figure keeps its natural size.
         val (sw, sh) = cropRenderSize(SRect(0.1, 0.1, 0.3, 0.2), 1.414)
         assertEquals(480, sw)
@@ -55,12 +55,10 @@ class StudyCropTest {
     }
 
     @Test fun fitWithinNeverEnlarges() {
-        assertEquals(800 to 600, fitWithin(800, 600, 1600))
-        assertEquals(1600 to 800, fitWithin(4000, 2000, 1600))
-        assertEquals(1 to 1600, fitWithin(1, 100000, 1600))
-        assertEquals(1400, studyImageEdge(true))
-        assertEquals(1600, studyImageEdge(false))
-        assertEquals(979, shrunkEdge(1400))
+        assertEquals(800 to 600, fitWithin(800, 600, 1200.0))
+        assertEquals(1200 to 600, fitWithin(4000, 2000, 1200.0))
+        assertEquals(1 to 1200, fitWithin(1, 100000, 1200.0))
+        assertEquals(936 to 468, fitWithin(4000, 2000, 936.0))
     }
 
     @Test fun placementMatchesDesktop() {

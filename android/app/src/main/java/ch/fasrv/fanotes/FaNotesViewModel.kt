@@ -3136,6 +3136,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             message.value = "Maximal 12 Bilder pro Notiz."
             return false
         }
+        val used = ch.fasrv.fanotes.study.annotationImageChars(before)
+        if (!ch.fasrv.fanotes.study.imageFitsBudget(used, dataUrl.length)) {
+            message.value = ch.fasrv.fanotes.study.imageBudgetMessage(used, ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.study.IMAGE_BUDGET_TEMPLATE))
+            return false
+        }
         val image = ch.fasrv.fanotes.study.StudyImage(
             ch.fasrv.fanotes.study.newAnnotationId(), page, at?.x ?: 0.06, at?.y ?: 0.06, at?.w ?: 0.4, aspect, 1.0, false, dataUrl, title.take(80),
         )
@@ -3153,10 +3158,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun importStudyImage(uri: Uri, page: Int, title: String? = null, afterRead: () -> Unit = {}) {
         val resolver = getApplication<Application>().contentResolver
         viewModelScope.launch {
+            var tooLarge = false
             val payload = withContext(Dispatchers.IO) {
                 try {
                     val bytes = readUri(uri) ?: return@withContext null
                     StudyImageImport.encode(bytes, resolver.getType(uri).orEmpty())
+                } catch (_: StudyImageTooLarge) {
+                    tooLarge = true
+                    null
                 } catch (_: Exception) {
                     null
                 } finally {
@@ -3164,7 +3173,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             if (payload == null) {
-                message.value = "Das Bild konnte nicht gelesen werden."
+                message.value = if (tooLarge) "Das Bild ist zu groß." else "Das Bild konnte nicht gelesen werden."
                 return@launch
             }
             val name = title ?: uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.').orEmpty()
@@ -3180,11 +3189,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val note = open.value ?: return
         if (note.kind != NoteKind.PDF) return
         viewModelScope.launch {
+            var tooLarge = false
             val payload = withContext(Dispatchers.IO) {
-                try { renderPdfCrop(note, page, crop) } catch (_: Exception) { null }
+                try { renderPdfCrop(note, page, crop) } catch (_: StudyImageTooLarge) { tooLarge = true; null } catch (_: Exception) { null }
             }
             if (payload == null) {
-                message.value = "Der Ausschnitt konnte nicht gerendert werden."
+                message.value = if (tooLarge) "Das Bild ist zu groß." else "Der Ausschnitt konnte nicht gerendert werden."
                 return@launch
             }
             addStudyImage(page, payload.dataUrl, payload.aspect, "Abb. S. $page", ch.fasrv.fanotes.study.cropPlacement(crop))
