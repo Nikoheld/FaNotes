@@ -595,13 +595,17 @@ fun FaNotesScreen(
         if (desk["update-check"] != "off") model.checkUpdate()
     }
 
-    // New files from outside: look again on resume and every 20 s while the app is in front.
+    // New files from outside: look again on resume and every 60 s while the app is in front (slow
+    // rescans back off, see RescanPolicy).
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, model) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            // Every resume rescans once; after a slow scan the timer stays off until the next resume.
+            model.rescanTree()
             while (true) {
+                kotlinx.coroutines.delay(model.rescanPolicy.intervalMs)
+                if (model.rescanPolicy.resumeOnly) break
                 model.rescanTree()
-                kotlinx.coroutines.delay(20_000)
             }
         }
     }
