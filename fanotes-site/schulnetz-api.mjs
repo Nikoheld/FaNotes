@@ -26,6 +26,7 @@ import {
   eventQueryWindow,
   hasFetchedWeeks,
   keepLoadedGrades,
+  preserveExplicitZeroWeight,
   trustedGradeRead,
   parseWeekSpan,
   prepareGradeNotifications,
@@ -449,7 +450,7 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (!body || typeof body !== 'object' || Array.isArray(body)) fail(400, 'Der Schnappschuss ist ungültig.')
     const previous = await readSnapshotFile(accountId)
     const snapshot = { ...keepServerLessons(previous, body), revision: (link.revision || 0) + 1, fetchedAt: body.fetchedAt || now().toISOString() }
-    snapshot.grades = keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot))
+    snapshot.grades = preserveExplicitZeroWeight(previous?.grades, keepLoadedGrades(previous?.grades, snapshot.grades, trustedGradeRead(snapshot)))
     // The app reads every grade row; an upload whose grades were kept is stored as a complete list.
     snapshot.gradeParser = snapshot.grades === previous?.grades ? (Number(previous?.gradeParser) || 0) : GRADE_PARSER_VERSION
     // The phone's own read errors describe its read, not what the server holds: when the server reads

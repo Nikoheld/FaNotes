@@ -892,6 +892,40 @@ export const keepLoadedGrades = (previousGrades, nextGrades, complete = true) =>
   if (!complete || next.length === 0 || next.some((grade) => placeholderCourse(grade.course || grade.subject || grade.courseId))) return prev
   return next
 }
+
+/**
+ * The phone still reads an explicit weight of 0 as 1. An upload of that list must not
+ * replace the server's 0, or every upload and the next Schulnetz read announce each other.
+ * A different mark, title, day or course is left alone, and a weight other than 1 is kept.
+ */
+export const preserveExplicitZeroWeight = (previousGrades, nextGrades) => {
+  const next = Array.isArray(nextGrades) ? nextGrades : []
+  const zeros = new Map()
+  for (const grade of Array.isArray(previousGrades) ? previousGrades : []) {
+    if (Number(grade?.weight) !== 0 || grade?.mark == null) continue
+    zeros.set([
+      normalizeGradeText(grade.courseId || grade.course || grade.subject || ''),
+      normalizeGradeDate(grade.date),
+      normalizeGradeText(grade.title),
+      numKey(grade.mark),
+    ].join('\u0000'), grade)
+  }
+  if (!zeros.size) return next
+  let changed = false
+  const kept = next.map((grade) => {
+    if (Number(grade?.weight) !== 1 || grade?.mark == null) return grade
+    const key = [
+      normalizeGradeText(grade.courseId || grade.course || grade.subject || ''),
+      normalizeGradeDate(grade.date),
+      normalizeGradeText(grade.title),
+      numKey(grade.mark),
+    ].join('\u0000')
+    if (!zeros.has(key)) return grade
+    changed = true
+    return { ...grade, weight: 0 }
+  })
+  return changed ? kept : next
+}
 export const eventLabel = (event) => cleanSchulnetzText(event.courseName) || cleanSchulnetzText(event.text) || cleanSchulnetzText(event.timetableText) || 'Lektion'
 const noticeClock = (raw) => {
   const text = cleanSchulnetzText(raw)

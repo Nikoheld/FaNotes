@@ -34,6 +34,7 @@ import {
   normalizeSchoolBase,
   parseGradesHtml,
   parseWeight,
+  preserveExplicitZeroWeight,
   parseRawSnapshot,
   pluspunkte,
   redactSecrets,
@@ -1627,6 +1628,12 @@ test('a grade weighted zero does not count as weight one', () => {
   assert.equal(parseWeight(''), 1)
   assert.equal(parseWeight('0'), 0)
   assert.equal(parseWeight('0,5'), 0.5)
+  const zero = { id: 'web:mat:01.03.2026:Test:5', courseId: 'MAT', title: 'Test', date: '2026-03-01', mark: 5, weight: 0 }
+  const asOne = { ...zero, weight: 1 }
+  assert.equal(preserveExplicitZeroWeight([zero], [asOne])[0].weight, 0)
+  assert.equal(preserveExplicitZeroWeight([zero], [{ ...asOne, mark: 4 }])[0].weight, 1)
+  assert.equal(preserveExplicitZeroWeight([zero], [{ ...asOne, weight: 2 }])[0].weight, 2)
+  assert.equal(preserveExplicitZeroWeight([zero], [asOne, { ...asOne, id: 'other', title: 'Andere', weight: 1 }])[1].weight, 1)
   assert.equal(parseWeight('-1'), 1)
   const html = `<table><tr><td>Chemie-K26A-1 Chemie</td><td>5.0</td></tr><tr><td><table>
     <tr><td>02.03.2026</td><td>Übung</td><td>5.0</td><td>0</td></tr>
