@@ -212,6 +212,9 @@ export const createKantiWebStore = (options = {}) => {
   }
   const nowMs = () => now().getTime()
   const alive = (session) => Boolean(session && session.v === 1 && Date.parse(session.expiresAt) > nowMs() && Date.parse(session.maxUntil) > nowMs())
+  // A missing expiry can still end the session. A value that is not a time must not look finished.
+  const instantKnown = (value) => value == null || value === '' || (typeof value === 'string' && Number.isFinite(Date.parse(value)))
+  const expiryKnown = (session) => instantKnown(session?.expiresAt) && instantKnown(session?.maxUntil)
   // A missing version can go. Any other version, including one that is not a number, must not look dead.
   const otherVersion = (session) => Boolean(session) && Object.hasOwn(session, 'v') && session.v != null && session.v !== 1
   const plainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -263,6 +266,8 @@ export const createKantiWebStore = (options = {}) => {
     if (otherVersion(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
     // A connection list or sign-in that is not the known shape must not look empty, or the next request deletes the session or drops that field.
     if (session && session.v === 1 && !sessionShapeKnown(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
+    // A saved expiry that is not a time must not look finished, or the next request deletes the session.
+    if (session && session.v === 1 && !expiryKnown(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
     return alive(session) ? session : null
   }
   const saveSession = async (hash, session) => {
@@ -538,8 +543,9 @@ export const createKantiWebStore = (options = {}) => {
       } catch {
         continue
       }
-      // A session of another version stays. Sweep only removes a missing, broken, or expired version 1 file.
+      // A session of another version stays. A version 1 expiry that is not a time stays. Sweep only removes a missing, broken, or expired version 1 file.
       if (otherVersion(session)) continue
+      if (session && session.v === 1 && !expiryKnown(session)) continue
       if (!alive(session)) await locked(`session:${hash}`, () => deleteSession(hash))
     }
   }
