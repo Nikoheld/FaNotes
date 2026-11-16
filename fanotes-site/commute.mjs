@@ -485,6 +485,11 @@ export const createCommute = (options = {}) => {
 
   const read = async (accountId) => {
     const stored = await readJson(file(accountId))
+    // A missing or broken file can start again. A file that is there but not this route list must not look empty, or the next save replaces it.
+    if (stored != null) {
+      const known = typeof stored === 'object' && !Array.isArray(stored) && Array.isArray(stored.routes)
+      if (!known) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+    }
     const settings = sanitizeSettings(stored?.settings)
     // Version 1 hidden labels mixed half-class choices (removed) with hidden lessons; the app sends
     // the hidden lessons again, so no lesson stays left out of the first/last lesson.
