@@ -1624,6 +1624,19 @@ test('seal round trip uses aes-256-gcm', () => {
 })
 
 
+test('two Kurs courses with the same test stay different grades', () => {
+  const row = (date, topic, mark) => `<tr><td>${date}</td><td>${topic}</td><td>${mark}</td><td>1</td></tr>`
+  const course = (code, subject, rows) => `<tr><td><b>${code}</b><br>${subject}</td><td>5.0</td></tr><tr><td colspan="4"><table>${rows}</table></td></tr>`
+  const html = `<table><tr><th>Fach</th><th>Durchschnitt</th></tr>${course('Kurs 2.1 (GF)', 'Deutsch', row('01.03.2026', 'Test', '5.5'))}${course('Kurs 2.2 (GF)', 'Französisch', row('01.03.2026', 'Test', '5.5'))}</table>`
+  const grades = parseGradesHtml(html)
+  assert.deepEqual(grades.map((grade) => grade.courseId), ['Kurs 2.1 (GF)', 'Kurs 2.2 (GF)'])
+  assert.notEqual(grades[0].id, grades[1].id)
+  assert.notEqual(gradeTargetId(grades[0]), gradeTargetId(grades[1]))
+  const blank = { grades: [], events: [], exams: [], absences: [], messages: [] }
+  assert.equal(diffSnapshots(blank, { ...blank, grades }).length, 2)
+  assert.equal(diffSnapshots({ ...blank, grades }, { ...blank, grades }).length, 0)
+})
+
 test('a grade weighted zero does not count as weight one', () => {
   assert.equal(parseWeight(''), 1)
   assert.equal(parseWeight('0'), 0)
@@ -2711,7 +2724,7 @@ test('every grade row of a real-shaped grades page is read, tooltips and pending
   assert.equal(by('Vocabulaire').date, '')
   assert.equal(by('Vocabulaire').weight, 1)
   assert.ok(grades.every((grade) => grade.mark == null || (grade.mark >= 1 && grade.mark <= 6)))
-  assert.deepEqual([...new Set(grades.map((grade) => grade.courseId))], ['MAT_K99Z_Demo', 'Kurs', 'BIO_K99Z_Demo', 'FRA_K99Z_Demo'])
+  assert.deepEqual([...new Set(grades.map((grade) => grade.courseId))], ['MAT_K99Z_Demo', 'Kurs 2.1 (GF)', 'BIO_K99Z_Demo', 'FRA_K99Z_Demo'])
 })
 
 test('a pending grade is not news, its mark arriving is a new grade', () => {
