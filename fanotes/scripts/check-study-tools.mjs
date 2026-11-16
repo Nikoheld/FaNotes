@@ -306,6 +306,106 @@ try {
   assert.ok(render.renderMapSvg(cmap, render.EXPORT_PALETTE).svg.includes('marker-end'))
   assert.equal(registry.renderStudyBlockHtml('map', '{}').includes('<svg'), true, 'broken data falls back to the starter map')
 
+  // -- hostile block data ---------------------------------------------------------------
+  // Whatever a note, a shared note or a synced file puts into a block must come out as inert markup.
+  {
+    const ALLOWED_TAGS = new Set(['div', 'span', 'p', 'b', 'pre', 'figure', 'figcaption', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'svg', 'rect', 'path', 'text', 'defs', 'marker'])
+    const SAFE_SRC = /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/u
+    /** Every tag and attribute of rendered markup: no scripts, handlers, links, styles that load things, or odd pictures. */
+    const inert = (html, label) => {
+      for (const [tag, closing, name, rest] of [...html.matchAll(/<(\/?)([A-Za-z][A-Za-z0-9-]*)([^>]*)>/gu)].map((match) => match.slice(0, 4))) {
+        assert.ok(ALLOWED_TAGS.has(name.toLowerCase()), `${label}: unexpected tag ${tag.slice(0, 60)}`)
+        if (closing) continue
+        const attributes = [...rest.matchAll(/\s([A-Za-z][\w:-]*)="([^"]*)"/gu)]
+        const leftover = rest.replace(/\s([A-Za-z][\w:-]*)="([^"]*)"/gu, '').replace(/\s*\/?\s*$/u, '')
+        assert.equal(leftover, '', `${label}: attribute syntax in ${tag.slice(0, 80)}`)
+        for (const [, attribute, value] of attributes) {
+          const lower = attribute.toLowerCase()
+          assert.ok(!lower.startsWith('on'), `${label}: event handler ${attribute}`)
+          assert.ok(!['href', 'xlink:href', 'srcset', 'action', 'formaction', 'poster', 'background'].includes(lower), `${label}: link attribute ${attribute}`)
+          if (lower === 'src') assert.ok(SAFE_SRC.test(value), `${label}: src ${value.slice(0, 60)}`)
+          if (lower === 'data-vault-src') assert.ok(blocks.isVaultImageRef(value.replaceAll('&amp;', '&')), `${label}: data-vault-src ${value.slice(0, 60)}`)
+          if (lower === 'style') assert.ok(!/url\s*\(|@import|expression\s*\(|javascript:|behavior|-moz-binding/iu.test(value), `${label}: style ${value.slice(0, 80)}`)
+        }
+      }
+    }
+    const texts = [
+      '<img src=x onerror=alert(1)>', '"><svg onload=alert(1)>', "' onmouseover='alert(1)", '</text><script>alert(1)</script>',
+      '&lt;b&gt; & &amp;', 'javascript:alert(1)', '<style>*{background:url(//tracker.example/p.png)}</style>', 'x\u2028<!--', '`${alert(1)}`',
+    ]
+    const hostileRefs = [
+      'javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
+      'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=', 'data:image/svg+xml,<svg onload=alert(1)>', 'data:image/png;base64,AAAA" onerror="alert(1)',
+      'https://tracker.example/pixel.gif', '//tracker.example/p.png', 'http://127.0.0.1:1234/x.png', 'file:///etc/passwd', 'blob:https://x/uuid',
+      '.fanotes/worksheets/abcdefgh.svg', '.fanotes/worksheets/../../secret.png', '.fanotes/worksheets/abcdefgh.png" onerror="alert(1)',
+      '.fanotes/worksheets/abcdefgh.png\n', ' .fanotes/worksheets/abcdefgh.png', 'x', '',
+    ]
+    const vaultRef = '.fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.png'
+    const dataRef = 'data:image/png;base64,iVBORw0KGgo='
+    const keyData = (text, ref = '') => ({
+      v: 1, title: text, compareImage: ref, compareLabel: text,
+      table: { features: [text], items: [{ id: 'a', name: text, values: [text] }] },
+      tree: { root: 'n1', nodes: [{ id: 'n1', kind: 'question', text, branches: [{ label: text, to: 'n2' }, { label: 'x', to: 'n3' }] }, { id: 'n2', kind: 'leaf', text }, { id: 'n3', kind: 'leaf', text }] },
+    })
+    const plateData = (text, ref = '', cols = 4) => ({ v: 1, title: text, cols, showLabels: true, items: [{ id: 'p1', label: text, note: text, img: ref }] })
+    const mapData = (text) => ({ v: 1, title: text, nodes: [{ id: 'a', text }, { id: 'b', text }], edges: [{ id: 'e1', from: 'a', to: 'b', label: text }] })
+    const sortData = (text) => ({ v: 1, title: text, mode: 'groups', cards: [{ id: 'c1', text }, { id: 'c2', text: `${text}2` }], groups: [{ id: 'g1', title: text, cards: ['c1'] }] })
+    const termData = (text) => ({ v: 1, terms: [{ id: 't1', term: text, definition: text, example: text, source: text }] })
+    const render1 = (kind, data) => registry.renderStudyBlockHtml(kind, JSON.stringify(data))
+
+    // 1. Hostile text in every slot: the block renders (it is valid data) and nothing becomes markup.
+    for (const text of texts) {
+      for (const [kind, data] of [['key', keyData(text)], ['plate', plateData(text)], ['map', mapData(text)], ['sort', sortData(text)], ['term', termData(text)]]) {
+        const html = render1(kind, data)
+        assert.ok(!html.includes('lw-error'), `${kind} with hostile text still renders: ${text.slice(0, 16)}`)
+        inert(html, `${kind} text=${text.slice(0, 16)}`)
+      }
+      // A block that is not valid JSON, or that FaNotes would not read completely, shows its source as escaped text.
+      inert(registry.renderStudyBlockHtml('map', `{ ${text}`), `broken block ${text.slice(0, 16)}`)
+      inert(registry.renderStudyBlockHtml('key', JSON.stringify({ ...keyData(text), extra: text })), `lossy block ${text.slice(0, 16)}`)
+    }
+    // 2. Hostile picture references and column counts through the whole pipeline: refused or shown as source, never rendered.
+    for (const ref of hostileRefs) {
+      inert(render1('plate', plateData('x', ref)), `plate ref=${ref.slice(0, 24)}`)
+      inert(render1('key', keyData('x', ref)), `key ref=${ref.slice(0, 24)}`)
+    }
+    for (const cols of ['4;background:url(//tracker.example/p.png)', '4" onclick="alert(1)', 1.5, -3, 9, 1e9, '0x2', {}, [3], null, true]) inert(render1('plate', plateData('x', '', cols)), `cols ${JSON.stringify(cols)}`)
+    // Allowed pictures still render.
+    assert.match(render1('plate', plateData('x', vaultRef)), /<img data-vault-src="\.fanotes\/worksheets\/0b3e4f5a-1111-4222-8333-444455556666\.png" alt="x"\/>/u)
+    assert.match(render1('plate', plateData('x', dataRef)), /<img alt="x" src="data:image\/png;base64,iVBORw0KGgo="\/>/u)
+    assert.ok(render1('key', keyData('x', vaultRef)).includes('lw-compare'), 'a vault picture next to the key still renders')
+
+    // 3. The renderer on its own, as a future caller that does not read the block through the normaliser would use it.
+    const rawPlate = (img, cols = 4) => ({ v: 1, title: 't', cols, showLabels: true, items: [{ id: 'p', label: 'l', note: '', img }] })
+    const rawKey = (ref) => ({ ...key.normaliseKeyData(keyData('k')), compareImage: ref })
+    for (const ref of hostileRefs) {
+      assert.equal(render.imgTag(ref, 'alt'), '', `imgTag refuses ${JSON.stringify(ref.slice(0, 30))}`)
+      const plate = render.renderStudyHtml('plate', rawPlate(ref))
+      inert(plate, `renderStudyHtml plate ref=${ref.slice(0, 24)}`)
+      assert.ok(plate.includes('lw-plate-empty') && !plate.includes('<img'), `a refused picture leaves the placeholder: ${ref.slice(0, 24)}`)
+      const keyHtml = render.renderStudyHtml('key', rawKey(ref))
+      inert(keyHtml, `renderStudyHtml key ref=${ref.slice(0, 24)}`)
+      assert.ok(!keyHtml.includes('lw-compare'), `a refused comparison picture drops the whole figure: ${ref.slice(0, 24)}`)
+    }
+    assert.equal(render.imgTag(vaultRef, 'a"b'), `<img data-vault-src="${vaultRef}" alt="a&quot;b"/>`)
+    assert.equal(render.imgTag(dataRef, '<b>'), `<img alt="&lt;b&gt;" src="${dataRef}"/>`)
+    assert.equal(render.imgTag(`data:image/png;base64,${'A'.repeat(blocks.IMAGE_DATA_LIMIT)}`, 'big'), '', 'oversized data URLs are refused')
+    assert.equal(render.imgTag(undefined, 'x'), '')
+    for (const cols of ['4;background:url(//tracker.example/p.png)', '4" onclick="alert(1)', 1.5, -3, 0, 9, 1e9, {}, null, undefined, NaN, Infinity, '', ' ', 'x']) {
+      const html = render.renderStudyHtml('plate', rawPlate('', cols))
+      inert(html, `renderStudyHtml cols ${JSON.stringify(cols)}`)
+      assert.match(html, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/u, `cols ${String(cols).slice(0, 12)} falls back to the default`)
+    }
+    // Values the reader has always coerced with Number() (hex strings, one-element arrays, booleans) still come out as one integer 1..8.
+    for (const cols of ['0x2', [3], true, '5', ' 6 ']) {
+      const html = render.renderStudyHtml('plate', rawPlate('', cols))
+      inert(html, `renderStudyHtml coerced cols ${JSON.stringify(cols)}`)
+      assert.match(html, /grid-template-columns:repeat\([1-8],minmax\(0,1fr\)\)"/u, `cols ${JSON.stringify(cols)} stays one integer 1..8`)
+    }
+    for (const [cols, expected] of [[1, 1], [8, 8], [3, 3], ['5', 5]]) assert.match(render.renderStudyHtml('plate', rawPlate('', cols)), new RegExp(`repeat\\(${expected},minmax`, 'u'), `cols ${cols}`)
+    assert.deepEqual([1.5, '4;x', 9, 0, 3].map(cards.plateColumns), [4, 4, 4, 4, 3], 'the reader and the renderer share one rule')
+  }
+
   // -- highlights overview -------------------------------------------------------------
   const sample = [
     { id: 'm2', page: 5, quote: 'Zweite Stelle', kind: 'highlight' },

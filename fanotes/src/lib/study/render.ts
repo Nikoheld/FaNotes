@@ -3,11 +3,11 @@
  * result can be set as innerHTML in the editor widget and in the Markdown preview.
  */
 
-import { escapeHtml as esc, isVaultImageRef, type StudyKind } from './blocks'
+import { asImage, escapeHtml as esc, isVaultImageRef, type StudyKind } from './blocks'
 import { layoutKeyTree, type KeyData } from './keyTree'
 import { layoutMap, type MapData } from './conceptMap'
 import { unsortedCards, type SortData } from './sortBoard'
-import type { PlateData, TermData } from './cardsModels'
+import { plateColumns, type PlateData, type TermData } from './cardsModels'
 
 export type Palette = { text: string; muted: string; line: string; fill: string; accent: string; leaf: string; bg: string }
 
@@ -24,10 +24,17 @@ export const THEME_PALETTE: Palette = {
 /** Exported images are always light so they read on a worksheet. */
 export const EXPORT_PALETTE: Palette = { text: '#1b1d23', muted: '#4b5565', line: '#667085', fill: '#ffffff', accent: '#2f4bd0', leaf: '#e8edfb', bg: '#ffffff' }
 
-/** `<img>` for a stored picture: vault files are filled in later by hydrateVaultImages. */
-export const imgTag = (ref: string, alt: string, extra = '') => (
-  isVaultImageRef(ref) ? `<img data-vault-src="${esc(ref)}" alt="${esc(alt)}"${extra}/>` : `<img alt="${esc(alt)}" src="${esc(ref)}"${extra}/>`
-)
+/**
+ * `<img>` for a stored picture: vault files are filled in later by hydrateVaultImages. Only what `asImage`
+ * accepts is rendered (a worksheet file of the vault, or a small base64 png/jpeg/webp/gif data URL); any
+ * other reference gives an empty string, so a caller that skipped the block normalisation cannot turn a
+ * block into a remote tracking pixel, a `javascript:` URL or a `data:text/html` / SVG sink.
+ */
+export const imgTag = (ref: string, alt: string) => {
+  const safe = asImage(ref)
+  if (!safe) return ''
+  return isVaultImageRef(safe) ? `<img data-vault-src="${esc(safe)}" alt="${esc(alt)}"/>` : `<img alt="${esc(alt)}" src="${esc(safe)}"/>`
+}
 
 const FONT = "font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif"
 
@@ -95,7 +102,8 @@ const tableHtml = (data: KeyData) => {
 
 const renderKeyHtml = (data: KeyData) => {
   const tree = renderKeyTreeSvg(data)
-  const compare = data.compareImage ? `<figure class="lw-compare">${imgTag(data.compareImage, data.compareLabel || 'Vergleichsbaum')}<figcaption>${esc(data.compareLabel || 'Vergleich')}</figcaption></figure>` : ''
+  const compareImage = data.compareImage ? imgTag(data.compareImage, data.compareLabel || 'Vergleichsbaum') : ''
+  const compare = compareImage ? `<figure class="lw-compare">${compareImage}<figcaption>${esc(data.compareLabel || 'Vergleich')}</figcaption></figure>` : ''
   return `${data.title ? `<div class="lw-title">${esc(data.title)}</div>` : ''}${tableHtml(data)}<div class="lw-key-views${compare ? ' is-compare' : ''}"><div class="lw-svg">${data.tree.nodes.length ? tree.svg : ''}</div>${compare}</div>`
 }
 
@@ -108,8 +116,9 @@ const renderSortHtml = (data: SortData) => {
 }
 
 const renderPlateHtml = (data: PlateData) => {
-  const cells = data.items.map((item) => `<figure class="lw-plate-item">${item.img ? imgTag(item.img, item.label) : '<div class="lw-plate-empty"></div>'}${data.showLabels ? `<figcaption>${esc(item.label)}</figcaption>` : ''}</figure>`).join('')
-  return `${data.title ? `<div class="lw-title">${esc(data.title)}</div>` : ''}<div class="lw-plate" style="grid-template-columns:repeat(${data.cols},minmax(0,1fr))">${cells}</div>`
+  const cells = data.items.map((item) => `<figure class="lw-plate-item">${(item.img && imgTag(item.img, item.label)) || '<div class="lw-plate-empty"></div>'}${data.showLabels ? `<figcaption>${esc(item.label)}</figcaption>` : ''}</figure>`).join('')
+  // The column count goes into a style attribute: clamp it here too, not only when the block is read.
+  return `${data.title ? `<div class="lw-title">${esc(data.title)}</div>` : ''}<div class="lw-plate" style="grid-template-columns:repeat(${plateColumns(data.cols)},minmax(0,1fr))">${cells}</div>`
 }
 
 const renderTermHtml = (data: TermData) => data.terms.map((entry) => (
