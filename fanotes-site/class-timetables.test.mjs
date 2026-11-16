@@ -660,6 +660,23 @@ test('an unreadable timetable file is left in place', async () => {
   }
 })
 
+test('a timetable pointer that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-pointer-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const pointer = join(store.root, 'current.json')
+  const stored = '{"published":"20261115T120000Z-abc123"}\n'
+  await mkdir(store.root, { recursive: true, mode: 0o700 })
+  await writeFile(pointer, stored, { mode: 0o600 })
+  try {
+    await assert.rejects(() => store.summary(), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(pointer, 'utf8'), stored)
+    await rm(pointer)
+    assert.deepEqual(await store.summary(), { available: false })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('an unreadable timetable page is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'timetable-page-'))
   const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })

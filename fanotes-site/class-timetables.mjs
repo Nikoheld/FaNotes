@@ -526,7 +526,10 @@ export const createClassTimetables = (options = {}) => {
   }
   const currentVersion = async () => {
     const pointer = await readJson(join(root, 'current.json'))
-    return pointer && versionDir(pointer.version) ? pointer.version : null
+    // A missing or broken pointer can start again. A pointer that is there but not a version must not look unpublished.
+    if (!pointer) return null
+    if (!versionDir(pointer.version)) throw Object.assign(new Error('timetable pointer'), { code: 'EBADMSG' })
+    return pointer.version
   }
   const readIndex = async () => {
     const at = now().getTime()
