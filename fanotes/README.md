@@ -181,6 +181,7 @@ npm run typecheck
 npm run check:efficiency
 npm run check:startup
 npm run check:themes
+npm run check:graphics-contrast
 npm run check:scribble-erase
 npm run check:glyphenwerk
 npm run check:ink-recognition
@@ -397,6 +398,7 @@ npm run typecheck
 npm run check:efficiency
 npm run check:startup
 npm run check:themes
+npm run check:graphics-contrast
 npm run check:scribble-erase
 npm run check:glyphenwerk
 npm run check:ink-recognition

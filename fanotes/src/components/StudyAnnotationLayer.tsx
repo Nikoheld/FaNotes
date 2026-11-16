@@ -46,6 +46,11 @@ export type StudyAnnotationLayerProps = {
 const KIND_LABELS: Record<string, string> = { callout: 'Beschriftung', stamp: 'Zeichen', legend: 'Legende', image: 'Bild', stroke: 'Markierung', measure: 'Messung' }
 const LABEL_COLORS = ['#1d4ed8', '#dc2626', '#16a34a', '#111827']
 const HIGHLIGHT_COLORS = ['#facc15', '#f97316', '#22c55e', '#38bdf8', '#e879f9']
+const COLOR_NAMES: Record<string, string> = {
+  '#1d4ed8': 'Blau', '#dc2626': 'Rot', '#16a34a': 'Grün', '#111827': 'Schwarz',
+  '#facc15': 'Gelb', '#f97316': 'Orange', '#22c55e': 'Hellgrün', '#38bdf8': 'Hellblau', '#e879f9': 'Pink',
+}
+const colorLabel = (color: string) => `Farbe ${COLOR_NAMES[color] ?? color}`
 const A4_WIDTH_CM = 21
 const SAVE_DELAY_MS = 500
 
@@ -805,7 +810,7 @@ export function StudyAnnotationLayer({ path, pdf, open, onClose }: StudyAnnotati
       </div>
       {ghost && <div className="study-ghost" style={{ left: ghost.x, top: ghost.y }}>{ghost.text}</div>}
       {open && (
-        <div className="study-panel" role="dialog" aria-label="Lernwerkzeuge" onPointerDown={(e) => e.stopPropagation()}>
+        <div className="study-panel" role="region" aria-label="Lernwerkzeuge" onPointerDown={(e) => e.stopPropagation()}>
           <div className="study-panel-head">
             <strong>Lernwerkzeuge</strong>
             <span>
@@ -826,7 +831,7 @@ export function StudyAnnotationLayer({ path, pdf, open, onClose }: StudyAnnotati
                 <label className="study-check"><input type="checkbox" checked={numbered} onChange={(e) => setNumbered(e.target.checked)} /> Nummeriert (1, 2, 3 + Legende)</label>
               </div>
               <div className="study-row">
-                {LABEL_COLORS.map((c) => <button key={c} type="button" className={`study-swatch ${labelColor === c ? 'is-active' : ''}`} style={{ background: c }} aria-label={`Farbe ${c}`} onClick={() => setLabelColor(c)} />)}
+                {LABEL_COLORS.map((c) => <button key={c} type="button" className={`study-swatch ${labelColor === c ? 'is-active' : ''}`} style={{ background: c }} aria-label={colorLabel(c)} aria-pressed={labelColor === c} onClick={() => setLabelColor(c)} />)}
                 {toolButton('legend', 'Legende platzieren', 'Zeigt Zeichen und nummerierte Beschriftungen')}
                 {numbered && <button type="button" className="study-tool" onClick={() => commit(renumberCallouts(itemsRef.current))}>Neu nummerieren</button>}
               </div>
@@ -859,7 +864,7 @@ export function StudyAnnotationLayer({ path, pdf, open, onClose }: StudyAnnotati
               <div className="study-row">{toolButton('legend', 'Legende platzieren', 'Legende aus den gesetzten Zeichen')}</div>
               <div className="study-row">
                 {toolButton('highlight', 'Ast markieren', 'Dicker, durchscheinender Stift für Äste im Stammbaum')}
-                {HIGHLIGHT_COLORS.map((c) => <button key={c} type="button" className={`study-swatch ${hlColor === c ? 'is-active' : ''}`} style={{ background: c }} aria-label={`Farbe ${c}`} onClick={() => { setHlColor(c); setTool('highlight') }} />)}
+                {HIGHLIGHT_COLORS.map((c) => <button key={c} type="button" className={`study-swatch ${hlColor === c ? 'is-active' : ''}`} style={{ background: c }} aria-label={colorLabel(c)} aria-pressed={hlColor === c} onClick={() => { setHlColor(c); setTool('highlight') }} />)}
               </div>
               <label className="study-slider">Dicke <input type="range" min={6} max={40} value={hlWidth} onChange={(e) => setHlWidth(Number(e.target.value))} /></label>
             </>}
