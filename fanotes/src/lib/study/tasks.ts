@@ -130,14 +130,15 @@ export const detectTasks = (pages: readonly PageLines[]): StudyTask[] => {
 
 export const TASKS_START = '<!-- fanotes-tasks-v1'
 const TASKS_END = '-->'
+/** The marker must end there: a renamed `fanotes-tasks-v1-broken` comment is not ours any more. */
+const MARKER = /<!-- fanotes-tasks-v1(?![-\w])/gu
 
 const text = (value: unknown, max: number) => (typeof value === 'string' ? value.slice(0, max) : '')
 
-export const readTaskList = (markdown: string): StudyTaskList | null => {
-  const block = locateEmbeddedJsonComment(markdown, TASKS_START)
-  if (!block) return null
+const parseTaskList = (json: string): StudyTaskList | null => {
   try {
-    const parsed = JSON.parse(markdown.slice(block.jsonStart, block.jsonEnd)) as { tasks?: unknown; removed?: unknown }
+    const parsed = JSON.parse(json) as { tasks?: unknown; removed?: unknown }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
     const tasks = (Array.isArray(parsed.tasks) ? parsed.tasks : []).slice(0, 300).flatMap((entry): StudyTask[] => {
       if (!entry || typeof entry !== 'object') return []
       const task = entry as Record<string, unknown>
@@ -162,12 +163,74 @@ export const readTaskList = (markdown: string): StudyTaskList | null => {
   }
 }
 
-export const writeTaskList = (markdown: string, list: StudyTaskList): string => {
-  const existing = locateEmbeddedJsonComment(markdown, TASKS_START)
-  const without = existing ? `${markdown.slice(0, existing.start)}${markdown.slice(existing.end)}` : markdown
-  if (!list.tasks.length && !list.removed.length) return without.replace(/\n{3,}/gu, '\n\n')
-  const block = `\n${TASKS_START}\n${JSON.stringify(list, null, 1)}\n${TASKS_END}\n`
-  return `${without.replace(/\s*$/u, '')}${block}`
+type TaskComment = {
+  start: number
+  /** End of the comment, or null when it never closes (everything after it would be swallowed). */
+  end: number | null
+  /** The parsed list; null for a comment that is not valid. */
+  list: StudyTaskList | null
+}
+
+/** Every `fanotes-tasks-v1` comment in the note, valid or not, in order. */
+const findTaskComments = (markdown: string): TaskComment[] => {
+  const starts = [...markdown.matchAll(MARKER)].map((match) => match.index ?? 0)
+  return starts.map((start, index): TaskComment => {
+    const located = locateEmbeddedJsonComment(markdown.slice(start), TASKS_START)
+    if (located) {
+      const list = parseTaskList(markdown.slice(start + located.jsonStart, start + located.jsonEnd))
+      return { start, end: start + located.end, list }
+    }
+    // Broken: it only counts as closed when its own "-->" comes before the next marker.
+    const limit = index + 1 < starts.length ? starts[index + 1] : markdown.length
+    const close = markdown.indexOf(TASKS_END, start + TASKS_START.length)
+    return { start, end: close >= 0 && close + TASKS_END.length <= limit ? close + TASKS_END.length : null, list: null }
+  })
+}
+
+/** The stored list. A broken comment is skipped when a later one is valid. */
+export const readTaskList = (markdown: string): StudyTaskList | null => {
+  for (const comment of findTaskComments(markdown)) if (comment.list) return comment.list
+  return null
+}
+
+/** Removes a comment together with the line break it was written with, nothing else. */
+const removeComment = (markdown: string, start: number, end: number) => {
+  let before = markdown.slice(0, start)
+  const after = markdown.slice(end)
+  if (before.endsWith('\n') && after.startsWith('\n')) before = before.slice(0, -1)
+  return `${before}${after}`
+}
+
+/**
+ * Stores the list as exactly one comment: the first valid one is replaced in place, further valid ones are
+ * removed, and invalid ones are kept as `fanotes-tasks-v1-broken` so their text can be recovered.
+ * Returns null (and changes nothing) when an invalid comment never closes: renaming it would not
+ * stop it from swallowing the rest of the note, so the user has to repair that by hand.
+ */
+export const writeTaskList = (markdown: string, list: StudyTaskList): string | null => {
+  const comments = findTaskComments(markdown)
+  if (comments.some((comment) => !comment.list && comment.end === null)) return null
+  const empty = !list.tasks.length && !list.removed.length
+  const block = `${TASKS_START}\n${JSON.stringify(list, null, 1)}\n${TASKS_END}`
+  let output = markdown
+  let placed = false
+  // From the back, so earlier offsets stay valid.
+  for (const comment of [...comments].reverse()) {
+    if (!comment.list) {
+      output = `${output.slice(0, comment.start)}${TASKS_START}-broken${output.slice(comment.start + TASKS_START.length)}`
+      continue
+    }
+    const end = comment.end as number
+    const first = comments.find((entry) => entry.list) === comment
+    if (first && !empty) {
+      output = `${output.slice(0, comment.start)}${block}${output.slice(end)}`
+      placed = true
+    } else {
+      output = removeComment(output, comment.start, end)
+    }
+  }
+  if (empty || placed) return output
+  return `${output.replace(/\s*$/u, '')}\n${block}\n`
 }
 
 const numberOrder = (task: StudyTask) => (task.number ? Number(task.number) : Number.MAX_SAFE_INTEGER)
