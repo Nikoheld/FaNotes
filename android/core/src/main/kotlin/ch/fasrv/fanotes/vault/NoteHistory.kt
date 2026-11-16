@@ -323,6 +323,13 @@ private class HistoryIndex(var path: String?, val snapshots: MutableList<History
 
 private fun readHistoryIndex(io: VaultIo, directory: String): HistoryIndex {
     val raw = io.read("$directory/index.json")?.decodeToString() ?: return HistoryIndex(null, mutableListOf())
+    return parseHistoryIndex(raw)
+}
+
+/** Snapshot times in the text of a history `index.json`, oldest first. Empty when the text is no history index. */
+fun historyStampsFromIndex(raw: String): List<String> = parseHistoryIndex(raw).snapshots.map { it.createdAt }
+
+private fun parseHistoryIndex(raw: String): HistoryIndex {
     return try {
         val parsed = parseJson(raw) as? JsonValue.Obj ?: return HistoryIndex(null, mutableListOf())
         if (parsed.string("format") != HISTORY_FORMAT) return HistoryIndex(null, mutableListOf())

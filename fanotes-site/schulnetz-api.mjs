@@ -990,10 +990,11 @@ export const createSchulnetzRuntime = (options = {}) => {
   /** Missing file means "not migrated yet". A present file is the durable ledger. */
   const readGradeLedger = async (accountId) => {
     const parsed = await readJson(resolve(accountDir(accountId), 'notified-grades.json'))
-    // A missing or broken file can start again. A file that is there but not this ledger must not look missing, or the next publish replaces it and a failed change log deletes it.
+    // A missing or broken file can start again. A file that is there but not this ledger, including a key that is not text, must not look missing, or the next publish drops that key.
     if (!parsed) return null
-    if (parsed.version !== 1 || !Array.isArray(parsed.keys)) throw Object.assign(new Error('grade ledger'), { code: 'EBADMSG' })
-    return parsed.keys.filter((key) => typeof key === 'string' && key)
+    const keysKnown = parsed.version === 1 && Array.isArray(parsed.keys) && parsed.keys.every((key) => typeof key === 'string' && key)
+    if (!keysKnown) throw Object.assign(new Error('grade ledger'), { code: 'EBADMSG' })
+    return parsed.keys
   }
 
   const writeGradeLedger = async (accountId, keys) => {
@@ -1049,6 +1050,15 @@ export const createSchulnetzRuntime = (options = {}) => {
     if (stored && (stored.version !== 1 || !weeks || typeof weeks !== 'object' || Array.isArray(weeks))) {
       throw Object.assign(new Error('agenda baseline'), { code: 'EBADMSG' })
     }
+    const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+    const weekKnown = (week) => plain(week)
+      && (week.events == null || Array.isArray(week.events))
+      && (week.exams == null || Array.isArray(week.exams))
+      && (week.weekFetched == null || plain(week.weekFetched))
+      && (week.examWeekFetched == null || plain(week.examWeekFetched))
+      && (week.fetchedAt == null || typeof week.fetchedAt === 'string')
+    // A saved week that is not a week must not be rebuilt, or the next read replaces it.
+    if (stored && !Object.values(weeks).every(weekKnown)) throw Object.assign(new Error('agenda baseline'), { code: 'EBADMSG' })
     const read = prepareAgendaRead(stored ? weeks : {}, snapshot)
     // Durable before any diff/push; a crash cannot turn an imported week into a second first read.
     await writeJson(path, { version: 1, weeks: read.weeks })
