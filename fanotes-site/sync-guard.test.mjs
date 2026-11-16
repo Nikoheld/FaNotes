@@ -441,6 +441,80 @@ test('a download records a full live blob whose size differs and does not send a
   assert.deepEqual(readFileSync(tinyBlob), remnant)
 })
 
+test('a short remnant does not become the note when a full body is stored', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(80)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const revision = revisionOf(created)
+  const blob = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const remnant = randomBytes(10)
+  writeFileSync(blob, remnant)
+  const removed = await call('DELETE', `/api/v1/sync/files/${id}`, {
+    token,
+    headers: { 'If-Match': String(revision), 'X-FaNotes-Delete': '1' },
+  })
+  assert.equal(removed.status, 409, removed.body.toString('utf8'))
+  assert.equal(jsonOf(removed).reason, 'guard')
+  assert.equal(jsonOf(removed).entry.revision, revision)
+  assert.equal(jsonOf(removed).entry.sha256, sha256(original))
+  assert.deepEqual(readFileSync(blob), remnant)
+  const replacement = randomBytes(96)
+  const stored = await putFile(id, replacement, revision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(stored.status, 200, stored.body.toString('utf8'))
+  assert.deepEqual((await readFile(id)).body, replacement)
+  const changes = await call('GET', '/api/v1/sync/changes?since=0', { token })
+  const entry = JSON.parse(changes.body.toString('utf8')).entries.find((item) => item.id === id)
+  assert.equal(entry.deleted, false)
+  assert.equal(entry.sha256, sha256(replacement))
+  assert.equal(entry.size, replacement.length)
+  assert.ok(entry.revision > revision)
+  const revisionDir = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  if (existsSync(revisionDir)) {
+    for (const name of readdirSync(revisionDir)) {
+      assert.ok(readFileSync(join(revisionDir, name)).length >= 28)
+      assert.equal(readFileSync(join(revisionDir, name)).equals(remnant), false)
+    }
+  }
+})
+
+test('a short remnant does not block restoring an archived note', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(80)
+  const created = await putFile(id, original, 0, { 'X-FaNotes-Blank': '0' })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const archivedRevision = revisionOf(created)
+  const next = randomBytes(90)
+  const replaced = await putFile(id, next, archivedRevision, { 'X-FaNotes-Blank': '0' })
+  assert.equal(replaced.status, 200, replaced.body.toString('utf8'))
+  const current = revisionOf(replaced)
+  const blob = join(dataDirectory, 'accounts', accountId, 'blobs', id)
+  const remnant = randomBytes(10)
+  writeFileSync(blob, remnant)
+  const body = Buffer.from(JSON.stringify({ revision: archivedRevision }))
+  const restored = await call('POST', `/api/v1/sync/files/${id}/restore`, {
+    token,
+    body,
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': body.length,
+      'If-Match': String(current),
+    },
+  })
+  assert.equal(restored.status, 200, restored.body.toString('utf8'))
+  assert.deepEqual((await readFile(id)).body, original)
+  const directory = join(dataDirectory, 'accounts', accountId, 'revisions', id)
+  assert.deepEqual(readFileSync(join(directory, String(archivedRevision))), original)
+  for (const name of readdirSync(directory)) {
+    assert.equal(readFileSync(join(directory, name)).equals(remnant), false)
+  }
+  const changes = await call('GET', '/api/v1/sync/changes?since=0', { token })
+  const entry = JSON.parse(changes.body.toString('utf8')).entries.find((item) => item.id === id)
+  assert.equal(entry.sha256, sha256(original))
+  assert.equal(entry.size, original.length)
+  assert.equal(entry.deleted, false)
+})
+
 test('an explicit clear keeps the previous blob in the revision archive', async () => {
   const id = randomBytes(32).toString('hex')
   const original = randomBytes(5000)

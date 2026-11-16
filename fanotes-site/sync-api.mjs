@@ -1279,6 +1279,8 @@ const unarchivedBytes = async (accountId, fileId, current, nextSize) => {
   const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
   const live = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
   if (!live?.isFile()) return 0
+  // A torn live file is not archived, so its table size is not reserved again.
+  if (live.size < EMPTY_CIPHERTEXT_BYTES && live.size !== currentSize) return 0
   const files = await listRevisionFiles(revisionsDirectory(accountId, fileId))
   const name = revisionArchiveName(current, nextSize)
   const simulated = files.map((file) => ({ name: file.name, size: file.size, revision: file.revision }))
@@ -1322,7 +1324,8 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
     // Copy into a temporary name and rename it. A crash must not leave a torn
     // file under the revision name, or a later restore would publish that copy.
     if (!existing) {
-      await copyDurable(blobPath, dest)
+      // A torn live file must not take the archive slot of this note.
+      if (!(stat.size < EMPTY_CIPHERTEXT_BYTES && stat.size !== currentSize)) await copyDurable(blobPath, dest)
     } else if (existing.isFile()) {
       if (!await holdsCurrent(dest, existing.size) && await holdsCurrent(blobPath, stat.size)) await copyDurable(blobPath, dest)
     } else if (await holdsCurrent(blobPath, stat.size)) {
@@ -1428,6 +1431,10 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
     return { matchesRequest: true, entry }
   }
   const currentSize = Number(current.size) || 0
+  // A short remnant is not a newer note. Publishing it would replace the
+  // table row, and the device that still has the note would be told its copy
+  // is stale.
+  if (stat.size < EMPTY_CIPHERTEXT_BYTES && stat.size !== currentSize) return null
   const liveSha = await hashFile(blobPath)
   if (stat.size === currentSize && liveSha === current.sha256) return null
   const matchesRequest = Boolean(incoming) && incoming.size === stat.size && incoming.sha256 === liveSha
