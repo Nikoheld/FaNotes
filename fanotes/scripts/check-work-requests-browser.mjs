@@ -17,8 +17,8 @@ const browser = await chromium.launch({ executablePath: process.env.FANOTES_CHRO
 try {
   const page = await browser.newPage({ viewport: { width: 980, height: 800 } })
   const posts = []
-  const requests = [{ id: 'req-1', type: 'bug', title: 'Stift springt', description: 'Beim Schreiben springt der Stift.', status: 'working', percent: 40, createdAt: '2026-11-16T10:00:00Z', updatedAt: '2026-11-16T10:05:00Z' }]
-  let events = [{ id: '1', at: '2026-11-16T10:01:00Z', type: 'progress', message: 'Fehler wird untersucht', percent: 10 }]
+  // Shapes follow fanotes-site/work-requests-api.mjs: epoch-ms times, `step`, `approved`, `cancelled`, `pr`.
+  const requests = [{ id: 'req-1', type: 'bug', title: 'Stift springt', description: 'Beim Schreiben springt der Stift.', priority: 'normal', status: 'working', percent: 40, step: 'Fehler wird untersucht', pr: null, reason: '', approved: false, cancelled: false, createdAt: 1_700_000_000_000, updatedAt: 1_700_000_060_000, lastSeq: 3 }]
   const json = (body, status = 200) => ({ status, contentType: 'application/json', body: JSON.stringify(body) })
 
   await page.route('**/api/v1/requests**', async (route) => {
@@ -26,21 +26,21 @@ try {
     const url = new URL(req.url())
     const path = url.pathname.replace('/api/v1/requests', '') || '/'
     assert.equal(req.headers().authorization, 'Bearer test-token', 'session token is sent')
-    if (path === '/capabilities') return route.fulfill(json({ allowed: true }))
+    if (path === '/capabilities') return route.fulfill(json({ enabled: true }))
     if (path === '/' && req.method() === 'POST') {
       const body = req.postDataJSON(); posts.push(body)
-      const created = { id: 'req-2', type: body.type, title: body.title, description: body.description, status: 'queued', createdAt: '2026-11-16T11:00:00Z' }
+      const created = { id: 'req-2', type: body.type, title: body.title, description: body.description, priority: body.priority, status: 'queued', percent: 0, step: '', pr: null, reason: '', approved: false, cancelled: false, createdAt: 1_700_000_100_000, updatedAt: 1_700_000_100_000, lastSeq: 1 }
       requests.unshift(created)
-      return route.fulfill(json(created, 201))
+      return route.fulfill(json({ request: created }, 201))
     }
     if (path === '/') return route.fulfill(json({ requests }))
-    if (path.endsWith('/events')) return route.fulfill({ status: 404, body: 'no stream' }) // forces the polling fallback
-    if (path.endsWith('/approve')) { requests.find((r) => r.id === 'req-1').status = 'merged'; posts.push({ approve: true }); return route.fulfill(json({ ok: true })) }
+    if (path.endsWith('/events')) return route.fulfill({ status: 502, body: 'no stream' }) // forces the polling fallback
+    if (path.endsWith('/approve')) { Object.assign(requests.find((r) => r.id === 'req-1'), { status: 'merged', approved: true }); posts.push({ approve: true }); return route.fulfill(json({ ok: true })) }
     if (path.endsWith('/cancel')) { posts.push({ cancel: true }); return route.fulfill(json({ ok: true })) }
-    if (path.endsWith('/messages')) { posts.push({ message: req.postDataJSON().message }); return route.fulfill(json({ ok: true })) }
+    if (path.endsWith('/messages')) { posts.push({ message: req.postDataJSON().text }); return route.fulfill(json({ ok: true })) }
     const id = path.slice(1)
     const request = requests.find((r) => r.id === id)
-    return route.fulfill(request ? json({ request, events }) : json({ error: 'nicht gefunden' }, 404))
+    return route.fulfill(request ? json({ request }) : json({ error: 'nicht gefunden' }, 404))
   })
 
   await page.goto(`${origin}/scripts/work-requests-harness/index.html`)
@@ -59,8 +59,8 @@ try {
   await send.click()
   await dialog.getByText('Dunkles Thema für Karteikarten').first().waitFor()
   assert.equal(posts[0].type, 'feature')
-  assert.match(posts[0].screenshot, /^data:image\/png;base64,/u)
-  assert.equal(Array.isArray(posts[0].logs) || posts[0].logs === undefined, true)
+  assert.match(posts[0].screenshot, /^iVBOR/u, 'raw base64, no data: prefix')
+  assert.ok(posts[0].logs === undefined || typeof posts[0].logs === 'string', 'logs are sent as text')
 
   // Detail of the new request is shown (queued -> cancel + message available, no approve)
   assert.equal(await dialog.getByRole('button', { name: 'Übernehmen' }).count(), 0)
@@ -73,14 +73,14 @@ try {
   await dialog.locator('.wr-item', { hasText: 'Stift springt' }).locator('.wr-chip', { hasText: 'In Arbeit' }).waitFor()
   await dialog.locator('.wr-item', { hasText: 'Stift springt' }).click()
   await dialog.getByText('Fehler wird untersucht').waitFor()
-  events = [...events, { id: '2', at: '2026-11-16T10:02:00Z', type: 'progress', message: 'Tests laufen', percent: 70 }]
   const first = requests.find((r) => r.id === 'req-1')
-  first.status = 'pr_open'
+  Object.assign(first, { step: 'Tests laufen', percent: 70, status: 'waiting_for_you' })
   first.pr = { number: 99, url: 'https://github.com/Nikoheld/FaNotes/pull/99', ci: 'success' }
   await dialog.getByText('Tests laufen').waitFor({ timeout: 9000 })
-  const prLink = dialog.getByRole('link', { name: /Änderung #99/u })
+  const prLink = dialog.getByRole('link', { name: /Änderung #99 · Prüfung: bestanden/u })
   await prLink.waitFor()
   assert.equal(await prLink.getAttribute('href'), 'https://github.com/Nikoheld/FaNotes/pull/99')
+  assert.equal(await dialog.getByRole('progressbar').getAttribute('aria-valuenow'), '70')
   if (screenshotPath) await page.screenshot({ path: screenshotPath })
 
   // Message, then approve

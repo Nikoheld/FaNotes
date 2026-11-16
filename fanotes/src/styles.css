@@ -4312,3 +4312,4 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .wr-timeline .wr-end { display: block; height: 0; }
 .wr-message { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
 .wr-message textarea { min-height: 70px; }
+.wr-note { font: 500 12.5px/1.4 var(--ui-font, system-ui); color: var(--text-muted); }

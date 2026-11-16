@@ -4681,5 +4681,11 @@
   "Der Screenshot ist zu groß oder hat ein unbekanntes Format.": "The screenshot is too large or has an unknown format.",
   "Die Protokolle sind zu groß, um sie anzuhängen.": "The logs are too large to attach.",
   "Bitte gib einen Titel an (höchstens 120 Zeichen).": "Please enter a title (at most 120 characters).",
-  "Bitte beschreibe die Anfrage (höchstens 4000 Zeichen).": "Please describe the request (at most 4000 characters)."
+  "Bitte beschreibe die Anfrage (höchstens 4000 Zeichen).": "Please describe the request (at most 4000 characters).",
+  "bestanden": "passed",
+  "läuft": "running",
+  "fehlgeschlagen": "failed",
+  "ausstehend": "pending",
+  "Freigegeben. Claude übernimmt die Änderung, sobald die Prüfung bestanden ist.": "Approved. Claude merges the change once the checks have passed.",
+  "Übernahme freigegeben": "Merge approved"
 }

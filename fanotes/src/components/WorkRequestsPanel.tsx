@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { diagnosticLog } from '../lib/bugReport'
 import {
   WORK_REQUEST_DESCRIPTION_MAX, WORK_REQUEST_MESSAGE_MAX, WORK_REQUEST_TITLE_MAX, WorkRequestError, canApprove, canCancel, canMessage,
-  draftProblemText, statusInfo, validateDraft,
+  ciLabel, describeEvent, draftProblemText, progressPercent, statusInfo, validateDraft,
   type WorkRequest, type WorkRequestDetail, type WorkRequestKind, type WorkRequestPriority, type WorkRequestsClient,
 } from '../lib/workRequests'
 
@@ -16,10 +16,10 @@ type Props = {
 }
 
 const errorText = (error: unknown) => error instanceof WorkRequestError || error instanceof Error ? error.message : 'Das hat nicht geklappt.'
-const timeText = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' }) }
+const timeText = (at: number) => { const d = new Date(at); return Number.isNaN(d.getTime()) || !at ? '' : d.toLocaleTimeString('de-CH', { timeStyle: 'short' }) }
 
 function StatusChip({ request }: { request: WorkRequest }) {
-  const info = statusInfo(request.status)
+  const info = statusInfo(request.status, request.cancelled)
   return <span className={`wr-chip is-${info.tone}`} data-status={request.status}>{info.label}</span>
 }
 
@@ -157,11 +157,13 @@ function RequestDetail({ client, id, onBack }: { client: WorkRequestsClient; id:
 
   const act = async (run: () => Promise<void>) => {
     setBusy(true); setError(null)
-    try { await run(); setDetail(await client.detail(id)) } catch (err) { setError(errorText(err)) } finally { setBusy(false) }
+    try { await run(); const fresh = await client.detail(id); setDetail((current) => current ? { ...current, request: fresh } : current) } catch (err) { setError(errorText(err)) } finally { setBusy(false) }
   }
 
   if (!detail) return <div className="wr-empty">{error ? <span role="alert">{error}</span> : <><LoaderCircle className="spin" size={16} /> Wird geladen …</>}</div>
   const { request, events } = detail
+  const shown = events.map((event) => ({ event, text: describeEvent(event) })).filter((entry): entry is { event: typeof entry.event; text: string } => entry.text !== null)
+  const percent = progressPercent(request, events)
   return (
     <div className="wr-detail">
       <button type="button" className="secondary-button wr-back" onClick={onBack}>Zurück</button>
@@ -170,16 +172,17 @@ function RequestDetail({ client, id, onBack }: { client: WorkRequestsClient; id:
         <StatusChip request={request} />
       </div>
       <p className="wr-desc">{request.description}</p>
-      {request.percent !== null && !['merged', 'rejected', 'failed', 'cancelled'].includes(request.status) && (
-        <div className="wr-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={request.percent}><span style={{ width: `${request.percent}%` }} /></div>
+      {percent !== null && (
+        <div className="wr-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div>
       )}
+      {request.approved && request.status === 'waiting_for_you' && <div className="wr-note" role="status">Freigegeben. Claude übernimmt die Änderung, sobald die Prüfung bestanden ist.</div>}
       {request.reason && <div className="settings-inline-error" role="status">{request.reason}</div>}
       {request.pr && (
-        <a className="wr-pr" href={request.pr.url} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} />Änderung #{request.pr.number}{request.pr.ci ? ` · Prüfung: ${request.pr.ci}` : ''}</a>
+        <a className="wr-pr" href={request.pr.url} target="_blank" rel="noopener noreferrer"><ExternalLink size={13} />Änderung #{request.pr.number}{ciLabel(request.pr.ci) ? ` · Prüfung: ${ciLabel(request.pr.ci)}` : ''}</a>
       )}
       <ol className="wr-timeline" aria-label="Fortschritt">
-        {events.map((event) => (
-          <li key={event.id}><time>{timeText(event.at)}</time><span>{event.message}</span>{event.percent !== null && <em>{event.percent} %</em>}</li>
+        {shown.map(({ event, text }) => (
+          <li key={event.seq}><time>{timeText(event.at)}</time><span>{text}</span>{event.percent !== null && <em>{event.percent} %</em>}</li>
         ))}
         <li ref={endRef} aria-hidden="true" className="wr-end" />
       </ol>
@@ -193,7 +196,7 @@ function RequestDetail({ client, id, onBack }: { client: WorkRequestsClient; id:
       <div className="bug-report-actions">
         {canCancel(request.status) && <button type="button" className="secondary-button" disabled={busy} onClick={() => void act(() => client.cancel(id))}>Abbrechen</button>}
         {canMessage(request.status) && <button type="button" className="secondary-button" disabled={busy} onClick={() => setMessageOpen((open) => !open)}><MessageSquare size={14} />Nachricht</button>}
-        {canApprove(request.status) && <button type="button" className="primary-button" disabled={busy} onClick={() => void act(() => client.approve(id))}><Check size={14} />Übernehmen</button>}
+        {canApprove(request.status, request.approved) && <button type="button" className="primary-button" disabled={busy} onClick={() => void act(() => client.approve(id))}><Check size={14} />Übernehmen</button>}
       </div>
     </div>
   )
