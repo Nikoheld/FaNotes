@@ -4738,5 +4738,8 @@
   "Token kopieren": "Copy token",
   "Das Token konnte nicht geladen werden.": "The token could not be loaded.",
   "Der Zugriff ist noch aus. Die Konfiguration kann schon kopiert werden. Das KI-Programm sieht die Werkzeuge, sobald du den Zugriff erlaubst.": "Access is still off. You can already copy the configuration. The AI program sees the tools as soon as you allow access.",
-  "Dieser Befehl startet die komplette App und braucht eine Bildschirmsitzung (DISPLAY). Ohne Anzeige, etwa per SSH, funktioniert er nicht.": "This command starts the whole app and needs a display session (DISPLAY). It does not work without a display, for example over SSH."
+  "Dieser Befehl startet die komplette App und braucht eine Bildschirmsitzung (DISPLAY). Ohne Anzeige, etwa per SSH, funktioniert er nicht.": "This command starts the whole app and needs a display session (DISPLAY). It does not work without a display, for example over SSH.",
+  "Screenshot angehängt": "Screenshot attached",
+  "Änderung": "Change",
+  "Status": "Status"
 }

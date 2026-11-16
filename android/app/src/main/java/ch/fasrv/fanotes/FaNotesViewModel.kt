@@ -162,6 +162,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -245,6 +246,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var previewImageTicket = 0
     private var splitImageTicket = 0
     val sync = graph.engine.state.stateIn(viewModelScope, SharingStarted.Eagerly, graph.engine.state.value)
+    val workRequestsOpen = MutableStateFlow(false)
+    /** True only when the server says the signed-in sync account may send work requests. */
+    val workRequestsAllowed = MutableStateFlow(false)
+    val workRequests = ch.fasrv.fanotes.desk.WorkRequestsClient(OkHttpWorkRequestsTransport(), { graph.engine.currentSession() })
+
+    init {
+        viewModelScope.launch {
+            sync.map { it.account?.accountId }.distinctUntilChanged().collect { account ->
+                workRequestsAllowed.value = false
+                if (account != null) workRequestsAllowed.value = withContext(Dispatchers.IO) { workRequests.capabilities() }
+            }
+        }
+    }
     private val _vaultLabel = MutableStateFlow(graph.initialVaultLabel)
     val vaultLabel = _vaultLabel.asStateFlow()
     val canvasToken = MutableStateFlow(0)
@@ -2453,6 +2467,18 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         bugReportOpen.value = true
         bugReportMessage.value = null
     }
+
+    /** Same entry point as the desktop shortcut: the panel for the owner account, else the anonymous bug report. */
+    fun openWorkRequests() {
+        if (workRequestsAllowed.value) workRequestsOpen.value = true else openBugReport()
+    }
+
+    fun closeWorkRequests() {
+        workRequestsOpen.value = false
+    }
+
+    /** Logs and version for a new request; the same five-minute buffer as the bug report. */
+    fun workRequestLogs(): List<ch.fasrv.fanotes.desk.BugReportEvent> = bugLog.snapshot(System.currentTimeMillis())
 
     fun closeBugReport() {
         bugReportOpen.value = false
@@ -5075,6 +5101,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 after.installedAddons.lastOrNull()?.let { rememberAddon(it) }
             }
             "bug-report" -> openBugReport()
+            "work-requests" -> openWorkRequests()
             "trash" -> openTrash()
             "pin-tab" -> togglePinTab()
             "close-others" -> closeTabs("others")
