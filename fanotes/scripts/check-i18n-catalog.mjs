@@ -21,6 +21,7 @@ const CHROME_FILES = [
   'src/components/SubjectBookPane.tsx',
   'src/components/BugReportModal.tsx',
   'src/components/ConfirmDialog.tsx',
+  'src/components/ExternalChangeBanner.tsx',
   'src/components/SearchPanel.tsx',
   'src/components/PaperView.tsx',
   'src/components/DrawingBoard.tsx',
@@ -44,6 +45,7 @@ const CHROME_FILES = [
   'src/lib/addons/manifest.ts',
   '../src/App.tsx',
   'src/lib/subjectBook.ts',
+  'src/lib/useExternalTabChanges.ts',
   'electron/main.cjs',
 ]
 

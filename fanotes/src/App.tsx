@@ -68,6 +68,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
 import { ConfirmDialog } from './components/ConfirmDialog'
+import { ExternalChangeBanner } from './components/ExternalChangeBanner'
 import { FolderPathDialog } from './components/FolderPathDialog'
 import { FileTree } from './components/FileTree'
 import { EditorExportControls } from './components/EditorExportControls'
@@ -91,6 +92,7 @@ import { parseAddonSource } from './lib/addons/registry'
 import { addonRuntime } from './lib/addons/runtime'
 import { startMcpBridge } from './lib/mcp/bridge'
 import { syncEngine } from './lib/sync/engine'
+import { useExternalTabChanges, useTabHolds } from './lib/useExternalTabChanges'
 import { syncStatusLabel } from './lib/sync/status'
 import type { SettingsSection } from './components/SettingsModal'
 import { ProfileOverviewPublisher } from './components/ProfileOverviewPublisher'
@@ -344,6 +346,8 @@ type NoteTabButtonProps = {
   inSplit: boolean
   dirty: boolean
   pinned: boolean
+  /** Paused because the file was deleted or edited outside FaNotes. */
+  hold?: 'deleted' | 'conflict'
   path: string
   title: string
   index: number
@@ -361,7 +365,7 @@ type NoteTabButtonProps = {
 const NOTE_TAB_DRAG_TYPE = 'application/x-fanotes-tab'
 
 const NoteTabButton = memo(function NoteTabButton({
-  active, inSplit, dirty, pinned, path, title, index, dropSide,
+  active, inSplit, dirty, pinned, hold, path, title, index, dropSide,
   onOpen, onSplit, onClose, onContextMenu, onDragStart, onDragOver, onDrop, onDragEnd,
 }: NoteTabButtonProps) {
   const tabRef = useRef<HTMLDivElement>(null)
@@ -379,7 +383,7 @@ const NoteTabButton = memo(function NoteTabButton({
   return (
     <div
       ref={tabRef}
-      className={`note-tab ${active ? 'active' : ''} ${inSplit ? 'in-split' : ''} ${pinned ? 'is-pinned' : ''} ${dropSide ? `drop-${dropSide}` : ''}`}
+      className={`note-tab ${active ? 'active' : ''} ${inSplit ? 'in-split' : ''} ${pinned ? 'is-pinned' : ''} ${hold ? `is-${hold}` : ''} ${dropSide ? `drop-${dropSide}` : ''}`}
       title={path}
       aria-keyshortcuts={shortcut ?? undefined}
       draggable
@@ -410,13 +414,14 @@ const NoteTabButton = memo(function NoteTabButton({
         className="note-tab-main"
         role="tab"
         aria-selected={active}
-        aria-label={`${title}${pinned ? ', angeheftet' : ''}${inSplit ? ', in der zweiten Spalte' : ''}${dirty ? ', nicht gespeicherte Änderungen' : ''}`}
+        aria-label={`${title}${pinned ? ', angeheftet' : ''}${inSplit ? ', in der zweiten Spalte' : ''}${dirty ? ', nicht gespeicherte Änderungen' : ''}${hold === 'deleted' ? ', Datei wurde ausserhalb von FaNotes gelöscht' : hold === 'conflict' ? ', Datei wurde ausserhalb von FaNotes geändert' : ''}`}
         onClick={(event) => { event.shiftKey ? void onSplit(path) : void onOpen(path) }}
         onAuxClick={(event) => { if (event.button === 1 && !pinned) void onClose(path) }}
       >
         {pinned ? <Pin aria-hidden="true" size={12} /> : isPdfNotePath(path) ? <File aria-hidden="true" size={13} /> : <Files aria-hidden="true" size={13} />}
         <span>{title}</span>
         {inSplit && <Columns2 aria-hidden="true" size={11} className="tab-split-mark" />}
+        {hold && <span className="tab-hold-mark" title={hold === 'deleted' ? 'Datei wurde ausserhalb von FaNotes gelöscht' : 'Datei wurde ausserhalb von FaNotes geändert'}><CircleAlert aria-hidden="true" size={12} /></span>}
         {dirty && <i className="dirty-dot" title="Noch nicht gespeichert" />}
       </button>
       {!pinned && <button className="tab-close" type="button" aria-label={`${title} schließen`} title="Tab schließen (Strg+W)" onClick={() => { void onClose(path) }}><X aria-hidden="true" size={12} /></button>}
@@ -929,6 +934,9 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [newArrivals])
   const saveTimers = useRef(new Map<string, number>())
   const pendingWrites = useRef(new Map<string, string>())
+  // Tabs whose file was deleted or edited outside FaNotes are paused: nothing is saved over either side until the user decides.
+  const { holds: tabHolds, holdsRef: tabHoldsRef, ownWritesRef: tabOwnWritesRef, setHold: setTabHold, noteOwnWrite, moveTabState, pruneTabState } = useTabHolds()
+  const parkHeldTabRef = useRef<(path: string) => Promise<boolean>>(async () => true)
   const settingsTimer = useRef<number | null>(null)
   const pageStatsRef = useRef(new Map<string, PageStatsSession>())
   /** A failed page-stats read. Saving must not invent a fresh session over the companion. */
@@ -979,6 +987,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [])
 
   useEffect(() => { tabsRef.current = tabs }, [tabs])
+  useEffect(() => { pruneTabState(new Set(tabs.map((tab) => tab.path))) }, [pruneTabState, tabs])
   useEffect(() => { drawingSessionRef.current = drawingSession }, [drawingSession])
   useEffect(() => { activePathRef.current = activePath }, [activePath])
   useEffect(() => { splitPathRef.current = splitPath }, [splitPath])
@@ -1242,6 +1251,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const activeEntryMutating = useMemo(() => Boolean(activePath && mutatingEntryPaths.some(
     (path) => activePath === path || activePath.startsWith(`${path}/`),
   )), [activePath, mutatingEntryPaths])
+  /** The open note's file was deleted or edited outside FaNotes; it is read-only until the user decides. */
+  const activeHeld = Boolean(activePath && tabHolds[activePath])
   const counts = useMemo(() => countEntries(tree), [tree])
   const visibleTree = useMemo(() => filterTreeByTag(tree, tagFilter, new Map(Object.entries(tagIndex))), [tagFilter, tagIndex, tree])
   const knownTags = useMemo(() => collectVaultTags(Object.values(tagIndex).map((tags) => ({ content: tags.map((tag) => `#${tag}`).join(' ') }))), [tagIndex])
@@ -2075,6 +2086,11 @@ export default function App({ startupBootstrap }: AppProps) {
     const timer = saveTimers.current.get(path)
     if (timer) window.clearTimeout(timer)
     saveTimers.current.delete(path)
+    // The file was deleted or edited outside FaNotes and nobody has decided yet: write nothing, keep the text.
+    if (tabHoldsRef.current[path]) {
+      if (!options?.quiet) toast('Speichern ist pausiert: Diese Notiz wurde ausserhalb von FaNotes verändert. Entscheide zuerst im Hinweis über dem Text.', 'info')
+      return false
+    }
     // A statistics-only write (no typing happened) must not flash "Speichern…".
     if (!options?.quiet) setSaveState('saving')
     try {
@@ -2097,6 +2113,8 @@ export default function App({ startupBootstrap }: AppProps) {
         }, famdEncodingForSave(nextContent))
       }
       const visibleContent = stripFamdPayload(nextContent)
+      // The vault watcher reports this write a moment later; it must not look like an outside edit.
+      noteOwnWrite(path, visibleContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
       addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
       // Document search re-reads changed notes in the background (debounced).
@@ -2150,7 +2168,7 @@ export default function App({ startupBootstrap }: AppProps) {
       toast(error instanceof Error ? error.message : 'Speichern fehlgeschlagen.', 'error')
       return false
     }
-  }, [flushPageStats, pushEditableShare, toast])
+  }, [flushPageStats, noteOwnWrite, pushEditableShare, tabHoldsRef, toast])
 
   /** Writes statistics that moved on without any typing, without touching the save indicator. */
   const persistPageStatsQuietly = useCallback((path: string, minDwellDeltaMs: number) => {
@@ -2265,24 +2283,31 @@ export default function App({ startupBootstrap }: AppProps) {
     return window.fanotes.convertFamdNotes()
   }, [])
 
-  const flushPendingWrites = useCallback(async (): Promise<boolean> => {
+  const flushPendingWrites = useCallback(async (options?: { keepHeld?: boolean }): Promise<boolean> => {
     editorRef.current?.flushChanges()
     splitEditorRef.current?.flushChanges()
     saveTimers.current.forEach((timer) => window.clearTimeout(timer))
     saveTimers.current.clear()
+    // Paused tabs (their file was deleted or edited outside FaNotes) are not written. Whoever closes the
+    // app or the vault gets their unsaved text kept as conflict copies instead, so that neither side is lost.
+    if (!options?.keepHeld) {
+      for (const path of Object.keys(tabHoldsRef.current)) {
+        if (!await parkHeldTabRef.current(path)) return false
+      }
+    }
 
     // A new edit can arrive while an earlier IPC write is in flight. Repeat
     // with the latest snapshots instead of silently dropping that newer edit.
     // Open notes whose statistics moved on since their last write go along.
     for (const tab of tabsRef.current) queuePageStatsWrite(tab.path)
     for (let pass = 0; pass < 8; pass += 1) {
-      const pending = [...pendingWrites.current.entries()]
+      const pending = [...pendingWrites.current.entries()].filter(([path]) => !tabHoldsRef.current[path])
       if (!pending.length) return true
       const results = await Promise.all(pending.map(([path, content]) => saveContent(path, content)))
       if (results.some((saved) => !saved)) return false
     }
-    return pendingWrites.current.size === 0
-  }, [queuePageStatsWrite, saveContent])
+    return [...pendingWrites.current.keys()].every((path) => tabHoldsRef.current[path])
+  }, [queuePageStatsWrite, saveContent, tabHoldsRef])
 
   const saveCurrentWork = useCallback(async (announce = false): Promise<boolean> => {
     if (!activePathRef.current) {
@@ -2290,7 +2315,11 @@ export default function App({ startupBootstrap }: AppProps) {
       return false
     }
     const documentLayersSaved = await flushDocumentLayers()
-    const notesSaved = documentLayersSaved && await flushPendingWrites()
+    const notesSaved = documentLayersSaved && await flushPendingWrites({ keepHeld: true })
+    if (notesSaved && tabHoldsRef.current[activePathRef.current ?? '']) {
+      toast('Speichern ist pausiert: Diese Notiz wurde ausserhalb von FaNotes verändert. Entscheide zuerst im Hinweis über dem Text.', 'info')
+      return false
+    }
     if (notesSaved) {
       setSaveState('saved')
       if (announce) toast('Alles sicher gespeichert.', 'success')
@@ -2298,7 +2327,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     if (documentLayersSaved) toast('Die Notiz konnte nicht vollständig gespeichert werden.', 'error')
     return false
-  }, [flushDocumentLayers, flushPendingWrites, toast])
+  }, [flushDocumentLayers, flushPendingWrites, tabHoldsRef, toast])
 
   const flushPendingEntry = useCallback(async (entryPath: string): Promise<boolean> => {
     const belongsToEntry = (candidate: string) => candidate === entryPath || candidate.startsWith(`${entryPath}/`)
@@ -2309,14 +2338,18 @@ export default function App({ startupBootstrap }: AppProps) {
       window.clearTimeout(timer)
       saveTimers.current.delete(path)
     })
+    // Paused tabs inside the entry keep their unsaved text as conflict copies; nothing is written to their files.
+    for (const path of Object.keys(tabHoldsRef.current)) {
+      if (belongsToEntry(path) && !await parkHeldTabRef.current(path)) return false
+    }
     for (let pass = 0; pass < 8; pass += 1) {
-      const pending = [...pendingWrites.current.entries()].filter(([path]) => belongsToEntry(path))
+      const pending = [...pendingWrites.current.entries()].filter(([path]) => belongsToEntry(path) && !tabHoldsRef.current[path])
       if (!pending.length) return true
       const results = await Promise.all(pending.map(([path, content]) => saveContent(path, content)))
       if (results.some((saved) => !saved)) return false
     }
-    return ![...pendingWrites.current.keys()].some(belongsToEntry)
-  }, [saveContent])
+    return ![...pendingWrites.current.keys()].some((path) => belongsToEntry(path) && !tabHoldsRef.current[path])
+  }, [saveContent, tabHoldsRef])
 
   const flushSettings = useCallback(async (): Promise<boolean> => {
     for (let pass = 0; pass < 8; pass += 1) {
@@ -2374,12 +2407,14 @@ export default function App({ startupBootstrap }: AppProps) {
     setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
     pendingWrites.current.set(path, content)
     addonNoteChangedRef.current?.(path, content)
+    // A paused tab (its file was deleted or edited outside FaNotes) keeps what is typed but saves nothing.
+    if (tabHoldsRef.current[path]) return
     setSaveState('saving')
     const existing = saveTimers.current.get(path)
     if (existing) window.clearTimeout(existing)
     const timer = window.setTimeout(() => { void saveContent(path, content) }, settings.autosaveDelay)
     saveTimers.current.set(path, timer)
-  }, [saveContent, settings.autosaveDelay])
+  }, [saveContent, settings.autosaveDelay, tabHoldsRef])
 
   const updateContent = useCallback((content: string) => {
     if (activePath) updateContentFor(activePath, content)
@@ -2403,10 +2438,13 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePathRef.current === path) editorRef.current?.flushChanges()
     if (splitPathRef.current === path) splitEditorRef.current?.flushChanges()
     if (activePathRef.current === path && !await flushDocumentLayers()) return
+    // A paused tab is not written. Its unsaved text is kept as a conflict copy before the tab goes.
+    const held = Boolean(tabHoldsRef.current[path])
+    if (held && !await parkHeldTabRef.current(path)) return
     const currentTabs = tabsRef.current
     const closing = currentTabs.find((tab) => tab.path === path)
     const latestContent = pendingWrites.current.get(path) ?? closing?.content
-    if (closing && latestContent !== undefined && (latestContent !== closing.savedContent || statsNeedWrite)) {
+    if (!held && closing && latestContent !== undefined && (latestContent !== closing.savedContent || statsNeedWrite)) {
       // pendingWrites is updated synchronously by CodeMirror and can be newer
       // than tabsRef until React's passive effect runs. Never overwrite it
       // with the stale tab snapshot during a rapid type-and-close gesture.
@@ -2426,7 +2464,7 @@ export default function App({ startupBootstrap }: AppProps) {
       const remaining = latestTabs.filter((tab) => tab.path !== path)
       return remaining[Math.min(Math.max(latestIndex, 0), remaining.length - 1)]?.path ?? null
     })
-  }, [flushDocumentLayers, saveContent])
+  }, [flushDocumentLayers, saveContent, tabHoldsRef])
 
   /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
   const isSyncPathBusy = useCallback((path: string) => {
@@ -2437,12 +2475,56 @@ export default function App({ startupBootstrap }: AppProps) {
     const companionOwner = path.endsWith('.famd') ? tabsRef.current.find((tab) => companionNotePath(tab.path, '.famd') === path)?.path : undefined
     const notePath = companionOwner ?? path
     if (pendingWrites.current.has(notePath) || saveTimers.current.has(notePath)) return true
+    // Paused until the user decides what happens to the outside change: the sync must not decide it either.
+    if (tabHoldsRef.current[notePath]) return true
     const tab = tabsRef.current.find((candidate) => candidate.path === notePath)
     if (tab && tab.content !== tab.savedContent) return true
     // Ink and worksheet layers live in the .famd companion; while they are open here, the other device's copy waits.
     if (path.endsWith('.famd') && activePathRef.current === notePath && (drawingOpenRef.current || drawingDirtyRef.current)) return true
     return false
-  }, [])
+  }, [tabHoldsRef])
+
+  /**
+   * A file changed under an open tab (another device through the sync, another
+   * program through the vault watcher): take its text for a tab that holds
+   * nothing unsaved. `content` is the text when the caller already read it. A
+   * changed `.famd` also reloads the statistics and the handwriting. A tab with
+   * unsaved text is left alone: false.
+   */
+  const reloadCleanTab = useCallback(async (path: string, famdTouched: boolean, content?: string): Promise<boolean> => {
+    const tab = tabsRef.current.find((candidate) => candidate.path === path)
+    if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(path)) return false
+    try {
+      const fresh = content === undefined ? await readNoteTab(path) : { content }
+      const open = tabsRef.current.find((candidate) => candidate.path === path)
+      if (!open || open.content !== open.savedContent || pendingWrites.current.has(path)) return false
+      setTabs((current) => current.map((candidate) => candidate.path === path && candidate.content === candidate.savedContent ? { ...candidate, content: fresh.content, savedContent: fresh.content } : candidate))
+      setTagIndex((current) => ({ ...current, [path]: parseNoteTags(fresh.content) }))
+      // The file is there again with its own text: whatever paused this tab is over.
+      setTabHold(path, null)
+      if (!famdTouched || (activePathRef.current === path && drawingDirtyRef.current)) return true
+      // The open session was loaded from the previous companion. Keeping it
+      // would write those statistics and that ink back over the other device.
+      pageStatsRef.current.delete(path)
+      pageStatsUnreadableRef.current.delete(path)
+      await preparePageStats(path)
+      if (activePathRef.current === path && !pageStatsUnreadableRef.current.has(path)) {
+        activatePageStats(path, fresh.content)
+      }
+      if (activePathRef.current !== path || drawingDirtyRef.current) return true
+      const requestId = ++drawingLoadRequestRef.current
+      const document = await readNoteInk(path, fresh.content)
+      if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path || drawingDirtyRef.current) return true
+      setDrawingSession({
+        ...overlaySessionAfterInkReady(drawingOpenRef.current, drawingSessionFromLoad(requestId, document)),
+        path,
+      })
+      return true
+    } catch {
+      // The note vanished between the change list and the read; the next tree refresh reflects that.
+      return false
+    }
+  }, [activatePageStats, preparePageStats, readNoteTab, setTabHold])
 
   /** Files another device changed: refresh the tree, reload clean open tabs, drop tabs of deleted notes. */
   const applyRemoteChanges = useCallback(async ({ written, removed }: { written: string[]; removed: string[] }) => {
@@ -2476,38 +2558,10 @@ export default function App({ startupBootstrap }: AppProps) {
       }
     }
     for (const path of touched) {
-      const tab = tabsRef.current.find((candidate) => candidate.path === path)
-      if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(path)) continue
       const famdPath = companionNotePath(path, '.famd')
-      const famdTouched = written.includes(famdPath) || (isPdfNotePath(path) && written.includes(path))
-      try {
-        const fresh = await readNoteTab(path)
-        const open = tabsRef.current.find((candidate) => candidate.path === path)
-        if (!open || open.content !== open.savedContent || pendingWrites.current.has(path)) continue
-        setTabs((current) => current.map((candidate) => candidate.path === path && candidate.content === candidate.savedContent ? { ...candidate, content: fresh.content, savedContent: fresh.content } : candidate))
-        setTagIndex((current) => ({ ...current, [path]: parseNoteTags(fresh.content) }))
-        if (!famdTouched || (activePathRef.current === path && drawingDirtyRef.current)) continue
-        // The open session was loaded from the previous companion. Keeping it
-        // would write those statistics and that ink back over the other device.
-        pageStatsRef.current.delete(path)
-        pageStatsUnreadableRef.current.delete(path)
-        await preparePageStats(path)
-        if (activePathRef.current === path && !pageStatsUnreadableRef.current.has(path)) {
-          activatePageStats(path, fresh.content)
-        }
-        if (activePathRef.current !== path || drawingDirtyRef.current) continue
-        const requestId = ++drawingLoadRequestRef.current
-        const document = await readNoteInk(path, fresh.content)
-        if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path || drawingDirtyRef.current) continue
-        setDrawingSession({
-          ...overlaySessionAfterInkReady(drawingOpenRef.current, drawingSessionFromLoad(requestId, document)),
-          path,
-        })
-      } catch {
-        // The note vanished between the change list and the read; the next tree refresh reflects that.
-      }
+      await reloadCleanTab(path, written.includes(famdPath) || (isPdfNotePath(path) && written.includes(path)))
     }
-  }, [activatePageStats, preparePageStats, readNoteTab, refreshTree])
+  }, [reloadCleanTab, refreshTree])
 
   const syncDepsRef = useRef({ isSyncPathBusy, applyRemoteChanges, toast })
   syncDepsRef.current = { isSyncPathBusy, applyRemoteChanges, toast }
@@ -3563,6 +3617,64 @@ export default function App({ startupBootstrap }: AppProps) {
     await Promise.all(renamedPending.map(([renamedPath, content]) => saveContent(renamedPath, content)))
   }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapPageStats, remapWorkspacePaths, saveContent, toast])
 
+  /**
+   * An open note whose file was renamed or moved outside FaNotes: the tab, the
+   * split, the history and the statistics follow it, as they do for a rename in
+   * the app (without the file operation, which already happened). Returns the
+   * unsaved text that now belongs to the new path; the caller saves it there.
+   */
+  const retargetOpenNote = useCallback((from: string, to: string): Array<[string, string]> => {
+    remapNotePaperPaths(from, to)
+    remapWorkspacePaths(from, to)
+    remapPageStats(from, to)
+    moveTabState(from, to)
+    vaultStructureRevisionRef.current += 1
+    const timer = saveTimers.current.get(from)
+    if (timer) window.clearTimeout(timer)
+    saveTimers.current.delete(from)
+    const title = stripExtension(fileName(to))
+    const follow = (tab: NoteTab): NoteTab => (tab.path === from ? { ...tab, path: to, title } : tab)
+    // The ref is behind the state until React has rendered; whatever runs next must already see the new path.
+    tabsRef.current = tabsRef.current.map(follow)
+    setTabs((current) => current.map(follow))
+    const moved: Array<[string, string]> = []
+    const unsaved = pendingWrites.current.get(from)
+    if (unsaved !== undefined) {
+      pendingWrites.current.delete(from)
+      pendingWrites.current.set(to, unsaved)
+      moved.push([to, unsaved])
+    }
+    if (activePathRef.current === from) activePathRef.current = to
+    setActivePath((current) => (current === from ? to : current))
+    return moved
+  }, [moveTabState, remapNotePaperPaths, remapPageStats, remapWorkspacePaths])
+
+  const externalTabs = useExternalTabChanges({
+    holdsRef: tabHoldsRef,
+    setHold: setTabHold,
+    ownWritesRef: tabOwnWritesRef,
+    tabsRef,
+    setTabs,
+    pendingWrites,
+    saveTimers,
+    treeRef,
+    mutatingEntryPathsRef,
+    vaultSessionGenerationRef,
+    activePathRef,
+    flushEditors: () => {
+      editorRef.current?.flushChanges()
+      splitEditorRef.current?.flushChanges()
+    },
+    flushDocumentLayers,
+    reloadCleanTab,
+    retargetOpenNote,
+    saveContent,
+    refreshTree,
+    toast,
+    deviceName: () => settingsRef.current.syncDeviceName ?? '',
+  })
+  parkHeldTabRef.current = externalTabs.parkHeldTab
+
   const moveEntry = useCallback(async (path: string, destFolder = '') => {
     const session = vaultSessionGenerationRef.current
     const active = activePathRef.current
@@ -4444,6 +4556,10 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Öffne zuerst eine Notiz, um darauf handschriftlich zu schreiben.', 'info')
       return
     }
+    if (tabHoldsRef.current[activeTab.path]) {
+      toast('Diese Notiz ist pausiert, bis du den Hinweis über dem Text beantwortet hast.', 'info')
+      return
+    }
     drawingOpenRef.current = true
     setOverviewOpen(false)
     setHomeworkOpen(false)
@@ -4472,6 +4588,11 @@ export default function App({ startupBootstrap }: AppProps) {
       openDrawing()
     }
   }, [closeDrawing, openDrawing])
+
+  // The pen is put down while the note is paused: strokes could not be saved into a file that is gone or was edited elsewhere.
+  useEffect(() => {
+    if (drawingOpen && activePath && tabHolds[activePath]) closeDrawing()
+  }, [activePath, closeDrawing, drawingOpen, tabHolds])
 
   const openNoteRef = useRef(openNote)
   const openDrawingRef = useRef(openDrawing)
@@ -4763,6 +4884,10 @@ export default function App({ startupBootstrap }: AppProps) {
   const saveDrawingAsset = useCallback(async (payload: DrawingSavePayload, notePathOverride?: string | null) => {
     const session = vaultSessionGenerationRef.current
     const notePath = notePathOverride ?? activePath
+    // The note's file is gone: saving the strokes would create its handwriting file again as a note of its own.
+    if (notePath && tabHoldsRef.current[notePath]?.kind === 'deleted') {
+      throw new Error('Diese Notiz wurde ausserhalb von FaNotes gelöscht. Stelle sie wieder her oder speichere sie unter neuem Namen, damit die Handschrift gesichert werden kann.')
+    }
     const { inkSummary, ...drawing } = payload
     const asset = await window.fanotes.saveDrawing({
       ...drawing,
@@ -4820,7 +4945,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePathRef.current !== notePath) return result
     setDrawingSession((current) => current.path === notePath ? { ...current, document } : current)
     return result
-  }, [activePath, editableShareOwns, pushEditableShare, recordInkSnapshotFor, saveContent])
+  }, [activePath, editableShareOwns, pushEditableShare, recordInkSnapshotFor, saveContent, tabHoldsRef])
 
   const saveWorksheetDocument = useCallback(async (document: WorksheetDocument) => {
     const session = vaultSessionGenerationRef.current
@@ -5959,6 +6084,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   inSplit={tab.path === splitPath}
                   dirty={tab.content !== tab.savedContent}
                   pinned={Boolean(tab.pinned)}
+                  hold={tabHolds[tab.path]?.kind}
                   path={tab.path}
                   title={tab.title}
                   index={index}
@@ -6034,7 +6160,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
                 if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
                 if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
-                return <FormattingToolbar onInsertStudy={insertStudyBlock} disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} />
+                return <FormattingToolbar onInsertStudy={insertStudyBlock} disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating || activeHeld} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} />
               })()}
             </div>
             <div className="toolbar-group toolbar-end">
@@ -6047,7 +6173,7 @@ export default function App({ startupBootstrap }: AppProps) {
               {activeTab && !isPdfActive && !drawingOpen && (
                 <PaperStylePicker
                   value={activePaper}
-                  disabled={activeEntryMutating}
+                  disabled={activeEntryMutating || activeHeld}
                   onChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
                 />
               )}
@@ -6251,6 +6377,24 @@ export default function App({ startupBootstrap }: AppProps) {
               )
             )}
             <div className="editor-stage-main">
+            {!(glyphenWerkOpen || calendarOpen || homeworkOpen || studyOpen || overviewOpen) && [activeTab, splitTab].map((tab, position) => {
+              const hold = tab ? tabHolds[tab.path] : undefined
+              if (!tab || !hold || (position === 1 && tab.path === activeTab?.path)) return null
+              return (
+                <ExternalChangeBanner
+                  key={tab.path}
+                  kind={hold.kind}
+                  title={tab.title}
+                  canRestore={!isPdfNotePath(tab.path)}
+                  busy={externalTabs.busyPath === tab.path}
+                  onRestore={() => void externalTabs.restoreTab(tab.path)}
+                  onSaveAs={(name) => void externalTabs.saveTabAs(tab.path, name)}
+                  onKeepMine={() => void externalTabs.keepMine(tab.path)}
+                  onLoadExternal={() => void externalTabs.loadExternal(tab.path)}
+                  onCloseTab={() => void closeTab(tab.path)}
+                />
+              )
+            })}
             <Suspense fallback={<div className="editor-module-loading"><LoaderCircle className="spin" size={20} /><span>Ansicht wird geladen …</span></div>}>
               {glyphenWerkOpen ? (
               <SafeBoundary name="GlyphenWerk" fallbackTitle="GlyphenWerk ist abgestürzt">
@@ -6303,7 +6447,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         <PdfNoteView
                           path={activeTab.path}
                           title={activeTab.title}
-                          inputDisabled={drawingOpen || activeEntryMutating}
+                          inputDisabled={drawingOpen || activeEntryMutating || activeHeld}
                           quotes={readPdfMarks(activeTab.content)}
                           onMarkSelection={(quote, page) => {
                             const marks = addPdfMark(readPdfMarks(activeTab.content), { page, quote, kind: 'highlight' })
@@ -6315,7 +6459,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -6466,7 +6610,7 @@ export default function App({ startupBootstrap }: AppProps) {
                           onEditActivity={(activity) => recordEditActivityFor(splitTab.path, activity)}
                           settings={settings}
                           paperMode
-                          readOnly={drawingOpen && focusedPane === 'split'}
+                          readOnly={(drawingOpen && focusedPane === 'split') || Boolean(tabHolds[splitTab.path])}
                         />
                       </SafeBoundary>
                     </div>
