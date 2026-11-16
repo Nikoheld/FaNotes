@@ -48,7 +48,7 @@ fun imageFitsBudget(used: Int, add: Int): Boolean =
 private fun megabytes(chars: Int) = String.format(Locale.ROOT, "%.1f", chars / 1_000_000.0).replace('.', ',')
 
 /** German template (used size, budget size) so the app can run it through its UI translation first. */
-const val IMAGE_BUDGET_TEMPLATE = "Bildspeicher dieser Notiz voll (%s von %s MB). Entferne zuerst ein Bild."
+const val IMAGE_BUDGET_TEMPLATE = "Der Bildspeicher dieser Notiz ist voll (%s von %s MB). Entferne zuerst ein Bild."
 
 /** Message shown (and nothing added) when an insert would exceed the budget. */
 fun imageBudgetMessage(used: Int, template: String = IMAGE_BUDGET_TEMPLATE): String =

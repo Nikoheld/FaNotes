@@ -800,7 +800,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             studyScanning.value = false
             if (open.value?.path != note.path) return@launch
             if (pages.isEmpty()) {
-                message.value = "Der PDF-Text konnte nicht gelesen werden."
+                message.value = "Das PDF konnte nicht gelesen werden. Es ist vielleicht beschädigt oder passwortgeschützt. Du kannst Aufträge von Hand hinzufügen."
+                return@launch
+            }
+            if (pages.all { it.lines.isEmpty() }) {
+                message.value = "Das PDF enthält keinen auslesbaren Text (z. B. ein Scan). Du kannst Aufträge von Hand hinzufügen."
                 return@launch
             }
             val detected = ch.fasrv.fanotes.study.detectTasks(pages)
@@ -909,7 +913,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val ref = studyBlockFor(target)
         if (ref == null) {
             studyEdit.value = null
-            message.value = "Die Notiz hat sich geändert. Öffne den Block neu."
+            message.value = "Deine Änderung wurde nicht gespeichert, weil sich die Notiz geändert hat. Öffne den Block neu."
             return
         }
         val next = ch.fasrv.fanotes.study.writeStudyBlockMerged(markdown.value, ref, data)
@@ -926,8 +930,12 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun insertStudyTemplate(kind: ch.fasrv.fanotes.study.StudyKind) {
-        if (open.value == null || open.value?.kind == NoteKind.PDF) {
-            message.value = "Lernwerkzeug-Blöcke gehören in eine Markdown-Notiz."
+        if (open.value == null) {
+            message.value = "Öffne zuerst eine Notiz."
+            return
+        }
+        if (open.value?.kind == NoteKind.PDF) {
+            message.value = "In ein PDF lassen sich keine Lernwerkzeuge einfügen. Öffne eine Textnotiz."
             return
         }
         val data = when (kind) {
@@ -3285,7 +3293,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             if (payload == null) {
-                message.value = if (tooLarge) "Das Bild ist zu groß." else "Das Bild konnte nicht gelesen werden."
+                message.value = if (tooLarge) "Das Bild ist zu groß." else "Das Bild konnte nicht gelesen werden. Wähle eine andere Bilddatei."
                 return@launch
             }
             val name = title ?: uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.').orEmpty()
@@ -3306,7 +3314,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 try { renderPdfCrop(note, page, crop) } catch (_: StudyImageTooLarge) { tooLarge = true; null } catch (_: OutOfMemoryError) { tooLarge = true; null } catch (_: Exception) { null }
             }
             if (payload == null) {
-                message.value = if (tooLarge) "Das Bild ist zu groß." else "Der Ausschnitt konnte nicht gerendert werden."
+                message.value = if (tooLarge) "Der Ausschnitt ist zu groß. Wähle einen kleineren Bereich." else "Der Ausschnitt konnte nicht erstellt werden. Wähle einen kleineren Bereich."
                 return@launch
             }
             addStudyImage(page, payload.dataUrl, payload.aspect, "Abb. S. $page", ch.fasrv.fanotes.study.cropPlacement(crop))
