@@ -176,6 +176,7 @@ private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWor
     "addon-store" -> installAddon(work, extras)
     "reveal" -> reveal(work)
     "bug-report" -> work.copy(overlays = work.overlays + "bug", message = null)
+    "work-requests" -> work.copy(message = "Fehler & Wünsche gibt es bald auch hier.")
     "note-here" -> addNote(work, parentOf(work.openPath), "Unbenannte Notiz", "# Unbenannte Notiz\n\n")
     "download-note" -> exportCurrent(work, "md", "text/markdown")
     "trash" -> work.copy(destination = "trash", overlays = work.overlays + "trash", message = null)

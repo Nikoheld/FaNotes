@@ -229,6 +229,7 @@ fun paletteCommands(
         PaletteCommand("sync", "Jetzt synchronisieren", "FaNotes", keywords = "sync synchronisieren cloud server geräte"),
         PaletteCommand("sync-settings", "Sync einrichten", "FaNotes", "Konto erstellen oder anmelden", keywords = "sync konto anmelden cloud geräte"),
         PaletteCommand("bug-report", "Fehler melden", "FaNotes", "Kurz beschreiben; die letzten fünf Minuten werden angehängt", keywords = "bug report fehler logs support"),
+        PaletteCommand("work-requests", "Fehler & Wünsche", "FaNotes", "Fehler oder Funktion melden und den Fortschritt verfolgen", "Ctrl ⇧ B", "wunsch funktion anfrage claude fehler bug request"),
         PaletteCommand("import-pdf-note", "PDF importieren", "Dateien", "PDF wird selbst zur Notiz — mit Handschrift und Viewer", keywords = "pdf import notiz viewer"),
         PaletteCommand("new-story", "Neue Geschichte", "Dateien", "Schreibmodus mit Seiten, Kapiteln und Szenen", keywords = "geschichte roman buch schreiben story novel writing kapitel"),
         PaletteCommand("import-story", "Geschichte importieren …", "Dateien", "Word (.docx), Markdown oder Text als Geschichte öffnen", keywords = "import docx word markdown geschichte roman story"),
