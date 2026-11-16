@@ -1640,3 +1640,76 @@ test('a link device id that is not an id is left in place', async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a link school address that is not an allowed address is left in place', async () => {
+  let calls = 0
+  const root = await mkdtemp(join(tmpdir(), 'grade-link-base-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { calls += 1; throw new Error('school') },
+    autostart: false,
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.74')
+    await runtime.linkAccount(guest.accountId, {
+      mode: 'web',
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      userAgent: 'KantiTest',
+      ssoCookies: { 'login.microsoftonline.com': 'ESTSAUTHPERSISTENT=synthetic' },
+    })
+    const linkFile = join(root, 'accounts', guest.accountId, 'link.json')
+    const snapshot = join(root, 'accounts', guest.accountId, 'snapshot.json')
+    const keptSnapshot = '{"grades":[{"id":"g-keep"}]}\n'
+    await writeFile(snapshot, keptSnapshot, { mode: 0o600 })
+    const live = JSON.parse(await readFile(linkFile, 'utf8'))
+    const call = async () => {
+      const request = {
+        method: 'GET',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.74' },
+        async *[Symbol.asyncIterator]() {},
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/status'))
+      return status
+    }
+    const keep = async (baseUrl) => {
+      const stored = JSON.stringify({ ...live, baseUrl })
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      await assert.rejects(() => runtime.pollAccount(guest.accountId), (error) => error?.code === 'EBADMSG')
+      assert.equal(calls, 0)
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await keep('https://example.com')
+    await keep('http://www.schulnetz-ag.ch/aksa')
+    await keep('https://a:b@www.schulnetz-ag.ch/aksa')
+    await keep(true)
+    const open = async (baseUrl) => {
+      const next = { ...live }
+      if (baseUrl === undefined) delete next.baseUrl
+      else next.baseUrl = baseUrl
+      const stored = JSON.stringify(next)
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call(), 200)
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await open('https://www.schulnetz-ag.ch/aksa')
+    await open('https://www.schulnetz-ag.ch/aksa/')
+    await open('')
+    await open(undefined)
+    const device = JSON.stringify({ ...live, mode: 'device', baseUrl: 'https://intranet.tam.ch/aksa' })
+    await writeFile(linkFile, device, { mode: 0o600 })
+    assert.equal(await call(), 200)
+    const skipped = await runtime.pollAccount(guest.accountId)
+    assert.equal(skipped.skipped, true)
+    assert.equal(calls, 0)
+    assert.equal(await readFile(linkFile, 'utf8'), device)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
