@@ -318,12 +318,16 @@ export const createKantiWebStore = (options = {}) => {
 
   // ── Pairing codes ─────────────────────────────────────────────────────────
 
+  // A missing version can go. Any other version must not look unused, or the sweep deletes it once its old expiry has passed.
+  const otherPairingVersion = (record) => Boolean(record) && typeof record === 'object' && Object.hasOwn(record, 'v') && record.v != null && record.v !== 1
   const readPairing = async (rawCode) => {
     const code = normalizePairingCode(rawCode)
     if (!code) return null
     const file = pairingPath(sha256(`code:${code}`))
     const record = await readJson(file)
-    if (!record || record.v !== 1) return null
+    if (!record) return null
+    if (otherPairingVersion(record)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
+    if (record.v !== 1) return null
     if (Date.parse(record.expiresAt) <= nowMs()) {
       await fs.rm(file, { force: true })
       return null
@@ -504,6 +508,7 @@ export const createKantiWebStore = (options = {}) => {
       } catch {
         continue
       }
+      if (otherPairingVersion(record)) continue
       if (!record || Date.parse(record.expiresAt) <= nowMs()) await fs.rm(resolve(pairingsDir, name), { force: true })
     }
     for (const name of await fs.readdir(sessionsDir).catch(() => [])) {

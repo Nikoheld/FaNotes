@@ -941,3 +941,34 @@ test('a browser session whose version is not a number is left in place', async (
     await env.close()
   }
 })
+
+test('a pairing code of another version is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const offer = await env.store.createOffer()
+    const pairings = join(env.store.root, 'pairings')
+    const [name] = await readdir(pairings)
+    const file = join(pairings, name)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    parsed.v = '2'
+    parsed.expiresAt = '2020-01-01T00:00:00.000Z'
+    parsed.connections = [{ accountId: 'd'.repeat(32), kept: true }]
+    const stored = `${JSON.stringify(parsed)}\n`
+    await writeFile(file, stored)
+    await assert.rejects(() => env.store.lookupPairing(offer.code), (error) => error?.code === 'EBADMSG')
+    await env.store.sweep(true)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    const expired = await env.store.createOffer()
+    const names = await readdir(pairings)
+    const expiredName = names.find((item) => item !== name)
+    const expiredFile = join(pairings, expiredName)
+    const old = JSON.parse(await readFile(expiredFile, 'utf8'))
+    old.expiresAt = '2020-01-01T00:00:00.000Z'
+    await writeFile(expiredFile, JSON.stringify(old))
+    await env.store.sweep(true)
+    await assert.rejects(readFile(expiredFile), (error) => error?.code === 'ENOENT')
+    assert.equal(await readFile(file, 'utf8'), stored)
+  } finally {
+    await env.close()
+  }
+})
