@@ -502,6 +502,16 @@ export const createCommute = (options = {}) => {
       if (!known) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // An entry the sanitizer would skip must not look absent, or the next check deletes its alert state and the next save drops the route.
       if (sanitizeRoutes(stored.routes).length !== stored.routes.length) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      // Hidden labels or a threshold that are not the known shape must not look like the defaults, or the next save clears them.
+      const settings = stored.settings
+      if (settings != null) {
+        const labels = settings.hiddenLabels
+        const threshold = settings.delayThreshold
+        const settingsKnown = typeof settings === 'object' && !Array.isArray(settings)
+          && (labels == null || (Array.isArray(labels) && labels.every((label) => typeof label === 'string')))
+          && (threshold == null || (typeof threshold === 'number' && Number.isFinite(threshold)))
+        if (!settingsKnown) throw Object.assign(new Error('commute settings'), { code: 'EBADMSG' })
+      }
     }
     const settings = sanitizeSettings(stored?.settings)
     // Version 1 hidden labels mixed half-class choices (removed) with hidden lessons; the app sends
