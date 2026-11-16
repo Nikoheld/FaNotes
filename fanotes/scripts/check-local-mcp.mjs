@@ -646,10 +646,12 @@ try {
     try {
       await host.apply({ mcpEnabled: true, mcpHttpEnabled: true })
       const info = host.info()
+      assert.equal('httpToken' in info, false, 'info() must not carry the token')
+      assert.ok(!JSON.stringify(info).includes(host.revealToken().token), 'info() must not contain the token anywhere')
       assert.equal(info.httpRunning, true, info.httpError)
       const hostPort = Number(new URL(info.httpUrl).port)
       assert.notEqual(hostPort, stored.port)
-      const reply = await httpPost(hostPort, { body: rpc('ping'), headers: { Authorization: `Bearer ${info.httpToken}` } })
+      const reply = await httpPost(hostPort, { body: rpc('ping'), headers: { Authorization: `Bearer ${host.revealToken().token}` } })
       assert.equal(reply.status, 200)
       assert.equal(loadTokenStore(hostData).port, hostPort, 'the new port is remembered')
     } finally {

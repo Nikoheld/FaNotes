@@ -6,6 +6,7 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
+const { ONENOTE_PAGE_MARKER, ONENOTE_PAGE_POLICY_META, pageSha256 } = require('./onenote-page-guard.cjs')
 
 const MAX_SOURCE_BYTES = 4 * 1024 * 1024 * 1024
 const MAX_ARCHIVE_ENTRIES = 20_000
@@ -415,8 +416,7 @@ async function sanitizePage(pagePath, outputRoot) {
     .replace(/@import\s+[^;]+;?/giu, '')
     .replace(/url\s*\([^)]*\)/giu, 'none')
     .replace(/expression\s*\([^)]*\)/giu, '')
-  const policy = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; media-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
-  const guard = `<meta name="fanotes-onenote-safe-v1" content="1"><meta http-equiv="Content-Security-Policy" content="${policy}"><style id="fanotes-page-guard">html,body{width:${dimensions.width}px;min-width:${dimensions.width}px;min-height:${dimensions.height}px;overflow:hidden;background:#fff;color:#111}a{color:inherit;text-decoration:underline;pointer-events:none}</style>`
+  const guard = `${ONENOTE_PAGE_MARKER}${ONENOTE_PAGE_POLICY_META}<style id="fanotes-page-guard">html,body{width:${dimensions.width}px;min-width:${dimensions.width}px;min-height:${dimensions.height}px;overflow:hidden;background:#fff;color:#111}a{color:inherit;text-decoration:underline;pointer-events:none}</style>`
   html = html.includes('<head>') ? html.replace('<head>', `<head>${guard}`) : `<!doctype html><html><head>${guard}</head><body>${html}</body></html>`
   if (Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) throw new Error('Eine eingebettete OneNote-Seite überschreitet nach der Bildübernahme die sichere Größe.')
   return { html, title: safeSegment(title, 'OneNote-Seite'), transcript, ...dimensions }
@@ -596,6 +596,7 @@ async function importOneNoteToVault({ inputPath, vaultRoot, one2html, sevenZip }
         updatedAt: now,
         pageWidth: page.width,
         pageHeight: page.height,
+        htmlSha256: pageSha256(page.html),
         textBoxes: [],
       }
       await atomicWrite(sourcePath, page.html)
