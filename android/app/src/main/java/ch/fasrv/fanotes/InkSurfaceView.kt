@@ -1064,7 +1064,7 @@ class InkSurfaceView @JvmOverloads constructor(
             eraser -> {
                 erasing = true
                 current.beginErase()
-                current.eraseSamples(listOf(point(event, index, x, y)), eraserRadius(), nowIso())
+                if (current.eraseSamples(listOf(point(event, index, x, y)), eraserRadius(), nowIso())) current.erasedBounds?.let { dropTilesIn(it) }
                 onChanged()
             }
             placingHighlight -> {
@@ -1121,7 +1121,7 @@ class InkSurfaceView @JvmOverloads constructor(
             for (h in 0 until history) samples += point(event, index, historical = h)
             samples += point(event, index)
             if (current.eraseSamples(samples, eraserRadius(), nowIso())) {
-                dropTilesNear(event, index)
+                current.erasedBounds?.let { dropTilesIn(it) }
                 onChanged()
             }
         } else if (selecting) {
@@ -1792,15 +1792,17 @@ class InkSurfaceView @JvmOverloads constructor(
         for (key in stale) tiles.remove(key)?.recycle()
     }
 
-    private fun dropTilesNear(event: MotionEvent, index: Int) {
-        val scale = pixelsPerPageUnit().toDouble().coerceAtLeast(0.0001)
-        val pageX = (event.getX(index) - pageLeft) / scale
-        val pageY = (event.getY(index) - pageTop) / scale
-        val radius = eraserRadius() + TILE_PAGE
+    /**
+     * Drops the cached tiles under [bounds] (page px: left, top, right, bottom), the box the last erase call changed.
+     * It spans the whole swept path of the frame, not only the event point, so ink erased between two
+     * frames does not stay painted from a stale tile.
+     */
+    private fun dropTilesIn(bounds: DoubleArray) {
+        val margin = TILE_PAGE.toDouble()
         val stale = tiles.keys.filter { key ->
             val x = (key shr 32).toInt()
             val y = (key and 0xffffffffL).toInt()
-            pageX + radius >= x && pageX - radius <= x + TILE_PAGE && pageY + radius >= y && pageY - radius <= y + TILE_PAGE
+            bounds[2] + margin >= x && bounds[0] - margin <= x + TILE_PAGE && bounds[3] + margin >= y && bounds[1] - margin <= y + TILE_PAGE
         }
         for (key in stale) tiles.remove(key)?.recycle()
     }
