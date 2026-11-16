@@ -803,6 +803,43 @@ test('a timetable index that is not the known shape is left in place', async () 
   }
 })
 
+test('a catalog entry that is not a class or room is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-catalog-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const indexFile = join(dir, 'index.json')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  const keep = async (classes, rooms) => {
+    const stored = `${JSON.stringify({
+      uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ', classes, rooms, warnings: [],
+    })}\n`
+    await writeFile(indexFile, stored, { mode: 0o600 })
+    await assert.rejects(() => store.summary(), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(indexFile, 'utf8'), stored)
+  }
+  try {
+    await keep(['kept'], ['T01'])
+    await keep([{ code: 'kept', teacher: 'Tst' }], ['T01'])
+    await keep([{ code: 'G26A', teacher: 1 }], ['T01'])
+    await keep([{ code: 'G26A' }], ['T01'])
+    await keep([{ code: 'G26A', teacher: 'Tst' }], [1])
+    await keep([{ code: 'G26A', teacher: 'Tst' }], ['bad/room'])
+    await writeFile(indexFile, `${JSON.stringify({
+      uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+      classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: ['T01'], warnings: [],
+    })}\n`, { mode: 0o600 })
+    const summary = await store.summary()
+    assert.equal(summary.available, true)
+    assert.equal(summary.classes[0].code, 'G26A')
+    assert.equal(summary.classes[0].teacher, 'Tst')
+    assert.deepEqual(summary.rooms, ['T01'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('an unreadable timetable page is left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'timetable-page-'))
   const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
