@@ -1414,7 +1414,7 @@ test('a link sign-in time that is not a time is left in place', async () => {
     await writeFile(linkFile, fresh, { mode: 0o600 })
     assert.equal(await call(), 200)
     assert.equal(await readFile(linkFile, 'utf8'), fresh)
-    const expired = { ...live, cookiesSavedAt: '2020-01-01T00:00:00.000Z', sso: { kept: true }, serverSession: { kept: true } }
+    const expired = { ...live, cookiesSavedAt: '2020-01-01T00:00:00.000Z' }
     await writeFile(linkFile, JSON.stringify(expired), { mode: 0o600 })
     await runtime.pollAccount(guest.accountId)
     const cleared = JSON.parse(await readFile(linkFile, 'utf8'))
@@ -1422,6 +1422,80 @@ test('a link sign-in time that is not a time is left in place', async () => {
     assert.equal(cleared.sso, null)
     assert.equal(cleared.serverSession, null)
     assert.equal(cleared.cookiesSavedAt, '')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a link sign-in that is not a sealed token is left in place', async () => {
+  let calls = 0
+  const root = await mkdtemp(join(tmpdir(), 'grade-link-seal-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { calls += 1; throw new Error('school') },
+    autostart: false,
+    now: () => new Date('2026-11-16T12:00:00.000Z'),
+  })
+  try {
+    const guest = await runtime.createGuest('203.0.113.97')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const linkFile = join(root, 'accounts', guest.accountId, 'link.json')
+    const snapshot = join(root, 'accounts', guest.accountId, 'snapshot.json')
+    const keptSnapshot = '{"grades":[{"id":"g-keep"}]}\n'
+    await writeFile(snapshot, keptSnapshot, { mode: 0o600 })
+    const live = JSON.parse(await readFile(linkFile, 'utf8'))
+    const call = async () => {
+      const request = {
+        method: 'GET',
+        headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+        socket: { remoteAddress: '203.0.113.97' },
+        async *[Symbol.asyncIterator]() {},
+      }
+      let status = 0
+      await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/status'))
+      return status
+    }
+    const keep = async (extra) => {
+      const stored = JSON.stringify({ ...live, ...extra })
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call(), 500)
+      await assert.rejects(() => runtime.pollAccount(guest.accountId), (error) => error?.code === 'EBADMSG')
+      assert.equal(calls, 0)
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await keep({ refresh: { v: 2, iv: 'aa', tag: 'bb', data: 'cc' } })
+    await keep({ access: [] })
+    await keep({ sso: 'sealed' })
+    await keep({ serverSession: { v: '1', iv: 'aa', tag: 'bb', data: 'cc' } })
+    await keep({ serverSession: { v: 1, iv: 1, tag: 'bb', data: 'cc' } })
+    const open = async (extra) => {
+      const stored = JSON.stringify({ ...live, ...extra })
+      await writeFile(linkFile, stored, { mode: 0o600 })
+      assert.equal(await call(), 200)
+      assert.equal(await readFile(linkFile, 'utf8'), stored)
+      assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
+    }
+    await open({ access: null })
+    await open({ access: '' })
+    await open({ serverSession: null })
+    await open({ sso: null })
+    await open({ refresh: { ...live.refresh, extra: true } })
+    const blank = JSON.stringify({ ...live, refresh: '' })
+    await writeFile(linkFile, blank, { mode: 0o600 })
+    assert.equal(await call(), 200)
+    await runtime.pollAccount(guest.accountId)
+    const cleared = JSON.parse(await readFile(linkFile, 'utf8'))
+    assert.equal(calls, 0)
+    assert.equal(cleared.needsReauth, true)
+    assert.equal(cleared.lastError, 'token')
+    assert.equal(cleared.refresh, '')
+    assert.equal(await readFile(snapshot, 'utf8'), keptSnapshot)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
