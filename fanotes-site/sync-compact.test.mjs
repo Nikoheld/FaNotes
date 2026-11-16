@@ -177,6 +177,46 @@ test('a failed log write does not publish the revision', async () => {
   assert.equal(published.sha256, sha256(newer))
 })
 
+test('a failed directory sync takes the log line back', async () => {
+  const id = randomBytes(32).toString('hex')
+  const original = randomBytes(120)
+  const created = await putFile(id, original, 0)
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const createdJson = JSON.parse(created.body.toString('utf8'))
+  const revision = createdJson.revision
+  const newer = randomBytes(180)
+  process.env.FANOTES_SYNC_DIRSYNC_FAIL = '1'
+  try {
+    const failed = await putFile(id, newer, revision)
+    assert.equal(failed.status, 500)
+    const feed = JSON.parse((await call('GET', '/api/v1/sync/changes?since=0', { token, accountId })).body.toString('utf8'))
+    const listed = feed.entries.find((entry) => entry.id === id)
+    assert.equal(listed.revision, revision)
+    assert.equal(listed.sha256, sha256(original))
+    assert.equal(feed.revision, createdJson.tableRevision)
+    let logText = ''
+    try {
+      logText = readFileSync(join(dataDirectory, 'accounts', accountId, 'changes.jsonl'), 'utf8')
+    } catch {
+      logText = ''
+    }
+    assert.equal(logText.includes(sha256(newer)), false)
+  } finally {
+    delete process.env.FANOTES_SYNC_DIRSYNC_FAIL
+  }
+  const retried = await putFile(id, newer, revision)
+  assert.equal(retried.status, 200, retried.body.toString('utf8'))
+  const saved = JSON.parse(retried.body.toString('utf8'))
+  assert.ok(saved.revision > revision)
+  const live = await call('GET', `/api/v1/sync/files/${id}`, { token, accountId })
+  assert.equal(live.status, 200)
+  assert.deepEqual(live.body, newer)
+  const after = JSON.parse((await call('GET', '/api/v1/sync/changes?since=0', { token, accountId })).body.toString('utf8'))
+  const published = after.entries.find((entry) => entry.id === id)
+  assert.equal(published.revision, saved.revision)
+  assert.equal(published.sha256, sha256(newer))
+})
+
 test.after(() => new Promise((resolve) => {
   server.close(() => {
     rmSync(dataDirectory, { recursive: true, force: true })
