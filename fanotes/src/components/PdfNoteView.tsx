@@ -52,6 +52,7 @@ import {
   type PdfZoomMode,
 } from '../lib/pdfCamera'
 import { pdfPageScrollIntoViewBlock } from '../lib/pdfOpenCamera'
+import { claimPreparingPdfDocument, returnPreparedPdfDocument, takePreparedPdfDocument } from '../lib/pdfPrepare'
 import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
 import { pageNeedsLocalOcr, pdfByteStamp, pdfPagePlainText, pdfTextSearchHits } from '../lib/pdfOcr'
 import { subscribePdfReveal } from '../lib/docSearch/reveal'
@@ -91,6 +92,16 @@ const RESIZE_DEBOUNCE_MS = 180
 /** Scroll re-plan cadence; the plan itself is a no-op while the painted window still covers the viewport. */
 const SCROLL_PAINT_THROTTLE_MS = 140
 const HIDE_DEBOUNCE_MS = 360
+/**
+ * A freshly opened document stays hidden until a page bitmap is on its canvas,
+ * so the sheet appears once, painted, instead of as grey then white frames that
+ * fill in. Longest hold before the frames show anyway (huge or broken page).
+ */
+export const PDF_OPEN_REVEAL_CAP_MS = 320
+/** Class on the sheet (or the bare view) while that first bitmap is pending. */
+export const PDF_OPENING_CLASS = 'is-pdf-opening'
+/** A prepared document dropped this soon after adoption goes back to the hand-off slot. */
+const PDF_RETURN_WINDOW_MS = 250
 const VIEWPORT_ROOT_MARGIN = '160px 0px'
 const MIN_SCALE = 0.5
 const MAX_SCALE = 2.5
@@ -348,7 +359,8 @@ function PdfPage({
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const hideTimerRef = useRef<number | null>(null)
-  const [mounted, setMounted] = useState(false)
+  // The start page paints without waiting a frame for its first intersection.
+  const [mounted, setMounted] = useState(active)
   const [ratio, setRatio] = useState(defaultRatio)
 
   const handleRatio = useCallback((next: number) => {
@@ -698,9 +710,21 @@ export function PdfNoteView({
     }, 80)
   }, [onLayoutChange])
 
-  useEffect(() => {
+  // False from the commit that lays out a new document until its first page
+  // bitmap (or the cap). See PDF_OPEN_REVEAL_CAP_MS.
+  const [firstPaintDone, setFirstPaintDone] = useState(false)
+  const handlePageReady = useCallback(() => {
+    setFirstPaintDone(true)
+    notifyLayout()
+  }, [notifyLayout])
+
+  // A layout effect: a document the app prepared before the switch is adopted
+  // before the first paint, so the pages (and the camera fitted to them) are
+  // the first frame instead of a loading box that jumps away.
+  useLayoutEffect(() => {
     let alive = true
     setLoading(true)
+    setFirstPaintDone(false)
     setError(null)
     setNeedsPassword(false)
     setPasswordDraft('')
@@ -721,37 +745,59 @@ export function PdfNoteView({
     setCameraMode('custom')
     expectedZoomRef.current = null
     setFit(UNMEASURED_FIT)
-    void loadVaultPdfBytes(path)
-      .then(async (bytes) => {
+    // The open document; the ratio is page 1 at rotation 0 (rotation was just reset).
+    const adopt = (loaded: PDFDocumentProxy, task: PDFDocumentLoadingTask, ratio: number | null) => {
+      pdfTaskRef.current = task
+      setPdf(loaded)
+      setPageCount(loaded.numPages)
+      const restored = pdfStartPageForLoad(path, loadedPathRef.current, initialPage)
+      loadedPathRef.current = path
+      const start = Math.max(1, Math.min(loaded.numPages, restored ?? 1))
+      setCurrentPage(start)
+      setPageDraft(String(start))
+      if (ratio !== null && Number.isFinite(ratio) && ratio > 0) setPageRatio(ratio)
+      void outlineFromPdf(loaded).then((items) => { if (alive) setOutline(items) }).catch(() => undefined)
+      setLoading(false)
+      notifyLayout()
+    }
+    const ready = password ? null : takePreparedPdfDocument(path)
+    const adoptedAt = performance.now()
+    if (ready) {
+      pdfIdentityRef.current = { path, size: ready.size, stamp: ready.stamp }
+      adopt(ready.pdf, ready.task, ready.ratio)
+    } else {
+      void (password ? Promise.resolve(null) : claimPreparingPdfDocument(path)).then(async (claimed) => {
+        if (!alive) {
+          if (claimed) void claimed.task.destroy().catch(() => undefined)
+          return
+        }
+        if (claimed) {
+          pdfIdentityRef.current = { path, size: claimed.size, stamp: claimed.stamp }
+          adopt(claimed.pdf, claimed.task, claimed.ratio)
+          return
+        }
+        const bytes = await loadVaultPdfBytes(path)
         if (!alive) return
         if (!bytes.length) throw new Error('Die PDF-Datei ist leer.')
         pdfIdentityRef.current = { path, size: bytes.byteLength, stamp: pdfByteStamp(bytes) }
         try {
-          const { pdf: loaded, task } = await openPdfDocument(bytes, password || undefined)
+          const { pdf: loaded, task } = await openPdfDocument(bytes, password || undefined, { viewer: true })
           if (!alive) {
             await task.destroy()
             return
           }
-          pdfTaskRef.current = task
-          setPdf(loaded)
-          setPageCount(loaded.numPages)
-          const restored = pdfStartPageForLoad(path, loadedPathRef.current, initialPage)
-          loadedPathRef.current = path
-          const start = Math.max(1, Math.min(loaded.numPages, restored ?? 1))
-          setCurrentPage(start)
-          setPageDraft(String(start))
+          let ratio: number | null = null
           try {
-            const first = await loaded.getPage(1)
-            if (alive) {
-              const viewport = first.getViewport({ scale: 1, rotation })
-              setPageRatio(viewport.height / Math.max(1, viewport.width))
-            }
+            const viewport = (await loaded.getPage(1)).getViewport({ scale: 1, rotation: 0 })
+            ratio = viewport.height / Math.max(1, viewport.width)
           } catch {
             // Keep the A4 fallback.
           }
-          void outlineFromPdf(loaded).then((items) => { if (alive) setOutline(items) })
-          setLoading(false)
-          notifyLayout()
+          if (!alive) {
+            await task.destroy()
+            return
+          }
+          adopt(loaded, task, ratio)
         } catch (reason: unknown) {
           const name = reason && typeof reason === 'object' && 'name' in reason ? String(reason.name) : ''
           if (name === 'PasswordException') {
@@ -771,14 +817,33 @@ export function PdfNoteView({
           : message)
         setLoading(false)
       })
+    }
     return () => {
       alive = false
       if (layoutTimerRef.current !== null) window.clearTimeout(layoutTimerRef.current)
       const task = pdfTaskRef.current
       pdfTaskRef.current = null
+      // Torn down in the same breath as it was adopted (StrictMode's replay):
+      // hand the document back so the replay does not read the file again.
+      if (ready && task === ready.task && performance.now() - adoptedAt < PDF_RETURN_WINDOW_MS) {
+        returnPreparedPdfDocument(ready)
+        return
+      }
       void task?.destroy().catch(() => undefined)
     }
   }, [notifyLayout, password, path, setCameraMode])
+
+  useLayoutEffect(() => {
+    const view = viewRef.current
+    if (!view || !pdf || firstPaintDone) return
+    const sheet = view.closest<HTMLElement>('.unified-paper') ?? view
+    sheet.classList.add(PDF_OPENING_CLASS)
+    const timer = window.setTimeout(() => setFirstPaintDone(true), PDF_OPEN_REVEAL_CAP_MS)
+    return () => {
+      window.clearTimeout(timer)
+      sheet.classList.remove(PDF_OPENING_CLASS)
+    }
+  }, [firstPaintDone, pdf])
 
   useEffect(() => {
     if (!pdf) return undefined
@@ -1335,7 +1400,7 @@ export function PdfNoteView({
                   sourcePath={path}
                   password={password}
                   onRatio={handlePageRatio}
-                  onReady={notifyLayout}
+                  onReady={handlePageReady}
                   onVisible={handleVisible}
                 />
               )

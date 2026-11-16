@@ -65,7 +65,7 @@ import {
   X,
 } from 'lucide-react'
 import { notifyStoryWritten, storySyncBusy } from './writing/liveSync'
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
 import { ConfirmDialog } from './components/ConfirmDialog'
@@ -286,7 +286,8 @@ import { snowLayerActive } from './lib/snowTheme'
 import { SnowLayer } from './components/SnowLayer'
 import type { AppSettings, BootstrapData, CreateResult, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
-const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module) => ({ default: module.DrawingBoard })))
+const loadDrawingBoardModule = () => import('./components/DrawingBoard')
+const DrawingBoard = lazy(() => loadDrawingBoardModule().then((module) => ({ default: module.DrawingBoard })))
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
 const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspace').then((module) => ({ default: module.GlyphenWerkWorkspace })))
 const WritingMode = lazy(() => import('./writing/ui/WritingMode').then((module) => ({ default: module.WritingMode })))
@@ -326,10 +327,20 @@ const VaultOverview = lazy(() => import('./components/VaultOverview').then((modu
 const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
 const CalendarView = lazy(() => import('./components/CalendarView').then((module) => ({ default: module.CalendarView })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
-const PdfNoteView = lazy(() => import('./components/PdfNoteView').then((module) => ({ default: module.PdfNoteView })))
+const loadPdfNoteViewModule = () => import('./components/PdfNoteView')
+const PdfNoteView = lazy(() => loadPdfNoteViewModule().then((module) => ({ default: module.PdfNoteView })))
 const StableWorksheetLayer = memo(WorksheetLayer)
 const STARTUP_TREE_REFRESH_DELAY_MS = 18_000
 const STARTUP_DOCUMENT_LAYER_DELAY_MS = 160
+/**
+ * Opening a document keeps the previous one on screen while the next one's
+ * PDF and handwriting load, at most this long. Then the switch is one commit:
+ * no loading box, no text that gets its ink a moment later.
+ */
+const DOCUMENT_OPEN_PREPARE_MS = 450
+/** Handwriting read for an open that never committed is not used after this. */
+const PREPARED_INK_TTL_MS = 3_000
+type PreparedNoteInk = { path: string; content: string; at: number; document: DrawingLibraryDocument | null }
 /** How long a renamed/moved path still redirects late editor flushes to the new name. */
 const MOVED_PATH_ALIAS_MS = 30_000
 /** Statistics of the open note reach the disk at least this often (in one-second ticks). */
@@ -978,6 +989,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const drawingLoadRequestRef = useRef(0)
   const worksheetLoadRequestRef = useRef(0)
   const initialDrawingLoadRef = useRef(true)
+  const preparedInkRef = useRef<PreparedNoteInk | null>(null)
+  const openSequenceRef = useRef(0)
   const initialWorksheetLoadRef = useRef(true)
   const worksheetDirtyIdsRef = useRef(new Set<string>())
   const closeInProgressRef = useRef(false)
@@ -1287,7 +1300,9 @@ export default function App({ startupBootstrap }: AppProps) {
     relativePath: activeTab.path,
     markdown: visibleNoteContent(pendingWrites.current.get(activeTab.path) ?? activeTab.content),
   } : null, [activeTab, lmStudioOpen])
-  useEffect(() => {
+  // A layout effect: handwriting read before the switch (prepareDocumentOpen)
+  // mounts in the same commit as the note's text, not one paint later.
+  useLayoutEffect(() => {
     const requestId = ++drawingLoadRequestRef.current
     drawingDirtyRef.current = false
     const path = activeTab?.path
@@ -1307,6 +1322,18 @@ export default function App({ startupBootstrap }: AppProps) {
     }, requestId)
     drawingOpenRef.current = switched.drawingOpen
     setDrawingOpen(switched.drawingOpen)
+    const prepared = preparedInkRef.current
+    preparedInkRef.current = null
+    if (
+      !initialNoteLoad && prepared && prepared.path === path && prepared.content === content
+      && Date.now() - prepared.at <= PREPARED_INK_TTL_MS
+    ) {
+      setDrawingSession({
+        ...overlaySessionAfterInkReady(switched.drawingOpen, drawingSessionFromLoad(requestId, prepared.document)),
+        path,
+      })
+      return
+    }
     setDrawingSession({ ...overlaySessionAfterNoteSwitch(switched), path })
 
     // Saved handwriting loads in both input modes; keyboard mode mounts it
@@ -1873,6 +1900,31 @@ export default function App({ startupBootstrap }: AppProps) {
     void loadNoteCompanion(path)
   }, [activatePageStats, flushPageStats, loadNoteCompanion, rememberLastOpenNote])
 
+  /**
+   * Load what the next document shows in its first frame while the current
+   * one stays on screen: a PDF's parsed document (handed to PdfNoteView) and
+   * the note's handwriting (picked up by the drawing session effect). Capped
+   * at DOCUMENT_OPEN_PREPARE_MS; a slower load finishes after the switch.
+   */
+  const prepareDocumentOpen = useCallback(async (path: string, content: string) => {
+    const work: Promise<unknown>[] = []
+    if (isPdfNotePath(path)) {
+      work.push(Promise.all([loadPdfNoteViewModule(), import('./lib/pdfPrepare')])
+        .then(([, prepare]) => prepare.preparePdfDocument(path)))
+    }
+    work.push(readNoteInk(path, content).then((document) => {
+      preparedInkRef.current = { path, content, at: Date.now(), document }
+      if (document || drawingOpenRef.current) return loadDrawingBoardModule()
+      return undefined
+    }))
+    let timer = 0
+    await Promise.race([
+      Promise.all(work).catch(() => undefined),
+      new Promise<void>((resolve) => { timer = window.setTimeout(resolve, DOCUMENT_OPEN_PREPARE_MS) }),
+    ])
+    window.clearTimeout(timer)
+  }, [])
+
   const openNote = useCallback(async (path: string): Promise<boolean> => {
     if (activePathRef.current && activePathRef.current !== path) {
       // Book the last keystrokes under the note that is leaving before its editor unmounts.
@@ -1898,9 +1950,13 @@ export default function App({ startupBootstrap }: AppProps) {
     const previousActive = activePathRef.current
     const swapIntoSplit = splitPathRef.current === path && previousActive && previousActive !== path
     const existing = tabsRef.current.find((tab) => tab.path === path)
+    // A later open wins; an earlier one still preparing must not switch back.
+    const sequence = ++openSequenceRef.current
     if (existing) {
       if (session !== vaultSessionGenerationRef.current) return false
       if (!isPdfNotePath(path)) await loadMarkdownEditor()
+      if (path !== previousActive) await prepareDocumentOpen(path, existing.content)
+      if (session !== vaultSessionGenerationRef.current || sequence !== openSequenceRef.current) return false
       revealOpenedNote(path, existing.content, swapIntoSplit ? previousActive : null)
       return true
     }
@@ -1915,6 +1971,12 @@ export default function App({ startupBootstrap }: AppProps) {
       ) return false
       const { content } = tab
       if (!isPdfNotePath(path)) await loadMarkdownEditor()
+      await prepareDocumentOpen(path, content)
+      if (
+        session !== vaultSessionGenerationRef.current ||
+        structureRevision !== vaultStructureRevisionRef.current ||
+        sequence !== openSequenceRef.current
+      ) return false
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       revealOpenedNote(path, content, swapIntoSplit ? previousActive : null)
@@ -1930,7 +1992,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [flushDocumentLayers, readNoteTab, revealOpenedNote, toast])
+  }, [flushDocumentLayers, prepareDocumentOpen, readNoteTab, revealOpenedNote, toast])
 
   /**
    * Bring back the tabs, pins and split the vault was left with. The active
@@ -2528,6 +2590,13 @@ export default function App({ startupBootstrap }: AppProps) {
       // edit while this save was in flight.
       if (!saved || pendingWrites.current.has(closing.path)) return
     }
+    if (activePathRef.current === path) {
+      // The neighbour that takes over opens like any other document: prepared first.
+      const index = tabsRef.current.findIndex((tab) => tab.path === path)
+      const remaining = tabsRef.current.filter((tab) => tab.path !== path)
+      const next = remaining[Math.min(Math.max(index, 0), remaining.length - 1)]
+      if (next) await prepareDocumentOpen(next.path, next.content)
+    }
     closedTabsRef.current = rememberClosedTab(closedTabsRef.current, path)
     setTabs((current) => current.filter((tab) => tab.path !== path))
     setSplitPath((current) => current === path ? null : current)
@@ -2538,7 +2607,7 @@ export default function App({ startupBootstrap }: AppProps) {
       const remaining = latestTabs.filter((tab) => tab.path !== path)
       return remaining[Math.min(Math.max(latestIndex, 0), remaining.length - 1)]?.path ?? null
     })
-  }, [flushDocumentLayers, saveContent, tabHoldsRef])
+  }, [flushDocumentLayers, prepareDocumentOpen, saveContent, tabHoldsRef])
 
   /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
   const isSyncPathBusy = useCallback((path: string) => {
