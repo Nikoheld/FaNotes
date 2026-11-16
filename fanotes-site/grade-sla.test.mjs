@@ -545,3 +545,37 @@ test('an agenda baseline that is not the known shape is left in place', async ()
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test('a reveal ledger that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'grade-reveal-'))
+  const runtime = createSchulnetzRuntime({
+    root,
+    key: randomBytes(32),
+    fetch: async () => { throw new Error('school') },
+    autostart: false,
+  })
+  const ledger = '{"version":2,"hidden":["c-keep"],"revealed":["c-old"]}\n'
+  try {
+    const guest = await runtime.createGuest('203.0.113.83')
+    await runtime.linkAccount(guest.accountId, {
+      baseUrl: 'https://www.schulnetz-ag.ch/aksa',
+      deviceId: '0123456789abcdef01234567',
+      refreshToken: 'synthetic-refresh-token-long-enough',
+    })
+    const dir = join(root, 'accounts', guest.accountId)
+    const file = join(dir, 'reveals.json')
+    await writeFile(file, ledger, { mode: 0o600 })
+    const request = {
+      method: 'PUT',
+      headers: { 'x-kanti-guest': guest.accountId, authorization: `Bearer ${guest.token}` },
+      socket: { remoteAddress: '203.0.113.83' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from('{"hidden":["c-new"]}') },
+    }
+    let status = 0
+    await runtime.handle(request, { writeHead(code) { status = code }, end() {} }, new URL('http://127.0.0.1/api/v1/schulnetz/reveals'))
+    assert.equal(status, 500)
+    assert.equal(await readFile(file, 'utf8'), ledger)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
