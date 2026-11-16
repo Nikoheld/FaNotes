@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import android.util.Base64
 import ch.fasrv.fanotes.study.ANNOTATION_IMAGE_TARGET_CHARS
+import ch.fasrv.fanotes.study.STUDY_IMAGE_MAX_EDGE
 import ch.fasrv.fanotes.study.fitWithin
 import ch.fasrv.fanotes.study.studyEncodeSteps
 import java.io.ByteArrayInputStream
@@ -32,7 +33,8 @@ object StudyImageImport {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 2400) sample *= 2
+        // Decode just above the stored edge (1200): a 12 MP photo stays near 12 MB instead of ~70 MB.
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= STUDY_IMAGE_MAX_EDGE) sample *= 2
         val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
         val upright = rotated(decoded, orientation(bytes))
         var flat: Bitmap? = null

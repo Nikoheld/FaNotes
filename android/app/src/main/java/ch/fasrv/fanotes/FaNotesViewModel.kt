@@ -485,6 +485,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     jumpToHeading(markdown.value, headingAnchor)
                     return@launch
                 }
+                stopStudyTimer()
                 if (!force) saveNow()
                 val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
                 if (generation != openGeneration) return@launch
@@ -741,20 +742,21 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val studyTimer = MutableStateFlow<Triple<String, String, Long>?>(null)
     val studyScanning = MutableStateFlow(false)
     private var studyTimerJob: Job? = null
+    private val STUDY_TIMER_SAVE_MS = 60_000L
 
     /** Kind id and index of the study block whose editor is open. */
-    val studyEdit = MutableStateFlow<Pair<String, Int>?>(null)
+    val studyEdit = MutableStateFlow<StudyEditTarget?>(null)
 
     private fun storedTasks(): ch.fasrv.fanotes.study.StudyTaskList =
         ch.fasrv.fanotes.study.readTaskList(markdown.value) ?: ch.fasrv.fanotes.study.StudyTaskList(emptyList(), emptyList())
 
-    private fun commitTasks(list: ch.fasrv.fanotes.study.StudyTaskList) {
+    private fun commitTasks(list: ch.fasrv.fanotes.study.StudyTaskList, typed: Boolean = true) {
         if (open.value?.kind != NoteKind.PDF) return
-        updateMarkdown(ch.fasrv.fanotes.study.writeTaskList(markdown.value, list))
+        updateMarkdown(ch.fasrv.fanotes.study.writeTaskList(markdown.value, list), typed)
     }
 
-    fun updateStudyTask(id: String, change: (ch.fasrv.fanotes.study.StudyTask) -> ch.fasrv.fanotes.study.StudyTask) {
-        commitTasks(ch.fasrv.fanotes.study.updateTask(storedTasks(), id, change))
+    fun updateStudyTask(id: String, typed: Boolean = true, change: (ch.fasrv.fanotes.study.StudyTask) -> ch.fasrv.fanotes.study.StudyTask) {
+        commitTasks(ch.fasrv.fanotes.study.updateTask(storedTasks(), id, change), typed)
     }
 
     fun addStudyTask() {
@@ -846,13 +848,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         studyTimer.value = Triple(path, id, System.currentTimeMillis())
         studyTimerJob = viewModelScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(10_000)
+                kotlinx.coroutines.delay(STUDY_TIMER_SAVE_MS)
                 saveStudyTimer(restart = true)
             }
         }
     }
 
-    /** Adds the elapsed seconds to the running task. The stored time lags by at most ten seconds. */
+    /** Adds the elapsed seconds to the running task. While it runs the note is written at most once a minute; pause, stop, a note switch and leaving the app write it too. */
     private fun saveStudyTimer(restart: Boolean) {
         val (path, id, since) = studyTimer.value ?: return
         if (open.value?.path != path) {
@@ -862,8 +864,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
         val now = System.currentTimeMillis()
         val seconds = Math.round((now - since) / 1000.0).toInt()
-        if (seconds > 0) updateStudyTask(id) { it.copy(spentSec = (it.spentSec + seconds).coerceAtMost(86_400 * 7)) }
+        if (seconds > 0) updateStudyTask(id, typed = false) { it.copy(spentSec = (it.spentSec + seconds).coerceAtMost(86_400 * 7)) }
         studyTimer.value = if (restart) Triple(path, id, if (seconds > 0) now else since) else null
+    }
+
+    /** The app goes to the background: write the elapsed time, the timer keeps running. */
+    fun flushStudyTimer() {
+        if (studyTimer.value != null) saveStudyTimer(restart = true)
     }
 
     fun stopStudyTimer() {
@@ -873,25 +880,39 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         studyTimer.value = null
     }
 
-    fun studyBlockAt(index: Int) = ch.fasrv.fanotes.study.findStudyBlocks(markdown.value).getOrNull(index)
+    /** A study block named by kind, offset in the whole note and a hash of its JSON. */
+    data class StudyEditTarget(val kind: ch.fasrv.fanotes.study.StudyKind, val from: Int, val hash: Int)
 
-    fun openStudyBlock(kind: String, index: Int) {
-        studyEdit.value = kind to index
+    fun studyBlockFor(target: StudyEditTarget) =
+        ch.fasrv.fanotes.study.locateStudyBlock(markdown.value, target.kind, target.from, target.hash)
+
+    fun openStudyBlock(kind: String, from: Int, hash: Int) {
+        val studyKind = ch.fasrv.fanotes.study.StudyKind.of(kind) ?: return
+        studyEdit.value = StudyEditTarget(studyKind, from, hash)
     }
 
     fun closeStudyBlock() {
         studyEdit.value = null
     }
 
-    /** Writes an edited block straight back into the note, like the desktop editors. */
-    fun writeStudyBlock(index: Int, data: ch.fasrv.fanotes.json.JsonValue) {
-        val ref = studyBlockAt(index) ?: return
-        updateMarkdown(ch.fasrv.fanotes.study.replaceStudyBlock(markdown.value, ref, data))
+    /** Writes an edited block straight back into the note, unless the block moved or changed since it was opened. */
+    fun writeStudyBlock(data: ch.fasrv.fanotes.json.JsonValue) {
+        val target = studyEdit.value ?: return
+        val ref = studyBlockFor(target)
+        if (ref == null) {
+            studyEdit.value = null
+            message.value = "Die Notiz hat sich geändert. Öffne den Block neu."
+            return
+        }
+        val next = ch.fasrv.fanotes.study.writeStudyBlockMerged(markdown.value, ref, data)
+        updateMarkdown(next)
+        val written = ch.fasrv.fanotes.study.findStudyBlocks(next).firstOrNull { it.from == ref.from && it.kind == target.kind }
+        studyEdit.value = written?.let { target.copy(from = it.from, hash = ch.fasrv.fanotes.study.studyBodyHash(it.body)) }
     }
 
     /** Puts the caret on the block's first JSON line so the source shows. */
-    fun showStudySource(index: Int) {
-        val ref = studyBlockAt(index) ?: return
+    fun showStudySource() {
+        val ref = studyEdit.value?.let { studyBlockFor(it) } ?: return
         studyEdit.value = null
         requestGotoLine((ref.startLine + 1).toString())
     }
@@ -1186,10 +1207,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         gotoLineInput.value = null
     }
 
-    fun updateMarkdown(value: String) {
+    /** [typed] false for writes the app makes itself (the task timer): they are no keystroke in the page statistics. */
+    fun updateMarkdown(value: String, typed: Boolean = true) {
         val now = System.currentTimeMillis()
-        rememberActivity { ch.fasrv.fanotes.desk.recordKeystroke(it, now, lastTypedAtMs) }
-        lastTypedAtMs = now
+        if (typed) {
+            rememberActivity { ch.fasrv.fanotes.desk.recordKeystroke(it, now, lastTypedAtMs) }
+            lastTypedAtMs = now
+        }
         markdown.value = value
         open.value?.path?.let { rememberTags(it, value) }
         noteChanged()
@@ -1869,6 +1893,22 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             val title = path.substringAfterLast('/').substringBeforeLast('.')
             message.value = "Arbeitsblatt „$title“ wurde als neue Notiz angelegt."
             graph.engine.notifyLocalChange()
+        }
+    }
+
+    /** Like [readUri] but gives up with [StudyImageTooLarge] once more than [max] bytes arrive. */
+    fun readUriCapped(uri: Uri, max: Int): ByteArray? {
+        val input = getApplication<Application>().contentResolver.openInputStream(uri) ?: return null
+        input.use { stream ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val n = stream.read(buffer)
+                if (n < 0) break
+                if (out.size() + n > max) throw StudyImageTooLarge()
+                out.write(buffer, 0, n)
+            }
+            return out.toByteArray()
         }
     }
 
@@ -3155,15 +3195,20 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Reads a picked image off the main thread, shrinks it to the note's budget and adds it to [page]. */
+    private val STUDY_IMAGE_INPUT_MAX_BYTES = 40 * 1024 * 1024
+
     fun importStudyImage(uri: Uri, page: Int, title: String? = null, afterRead: () -> Unit = {}) {
         val resolver = getApplication<Application>().contentResolver
         viewModelScope.launch {
             var tooLarge = false
             val payload = withContext(Dispatchers.IO) {
                 try {
-                    val bytes = readUri(uri) ?: return@withContext null
+                    val bytes = readUriCapped(uri, STUDY_IMAGE_INPUT_MAX_BYTES) ?: return@withContext null
                     StudyImageImport.encode(bytes, resolver.getType(uri).orEmpty())
                 } catch (_: StudyImageTooLarge) {
+                    tooLarge = true
+                    null
+                } catch (_: OutOfMemoryError) {
                     tooLarge = true
                     null
                 } catch (_: Exception) {
@@ -3191,7 +3236,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             var tooLarge = false
             val payload = withContext(Dispatchers.IO) {
-                try { renderPdfCrop(note, page, crop) } catch (_: StudyImageTooLarge) { tooLarge = true; null } catch (_: Exception) { null }
+                try { renderPdfCrop(note, page, crop) } catch (_: StudyImageTooLarge) { tooLarge = true; null } catch (_: OutOfMemoryError) { tooLarge = true; null } catch (_: Exception) { null }
             }
             if (payload == null) {
                 message.value = if (tooLarge) "Das Bild ist zu groß." else "Der Ausschnitt konnte nicht gerendert werden."
@@ -3213,6 +3258,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                         val aspect = page.height.toDouble() / page.width.coerceAtLeast(1)
                         val (w, h) = ch.fasrv.fanotes.study.cropRenderSize(crop, aspect)
                         val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                        try {
                         bitmap.eraseColor(android.graphics.Color.WHITE)
                         val sx = w / ((crop.r - crop.l) * page.width).toFloat()
                         val sy = h / ((crop.b - crop.t) * page.height).toFloat()
@@ -3223,9 +3269,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                         page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                         val out = java.io.ByteArrayOutputStream()
                         bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                        bitmap.recycle()
                         // Same budget and PNG rules as a picked image (long edge 1400, shrinks to fit).
                         return StudyImageImport.encode(out.toByteArray(), "image/png")
+                        } finally {
+                            bitmap.recycle()
+                        }
                     }
                 }
             }

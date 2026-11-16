@@ -353,6 +353,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        model.flushStudyTimer()
         try {
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeout(4_000) { model.saveNow() }
@@ -3141,10 +3142,21 @@ private fun PageSurface(
         if (uri != null && target != null) model.importStudyImage(uri, target.ink.study.visiblePage())
     }
     val appContext = androidx.compose.ui.platform.LocalContext.current
-    val cameraTarget = remember { arrayOfNulls<Pair<java.io.File, Int>>(1) }
+    // "path|page" of a photo being taken; saved so a recreated activity can still import it.
+    var cameraTarget by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        // Drop photos left by an interrupted capture (the pending one is kept).
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val keep = cameraTarget.substringBeforeLast('|', "")
+            java.io.File(appContext.cacheDir, "study-camera").listFiles()?.forEach { if (it.path != keep) it.delete() }
+        }
+    }
     val takeStudyPhoto = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
-        val (file, pageNumber) = cameraTarget[0] ?: return@rememberLauncherForActivityResult
-        cameraTarget[0] = null
+        val target = cameraTarget
+        cameraTarget = ""
+        val file = java.io.File(target.substringBeforeLast('|', ""))
+        val pageNumber = target.substringAfterLast('|', "").toIntOrNull() ?: return@rememberLauncherForActivityResult
+        if (file.path.isEmpty() || file.parentFile?.name != "study-camera") return@rememberLauncherForActivityResult
         if (!saved) {
             file.delete()
             return@rememberLauncherForActivityResult
@@ -3241,7 +3253,7 @@ private fun PageSurface(
             )
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
-            page.onStudyBlock = { kind, index -> model.openStudyBlock(kind, index) }
+            page.onStudyBlock = { kind, from, hash -> model.openStudyBlock(kind, from, hash) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
             val pendingStamp = model.stampRequest.value
             if (!pendingStamp.isNullOrEmpty()) {
@@ -3312,11 +3324,11 @@ private fun PageSurface(
             page.onStudyCamera = {
                 val dir = java.io.File(appContext.cacheDir, "study-camera").apply { mkdirs() }
                 val file = java.io.File(dir, "photo-${System.currentTimeMillis()}.jpg")
-                cameraTarget[0] = file to page.ink.study.visiblePage()
+                cameraTarget = "${file.path}|${page.ink.study.visiblePage()}"
                 try {
                     takeStudyPhoto.launch(androidx.core.content.FileProvider.getUriForFile(appContext, "${appContext.packageName}.files", file))
                 } catch (_: Exception) {
-                    cameraTarget[0] = null
+                    cameraTarget = ""
                     file.delete()
                     model.message.value = "Keine Kamera-App gefunden."
                 }

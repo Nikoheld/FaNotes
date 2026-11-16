@@ -4,7 +4,10 @@ import { clipboardImageFile } from '../lib/clipboardImage'
 import { noteLinkPageAtPoint } from '../lib/noteLink'
 import { readUsedSheetZoom } from '../lib/paperView'
 import {
+  ANNOTATION_IMAGE_BUDGET_CHARS,
+  ANNOTATION_IMAGE_TARGET_CHARS,
   STAMPS,
+  annotationImageChars,
   createAnnotationHistory,
   formatMeasure,
   legendRows,
@@ -55,10 +58,13 @@ const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, rejec
   image.src = src
 })
 
-/** Downscale to a data URL that fits in the note file. */
+/**
+ * Re-encode to a small data URL: at most 1200 px on the long edge, JPEG quality stepped down
+ * until it fits the target size. PNG is tried first for crops (line art) when it is small enough.
+ */
 const encodeImage = (source: CanvasImageSource, width: number, height: number, png: boolean) => {
-  let max = png ? 1400 : 1600
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  let max = 1200
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     const scale = Math.min(1, max / Math.max(width, height))
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(width * scale))
@@ -68,9 +74,15 @@ const encodeImage = (source: CanvasImageSource, width: number, height: number, p
     context.fillStyle = '#fff'
     context.fillRect(0, 0, canvas.width, canvas.height)
     context.drawImage(source, 0, 0, canvas.width, canvas.height)
-    const url = png && attempt === 0 ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85 - attempt * 0.1)
-    if (url.length <= 1_500_000) return { url, aspect: canvas.width / canvas.height }
-    max *= 0.7
+    if (png && attempt < 2) {
+      const url = canvas.toDataURL('image/png')
+      if (url.length <= ANNOTATION_IMAGE_TARGET_CHARS) return { url, aspect: canvas.width / canvas.height }
+    }
+    for (const quality of [0.82, 0.7, 0.58, 0.46]) {
+      const url = canvas.toDataURL('image/jpeg', quality)
+      if (url.length <= ANNOTATION_IMAGE_TARGET_CHARS) return { url, aspect: canvas.width / canvas.height }
+    }
+    max *= 0.78
   }
   throw new Error('Das Bild ist zu groß.')
 }
@@ -183,6 +195,27 @@ export function StudyAnnotationLayer({ path, pdf, open, onClose }: StudyAnnotati
     }).catch(() => { if (!cancelled) loadedPathRef.current = path })
     return () => { cancelled = true }
   }, [flush, path, replace])
+
+  // The companion file can be replaced from outside (sync, another window). Adopt it unless there
+  // are unsaved local edits, and drop the undo stack: its snapshots belong to the replaced list.
+  useEffect(() => {
+    if (!path || typeof window.fanotes.onVaultChanged !== 'function' || typeof window.fanotes.readNoteCompanion !== 'function') return undefined
+    const famdPath = `${path.replace(/\.(md|markdown|famd|pdf)$/iu, '')}.famd`
+    return window.fanotes.onVaultChanged((change) => {
+      if (!change.changed.some((entry) => entry === famdPath || entry.endsWith(`/${famdPath}`))) return
+      if (dirtyRef.current || saveTimerRef.current !== null || loadedPathRef.current !== path) return
+      void window.fanotes.readNoteCompanion?.(path).then((companion) => {
+        if (pathRef.current !== path || dirtyRef.current || saveTimerRef.current !== null) return
+        const incoming = parseAnnotations(companion?.annotations)
+        if (JSON.stringify(incoming) === JSON.stringify(itemsRef.current)) return
+        historyRef.current = createAnnotationHistory()
+        setHistoryTick((tick) => tick + 1)
+        setSelectedId(null)
+        setCompareId(null)
+        replace(incoming)
+      }).catch(() => {})
+    })
+  }, [path, replace])
 
   useEffect(() => {
     const onHide = () => { void flush() }
@@ -342,6 +375,12 @@ export function StudyAnnotationLayer({ path, pdf, open, onClose }: StudyAnnotati
       return
     }
     const { url, aspect } = encodeImage(source, width, height, png)
+    const used = annotationImageChars(itemsRef.current)
+    if (used + url.length > ANNOTATION_IMAGE_BUDGET_CHARS) {
+      const mb = (chars: number) => (chars / 1_000_000).toFixed(1).replace('.', ',')
+      setStatus(`Bildspeicher dieser Notiz voll (${mb(used)} von ${mb(ANNOTATION_IMAGE_BUDGET_CHARS)} MB). Entferne zuerst ein Bild.`)
+      return
+    }
     const page = at?.page ?? visiblePage()
     const created = add({ kind: 'image', id: newAnnotationId(), page, x: at?.x ?? 0.06, y: at?.y ?? 0.06, w: at?.w ?? 0.4, aspect, opacity: 1, locked: false, src: url, title } as ImageAnnotation)
     if (created) { setSelectedId(created.id); setStatus('Bild eingefügt. Zum Nachzeichnen die Deckkraft senken und sperren.') }

@@ -1,5 +1,5 @@
 import { Check, MessageSquare, RotateCcw, Trash2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import * as commands from '../editor/commands'
 import type { WritingController } from '../editor/controller'
 import { makeDoc } from '../editor/doc'
@@ -38,7 +38,10 @@ const Toggle = ({ label, checked, onChange }: { label: string; checked: boolean;
   <label className="wm-toggle"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /> <span>{label}</span></label>
 )
 
-export function Inspector({ controller, manifest, footnoteNumbers, onClose, tab: requestedTab, onTab, check, scene }: { controller: WritingController; manifest: StoryManifest; footnoteNumbers: Map<string, string>; onClose: () => void; tab: Tab; onTab: (tab: Tab) => void; check: Omit<ComponentProps<typeof CheckPanel>, 'controller'>; scene: import('react').ReactNode }) {
+export const Inspector = memo(function Inspector({ controller, manifest, footnoteNumbers, onClose, tab: requestedTab, onTab, check, scene }: {
+  /** Changes when the document changed; the panels read it from the controller. */
+  revision?: unknown
+  controller: WritingController; manifest: StoryManifest; footnoteNumbers: Map<string, string>; onClose: () => void; tab: Tab; onTab: (tab: Tab) => void; check: Omit<ComponentProps<typeof CheckPanel>, 'controller'>; scene: import('react').ReactNode }) {
   const tab = requestedTab
   const setTab = onTab
   const [styleId, setStyleId] = useState('body')
@@ -241,4 +244,4 @@ export function Inspector({ controller, manifest, footnoteNumbers, onClose, tab:
       )}
     </aside>
   )
-}
+})

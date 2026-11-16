@@ -6,7 +6,16 @@
 
 export const ANNOTATION_LIMIT = 600
 export const ANNOTATION_IMAGE_LIMIT = 12
-export const ANNOTATION_IMAGE_MAX_CHARS = 1_600_000
+export const ANNOTATION_IMAGE_MAX_CHARS = 1_600_000 // still accepted when reading older notes
+/** New images are re-encoded to stay near this size (data URL characters, about 225 KB of JPEG). */
+export const ANNOTATION_IMAGE_TARGET_CHARS = 300_000
+/** Hard cap for one new image after re-encoding. */
+export const ANNOTATION_IMAGE_NEW_MAX_CHARS = 450_000
+/** Per-note budget for all annotation images, well below the 16 MB sync limit. */
+export const ANNOTATION_IMAGE_BUDGET_CHARS = 8_000_000
+export const annotationImageChars = (list) => (
+  Array.isArray(list) ? list.reduce((sum, item) => sum + (item && item.kind === 'image' && typeof item.src === 'string' ? item.src.length : 0), 0) : 0
+)
 export const ANNOTATION_TEXT_MAX = 400
 export const ANNOTATION_TERMS_MAX = 80
 export const ANNOTATION_STROKE_POINTS_MAX = 600
@@ -45,6 +54,24 @@ const text = (value, max = ANNOTATION_TEXT_MAX) => (typeof value === 'string' ? 
 
 export const newAnnotationId = () => `an-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
+/**
+ * Replacement id for an object that has none (or an invalid one). Deterministic, so loading
+ * the same file twice, or merging conflict copies, never mints a second identity.
+ * Rule (shared with Android): "an-" + FNV-1a 32 bit of the UTF-8 bytes of
+ * kind|index|page|round(x*10000)|round(y*10000)|text, in base 36, where index is the
+ * position in the stored array and x/y (clamped to 0..1) are ax,ay for callouts, the first point for
+ * strokes and measures, else x,y (missing = 0), text is the label text or stamp id.
+ */
+export const stableAnnotationId = (kind, index, page, x, y, text) => {
+  const canonical = `${kind}|${index}|${page}|${Math.round(unit(x, 0) * 10000)}|${Math.round(unit(y, 0) * 10000)}|${text}`
+  let hash = 0x811c9dc5
+  for (const byte of new TextEncoder().encode(canonical)) {
+    hash ^= byte
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return `an-${hash.toString(36)}`
+}
+
 const points = (value, min, max) => {
   if (!Array.isArray(value)) return []
   const out = []
@@ -59,11 +86,17 @@ const points = (value, min, max) => {
   return out.length >= min ? out : []
 }
 
-export const sanitizeAnnotation = (value) => {
+export const sanitizeAnnotation = (value, index = 0) => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const raw = value
   if (typeof raw.kind !== 'string' || !KINDS.has(raw.kind)) return null
-  const id = typeof raw.id === 'string' && ID.test(raw.id) ? raw.id : newAnnotationId()
+  const firstPoint = Array.isArray(raw.pts) && Array.isArray(raw.pts[0]) ? raw.pts[0] : []
+  const id = typeof raw.id === 'string' && ID.test(raw.id) ? raw.id : stableAnnotationId(
+    raw.kind, index, page(raw.page),
+    raw.kind === 'callout' ? raw.ax : firstPoint.length ? firstPoint[0] : raw.x,
+    raw.kind === 'callout' ? raw.ay : firstPoint.length ? firstPoint[1] : raw.y,
+    typeof raw.text === 'string' ? raw.text : typeof raw.stamp === 'string' ? raw.stamp : '',
+  )
   switch (raw.kind) {
     case 'callout': {
       const ax = unit(raw.ax, 0.5)
@@ -131,8 +164,8 @@ export const parseAnnotations = (value) => {
   const seen = new Set()
   const out = []
   let images = 0
-  for (const entry of value) {
-    const item = sanitizeAnnotation(entry)
+  for (const [index, entry] of value.entries()) {
+    const item = sanitizeAnnotation(entry, index)
     if (!item || seen.has(item.id)) continue
     if (item.kind === 'image' && ++images > ANNOTATION_IMAGE_LIMIT) continue
     seen.add(item.id)

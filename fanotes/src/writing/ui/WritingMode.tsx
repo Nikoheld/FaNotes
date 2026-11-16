@@ -1,15 +1,14 @@
 import {
-  AlignCenter, AlignJustify, AlignLeft, AlignRight, ArrowLeft, Bold, BookOpen, ChevronDown, ChevronRight, Columns2, Eye, FilePlus2, FileText,
-  CalendarRange, Download, Focus, Italic, LayoutGrid, ListTree, LoaderCircle, MapPin, MessageSquarePlus, Minus, MoreHorizontal, PanelRight, Plus, Redo2, Replace, Search, SlidersHorizontal, SpellCheck, Strikethrough, Subscript, Superscript, Target, TextCursor, Trash2, Underline, Undo2, Users, X,
+  ArrowLeft, ChevronDown, ChevronRight, FilePlus2, LoaderCircle, MoreHorizontal, Plus, Replace, Search, Trash2, X,
 } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as commands from '../editor/commands'
 import { WritingController, type EditKind } from '../editor/controller'
 import { blockAt, blockLength, caret, clampPos, isCollapsed, makeDoc, ordered, updateBinder, withScene, type Pos } from '../editor/doc'
 import { CanvasMeasurer, loadHyphenator, loadWritingFonts, hyphenatorFor, type Hyphenator } from '../layout/measure'
 import { LayoutCache, layoutManuscript } from '../layout/paginate'
 import { LANGUAGE_TYPOGRAPHY } from '../model/defaults'
-import { paragraphKey, titleKey } from '../model/flow'
+import { paragraphKey, titleKey, type FlowBlock } from '../model/flow'
 import { writerId } from '../model/ids'
 import { marksAt, runsText } from '../model/runs'
 import type { Align, BinderNode, FontFamilyId, Marks, Scene, StoryLanguage, StoryManifest } from '../model/types'
@@ -22,6 +21,9 @@ import { autocorrectAfterInput, startsSentence } from '../assist/typography'
 import { AssistPopover, type PopoverTarget } from './AssistPopover'
 import { defaultAutocorrectSettings, type AutocorrectSettings } from './CheckPanel'
 import { Inspector, type InspectorTab } from './Inspector'
+import { ZOOMS, Toolbar, type Area, type ToolbarActions } from './Toolbar'
+import { StatusBar } from './StatusBar'
+import { useBurstThrottled, useShallowStable, useStableActions } from './renderHooks'
 import { Corkboard, Outline, LABEL_COLORS, STATUS_LABEL } from './BoardViews'
 import { BibleSheets, Timeline } from './BibleViews'
 import { GoalsView } from './GoalsView'
@@ -49,25 +51,9 @@ type Props = {
   onSaved?: (paths: string[]) => void
 }
 
-const FONT_CHOICES: Array<{ id: FontFamilyId; label: string }> = [
-  { id: 'literata', label: 'Literata' },
-  { id: 'garamond', label: 'EB Garamond' },
-  { id: 'courier', label: 'Courier Prime' },
-  { id: 'atkinson', label: 'Atkinson' },
-]
-const SIZES = [8, 9, 10, 10.5, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 40]
-const ZOOMS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3]
-const COLORS = ['#1f2937', '#7f1d1d', '#9a3412', '#166534', '#1e3a8a', '#6b21a8', '#6b7280']
-const HIGHLIGHTS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa']
-const LANGUAGES: Array<{ id: StoryLanguage; label: string }> = [
-  { id: 'de', label: 'DE' },
-  { id: 'de-CH', label: 'DE-CH' },
-  { id: 'en-US', label: 'EN-US' },
-  { id: 'en-GB', label: 'EN-GB' },
-]
-
 type FindState = { open: boolean; replace: boolean; query: string; replacement: string; caseSensitive: boolean; wholeWord: boolean; regex: boolean; current: number }
 
+const NO_HIGHLIGHTS: Highlight[] = []
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
 
 export function WritingMode({ path, onClose, onSaved }: Props) {
@@ -84,7 +70,6 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const [binderOpen, setBinderOpen] = useState(true)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('check')
-  type Area = 'manuscript' | 'board' | 'outline' | 'characters' | 'places' | 'timeline' | 'goals'
   const [area, setArea] = useState<Area>(() => (localStorage.getItem('fanotes.writing.area') as Area | null) ?? 'manuscript')
   const [reference, setReference] = useState<Reference | null>(null)
   const [typewriter, setTypewriter] = useState(() => localStorage.getItem('fanotes.writing.typewriter') === '1')
@@ -160,6 +145,8 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   const subscribe = useCallback((listener: () => void) => controller?.subscribe(listener) ?? (() => undefined), [controller])
   const state = useSyncExternalStore(subscribe, () => controller?.state ?? null)
   const doc = state?.doc ?? null
+  // Word counts, the binder and the inspector follow the document with a short delay while typing.
+  const slowDoc = useBurstThrottled(doc)
 
   // ── Layout ─────────────────────────────────────────────────────────────
   // The previous layout lets pagination restart at the changed page (see paginate.ts).
@@ -495,16 +482,18 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
     if (!found && !word) return
     setPopover({ block: pos.block, left: rect.left + x * zoom, top: rect.top + y * zoom + 18, issue: found?.issue ?? null, word, synonyms: !spelling, language: language.startsWith('de') ? 'de' : 'en' })
   }
-  const underlinesFor = useCallback((blockIndex: number) => {
-    if (!layout) return []
-    const block = layout.blocks[blockIndex]
-    if (block?.ref.kind !== 'para') return []
-    return assistant.check(block.runs, block.lang, layout.blocks.length ? (doc?.manifest.language ?? 'de') : 'de').issues
+  // Keyed on the assistant's inputs only (not on the layout), so that pages whose lines did not change keep their underlines.
+  const storyLanguage = doc?.manifest.language ?? 'de'
+  const dictionaryWords = doc?.manifest.dictionary
+  const ignoredIssues = doc?.manifest.ignored
+  const underlinesFor = useCallback((block: FlowBlock) => {
+    if (block.ref.kind !== 'para') return []
+    return assistant.check(block.runs, block.lang, storyLanguage).issues
       .filter((issue) => issue.to > issue.from)
       .map((issue) => ({ block: block.key, from: issue.from, to: issue.to, kind: issue.category === 'spelling' ? 'spelling' as const : issue.category === 'style' ? 'style' as const : 'grammar' as const }))
     // The assistant's lists, settings and lexicon are part of its cache key.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layout, assistant, assistSettings, lexiconReady, doc?.manifest.dictionary, doc?.manifest.ignored, doc?.manifest.language])
+  }, [assistant, assistSettings, lexiconReady, dictionaryWords, ignoredIssues, storyLanguage])
 
   const moveCaret = (motion: Motion, extend: boolean) => {
     if (!controller || !layout || !measurer) return
@@ -769,7 +758,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
 
   // ── Find & replace ─────────────────────────────────────────────────────
   const matches = useMemo<Highlight[]>(() => {
-    if (!doc || !find.open || !find.query) return []
+    if (!doc || !find.open || !find.query) return NO_HIGHLIGHTS
     let pattern: RegExp
     try {
       const source = find.regex ? find.query : escapeRegExp(find.query)
@@ -838,26 +827,28 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
   const range = doc && selection && !isCollapsed(selection) ? ordered(doc, selection) : null
   const headBlock = doc && selection ? blockAt(doc, selection.head.block) : undefined
   const marks: Marks = (state?.storedMarks ?? (headBlock ? marksAt(headBlock.runs, selection!.head.offset) : undefined)) ?? {}
-  const counts = useMemo(() => (doc ? countBlocks(doc.flow) : { words: 0, chars: 0, charsNoSpaces: 0, paragraphs: 0 }), [doc])
+  const stableMarks = useShallowStable(marks)
+  const counts = useMemo(() => (slowDoc ? countBlocks(slowDoc.flow) : { words: 0, chars: 0, charsNoSpaces: 0, paragraphs: 0 }), [slowDoc])
   // Words per scene for the binder; counts are cached per paragraph, so this is cheap per keystroke.
   const sceneWords = useMemo(() => {
     const out = new Map<string, number>()
-    if (!doc) return out
-    for (const scene of doc.scenes.values()) out.set(scene.id, scene.paragraphs.reduce((sum, paragraph) => sum + (paragraph.deleted ? 0 : countRuns(paragraph.runs).words), 0))
+    if (!slowDoc) return out
+    for (const scene of slowDoc.scenes.values()) out.set(scene.id, scene.paragraphs.reduce((sum, paragraph) => sum + (paragraph.deleted ? 0 : countRuns(paragraph.runs).words), 0))
     return out
-  }, [doc])
+  }, [slowDoc])
+  const sceneWordsOf = useCallback((id: string) => sceneWords.get(id) ?? null, [sceneWords])
   const tools = useStoryTools({
     host,
     path,
     files: storyFiles,
     writer,
-    totalWords: doc ? counts.words : null,
+    totalWords: slowDoc ? counts.words : null,
     onWritten: (paths) => onSaved?.(paths),
     onError: (message) => setNotice(message),
   })
-  const characters = useMemo(() => tools.entriesOf('character'), [tools])
-  const places = useMemo(() => tools.entriesOf('place'), [tools])
-  const events = useMemo(() => tools.entriesOf('event'), [tools])
+  const characters = useMemo(() => tools.entriesOf('character'), [tools.entriesOf])
+  const places = useMemo(() => tools.entriesOf('place'), [tools.entriesOf])
+  const events = useMemo(() => tools.entriesOf('event'), [tools.entriesOf])
   // Names from the bible count as correctly spelled.
   useEffect(() => {
     if (!manifestForLists) return
@@ -938,7 +929,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
     const walk = (nodes: BinderNode[]) => { for (const node of nodes) { for (const link of node.links ?? []) out.add(link); if (node.children) walk(node.children) } }
     if (doc) walk(doc.manifest.binder)
     return [...out]
-  }, [doc])
+  }, [doc?.manifest.binder])
 
   const selectionCounts = useMemo(() => (state && range ? countText(commands.selectedText(state)) : null), [state, range])
   const language = doc?.manifest.language ?? 'de'
@@ -948,7 +939,7 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
   const setStyle = (style: string) => run(controller ? commands.setParagraphStyle(controller.state, style) : null, 'format')
   const setMarkValue = (patch: Parameters<typeof commands.setMark>[1]) => run(controller ? commands.setMark(controller.state, patch) : null, 'format')
   const setAlignment = (align: Align) => run(controller ? commands.setAlign(controller.state, align) : null, 'format')
-  const refocus = () => window.requestAnimationFrame(() => input.current?.focus({ preventScroll: true }))
+  const refocus = useCallback(() => window.requestAnimationFrame(() => input.current?.focus({ preventScroll: true })), [])
 
   const goToBlock = (key: string) => {
     if (!controller) return
@@ -979,6 +970,94 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
     refocus()
   }
 
+  const openGoals = useCallback(() => setArea('goals'), [])
+  const toolbarActions = useStableActions({
+    close,
+    refocus,
+    undo: () => { controller?.undo() },
+    redo: () => { controller?.redo() },
+    setStyle,
+    setMarkValue,
+    setAlignment,
+    toggleMark: (key: 'b' | 'i' | 'u' | 's' | 'sup' | 'sub' | 'sc') => { if (controller) run(commands.toggleMark(controller.state, key), 'format') },
+    insertBreak: (kind: 'page' | 'scene' | 'chapter') => {
+      if (!controller) return
+      run(kind === 'page' ? commands.insertPageBreak(controller.state) : commands.splitScene(controller.state, kind === 'chapter' ? { chapter: true, titles: titles() } : { titles: titles() }), 'structure')
+    },
+    addFootnote,
+    addComment,
+    changeLanguage: (next: StoryLanguage) => {
+      if (!controller || !doc) return
+      controller.replaceDoc(makeDoc({ ...doc.manifest, language: next }, doc.scenes))
+      void loadHyphenator(next).then(() => setHyphenators((value) => ({ ...value, [next]: hyphenatorFor(next) })))
+    },
+    toggleReference: () => {
+      if (!doc) return
+      if (reference) { setReference(null); return }
+      const node = headBlock?.sceneId ? findIn(doc.manifest.binder, headBlock.sceneId) : null
+      const first = node?.links?.[0]
+      setReference(first ? { kind: 'note', path: first } : characters[0] ? { kind: 'bible', id: characters[0].id } : { kind: 'scene', id: [...doc.scenes.keys()][0] })
+    },
+  } satisfies ToolbarActions)
+  const binderActions = useStableActions({
+    open: (node: BinderNode) => {
+      if (node.kind === 'scene') { openScene(node.id); return }
+      if (node.id === TRASH_ID || node.kind === 'folder') return
+      setArea('manuscript')
+      goToBlock(titleKey(node.id))
+    },
+    rename: renameNode,
+    addChapter,
+    addScene,
+    move: moveBinderNode,
+    patch: patchNode,
+    trash: trashNode,
+  })
+  const sceneActions = useStableActions({
+    patch: (sceneId: string, patch: Partial<BinderNode>) => patchNode(sceneId, patch),
+    openNote: (notePath: string) => setReference({ kind: 'note', path: notePath }),
+    takeSnapshot: async (sceneId: string, title: string, note: string) => {
+      const scene = controller?.state.doc.scenes.get(sceneId)
+      if (!scene) return
+      try {
+        await tools.takeSnapshot(scene, title, 'manual', note)
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : String(error))
+      }
+    },
+    compare: (stamp: string) => { void openCompare(stamp) },
+    jump: (block: string, from: number, to: number) => { controller?.select({ anchor: { block, offset: from }, head: { block, offset: to } }); refocus() },
+    closeInspector: () => setInspectorOpen(false),
+  })
+  const headSceneId = headBlock?.sceneId ?? null
+  const slowLayout = useBurstThrottled(layout)
+  const checkProps = useMemo(() => ({
+    assistant,
+    settings: assistSettings,
+    onSettings: setAssistSettings,
+    autocorrect,
+    onAutocorrect: setAutocorrect,
+    sceneId: headSceneId,
+    onJump: sceneActions.jump,
+  }), [assistant, assistSettings, autocorrect, headSceneId, sceneActions])
+  const scenePanel = useMemo(() => {
+    const node = headSceneId && slowDoc ? findIn(slowDoc.manifest.binder, headSceneId) : null
+    return (
+      <ScenePanel
+        key={headSceneId ?? 'none'}
+        node={node}
+        words={headSceneId ? sceneWords.get(headSceneId) ?? 0 : 0}
+        characters={characters}
+        places={places}
+        stamps={headSceneId ? tools.stampsFor(headSceneId) : []}
+        onPatch={(patch) => { if (headSceneId) sceneActions.patch(headSceneId, patch) }}
+        onOpenNote={sceneActions.openNote}
+        onTakeSnapshot={(note) => sceneActions.takeSnapshot(headSceneId ?? '', node?.title ?? '', note)}
+        onCompare={sceneActions.compare}
+      />
+    )
+  }, [headSceneId, slowDoc?.manifest.binder, sceneWords, characters, places, tools.stampsFor, sceneActions])
+
   if (error) {
     return (
       <div className="wm-root">
@@ -995,104 +1074,39 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
 
   return (
     <div className={`wm-root${focusMode ? ' is-focus' : ''}`}>
-      <header className="wm-toolbar" onMouseDown={(event) => { if ((event.target as HTMLElement).closest('button')) event.preventDefault() }}>
-        <button type="button" className="wm-icon" title={L('Zurück zu den Notizen', 'Back to notes')} onClick={() => void close()}><ArrowLeft size={16} /></button>
-        <button type="button" className={`wm-icon${binderOpen ? ' is-on' : ''}`} title={L('Gliederung', 'Binder')} onClick={() => setBinderOpen((value) => !value)}><BookOpen size={16} /></button>
-        <strong className="wm-title" data-i18n-ignore>{doc.manifest.title || storyTitleFromPath(path)}</strong>
-        <div className="wm-segmented wm-areas" role="tablist" aria-label={L('Bereich', 'Area')}>
-          {([
-            ['manuscript', FileText, L('Manuskript', 'Manuscript')],
-            ['board', LayoutGrid, L('Pinnwand', 'Corkboard')],
-            ['outline', ListTree, L('Übersicht', 'Outline')],
-            ['characters', Users, L('Figuren', 'Characters')],
-            ['places', MapPin, L('Orte', 'Places')],
-            ['timeline', CalendarRange, L('Zeitleiste', 'Timeline')],
-            ['goals', Target, L('Ziele', 'Goals')],
-          ] as const).map(([id, Icon, label]) => (
-            <button key={id} type="button" role="tab" aria-selected={area === id} className={area === id ? 'is-on' : ''} title={label} aria-label={label} onClick={() => { setArea(id); if (id === 'manuscript') refocus() }}><Icon size={15} /></button>
-          ))}
-        </div>
-        <span className="wm-sep" />
-        {area === 'manuscript' && (<>
-        <button type="button" className="wm-icon" title={L('Rückgängig (Strg+Z)', 'Undo (Ctrl+Z)')} disabled={!controller.canUndo()} onClick={() => { controller.undo(); refocus() }}><Undo2 size={16} /></button>
-        <button type="button" className="wm-icon" title={L('Wiederholen (Strg+Y)', 'Redo (Ctrl+Y)')} disabled={!controller.canRedo()} onClick={() => { controller.redo(); refocus() }}><Redo2 size={16} /></button>
-        <span className="wm-sep" />
-        <select className="wm-select wm-style" value={currentStyle} title={L('Absatzformat', 'Paragraph style')} onChange={(event) => { setStyle(event.target.value); refocus() }}>
-          {styleIds.map((id) => <option key={id} value={id}>{styleName(doc.manifest.styles[id])}</option>)}
-        </select>
-        <select className="wm-select" value={marks.font ?? doc.manifest.styles[currentStyle]?.font ?? 'literata'} title={L('Schrift', 'Font')} onChange={(event) => { setMarkValue({ font: event.target.value as FontFamilyId }); refocus() }}>
-          {FONT_CHOICES.map((font) => <option key={font.id} value={font.id}>{font.label}</option>)}
-        </select>
-        <select className="wm-select wm-size" value={String(marks.size ?? doc.manifest.styles[currentStyle]?.size ?? 11)} title={L('Schriftgrösse', 'Font size')} onChange={(event) => { setMarkValue({ size: Number(event.target.value) }); refocus() }}>
-          {[...new Set([...SIZES, marks.size ?? doc.manifest.styles[currentStyle]?.size ?? 11])].sort((a, b) => a - b).map((size) => <option key={size} value={size}>{size}</option>)}
-        </select>
-        <span className="wm-sep" />
-        {([['b', Bold, L('Fett (Strg+B)', 'Bold (Ctrl+B)')], ['i', Italic, L('Kursiv (Strg+I)', 'Italic (Ctrl+I)')], ['u', Underline, L('Unterstrichen (Strg+U)', 'Underline (Ctrl+U)')], ['s', Strikethrough, L('Durchgestrichen', 'Strikethrough')], ['sup', Superscript, L('Hochgestellt', 'Superscript')], ['sub', Subscript, L('Tiefgestellt', 'Subscript')]] as const).map(([key, Icon, label]) => (
-          <button key={key} type="button" className={`wm-icon${marks[key] ? ' is-on' : ''}`} title={label} aria-pressed={Boolean(marks[key])} onClick={() => { run(commands.toggleMark(controller.state, key), 'format'); refocus() }}><Icon size={16} /></button>
-        ))}
-        <button type="button" className={`wm-icon wm-text-icon${marks.sc ? ' is-on' : ''}`} title={L('Kapitälchen (Strg+Umschalt+K)', 'Small caps (Ctrl+Shift+K)')} onClick={() => { run(commands.toggleMark(controller.state, 'sc'), 'format'); refocus() }}>Kᴀᴘ</button>
-        <details className="wm-menu">
-          <summary className="wm-icon" title={L('Farbe und Markierung', 'Colour and highlight')}><span className="wm-color-dot" style={{ background: marks.color ?? 'currentColor' }} /><ChevronDown size={12} /></summary>
-          <div className="wm-popover">
-            <small>{L('Schriftfarbe', 'Text colour')}</small>
-            <div className="wm-swatches">{COLORS.map((color) => <button key={color} type="button" style={{ background: color }} aria-label={color} onClick={() => { setMarkValue({ color }); refocus() }} />)}<button type="button" className="wm-swatch-clear" onClick={() => { setMarkValue({ color: null }); refocus() }}><X size={12} /></button></div>
-            <small>{L('Markierung', 'Highlight')}</small>
-            <div className="wm-swatches">{HIGHLIGHTS.map((color) => <button key={color} type="button" style={{ background: color }} aria-label={color} onClick={() => { setMarkValue({ hl: color }); refocus() }} />)}<button type="button" className="wm-swatch-clear" onClick={() => { setMarkValue({ hl: null }); refocus() }}><X size={12} /></button></div>
-          </div>
-        </details>
-        <span className="wm-sep" />
-        {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight], ['justify', AlignJustify]] as const).map(([align, Icon]) => (
-          <button key={align} type="button" className={`wm-icon${(headBlock?.align ?? doc.manifest.styles[currentStyle]?.align) === align ? ' is-on' : ''}`} title={{ left: L('Linksbündig (Strg+L)', 'Align left (Ctrl+L)'), center: L('Zentriert (Strg+E)', 'Centre (Ctrl+E)'), right: L('Rechtsbündig (Strg+R)', 'Align right (Ctrl+R)'), justify: L('Blocksatz (Strg+J)', 'Justify (Ctrl+J)') }[align]} onClick={() => { setAlignment(align); refocus() }}><Icon size={16} /></button>
-        ))}
-        <span className="wm-sep" />
-        <details className="wm-menu">
-          <summary className="wm-icon" title={L('Einfügen', 'Insert')}><Plus size={16} /><ChevronDown size={12} /></summary>
-          <div className="wm-popover wm-list">
-            <button type="button" onClick={() => { addFootnote(); refocus() }}>{L('Fussnote', 'Footnote')} <kbd>Strg+Alt+F</kbd></button>
-            <button type="button" onClick={() => { addComment(); refocus() }}><MessageSquarePlus size={14} /> {L('Kommentar', 'Comment')} <kbd>Strg+Alt+M</kbd></button>
-            <button type="button" onClick={() => { run(commands.insertPageBreak(controller.state), 'structure'); refocus() }}>{L('Seitenumbruch', 'Page break')} <kbd>Strg+Enter</kbd></button>
-            <button type="button" onClick={() => { run(commands.splitScene(controller.state, { titles: titles() }), 'structure'); refocus() }}>{L('Neue Szene ab hier', 'New scene from here')} <kbd>Strg+⇧+Enter</kbd></button>
-            <button type="button" onClick={() => { run(commands.splitScene(controller.state, { chapter: true, titles: titles() }), 'structure'); refocus() }}>{L('Neues Kapitel ab hier', 'New chapter from here')} <kbd>Strg+Alt+Enter</kbd></button>
-          </div>
-        </details>
-        <button type="button" className={`wm-icon${find.open ? ' is-on' : ''}`} title={L('Suchen und Ersetzen (Strg+F / Strg+H)', 'Find and replace (Ctrl+F / Ctrl+H)')} onClick={() => setFind((value) => ({ ...value, open: !value.open }))}><Search size={16} /></button>
-        </>)}
-        <span className="wm-grow" />
-        <select className="wm-select" value={language} title={L('Sprache der Geschichte', 'Story language')} onChange={(event) => {
-          const next = event.target.value as StoryLanguage
-          controller.replaceDoc(makeDoc({ ...doc.manifest, language: next }, doc.scenes))
-          void loadHyphenator(next).then(() => setHyphenators((value) => ({ ...value, [next]: hyphenatorFor(next) })))
-        }}>
-          {LANGUAGES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-        </select>
-        <div className="wm-segmented" role="group" aria-label={L('Ansicht', 'View')}>
-          <button type="button" className={view === 'page' ? 'is-on' : ''} title={L('Seitenansicht', 'Print layout')} onClick={() => setView('page')}><FileText size={15} /></button>
-          <button type="button" className={view === 'spread' ? 'is-on' : ''} title={L('Doppelseite', 'Two-page spread')} onClick={() => setView('spread')}><Columns2 size={15} /></button>
-          <button type="button" className={view === 'draft' ? 'is-on' : ''} title={L('Entwurf (fortlaufend)', 'Draft (continuous)')} onClick={() => setView('draft')}><Eye size={15} /></button>
-        </div>
-        <select className="wm-select wm-theme" value={theme} title={L('Papier', 'Paper')} onChange={(event) => setTheme(event.target.value as PageTheme)}>
-          <option value="paper">{L('Papier', 'Paper')}</option>
-          <option value="sepia">{L('Sepia', 'Sepia')}</option>
-          <option value="night">{L('Nacht', 'Night')}</option>
-          <option value="contrast">{L('Hoher Kontrast', 'High contrast')}</option>
-        </select>
-        <button type="button" className="wm-icon" title={L('Exportieren: PDF, Word, EPUB, Markdown, Text', 'Export: PDF, Word, EPUB, Markdown, text')} onClick={() => setExportOpen(true)}><Download size={16} /></button>
-        <button type="button" className={`wm-icon${typewriter ? ' is-on' : ''}`} title={L('Schreibmaschinen-Modus: die aktuelle Zeile bleibt auf gleicher Höhe', 'Typewriter mode: the current line stays at the same height')} aria-pressed={typewriter} onClick={() => { setTypewriter((value) => !value); refocus() }}><TextCursor size={16} /></button>
-        <button type="button" className={`wm-icon${reference ? ' is-on' : ''}`} title={L('Geteilte Ansicht: Szene, Figur oder Notiz daneben', 'Split view: a scene, character or note alongside')} aria-pressed={Boolean(reference)} onClick={() => {
-          if (reference) { setReference(null); return }
-          const node = headBlock?.sceneId ? findIn(doc.manifest.binder, headBlock.sceneId) : null
-          const first = node?.links?.[0]
-          setReference(first ? { kind: 'note', path: first } : characters[0] ? { kind: 'bible', id: characters[0].id } : { kind: 'scene', id: [...doc.scenes.keys()][0] })
-        }}><PanelRight size={16} /></button>
-        <button type="button" className={`wm-icon${inspectorOpen && inspectorTab === 'check' ? ' is-on' : ''}`} title={L('Prüfen: Rechtschreibung, Grammatik, Stil (F7)', 'Check spelling, grammar and style (F7)')} onClick={() => { if (inspectorOpen && inspectorTab === 'check') setInspectorOpen(false); else { setInspectorOpen(true); setInspectorTab('check') } }}><SpellCheck size={16} /></button>
-        <button type="button" className={`wm-icon${inspectorOpen && inspectorTab !== 'check' ? ' is-on' : ''}`} title={L('Seite, Formate und Notizen', 'Page, styles and notes')} onClick={() => { if (inspectorOpen && inspectorTab !== 'check') setInspectorOpen(false); else { setInspectorOpen(true); setInspectorTab('page') } }}><SlidersHorizontal size={16} /></button>
-        <button type="button" className={`wm-icon${focusMode ? ' is-on' : ''}`} title={L('Fokusmodus (F11)', 'Focus mode (F11)')} onClick={() => { setFocusMode((value) => !value); refocus() }}><Focus size={16} /></button>
-        <div className="wm-zoom">
-          <button type="button" className="wm-icon" title={L('Verkleinern', 'Zoom out')} onClick={() => setZoom((value) => ZOOMS.filter((step) => step < value - 0.001).at(-1) ?? value)}><Minus size={14} /></button>
-          <button type="button" className="wm-zoom-value" title={L('Auf 100 % (auch: Ctrl + Mausrad, zwei Finger)', 'Reset to 100 % (also: Ctrl + wheel, pinch)')} onClick={() => { setZoom(1); refocus() }}>{Math.round(zoom * 100)} %</button>
-          <button type="button" className="wm-icon" title={L('Vergrössern', 'Zoom in')} onClick={() => setZoom((value) => ZOOMS.find((step) => step > value + 0.001) ?? value)}><Plus size={14} /></button>
-        </div>
-      </header>
+      <Toolbar
+        act={toolbarActions}
+        title={doc.manifest.title || storyTitleFromPath(path)}
+        binderOpen={binderOpen}
+        setBinderOpen={setBinderOpen}
+        area={area}
+        setArea={setArea}
+        canUndo={controller.canUndo()}
+        canRedo={controller.canRedo()}
+        styles={doc.manifest.styles}
+        currentStyle={currentStyle}
+        marks={stableMarks}
+        align={headBlock?.align}
+        findOpen={find.open}
+        setFind={setFind}
+        language={language}
+        view={view}
+        setView={setView}
+        theme={theme}
+        setTheme={setTheme}
+        setExportOpen={setExportOpen}
+        typewriter={typewriter}
+        setTypewriter={setTypewriter}
+        referenceOpen={Boolean(reference)}
+        inspectorOpen={inspectorOpen}
+        setInspectorOpen={setInspectorOpen}
+        inspectorTab={inspectorTab}
+        setInspectorTab={setInspectorTab}
+        focusMode={focusMode}
+        setFocusMode={setFocusMode}
+        zoom={zoom}
+        setZoom={setZoom}
+      />
 
       {find.open && (
         <div className="wm-find" role="search">
@@ -1121,27 +1135,22 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
       <div className="wm-body">
         {binderOpen && !focusMode && (
           <Binder
-            nodes={doc.manifest.binder}
+            nodes={slowDoc?.manifest.binder ?? doc.manifest.binder}
             currentScene={headBlock?.sceneId ?? null}
-            sceneWords={(id) => sceneWords.get(id) ?? null}
-            onOpen={(node) => {
-              if (node.kind === 'scene') { openScene(node.id); return }
-              if (node.id === TRASH_ID || node.kind === 'folder') return
-              setArea('manuscript')
-              goToBlock(titleKey(node.id))
-            }}
-            onRename={renameNode}
-            onAddChapter={addChapter}
-            onAddScene={addScene}
-            onMove={moveBinderNode}
-            onPatch={patchNode}
-            onTrash={trashNode}
+            sceneWords={sceneWordsOf}
+            onOpen={binderActions.open}
+            onRename={binderActions.rename}
+            onAddChapter={binderActions.addChapter}
+            onAddScene={binderActions.addScene}
+            onMove={binderActions.move}
+            onPatch={binderActions.patch}
+            onTrash={binderActions.trash}
           />
         )}
         {area !== 'manuscript' && (
           <div className="wm-area">
-            {area === 'board' && <Corkboard binder={doc.manifest.binder} sceneWords={(id) => sceneWords.get(id) ?? null} characters={characters} onPatch={patchNode} onMove={moveBinderNode} onOpen={openScene} />}
-            {area === 'outline' && <Outline binder={doc.manifest.binder} sceneWords={(id) => sceneWords.get(id) ?? null} characters={characters} onPatch={patchNode} onMove={moveBinderNode} onOpen={openScene} />}
+            {area === 'board' && <Corkboard binder={doc.manifest.binder} sceneWords={sceneWordsOf} characters={characters} onPatch={patchNode} onMove={moveBinderNode} onOpen={openScene} />}
+            {area === 'outline' && <Outline binder={doc.manifest.binder} sceneWords={sceneWordsOf} characters={characters} onPatch={patchNode} onMove={moveBinderNode} onOpen={openScene} />}
             {(area === 'characters' || area === 'places') && <BibleSheets key={area} kind={area === 'characters' ? 'character' : 'place'} entries={area === 'characters' ? characters : places} binder={doc.manifest.binder} scenes={doc.scenes} writer={writer} onSave={tools.saveEntry} onOpenScene={openScene} />}
             {area === 'timeline' && <Timeline events={events} characters={characters} places={places} binder={doc.manifest.binder} writer={writer} onSave={tools.saveEntry} onOpenScene={openScene} />}
             {area === 'goals' && <GoalsView goals={doc.manifest.goals ?? {}} total={counts.words} today={tools.todayWords} session={tools.sessionWords} days={tools.days} onGoals={(goals) => controller.replaceDoc(makeDoc({ ...controller.state.doc.manifest, goals }, controller.state.doc.scenes))} />}
@@ -1210,45 +1219,13 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
           <Inspector
             controller={controller}
             manifest={doc.manifest}
-            footnoteNumbers={layout.footnoteNumbers}
-            onClose={() => setInspectorOpen(false)}
+            revision={slowDoc}
+            footnoteNumbers={(slowLayout ?? layout).footnoteNumbers}
+            onClose={sceneActions.closeInspector}
             tab={inspectorTab}
             onTab={setInspectorTab}
-            check={{
-              assistant,
-              settings: assistSettings,
-              onSettings: setAssistSettings,
-              autocorrect,
-              onAutocorrect: setAutocorrect,
-              sceneId: headBlock?.sceneId ?? null,
-              onJump: (block, from, to) => { controller.select({ anchor: { block, offset: from }, head: { block, offset: to } }); refocus() },
-            }}
-            scene={(() => {
-              const sceneId = headBlock?.sceneId ?? null
-              const node = sceneId ? findIn(doc.manifest.binder, sceneId) : null
-              return (
-                <ScenePanel
-                  key={sceneId ?? 'none'}
-                  node={node}
-                  words={sceneId ? sceneWords.get(sceneId) ?? 0 : 0}
-                  characters={characters}
-                  places={places}
-                  stamps={sceneId ? tools.stampsFor(sceneId) : []}
-                  onPatch={(patch) => { if (sceneId) patchNode(sceneId, patch) }}
-                  onOpenNote={(notePath) => setReference({ kind: 'note', path: notePath })}
-                  onTakeSnapshot={async (note) => {
-                    const scene = sceneId ? controller.state.doc.scenes.get(sceneId) : undefined
-                    if (!scene) return
-                    try {
-                      await tools.takeSnapshot(scene, node?.title ?? '', 'manual', note)
-                    } catch (error) {
-                      setNotice(error instanceof Error ? error.message : String(error))
-                    }
-                  }}
-                  onCompare={(stamp) => { void openCompare(stamp) }}
-                />
-              )
-            })()}
+            check={checkProps}
+            scene={scenePanel}
           />
         )}
       </div>
@@ -1286,21 +1263,26 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
         </div>
       )}
 
-      <footer className="wm-status" data-i18n-ignore>
-        <span>{L('Seite', 'Page')} {pageNumber} / {layout.pages.length}</span>
-        <span>{formatNumber(counts.words)} {L('Wörter', 'words')}{selectionCounts ? ` (${formatNumber(selectionCounts.words)} ${L('markiert', 'selected')})` : ''}</span>
-        <span title={L(`${formatNumber(counts.chars)} Zeichen mit Leerzeichen`, `${formatNumber(counts.chars)} characters with spaces`)}>{formatNumber(counts.charsNoSpaces)} {L('Zeichen', 'characters')}</span>
-        <span>{L(`${minutes} Min. Lesezeit`, `${minutes} min read`)}</span>
-        {doc.manifest.goals?.daily ? <button type="button" className="wm-status-goal" onClick={() => setArea('goals')}>{L('Heute', 'Today')} {formatNumber(tools.todayWords)} / {formatNumber(doc.manifest.goals.daily)}</button> : null}
-        <span className="wm-grow" />
-        <span>{styleName(doc.manifest.styles[currentStyle] ?? doc.manifest.styles.body)}</span>
-        <span className={`wm-save is-${saveState}`}>{saveState === 'saved' ? L('Gespeichert', 'Saved') : saveState === 'saving' ? L('Speichert …', 'Saving …') : L('Nicht gespeichert', 'Not saved')}{saveState === 'error' && controller.lastSaveError ? `: ${controller.lastSaveError}` : ''}</span>
-      </footer>
+      <StatusBar
+        pageNumber={pageNumber}
+        pageCount={layout.pages.length}
+        words={counts.words}
+        selectedWords={selectionCounts ? selectionCounts.words : null}
+        chars={counts.chars}
+        charsNoSpaces={counts.charsNoSpaces}
+        minutes={minutes}
+        dailyGoal={doc.manifest.goals?.daily ?? null}
+        todayWords={tools.todayWords}
+        styleLabel={styleName(doc.manifest.styles[currentStyle] ?? doc.manifest.styles.body)}
+        saveState={saveState}
+        saveError={controller.lastSaveError ?? null}
+        onOpenGoals={openGoals}
+      />
     </div>
   )
 }
 
-function Binder({ nodes, currentScene, sceneWords, onOpen, onRename, onAddChapter, onAddScene, onMove, onPatch, onTrash }: {
+const Binder = memo(function Binder({ nodes, currentScene, sceneWords, onOpen, onRename, onAddChapter, onAddScene, onMove, onPatch, onTrash }: {
   nodes: BinderNode[]
   currentScene: string | null
   sceneWords: (id: string) => number | null
@@ -1405,6 +1387,6 @@ function Binder({ nodes, currentScene, sceneWords, onOpen, onRename, onAddChapte
       <p className="wm-binder-hint">{L('Ziehen zum Umordnen', 'Drag to reorder')}</p>
     </nav>
   )
-}
+})
 
 export default WritingMode

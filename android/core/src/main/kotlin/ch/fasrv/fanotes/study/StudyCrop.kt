@@ -86,7 +86,9 @@ fun cropPlacement(r: SRect): CropPlacement {
     val w = r.r - r.l
     val target = min(0.5, max(0.2, w))
     val x = if (r.l + w + target + 0.02 <= 1.0) r.l + w + 0.02 else max(0.0, 1.0 - target - 0.02)
-    return CropPlacement(x, r.t, target)
+    // The image keeps the crop's shape, so its height in page fractions is target * (h / w); keep it on the page.
+    val height = if (w > 0.0) target * (r.b - r.t) / w else 0.0
+    return CropPlacement(x, min(r.t, max(0.0, 1.0 - height)), target)
 }
 
 enum class CompareDock { LEFT, BOTTOM }

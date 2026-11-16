@@ -7,6 +7,7 @@ import ch.fasrv.fanotes.json.jsonBool
 import ch.fasrv.fanotes.json.jsonNumber
 import ch.fasrv.fanotes.json.jsonObject
 import ch.fasrv.fanotes.json.jsonString
+import ch.fasrv.fanotes.json.stringify
 import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
@@ -134,6 +135,29 @@ private val STAMP_IDS = STUDY_STAMPS.map { it.id }.toSet()
 
 private var idCounter = 0L
 
+/**
+ * Replacement id for an annotation without a valid one, identical to the desktop `stableAnnotationId`:
+ * "an-" + base 36 of the FNV-1a 32 bit hash of the UTF-8 bytes of
+ * `kind|index|page|round(x*10000)|round(y*10000)|text`.
+ */
+fun stableAnnotationId(kind: String, index: Int, page: Int, x: Double, y: Double, text: String): String {
+    fun cell(v: Double) = floor(min(1.0, max(0.0, if (v.isFinite()) v else 0.0)) * 10000.0 + 0.5).toLong()
+    val canonical = "$kind|$index|$page|${cell(x)}|${cell(y)}|$text"
+    var hash = 0x811c9dc5L
+    for (byte in canonical.toByteArray(Charsets.UTF_8)) {
+        hash = (hash xor (byte.toLong() and 0xFF)) * 0x01000193L and 0xFFFFFFFFL
+    }
+    return "an-${java.lang.Long.toString(hash, 36)}"
+}
+
+private fun stableIdFor(raw: JsonValue.Obj, kind: String, index: Int): String {
+    val first = (raw["pts"] as? JsonValue.Arr)?.items?.firstOrNull() as? JsonValue.Arr
+    val x = if (kind == "callout") raw["ax"] else if (first != null && first.items.isNotEmpty()) first.items[0] else raw["x"]
+    val y = if (kind == "callout") raw["ay"] else if (first != null && first.items.isNotEmpty()) first.items.getOrNull(1) else raw["y"]
+    val text = raw.string("text") ?: raw.string("stamp") ?: ""
+    return stableAnnotationId(kind, index, page(raw["page"]), num(x, 0.0), num(y, 0.0), text)
+}
+
 /** Same shape as the desktop `newAnnotationId` (`an-<time36>-<rand36>`). */
 fun newAnnotationId(now: Long = System.currentTimeMillis(), random: Long = java.util.concurrent.ThreadLocalRandom.current().nextLong(0, 2_176_782_336L)): String {
     idCounter += 1
@@ -205,11 +229,11 @@ private fun validImageSrc(src: String): Boolean {
 }
 
 /** One annotation object -> typed value, or null when it must be dropped (unknown kind, bad image, too few points). */
-fun sanitizeAnnotation(value: JsonValue?): StudyAnnotation? {
+fun sanitizeAnnotation(value: JsonValue?, index: Int = 0): StudyAnnotation? {
     val raw = value as? JsonValue.Obj ?: return null
     val kind = raw.string("kind") ?: return null
     val rawId = raw.string("id")
-    val id = if (rawId != null && ID_RE.matches(rawId)) rawId else newAnnotationId()
+    val id = if (rawId != null && ID_RE.matches(rawId)) rawId else stableIdFor(raw, kind, index)
     return when (kind) {
         "callout" -> {
             val ax = unit(raw["ax"], 0.5)
@@ -274,8 +298,8 @@ fun parseStudyAnnotations(value: JsonValue?): List<StudyAnnotation> {
     val seen = HashSet<String>()
     val out = ArrayList<StudyAnnotation>()
     var images = 0
-    for (entry in arr.items) {
-        val item = sanitizeAnnotation(entry) ?: continue
+    for ((index, entry) in arr.items.withIndex()) {
+        val item = sanitizeAnnotation(entry, index) ?: continue
         if (item.id in seen) continue
         if (item is StudyImage) {
             images += 1

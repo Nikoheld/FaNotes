@@ -164,9 +164,9 @@ private const val TASKS_END = "-->"
 data class EmbeddedComment(val start: Int, val jsonStart: Int, val jsonEnd: Int, val end: Int)
 
 /** Port of `locateEmbeddedJsonComment`. */
-fun locateEmbeddedJsonComment(source: String, startMarker: String): EmbeddedComment? {
+fun locateEmbeddedJsonComment(source: String, startMarker: String, from: Int = 0): EmbeddedComment? {
     if (source.isEmpty() || startMarker.isEmpty()) return null
-    val start = source.indexOf(startMarker)
+    val start = source.indexOf(startMarker, from)
     if (start < 0) return null
     var index = start + startMarker.length
     while (index < source.length && source[index].isWhitespace()) index += 1
@@ -211,10 +211,40 @@ private fun JsonValue?.intOr0(): Int {
     return if (value == null || !value.isFinite()) 0 else jsRound(value).toInt()
 }
 
-fun readTaskList(markdown: String): StudyTaskList? {
-    val block = locateEmbeddedJsonComment(markdown, TASKS_START) ?: return null
+/** One `<!-- fanotes-tasks-v1` marker in a note; [comment] is null when its JSON is damaged. */
+private data class TaskComment(val start: Int, val end: Int, val comment: EmbeddedComment?, val list: StudyTaskList?)
+
+private const val BROKEN_TASKS_START = "<!-- fanotes-tasks-v1-broken"
+
+/** Every real tasks marker (the marker must be followed by whitespace, so the "-broken" copy is not one). */
+private fun taskComments(markdown: String): List<TaskComment> {
+    val found = ArrayList<TaskComment>()
+    var from = 0
+    while (true) {
+        val start = markdown.indexOf(TASKS_START, from)
+        if (start < 0) break
+        val after = start + TASKS_START.length
+        if (after < markdown.length && !markdown[after].isWhitespace()) {
+            from = after
+            continue
+        }
+        val comment = locateEmbeddedJsonComment(markdown, TASKS_START, start)?.takeIf { it.start == start }
+        val list = comment?.let { parseTaskJson(markdown.substring(it.jsonStart, it.jsonEnd)) }
+        if (comment != null && list != null) {
+            found += TaskComment(start, comment.end, comment, list)
+            from = comment.end
+        } else {
+            val close = markdown.indexOf("-->", after)
+            found += TaskComment(start, if (close >= 0) close + 3 else -1, null, null)
+            from = after
+        }
+    }
+    return found
+}
+
+private fun parseTaskJson(json: String): StudyTaskList? {
     val parsed = try {
-        parseJson(markdown.substring(block.jsonStart, block.jsonEnd)) as? JsonValue.Obj
+        parseJson(json) as? JsonValue.Obj
     } catch (_: Exception) {
         null
     } ?: return null
@@ -238,6 +268,9 @@ fun readTaskList(markdown: String): StudyTaskList? {
     return StudyTaskList(tasks, removed)
 }
 
+/** The first tasks comment that parses; a damaged one before it is skipped. */
+fun readTaskList(markdown: String): StudyTaskList? = taskComments(markdown).firstNotNullOfOrNull { it.list }
+
 private fun taskJson(task: StudyTask): JsonValue = ch.fasrv.fanotes.json.jsonObject(
     "id" to jsonString(task.id),
     "number" to jsonString(task.number),
@@ -249,16 +282,39 @@ private fun taskJson(task: StudyTask): JsonValue = ch.fasrv.fanotes.json.jsonObj
     "manual" to jsonBool(task.manual),
 )
 
+/**
+ * Replaces every tasks comment by one. A damaged comment is not deleted: its marker is renamed to
+ * `fanotes-tasks-v1-broken`, so the text stays in the note but is never read or duplicated again.
+ */
 fun writeTaskList(markdown: String, list: StudyTaskList): String {
-    val existing = locateEmbeddedJsonComment(markdown, TASKS_START)
-    val without = if (existing != null) markdown.substring(0, existing.start) + markdown.substring(existing.end) else markdown
-    if (list.tasks.isEmpty() && list.removed.isEmpty()) return without.replace(Regex("\n{3,}"), "\n\n")
+    var text = markdown
+    for (entry in taskComments(markdown).sortedByDescending { it.start }) {
+        if (entry.list == null) {
+            text = text.substring(0, entry.start) + BROKEN_TASKS_START + text.substring(entry.start + TASKS_START.length)
+        } else {
+            text = removeRange(text, entry.start, entry.end)
+        }
+    }
+    if (list.tasks.isEmpty() && list.removed.isEmpty()) return text
     val json = ch.fasrv.fanotes.json.jsonObject(
         "tasks" to JsonValue.Arr(list.tasks.map(::taskJson).toMutableList()),
         "removed" to JsonValue.Arr(list.removed.map { jsonString(it) as JsonValue }.toMutableList()),
     )
     val block = "\n$TASKS_START\n${prettyJson(json)}\n$TASKS_END\n"
-    return without.replace(Regex("(?U)\\s*$"), "") + block
+    return text.replace(Regex("(?U)\\s*$"), "") + block
+}
+
+/** Cuts [start, end); blank lines around the cut collapse to one, the rest of the note is untouched. */
+private fun removeRange(text: String, start: Int, end: Int): String {
+    var before = text.substring(0, start)
+    var after = text.substring(end)
+    val left = before.length - before.trimEnd('\n').length
+    val right = after.length - after.trimStart('\n').length
+    if (left + right >= 3) {
+        after = after.substring(right)
+        if (left < 2) after = "\n".repeat(2 - left) + after
+    }
+    return before + after
 }
 
 private fun numberOrder(task: StudyTask): Long = task.number.toLongOrNull() ?: Long.MAX_VALUE

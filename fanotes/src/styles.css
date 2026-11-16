@@ -4247,3 +4247,8 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 @container pdftoolbar (max-width: 230px) {
   .toolbar-context .pdf-note-tools button[aria-label="PDF-Gliederung"] { display: none; }
 }
+.lw-error { margin: 0 0 8px; padding: 6px 10px; border: 1px solid #b42318; border-radius: 7px; color: #b42318; background: color-mix(in srgb, #b42318 8%, var(--panel)); font-size: 13px; }
+.lw-raw { max-height: 40vh; margin: 0; overflow: auto; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-strong); color: var(--text); font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
+.lw-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: contents; }
+.lw-fieldset:disabled { opacity: .55; }
+.markdown-editor.paper-mode .cm-lw-broken { border-left: 3px solid #b42318; padding-left: 6px; }

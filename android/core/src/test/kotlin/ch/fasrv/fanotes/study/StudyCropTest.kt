@@ -71,6 +71,15 @@ class StudyCropTest {
         assertEquals(0.53, edge.x, 1e-9)
     }
 
+    @Test fun placementStaysOnThePage() {
+        // Tall crop at the page bottom: the image (0.2 wide, 0.2 * 0.3/0.2 = 0.3 high) is lifted to fit.
+        val p = cropPlacement(SRect(0.1, 0.7, 0.3, 1.0))
+        assertEquals(0.7, p.y, 1e-9)
+        val q = cropPlacement(SRect(0.1, 0.8, 0.2, 1.0))
+        assertEquals(0.2, q.w, 1e-9)
+        assertEquals(0.6, q.y, 1e-9)
+    }
+
     @Test fun compareSplitFollowsOrientation() {
         val land = compareLayout(2000, 1200)
         assertEquals(CompareDock.LEFT, land.dock)

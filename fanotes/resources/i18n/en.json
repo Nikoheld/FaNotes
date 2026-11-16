@@ -4364,5 +4364,7 @@
   "Keine Kamera-App gefunden.": "No camera app found.",
   "Foto als Referenzbild aufnehmen": "Take a photo as a reference image",
   "Der Ausschnitt konnte nicht gerendert werden.": "The crop could not be rendered.",
-  "Bildspeicher dieser Notiz voll (%s von %s MB). Entferne zuerst ein Bild.": "Image storage of this note is full (%s of %s MB). Remove an image first."
+  "Bildspeicher dieser Notiz voll (%s von %s MB). Entferne zuerst ein Bild.": "Image storage of this note is full (%s of %s MB). Remove an image first.",
+  "Die Notiz hat sich geändert. Öffne den Block neu.": "The note has changed. Open the block again.",
+  "Dieser Block ist nicht lesbar oder zu gross für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“.": "This block cannot be read or is too large for the tablet. It stays unchanged; see and edit it through “Show source”."
 }
