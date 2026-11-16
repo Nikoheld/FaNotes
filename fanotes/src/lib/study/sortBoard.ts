@@ -12,8 +12,11 @@ export type SortData = {
   groups: SortGroup[]
 }
 
-const MAX_CARDS = 120
-const MAX_GROUPS = 12
+/** Caps of the model. The normaliser enforces them; the editor reads them to stop short of a cap instead of being cut. */
+export const SORT_LIMITS = { cards: 120, groups: 12, title: 120, groupTitle: 80, cardText: 200 } as const
+
+const MAX_CARDS = SORT_LIMITS.cards
+const MAX_GROUPS = SORT_LIMITS.groups
 
 export const defaultSortData = (): SortData => ({
   v: 1,
@@ -29,7 +32,7 @@ export const normaliseSortData = (raw: unknown): SortData => {
   const ids = new Set<string>()
   for (const entry of asArray(source.cards, MAX_CARDS)) {
     const card = asRecord(entry)
-    const text = asText(card.text, 200).trim()
+    const text = asText(card.text, SORT_LIMITS.cardText).trim()
     let id = asText(card.id, 40)
     if (!text) continue
     if (!id || ids.has(id)) id = newId('c')
@@ -41,11 +44,11 @@ export const normaliseSortData = (raw: unknown): SortData => {
     const group = asRecord(entry)
     const list = asArray(group.cards, MAX_CARDS).filter((id): id is string => typeof id === 'string' && ids.has(id) && !placed.has(id))
     list.forEach((id) => placed.add(id))
-    return { id: asText(group.id, 40) || `g${index + 1}`, title: asText(group.title, 80), cards: list }
+    return { id: asText(group.id, 40) || `g${index + 1}`, title: asText(group.title, SORT_LIMITS.groupTitle), cards: list }
   })
   const mode = source.mode === 'sequence' ? 'sequence' : 'groups'
   if (!groups.length) groups.push({ id: 'g1', title: mode === 'sequence' ? 'Reihenfolge' : 'Gruppe 1', cards: [] })
-  return { v: 1, title: asText(source.title, 120), mode, cards, groups: mode === 'sequence' ? groups.slice(0, 1) : groups }
+  return { v: 1, title: asText(source.title, SORT_LIMITS.title), mode, cards, groups: mode === 'sequence' ? groups.slice(0, 1) : groups }
 }
 
 export const parseSortData = (body: string): SortData => {
@@ -60,12 +63,14 @@ export const parseCardList = (value: string): string[] => {
   return parts
     .map((part) => part.replace(/^\s*(?:[-*•·–]|\d{1,3}[.)])\s+/u, '').trim())
     .filter(Boolean)
-    .slice(0, MAX_CARDS)
 }
 
+/** How many more cards the board takes. */
+export const cardRoom = (data: SortData) => Math.max(0, MAX_CARDS - data.cards.length)
+
+/** Adds as many of `texts` as fit, in order; the caller keeps the rest (`texts.slice(cardRoom(data))`). */
 export const addCards = (data: SortData, texts: readonly string[]): SortData => {
-  const room = MAX_CARDS - data.cards.length
-  const added = texts.slice(0, Math.max(0, room)).map((text): SortCard => ({ id: newId('c'), text: text.slice(0, 200) }))
+  const added = texts.slice(0, cardRoom(data)).map((text): SortCard => ({ id: newId('c'), text: text.slice(0, SORT_LIMITS.cardText) }))
   return { ...data, cards: [...data.cards, ...added] }
 }
 
@@ -92,6 +97,24 @@ export const removeCard = (data: SortData, cardId: string): SortData => ({
   cards: data.cards.filter((card) => card.id !== cardId),
   groups: data.groups.map((group) => ({ ...group, cards: group.cards.filter((id) => id !== cardId) })),
 })
+
+/** A card taken out of the board, with where it was, so it can be put back. */
+export type RemovedCard = { card: SortCard; cardIndex: number; groupId: string | null; groupIndex: number }
+
+export const takeCard = (data: SortData, cardId: string): { data: SortData; removed: RemovedCard } | null => {
+  const cardIndex = data.cards.findIndex((card) => card.id === cardId)
+  if (cardIndex < 0) return null
+  const group = data.groups.find((entry) => entry.cards.includes(cardId))
+  return { data: removeCard(data, cardId), removed: { card: data.cards[cardIndex], cardIndex, groupId: group?.id ?? null, groupIndex: group ? group.cards.indexOf(cardId) : 0 } }
+}
+
+export const restoreCard = (data: SortData, removed: RemovedCard): SortData => {
+  if (data.cards.some((card) => card.id === removed.card.id) || data.cards.length >= SORT_LIMITS.cards) return data
+  const cards = [...data.cards]
+  cards.splice(Math.min(removed.cardIndex, cards.length), 0, removed.card)
+  const restored = { ...data, cards }
+  return removed.groupId && restored.groups.some((group) => group.id === removed.groupId) ? moveCard(restored, removed.card.id, removed.groupId, removed.groupIndex) : restored
+}
 
 export const addGroup = (data: SortData, title: string): SortData => {
   if (data.groups.length >= MAX_GROUPS || data.mode === 'sequence') return data

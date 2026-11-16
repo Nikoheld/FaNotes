@@ -7,8 +7,11 @@ export type MapNode = { id: string; text: string }
 export type MapEdge = { id: string; from: string; to: string; label: string }
 export type MapData = { v: 1; title: string; dir: 'TB' | 'LR'; nodes: MapNode[]; edges: MapEdge[] }
 
-const MAX_NODES = 80
-const MAX_EDGES = 160
+/** Caps of the model. The normaliser enforces them; the editor reads them to stop short of a cap instead of being cut. */
+export const MAP_LIMITS = { nodes: 80, edges: 160, title: 120, nodeText: 200, edgeLabel: 80 } as const
+
+const MAX_NODES = MAP_LIMITS.nodes
+const MAX_EDGES = MAP_LIMITS.edges
 
 export const defaultMapData = (): MapData => ({
   v: 1,
@@ -17,6 +20,9 @@ export const defaultMapData = (): MapData => ({
   nodes: [{ id: 'a', text: 'Ursache' }, { id: 'b', text: 'Wirkung' }],
   edges: [{ id: 'e1', from: 'a', to: 'b', label: 'führt zu' }],
 })
+
+/** Two arrows between the same boxes with the same text are one arrow. */
+const edgeKey = (edge: Pick<MapEdge, 'from' | 'to' | 'label'>) => `${edge.from}>${edge.to}>${edge.label}`
 
 export const normaliseMapData = (raw: unknown): MapData => {
   const source = asRecord(raw)
@@ -27,7 +33,7 @@ export const normaliseMapData = (raw: unknown): MapData => {
     const id = asText(node.id, 40)
     if (!id || ids.has(id)) continue
     ids.add(id)
-    nodes.push({ id, text: asText(node.text, 200) })
+    nodes.push({ id, text: asText(node.text, MAP_LIMITS.nodeText) })
   }
   const seen = new Set<string>()
   const edges: MapEdge[] = []
@@ -36,12 +42,12 @@ export const normaliseMapData = (raw: unknown): MapData => {
     const from = asText(edge.from, 40)
     const to = asText(edge.to, 40)
     if (!ids.has(from) || !ids.has(to) || from === to) continue
-    const key = `${from}>${to}>${asText(edge.label, 80)}`
+    const key = edgeKey({ from, to, label: asText(edge.label, MAP_LIMITS.edgeLabel) })
     if (seen.has(key)) continue
     seen.add(key)
-    edges.push({ id: asText(edge.id, 40) || newId('e'), from, to, label: asText(edge.label, 80) })
+    edges.push({ id: asText(edge.id, 40) || newId('e'), from, to, label: asText(edge.label, MAP_LIMITS.edgeLabel) })
   }
-  return { v: 1, title: asText(source.title, 120), dir: source.dir === 'LR' ? 'LR' : 'TB', nodes, edges }
+  return { v: 1, title: asText(source.title, MAP_LIMITS.title), dir: source.dir === 'LR' ? 'LR' : 'TB', nodes, edges }
 }
 
 export const parseMapData = (body: string): MapData => {
@@ -169,6 +175,37 @@ export const layoutMap = (data: MapData): MapLayout => {
   return { nodes, edges, width, height, layers }
 }
 
+// -- editing helpers: they never produce data the normaliser would cut ----------------
+
+/** Appends an empty box unless the map is full. */
+export const addMapNode = (data: MapData): MapData => (data.nodes.length >= MAP_LIMITS.nodes ? data : { ...data, nodes: [...data.nodes, { id: newId('n'), text: '' }] })
+
+/** A pair of boxes without an arrow yet (first to last when that is free), or null when the map is full or has no free pair. */
+export const freeMapPair = (data: MapData): { from: string; to: string } | null => {
+  if (data.edges.length >= MAP_LIMITS.edges || data.nodes.length < 2) return null
+  const taken = new Set(data.edges.map((edge) => `${edge.from}>${edge.to}`))
+  const first = data.nodes[0].id
+  const last = data.nodes[data.nodes.length - 1].id
+  if (!taken.has(`${first}>${last}`)) return { from: first, to: last }
+  for (const a of data.nodes) for (const b of data.nodes) if (a.id !== b.id && !taken.has(`${a.id}>${b.id}`)) return { from: a.id, to: b.id }
+  return null
+}
+
+export const addMapEdge = (data: MapData): MapData => {
+  const pair = freeMapPair(data)
+  return pair ? { ...data, edges: [...data.edges, { id: newId('e'), ...pair, label: '' }] } : data
+}
+
+/** Changes one arrow. The model cannot hold an arrow from a box to itself or a copy of another arrow, so those come back as 'loop' and 'copy' instead of data. */
+export const patchMapEdge = (data: MapData, id: string, patch: Partial<Pick<MapEdge, 'from' | 'to' | 'label'>>): MapData | 'loop' | 'copy' => {
+  const current = data.edges.find((edge) => edge.id === id)
+  if (!current) return data
+  const next = { ...current, ...patch }
+  if (next.from === next.to) return 'loop'
+  if (data.edges.some((edge) => edge.id !== id && edgeKey(edge) === edgeKey(next))) return 'copy'
+  return { ...data, edges: data.edges.map((edge) => (edge.id === id ? next : edge)) }
+}
+
 const slug = (value: string) => value.toLocaleLowerCase('de').replace(/\s+/gu, ' ').trim()
 
 /**
@@ -182,7 +219,7 @@ export const mapFromText = (data: MapData, input: string): MapData => {
     const key = slug(text)
     let node = nodes.find((entry) => slug(entry.text) === key)
     if (!node && nodes.length < MAX_NODES) {
-      node = { id: newId('n'), text: text.trim().slice(0, 200) }
+      node = { id: newId('n'), text: text.trim().slice(0, MAP_LIMITS.nodeText) }
       nodes.push(node)
     }
     return node
@@ -192,12 +229,17 @@ export const mapFromText = (data: MapData, input: string): MapData => {
     if (!line) continue
     const labelled = /^(.+?)\s*-\(([^)]*)\)->\s*(.+)$/u.exec(line)
     const parts = labelled ? [labelled[1], labelled[3]] : line.split(/\s*(?:->|→)\s*/u)
-    const label = labelled ? labelled[2] : parts.length === 3 ? parts[1] : ''
-    const ends = labelled ? parts : parts.length === 3 ? [parts[0], parts[2]] : parts.slice(0, 2)
-    if (ends.length < 2 || !ends[0].trim() || !ends[1].trim()) continue
-    const a = find(ends[0])
-    const b = find(ends[1])
-    if (a && b && a.id !== b.id && edges.length < MAX_EDGES) edges.push({ id: newId('e'), from: a.id, to: b.id, label: label.trim().slice(0, 80) })
+    // "A -> label -> B" is one labelled arrow; a longer chain "A -> B -> C -> D" is one arrow per step.
+    const pairs: Array<[string, string, string]> = labelled
+      ? [[labelled[1], labelled[3], labelled[2]]]
+      : parts.length === 3 ? [[parts[0], parts[2], parts[1]]] : parts.slice(0, -1).map((part, index): [string, string, string] => [part, parts[index + 1], ''])
+    for (const [from, to, label] of pairs) {
+      if (!from.trim() || !to.trim()) continue
+      const a = find(from)
+      const b = find(to)
+      const text = label.trim().slice(0, MAP_LIMITS.edgeLabel)
+      if (a && b && a.id !== b.id && edges.length < MAX_EDGES && !edges.some((edge) => edgeKey(edge) === edgeKey({ from: a.id, to: b.id, label: text }))) edges.push({ id: newId('e'), from: a.id, to: b.id, label: text })
+    }
   }
   return normaliseMapData({ ...data, nodes, edges })
 }
