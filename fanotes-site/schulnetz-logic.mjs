@@ -37,9 +37,12 @@ export const numKey = (value) => {
 }
 
 export const parseMark = (raw) => {
-  const cleaned = String(raw ?? '').trim().replace(/\s/g, '').replace(',', '.')
-  if (!cleaned || cleaned === '-' || cleaned.toLowerCase() === 'null') return null
-  const value = Number(cleaned)
+  const text = String(raw ?? '').trim()
+  if (!text || text === '-' || text.toLowerCase() === 'null') return null
+  // The mark cell can also hold the point count. Joining the digits would hide the mark.
+  const match = /-?\d+(?:[.,]\d+)?/u.exec(text.replace(/['’\u00a0]/g, ''))
+  if (!match) return null
+  const value = Number(match[0].replace(',', '.'))
   if (!Number.isFinite(value) || value < 1 || value > 6) return null
   return value
 }
