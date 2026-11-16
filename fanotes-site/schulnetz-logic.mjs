@@ -433,20 +433,20 @@ export const isLesson = (event) => {
 // alone would keep only the first week's lesson and drop every later one.
 const mergeKey = (event) => (isLesson(event) ? `lesson|${event.id}|${event.start}` : event.id)
 
-export const mergeEventsById = (base, incoming) => {
+export const mergeEventsById = (base, incoming, keyOf = mergeKey) => {
   const extra = incoming || []
   if (!extra.length) return base || []
-  const incomingById = new Map(extra.map((event) => [mergeKey(event), event]))
+  const incomingById = new Map(extra.map((event) => [keyOf(event), event]))
   const seen = new Set()
   const out = []
   for (const event of base || []) {
-    const key = mergeKey(event)
+    const key = keyOf(event)
     if (seen.has(key)) continue
     seen.add(key)
     out.push(incomingById.get(key) || event)
   }
   for (const event of extra) {
-    const key = mergeKey(event)
+    const key = keyOf(event)
     if (seen.has(key)) continue
     seen.add(key)
     out.push(event)
@@ -454,9 +454,19 @@ export const mergeEventsById = (base, incoming) => {
   return out
 }
 
+/**
+ * A bare number is a scheduler id: the entry's position in one week's answer (0, 1, 2… again every
+ * week, and the class overview counts separately from the timetable; the live feed had 43 ids for 786
+ * entries). It names an exam only together with its time. Any other id (an iCal UID, a REST id) is
+ * the exam's own. Kotlin mirror: positionalScheduleId (WeekRange.kt).
+ */
+export const positionalScheduleId = (event) => /^\d+$/u.test(cleanSchulnetzText(event?.id || ''))
+const examMergeKey = (event) => (positionalScheduleId(event) ? `${cleanSchulnetzText(event.id)}|${event.start}` : event.id)
+
 /** Exams found inside the timetable feed stay on the exam list after lesson overlay drops them. */
 // An exam listed both in the timetable and in the overview (same slot, same label) is one exam.
-export const carryTimetableExams = (events, exams) => distinctExams(mergeEventsById(exams || [], (events || []).filter(isExamLike)))
+// Merged by id and start: by id alone, exam 1 of one week replaced exam 1 of every other week.
+export const carryTimetableExams = (events, exams) => distinctExams(mergeEventsById(exams || [], (events || []).filter(isExamLike), examMergeKey))
 
 /**
  * Course identity of a Schulnetz course label. A label starts with the subject, then a group part
@@ -2393,9 +2403,12 @@ export const prepareAgendaRead = (stored = {}, next = {}) => {
   return { before: { ...next, events: distinct(beforeEvents), exams: distinct(beforeExams) }, weeks }
 }
 
+// A scheduler id (see positionalScheduleId) names the same exam only on the same day; any other id
+// follows its exam to another day. Kotlin mirror: sameExamId (AgendaBaseline.kt).
 const sameExamId = (left, right) => {
   const key = (event) => cleanSchulnetzText(event.id || '').split('@')[0]
-  return Boolean(key(left)) && key(left) === key(right)
+  if (!key(left) || key(left) !== key(right)) return false
+  return !positionalScheduleId(left) || (Boolean(eventDay(left)) && eventDay(left) === eventDay(right))
 }
 const examLabel = (event) => [event.text, event.timetableText, event.courseName].map((text) => cleanSchulnetzText(text).toLowerCase()).find(Boolean) || ''
 const schoolStamp = (raw) => {
