@@ -796,6 +796,57 @@ test('a commute threshold, stop type, or notify flag the sanitizer would replace
   }
 })
 
+test('a commute pin arrival the sanitizer would clear is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'commute-arrival-'))
+  const accountId = '7'.repeat(32)
+  const routeFile = join(root, 'accounts', accountId, 'commute.json')
+  const commute = createCommute({
+    root,
+    now: () => new Date(parseLocal('2026-11-13 06:00:00')),
+    lessonsFor: async () => [],
+    provider: { trips: async () => ({ trips: [], stale: false }), stops: async () => ({ stops: [] }) },
+  })
+  const pin = (day, extra = {}) => ({ days: [day], line: 'S1', stop: 'Testdorf', departure: '07:30', ...extra })
+  try {
+    await commute.save(accountId, { routes: [route()], settings: { delayThreshold: 3 } })
+    const valid = await readFile(routeFile, 'utf8')
+    const keep = async (arrival) => {
+      const parsed = JSON.parse(valid)
+      parsed.routes[0].pins = [pin(1, { arrival })]
+      const stored = `${JSON.stringify(parsed)}\n`
+      await writeFile(routeFile, stored, { mode: 0o600 })
+      await assert.rejects(() => commute.view(accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(() => commute.checkAccount(accountId), (error) => error?.code === 'EBADMSG')
+      await assert.rejects(
+        () => commute.save(accountId, { routes: [route()], settings: { delayThreshold: 9 } }),
+        (error) => error?.code === 'EBADMSG',
+      )
+      assert.equal(await readFile(routeFile, 'utf8'), stored)
+    }
+    await keep('25:99')
+    await keep('evening')
+    const open = async (pins) => {
+      const parsed = JSON.parse(valid)
+      parsed.routes[0].pins = pins
+      const stored = `${JSON.stringify(parsed)}\n`
+      await writeFile(routeFile, stored, { mode: 0o600 })
+      const opened = await commute.view(accountId)
+      assert.equal(await readFile(routeFile, 'utf8'), stored)
+      return opened
+    }
+    const padded = await open([pin(1, { arrival: '7:05' })])
+    assert.equal(padded.routes[0].pins[0].arrival, '07:05')
+    const blank = await open([pin(1, { arrival: '' })])
+    assert.equal(blank.routes[0].pins[0].arrival, '')
+    const capped = await open([1, 2, 3, 4, 5, 6, 7, 1].map((day, index) => pin(day, index === 7 ? { arrival: '99:99' } : {})))
+    assert.equal(capped.routes[0].pins.length, 7)
+    await writeFile(routeFile, valid, { mode: 0o600 })
+    assert.equal((await commute.view(accountId)).routes[0].id, 'a1b2c3d4e5f6')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('commute settings that are not the known shape are left in place', async () => {
   const root = await mkdtemp(join(tmpdir(), 'commute-settings-'))
   const accountId = 'e'.repeat(32)
