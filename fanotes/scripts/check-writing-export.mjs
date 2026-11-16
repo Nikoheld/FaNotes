@@ -406,6 +406,30 @@ try {
     }
   })
 
+  await test('EPUB: language values are escaped even when they never went through the model sanitiser', async () => {
+    const hostile = makeStory()
+    hostile.manifest.language = 'de"><script>alert(1)</script>'
+    const [firstScene] = [...hostile.scenes.values()]
+    firstScene.paragraphs[0].lang = 'en"><b onclick="x">'
+    firstScene.paragraphs[1].runs[0].m = { ...(firstScene.paragraphs[1].runs[0].m ?? {}), lang: 'fr"><i onclick="x">' }
+    const result = await exporter.exportStory(hostile, 'epub', { ...options, notes: 'footnotes' })
+    const zip = await JSZip.loadAsync(result.bytes)
+    let checked = 0
+    for (const name of Object.keys(zip.files).filter((entry) => /\.(xhtml|opf|ncx)$/u.test(entry))) {
+      const xml = await zip.file(name).async('string')
+      assertWellFormed(xml, `hostile language ${name}`)
+      assert.ok(!/<script|<b onclick|<i onclick|"><(?:script|b|i)\b/u.test(xml), `${name}: no injected markup`)
+      checked += 1
+    }
+    assert.ok(checked >= 5, 'every XHTML, OPF and NCX file was inspected')
+    const opf = await zip.file('OEBPS/content.opf').async('string')
+    assert.ok(opf.includes('<dc:language>de&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;</dc:language>'))
+    assert.ok((await zip.file('OEBPS/toc.ncx').async('string')).includes('xml:lang="de&quot;&gt;&lt;script&gt;'))
+    const bodies = (await Promise.all(Object.keys(zip.files).filter((entry) => /^OEBPS\/text\/c\d+\.xhtml$/u.test(entry)).map((entry) => zip.file(entry).async('string')))).join('')
+    assert.ok(bodies.includes('lang="en&quot;&gt;&lt;b onclick=&quot;x&quot;&gt;"'), 'paragraph language is escaped')
+    assert.ok(bodies.includes('lang="fr&quot;&gt;&lt;i onclick=&quot;x&quot;&gt;"'), 'run language is escaped')
+  })
+
   // ── Markdown and text ──────────────────────────────────────────────────
   await test('Markdown and plain text match the golden files', async () => {
     fs.mkdirSync(goldenDir, { recursive: true })

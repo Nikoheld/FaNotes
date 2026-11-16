@@ -2021,6 +2021,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         displayMode: true,
         throwOnError: false,
         strict: false,
+        trust: false,
+        maxExpand: 1000,
         output: 'htmlAndMathml',
       })
     } catch {
@@ -8056,6 +8058,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         displayMode: true,
         throwOnError: false,
         strict: false,
+        trust: false,
+        maxExpand: 1000,
         output: 'htmlAndMathml',
       })
     } catch {

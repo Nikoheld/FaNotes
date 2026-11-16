@@ -38,6 +38,7 @@ const { DEFAULT_TABLET_BUTTON_ACTIONS } = require('./tablet-buttons.cjs')
 const { sanitizeSettings: sanitizeStoredSettings } = require('./settings-sanitize.cjs')
 const { channelForPackagedVersion } = require('./releaseVersion.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
+const { installSecurityHeaders } = require('./content-security-policy.cjs')
 const {
   onboardingRequiredFromConfig,
   onboardingRequiredFromVaultStatus,
@@ -5661,37 +5662,9 @@ function installSecurityPolicy() {
   currentSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   currentSession.setPermissionCheckHandler(() => false)
 
-  currentSession.webRequest.onHeadersReceived((details, callback) => {
-    const isEmbeddedGlyphenWerkResource = /\/glyphenwerk\//iu.test(details.url)
-    const devUrl = trustedDevUrl()
-    const connectSource = devUrl
-      ? "'self' fanotes-model: https://fanotes.fasrv.ch ws://127.0.0.1:* ws://localhost:* ws://[::1]:* http://127.0.0.1:* http://localhost:*"
-      : "'self' fanotes-model: https://fanotes.fasrv.ch"
-    const policy = [
-      "default-src 'self'",
-      "script-src 'self' blob: 'wasm-unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "font-src 'self' data:",
-      "worker-src 'self' blob:",
-      `connect-src ${connectSource}`,
-      "media-src 'self' data: blob:",
-      "frame-src 'self'",
-      "object-src 'none'",
-      "base-uri 'self'",
-      "form-action 'none'",
-      isEmbeddedGlyphenWerkResource ? "frame-ancestors 'self'" : "frame-ancestors 'none'",
-    ].join('; ')
-    callback({
-      responseHeaders: {
-        ...(details.responseHeaders ?? {}),
-        'Content-Security-Policy': [policy],
-        'Cross-Origin-Opener-Policy': ['same-origin'],
-        'Cross-Origin-Embedder-Policy': ['require-corp'],
-        'Cross-Origin-Resource-Policy': ['same-origin'],
-      },
-    })
-  })
+  // The policy and isolation headers live in content-security-policy.cjs (see there for how they reach
+  // file://, dev-server and custom-scheme documents).
+  installSecurityHeaders(currentSession, { isDevServer: () => Boolean(trustedDevUrl()) })
 }
 
 function installModelProtocol() {

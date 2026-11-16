@@ -13,8 +13,16 @@ export const TERM_LIMITS = { terms: 30, term: 160, definition: 2000, example: 10
 
 const MAX_ITEMS = PLATE_LIMITS.items
 const MAX_TERMS = TERM_LIMITS.terms
+export const PLATE_DEFAULT_COLS = 4
+export const PLATE_MAX_COLS = 8
 
-export const defaultPlateData = (): PlateData => ({ v: 1, title: 'Bildtafel', cols: 4, showLabels: true, items: [] })
+/** Columns of an identification sheet: an integer 1..8, anything else is the default. The renderer applies it again. */
+export const plateColumns = (value: unknown) => {
+  const cols = Number(value)
+  return Number.isInteger(cols) && cols >= 1 && cols <= PLATE_MAX_COLS ? cols : PLATE_DEFAULT_COLS
+}
+
+export const defaultPlateData = (): PlateData => ({ v: 1, title: 'Bildtafel', cols: PLATE_DEFAULT_COLS, showLabels: true, items: [] })
 export const defaultTermData = (): TermData => ({ v: 1, terms: [{ id: newId('t'), term: '', definition: '', example: '', source: '' }] })
 
 export const normalisePlateData = (raw: unknown): PlateData => {
@@ -30,11 +38,10 @@ export const normalisePlateData = (raw: unknown): PlateData => {
     ids.add(id)
     return { id, label, note: asText(item.note, PLATE_LIMITS.note), img: asImage(item.img) }
   })
-  const cols = Number(source.cols)
   return {
     v: 1,
     title: asText(source.title, PLATE_LIMITS.title),
-    cols: Number.isInteger(cols) && cols >= 1 && cols <= 8 ? cols : 4,
+    cols: plateColumns(source.cols),
     showLabels: source.showLabels !== false,
     items,
   }

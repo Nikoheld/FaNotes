@@ -81,7 +81,7 @@ const inlineHtml = (runs: Run[], note: (id: string) => string, lang: string | un
       if (marks.sup) html = `<sup>${html}</sup>`
       if (marks.sub) html = `<sub>${html}</sub>`
       if (styles.length || marks.size) html = `<span style="${esc([...styles, marks.size ? `font-size: ${marks.size}pt` : ''].filter(Boolean).join('; '))}">${html}</span>`
-      if (marks.lang && marks.lang !== lang) html = `<span lang="${marks.lang}" xml:lang="${marks.lang}">${html}</span>`
+      if (marks.lang && marks.lang !== lang) html = `<span lang="${esc(marks.lang)}" xml:lang="${esc(marks.lang)}">${html}</span>`
       out += html
     }
     if (marks.fn) out += note(marks.fn)
@@ -92,7 +92,7 @@ const inlineHtml = (runs: Run[], note: (id: string) => string, lang: string | un
 
 const xhtml = (language: string, title: string, body: string, bodyType = 'bodymatter') => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${language}" xml:lang="${language}">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${esc(language)}" xml:lang="${esc(language)}">
 <head>
 <meta charset="UTF-8"/>
 <title>${esc(title)}</title>
@@ -155,7 +155,7 @@ export const writeEpub = async (input: EpubInput): Promise<Uint8Array> => {
       if (block.afterBreak && (style.dropCap ?? 0) > 1) classes.push(`dropcap dropcap-${style.dropCap}`)
       const inline = [block.align ? `text-align: ${block.align}` : '', block.breakBefore === 'page' ? 'page-break-before: always; break-before: page' : ''].filter(Boolean)
       if (inline.length) attrs.push(`style="${inline.join('; ')}"`)
-      if (lang) attrs.push(`lang="${lang}" xml:lang="${lang}"`)
+      if (lang) attrs.push(`lang="${esc(lang)}" xml:lang="${esc(lang)}"`)
       const kind = titleKind(prepared, block)
       if (kind) classes.push(kind)
       const content = inlineHtml(block.runs, (id) => (prepared.footnotes.has(id) ? ref(id) : ''), lang ?? language)
@@ -240,7 +240,7 @@ export const writeEpub = async (input: EpubInput): Promise<Uint8Array> => {
   const tocTitle = language.startsWith('en') ? 'Contents' : 'Inhalt'
   const navXhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${language}" xml:lang="${language}">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${esc(language)}" xml:lang="${esc(language)}">
 <head>
 <meta charset="UTF-8"/>
 <title>${esc(tocTitle)}</title>
@@ -265,7 +265,7 @@ ${navList(nav)}
   }).join('')
   const identifier = `urn:fanotes:story:${manifest.id}`
   const ncx = `<?xml version="1.0" encoding="UTF-8"?>
-<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="${language}">
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="${esc(language)}">
 <head><meta name="dtb:uid" content="${esc(identifier)}"/><meta name="dtb:depth" content="${Math.max(1, depthOf(nav))}"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head>
 <docTitle><text>${esc(manifest.title)}</text></docTitle>
 ${manifest.author ? `<docAuthor><text>${esc(manifest.author)}</text></docAuthor>\n` : ''}<navMap>${navPoints(nav)}</navMap>
@@ -281,11 +281,11 @@ ${manifest.author ? `<docAuthor><text>${esc(manifest.author)}</text></docAuthor>
     ...fontFiles.map((font, index) => `<item id="font${index + 1}" href="${font.path}" media-type="font/ttf"/>`),
   ]
   const opf = `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="${language}">
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="${esc(language)}">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
 <dc:identifier id="bookid">${esc(identifier)}</dc:identifier>
 <dc:title>${esc(manifest.title)}</dc:title>
-${manifest.author ? `<dc:creator id="author">${esc(manifest.author)}</dc:creator>\n` : ''}<dc:language>${language}</dc:language>
+${manifest.author ? `<dc:creator id="author">${esc(manifest.author)}</dc:creator>\n` : ''}<dc:language>${esc(language)}</dc:language>
 ${manifest.subtitle ? `<dc:description>${esc(manifest.subtitle)}</dc:description>\n` : ''}<meta property="dcterms:modified">${modified}</meta>
 <meta name="generator" content="FaNotes"/>
 </metadata>
