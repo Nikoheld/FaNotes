@@ -33,6 +33,7 @@ import {
   prepareAgendaRead,
   normalizeSchoolBase,
   parseGradesHtml,
+  parseMark,
   parseWeight,
   preserveExplicitZeroWeight,
   parseRawSnapshot,
@@ -164,6 +165,23 @@ test('course average rows are not grades and drop silently', () => {
   assert.equal(parseRawSnapshot({ grades: JSON.stringify([average, exam]) }).grades.length, 1)
   const html = '<table><tr><td><b>CHE-K26A-1</b></td><td>4.2</td></tr><tr><td><table><tr><td>17.09.2026</td><td>Durchschnitt</td><td>4.2</td><td>1</td></tr><tr><td>17.09.2026</td><td>1. Prüfung</td><td>4.2</td><td>1</td></tr></table></td></tr></table>'
   assert.deepEqual(parseGradesHtml(html).map((grade) => grade.title), ['1. Prüfung'])
+})
+
+test('a point count beside the mark does not hide the mark', () => {
+  assert.equal(parseMark('4.25'), 4.25)
+  assert.equal(parseMark('5,5'), 5.5)
+  assert.equal(parseMark('4.25 Punkte: 18'), 4.25)
+  assert.equal(parseMark('4.25 18'), 4.25)
+  assert.equal(parseMark('5.5*'), 5.5)
+  assert.equal(parseMark('18'), null)
+  assert.equal(parseMark('-'), null)
+  assert.equal(parseMark(''), null)
+  const html = '<table><tr><td><b>CHE-K26A-1</b></td><td>5.0</td></tr><tr><td colspan="2"><table>' +
+    '<tr><td>03.03.2026</td><td>Labor</td><td>4.25 Punkte: 18</td><td>1</td></tr>' +
+    '</table></td></tr></table>'
+  const [grade] = parseGradesHtml(html)
+  assert.equal(grade.mark, 4.25)
+  assert.equal(grade.title, 'Labor')
 })
 
 test('a non-breaking space entity does not hide a mark or a weight', () => {
