@@ -79,12 +79,12 @@ Every item also has `id` and `page`. Unknown kinds are dropped and bad values ar
 | Measures (angle, distance) | yes | yes |
 | Reference image from file | yes | yes (system picker) |
 | Reference image from clipboard | yes | no |
-| Reference image from camera | yes (device capture) | not yet (open PR #1220) |
-| PDF crop as image | yes | not yet (open PR #1220) |
-| Compare view | yes | not yet (open PR #1220) |
+| Reference image from camera | yes (device capture) | yes (#1220) |
+| PDF crop as image | yes | yes (#1220) |
+| Compare view | yes | yes (#1220; side panel in landscape, bottom in portrait) |
 | Annotation undo/redo | yes | yes (own stack; ink undo unchanged) |
 
-On Android, study gestures go through the normal ink path, so palm rejection, pen-only and "finger draws" apply; a plain finger still navigates. Android camera capture, PDF crop and the compare view are in the open PR #1220 and not part of the merged app yet.
+On Android, study gestures go through the normal ink path, so palm rejection, pen-only and "finger draws" apply; a plain finger still navigates. Android camera capture, PDF crop and the compare view came with #1220; images from every source are re-encoded to the same caps as desktop (≈300 KB, long edge 1200 px, 8 MB per note).
 
 ## Checks
 
