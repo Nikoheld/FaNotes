@@ -72,3 +72,9 @@ Make sure `claude` and `gh` are authenticated for the service user and that `log
 
 `node --test scripts/request-worker/test/*.test.mjs` covers the stream-json to progress mapping, the state machine, config/prompt/CLI args,
 and end-to-end dry runs against a fake server, a fake `claude`, a fake `gh` and a temporary git repo (happy path, cancel, no PR, follow-up, red CI, crash recovery), plus `integration.test.mjs`, which runs the worker against the real server module in-process.
+
+## Repairs
+
+- A PR that conflicts with main (GitHub runs no checks then) goes back to Claude with a "merge main, resolve, push" message, up to 3 times, before and at merge time.
+- The Android check after the merge runs Gradle `--offline`, so a network drop cannot fail it.
+- PR merged by hand after the worker gave up: `node scripts/request-worker/mark-merged.mjs <requestId>:<prNumber> ...` (same env as the worker). It checks with gh that the PR is merged, then the owner's panel shows "merged".

@@ -15,6 +15,7 @@ import { ciState, findOpenPr } from './ci.mjs'
 
 const sleepDefault = (ms) => new Promise((r) => setTimeout(r, ms))
 const MAX_CI_FIXES = 2
+const MAX_CONFLICT_FIXES = 3
 // Phases in which Claude may run: only one such job at a time.
 const ACTIVE = new Set(['claimed', 'preparing', 'running'])
 const SERVER_CI = { green: 'success', red: 'failure', pending: 'pending' }
@@ -85,6 +86,18 @@ class Job {
       this.save()
       return
     }
+  }
+  // The PR conflicts with main: send Claude back to merge main into the branch and push.
+  async fixConflict() {
+    const st = this.state
+    st.conflictFixes = st.conflictFixes || 0
+    if (st.conflictFixes >= MAX_CONFLICT_FIXES) { await this.fail('Merge-Konflikt mit main liess sich nicht lösen'); return false }
+    st.conflictFixes++
+    st.pending.push({ id: `conflict-${st.conflictFixes}`, text: 'The pull request now has merge conflicts with main (other requests were merged meanwhile). Run `git fetch origin main` and `git merge origin/main` on your branch, resolve every conflict so both sides keep working (in fanotes/resources/i18n/en.json and package.json keep both added blocks, valid JSON, no duplicate keys), run the relevant checks and tsc again, commit the merge and push. Do not open a new pull request.' })
+    await this.postEvent('Konflikt mit main, Claude führt main zusammen', { percent: 88 })
+    await this.postStatus({ status: 'working' })
+    this.go('running')
+    return true
   }
   // The owner cancelled: the server already moved the request to `rejected`; nothing to post.
   cancelled() {
@@ -243,6 +256,7 @@ class Job {
       if (this.budgetLeft() <= 0) { await this.fail('Zeitbudget überschritten'); return false }
       if (st.pending.length) { await this.postStatus({ status: 'working' }); this.go('running'); return true }
       const ci = await ciState(config, this.dir, st.pr.number)
+      if (ci.state === 'conflict') return this.fixConflict()
       if (ci.state === 'green') {
         await this.postEvent('CI ist grün', { percent: 95 })
         await this.postStatus({ status: 'waiting_for_you', prNumber: st.pr.number, prUrl: st.pr.url, ci: SERVER_CI.green })
@@ -283,10 +297,16 @@ class Job {
   async mergePhase() {
     const { config, state: st } = this
     const ci = await ciState(config, this.dir, st.pr.number)
+    if (ci.state === 'conflict') return this.fixConflict()
     if (ci.state !== 'green') { await this.fail(`Nicht gemergt: CI ist nicht grün (${ci.state})`); return false }
     await this.postEvent('Merged den Pull Request', { percent: 96 })
     const r = await run(config.ghBin, ['pr', 'merge', String(st.pr.number), '--merge'], { cwd: this.dir, timeoutMs: 120_000 })
-    if (r.code !== 0) { await this.fail('Merge fehlgeschlagen: ' + this.log.redact(r.stderr.trim().slice(-200))); return false }
+    if (r.code !== 0) {
+      // main may have moved between the check and the merge.
+      if ((await ciState(config, this.dir, st.pr.number)).state === 'conflict') return this.fixConflict()
+      await this.fail('Merge fehlgeschlagen: ' + this.log.redact(r.stderr.trim().slice(-200)))
+      return false
+    }
     this.go('verifying')
     return true
   }
@@ -297,7 +317,7 @@ class Job {
     return [
       { label: 'tsc', cmd: 'npx', args: ['tsc', '-p', 'tsconfig.app.json', '--noEmit'], cwd: 'fanotes', env: {} },
       { label: 'Android-Tests', cmd: './gradlew', cwd: 'android', env: gradleEnv,
-        args: ['--no-daemon', '-Dorg.gradle.jvmargs=-Xmx1536m', '-Pkotlin.compiler.execution.strategy=in-process', ':core:test', ':app:compileDebugKotlin'] },
+        args: ['--offline', '--no-daemon', '-Dorg.gradle.jvmargs=-Xmx1536m', '-Pkotlin.compiler.execution.strategy=in-process', ':core:test', ':app:compileDebugKotlin'] },
     ]
   }
 

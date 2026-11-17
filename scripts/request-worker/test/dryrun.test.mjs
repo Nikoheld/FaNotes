@@ -142,6 +142,21 @@ test('red CI is not merged after limited fix attempts', async (t) => {
   assert.equal(s.claudeRuns().length, 3) // initial + 2 fixes
 })
 
+test('a PR that conflicts with main goes back to Claude, then merges', async (t) => {
+  const marker = path.join(os.tmpdir(), `rw-conflict-${process.pid}-${Date.now()}`)
+  fs.writeFileSync(marker, '')
+  const s = await setup(t, { env: { FAKE_GH_CONFLICT_FILE: marker }, onWaiting: (rec) => { rec.control = { status: 'waiting_for_you', approved: true, cancelled: false, messages: [] } } })
+  t.after(() => { fs.rmSync(marker, { force: true }); delete process.env.FAKE_GH_CONFLICT_FILE })
+  s.server.rec.queue.push({ ...REQ })
+  await s.worker.loop()
+  const runs = s.claudeRuns()
+  assert.equal(runs.length, 2)
+  assert.ok(runs[1].args.includes('--resume') && runs[1].prompt.includes('merge conflicts'))
+  assert.ok(s.server.rec.events.some((e) => /Konflikt mit main/.test(e.text)))
+  assert.equal(s.server.rec.statuses.at(-1).status, 'merged')
+  assert.deepEqual(s.ghLog(), ['pr merge 4242 --merge'])
+})
+
 test('crash recovery: persisted running job resumes the session', async (t) => {
   const s = await setup(t, { onWaiting: (rec) => { rec.control = { status: 'waiting_for_you', approved: true, messages: [] } } })
   const { createWorktree } = await import('../worktree.mjs')

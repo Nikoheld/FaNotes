@@ -25,9 +25,12 @@ export function bucketOf(check) {
 }
 
 export async function ciState(config, cwd, prNumber) {
-  const r = await run(config.ghBin, ['pr', 'view', String(prNumber), '--json', 'statusCheckRollup'], { cwd, timeoutMs: 60_000 })
+  const r = await run(config.ghBin, ['pr', 'view', String(prNumber), '--json', 'statusCheckRollup,mergeable'], { cwd, timeoutMs: 60_000 })
   try {
-    const rollup = JSON.parse(r.stdout).statusCheckRollup
+    const { statusCheckRollup: rollup, mergeable } = JSON.parse(r.stdout)
+    // GitHub runs no pull_request checks while the PR conflicts with its base, so a conflict
+    // would otherwise look "pending" until the CI timeout.
+    if (mergeable === 'CONFLICTING') return { state: 'conflict', failed: [] }
     return summarizeChecks((rollup || []).map((c) => ({ name: c.name || c.context || '', bucket: bucketOf(c) })))
   } catch { return { state: 'pending', failed: [], error: true } }
 }
