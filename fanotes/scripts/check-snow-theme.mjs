@@ -5,22 +5,28 @@ import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
 import {
   applyThemeChoice,
-  createSnowField,
-  dragSnowField,
+  burstSnow,
+  createSnowWorld,
+  interactSnow,
   obstaclesFromRects,
-  snowDragHitsSettled,
   snowLayerActive,
-  sprinkleSnow,
-  stepSnowField,
-  wakeSnowForObstacles,
-  SNOW_DRAG_REACH,
+  snowWind,
+  stepSnowWorld,
+  syncSnowObstacles,
   SNOW_FLAKE_COUNT,
+  SNOW_FLOOR_DEPTH,
+  SNOW_LEDGE_DEPTH,
 } from '../src/lib/snowTheme.ts'
 
 const require = createRequire(import.meta.url)
 const { sanitizeSettings } = require('../electron/settings-sanitize.cjs')
 const appRoot = fileURLToPath(new URL('..', import.meta.url))
 const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.url), 'utf8')
+
+const floorFor = (world) => {
+  stepSnowWorld(world, 16)
+  return world.piles.get('floor')
+}
 
 const vite = await createServer({
   root: appRoot,
@@ -59,180 +65,76 @@ try {
     }
   }
 
-  const field = createSnowField(1000, 800)
-  assert.ok(field.flakes.length >= 40)
-  const xs = field.flakes.map((flake) => flake.x)
-  const ys = field.flakes.map((flake) => flake.y)
-  assert.ok(Math.max(...xs) - Math.min(...xs) > field.width * 0.5)
-  assert.ok(Math.max(...ys) - Math.min(...ys) > field.height * 0.5)
-  const before = field.flakes.map((flake) => [flake.x, flake.y])
-  const obstacle = { left: 80, right: 460, top: 360 }
+  const world = createSnowWorld(1000, 800)
+  assert.equal(world.flakes.length, SNOW_FLAKE_COUNT)
+  const ledge = { left: 80, right: 460, top: 360 }
   const ceiling = obstaclesFromRects([
     { left: 0, top: 0, right: 1000, width: 1000, height: 40 },
-    { left: obstacle.left, top: obstacle.top, right: obstacle.right, width: obstacle.right - obstacle.left, height: 220 },
-  ], field.width, field.height)
-  assert.deepEqual(ceiling, [obstacle])
-  const highest = field.flakes.reduce((best, flake, index) => (flake.y < field.flakes[best].y ? index : best), 0)
-  const stepped = stepSnowField(field, 48, false, [obstacle])
-  assert.ok(stepped.flakes[highest].y > field.flakes[highest].y)
-  assert.deepEqual(field.flakes.map((flake) => [flake.x, flake.y]), before)
-  const held = stepSnowField(field, 48, true, [obstacle])
-  assert.equal(held, field)
+    { left: ledge.left, top: ledge.top, right: ledge.right, width: ledge.right - ledge.left, height: 220 },
+  ], 1000, 800)
+  assert.deepEqual(ceiling, [ledge])
+  syncSnowObstacles(world, [ledge])
+  const ledgePile = [...world.piles.values()].find((pile) => pile.top === 360)
+  assert.ok(ledgePile)
 
-  const bottomOf = (flake) => flake.y + flake.radius * 2
-  const overlaps = (flake, left, right) => flake.x < right && flake.x + flake.radius * 2 > left
-  let settled = field
-  for (let frame = 0; frame < 800; frame += 1) {
-    const next = stepSnowField(settled, 16, false, [obstacle])
-    if (next === settled) break
-    settled = next
-  }
-  assert.equal(stepSnowField(settled, 48, false, [obstacle]), settled)
-  assert.ok(settled.flakes.some((flake) => flake.settled && Math.abs(bottomOf(flake) - obstacle.top) < 0.01 && overlaps(flake, obstacle.left, obstacle.right)))
-  assert.ok(settled.flakes.some((flake) => flake.settled && Math.abs(bottomOf(flake) - field.height) < 0.01 && !overlaps(flake, obstacle.left, obstacle.right)))
-  assert.ok(settled.flakes.length < field.flakes.length)
-  assert.ok(settled.flakes.some((flake) => flake.radius > 7))
-  assert.ok(settled.flakes.every((flake) => flake.y + flake.radius * 2 <= field.height + 0.01))
-  assert.ok(settled.flakes.every((flake) => flake.y > -flake.radius))
+  const wind = [0, 5, 10, 30].map(snowWind)
+  assert.ok(new Set(wind).size > 1)
+  assert.equal(snowWind(12.5), snowWind(12.5))
 
-  const clusterIndex = settled.flakes.findIndex((flake) => flake.settled)
-  const cluster = settled.flakes[clusterIndex]
-  const pointerX = cluster.x + cluster.radius
-  const pointerY = cluster.y + cluster.radius
-  const distantIndex = settled.flakes.findIndex((flake) => (
-    Math.hypot(pointerX - (flake.x + flake.radius), pointerY - (flake.y + flake.radius)) > SNOW_DRAG_REACH + flake.radius + 80
-  ))
-  assert.ok(clusterIndex >= 0)
-  assert.ok(distantIndex >= 0)
-  assert.equal(snowDragHitsSettled(settled, pointerX, pointerY), true)
-  assert.equal(snowDragHitsSettled(settled, settled.flakes[distantIndex].x, -400), false)
-  const dx = 36
-  const dy = -18
-  const dragged = dragSnowField(settled, pointerX, pointerY, dx, dy)
-  assert.notEqual(dragged.flakes[clusterIndex].x, cluster.x)
-  assert.ok(Math.abs(dragged.flakes[clusterIndex].vx) + Math.abs(dragged.flakes[clusterIndex].vy) > 0)
-  assert.equal(dragged.flakes[distantIndex].x, settled.flakes[distantIndex].x)
-  assert.equal(dragged.flakes[distantIndex].y, settled.flakes[distantIndex].y)
-  assert.equal(dragged.flakes.every((flake, index) => flake.x === settled.flakes[index].x + dx && flake.y === settled.flakes[index].y + dy), false)
-  let moving = dragged
-  let traveled = false
-  const clusterId = cluster.id
-  let previous = moving.flakes.find((flake) => flake.id === clusterId)
-  for (let frame = 0; frame < 40; frame += 1) {
-    const next = stepSnowField(moving, 16, false, [obstacle])
-    const flake = next.flakes.find((item) => item.id === clusterId)
-    if (!flake || !previous || flake.x !== previous.x || flake.y !== previous.y) traveled = true
-    previous = flake
-    moving = next
-  }
-  assert.equal(traveled, true)
-  for (let frame = 0; frame < 800; frame += 1) {
-    const next = stepSnowField(moving, 16, false, [obstacle])
-    if (next === moving) break
-    moving = next
-  }
-  assert.equal(stepSnowField(moving, 48, false, [obstacle]), moving)
-  assert.ok(moving.flakes.every((flake) => flake.settled))
-  const floorIndex = settled.flakes.findIndex((flake) => Math.abs(bottomOf(flake) - field.height) < 0.01)
-  assert.ok(floorIndex >= 0)
-  const floorFlake = settled.flakes[floorIndex]
-  const pushedDown = dragSnowField(settled, floorFlake.x + floorFlake.radius, floorFlake.y + floorFlake.radius, 20, 2)
-  assert.ok(bottomOf(pushedDown.flakes[floorIndex]) > field.height)
-  let recovered = pushedDown
-  for (let frame = 0; frame < 300; frame += 1) {
-    const next = stepSnowField(recovered, 16, false, [obstacle])
-    if (next === recovered) break
-    recovered = next
-  }
-  const recoveredFlake = recovered.flakes.find((flake) => flake.id === floorFlake.id)
-  if (recoveredFlake) {
-    assert.equal(recoveredFlake.settled, true)
-    assert.ok(Math.abs(bottomOf(recoveredFlake) - field.height) < 0.01)
-  }
-  assert.ok(recovered.flakes.some((flake) => flake.settled && Math.abs(bottomOf(flake) - field.height) < 0.01))
-  assert.ok(recovered.flakes.every((flake) => bottomOf(flake) <= field.height + 0.01))
+  const tracked = world.flakes.reduce((best, flake) => (flake.y < best.y ? flake : best))
+  const trackedY = tracked.y
+  for (let frame = 0; frame < 20; frame += 1) stepSnowWorld(world, 16)
+  assert.ok(tracked.y > trackedY)
+  const before = JSON.stringify(world.flakes.map((flake) => flake.x))
+  stepSnowWorld(world, 0)
+  assert.equal(JSON.stringify(world.flakes.map((flake) => flake.x)), before)
 
-  const clump = {
-    width: 1000,
-    height: 800,
-    flakes: [
-      { id: 1, x: 100, y: 788, radius: 6, vx: 0, vy: 0, settled: true },
-      { id: 2, x: 108, y: 788, radius: 6, vx: 0, vy: 0, settled: true },
-      { id: 3, x: 116, y: 788, radius: 6, vx: 0, vy: 0, settled: true },
-      { id: 9, x: 860, y: 788, radius: 6, vx: 0, vy: 0, settled: true },
-    ],
+  for (let frame = 0; frame < 3000; frame += 1) stepSnowWorld(world, 16)
+  assert.equal(world.flakes.length >= SNOW_FLAKE_COUNT, true)
+  assert.ok(world.flakes.length <= SNOW_FLAKE_COUNT + 60)
+  const floor = world.piles.get('floor')
+  assert.ok(Math.max(...floor.heights) > 1, 'snow piles up on the floor')
+  assert.ok(Math.max(...floor.heights) <= SNOW_FLOOR_DEPTH + 0.001)
+  assert.ok(Math.max(...ledgePile.heights) > 0.5, 'snow piles up on a ledge')
+  assert.ok(Math.max(...ledgePile.heights) <= SNOW_LEDGE_DEPTH + 0.001)
+  for (const pile of world.piles.values()) {
+    for (let index = 0; index < pile.heights.length - 1; index += 1) {
+      assert.ok(Math.abs(pile.heights[index] - pile.heights[index + 1]) < 4, 'slopes stay below the repose limit')
+    }
   }
-  let packed = clump
-  for (let frame = 0; frame < 80; frame += 1) {
-    const next = stepSnowField(packed, 16, false, [])
-    if (next === packed) break
-    packed = next
-  }
-  assert.ok(packed.flakes.length < clump.flakes.length)
-  const ball = packed.flakes.find((flake) => flake.radius > 6.5)
-  assert.ok(ball)
-  assert.equal(ball.settled, true)
-  assert.ok(Math.abs(bottomOf(ball) - clump.height) < 0.01)
-  const loner = packed.flakes.find((flake) => flake.id === 9)
-  assert.ok(loner)
-  assert.equal(loner.x, 860)
-  assert.equal(loner.radius, 6)
-  const ballDrag = dragSnowField(packed, ball.x + ball.radius, ball.y + ball.radius, 22, 0)
-  const draggedBall = ballDrag.flakes.find((flake) => flake.id === ball.id)
-  assert.ok(draggedBall.x > ball.x)
-  assert.equal(ballDrag.flakes.find((flake) => flake.id === 9).x, 860)
-  let rolled = ballDrag
-  for (let frame = 0; frame < 200; frame += 1) {
-    const next = stepSnowField(rolled, 16, false, [])
-    if (next === rolled) break
-    rolled = next
-  }
-  assert.equal(stepSnowField(rolled, 16, false, []), rolled)
-  assert.ok(rolled.flakes.every((flake) => flake.settled && bottomOf(flake) <= clump.height + 0.01))
+  assert.ok(world.flakes.every((flake) => Number.isFinite(flake.x) && Number.isFinite(flake.y)))
 
-  const full = createSnowField(1000, 800)
-  assert.equal(full.flakes.length, SNOW_FLAKE_COUNT)
-  assert.equal(sprinkleSnow(full, 3), full)
-  const short = { ...full, flakes: full.flakes.slice(0, 10) }
-  const added = sprinkleSnow(short, 2)
-  assert.equal(added.flakes.length, 12)
-  assert.ok(added.flakes[11].y < 0)
-  assert.equal(added.flakes[11].settled, false)
-  assert.equal(short.flakes.length, 10)
+  // Stirring pushes flakes; plowing removes snow and throws flakes up.
+  const stir = createSnowWorld(1000, 800)
+  stir.flakes[0].x = 500
+  stir.flakes[0].y = 400
+  stir.flakes[0].vx = 0
+  stir.flakes[0].vy = 0
+  interactSnow(stir, 480, 400, 600, 0, false)
+  assert.ok(stir.flakes[0].vx > 100)
+  const bank = floorFor(stir)
+  bank.heights.fill(10)
+  const volume = bank.heights.reduce((sum, value) => sum + value, 0)
+  const count = stir.flakes.length
+  interactSnow(stir, 500, 790, 400, -50, true)
+  assert.ok(bank.heights.reduce((sum, value) => sum + value, 0) < volume)
+  assert.ok(stir.flakes.length > count)
+  assert.equal(bank.heights[2], 10)
+  const flat = createSnowWorld(1000, 800)
+  const still = JSON.stringify(flat.flakes)
+  interactSnow(flat, Number.NaN, 0, 0, 0, true)
+  assert.equal(JSON.stringify(flat.flakes), still)
+  const burst = createSnowWorld(1000, 800)
+  burstSnow(burst, 500, 400, 10)
+  assert.equal(burst.flakes.length, SNOW_FLAKE_COUNT + 10)
 
-  const menu = { left: 100, right: 400, top: 200 }
-  const pile = {
-    width: 1000,
-    height: 800,
-    flakes: [
-      { x: 150, y: 190, radius: 5, vx: 0, vy: 0, settled: true },
-      { x: 150, y: 180, radius: 5, vx: 0, vy: 0, settled: true },
-      { x: 800, y: 790, radius: 5, vx: 0, vy: 0, settled: true },
-    ],
-  }
-  assert.equal(wakeSnowForObstacles(pile, [menu]), pile)
-  const woken = wakeSnowForObstacles(pile, [])
-  assert.notEqual(woken, pile)
-  assert.equal(pile.flakes[0].settled, true)
-  assert.equal(pile.flakes[1].settled, true)
-  assert.equal(woken.flakes[0].settled, false)
-  assert.equal(woken.flakes[1].settled, false)
-  assert.ok(woken.flakes[0].vy >= 0.08)
-  assert.ok(woken.flakes[1].vy >= 0.08)
-  assert.equal(woken.flakes[2].settled, true)
-  assert.equal(woken.flakes[2].x, pile.flakes[2].x)
-  let fallen = woken
-  for (let frame = 0; frame < 800; frame += 1) {
-    const next = stepSnowField(fallen, 16, false, [])
-    if (next === fallen) break
-    fallen = next
-  }
-  assert.equal(stepSnowField(fallen, 16, false, []), fallen)
-  assert.ok(fallen.flakes.length < pile.flakes.length)
-  assert.ok(fallen.flakes.every((flake) => flake.settled && bottomOf(flake) > 700))
-  assert.ok(fallen.flakes.some((flake) => flake.radius > 5))
-  assert.ok(fallen.flakes.some((flake) => Math.abs(flake.x - 800) < 1 && flake.radius === 5))
-  assert.deepEqual(field.flakes.map((flake) => [flake.x, flake.y]), before)
+  // A ledge that disappears sheds its snow as flakes.
+  ledgePile.heights.fill(8)
+  const flakesBefore = world.flakes.length
+  syncSnowObstacles(world, [])
+  assert.equal(world.piles.has('floor'), true)
+  assert.equal([...world.piles.values()].some((pile) => pile.top === 360), false)
+  assert.ok(world.flakes.length > flakesBefore)
 } finally {
   await vite.close()
 }
@@ -244,7 +146,7 @@ const farbschema = settings.slice(settings.indexOf('title="Farbschema"'), settin
 assert.match(farbschema, /THEMES\.map\(\(theme\)/)
 assert.match(farbschema, /applyThemeChoice\(settings, theme\)/)
 assert.doesNotMatch(farbschema, /setting-row/)
-assert.match(settings, /\{`Anpassung · \$\{section\.count\} Optionen`\}/)
+assert.match(settings, /`Anpassung · \$\{section\.count\} Optionen`/)
 const appearance = settings.slice(settings.indexOf("active === 'appearance'"), settings.indexOf("active === 'editor'"))
 const appearanceRows = appearance.match(/<SettingRow\b/g)?.length ?? 0
 const appearanceCount = Number(settings.match(/case 'appearance': return (\d+)/)?.[1])
@@ -254,7 +156,7 @@ assert.equal(appearanceCount, 12)
 const css = read('src/styles.css')
 const blockFor = (selector) => {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  return css.match(new RegExp(`${escaped}\\s*\\{([^}]+)\\}`))?.[1] ?? ''
+  return css.match(new RegExp(`${escaped}(?:,[^{]*)?\\s*\\{([^}]+)\\}`))?.[1] ?? ''
 }
 const tokenNames = (block) => [...block.matchAll(/--([\w-]+)\s*:/g)].map((match) => match[1])
 const snowTokens = new Set(tokenNames(blockFor('.app-shell.theme-snow')))
@@ -273,22 +175,20 @@ assert.match(blockFor('.snow-layer'), /inset:\s*0/)
 assert.match(blockFor('.snow-layer'), /pointer-events:\s*none/)
 const snowLayer = read('src/components/SnowLayer.tsx')
 assert.match(snowLayer, /obstaclesFromRects/)
-assert.match(snowLayer, /stepSnowField\([\s\S]*obstaclesRef/)
-assert.match(snowLayer, /wakeSnowForObstacles/)
-assert.match(snowLayer, /sprinkleSnow/)
-assert.match(snowLayer, /snowDragHitsSettled/)
+assert.match(snowLayer, /stepSnowWorld/)
+assert.match(snowLayer, /syncSnowObstacles/)
+assert.match(snowLayer, /interactSnow/)
 assert.match(snowLayer, /controlTarget\(event\.target\)/)
-assert.match(snowLayer, /button, a, input, textarea/)
 assert.match(snowLayer, /MutationObserver/)
 assert.match(snowLayer, /attributeFilter:\s*\['class', 'hidden'\]/)
-assert.match(snowLayer, /setInterval\(schedule, 200\)/)
+assert.doesNotMatch(snowLayer, /preventDefault|stopPropagation/)
 
 const app = read('src/App.tsx')
 const layerUses = app.match(/<SnowLayer\b/g) ?? []
 const guarded = app.match(/snowLayerActive\(theme\) \? <SnowLayer\b/g) ?? []
 assert.ok(layerUses.length >= 1)
 assert.equal(layerUses.length, guarded.length)
-assert.equal(app.includes("snow: ['#f4f7fb', '#e7eef6', '#e7eef6', '#fbfcfe']"), true)
+assert.equal(app.includes("snow: ['#eef5fc', '#dfecf8', '#e1edf8', '#fafdff']"), true)
 
 console.log(`appearance Anpassung · ${appearanceCount} Optionen matches ${appearanceRows} setting rows`)
 console.log('snow-theme ok')

@@ -167,12 +167,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 .app-shell.theme-snow, body.app-theme-snow {
-  --bg: #f4f7fb;
-  --bg-elevated: #e7eef6;
-  --panel: #e7eef6;
-  --panel-strong: #fbfcfe;
-  --panel-hover: #dbe5f0;
-  --panel-active: #d0dce9;
+  --bg: #eef5fc;
+  --bg-elevated: #dfecf8;
+  --panel: #e1edf8;
+  --panel-strong: #fafdff;
+  --panel-hover: #d2e3f3;
+  --panel-active: #c3d8ed;
   --border: rgba(28, 42, 58, .1);
   --border-strong: rgba(28, 42, 58, .18);
   --text: #1c2a38;
@@ -197,18 +197,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   pointer-events: none;
 }
 
-.snow-flake {
-  position: absolute;
-  top: 0;
-  left: 0;
-  border-radius: 50%;
-  background: radial-gradient(circle at 34% 32%, #ffffff 0 26%, #f4f8fb 48%, #d5e4f0 100%);
-  box-shadow:
-    inset 0 -3px 5px rgba(90, 120, 145, .32),
-    inset 2px 2px 3px rgba(255, 255, 255, .85),
-    0 0 0 1px rgba(28, 42, 58, .32),
-    0 2px 5px rgba(28, 42, 58, .22);
-}
+.snow-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 
 /* The shell background never shows: the ribbon, the sidebar, and the note
    sheet each paint their own opaque fill. A design has to land on those
