@@ -12,6 +12,7 @@ import {
   CircleAlert,
   Eraser,
   FileInput,
+  Highlighter,
   GripVertical,
   LoaderCircle,
   ListChecks,
@@ -62,6 +63,13 @@ import { pdfFromRgbaPages, type CanvasPdfPage } from '../lib/canvasPdf'
 import { rasterizePaperLayers, scrollPaperTo, waitForPaperPaint } from '../lib/canvasSnapshot'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
+import { PenQuickMenu } from './PenQuickMenu'
+import {
+  PEN_TIP_MASK,
+  quickMenuChordOnDown,
+  quickMenuChordOnMove,
+  type QuickMenuPanState,
+} from '../lib/penQuickMenu'
 import type {
   RecognitionResources,
 } from '../lib/handwritingDb'
@@ -988,6 +996,8 @@ const paperLabel: Record<PaperStyle, string> = Object.fromEntries(
 ) as Record<PaperStyle, string>
 
 const colorChoices = ['#191c24', '#3d52d5', '#7654d6', '#d74769', '#df7627', '#138d75']
+/** Drawing colours for the Wacom quick menu ring (Textmarker yellow first). */
+const QUICK_ART_COLORS = ['#f2b735', '#77ad3a', '#21a8c7', '#e5489a', '#f06c32', '#6548dc', '#d83b52', '#17191f']
 const artColorChoices = [
   '#17191f', '#ffffff', '#6c727f', '#d83b52', '#f06c32', '#f2b735', '#77ad3a',
   '#1ca982', '#21a8c7', '#3478df', '#6548dc', '#a444cf', '#e5489a', '#8b5a3c',
@@ -1732,7 +1742,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     y: number
     pointerType: string
     samples: FingerPanSample[]
-  } | null>(null)
+  } & QuickMenuPanState | null>(null)
+  const openPenQuickMenuRef = useRef<(x: number, y: number, pointerId: number) => void>(() => {})
   const fingerPanFlingRef = useRef(0)
   const lastFingerPanAtRef = useRef(0)
   const undoNowRef = useRef<() => void>(() => {})
@@ -1778,6 +1789,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [tool, setTool] = useState<DrawingTool>(initialToolMemory.tool)
   const [inkMode, setInkMode] = useState<InkMode>(initialToolMemory.inkMode)
   const [artPanelOpen, setArtPanelOpen] = useState(false)
+  const [penQuickMenu, setPenQuickMenu] = useState<{ x: number; y: number; pointerId: number } | null>(null)
   const [artStudioTab, setArtStudioTab] = useState<ArtStudioTab>('brushes')
   const [artBrush, setArtBrush] = useState<ArtBrush>(initialArtPreferences.brush)
   const [artColor, setArtColor] = useState(initialArtPreferences.color)
@@ -5223,7 +5235,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     return true
   }, [startFingerPanFling])
-  const beginTabletPan = (pointerId: number, clientX: number, clientY: number, pointerType: string, now: number) => {
+  const beginTabletPan = (
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+    pointerType: string,
+    now: number,
+    stylusButton = false,
+    buttons = 0,
+  ) => {
     cancelFingerPanFling()
     tabletPanRef.current = {
       pointerId,
@@ -5231,14 +5251,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       y: clientY,
       pointerType,
       samples: [{ t: now, x: clientX, y: clientY }],
+      stylusButton,
+      tipDown: (buttons & PEN_TIP_MASK) !== 0,
+      menu: false,
+      lastAt: now,
     }
   }
-  const dragSheetWithPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
+  const dragSheetWithPointer = useCallback((pointerId: number, clientX: number, clientY: number, buttons?: number) => {
     const pan = tabletPanRef.current
     if (!pan || pan.pointerId !== pointerId) return false
+    const now = performance.now()
+    // Pan button held, then the tip: open the quick menu and freeze the sheet.
+    if (quickMenuChordOnMove(pan, pointerId, buttons, now)) {
+      pan.menu = true
+      openPenQuickMenuRef.current(clientX, clientY, pointerId)
+    }
+    if (pan.menu) return true
     const dx = clientX - pan.x
     const dy = clientY - pan.y
-    const now = performance.now()
     pan.x = clientX
     pan.y = clientY
     pan.samples = pushFingerPanSample(pan.samples, { t: now, x: clientX, y: clientY }, now)
@@ -5376,8 +5406,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // A new contact stops a coasting finger pan. The mouse event a touch lift
     // synthesizes must not, or the coast would die in the same gesture.
     if (!(event.pointerType === 'mouse' && performance.now() - lastFingerPanAtRef.current < 500)) cancelFingerPanFling()
-    if (event.pointerType === 'pen') tabletPanRef.current = null
     const now = performance.now()
+    if (quickMenuChordOnDown(tabletPanRef.current, event.nativeEvent, now)) {
+      // The tip arrived as its own pointer while a mouse-labelled pan button is held.
+      event.preventDefault()
+      const pan = tabletPanRef.current
+      if (pan) pan.menu = true
+      openPenQuickMenuRef.current(event.clientX, event.clientY, event.pointerId)
+      return
+    }
+    if (event.pointerType === 'pen') tabletPanRef.current = null
     const asStylus = event.pointerType === 'pen' || (
       lastPenContactRef.current > 0 && now - lastPenContactRef.current < POST_PEN_IGNORE_MS
     )
@@ -5393,7 +5431,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (buttonAction === 'undo') undoNowRef.current()
       if (buttonAction === 'redo') redoNowRef.current()
       if (buttonAction === 'pan') {
-        beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now)
+        beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now, true, event.buttons)
         activePointerRef.current = event.pointerId
         if (event.pointerType === 'pen') {
           lastPenContactRef.current = now
@@ -5742,7 +5780,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, cancelFingerPanFling, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, selectionPurpose, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY)) {
+    if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY, event.buttons)) {
       if (event.cancelable) event.preventDefault()
       return
     }
@@ -6534,7 +6572,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     const onWindowPointerMove = (event: PointerEvent) => {
-      if (dragSheetWithPointerRef.current(event.pointerId, event.clientX, event.clientY)) return
+      if (dragSheetWithPointerRef.current(event.pointerId, event.clientX, event.clientY, event.buttons)) return
       if (!inputActive || activePointerRef.current !== event.pointerId) return
       const now = performance.now()
       const heldEraser = buttonEraserGestureRef.current && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
@@ -8684,6 +8722,47 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     else setArtColor(color)
   }
 
+  // Wacom quick menu (pan button + tip): the same actions as the toolbar.
+  openPenQuickMenuRef.current = (x, y, pointerId) => {
+    setArtPanelOpen(false)
+    setPenQuickMenu({ x, y, pointerId })
+  }
+  const quickMenuUsesStrip = tool === 'pen' && inkMode === 'drawing'
+  const quickMenuColors = quickMenuUsesStrip && !stripUsesPenColor ? QUICK_ART_COLORS : colorChoices
+  const quickMenuColor = quickMenuUsesStrip ? stripColor : penColor
+  const quickMenuTools = [
+    { id: 'write', label: 'Schreiben', icon: <PenLine size={18} />, active: tool === 'pen' && inkMode === 'writing' },
+    { id: 'highlighter', label: 'Textmarker', icon: <Highlighter size={18} />, active: tool === 'pen' && inkMode === 'drawing' && artBrush === 'highlighter' },
+    { id: 'eraser', label: 'Radierer', icon: <Eraser size={18} />, active: tool === 'eraser' },
+    { id: 'select', label: 'Verschieben', icon: <Move size={18} />, active: tool === 'select' },
+    { id: 'laser', label: 'Laserpointer', icon: <Crosshair size={18} />, active: tool === 'laser' },
+  ]
+  const closePenQuickMenu = () => {
+    setPenQuickMenu(null)
+    requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
+  }
+  const chooseQuickMenuTool = (id: string) => {
+    if (id === 'write') activateWriting()
+    else if (id === 'highlighter') {
+      const brush = ART_BRUSHES.find((item) => item.id === 'highlighter')
+      if (brush) chooseArtBrush(brush)
+      activateDrawing()
+      setArtPanelOpen(false)
+    } else if (id === 'eraser') activateEraser()
+    else if (id === 'select') beginInkEdit()
+    else if (id === 'laser') activateLaser()
+    closePenQuickMenu()
+  }
+  const chooseQuickMenuColor = (color: string) => {
+    if (quickMenuUsesStrip) chooseStripColor(color)
+    else {
+      choosePenColor(color)
+      // A colour is for writing: leave the eraser, laser or selection.
+      if (tool !== 'pen') activateWriting()
+    }
+    closePenQuickMenu()
+  }
+
   const mergeActions = (labeled: boolean) => (
     sectionsEnabled && inkMode === 'writing' && sections.length > 1 ? <>
       <button
@@ -9167,6 +9246,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         if (inline) return portalInkToolbar(createPortal, toolbar, inkToolbarHost, inputActive)
         return toolbar
       })()}
+
+      {penQuickMenu && createPortal(
+        <PenQuickMenu
+          x={penQuickMenu.x}
+          y={penQuickMenu.y}
+          pointerId={penQuickMenu.pointerId}
+          tools={quickMenuTools}
+          colors={quickMenuColors}
+          activeColor={quickMenuColor}
+          onTool={chooseQuickMenuTool}
+          onColor={chooseQuickMenuColor}
+          onClose={closePenQuickMenu}
+        />,
+        document.body,
+      )}
 
       {(rulerPose || setSquarePose || compassPose)
         && draftingSettings.panelOpen
