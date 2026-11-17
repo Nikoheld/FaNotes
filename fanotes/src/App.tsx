@@ -1550,6 +1550,8 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [worksheetSession.documents])
 
   const toast = useCallback((message: string, kind: Toast['kind'] = 'info') => {
+    // Error toasts feed the opt-in diagnostics: a hash and a count, never the text itself.
+    if (kind === 'error') diagnosticLog.record({ at: Date.now(), kind: 'error', message })
     const id = ++toastCounter.current
     setToasts((current) => [...current.slice(-3), { id, kind, message }])
     window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), kind === 'error' ? 6500 : 4000)

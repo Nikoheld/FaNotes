@@ -123,6 +123,14 @@ try {
   client.configureDiagnostics({ usage: true, logs: false })
   client.recordFeature('tool.pen'); client.recordFeature('not a valid name!')
   assert.deepEqual(client.previewDiagnostics().usage.counters, { 'tool.pen': 1 })
+  // Tool switches and error toasts reach the counters through the shared diagnostic log.
+  const { diagnosticLog } = await server.ssrLoadModule('/src/lib/bugReport.ts')
+  diagnosticLog.record({ at: Date.now(), kind: 'tool', tool: 'Eraser' })
+  diagnosticLog.record({ at: Date.now(), kind: 'error', message: 'Die Notiz "Bio" konnte nicht gespeichert werden.' })
+  const counted = client.previewDiagnostics().usage
+  assert.equal(counted.counters["tool.eraser"], 1, 'a tool switch is counted')
+  assert.equal(Object.values(counted.errors).reduce((sum, n) => sum + n, 0), 1, 'an error toast is counted')
+  assert.ok(!JSON.stringify(counted).includes('konnte') && !JSON.stringify(counted).includes('Bio'), 'the error text never leaves the device')
   assert.equal(await client.sendDailyIfDue(), true)
   assert.equal(fetches, 1)
   assert.equal(await client.sendDailyIfDue(), false, 'second call within a day does not send')
