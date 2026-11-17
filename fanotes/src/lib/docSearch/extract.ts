@@ -45,7 +45,7 @@ const titleOf = (path: string) => (path.split('/').pop() ?? path).replace(/\.[^.
 /**
  * Searchable documents of the current vault. Dot folders (`.fanotes` data,
  * sync state, Schulnetz data), dotfiles and excluded notes are never listed.
- * A `.famd` beside a `.pdf` or `.md` is that document's companion, not its own.
+ * A `.famd` beside a `.pdf`, `.md`, or `.markdown` note is that document's companion, not its own.
  */
 export const listSearchDocuments = (tree: VaultEntry[], storyStamp?: (path: string) => string) => {
   const files = new Map<string, VaultEntry>()
@@ -67,14 +67,12 @@ export const listSearchDocuments = (tree: VaultEntry[], storyStamp?: (path: stri
       // A story folder's own time does not change when a scene does; the service adds a stamp
       // that changes with every save and sync of the story (and once per app start).
       if (storyStamp) sources.push({ path, title: titleOf(path), kind: 'story', fingerprint: `story:${fp(entry)}|${storyStamp(path)}`, modifiedAt })
-    } else if (extension === 'pdf') {
+    } else if (extension === 'pdf' || extension === 'md' || extension === 'markdown') {
       const companion = files.get(`${stemOf(path)}.famd`)
-      sources.push({ path, title: titleOf(path), kind: 'pdf', fingerprint: `${fp(entry)}|${fp(companion)}`, modifiedAt })
-    } else if (extension === 'md') {
-      const companion = files.get(`${stemOf(path)}.famd`)
-      sources.push({ path, title: titleOf(path), kind: 'note', fingerprint: `${fp(entry)}|${fp(companion)}`, modifiedAt })
+      sources.push({ path, title: titleOf(path), kind: extension === 'pdf' ? 'pdf' : 'note', fingerprint: `${fp(entry)}|${fp(companion)}`, modifiedAt })
     } else if (extension === 'famd') {
-      if (files.has(`${stemOf(path)}.pdf`) || files.has(`${stemOf(path)}.md`)) continue
+      const stem = stemOf(path)
+      if (files.has(`${stem}.pdf`) || files.has(`${stem}.md`) || files.has(`${stem}.markdown`)) continue
       sources.push({ path, title: titleOf(path), kind: 'note', fingerprint: fp(entry), modifiedAt })
     }
   }

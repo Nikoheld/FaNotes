@@ -255,6 +255,32 @@ const checkFormat = async () => {
     const rendererV1 = renderer.serializeFamd(markdown, payload)
     assert.match(rendererV1, /fanotes-famd:v1/u)
     assert.equal(renderer.parseFamd(rendererV1).payload.schema, 'fanotes-famd-v1')
+
+    const nestedInk = {
+      schemaVersion: 1,
+      strokes: [],
+      sections: [{
+        id: 'a',
+        collapsed: true,
+        hidden: {
+          strokes: [],
+          sections: [{
+            id: 'b',
+            collapsed: true,
+            hidden: { strokes: [{ points: [{ x: 0.2, y: 0.4 }] }], sections: [] },
+          }],
+        },
+      }],
+    }
+    const nestedPayload = { ...renderer.emptyFamdPayload('2026-11-01T00:00:00.000Z'), ink: nestedInk }
+    assert.equal(renderer.inkHasMarks(nestedPayload), true, 'collapsed subsection ink counts')
+    const encode = (text) => new TextEncoder().encode(text)
+    assert.equal(renderer.noteSyncKind('Physik.famd', encode(renderer.serializeFamd('', nestedPayload, 'v2'))), 'present')
+    assert.equal(renderer.noteSyncKind('Physik.famd', encode(renderer.serializeFamd('', nestedPayload))), 'present')
+    assert.equal(
+      renderer.noteSyncKind('Physik.famd', encode(renderer.serializeFamd('', renderer.emptyFamdPayload('2026-11-01T00:00:00.000Z'), 'v2'))),
+      'blank',
+    )
   } finally {
     await server.close()
   }

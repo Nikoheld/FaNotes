@@ -1,10 +1,12 @@
 import {
   addDays,
+  addMonths,
   createEvent,
   dateKey,
   parseDateKey,
   parseWall,
   sanitizeCalendarDocument,
+  startOfDay,
   type CalendarDocument,
   type CalendarEvent,
   type RecurrenceFreq,
@@ -122,6 +124,76 @@ const recurrenceFromRule = (rule: string): RecurrenceFreq => {
   return 'none'
 }
 
+const calendarDaysBetween = (from: Date, to: Date) => {
+  const fromUtc = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate())
+  const toUtc = Date.UTC(to.getFullYear(), to.getMonth(), to.getDate())
+  return Math.floor((toUtc - fromUtc) / 86_400_000)
+}
+
+const instanceAt = (origin: Date, frequency: RecurrenceFreq, step: number) => {
+  if (frequency === 'weekly') return addDays(origin, step * 7)
+  if (frequency === 'monthly') return addMonths(origin, step)
+  if (frequency === 'yearly') return addMonths(origin, step * 12)
+  return addDays(origin, step)
+}
+
+/** Last generated start at or before `untilMs`. The cadence matches the calendar model. */
+const lastStartOnOrBefore = (origin: Date, frequency: RecurrenceFreq, untilMs: number) => {
+  if (origin.getTime() > untilMs) return null
+  if (frequency === 'daily' || frequency === 'weekly') {
+    const unit = frequency === 'weekly' ? 7 : 1
+    let step = Math.floor(calendarDaysBetween(origin, new Date(untilMs)) / unit)
+    if (step < 0) return null
+    let last = instanceAt(origin, frequency, step)
+    if (last.getTime() > untilMs) {
+      step -= 1
+      if (step < 0) return null
+      last = instanceAt(origin, frequency, step)
+    }
+    return last
+  }
+  let best = origin
+  for (let step = 1; step <= 2400; step += 1) {
+    const next = instanceAt(origin, frequency, step)
+    if (next.getTime() <= best.getTime() || next.getTime() > untilMs) break
+    best = next
+  }
+  return best
+}
+
+const earlierDateKey = (left: string | null, right: string | null) => {
+  if (!left) return right
+  if (!right) return left
+  return left < right ? left : right
+}
+
+/**
+ * Last day the series should show. A date-only UNTIL includes that whole day.
+ * A date-time UNTIL includes an instance only when it starts at or before that
+ * instant. COUNT is the number of instances when INTERVAL is 1 or absent.
+ * A larger INTERVAL is not representable here, so COUNT is ignored then.
+ */
+const recurrenceUntilFor = (rule: string, start: Date, frequency: RecurrenceFreq): string | null => {
+  if (frequency === 'none') return null
+  const untilRaw = /UNTIL=([^;]+)/iu.exec(rule)?.[1]?.trim() ?? ''
+  let untilKey: string | null = null
+  if (untilRaw) {
+    const parsed = parseIcsDate(untilRaw)
+    if (parsed?.allDay) untilKey = dateKey(parsed.date)
+    else if (parsed) {
+      const last = lastStartOnOrBefore(start, frequency, parsed.date.getTime())
+      untilKey = last ? dateKey(last) : dateKey(addDays(startOfDay(start), -1))
+    }
+  }
+  const interval = Number(/INTERVAL=(\d+)/iu.exec(rule)?.[1] ?? '1')
+  const count = Number(/COUNT=(\d+)/iu.exec(rule)?.[1] ?? '')
+  let countKey: string | null = null
+  if (Number.isInteger(count) && count >= 1 && count <= 20_000 && Number.isInteger(interval) && interval <= 1) {
+    countKey = dateKey(instanceAt(start, frequency, count - 1))
+  }
+  return earlierDateKey(untilKey, countKey)
+}
+
 const splitEvents = (text: string) => {
   const blocks: string[][] = []
   let current: string[] | null = null
@@ -191,9 +263,8 @@ const parseIcs = (ics: string, calendarId: string): { events: CalendarEvent[], c
     const endRaw = lines.find((entry) => entry.startsWith('DTEND'))
     const end = endRaw ? parseIcsDate(endRaw.slice(endRaw.indexOf(':') + 1)) : null
     const durationEnd = end ? null : applyIcsDuration(start.date, start.allDay, field(lines, 'DURATION'))
-    const untilRaw = /UNTIL=(\d{8})/u.exec(field(lines, 'RRULE'))
-    const until = untilRaw ? `${untilRaw[1].slice(0, 4)}-${untilRaw[1].slice(4, 6)}-${untilRaw[1].slice(6, 8)}` : null
-    const recurrence = recurrenceFromRule(field(lines, 'RRULE'))
+    const rule = field(lines, 'RRULE')
+    const recurrence = recurrenceFromRule(rule)
     const built = createEvent({
       calendarId,
       title: summary,
@@ -207,7 +278,7 @@ const parseIcs = (ics: string, calendarId: string): { events: CalendarEvent[], c
       ...built,
       id: uid || built.id,
       recurrence,
-      recurrenceUntil: recurrence === 'none' ? null : until,
+      recurrenceUntil: recurrenceUntilFor(rule, start.date, recurrence),
       exceptionDates: recurrence === 'none' ? [] : exceptionDatesFrom(lines),
     })
   }
