@@ -1787,6 +1787,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [initialArtPreferences] = useState(loadArtPreferences)
   const [initialToolMemory] = useState(loadToolMemory)
   const [tool, setTool] = useState<DrawingTool>(initialToolMemory.tool)
+  // Which tools get used feeds the opt-in usage statistics (`tool.<name>` counters).
+  // Only real switches count: opening a note with its remembered tool is not a use.
+  const recordedToolRef = useRef(tool)
+  useEffect(() => {
+    if (recordedToolRef.current === tool) return
+    recordedToolRef.current = tool
+    diagnosticLog.record({ at: Date.now(), kind: 'tool', tool })
+  }, [tool])
   const [inkMode, setInkMode] = useState<InkMode>(initialToolMemory.inkMode)
   const [artPanelOpen, setArtPanelOpen] = useState(false)
   const [penQuickMenu, setPenQuickMenu] = useState<{ x: number; y: number; pointerId: number } | null>(null)
