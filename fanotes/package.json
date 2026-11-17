@@ -235,6 +235,7 @@
     "check:homework-day": "cross-env TZ=Europe/Zurich node scripts/check-homework-day.mjs",
     "check:flashcards": "node scripts/check-flashcards.mjs",
     "check:study-tools": "node scripts/check-study-tools.mjs",
+    "check:crypto-tools": "node scripts/check-crypto-tools.mjs",
     "check:embedded-json-comment": "node scripts/check-embedded-json-comment.mjs",
     "check:markdown-code": "node scripts/check-markdown-code.mjs",
     "check:clipboard-image": "node scripts/check-clipboard-image.mjs",
