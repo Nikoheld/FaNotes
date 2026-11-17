@@ -37,7 +37,9 @@ let replacements: Array<[string, string]> = []
 let replacementExpression: RegExp | null = null
 let replacementPreparationScheduled = false
 const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|schritt|willkommen|zurück|weiter|fertig|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge|experimentell|verlinkung|sitzung|auspoppen|finde|pinsel|farben|piktogramme|bleistift|kalligrafie|textmarker|aquarell|deckkraft|verlauf|sammlung|ausgewogen|zeilenabstand|datenerfassung|muster|paket|modell|integriert|verbindungen|trainingspaket|aktueller|strich|frei|breite|erfassen)\b|Vault-Wurzel|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|ordner|notiz|seite|speicher|erkenn|einstell)/iu
-const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich', 'gespeichert', 'werden', 'Holt', 'Kopie', 'Textfeld'])
+const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich', 'gespeichert', 'werden', 'Holt', 'Kopie', 'Textfeld',
+  // Study tools: single words that also occur inside longer German phrases.
+  'Frage', 'Ergebnis', 'Zweig', 'Merkmal', 'Gruppe', 'Gruppen', 'Nummer', 'Mischen', 'Boxen', 'Pfeile', 'Pfeil', 'Auftrag', 'Aufträge', 'Begriff', 'Stapel', 'Beispiel', 'Beispiel:', 'Zeit', 'Spalten', 'Vergleich', 'Minuten', 'Tabelle', 'Markierungen', 'Ursache', 'Wirkung', 'Fortschritt', 'Sortieren', 'Reihenfolge', 'Bildtafel', 'Beschriftung', 'Gruppenname', 'Schliessen', 'Bearbeiten', 'Entfernen', 'Hinzufügen', 'Übernehmen', 'Begriffsnetz', 'Quelle'])
 
 const textSnapshots = new WeakMap<Text, { source: string; translated: string }>()
 const attributeSnapshots = new WeakMap<Element, Map<string, AttributeSnapshot>>()
@@ -147,7 +149,17 @@ function translateComposedChrome(source: string): string | null {
     const phase = syncing[1] === 'Holt' ? 'Fetching' : syncing[1] === 'Lädt hoch' ? 'Uploading' : 'Checking'
     return `${phase} ${syncing[2]}/${syncing[3]}`
   }
-  const idShape = /^"id" \((.+)\) darf nur Kleinbuchstaben, Ziffern und Bindestriche enthalten \(2-64 Zeichen\)\.$/u.exec(source)
+  // Sync status (src/lib/sync/status.ts): the pause the server asked for, and changes that wait for a note.
+  const syncPaused = /^Sync pausiert – geht um (\d{2}:\d{2}) weiter$/u.exec(source)
+  if (syncPaused) return `Sync paused – resumes at ${syncPaused[1]}`
+  const syncHeld = /^(Synchron|Sync pausiert|Sync pausiert – geht um \d{2}:\d{2} weiter) · (\d+) Änderung(?:en)? von (?:einem anderen Gerät|anderen Geräten) wart(?:et|en)$/u.exec(source)
+  if (syncHeld) {
+    const count = Number(syncHeld[2])
+    return `${translateCore(syncHeld[1])} · ${count} ${count === 1 ? 'change from another device is' : 'changes from other devices are'} waiting`
+  }
+  const syncTitle = /^Sync · (\S+@\S+) · (.+)$/u.exec(source)
+  if (syncTitle) return `Sync · ${syncTitle[1]} · ${translateCore(syncTitle[2])}`
+  const idShape =/^"id" \((.+)\) darf nur Kleinbuchstaben, Ziffern und Bindestriche enthalten \(2-64 Zeichen\)\.$/u.exec(source)
   if (idShape) return `"id" (${idShape[1]}) may only contain lowercase letters, digits, and hyphens (2-64 characters).`
   const idFolder = /^"id" \((.+)\) muss dem Ordnernamen \((.+)\) entsprechen\.$/u.exec(source)
   if (idFolder) return `"id" (${idFolder[1]}) must match the folder name (${idFolder[2]}).`
@@ -224,6 +236,8 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (updateMessage) return updateMessage
   if (/^1 Treffer$/u.test(source)) return '1 match'
   if (/^\d+ Treffer$/u.test(source)) return source.replace('Treffer', 'matches')
+  const arrivedFiles = /^(\d+) neue(?:s|n)? (?:Datei|Dateien)(?: in (.+))?$/u.exec(source)
+  if (arrivedFiles) return `${arrivedFiles[1]} new ${arrivedFiles[1] === '1' ? 'file' : 'files'}${arrivedFiles[2] ? ` in ${arrivedFiles[2]}` : ''}`
   const selectedOf = /^(\d+) von (\d+) ausgewählt$/u.exec(source)
   if (selectedOf) return `${selectedOf[1]} of ${selectedOf[2]} selected`
   if (/^Nur Eingang$/u.test(source)) return 'Only Inbox'

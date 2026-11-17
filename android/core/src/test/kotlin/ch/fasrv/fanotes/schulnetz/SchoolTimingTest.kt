@@ -38,6 +38,16 @@ class SchoolTimingTest {
         assertFalse(changeIsOver(change("exam", "01.01.2026", id = "probe:1"), at))
     }
 
+    @Test fun anAppointmentPastMidnightStaysOpenThatEvening() {
+        val late = change("event", "16.11.2026 · Abend · 23:00–00:30", date = "2026-11-16")
+        assertFalse(changeIsOver(late, ZonedDateTime.of(2026, 11, 16, 22, 0, 0, 0, SCHOOL_ZONE)))
+        assertFalse(changeIsOver(late, ZonedDateTime.of(2026, 11, 16, 23, 15, 0, 0, SCHOOL_ZONE)))
+        assertFalse(changeIsOver(late, ZonedDateTime.of(2026, 11, 17, 0, 15, 0, 0, SCHOOL_ZONE)))
+        assertTrue(changeIsOver(late, ZonedDateTime.of(2026, 11, 17, 0, 45, 0, 0, SCHOOL_ZONE)))
+        assertTrue(changeIsOver(change("event", "15.11.2026 · Abend · 23:00–00:30", date = "2026-11-15"), ZonedDateTime.of(2026, 11, 16, 22, 0, 0, 0, SCHOOL_ZONE)))
+        assertFalse(changeIsOver(change("timetable", "09.11.2026 · Deutsch · 9:00–10:00", date = "2026-11-09"), ZonedDateTime.of(2026, 11, 9, 9, 30, 0, 0, SCHOOL_ZONE)))
+    }
+
     @Test fun diffDropsNoticesForPastExams() {
         val past = exam("p1", "2026-10-29T10:00:00", "2026-10-29T10:45:00")
         val future = exam("p2", "2026-11-19T10:00:00", "2026-11-19T10:45:00")

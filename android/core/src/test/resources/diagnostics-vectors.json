@@ -1,0 +1,532 @@
+{
+ "context": {
+  "desktop": {
+   "vaultPath": "/home/anna/Notizen",
+   "homeDir": "/home/anna",
+   "userName": "anna"
+  },
+  "android": {
+   "vaultPath": "/storage/emulated/0/Android/data/ch.fasrv.fanotes/files/MeinVault",
+   "homeDir": "/data/user/0/ch.fasrv.fanotes",
+   "userName": ""
+  }
+ },
+ "scrub": [
+  {
+   "input": "Notiz „Scheidung Anwalt Müller“ konnte nicht gespeichert werden",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Notiz <quoted> konnte nicht gespeichert werden"
+  },
+  {
+   "input": "Titel \"Scheidung\" fehlt",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Titel 'Gehalt 2026' fehlt",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Titel «Chemo» fehlt",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Titel ‚Chemo‘ fehlt",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Titel “Chemo” fehlt",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Privat/Krankheit/Befund.md",
+   "context": "desktop",
+   "max": 300,
+   "expected": "<path>"
+  },
+  {
+   "input": "Ordner Privat/Krankheit",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Ordner <path>"
+  },
+  {
+   "input": "Ordner Privat\\Krankheit",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Ordner <path>"
+  },
+  {
+   "input": "open C:\\Users\\Anna Müller\\Documents\\Befund Krebs.pdf failed",
+   "context": "desktop",
+   "max": 300,
+   "expected": "open <path>"
+  },
+  {
+   "input": "load %2Fhome%2Fanna%2FNotizen%2FKrankheit.md now",
+   "context": "desktop",
+   "max": 300,
+   "expected": "load <path>"
+  },
+  {
+   "input": "load %252Fhome%252Fanna%252FKrankheit.md now",
+   "context": "desktop",
+   "max": 300,
+   "expected": "load <path>"
+  },
+  {
+   "input": "load %E2%82%AC%2Fx and %E0%A4%A broken",
+   "context": "desktop",
+   "max": 300,
+   "expected": "load <path> and %E0%A4%A broken"
+  },
+  {
+   "input": "ENOENT: open /home/anna/Notizen/Mathe/Klausur Analysis.md",
+   "context": "desktop",
+   "max": 300,
+   "expected": "ENOENT: open <path>"
+  },
+  {
+   "input": "failed C:\\Users\\Bob\\Docs\\Geheim.pdf for anna@example.com",
+   "context": "desktop",
+   "max": 300,
+   "expected": "failed <path><email>"
+  },
+  {
+   "input": "GET https://user:pw@nas.privat.example.org/vault/abc?token=abc123 failed",
+   "context": "desktop",
+   "max": 300,
+   "expected": "GET <url> <redacted>"
+  },
+  {
+   "input": "connect 192.168.1.20:8080 refused",
+   "context": "desktop",
+   "max": 300,
+   "expected": "connect <ip> refused"
+  },
+  {
+   "input": "connect [2001:db8::1]:443 refused",
+   "context": "desktop",
+   "max": 300,
+   "expected": "connect <ip> refused"
+  },
+  {
+   "input": "peer fe80::1 gone and 2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+   "context": "desktop",
+   "max": 300,
+   "expected": "peer <ip> gone and <ip>"
+  },
+  {
+   "input": "aws AKIAIOSFODNN7EXAMPLE used",
+   "context": "desktop",
+   "max": 300,
+   "expected": "aws <token> used"
+  },
+  {
+   "input": "key sk-abc123def456ghi789 used",
+   "context": "desktop",
+   "max": 300,
+   "expected": "key <token> used"
+  },
+  {
+   "input": "jwt eyJhbGciOi.eyJzdWIiOiIx.sig used",
+   "context": "desktop",
+   "max": 300,
+   "expected": "jwt <token> used"
+  },
+  {
+   "input": "pairing code 483-921-770 shown",
+   "context": "desktop",
+   "max": 300,
+   "expected": "pairing code <code> shown"
+  },
+  {
+   "input": "password: hunter2 and more words\nnext line ok",
+   "context": "desktop",
+   "max": 300,
+   "expected": "password: <redacted> next line ok"
+  },
+  {
+   "input": "token = abcdef ghi",
+   "context": "desktop",
+   "max": 300,
+   "expected": "token: <redacted>"
+  },
+  {
+   "input": "mail anna@localhost bounced",
+   "context": "desktop",
+   "max": 300,
+   "expected": "mail <email> bounced"
+  },
+  {
+   "input": "Authorization: Bearer abcdefghijklmnop1234567890",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Authorization: <redacted>"
+  },
+  {
+   "input": "id 0123456789abcdef0123456789abcdef01234567",
+   "context": "desktop",
+   "max": 300,
+   "expected": "id <hash>"
+  },
+  {
+   "input": "Mathe Notizen.md konnte nicht gespeichert werden",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Mathe <file> konnte nicht gespeichert werden"
+  },
+  {
+   "input": "anna hat Anna gesehen",
+   "context": "desktop",
+   "max": 300,
+   "expected": "<name> hat <name> gesehen"
+  },
+  {
+   "input": "Äpfel und Übung: ENOENT",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Äpfel und Übung: ENOENT"
+  },
+  {
+   "input": "Müller-Straße 12, 8000 Zürich",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Müller-Straße 12, 8000 Zürich"
+  },
+  {
+   "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "context": "desktop",
+   "max": 300,
+   "expected": "<token>"
+  },
+  {
+   "input": "wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort ",
+   "context": "desktop",
+   "max": 300,
+   "expected": "wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort "
+  },
+  {
+   "input": "Vault /storage/emulated/0/Android/data/ch.fasrv.fanotes/files/MeinVault/Mathe/a.md fehlt",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Vault <path>"
+  },
+  {
+   "input": "Mein Vault MeinVault ist leer",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Mein Vault MeinVault ist leer"
+  },
+  {
+   "input": "ghp_abcdefghijklmnop and github_pat_11ABCDEFG0abcdefgh",
+   "context": "desktop",
+   "max": 300,
+   "expected": "<token> and <token>"
+  },
+  {
+   "input": "Key: AbCdEf1234567890AbCdEf1234567890 und KEY=geheim",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Key: <redacted>"
+  },
+  {
+   "input": "www.example.com/pfad und http://10.0.0.1:8080/x",
+   "context": "desktop",
+   "max": 300,
+   "expected": "<url> und <url>"
+  },
+  {
+   "input": "tab\tseparated nbsp em and trailing   ",
+   "context": "desktop",
+   "max": 300,
+   "expected": "tab separated nbsp em and trailing"
+  },
+  {
+   "input": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+   "context": "desktop",
+   "max": 300,
+   "expected": "<token>"
+  },
+  {
+   "input": "sha 0123456789abcdef01234567 end",
+   "context": "desktop",
+   "max": 300,
+   "expected": "sha <hash> end"
+  },
+  {
+   "input": "a1b2c3d4e5f6g7h8i9j0k1 token-like",
+   "context": "desktop",
+   "max": 300,
+   "expected": "<token> token-like"
+  },
+  {
+   "input": "emoji 😀 test \"😀 quoted\" ok",
+   "context": "desktop",
+   "max": 300,
+   "expected": "emoji 😀 test <quoted> ok"
+  },
+  {
+   "input": "file:///home/anna/x.md and \\\\server\\share\\x.txt",
+   "context": "desktop",
+   "max": 300,
+   "expected": "fil<path><path>"
+  },
+  {
+   "input": "Zeit 12:34:56 und Version 1.2.3.4 und 2001:db8::",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Zeit 12:34:56 und Version <ip> und <ip>"
+  },
+  {
+   "input": "Nur Text ohne alles",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Nur Text ohne alles"
+  },
+  {
+   "input": "",
+   "context": "desktop",
+   "max": 300,
+   "expected": ""
+  },
+  {
+   "input": "Fehler bei “Titel mit ’ Apostroph” und `code` und ´akut´",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Fehler bei <quoted> Apostroph<quoted>code<quoted>akut´"
+  },
+  {
+   "input": "Datei Bericht.docx, Bild.JPG, Song.m4a, Archiv.zip.",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Datei <file>, <file>, <file>, <file>."
+  },
+  {
+   "input": "Ordner /srv/x y/z und /opt/app",
+   "context": "desktop",
+   "max": 300,
+   "expected": "Ordner <path>"
+  },
+  {
+   "input": "Notiz „Scheidung Anwalt Müller“ konnte nicht gespeichert werden",
+   "context": "android",
+   "max": 300,
+   "expected": "Notiz <quoted> konnte nicht gespeichert werden"
+  },
+  {
+   "input": "Titel \"Scheidung\" fehlt",
+   "context": "android",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Titel 'Gehalt 2026' fehlt",
+   "context": "android",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Titel «Chemo» fehlt",
+   "context": "android",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Titel ‚Chemo‘ fehlt",
+   "context": "android",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Titel “Chemo” fehlt",
+   "context": "android",
+   "max": 300,
+   "expected": "Titel <quoted> fehlt"
+  },
+  {
+   "input": "Privat/Krankheit/Befund.md",
+   "context": "android",
+   "max": 300,
+   "expected": "<path>"
+  },
+  {
+   "input": "Ordner Privat/Krankheit",
+   "context": "android",
+   "max": 300,
+   "expected": "Ordner <path>"
+  },
+  {
+   "input": "Ordner Privat\\Krankheit",
+   "context": "android",
+   "max": 300,
+   "expected": "Ordner <path>"
+  },
+  {
+   "input": "open C:\\Users\\Anna Müller\\Documents\\Befund Krebs.pdf failed",
+   "context": "android",
+   "max": 300,
+   "expected": "open <path>"
+  },
+  {
+   "input": "load %2Fhome%2Fanna%2FNotizen%2FKrankheit.md now",
+   "context": "android",
+   "max": 300,
+   "expected": "load <path>"
+  },
+  {
+   "input": "load %252Fhome%252Fanna%252FKrankheit.md now",
+   "context": "android",
+   "max": 300,
+   "expected": "load <path>"
+  },
+  {
+   "input": "Vault /storage/emulated/0/Android/data/ch.fasrv.fanotes/files/MeinVault/Mathe/a.md fehlt",
+   "context": "android",
+   "max": 300,
+   "expected": "Vault <path>"
+  },
+  {
+   "input": "Mein Vault MeinVault ist leer",
+   "context": "android",
+   "max": 300,
+   "expected": "Mein Vault <name> ist leer"
+  },
+  {
+   "input": "ghp_abcdefghijklmnop and github_pat_11ABCDEFG0abcdefgh",
+   "context": "android",
+   "max": 300,
+   "expected": "<token> and <token>"
+  },
+  {
+   "input": "Key: AbCdEf1234567890AbCdEf1234567890 und KEY=geheim",
+   "context": "android",
+   "max": 300,
+   "expected": "Key: <redacted>"
+  },
+  {
+   "input": "www.example.com/pfad und http://10.0.0.1:8080/x",
+   "context": "android",
+   "max": 300,
+   "expected": "<url> und <url>"
+  },
+  {
+   "input": "tab\tseparated nbsp em and trailing   ",
+   "context": "android",
+   "max": 300,
+   "expected": "tab separated nbsp em and trailing"
+  },
+  {
+   "input": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+   "context": "android",
+   "max": 300,
+   "expected": "<token>"
+  },
+  {
+   "input": "sha 0123456789abcdef01234567 end",
+   "context": "android",
+   "max": 300,
+   "expected": "sha <hash> end"
+  },
+  {
+   "input": "a1b2c3d4e5f6g7h8i9j0k1 token-like",
+   "context": "android",
+   "max": 300,
+   "expected": "<token> token-like"
+  },
+  {
+   "input": "emoji 😀 test \"😀 quoted\" ok",
+   "context": "android",
+   "max": 300,
+   "expected": "emoji 😀 test <quoted> ok"
+  },
+  {
+   "input": "file:///home/anna/x.md and \\\\server\\share\\x.txt",
+   "context": "android",
+   "max": 300,
+   "expected": "<url> and <path>"
+  },
+  {
+   "input": "Zeit 12:34:56 und Version 1.2.3.4 und 2001:db8::",
+   "context": "android",
+   "max": 300,
+   "expected": "Zeit 12:34:56 und Version <ip> und <ip>"
+  },
+  {
+   "input": "Nur Text ohne alles",
+   "context": "android",
+   "max": 300,
+   "expected": "Nur Text ohne alles"
+  },
+  {
+   "input": "",
+   "context": "android",
+   "max": 300,
+   "expected": ""
+  },
+  {
+   "input": "Fehler bei “Titel mit ’ Apostroph” und `code` und ´akut´",
+   "context": "android",
+   "max": 300,
+   "expected": "Fehler bei <quoted> Apostroph<quoted>code<quoted>akut´"
+  },
+  {
+   "input": "Datei Bericht.docx, Bild.JPG, Song.m4a, Archiv.zip.",
+   "context": "android",
+   "max": 300,
+   "expected": "Datei <file>, <file>, <file>, <file>."
+  },
+  {
+   "input": "Ordner /srv/x y/z und /opt/app",
+   "context": "android",
+   "max": 300,
+   "expected": "Ordner <path>"
+  },
+  {
+   "input": "wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort ",
+   "context": "desktop",
+   "max": 1000,
+   "expected": "wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort wort "
+  }
+ ],
+ "hashes": [
+  {
+   "input": "a",
+   "expected": "2ba782c97901"
+  },
+  {
+   "input": "b",
+   "expected": "da5bc254d2bf"
+  },
+  {
+   "input": "",
+   "expected": "dcb81aee8d83"
+  },
+  {
+   "input": "x # y",
+   "expected": "7aa33306e33d"
+  },
+  {
+   "input": "Fehler beim Öffnen",
+   "expected": "eb7de8072fc7"
+  },
+  {
+   "input": "ünïcödé 😀",
+   "expected": "ff234597bcab"
+  },
+  {
+   "input": "null pointer # #",
+   "expected": "9f24b79a4290"
+  }
+ ]
+}

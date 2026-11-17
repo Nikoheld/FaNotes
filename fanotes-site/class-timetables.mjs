@@ -516,11 +516,20 @@ export const createClassTimetables = (options = {}) => {
     return join(root, version)
   }
   const readJson = async (file) => {
-    try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch { return null }
+    try {
+      return JSON.parse(await fs.readFile(file, 'utf8'))
+    } catch (error) {
+      // A missing or broken file is absent. Any other read error must not look the same, or the next read rebuilds and replaces the timetable.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
   }
   const currentVersion = async () => {
     const pointer = await readJson(join(root, 'current.json'))
-    return pointer && versionDir(pointer.version) ? pointer.version : null
+    // A missing or broken pointer can start again. A pointer that is there but not a version must not look unpublished.
+    if (!pointer) return null
+    if (!versionDir(pointer.version)) throw Object.assign(new Error('timetable pointer'), { code: 'EBADMSG' })
+    return pointer.version
   }
   const readIndex = async () => {
     const at = now().getTime()
@@ -528,6 +537,18 @@ export const createClassTimetables = (options = {}) => {
     if (indexCache && indexCache.generation === generation && at - indexCache.at < 30_000) return indexCache.value
     const version = await currentVersion()
     const index = version ? await readJson(join(versionDir(version), 'index.json')) : null
+    // A missing or broken catalog can start again. A file that is there but not the class and room lists must not look unpublished.
+    if (index != null) {
+      const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+      const classKnown = (item) => plain(item) && typeof item.code === 'string' && CLASS_CODE.test(item.code) && typeof item.teacher === 'string'
+      const roomKnown = (room) => typeof room === 'string' && ROOM_NAME.test(room)
+      const known = typeof index === 'object' && !Array.isArray(index)
+        && Array.isArray(index.classes) && index.classes.every(classKnown)
+        && Array.isArray(index.rooms) && index.rooms.every(roomKnown)
+        && (index.warnings == null || Array.isArray(index.warnings))
+      // A class or room that is not a catalog entry must not be listed as blank.
+      if (!known) throw Object.assign(new Error('timetable index'), { code: 'EBADMSG' })
+    }
     const value = index ? { ...index, version } : null
     if (generation === indexGeneration) indexCache = { at: now().getTime(), value, generation }
     return value
@@ -552,19 +573,28 @@ export const createClassTimetables = (options = {}) => {
     const file = join(versionDir(index.version), `${code}.${extension}`)
     return file
   }
-  const classPdf = async (code) => {
-    const file = await classFile(code, 'pdf')
-    return file ? fs.readFile(file).catch(() => null) : null
+  const readBytes = async (file) => {
+    if (!file) return null
+    try {
+      return await fs.readFile(file)
+    } catch (error) {
+      // A missing page is absent. Any other read error must not look the same, or the timetable page looks deleted.
+      if (error?.code === 'ENOENT') return null
+      throw error
+    }
   }
-  const classPng = async (code) => {
-    const file = await classFile(code, 'png')
-    return file ? fs.readFile(file).catch(() => null) : null
-  }
+  const classPdf = async (code) => readBytes(await classFile(code, 'pdf'))
+  const classPng = async (code) => readBytes(await classFile(code, 'png'))
   const room = async (name) => {
     if (!ROOM_NAME.test(String(name))) return null
     const version = await currentVersion()
     if (!version) return null
     const rooms = await readJson(join(versionDir(version), 'rooms.json'))
+    // A missing or broken file is absent. A file that is there but not the room map must not look empty.
+    if (rooms != null) {
+      const known = typeof rooms === 'object' && !Array.isArray(rooms) && Object.values(rooms).every((entries) => Array.isArray(entries))
+      if (!known) throw Object.assign(new Error('timetable rooms'), { code: 'EBADMSG' })
+    }
     if (!rooms || !Object.hasOwn(rooms, name)) return null
     return { room: name, entries: rooms[name] }
   }
@@ -577,7 +607,15 @@ export const createClassTimetables = (options = {}) => {
     const dir = versionDir(version)
     const task = (async () => {
       const stored = await readJson(join(dir, 'classes.json'))
-      if (stored) return stored
+      // A missing or broken file can be built again. A file that is there but not the class weeks must not look empty, or this rebuild replaces it.
+      if (stored != null) {
+        const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+        const weekKnown = (week) => plain(week) && Array.isArray(week.entries) && Array.isArray(week.footnotes)
+        const weeks = typeof stored === 'object' && !Array.isArray(stored) && Object.keys(stored).every((code) => CLASS_CODE.test(code))
+        // A saved week that is not a week must not be returned as an empty week.
+        if (!weeks || !Object.values(stored).every(weekKnown)) throw Object.assign(new Error('timetable classes'), { code: 'EBADMSG' })
+        return stored
+      }
       let text
       try { text = (await run('pdftotext', ['-bbox-layout', join(dir, 'source.pdf'), '-'])).stdout } catch { return null }
       const weeks = classWeeksOf(parseTimetableBbox(text))
@@ -633,9 +671,19 @@ export const createClassTimetables = (options = {}) => {
     const version = `${at.toISOString().replace(/[-:]/gu, '').replace(/\.\d+Z$/u, 'Z')}-${randomBytes(3).toString('hex')}`
     const dir = join(root, version)
     await fs.mkdir(dir, { recursive: true, mode: 0o700 })
+    let published = false
+    let pointer = null
     try {
       const source = join(dir, 'source.pdf')
       await fs.writeFile(source, pdf, { mode: 0o600 })
+      // Page count from the trailer is cheap. A huge file is refused before bbox text is extracted.
+      try {
+        const info = await run('pdfinfo', [source])
+        const declared = Number(/^Pages:\s+(\d+)/mu.exec(String(info?.stdout || ''))?.[1] || 0)
+        if (declared > MAX_PDF_PAGES) throw problem(413, 'Die PDF-Datei hat zu viele Seiten (höchstens 200).')
+      } catch (error) {
+        if (error?.status) throw error
+      }
       let text
       try {
         text = (await run('pdftotext', ['-bbox-layout', source, '-'])).stdout
@@ -662,16 +710,25 @@ export const createClassTimetables = (options = {}) => {
       await fs.writeFile(join(dir, 'rooms.json'), JSON.stringify(parsed.rooms), { mode: 0o600 })
       await fs.writeFile(join(dir, 'index.json'), JSON.stringify(index), { mode: 0o600 })
       // The new version is complete: switch the pointer in one rename.
-      const pointer = join(root, `current.json.${randomBytes(4).toString('hex')}.tmp`)
+      pointer = join(root, `current.json.${randomBytes(4).toString('hex')}.tmp`)
       await fs.writeFile(pointer, JSON.stringify({ version, switchedAt: at.toISOString() }), { mode: 0o600 })
       await fs.rename(pointer, join(root, 'current.json'))
+      pointer = null
+      published = true
       indexGeneration += 1
       indexCache = null
-      await prune(version)
+      try {
+        await prune(version)
+      } catch (error) {
+        log('warn', `alte Stundenpläne nicht entfernt (${error?.name || 'error'})`)
+      }
       log('info', `Stundenplan-PDF übernommen (${index.classes.length} Klassen, ${roomNames.length} Räume, ${index.warnings.length} Hinweise)`)
       report('info', 200, { classes: index.classes.length, rooms: roomNames.length, warnings: index.warnings.length })
       return { uploadedAt: index.uploadedAt, classes: index.classes.length, rooms: roomNames.length, warnings: index.warnings }
     } catch (error) {
+      if (pointer) await fs.rm(pointer, { force: true }).catch(() => undefined)
+      // The pointer already names this directory. Deleting it would drop the timetable that is current.
+      if (published) throw error
       await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined)
       const status = Number(error?.status) || 422
       report('warn', status, { error: String(error?.name || 'error') })
@@ -688,5 +745,26 @@ export const createClassTimetables = (options = {}) => {
     return result
   }
 
-  return { root, ingest, summary, readIndex, classPdf, classPng, classWeek, room }
+  // A read log names the kind of timetable, never the class code, teacher, or room.
+  const logged = (route, load) => async (...args) => {
+    const requestId = events.requestId()
+    const started = now().getTime()
+    const value = await load(...args)
+    const status = value == null ? 404 : 200
+    const fields = { requestId, method: 'GET', route, status, ms: Math.max(0, now().getTime() - started) }
+    if (status >= 400) events.warn(fields)
+    else events.info(fields)
+    return value
+  }
+
+  return {
+    root,
+    ingest,
+    summary: logged('/timetables', summary),
+    readIndex,
+    classPdf: logged('/timetables/class.pdf', classPdf),
+    classPng: logged('/timetables/class.png', classPng),
+    classWeek: logged('/timetables/class', classWeek),
+    room: logged('/timetables/room', room),
+  }
 }

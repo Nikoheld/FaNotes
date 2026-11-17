@@ -33,6 +33,9 @@ import {
   prepareAgendaRead,
   normalizeSchoolBase,
   parseGradesHtml,
+  parseMark,
+  parseWeight,
+  preserveExplicitZeroWeight,
   parseRawSnapshot,
   pluspunkte,
   redactSecrets,
@@ -84,6 +87,7 @@ import {
   isExamLike,
   isLesson,
   parseSchedulerXml,
+  isCancelled,
   parseIcs,
   carryTimetableExams,
   schedulerFetchUrl,
@@ -161,6 +165,36 @@ test('course average rows are not grades and drop silently', () => {
   assert.equal(parseRawSnapshot({ grades: JSON.stringify([average, exam]) }).grades.length, 1)
   const html = '<table><tr><td><b>CHE-K26A-1</b></td><td>4.2</td></tr><tr><td><table><tr><td>17.09.2026</td><td>Durchschnitt</td><td>4.2</td><td>1</td></tr><tr><td>17.09.2026</td><td>1. Prüfung</td><td>4.2</td><td>1</td></tr></table></td></tr></table>'
   assert.deepEqual(parseGradesHtml(html).map((grade) => grade.title), ['1. Prüfung'])
+})
+
+test('a point count beside the mark does not hide the mark', () => {
+  assert.equal(parseMark('4.25'), 4.25)
+  assert.equal(parseMark('5,5'), 5.5)
+  assert.equal(parseMark('4.25 Punkte: 18'), 4.25)
+  assert.equal(parseMark('4.25 18'), 4.25)
+  assert.equal(parseMark('5.5*'), 5.5)
+  assert.equal(parseMark('18'), null)
+  assert.equal(parseMark('-'), null)
+  assert.equal(parseMark(''), null)
+  const html = '<table><tr><td><b>CHE-K26A-1</b></td><td>5.0</td></tr><tr><td colspan="2"><table>' +
+    '<tr><td>03.03.2026</td><td>Labor</td><td>4.25 Punkte: 18</td><td>1</td></tr>' +
+    '</table></td></tr></table>'
+  const [grade] = parseGradesHtml(html)
+  assert.equal(grade.mark, 4.25)
+  assert.equal(grade.title, 'Labor')
+})
+
+test('a non-breaking space entity does not hide a mark or a weight', () => {
+  const html = '<table><tr><td><b>CHE-K26A-1</b></td><td>5.0</td></tr><tr><td colspan="2"><table>' +
+    '<tr><td>03.03.2026</td><td>Labor</td><td>5.5&nbsp;</td><td>0.5&nbsp;</td></tr>' +
+    '<tr><td>04.03.2026</td><td>Test</td><td>&#160;4,5</td><td>2</td></tr>' +
+    '<tr><td>05.03.2026</td><td>Offen</td><td>&nbsp;</td><td>1</td></tr>' +
+    '</table></td></tr></table>'
+  const grades = parseGradesHtml(html)
+  assert.equal(grades.find((grade) => grade.title === 'Labor').mark, 5.5)
+  assert.equal(grades.find((grade) => grade.title === 'Labor').weight, 0.5)
+  assert.equal(grades.find((grade) => grade.title === 'Test').mark, 4.5)
+  assert.equal(grades.find((grade) => grade.title === 'Offen').mark, null)
 })
 
 test('an excuse deadline is pushed once and only inside the window', () => {
@@ -1327,6 +1361,32 @@ test('week range follows the page span and stays quiet for a new week', () => {
   assert.equal(icsTest[0].eventType, 'exam')
   const icsLesson = parseIcs('BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-lesson\nDTSTART:20261112T080000\nDTEND:20261112T084500\nSUMMARY:Lesetest\nEND:VEVENT\nEND:VCALENDAR')
   assert.equal(icsLesson[0].eventType, 'lesson')
+  assert.equal(icsLesson[0].status, '')
+  const icsGone = parseIcs('BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-gone\nDTSTART:20261116T080000\nDTEND:20261116T084500\nSUMMARY:Mathematik\nSTATUS:CANCELLED\nEND:VEVENT\nEND:VCALENDAR')
+  assert.equal(icsGone.length, 1)
+  assert.equal(icsGone[0].status, 'cancelled')
+  assert.equal(icsGone[0].text, 'Mathematik')
+  assert.equal(isCancelled(icsGone[0]), true)
+  const icsFolded = parseIcs('BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u-fold\r\nDTSTART:20261116T080000\r\nDTEND:20261116T084500\r\nSUMMARY:Mathe\r\n matik\r\nSTATUS:CANCEL\r\n LED\r\nEND:VEVENT\r\nEND:VCALENDAR')
+  assert.equal(icsFolded.length, 1)
+  assert.equal(icsFolded[0].text, 'Mathematik')
+  assert.equal(icsFolded[0].status, 'cancelled')
+  const icsEscaped = parseIcs('BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-esc\nDTSTART:20261116T080000\nDTEND:20261116T084500\nSUMMARY:Raum A12\\, B4\\; C\nDESCRIPTION:Zeile\\nZwei\nLOCATION:C:\\\\Temp\nEND:VEVENT\nEND:VCALENDAR')
+  assert.equal(icsEscaped[0].text, 'Raum A12, B4; C')
+  assert.equal(icsEscaped[0].comment, 'Zeile\nZwei')
+  assert.equal(icsEscaped[0].room, 'C:\\Temp')
+  const utcLesson = (start) => parseIcs(`BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u-utc\nDTSTART:${start}\nDTEND:${start}\nSUMMARY:Physik\nEND:VEVENT\nEND:VCALENDAR`)[0].start
+  assert.equal(utcLesson('20261116T070000Z'), '2026-11-16T08:00:00')
+  assert.equal(utcLesson('20260715T070000Z'), '2026-07-15T09:00:00')
+  assert.equal(utcLesson('20261116T233000Z'), '2026-11-17T00:30:00')
+  assert.equal(utcLesson('20261116T080000'), '2026-11-16T08:00:00')
+  assert.equal(utcLesson('20261116T070000+0000'), '2026-11-16T08:00:00')
+  assert.equal(utcLesson('20261116T080000+0100'), '2026-11-16T08:00:00')
+  assert.equal(utcLesson('20261116T070000+00:00'), '2026-11-16T08:00:00')
+  assert.equal(utcLesson('20260715T070000+0000'), '2026-07-15T09:00:00')
+  assert.equal(utcLesson('20260715T080000+0200'), '2026-07-15T08:00:00')
+  assert.equal(utcLesson('20260715T080000+0100'), '2026-07-15T09:00:00')
+  assert.equal(utcLesson('20261116T233000+0000'), '2026-11-17T00:30:00')
   const narrow = eventQueryWindow({ spanStart: '', spanEnd: '', weekFetched: {}, icalFetchedAt: '', today: '2026-11-04', now: '2026-11-04T12:00:00Z' })
   assert.equal(narrow.wide, false)
   assert.equal(narrow.min, '2026-10-28')
@@ -1588,6 +1648,55 @@ test('seal round trip uses aes-256-gcm', () => {
   assert.throws(() => openToken(key, sealed))
 })
 
+
+test('two Kurs courses with the same test stay different grades', () => {
+  const row = (date, topic, mark) => `<tr><td>${date}</td><td>${topic}</td><td>${mark}</td><td>1</td></tr>`
+  const course = (code, subject, rows) => `<tr><td><b>${code}</b><br>${subject}</td><td>5.0</td></tr><tr><td colspan="4"><table>${rows}</table></td></tr>`
+  const html = `<table><tr><th>Fach</th><th>Durchschnitt</th></tr>${course('Kurs 2.1 (GF)', 'Deutsch', row('01.03.2026', 'Test', '5.5'))}${course('Kurs 2.2 (GF)', 'Französisch', row('01.03.2026', 'Test', '5.5'))}</table>`
+  const grades = parseGradesHtml(html)
+  assert.deepEqual(grades.map((grade) => grade.courseId), ['Kurs 2.1 (GF)', 'Kurs 2.2 (GF)'])
+  assert.notEqual(grades[0].id, grades[1].id)
+  assert.notEqual(gradeTargetId(grades[0]), gradeTargetId(grades[1]))
+  const blank = { grades: [], events: [], exams: [], absences: [], messages: [] }
+  assert.equal(diffSnapshots(blank, { ...blank, grades }).length, 2)
+  assert.equal(diffSnapshots({ ...blank, grades }, { ...blank, grades }).length, 0)
+})
+
+test('a grade weighted zero does not count as weight one', () => {
+  assert.equal(parseWeight(''), 1)
+  assert.equal(parseWeight('0'), 0)
+  assert.equal(parseWeight('0,5'), 0.5)
+  const zero = { id: 'web:mat:01.03.2026:Test:5', courseId: 'MAT', title: 'Test', date: '2026-03-01', mark: 5, weight: 0 }
+  const asOne = { ...zero, weight: 1 }
+  assert.equal(preserveExplicitZeroWeight([zero], [asOne])[0].weight, 0)
+  assert.equal(preserveExplicitZeroWeight([zero], [{ ...asOne, mark: 4 }])[0].weight, 1)
+  assert.equal(preserveExplicitZeroWeight([zero], [{ ...asOne, weight: 2 }])[0].weight, 2)
+  assert.equal(preserveExplicitZeroWeight([zero], [asOne, { ...asOne, id: 'other', title: 'Andere', weight: 1 }])[1].weight, 1)
+  assert.equal(parseWeight('-1'), 1)
+  const html = `<table><tr><td>Chemie-K26A-1 Chemie</td><td>5.0</td></tr><tr><td><table>
+    <tr><td>02.03.2026</td><td>Übung</td><td>5.0</td><td>0</td></tr>
+  </table></td></tr></table>`
+  const [grade] = parseGradesHtml(html)
+  assert.equal(grade.mark, 5)
+  assert.equal(grade.weight, 0)
+})
+
+test('two exams on the same day with the same mark stay distinct and are not announced again', () => {
+  const html = `<table><tr><td>Chemie-K26A-1 Chemie</td><td>5.0</td></tr><tr><td><table>
+    <tr><td>01.03.2026</td><td>Test</td><td>5.5</td><td>1</td></tr>
+    <tr><td>01.03.2026</td><td>Test</td><td>5.5</td><td>2</td></tr>
+  </table></td></tr></table>`
+  const grades = parseGradesHtml(html)
+  assert.equal(grades.length, 2)
+  assert.equal(grades[0].weight, 1)
+  assert.equal(grades[1].weight, 2)
+  assert.notEqual(grades[0].id, grades[1].id)
+  assert.equal(grades[0].id.endsWith(':2'), false)
+  const fresh = diffSnapshots({ grades: [] }, { grades }).filter((change) => change.category === 'grade')
+  assert.equal(fresh.length, 2)
+  const again = diffSnapshots({ grades }, { grades }).filter((change) => change.category === 'grade')
+  assert.equal(again.length, 0)
+})
 
 test('synthetic nested tables keep three courses and eighteen individual marks separate', async () => {
   const html = await readFile(new URL('../android/core/src/test/resources/schulnetz/noten-multi-course.html', import.meta.url), 'utf8')
@@ -2341,6 +2450,14 @@ test('notices about lessons, exams and appointments that already ended are dropp
   assert.equal(changeIsOver({ id: 'absence:a', category: 'absence', title: 'Neue Absenz', body: 'x', date: '2026-10-01' }, at), false)
   assert.equal(changeIsOver({ id: 'event:m1', category: 'event', title: 'Elternabend', body: 'Freitag 19 Uhr' }, at), false)
   assert.equal(changeIsOver({ id: 'probe:1', category: 'exam', title: 'Test', body: '01.01.2026' }, at), false)
+  // An end clock before the start clock is the next morning, not "already over" this evening.
+  const late = { id: 'ev:late', category: 'event', title: 'Neuer Termin', body: '16.11.2026 · Abend · 23:00–00:30', date: '2026-11-16' }
+  assert.equal(changeIsOver(late, new Date('2026-11-16T21:00:00Z')), false) // 22:00 Zurich
+  assert.equal(changeIsOver(late, new Date('2026-11-16T22:15:00Z')), false) // 23:15 Zurich
+  assert.equal(changeIsOver(late, new Date('2026-11-16T23:15:00Z')), false) // 00:15 the next day
+  assert.equal(changeIsOver(late, new Date('2026-11-16T23:45:00Z')), true) // 00:45 the next day
+  assert.equal(changeIsOver({ ...late, date: '2026-11-15', body: '15.11.2026 · Abend · 23:00–00:30' }, new Date('2026-11-16T21:00:00Z')), true)
+  assert.equal(changeIsOver({ id: 'tt:u', category: 'timetable', title: 'Zeit geändert', body: '09.11.2026 · Deutsch · 9:00–10:00', date: '2026-11-09' }, new Date('2026-11-09T08:30:00Z')), false)
 
   const blank = { grades: [], events: [], exams: [], absences: [], messages: [] }
   const past = { id: 'p1', start: '2026-10-29T10:00:00', end: '2026-10-29T10:45:00', text: 'Biologie', room: 'R1', teachers: [], courseName: 'Biologie', status: '', eventType: '1_pru' }
@@ -2632,7 +2749,7 @@ test('every grade row of a real-shaped grades page is read, tooltips and pending
   assert.equal(by('Vocabulaire').date, '')
   assert.equal(by('Vocabulaire').weight, 1)
   assert.ok(grades.every((grade) => grade.mark == null || (grade.mark >= 1 && grade.mark <= 6)))
-  assert.deepEqual([...new Set(grades.map((grade) => grade.courseId))], ['MAT_K99Z_Demo', 'Kurs', 'BIO_K99Z_Demo', 'FRA_K99Z_Demo'])
+  assert.deepEqual([...new Set(grades.map((grade) => grade.courseId))], ['MAT_K99Z_Demo', 'Kurs 2.1 (GF)', 'BIO_K99Z_Demo', 'FRA_K99Z_Demo'])
 })
 
 test('a pending grade is not news, its mark arriving is a new grade', () => {

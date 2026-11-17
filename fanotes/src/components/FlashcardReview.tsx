@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bindHandGestures } from '../../../src/lib/handGestures'
 import { getUiLanguage } from '../i18n'
+import { VaultImg } from './study/VaultImg'
 import { applyReview, cardsFromMarkdown, dueCards, reviewQueue, type FlashGrade } from '../lib/flashcards'
 
 const COPY = {
@@ -142,7 +143,8 @@ export function FlashcardReview({
         {card && (
           <div style={{ display: 'grid', gap: 12, padding: '4px 4px 12px' }}>
             <strong>{card.front}</strong>
-            {revealed ? <p>{card.back || copy.noAnswer}</p> : <button type="button" className="secondary-button" title={copy.showHint} onClick={() => setRevealed(true)}>{copy.show}</button>}
+            {card.frontImage && <VaultImg className="lw-card-image" src={card.frontImage} draggable={false} />}
+            {revealed ? <p style={{ whiteSpace: 'pre-line' }}>{card.back || copy.noAnswer}</p> : <button type="button" className="secondary-button" title={copy.showHint} onClick={() => setRevealed(true)}>{copy.show}</button>}
             {revealed && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 <button type="button" className="secondary-button" title="1" onClick={() => grade('again')}>{copy.again}</button>

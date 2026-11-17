@@ -32,6 +32,7 @@ enum class LiveKind {
     LINK,
     MATH,
     MATH_BLOCK,
+    STUDY_BLOCK,
     DETAILS_SUMMARY,
     DETAILS_BODY,
     DETAILS_END,
@@ -182,6 +183,21 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int): List
                 readingSources = reading.map { it.source },
                 readingInlines = reading.map { it.inlines },
             )
+        }
+    }
+    // Study blocks (fanotes-key, -sort, ...) draw as a table or diagram until the caret enters them.
+    for (block in ch.fasrv.fanotes.study.findStudyBlocks(text)) {
+        if (to >= block.from && from <= block.to) continue
+        val openLine = block.startLine
+        val closeLine = block.endLine
+        if ((openLine..closeLine).any { it in hidden }) continue
+        if (ch.fasrv.fanotes.study.studyBlockReadable(block).not()) continue
+        val host = lines[openLine - 1]
+        if (host.to > host.from) marks += LiveMark(host.from, host.to, LiveKind.STUDY_BLOCK, block.kind.id, block.body)
+        hidden += openLine
+        for (number in (openLine + 1)..closeLine) {
+            concealLine(marks, text, lines[number - 1])
+            hidden += number
         }
     }
     for (block in codeFenceBlocks(text)) {

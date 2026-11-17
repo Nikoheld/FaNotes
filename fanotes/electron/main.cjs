@@ -1,5 +1,13 @@
 'use strict'
 
+// `FaNotes --mcp` is the stdio MCP server for AI clients. It must run before
+// any app startup (windows, single-instance lock, profile migration).
+if (process.argv.slice(1).includes('--mcp')) {
+  const mcp = require('./fanotes-mcp.cjs')
+  mcp.runCli(process.argv.slice(1)).then(() => mcp.exitAfterDrain(0), () => mcp.exitAfterDrain(1))
+  return
+}
+
 const {
   applyLinuxOzoneLaunchEnvironment,
   cleanupStaleSingletonLocks,
@@ -21,6 +29,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const folderLocations = require('./folder-locations.cjs')
+const vaultWatch = require('./vault-watch.cjs')
 const { coerceWorksheetBytes } = require('./worksheet-bytes.cjs')
 const { encodeWindowCapture } = require('./window-capture.cjs')
 const { publishNewFile } = require('./exclusive-publish.cjs')
@@ -30,6 +39,7 @@ const { DEFAULT_TABLET_BUTTON_ACTIONS } = require('./tablet-buttons.cjs')
 const { sanitizeSettings: sanitizeStoredSettings } = require('./settings-sanitize.cjs')
 const { channelForPackagedVersion } = require('./releaseVersion.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
+const { installSecurityHeaders } = require('./content-security-policy.cjs')
 const {
   onboardingRequiredFromConfig,
   onboardingRequiredFromVaultStatus,
@@ -57,6 +67,7 @@ const {
   parseNoteBackups,
   parseNoteLinks,
   parseNoteTextFields,
+  parseAnnotations: parseNoteAnnotations,
   serializeFamd,
   stripFamdPayload,
   worksheetIdsFromMarkdown,
@@ -201,6 +212,11 @@ const IPC = Object.freeze({
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
   setFolderColor: 'fanotes:set-folder-color',
+  storyRead: 'fanotes:story-read',
+  storyWrite: 'fanotes:story-write',
+  storyList: 'fanotes:story-list',
+  storyCreate: 'fanotes:story-create',
+  setFileColor: 'fanotes:set-file-color',
   getFolderLocations: 'fanotes:get-folder-locations',
   pickFolderLocation: 'fanotes:pick-folder-location',
   setFolderLocations: 'fanotes:set-folder-locations',
@@ -220,6 +236,7 @@ const IPC = Object.freeze({
   readNoteBackups: 'fanotes:read-note-backups',
   writeNoteBackups: 'fanotes:write-note-backups',
   writeNoteTextFields: 'fanotes:write-note-text-fields',
+  writeNoteAnnotations: 'fanotes:write-note-annotations',
   readNoteCompanion: 'fanotes:read-note-companion',
   readSubjectBooks: 'fanotes:read-subject-books',
   writeSubjectBooks: 'fanotes:write-subject-books',
@@ -231,6 +248,7 @@ const IPC = Object.freeze({
   importPdfNote: 'fanotes:import-pdf-note',
   importOneNote: 'fanotes:import-onenote',
   readWorksheet: 'fanotes:read-worksheet',
+  readWorksheetHtml: 'fanotes:read-worksheet-html',
   saveWorksheet: 'fanotes:save-worksheet',
   deleteWorksheet: 'fanotes:delete-worksheet',
   listNoteHistory: 'fanotes:list-note-history',
@@ -255,6 +273,7 @@ const IPC = Object.freeze({
   aiListModels: 'fanotes:ai-list-models',
   aiTransform: 'fanotes:ai-transform',
   grokBuild: 'fanotes:grok-build',
+  mcpLocal: 'fanotes:mcp-local',
   loadSecureSettings: 'fanotes:load-secure-settings',
   saveSettings: 'fanotes:save-settings',
   resetAppData: 'fanotes:reset-app-data',
@@ -266,6 +285,7 @@ const IPC = Object.freeze({
   openExternal: 'fanotes:open-external',
   beforeClose: 'fanotes:before-close',
   shareOpen: 'fanotes:share-open',
+  vaultChanged: 'fanotes:vault-changed',
   confirmClose: 'fanotes:confirm-close',
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
@@ -303,6 +323,10 @@ const DEFAULT_SETTINGS = Object.freeze({
   syncAutomatic: true,
   syncDeviceName: '',
   syncExcludedFolders: '',
+  mcpEnabled: false,
+  mcpWriteAccess: false,
+  mcpHttpEnabled: false,
+  mcpExcludedFolders: '',
   syncHandwritingModel: false,
   syncNoteHistory: false,
   profileOwnerId: '',
@@ -346,6 +370,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   experimentalRemoteSupport: false,
   experimentalNoteBackup: false,
   experimentalSendData: false,
+  diagnosticsUsage: false,
+  diagnosticsLogs: false,
   lastOpenNotePath: '',
   dashboardLayout: '',
   homeworkApiChannelId: '',
@@ -431,6 +457,10 @@ const TREE_ASSET_EXTENSIONS = new Set([
   '.webm',
 ])
 const TREE_EXTENSIONS = new Set([...MARKDOWN_EXTENSIONS, ...TREE_ASSET_EXTENSIONS])
+// Writing-mode projects: `Name.story/` folders with JSON files inside.
+const STORY_FOLDER = /\.story$/iu
+const STORY_FILE = /^(.+\.story)\/((?:[A-Za-z0-9_-]{1,64}\/){0,3}[A-Za-z0-9_.-]{1,96}\.(?:json|md))$/iu
+const MAX_STORY_FILE_BYTES = 16 * 1024 * 1024
 const MAX_TEXT_BYTES = 16 * 1024 * 1024
 const MAX_IMAGE_BYTES = 32 * 1024 * 1024
 const MAX_DRAWING_JSON_BYTES = 24 * 1024 * 1024
@@ -934,6 +964,20 @@ async function loadSecureSettings() {
   return protectedSettingsLoadPromise
 }
 
+let localMcpHostInstance = null
+/** Local MCP server (loopback HTTP transport + settings info). See local-mcp-host.cjs. */
+function localMcpHost() {
+  localMcpHostInstance ??= require('./local-mcp-host.cjs').createLocalMcpHost({
+    userData: app.getPath('userData'),
+    getState: () => ({ settings: currentSettings, vaultPath: currentVaultPath }),
+    packaged: app.isPackaged,
+    execPath: process.execPath,
+    appImage: process.env.APPIMAGE || '',
+    version: app.getVersion(),
+  })
+  return localMcpHostInstance
+}
+
 function configPath() {
   return path.join(app.getPath('userData'), 'config.json')
 }
@@ -1128,9 +1172,12 @@ function cleanFolderColorEntries(candidate) {
   return colors
 }
 
-async function readFolderColors(root) {
+// Folder colours live in `folder-colors.json`; note and PDF colours use the same
+// format in `file-colors.json`, so clients that only know folder colours never
+// mistake a document for a folder.
+async function readFolderColors(root, fileName = 'folder-colors.json') {
   const internalDirectory = await ensureInternalVaultDirectory(root)
-  const metadataPath = path.join(internalDirectory, 'folder-colors.json')
+  const metadataPath = path.join(internalDirectory, fileName)
   try {
     const parentInfo = await fsp.lstat(path.dirname(metadataPath))
     if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink()) {
@@ -1153,7 +1200,7 @@ async function readFolderColors(root) {
   }
 }
 
-async function writeFolderColors(root, colors) {
+async function writeFolderColors(root, colors, fileName = 'folder-colors.json') {
   const internalDirectory = await ensureInternalVaultDirectory(root)
   const entries = [...colors.entries()]
     .filter(([relativePath, color]) => {
@@ -1170,7 +1217,7 @@ async function writeFolderColors(root, colors) {
   if (Buffer.byteLength(snapshot, 'utf8') > MAX_FOLDER_COLOR_BYTES) {
     throw new Error('Zu viele Ordnerfarben für diesen Vault.')
   }
-  await atomicWrite(path.join(internalDirectory, 'folder-colors.json'), snapshot, { encoding: 'utf8', mode: 0o600 })
+  await atomicWrite(path.join(internalDirectory, fileName), snapshot, { encoding: 'utf8', mode: 0o600 })
 }
 
 async function readSubjectBooksFromVault(root) {
@@ -1225,16 +1272,61 @@ function queueFolderColorMutation(root, vaultGeneration, operation) {
   return next
 }
 
-function mutateFolderColors(root, vaultGeneration, mutation) {
+function mutateFolderColors(root, vaultGeneration, mutation, fileName = 'folder-colors.json') {
   return queueFolderColorMutation(root, vaultGeneration, async () => {
     assertVaultWriteContext(root, vaultGeneration)
-    const colors = await readFolderColors(root)
+    const colors = await readFolderColors(root, fileName)
     assertVaultWriteContext(root, vaultGeneration)
     const changed = mutation(colors)
     if (changed === false) return
-    await writeFolderColors(root, colors)
+    await writeFolderColors(root, colors, fileName)
     assertVaultWriteContext(root, vaultGeneration)
   })
+}
+
+const FILE_COLORS_FILE = 'file-colors.json'
+
+function readFileColors(root) {
+  return readFolderColors(root, FILE_COLORS_FILE)
+}
+
+function mutateFileColors(root, vaultGeneration, mutation) {
+  return mutateFolderColors(root, vaultGeneration, mutation, FILE_COLORS_FILE)
+}
+
+/** Moves (or with `to === null` drops) the colour of a path and everything below it. */
+function retargetColorEntries(colors, from, to) {
+  let changed = false
+  for (const [candidate, candidateColor] of [...colors.entries()]) {
+    if (candidate !== from && !candidate.startsWith(`${from}/`)) continue
+    colors.delete(candidate)
+    if (to !== null) colors.set(candidate === from ? to : `${to}${candidate.slice(from.length)}`, candidateColor)
+    changed = true
+  }
+  return changed
+}
+
+/** Adds `color` to the note and PDF entries of a tree that have one. */
+function applyFileColors(entries, colors) {
+  if (!colors.size) return entries
+  for (const entry of entries) {
+    if (entry.kind === 'folder') applyFileColors(entry.children ?? [], colors)
+    else {
+      const color = colors.get(entry.relativePath)
+      if (color) entry.color = color
+    }
+  }
+  return entries
+}
+
+async function readFileColorsForTree(root) {
+  try {
+    return await readFileColors(root)
+  } catch (error) {
+    // The tree must still load when only the colour list is unreadable.
+    console.warn('Dokumentfarben konnten nicht gelesen werden:', error?.message ?? error)
+    return new Map()
+  }
 }
 
 async function persistConfig({
@@ -1529,6 +1621,50 @@ function folderLocationStoreNow() {
   return folderLocationStore
 }
 
+// Notices files added, changed or removed from outside FaNotes (Explorer, other
+// programs, other sync tools) in the vault and its linked folder locations.
+let vaultWatcher = null
+/** Latest watcher walk (with colors). Reusable once, for the getTree call that follows a change event. */
+let watcherTreeScan = null
+let vaultWatcherRoot = null
+function ensureVaultWatch(root) {
+  if (vaultWatcher && vaultWatcherRoot === root) return
+  vaultWatcher?.stop()
+  vaultWatcherRoot = root
+  // The scan is the same walk getTree does. Keep the latest one so the renderer's
+  // refresh after a change event can reuse it once instead of walking the vault again.
+  const scanRoot = async () => {
+    if (currentVaultPath !== root) throw new Error('vault changed')
+    const entries = applyFileColors(await readTreeDirectory(root, root, 0, await readFolderColors(root)), await readFileColorsForTree(root))
+    watcherTreeScan = { root, entries, at: Date.now(), reusable: false }
+    return entries
+  }
+  const getRoots = () => {
+    const roots = [root]
+    const map = folderLocationMap(root)
+    for (const list of Object.values(map || {})) {
+      if (Array.isArray(list)) for (const location of list) if (typeof location === 'string') roots.push(location)
+    }
+    return roots
+  }
+  vaultWatcher = vaultWatch.createVaultWatcher({
+    getRoots,
+    scan: scanRoot,
+    watch: fs.watch,
+    onChange: (diff) => {
+      const visible = (list) => list.filter((entry) => !vaultWatch.isIgnoredWatchPath(entry))
+      const cap = (list) => list.slice(0, 500)
+      const lists = [visible(diff.added), visible(diff.removed), visible(diff.changed)]
+      const truncated = lists.some((list) => list.length > 500)
+      const payload = { added: cap(lists[0]), removed: cap(lists[1]), changed: cap(lists[2]), ...(truncated ? { truncated: true } : {}) }
+      if (!payload.added.length && !payload.removed.length && !payload.changed.length) return
+      if (watcherTreeScan?.root === root) watcherTreeScan.reusable = true
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.vaultChanged, payload)
+    },
+  })
+  vaultWatcher.start()
+}
+
 function folderLocationMap(vault) {
   return folderLocations.mapFor(folderLocationStoreNow(), vault)
 }
@@ -1699,6 +1835,9 @@ function invalidateFamdCompanion(famdRelativePath) {
   }
   famdCompanionInflight.delete(famdRelativePath)
 }
+
+/** relative .famd path -> { signature: mtime:size, pageStats } for the statistics page. */
+const pageStatsByCompanion = new Map()
 
 async function loadFamdCompanion(notePath) {
   const famdRelative = companionNotePath(notePath, '.famd')
@@ -2261,6 +2400,12 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
       }
       if (info.isSymbolicLink()) continue
       const logicalChild = logicalDir ? `${logicalDir}/${directoryEntry.name}` : directoryEntry.name
+      if (info.isDirectory() && STORY_FOLDER.test(directoryEntry.name)) {
+        // A writing-mode project is one document in the tree.
+        seen.add(directoryEntry.name)
+        result.push({ name: directoryEntry.name, relativePath: logicalChild, kind: 'file', extension: 'story', modifiedAt: info.mtime.toISOString() })
+        continue
+      }
       if (info.isDirectory()) {
         const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
         if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
@@ -2308,6 +2453,11 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
       const absolutePath = path.join(scan, directoryEntry.name)
       const logicalChild = logicalDir ? `${logicalDir}/${directoryEntry.name}` : directoryEntry.name
       const extensionWithDot = path.extname(directoryEntry.name).toLocaleLowerCase('en-US')
+      if (directoryEntry.isDirectory() && STORY_FOLDER.test(directoryEntry.name)) {
+        seen.add(directoryEntry.name)
+        result.push({ name: directoryEntry.name, relativePath: logicalChild, kind: 'file', extension: 'story' })
+        continue
+      }
       if (directoryEntry.isDirectory()) {
         const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
         if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
@@ -2407,8 +2557,9 @@ function cleanCachedTreeEntries(candidate, parentPath = '', depth = 0, state = {
       cleaned.children = cleanCachedTreeEntries(entry.children ?? [], expectedPath, depth + 1, state)
     } else {
       const extension = path.extname(entry.name).slice(1).toLocaleLowerCase('en-US')
-      if (!extension || !TREE_EXTENSIONS.has(`.${extension}`)) throw new Error('Der Dateibaum-Cache enthält einen unbekannten Dateityp.')
+      if (!extension || (!TREE_EXTENSIONS.has(`.${extension}`) && extension !== 'story')) throw new Error('Der Dateibaum-Cache enthält einen unbekannten Dateityp.')
       cleaned.extension = extension
+      if (typeof entry.color === 'string' && /^#[\da-f]{6}$/i.test(entry.color)) cleaned.color = entry.color.toLowerCase()
       if (entry.modifiedAt !== undefined) {
         if (typeof entry.modifiedAt !== 'string' || !Number.isFinite(Date.parse(entry.modifiedAt))) {
           throw new Error('Der Dateibaum-Cache enthält ein ungültiges Änderungsdatum.')
@@ -2815,9 +2966,26 @@ function validateWorksheetDocument(candidate, expectedId) {
     createdAt: new Date(created).toISOString(),
     updatedAt: new Date(updated).toISOString(),
     ...(candidate.kind === 'html' ? { pageWidth: Math.round(pageWidth), pageHeight: Math.round(pageHeight) } : {}),
+    ...(candidate.kind === 'html' && /^[a-f0-9]{64}$/u.test(candidate.htmlSha256 ?? '') ? { htmlSha256: candidate.htmlSha256 } : {}),
     textBoxes,
     highlights,
   }
+}
+
+/**
+ * The OneNote page of a worksheet document, verified and guarded. The marker alone is forgeable, so the
+ * stored SHA-256 must match (documents from before the hash existed fall back to the strict guard-prefix check).
+ */
+async function readVerifiedOneNotePage(document, worksheetsDirectory) {
+  const format = WORKSHEET_FORMATS.get('.html')
+  const sourcePath = path.join(worksheetsDirectory, path.basename(document.sourceRelativePath))
+  const html = (await readRegularFileNoFollow(sourcePath, format.maxBytes)).toString('utf8')
+  const { guardedPageHtml, hasImporterGuard, pageSha256 } = require('./onenote-page-guard.cjs')
+  const intact = document.htmlSha256
+    ? pageSha256(html) === document.htmlSha256
+    : hasImporterGuard(html)
+  if (!intact || !hasImporterGuard(html)) throw new Error('Die importierte OneNote-Seite hat ihre Sicherheitsmarkierung verloren.')
+  return guardedPageHtml(html)
 }
 
 function decodePngDataUrl(imageData) {
@@ -3605,20 +3773,26 @@ function registerIpcHandlers() {
     const root = await assertCurrentVaultRoot()
     if (vaultPath !== root) throw new Error('Der Vault wurde während des Ladens verändert.')
     const folderColors = await readFolderColors(root)
-    const entries = await readFastTreeDirectory(root, root, 0, folderColors)
+    const entries = applyFileColors(await readFastTreeDirectory(root, root, 0, folderColors), await readFileColorsForTree(root))
     setImmediate(() => { void writeTreeCache(root, entries) })
+    ensureVaultWatch(root)
     return entries
   })
 
-  handle(IPC.getTree, async () => {
+  handle(IPC.getTree, async (_event, options) => {
     const { vaultPath } = await ensureBootstrap()
     const root = await assertCurrentVaultRoot()
     if (vaultPath !== root) throw new Error('Der Vault wurde während des Ladens verändert.')
+    // Only the refresh that answers a watcher event may reuse its walk (once, and only while fresh).
+    const scan = watcherTreeScan
+    watcherTreeScan = null
+    if (options?.fromWatcher === true && scan?.reusable && scan.root === root && Date.now() - scan.at < 5000) return scan.entries
     const folderColors = await readFolderColors(root)
-    const entries = await readTreeDirectory(root, root, 0, folderColors)
+    const entries = applyFileColors(await readTreeDirectory(root, root, 0, folderColors), await readFileColorsForTree(root))
     // The verified local cache makes subsequent starts independent of a full
     // NAS/disk traversal. Refreshing it must never delay the live tree result.
     setImmediate(() => { void writeTreeCache(root, entries) })
+    ensureVaultWatch(root)
     return entries
   })
 
@@ -3844,6 +4018,85 @@ function registerIpcHandlers() {
     return { color: color?.toLowerCase() ?? null }
   })
 
+  handle(IPC.setFileColor, async (_event, relativePath, color) => {
+    await ensureBootstrap()
+    const normalizedRelativePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    if (color !== null && (typeof color !== 'string' || !/^#[\da-f]{6}$/i.test(color))) {
+      throw new Error('Ungültige Dokumentfarbe.')
+    }
+    const requestedVaultGeneration = currentVaultGeneration
+    const { root } = await resolveVaultPath(normalizedRelativePath, { expected: 'file' })
+    await mutateFileColors(root, requestedVaultGeneration, (colors) => {
+      if (color === null) return colors.delete(normalizedRelativePath)
+      colors.set(normalizedRelativePath, color.toLowerCase())
+      return true
+    })
+    return { color: color?.toLowerCase() ?? null }
+  })
+
+  const storyFile = (relativePath) => {
+    const logical = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    const match = STORY_FILE.exec(logical)
+    if (!match) throw new Error('Nur Dateien in einem .story-Ordner können so gelesen oder geschrieben werden.')
+    return { logical, storyRoot: match[1] }
+  }
+
+  handle(IPC.storyRead, async (_event, relativePath) => {
+    await ensureBootstrap()
+    const { logical } = storyFile(relativePath)
+    let resolved
+    try {
+      resolved = await resolveVaultPath(logical, { expected: 'file' })
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null
+      throw error
+    }
+    return (await readRegularFileNoFollow(resolved.target, MAX_STORY_FILE_BYTES)).toString('utf8')
+  })
+
+  handle(IPC.storyWrite, async (_event, relativePath, content) => {
+    await ensureBootstrap()
+    const { logical, storyRoot } = storyFile(relativePath)
+    if (typeof content !== 'string' || Buffer.byteLength(content, 'utf8') > MAX_STORY_FILE_BYTES) throw new Error('Der Inhalt ist ungültig oder zu gross.')
+    if (logical.toLowerCase().endsWith('.json')) JSON.parse(content)
+    await resolveVaultPath(storyRoot, { expected: 'directory' })
+    const { target } = await resolveVaultPath(logical, { allowMissing: true })
+    await fsp.mkdir(path.dirname(target), { recursive: true })
+    // The folders just created are checked again: no link may lead out of the vault.
+    await resolveVaultPath(logical, { allowMissing: true })
+    await atomicWrite(target, content, { encoding: 'utf8' })
+  })
+
+  handle(IPC.storyList, async (_event, storyPath) => {
+    await ensureBootstrap()
+    const logical = normalizeRelativePath(storyPath).split(path.sep).join('/')
+    if (!STORY_FOLDER.test(logical)) throw new Error('Kein .story-Ordner.')
+    const { target } = await resolveVaultPath(logical, { expected: 'directory' })
+    const out = []
+    const walk = async (directory, prefix, depth) => {
+      if (depth > 4 || out.length > 20000) return
+      for (const entry of await fsp.readdir(directory, { withFileTypes: true })) {
+        if (entry.isSymbolicLink() || entry.name.startsWith('.')) continue
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+        if (entry.isDirectory()) await walk(path.join(directory, entry.name), relative, depth + 1)
+        else if (entry.isFile() && /\.(?:json|md)$/iu.test(entry.name)) out.push(relative)
+      }
+    }
+    await walk(target, '', 0)
+    return out
+  })
+
+  handle(IPC.storyCreate, async (_event, rawParent, rawName) => {
+    await ensureBootstrap()
+    const parent = typeof rawParent === 'string' && rawParent ? normalizeRelativePath(rawParent, { allowRoot: true }).split(path.sep).join('/') : ''
+    const name = safeEntryName(typeof rawName === 'string' ? rawName : '', 'Geschichte.story')
+    if (!STORY_FOLDER.test(name)) throw new Error('Ein Geschichten-Ordner endet auf .story.')
+    const { target: parentTarget } = await resolveVaultPath(parent, { allowRoot: true, expected: 'directory', asContent: true })
+    const candidate = await availableName(parentTarget, name)
+    await fsp.mkdir(path.join(parentTarget, candidate))
+    return parent ? `${parent}/${candidate}` : candidate
+  })
+
   handle(IPC.getFolderLocations, async (_event, relativePath) => {
     await ensureBootstrap()
     const logical = normalizeRelativePath(relativePath).split(path.sep).join('/')
@@ -3957,6 +4210,11 @@ function registerIpcHandlers() {
       } catch (error) {
         console.warn('Ordnerfarben konnten nach dem Umbenennen nicht verschoben werden:', error?.message ?? error)
       }
+      try {
+        await mutateFileColors(root, requestedVaultGeneration, (colors) => retargetColorEntries(colors, oldRelativePath, nextRelativePath))
+      } catch (error) {
+        console.warn('Dokumentfarben konnten nach dem Umbenennen nicht verschoben werden:', error?.message ?? error)
+      }
       await rewritePdfOcrSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
         console.warn('FaNotes: PDF-Texterkennung konnte nicht mit umbenannt werden:', error?.message ?? error)
       })
@@ -4042,6 +4300,11 @@ function registerIpcHandlers() {
       } catch (error) {
         console.warn('Ordnerfarben konnten nach dem Verschieben nicht mitgezogen werden:', error?.message ?? error)
       }
+      try {
+        await mutateFileColors(root, requestedVaultGeneration, (colors) => retargetColorEntries(colors, oldRelativePath, nextRelativePath))
+      } catch (error) {
+        console.warn('Dokumentfarben konnten nach dem Verschieben nicht mitgezogen werden:', error?.message ?? error)
+      }
       await rewritePdfOcrSidecars(root, oldRelativePath, nextRelativePath).catch((error) => {
         console.warn('FaNotes: PDF-Texterkennung konnte nicht mit verschoben werden:', error?.message ?? error)
       })
@@ -4088,6 +4351,11 @@ function registerIpcHandlers() {
         })
       } catch (error) {
         console.warn('Ordnerfarben konnten nach dem Löschen nicht bereinigt werden:', error?.message ?? error)
+      }
+      try {
+        await mutateFileColors(root, requestedVaultGeneration, (colors) => retargetColorEntries(colors, trashedRelativePath, null))
+      } catch (error) {
+        console.warn('Dokumentfarben konnten nach dem Löschen nicht bereinigt werden:', error?.message ?? error)
       }
       await rewritePdfOcrSidecars(root, trashedRelativePath, null).catch((error) => {
         console.warn('FaNotes: PDF-Texterkennung konnte nicht gelöscht werden:', error?.message ?? error)
@@ -4485,8 +4753,24 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
+    // The statistics page asks for every note. A stat is cheap; parsing a companion with ink is not.
+    const famdRelative = companionNotePath(notePath, '.famd')
+    let signature = null
+    try {
+      const { target } = await resolveVaultPath(famdRelative, { allowMissing: true, expected: 'file' })
+      const info = await statRegularFileNoFollow(target, MAX_FAMD_BYTES)
+      signature = `${info.mtimeMs}:${info.size}`
+    } catch { signature = null }
+    const known = signature ? pageStatsByCompanion.get(famdRelative) : null
+    if (known && known.signature === signature) return known.pageStats
     const loaded = await loadFamdCompanion(notePath)
-    return loaded?.pageStats ?? null
+    const pageStats = loaded?.pageStats ?? null
+    if (signature) {
+      pageStatsByCompanion.delete(famdRelative)
+      pageStatsByCompanion.set(famdRelative, { signature, pageStats })
+      while (pageStatsByCompanion.size > 20000) pageStatsByCompanion.delete(pageStatsByCompanion.keys().next().value)
+    }
+    return pageStats
   })
 
   handle(IPC.readNotePaperStyle, async (_event, relativePath) => {
@@ -4563,6 +4847,7 @@ function registerIpcHandlers() {
       noteLinks: loaded.noteLinks ?? [],
       noteBackups: loaded.noteBackups ?? [],
       textFields: loaded.textFields ?? [],
+      annotations: loaded.annotations ?? [],
     }
   })
 
@@ -4582,6 +4867,15 @@ function registerIpcHandlers() {
     assertNotePath(notePath)
     const fields = parseNoteTextFields(rawFields)
     return mutateFamdCompanion(notePath, () => ({ payload: { textFields: fields }, result: fields }))
+  })
+
+  handle(IPC.writeNoteAnnotations, async (_event, relativePath, rawList) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+    const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
+    assertNotePath(notePath)
+    const list = parseNoteAnnotations(rawList)
+    return mutateFamdCompanion(notePath, () => ({ payload: { annotations: list }, result: list }))
   })
 
   handle(IPC.readSubjectBooks, async () => {
@@ -4945,10 +5239,7 @@ function registerIpcHandlers() {
       const format = WORKSHEET_FORMATS.get(path.extname(document.sourceRelativePath).toLocaleLowerCase('en-US'))
       const sourcePath = path.join(worksheetsDirectory, path.basename(document.sourceRelativePath))
       await statRegularFileNoFollow(sourcePath, format.maxBytes)
-      if (document.kind === 'html') {
-        const header = (await readRegularFilePrefixNoFollow(sourcePath, format.maxBytes)).toString('utf8')
-        if (!header.includes('fanotes-onenote-safe-v1')) throw new Error('Die importierte OneNote-Seite hat ihre Sicherheitsmarkierung verloren.')
-      }
+      if (document.kind === 'html') await readVerifiedOneNotePage(document, worksheetsDirectory)
       return document
     } catch (error) {
       if (error?.code === 'ENOENT') throw new Error('Das Arbeitsblatt wurde nicht gefunden.')
@@ -4956,10 +5247,26 @@ function registerIpcHandlers() {
     }
   })
 
+  handle(IPC.readWorksheetHtml, async (_event, rawId) => {
+    await ensureBootstrap()
+    const id = assertWorksheetId(rawId)
+    const { worksheetsDirectory } = await ensureInternalWorksheetsDirectory()
+    const raw = (await readRegularFileNoFollow(path.join(worksheetsDirectory, `${id}.json`), MAX_WORKSHEET_JSON_BYTES)).toString('utf8')
+    const document = validateWorksheetDocument(JSON.parse(raw), id)
+    if (document.kind !== 'html') throw new Error('Dieses Arbeitsblatt ist keine OneNote-Seite.')
+    return readVerifiedOneNotePage(document, worksheetsDirectory)
+  })
+
   handle(IPC.saveWorksheet, async (_event, candidate) => {
     await ensureBootstrap()
     const id = assertWorksheetId(candidate?.id)
-    const document = validateWorksheetDocument({ ...candidate, updatedAt: new Date().toISOString() }, id)
+    const { worksheetsDirectory: savedDirectory } = await ensureInternalWorksheetsDirectory()
+    let storedHash
+    try {
+      storedHash = JSON.parse((await readRegularFileNoFollow(path.join(savedDirectory, `${id}.json`), MAX_WORKSHEET_JSON_BYTES)).toString('utf8'))?.htmlSha256
+    } catch { storedHash = undefined }
+    // The page hash is never taken from the renderer.
+    const document = validateWorksheetDocument({ ...candidate, htmlSha256: storedHash, updatedAt: new Date().toISOString() }, id)
     const serialized = `${JSON.stringify(document, null, 2)}\n`
     if (Buffer.byteLength(serialized, 'utf8') > MAX_WORKSHEET_JSON_BYTES) throw new Error('Die Arbeitsblattdaten sind zu groß.')
     const { worksheetsDirectory } = await ensureInternalWorksheetsDirectory()
@@ -5007,8 +5314,9 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Bildpfad.')
     const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
     const worksheetFormat = WORKSHEET_FORMATS.get(extension)
-    const mimeType = IMAGE_MIME_TYPES.get(extension) ?? worksheetFormat?.mimeType
+    const mimeType = IMAGE_MIME_TYPES.get(extension) ?? (worksheetFormat?.kind === 'html' ? undefined : worksheetFormat?.mimeType)
     if (!mimeType) throw new Error('Dieser Bildtyp ist für die Vorschau nicht erlaubt.')
+    if (extension === '.svg' && /^\.?fanotes\//iu.test(relativePath.replaceAll('\\', '/'))) throw new Error('Dieser Bildtyp ist für die Vorschau nicht erlaubt.')
     const { target } = await resolveVaultPath(relativePath, { allowInternal: true, expected: 'file' })
     const image = await readRegularFileNoFollow(target, worksheetFormat?.maxBytes ?? MAX_IMAGE_BYTES)
     return `data:${mimeType};base64,${image.toString('base64')}`
@@ -5019,8 +5327,9 @@ function registerIpcHandlers() {
     if (typeof relativePath !== 'string') throw new Error('Ungültiger Dateipfad.')
     const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
     const worksheetFormat = WORKSHEET_FORMATS.get(extension)
-    const mimeType = IMAGE_MIME_TYPES.get(extension) ?? worksheetFormat?.mimeType
+    const mimeType = IMAGE_MIME_TYPES.get(extension) ?? (worksheetFormat?.kind === 'html' ? undefined : worksheetFormat?.mimeType)
     if (!mimeType) throw new Error('Dieser Dateityp ist für die Vorschau nicht erlaubt.')
+    if (extension === '.svg' && /^\.?fanotes\//iu.test(relativePath.replaceAll('\\', '/'))) throw new Error('Dieser Dateityp ist für die Vorschau nicht erlaubt.')
     const { target } = await resolveVaultPath(relativePath, { allowInternal: true, expected: 'file' })
     return readRegularFileNoFollow(target, worksheetFormat?.maxBytes ?? MAX_IMAGE_BYTES)
   })
@@ -5224,6 +5533,13 @@ function registerIpcHandlers() {
     throw new Error('Unbekannte Grok-Build-Aktion.')
   })
 
+  handle(IPC.mcpLocal, async (_event, request) => {
+    const host = localMcpHost()
+    if (request?.action === 'regenerate') return host.regenerate()
+    if (request?.action === 'reveal') return host.revealToken()
+    return host.info()
+  })
+
   handle(IPC.loadSecureSettings, async () => loadSecureSettings())
 
   handle(IPC.saveSettings, async (_event, settings, options) => {
@@ -5239,6 +5555,7 @@ function registerIpcHandlers() {
           preserveProtectedSecrets: !clearProtectedSecrets,
         })
         currentSettings = nextSettings
+        void localMcpHost().apply(currentSettings).catch(() => {})
         if (clearProtectedSecrets) {
           protectedSettingsOnDisk.clear()
           protectedSettingsLoaded = true
@@ -5406,37 +5723,9 @@ function installSecurityPolicy() {
   currentSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   currentSession.setPermissionCheckHandler(() => false)
 
-  currentSession.webRequest.onHeadersReceived((details, callback) => {
-    const isEmbeddedGlyphenWerkResource = /\/glyphenwerk\//iu.test(details.url)
-    const devUrl = trustedDevUrl()
-    const connectSource = devUrl
-      ? "'self' fanotes-model: https://fanotes.fasrv.ch ws://127.0.0.1:* ws://localhost:* ws://[::1]:* http://127.0.0.1:* http://localhost:*"
-      : "'self' fanotes-model: https://fanotes.fasrv.ch"
-    const policy = [
-      "default-src 'self'",
-      "script-src 'self' blob: 'wasm-unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "font-src 'self' data:",
-      "worker-src 'self' blob:",
-      `connect-src ${connectSource}`,
-      "media-src 'self' data: blob:",
-      "frame-src 'self'",
-      "object-src 'none'",
-      "base-uri 'self'",
-      "form-action 'none'",
-      isEmbeddedGlyphenWerkResource ? "frame-ancestors 'self'" : "frame-ancestors 'none'",
-    ].join('; ')
-    callback({
-      responseHeaders: {
-        ...(details.responseHeaders ?? {}),
-        'Content-Security-Policy': [policy],
-        'Cross-Origin-Opener-Policy': ['same-origin'],
-        'Cross-Origin-Embedder-Policy': ['require-corp'],
-        'Cross-Origin-Resource-Policy': ['same-origin'],
-      },
-    })
-  })
+  // The policy and isolation headers live in content-security-policy.cjs (see there for how they reach
+  // file://, dev-server and custom-scheme documents).
+  installSecurityHeaders(currentSession, { isDevServer: () => Boolean(trustedDevUrl()) })
 }
 
 function installModelProtocol() {
@@ -5528,6 +5817,12 @@ async function createWindow() {
     mainWindow.show()
   }
   mainWindow.once('ready-to-show', revealWindow)
+  mainWindow.on('focus', () => vaultWatcher?.nudge())
+  // No periodic rescans while the window is hidden or minimized; showing it rescans at once.
+  mainWindow.on('minimize', () => vaultWatcher?.setActive(false))
+  mainWindow.on('hide', () => vaultWatcher?.setActive(false))
+  mainWindow.on('restore', () => vaultWatcher?.setActive(true))
+  mainWindow.on('show', () => vaultWatcher?.setActive(true))
   mainWindow.webContents.on('did-fail-load', revealWindow)
 
   mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault())
@@ -5641,6 +5936,7 @@ if (!app.requestSingleInstanceLock()) {
     installSecurityPolicy()
     registerIpcHandlers()
     await createWindow()
+    void readConfig().then(() => localMcpHost().apply(currentSettings)).catch(() => {})
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) void createWindow()
@@ -5660,6 +5956,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  void localMcpHostInstance?.stop()
   stopNativeOcr(new Error('FaNotes wird beendet.'))
   inkOcr?.stop()
   updateManager?.stop()

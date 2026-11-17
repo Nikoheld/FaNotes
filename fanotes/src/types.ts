@@ -2,6 +2,7 @@ import type { NoteBackupSnapshot } from './lib/noteBackup'
 import type { SendDataLinuxRuntime } from './lib/sendData'
 import type { NoteLinkRecord } from './lib/noteLink'
 import type { NoteTextField } from './lib/noteTextField'
+import type { NoteAnnotation } from '../electron/noteAnnotation.mjs'
 import type { SubjectBookRecord } from './lib/subjectBook'
 
 export type VaultEntry = {
@@ -74,6 +75,15 @@ export type HandwritingRecognitionResources = {
   characters: string[]
 }
 
+export type LocalMcpInfo = {
+  httpRunning: boolean
+  httpUrl: string
+  /** Masked hint such as `fnmcp_…ab12`; the token itself is only returned by the one-shot `reveal` action. */
+  httpTokenHint: string
+  httpError: string
+  stdio: { packaged: boolean; appImage: string; execPath: string; entryPath: string; copied?: boolean; platform: string; userData: string }
+}
+
 export type AppSettings = {
   uiLanguage: UiLanguagePreference
   theme: ThemeMode
@@ -110,6 +120,10 @@ export type AppSettings = {
   syncDeviceName: string
   /** Newline-separated vault folders that stay on this device. */
   syncExcludedFolders: string
+  mcpEnabled: boolean
+  mcpWriteAccess: boolean
+  mcpHttpEnabled: boolean
+  mcpExcludedFolders: string
   /** Upload the personal handwriting model as its own encrypted file. */
   syncHandwritingModel: boolean
   /** Also synchronise the local note-history folder. */
@@ -127,6 +141,8 @@ export type AppSettings = {
   /** Show the invisible handwriting transcript in the margin. */
   marginTranscript: boolean
   showWordCount: boolean
+  /** Editor toolbar placement: horizontal bar on top or vertical bar at the left edge. */
+  toolbarPosition: 'top' | 'side'
   showOutline: boolean
   defaultFolder: string
   dailyNotesFolder: string
@@ -184,6 +200,10 @@ export type AppSettings = {
   experimentalNoteBackup: boolean
   /** Experimental: ongoing batched diagnostics to fasrv. Off by default. */
   experimentalSendData: boolean
+  /** Opt-in: anonymous usage statistics, at most once a day. Off by default. */
+  diagnosticsUsage: boolean
+  /** Opt-in: scrubbed error logs with the daily report. Off by default. */
+  diagnosticsLogs: boolean
   /** Last opened note path. Restored on launch when the file still exists. */
   lastOpenNotePath: string
   /** Persisted start-dashboard cards. Empty means the default clock, date, note, and subject. */
@@ -344,7 +364,9 @@ export type SearchHit = {
   /** Document index: where the text came from. */
   source?: 'text' | 'text-layer' | 'ocr' | 'transcript'
   /** Document index: what part of the document matched. */
-  unit?: 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations'
+  unit?: 'note' | 'ink' | 'pdf-page' | 'worksheet' | 'annotations' | 'scene' | 'bible'
+  /** Document index: the story scene of a writing-mode hit. */
+  sceneId?: string
   /** Document index: estimated OCR confidence 0–1. */
   confidence?: number
   /** Document index: [start, end) ranges of matched words in `excerpt`. */
@@ -527,7 +549,8 @@ export type FaNotesApi = {
   selectVault: () => Promise<BootstrapData | null>
   getCachedTree: () => Promise<VaultEntry[] | null>
   getFastTree: () => Promise<VaultEntry[]>
-  getTree: () => Promise<VaultEntry[]>
+  /** `fromWatcher`: reuse the vault walk the file watcher just did (desktop). */
+  getTree: (options?: { fromWatcher?: boolean }) => Promise<VaultEntry[]>
   readFile: (relativePath: string) => Promise<string>
   readAssetDataUrl: (relativePath: string) => Promise<string>
   readAssetBytes: (relativePath: string) => Promise<Uint8Array>
@@ -614,6 +637,15 @@ export type FaNotesApi = {
   convertFamdNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   setFolderColor: (relativePath: string, color: string | null) => Promise<{ color: string | null }>
+  /** Writing mode: a JSON or Markdown file inside a `Name.story/` folder (null when missing). */
+  storyRead?: (relativePath: string) => Promise<string | null>
+  storyWrite?: (relativePath: string, content: string) => Promise<void>
+  /** Files inside a `.story` folder, relative to it. */
+  storyList?: (storyPath: string) => Promise<string[]>
+  /** Creates an empty `Name.story` folder (a free name) and returns its path. */
+  storyCreate?: (parentFolder: string, name: string) => Promise<string>
+  /** Colours a note or PDF in the tree. Stored in `.fanotes/file-colors.json`. Hosts without it omit the option. */
+  setFileColor?: (relativePath: string, color: string | null) => Promise<{ color: string | null }>
   getFolderLocations: (relativePath: string) => Promise<{ paths: string[] }>
   pickFolderLocation: () => Promise<string | null>
   setFolderLocations: (relativePath: string, paths: string[], moveContents?: boolean) => Promise<{ paths: string[]; moved: number; conflicts: string[] }>
@@ -633,6 +665,7 @@ export type FaNotesApi = {
   readNoteBackups?: (relativePath: string) => Promise<NoteBackupSnapshot[]>
   writeNoteBackups?: (relativePath: string, backups: NoteBackupSnapshot[]) => Promise<NoteBackupSnapshot[]>
   writeNoteTextFields?: (relativePath: string, fields: NoteTextField[]) => Promise<NoteTextField[]>
+  writeNoteAnnotations?: (relativePath: string, list: NoteAnnotation[]) => Promise<NoteAnnotation[]>
   /** Ink, page stats, links, paper style, backups, and text fields from one companion parse. */
   readNoteCompanion?: (relativePath: string) => Promise<{
     ink: DrawingLibraryDocument | null
@@ -641,6 +674,7 @@ export type FaNotesApi = {
     noteLinks: NoteLinkRecord[]
     noteBackups: NoteBackupSnapshot[]
     textFields?: NoteTextField[]
+    annotations?: NoteAnnotation[]
   } | null>
   readSubjectBooks?: () => Promise<SubjectBookRecord[]>
   writeSubjectBooks?: (books: SubjectBookRecord[]) => Promise<SubjectBookRecord[]>
@@ -653,6 +687,8 @@ export type FaNotesApi = {
   importPdfNote: (parentPath?: string) => Promise<CreateResult | null>
   importOneNote: () => Promise<OneNoteImportResult | null>
   readWorksheet: (id: string) => Promise<WorksheetDocument>
+  /** The verified, policy-guarded OneNote page of a worksheet, for a sandboxed srcdoc frame. */
+  readWorksheetHtml: (id: string) => Promise<string>
   saveWorksheet: (document: WorksheetDocument) => Promise<WorksheetDocument>
   deleteWorksheet: (id: string) => Promise<{ id: string }>
   listNoteHistory?: (relativePath: string) => Promise<NoteHistorySnapshot[]>
@@ -697,6 +733,11 @@ export type FaNotesApi = {
     expiresAt?: number
     rotated?: boolean
   } | null>
+  /** Local MCP server (Electron only): connection info for Settings → KI-Zugriff (MCP). */
+  mcpLocal?: {
+    (request: { action: 'info' | 'regenerate' }): Promise<LocalMcpInfo>
+    (request: { action: 'reveal' }): Promise<{ token: string }>
+  }
   loadSecureSettings?: () => Promise<Partial<AppSettings>>
   saveSettings: (settings: AppSettings, options?: { clearProtectedSecrets?: boolean }) => Promise<AppSettings>
   getServerBackupState?: () => Promise<ServerBackupState>
@@ -724,6 +765,8 @@ export type FaNotesApi = {
   addons?: AddonsHostApi
   sync?: SyncHostApi
   /** An editable share opened from fanotes://share/<id>. Missing until the desktop build that registers the protocol. */
+  /** Files added, changed or removed outside FaNotes. Desktop only. */
+  onVaultChanged?: (callback: (change: { added: string[]; removed: string[]; changed: string[]; truncated?: boolean }) => void) => () => void
   onShareOpen?: (callback: (id: string) => void) => () => void
   platform: string
 }

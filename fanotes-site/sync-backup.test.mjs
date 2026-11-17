@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { revisionNamesToKeep } from './sync-api.mjs'
+import { placeDurable, revisionNamesToKeep } from './sync-api.mjs'
 import { restoreBackup, runBackup } from './scripts/sync-backup.mjs'
 
 test('revision retention keeps the newest names and a larger older blob', () => {
@@ -14,6 +14,32 @@ test('revision retention keeps the newest names and a larger older blob', () => 
   assert.equal(keep.has('1'), true)
   assert.equal(keep.has('2'), false)
   assert.equal(keep.size, 9)
+})
+
+test('revision retention keeps the archived copy when a short sibling sorts later', () => {
+  const files = [
+    { name: '1', revision: 1, size: 5000 },
+    { name: 'c-1', revision: 1, size: 64 },
+    ...Array.from({ length: 7 }, (_, index) => ({ name: String(index + 2), revision: index + 2, size: 100 })),
+  ]
+  const keep = revisionNamesToKeep(files, 8, 6000)
+  assert.equal(keep.has('1'), true)
+  assert.equal(keep.has('c-1'), true)
+  assert.equal(keep.has('2'), true)
+  assert.equal(keep.has('8'), true)
+  assert.equal(keep.size, 9)
+})
+
+test('revision retention does not let a short sibling push out an older archive', () => {
+  const files = [
+    ...Array.from({ length: 9 }, (_, index) => ({ name: String(index + 1), revision: index + 1, size: 100 })),
+    { name: 'c-9', revision: 9, size: 64 },
+  ]
+  const keep = revisionNamesToKeep(files, 8, 1000)
+  assert.equal(keep.has('1'), false)
+  assert.equal(keep.has('2'), true)
+  assert.equal(keep.has('9'), true)
+  assert.equal(keep.has('c-9'), true)
 })
 
 test('a backup copies ciphertext, rotates old copies, and restore can dry-run', async () => {
@@ -68,6 +94,52 @@ test('an unreadable blob fails the backup without naming the file', async () => 
     )
   } finally {
     await chmod(hidden, 0o600).catch(() => {})
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('placing a note keeps the original file until the live name is durable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fanotes-place-'))
+  const sourceDir = join(root, 'incoming')
+  const destDir = join(root, 'blobs')
+  const source = join(sourceDir, 'upload.part')
+  const dest = join(destDir, 'note')
+  const bytes = Buffer.from('ciphertext-body-0123456789')
+  try {
+    await mkdir(sourceDir)
+    await mkdir(destDir)
+    await writeFile(dest, Buffer.from('previous-note'))
+    await writeFile(source, bytes)
+    const sourceIno = (await stat(source)).ino
+    await placeDurable(source, dest)
+    const staged = await stat(source)
+    const published = await stat(dest)
+    assert.equal(staged.ino, sourceIno)
+    assert.equal(published.ino, sourceIno)
+    assert.ok(published.nlink >= 2)
+    assert.deepEqual(await readFile(source), bytes)
+    assert.deepEqual(await readFile(dest), bytes)
+    assert.equal((await readdir(destDir)).some((name) => name.includes('.tmp')), false)
+    await rm(source)
+    assert.equal(await stat(source).then(() => true, () => false), false)
+    assert.deepEqual(await readFile(dest), bytes)
+    assert.equal((await stat(dest)).nlink, 1)
+    assert.equal((await stat(dest)).ino, sourceIno)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('placing a note leaves the original when the live directory is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'fanotes-place-'))
+  const source = join(root, 'upload.part')
+  const bytes = Buffer.from('ciphertext-body-0123456789')
+  try {
+    await writeFile(source, bytes)
+    await assert.rejects(placeDurable(source, join(root, 'missing', 'note')))
+    assert.deepEqual(await readFile(source), bytes)
+    assert.equal((await readdir(root)).includes('missing'), false)
+  } finally {
     await rm(root, { recursive: true, force: true })
   }
 })

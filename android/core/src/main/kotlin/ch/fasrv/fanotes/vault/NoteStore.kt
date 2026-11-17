@@ -60,11 +60,34 @@ interface VaultIo {
     fun list(directory: String): List<VaultEntry>
     fun walkFiles(): List<VaultEntry>
     fun mkdir(path: String)
+
+    /**
+     * The children of a directory entry that [list] returned. A provider that addresses documents by
+     * id (SAF) uses the entry's [VaultEntry.handle] and skips the path lookup; the default reads the path.
+     */
+    fun list(directory: VaultEntry): List<VaultEntry> = list(directory.path)
+
+    /**
+     * The first [maxBytes] of a file, or null when it is not there. For callers that must not hold a
+     * whole file in memory (the statistics page). The default reads everything; both vaults override it.
+     */
+    fun readHead(path: String, maxBytes: Int): VaultHead? = read(path)?.let { all ->
+        if (all.size <= maxBytes) VaultHead(all, complete = true) else VaultHead(all.copyOf(maxBytes), complete = false)
+    }
+
+    /** [readHead] for an entry that [list] returned: opens it by [VaultEntry.handle] when there is one. */
+    fun readHead(entry: VaultEntry, maxBytes: Int): VaultHead? = readHead(entry.path, maxBytes)
 }
 
-data class VaultEntry(val path: String, val directory: Boolean, val size: Long, val mtimeMs: Long)
+/**
+ * One file or directory of a listing. [handle] is the provider's own id (a SAF document id) so a
+ * later read or listing of this entry does not have to look the path up again; it is null for a plain
+ * directory and only valid for the listing that produced it.
+ */
+data class VaultEntry(val path: String, val directory: Boolean, val size: Long, val mtimeMs: Long, val handle: String? = null)
 
-enum class NoteKind { MARKDOWN, PDF, FOLDER }
+/** STORY: a writing-mode project folder (`Name.story/`), shown and opened as one document. */
+enum class NoteKind { MARKDOWN, PDF, FOLDER, STORY }
 
 data class VaultNode(
     val name: String,
@@ -117,7 +140,7 @@ fun censusNotes(nodes: List<VaultNode>, skip: Set<String> = emptySet()): NoteCen
                     folders += 1
                     walk(node.children, node.path)
                 }
-                NoteKind.MARKDOWN, NoteKind.PDF -> if (node.path !in skip) {
+                NoteKind.MARKDOWN, NoteKind.PDF, NoteKind.STORY -> if (node.path !in skip) {
                     notes += 1
                     here += 1
                 }
@@ -628,7 +651,9 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             .filter { !it.path.substringAfterLast('/').startsWith(".") }
             .mapNotNull { entry ->
                 val name = entry.path.substringAfterLast('/')
-                if (entry.directory) {
+                if (entry.directory && StoryFiles.isStoryFolder(entry.path)) {
+                    VaultNode(name.removeSuffix(".story").removeSuffix(".STORY"), entry.path, NoteKind.STORY, entry.mtimeMs)
+                } else if (entry.directory) {
                     VaultNode(name, entry.path, NoteKind.FOLDER, entry.mtimeMs, buildTree(entry.path))
                 } else {
                     val extension = extensionOf(name)
@@ -766,6 +791,12 @@ class DirectoryVault(val root: Path) : VaultIo {
         val target = resolve(path)
         if (!Files.isRegularFile(target)) return null
         return Files.readAllBytes(target)
+    }
+
+    override fun readHead(path: String, maxBytes: Int): VaultHead? {
+        val target = resolve(path)
+        if (!Files.isRegularFile(target)) return null
+        return Files.newInputStream(target).use { readHeadFrom(it, maxBytes, Files.size(target)) }
     }
 
     override fun write(path: String, bytes: ByteArray) {

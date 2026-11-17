@@ -1,5 +1,272 @@
 # Änderungsverlauf
 
+## 2026.11.3-beta.3
+
+- Keep a snapshot lesson that has no week.
+- Leave start-page lines as text in a snapshot.
+- Keep a snapshot row that is not a record.
+- Read an ICS time with a numeric offset as that zone's clock.
+- Keep a catalog entry that is not a class or room.
+- Android: Fehler & Wünsche panel (work requests)
+- Do not let an upload take a file slot it cannot fill.
+- Reconcile open tabs on failed save and first keystroke; add Electron check
+- Android copy fixes from review R18
+- Wire Android stats cache and diagnostics tick into the app
+- Keep a class week that is not a week.
+- Harden local MCP token exposure and OneNote page serving (R19 leftovers)
+- Fix vault-watch dots/toasts and statistics medium findings
+- Test: find the quoted diagnostics location in the X-Real-IP check too.
+- Fix MCP client compatibility (R5)
+- Keep a commute timetable entry that is not a stored trip.
+- Keep the exam material that Schulnetz stores in the mark field.
+- Keep a reveal ledger id that is not a token.
+- Test: find the quoted diagnostics location.
+- nginx: quote the diagnostics location regex.
+- Keep an agenda week that is not a week.
+- Align the work-requests client with the merged server API.
+- Align the request worker with the merged work-requests server API.
+- Keep a grade ledger key that is not text.
+- Add the Fehler & Wünsche work-requests panel (Ctrl+Shift+B).
+- Add work-request worker that runs Claude Code headless per request.
+- Add security headers to the work requests nginx locations
+- Add work requests server API (owner SSE, worker claim, status machine)
+- Harden diagnostics client address, study render and CSP delivery (R19, part 1)
+- Writing mode: reachable soft-wrap line ends, kept Shift+Enter indentation
+- Fix English catalog: duplicate keys, wrong values, missing Android strings
+- Harden the heavy-page ink double buffer (review R4)
+- Android: detect assignments on Android 12-14 and from synced text, keep the timer running, Aufträge as a bottom sheet
+- perf(android): Statistik loader limits, saved facts cache, cheap diagnostics check (core)
+- Fix eraser crossings and mid-segment cuts (desktop and Android)
+- Fix dark-mode contrast: study legend inputs, error red, heatmap and chart colours; aria fixes
+- Reserve only the bytes an open resumable replace still adds.
+- Reconcile open tabs with outside renames, deletes and edits
+- Fix study block UX: editor lock-out, overlapping key labels, caps (R9)
+- Keep sync going through a throttle pause, show the pause, and stop waiting notes from holding the sync back.
+- Give each Kurs course its own grade id.
+- Keep commute settings that are not the known shape.
+- Keep a push token that is not a token.
+- Keep a commute alert that is not an alert record.
+- Keep a browser session whose connections are not connections.
+- Reserve only the bytes a resumable replace still adds.
+- Keep a commute route the sanitizer would skip.
+- Keep an explicit zero grade weight when an app upload says one.
+- Keep a push ledger whose keys are not short strings.
+- Keep a mensa cache whose days are not days.
+- Keep a school link that is not the known shape.
+- Keep a pairing code of another version.
+- Keep every exam when Schulnetz reuses a scheduler id in another week
+- Read the release share in a child so a hung listing can be killed.
+- Keep a browser session whose version is not a number.
+- Reserve only the archive bytes a replace still keeps.
+- Keep a snapshot whose week maps are not objects.
+- Count an archived note once when a replace is retried.
+- Keep a timetable index that is not the class catalog.
+- Keep a snapshot whose saved lists are not arrays.
+- Docs: palm release, place on release, eraser sweep
+- Android eraser: sweep between frames and skip strokes that cannot be reached
+- Android study tools: place on release, survive recreation, cheaper painter
+- Android: release the pen palm lock on every pen up or cancel
+
+## 2026.11.3-beta.2
+
+- Keep a snapshot whose grades or events are not lists.
+- Keep a grade monitor that is not the known shape.
+- Keep a revision whose log line could not be taken back.
+- Read a grade whose mark is padded with a non-breaking space.
+- Keep a commute state file that is not the known shape.
+- Keep a commute file that is not the route list.
+- Keep a notice that runs past midnight until it has ended.
+- Keep a timetable room file that is not the known shape.
+- Wait until systemd has accepted the watchdog ping.
+- Publish a synced revision when closing the log fails.
+- Keep a timetable class file that is not the known shape.
+- Keep a published file table when a second load finishes.
+- Keep a grade that is weighted zero at weight zero.
+- Keep a commute budget file that is not the known shape.
+- Keep the next revision off a torn change-log line.
+- Take back a log line when its directory sync fails.
+- Publish a revision only after its log line is durable.
+- Keep a timetable pointer that is not the known shape.
+- Keep two same-day exams with the same mark as separate grades.
+- Keep a resumable upload bound to the revision it was opened against.
+- Keep a reveal ledger that is not the known shape.
+- Show a UTC calendar time in Europe/Zurich.
+- perf: cut vault watcher rescan cost (Android SAF, desktop)
+- Harden Android diagnostics scrubbing and sending
+- Docs: Android has camera, PDF crop and compare view since #1220.
+- Fix stale check scripts after settings/famd refactors
+- test(sync): settle the initial register/login cycle in SyncEngineTest
+- Add missing English translations for strings merged tonight
+- Writing mode: fix three regressions from the render split (#1221).
+- docs: study annotations, block safety rules, Statistik and diagnostics
+- Android study images: desktop size caps and per-note budget
+- Pin the stable annotation id test vectors as literals
+- Make study tool storage safe against malformed and concurrently changed notes
+- Android study tools: data-integrity fixes
+- perf(writing): re-render only what changed per keystroke
+- Android study annotations: camera reference, PDF crop, compare view
+- Study annotations: stable ids, image size budget, undo reset on reload
+- Android: fix main compile (rename study block painter)
+- test: redraw the stored MCP port when the OS reserves it (Windows EACCES)
+- ci: run local MCP and vault watch checks on Windows
+- Live merge review fixes: gate swap resend, emit when absorb turns clean
+- Android writing mode: merge another device's edits into the open story
+- Fix three checks that tonight's merges left stale or flaky.
+- Kanti+ web e2e: Zurich days in the seed, demo links across a minute, tour wait
+- Android: study tools (Aufträge panel, study blocks, flashcards)
+- Android: show and edit desktop study annotations (Lernen tools)
+- Add the study tool commands to the Android command table
+- Android: Statistik settings page and opt-in diagnostics UI
+- Android: vault statistics and opt-in diagnostics (core)
+- Keep a browser session that is not the known shape.
+- Cache the unhashed Schulnetz icons for a day.
+- Publish a note under its live name before the only copy is removed.
+- Keep a commute timetable file that is not the known shape.
+- Store picture-sheet images as vault files and extend the checks
+- Keep the PDF toolbar tidy beside the task panel on narrow windows
+- Skip empty groups in the sorting board list output
+- Add Settings Statistik page
+- Add opt-in diagnostics sharing (usage statistics and error reports)
+- Drop the repeated text/html entry from the Schulnetz charset list.
+- Keep study annotations on Android saves; readable selection label
+- Harden local MCP server after security review
+- Add study tools: assignments panel, highlights overview and note blocks
+- Android: keep and render desktop text box colour and bold
+- Keep the PDF toolbar zoom value on one line
+- Rebuild the PDF text box tool: selection, toolbar, auto-grow, clean-up
+- Leave a kept revision's short archive sibling in place.
+- Keep the archived copy a restore would publish when old revisions are pruned.
+- Keep a mensa cache that is not the known shape.
+- Add study tools: callout labels, stamps, reference images, measuring
+- Name UTF-8 on Schulnetz stylesheets.
+- Live merge: close the review's data-loss paths.
+- Double-buffer the heavy-page ink repaint
+- Writing mode: merge another device's edits into an open story.
+- Add local MCP server for desktop AI clients
+- Pick up files that appear, change or vanish outside FaNotes
+- Keep the live stroke visible until the committed layer shows it
+- Make the eraser strictly local (desktop and Android)
+- Match a delete leftover to the larger archived copy.
+- List the archived copy a restore of that revision would publish.
+- Replace the change log by rename when it is compacted.
+- Writing mode: a typed space shows at once, faster typing, pinch zoom.
+- Keep a push ledger that is not the known shape.
+- Name UTF-8 on Schulnetz HTML responses.
+- Restore the largest archived copy when a revision has two names.
+- Publish the e-mail index only after the account id is stored.
+- Keep an agenda baseline that is not the known shape.
+- Unescape commas, semicolons and backslashes in a calendar event.
+- Archive a replaced note through a temporary name before the revision is published.
+- Map the Schulnetz sitemap type so the charset is actually sent.
+- Keep a grade ledger that is not the known shape.
+- Keep a deleted note's metadata so a restore still works after compaction.
+- Send the Schulnetz sitemap and robots file as UTF-8.
+- Pause a throttled sync instead of failing it.
+- Link a recreated blobs directory before a note is written into it.
+- Keep a browser session when the account file cannot be read.
+- Check the account key again before a login issues a session.
+- Keep the opener policy on API locations that replace the server headers.
+- Do not wait again while a silent release share is still being read.
+- Record new metadata when a resumed upload already has its bytes.
+- Reload an account before a session touch writes it back.
+- Remove a failed temporary file before it can sit beside a note.
+- Link the incoming directory and make spool names durable.
+- Leave a live blob in place when the upload already matches it.
+- Keep the sensor policy on API locations that replace the server headers.
+- Copy a missing live blob back from the matching archive.
+- Keep the poller lock and the change log when they cannot be read.
+- Keep a timetable page when its file cannot be read.
+- Answer health even when the release share does not.
+- Sync a quarantine directory when a rejected upload is kept.
+- Save a new sync account before reserving its e-mail address.
+- Sync the partials directory whenever a resumable upload is removed.
+
+## 2026.11.3-beta.1
+
+- Offer "Neue Geschichte" and "Geschichte importieren" in the Android command palette.
+- Never write the server's version over a note this device cannot read.
+- Record milestones 6 and 7 of the writing mode.
+- Ship the writing mode inside the Android APK.
+- Sync the archive directory after dropping old revisions.
+- Run the writing mode's checks on pull requests.
+- Jump from a search hit to the paragraph, and keep sync away from a story open on Android.
+- Keep an account when its guest file cannot be read.
+- Link the archive directory before copying the previous note.
+- Keep a published timetable when its file cannot be read.
+- Keep the push ledger when it cannot be read.
+- Keep a saved commute route when its file cannot be read.
+- Remove a delete leftover that still matches its archive.
+- Open stories on Android tablets, and export and import stories everywhere.
+- Re-paginate after a footnote edit, and refuse built-in names and broken emoji in stories.
+- Deny framing on API locations that replace the server headers.
+- Merge stories paragraph by paragraph in sync and index scenes for search.
+- Sync the blobs directory before recording a recovered live file.
+- Keep a Schulnetz account file when it cannot be read.
+- Export stories as PDF, Word, EPUB, Markdown and text, and import Word, Markdown and text files.
+- Keep the mensa cache when its file cannot be read.
+- Add the story tools to the writing mode: corkboard, outline, bible, timeline, goals, versions.
+- Keep an unlogged resurrection until its own upload arrives.
+- Stop a hung FCM call and refuse redirects.
+- Keep a browser session when its file cannot be read.
+- Keep commute files when they cannot be read.
+- Record a full divergent live blob before download or delete.
+- Stop reading a Schulnetz page once it is too large.
+- Refuse a timetable PDF with too many pages before reading it.
+- Join folded iCal lines before reading a Schulnetz calendar event.
+- Give a large sync upload the same 300 seconds nginx allows.
+- Record a newer live blob before another upload replaces it.
+- Send the Schulnetz size error before closing a real upload.
+- Close a Schulnetz request once it is larger than the limit.
+- Add the story tools' data: binder moves and trash, bible, progress, snapshots.
+- Show spelling, grammar and style findings in the writing mode and autocorrect while typing.
+- Close an upload once it is larger than the limit.
+- Do not download a live blob whose size differs from its revision.
+- Mark a sync backup late when it is older than 26 hours.
+- Keep a cancelled calendar lesson instead of showing it as normal.
+- Cancel an upstream error page that is not parsed.
+- Add German and English writing assistance: autocorrect, rules, style, thesaurus.
+- Refuse to delete a live blob that does not match the table revision.
+- Remove a temporary account file when its replace fails.
+- Record a finished upload when its body is already the live blob.
+- Paginate incrementally and keep typing fast in a 600-page novel.
+- Keep a published timetable when a later step fails.
+- Flush the email index before saving a new sync account.
+- Stop reading an oversized FCM response.
+- Flush the account directory after appending a change-log line.
+- Stop reading an oversized Mensa or timetable body.
+- Open stories in a page editor: views, styles, find, notes, autosave.
+- Roll back the grade ledger when the change log cannot be stored.
+- Keep an archived revision when a retried save finds the live blob already replaced.
+- Flush the blob directory before recording a new note revision.
+- Keep every notification line when change-log updates overlap.
+- Flush the note index before truncating the change log.
+- Add the writing mode's editing commands, undo history and saving.
+- Serialize commute saves so a slower write cannot restore older pins.
+- Add the writing mode's document model, layout engine and bundled fonts.
+- Ignore symlinks when measuring the revision archive.
+- Design the writing mode: pages, story tools, autocorrect, sync and export.
+- Let crawlers cache the Schulnetz sitemap and robots file.
+- Share one Mensa cache load so a newer menu is not replaced.
+- Report the newest sync backup age on health.
+- Serve a sync download from the inode that matches its revision.
+- Log timetable reads as JSON without class codes or room names.
+- Count concurrent commute queries once each against the daily budget.
+- Flush an archived note to disk before the live blob is replaced.
+- Save concurrent commute timetables without dropping one.
+- Keep the tree's ⋯ menu on screen and let notes and PDFs have a colour.
+- Stop the hidden-grade check from matching the server clock.
+- Count reserved uploads against the quota and stream the blob when restoring a revision.
+- Count reserved partial uploads against the account quota on a direct put.
+- Generate the sync OpenAPI document from the router.
+- Log each sync request as JSON with a request id and no note or token.
+- Report ciphertext hashes and accept a resumable upload only when its checksum matches.
+- Stream sync uploads to disk so concurrent large notes stay out of the heap.
+- Refuse an empty or truncated upload that would resurrect a deleted note.
+- Do not follow a Mensa redirect off the menu host.
+- Retry a failed FCM sign-in without logging the token.
+- Log a timetable upload as JSON with counts only.
+- Keep the last commute timetable on disk for a restart.
+
 ## 2026.11.2
 
 - **Sync-Konflikte.** Neue Seite unter Einstellungen → Konflikte: beide Fassungen nebeneinander mit Vorschau (Text mit markierten Unterschieden, Handschrift, PDF, Bild). Eine Fassung behalten oder beide; die Wahl gilt auf allen Geräten.

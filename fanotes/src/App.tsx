@@ -6,13 +6,16 @@ import {
   ArrowRight,
   Bot,
   Bug,
+  Lightbulb,
   BookOpen,
   CalendarDays,
   CheckCircle2,
+  GraduationCap,
   CircleAlert,
   Clock,
   Cloud,
   CloudOff,
+  BookMarked,
   ClipboardList,
   Columns2,
   Command,
@@ -61,21 +64,26 @@ import {
   Type,
   X,
 } from 'lucide-react'
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
+import { notifyStoryWritten, storySyncBusy } from './writing/liveSync'
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
 import { ConfirmDialog } from './components/ConfirmDialog'
+import { ExternalChangeBanner } from './components/ExternalChangeBanner'
 import { FolderPathDialog } from './components/FolderPathDialog'
 import { FileTree } from './components/FileTree'
 import { EditorExportControls } from './components/EditorExportControls'
 import { FormattingToolbar } from './components/FormattingToolbar'
 import { NoteLinkLayer } from './components/NoteLinkLayer'
-import { NoteTextFieldLayer } from './components/NoteTextFieldLayer'
+import { NoteTextFieldLayer, NoteTextFieldToolbar } from './components/NoteTextFieldLayer'
+import { StudyAnnotationLayer } from './components/StudyAnnotationLayer'
 import type { GlyphenWerkView } from './components/GlyphenWerkWorkspace'
 import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/MarkdownEditor'
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { hasConnectedAiProvider } from './lib/aiProviderConnection'
 import { clipboardImageFile } from './lib/clipboardImage'
+import { STUDY_EVENT, studyModalOpen } from './lib/study/imageTools'
+import { STUDY_KINDS, STUDY_KIND_LABELS, type StudyKind } from './lib/study/blocks'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, inkHasMarks, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { inkJsonForRewrite } from './lib/packedInk'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
@@ -85,6 +93,9 @@ import { parseAddonSource } from './lib/addons/registry'
 import { addonRuntime } from './lib/addons/runtime'
 import { startMcpBridge } from './lib/mcp/bridge'
 import { syncEngine } from './lib/sync/engine'
+import { externalArrivals, loadArrivals, saveArrivals } from './lib/newArrivals.mjs'
+import { useExternalTabChanges, useTabHolds } from './lib/useExternalTabChanges'
+import { WorkRequestsClient } from './lib/workRequests'
 import { syncStatusLabel } from './lib/sync/status'
 import type { SettingsSection } from './components/SettingsModal'
 import { ProfileOverviewPublisher } from './components/ProfileOverviewPublisher'
@@ -212,6 +223,7 @@ import {
   type NoteOverlaySession,
 } from './lib/overlayInteract'
 import { installChromeTextSelect } from './lib/chromeTextSelect'
+import { readDocInputMode, writeDocInputMode } from './lib/docInputMode'
 import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
@@ -225,6 +237,7 @@ import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSqua
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { flushPaperViewMemory } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
+import { configureDiagnostics, markStartupReady, recordFeature, sendDailyIfDue, setDiagnosticsVault } from './lib/diagnosticsClient'
 import {
   collectSendDataNutzerdaten,
   linuxHyprlandRuntimeContext,
@@ -264,6 +277,7 @@ import { templatesToSeed, templatePath, NOTE_TEMPLATES, type NoteProfileId } fro
 import { backlinksFor } from './lib/backlinks'
 import { highlightPdfImportantMarks } from './lib/pdfImportantMarks'
 import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
+import { createPdfMarkEraseHost, unmarkPdfNote } from './lib/pdfMarkEraseHost'
 import { getHandwritingSamples, getMathLayoutExamples, getImportedLabels, putHandwritingSamples, putMathLayoutExamples, putHandwritingLabels } from './lib/handwritingDb'
 import { SafeBoundary } from './components/SafeBoundary'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
@@ -274,11 +288,15 @@ import { snowLayerActive } from './lib/snowTheme'
 import { SnowLayer } from './components/SnowLayer'
 import type { AppSettings, BootstrapData, CreateResult, DrawingLibraryDocument, NoteHistorySnapshot, NoteTab, OneNoteImportResult, PaperStyle, SearchHit, UpdateState, VaultEntry, WorksheetDocument } from './types'
 
-const DrawingBoard = lazy(() => import('./components/DrawingBoard').then((module) => ({ default: module.DrawingBoard })))
+const loadDrawingBoardModule = () => import('./components/DrawingBoard')
+const DrawingBoard = lazy(() => loadDrawingBoardModule().then((module) => ({ default: module.DrawingBoard })))
 const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').then((module) => ({ default: module.FirstRunOnboarding })))
 const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspace').then((module) => ({ default: module.GlyphenWerkWorkspace })))
+const WritingMode = lazy(() => import('./writing/ui/WritingMode').then((module) => ({ default: module.WritingMode })))
+const StoryImportDialog = lazy(() => import('./writing/import/ImportDialog').then((module) => ({ default: module.ImportDialog })))
 const CommandPalette = lazy(() => import('./components/CommandPalette').then((module) => ({ default: module.CommandPalette })))
 const StudyOverview = lazy(() => import('./components/StudyOverview').then((module) => ({ default: module.StudyOverview })))
+const StudyPanel = lazy(() => import('./components/study/StudyPanel').then((module) => ({ default: module.StudyPanel })))
 const FlashcardReview = lazy(() => import('./components/FlashcardReview').then((module) => ({ default: module.FlashcardReview })))
 const AiPanel = lazy(() => import('./components/AiPanel').then((module) => ({ default: module.AiPanel })))
 type MarkdownEditorComponent = typeof import('./components/MarkdownEditor')['MarkdownEditor']
@@ -304,16 +322,27 @@ const AddonPanelDock = lazy(() => import('./components/addons/AddonPanelDock').t
 const AddonPromptDialog = lazy(() => import('./components/addons/AddonPromptDialog').then((module) => ({ default: module.AddonPromptDialog })))
 const SearchPanel = lazy(() => import('./components/SearchPanel').then((module) => ({ default: module.SearchPanel })))
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })))
+const WorkRequestsPanel = lazy(() => import('./components/WorkRequestsPanel').then((module) => ({ default: module.WorkRequestsPanel })))
 const BugReportModal = lazy(() => import('./components/BugReportModal').then((module) => ({ default: module.BugReportModal })))
 const SubjectBookPane = lazy(() => import('./components/SubjectBookPane').then((module) => ({ default: module.SubjectBookPane })))
 const VaultOverview = lazy(() => import('./components/VaultOverview').then((module) => ({ default: module.VaultOverview })))
 const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
 const CalendarView = lazy(() => import('./components/CalendarView').then((module) => ({ default: module.CalendarView })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
-const PdfNoteView = lazy(() => import('./components/PdfNoteView').then((module) => ({ default: module.PdfNoteView })))
+const loadPdfNoteViewModule = () => import('./components/PdfNoteView')
+const PdfNoteView = lazy(() => loadPdfNoteViewModule().then((module) => ({ default: module.PdfNoteView })))
 const StableWorksheetLayer = memo(WorksheetLayer)
 const STARTUP_TREE_REFRESH_DELAY_MS = 18_000
 const STARTUP_DOCUMENT_LAYER_DELAY_MS = 160
+/**
+ * Opening a document keeps the previous one on screen while the next one's
+ * PDF and handwriting load, at most this long. Then the switch is one commit:
+ * no loading box, no text that gets its ink a moment later.
+ */
+const DOCUMENT_OPEN_PREPARE_MS = 450
+/** Handwriting read for an open that never committed is not used after this. */
+const PREPARED_INK_TTL_MS = 3_000
+type PreparedNoteInk = { path: string; content: string; at: number; document: DrawingLibraryDocument | null }
 /** How long a renamed/moved path still redirects late editor flushes to the new name. */
 const MOVED_PATH_ALIAS_MS = 30_000
 /** Statistics of the open note reach the disk at least this often (in one-second ticks). */
@@ -334,6 +363,8 @@ type NoteTabButtonProps = {
   inSplit: boolean
   dirty: boolean
   pinned: boolean
+  /** Paused because the file was deleted or edited outside FaNotes. */
+  hold?: 'deleted' | 'conflict'
   path: string
   title: string
   index: number
@@ -351,7 +382,7 @@ type NoteTabButtonProps = {
 const NOTE_TAB_DRAG_TYPE = 'application/x-fanotes-tab'
 
 const NoteTabButton = memo(function NoteTabButton({
-  active, inSplit, dirty, pinned, path, title, index, dropSide,
+  active, inSplit, dirty, pinned, hold, path, title, index, dropSide,
   onOpen, onSplit, onClose, onContextMenu, onDragStart, onDragOver, onDrop, onDragEnd,
 }: NoteTabButtonProps) {
   const tabRef = useRef<HTMLDivElement>(null)
@@ -369,7 +400,7 @@ const NoteTabButton = memo(function NoteTabButton({
   return (
     <div
       ref={tabRef}
-      className={`note-tab ${active ? 'active' : ''} ${inSplit ? 'in-split' : ''} ${pinned ? 'is-pinned' : ''} ${dropSide ? `drop-${dropSide}` : ''}`}
+      className={`note-tab ${active ? 'active' : ''} ${inSplit ? 'in-split' : ''} ${pinned ? 'is-pinned' : ''} ${hold ? `is-${hold}` : ''} ${dropSide ? `drop-${dropSide}` : ''}`}
       title={path}
       aria-keyshortcuts={shortcut ?? undefined}
       draggable
@@ -400,13 +431,14 @@ const NoteTabButton = memo(function NoteTabButton({
         className="note-tab-main"
         role="tab"
         aria-selected={active}
-        aria-label={`${title}${pinned ? ', angeheftet' : ''}${inSplit ? ', in der zweiten Spalte' : ''}${dirty ? ', nicht gespeicherte Änderungen' : ''}`}
+        aria-label={`${title}${pinned ? ', angeheftet' : ''}${inSplit ? ', in der zweiten Spalte' : ''}${dirty ? ', nicht gespeicherte Änderungen' : ''}${hold === 'deleted' ? ', Datei wurde ausserhalb von FaNotes gelöscht' : hold === 'conflict' ? ', Datei wurde ausserhalb von FaNotes geändert' : ''}`}
         onClick={(event) => { event.shiftKey ? void onSplit(path) : void onOpen(path) }}
         onAuxClick={(event) => { if (event.button === 1 && !pinned) void onClose(path) }}
       >
         {pinned ? <Pin aria-hidden="true" size={12} /> : isPdfNotePath(path) ? <File aria-hidden="true" size={13} /> : <Files aria-hidden="true" size={13} />}
         <span>{title}</span>
         {inSplit && <Columns2 aria-hidden="true" size={11} className="tab-split-mark" />}
+        {hold && <span className="tab-hold-mark" title={hold === 'deleted' ? 'Datei wurde ausserhalb von FaNotes gelöscht' : 'Datei wurde ausserhalb von FaNotes geändert'}><CircleAlert aria-hidden="true" size={12} /></span>}
         {dirty && <i className="dirty-dot" title="Noch nicht gespeichert" />}
       </button>
       {!pinned && <button className="tab-close" type="button" aria-label={`${title} schließen`} title="Tab schließen (Strg+W)" onClick={() => { void onClose(path) }}><X aria-hidden="true" size={12} /></button>}
@@ -495,6 +527,13 @@ const INITIAL_UPDATE_STATE: UpdateState = {
 }
 
 const stripExtension = (name: string) => name.replace(/\.(md|markdown|famd|pdf)$/i, '')
+function collectTreePaths(entries: VaultEntry[], files = false, out: string[] = []): string[] {
+  for (const entry of entries) {
+    if (!files || entry.kind !== 'folder') out.push(entry.relativePath)
+    if (entry.children) collectTreePaths(entry.children, files, out)
+  }
+  return out
+}
 const fileName = (path: string) => path.split('/').pop() ?? path
 const parentPath = (path: string) => path.split('/').slice(0, -1).join('/')
 const NOTE_INK_MARKER = /<!--\s*fanotes-ink:([a-zA-Z0-9_-]{1,96})\s*-->/u
@@ -777,6 +816,10 @@ export default function App({ startupBootstrap }: AppProps) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [lmStudioOpen, setLmStudioOpen] = useState(false)
   const [glyphenWerkOpen, setGlyphenWerkOpen] = useState(false)
+  /** The `.story` project open in the writing mode (full screen). */
+  const [writingPath, setWritingPath] = useState<string | null>(null)
+  const writingPathRef = useRef<string | null>(null)
+  writingPathRef.current = writingPath
   const [glyphenWerkView, setGlyphenWerkView] = useState<GlyphenWerkView>('capture')
   const [glyphenWerkSampleCount, setGlyphenWerkSampleCount] = useState<number | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -785,17 +828,29 @@ export default function App({ startupBootstrap }: AppProps) {
   const [inkReveal, setInkReveal] = useState<{ path: string; y: number; token: number } | null>(null)
   const [studyOpen, setStudyOpen] = useState(false)
   const [cardsOpen, setCardsOpen] = useState(false)
+  const [studyPanel, setStudyPanel] = useState<null | 'tasks' | 'marks'>(null)
   const [searchLoading, setSearchLoading] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
   const [fatalError, setFatalError] = useState<string | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [updateState, setUpdateState] = useState<UpdateState>(INITIAL_UPDATE_STATE)
   const [bugReportOpen, setBugReportOpen] = useState(false)
+  const [workRequestsOpen, setWorkRequestsOpen] = useState(false)
+  const [workRequestsAllowed, setWorkRequestsAllowed] = useState(false)
+  const workRequestsClient = useMemo(() => new WorkRequestsClient({ getSession: () => syncEngine.getSession() }), [])
   const [addonStoreOpen, setAddonStoreOpen] = useState(false)
   const [addonPrompt, setAddonPrompt] = useState<AddonPromptRequest | null>(null)
   const addonState = useSyncExternalStore(addonRuntime.subscribe, addonRuntime.getState, addonRuntime.getState)
   const syncState = useSyncExternalStore(syncEngine.subscribe, syncEngine.getState, syncEngine.getState)
+  const syncAccountId = syncState.account?.accountId ?? null
   const syncApi = window.fanotes?.sync ?? null
+  useEffect(() => {
+    let cancelled = false
+    setWorkRequestsAllowed(false)
+    if (syncAccountId) void workRequestsClient.capabilities().then((allowed) => { if (!cancelled) setWorkRequestsAllowed(allowed) })
+    return () => { cancelled = true }
+  }, [syncAccountId, workRequestsClient])
+  const openWorkRequestsOrBugReport = useCallback(() => { if (workRequestsAllowed) setWorkRequestsOpen(true); else setBugReportOpen(true) }, [workRequestsAllowed])
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined)
   const [shareLinkDialog, setShareLinkDialog] = useState<{ link: string; mode: 'copy' | 'live' | 'edit' } | null>(null)
   const shareLinkInputRef = useRef<HTMLInputElement>(null)
@@ -822,6 +877,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteTextFields, setNoteTextFields] = useState<NoteTextField[]>([])
   const [noteLinkPlacing, setNoteLinkPlacing] = useState(false)
   const [textFieldPlacing, setTextFieldPlacing] = useState(false)
+  const [selectedTextFieldId, setSelectedTextFieldId] = useState<string | null>(null)
+  const [studyToolsOpen, setStudyToolsOpen] = useState(false)
   const [textFieldFocusId, setTextFieldFocusId] = useState<string | null>(null)
   const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
   const [selectedNoteLinkId, setSelectedNoteLinkId] = useState<string | null>(null)
@@ -894,8 +951,27 @@ export default function App({ startupBootstrap }: AppProps) {
   const worksheetDirtyCallbacks = useRef(new Map<string, (dirty: boolean) => void>())
   const focusRestoreRef = useRef({ sidebar: true, inspector: true })
   const treeRef = useRef(tree)
+  const lastOwnTreeRefreshRef = useRef(0)
+  // path -> arrival time. Persisted per vault (localStorage) so the dots survive a restart.
+  const [newArrivals, setNewArrivals] = useState<Map<string, number>>(() => new Map())
+  const arrivalsVaultRef = useRef<string | null>(null)
+  /** Paths the sync engine wrote and when; those are never "new from outside". */
+  const syncWrittenRef = useRef(new Map<string, number>())
+  const syncEndedAtRef = useRef(0)
+  const newMarkedPaths = useMemo(() => {
+    const marked = new Set(newArrivals.keys())
+    for (const entryPath of newArrivals.keys()) {
+      let cut = entryPath.lastIndexOf('/')
+      while (cut > 0) { marked.add(entryPath.slice(0, cut)); cut = entryPath.lastIndexOf('/', cut - 1) }
+    }
+    return marked
+  }, [newArrivals])
   const saveTimers = useRef(new Map<string, number>())
   const pendingWrites = useRef(new Map<string, string>())
+  // Tabs whose file was deleted or edited outside FaNotes are paused: nothing is saved over either side until the user decides.
+  const { holds: tabHolds, holdsRef: tabHoldsRef, ownWritesRef: tabOwnWritesRef, setHold: setTabHold, noteOwnWrite, moveTabState, pruneTabState } = useTabHolds()
+  const parkHeldTabRef = useRef<(path: string) => Promise<boolean>>(async () => true)
+  const checkTabPathRef = useRef<(path: string) => Promise<void>>(async () => undefined)
   const settingsTimer = useRef<number | null>(null)
   const pageStatsRef = useRef(new Map<string, PageStatsSession>())
   /** A failed page-stats read. Saving must not invent a fresh session over the companion. */
@@ -910,12 +986,15 @@ export default function App({ startupBootstrap }: AppProps) {
   const settingsPersistedRevisionRef = useRef(0)
   const lastHomeworkSecretRef = useRef('')
   const drawingOpenRef = useRef(drawingOpen)
+  const modePathRef = useRef<string | null>(null)
   const drawingDirtyRef = useRef(false)
   const drawingSessionRef = useRef(drawingSession)
   const drawingSessionKeyRef = useRef(0)
   const drawingLoadRequestRef = useRef(0)
   const worksheetLoadRequestRef = useRef(0)
   const initialDrawingLoadRef = useRef(true)
+  const preparedInkRef = useRef<PreparedNoteInk | null>(null)
+  const openSequenceRef = useRef(0)
   const initialWorksheetLoadRef = useRef(true)
   const worksheetDirtyIdsRef = useRef(new Set<string>())
   const closeInProgressRef = useRef(false)
@@ -946,6 +1025,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [])
 
   useEffect(() => { tabsRef.current = tabs }, [tabs])
+  useEffect(() => { pruneTabState(new Set(tabs.map((tab) => tab.path))) }, [pruneTabState, tabs])
   useEffect(() => { drawingSessionRef.current = drawingSession }, [drawingSession])
   useEffect(() => { activePathRef.current = activePath }, [activePath])
   useEffect(() => { splitPathRef.current = splitPath }, [splitPath])
@@ -1093,6 +1173,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (bootstrap) void setUiLanguage(settings.uiLanguage)
   }, [bootstrap, settings.uiLanguage])
   useEffect(() => { drawingOpenRef.current = drawingOpen }, [drawingOpen])
+  useEffect(() => { if (modePathRef.current) writeDocInputMode(modePathRef.current, drawingOpen) }, [drawingOpen])
   useEffect(() => {
     if (!editorMenuOpen && !backupMenuOpen) return
     const close = () => {
@@ -1209,6 +1290,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const activeEntryMutating = useMemo(() => Boolean(activePath && mutatingEntryPaths.some(
     (path) => activePath === path || activePath.startsWith(`${path}/`),
   )), [activePath, mutatingEntryPaths])
+  /** The open note's file was deleted or edited outside FaNotes; it is read-only until the user decides. */
+  const activeHeld = Boolean(activePath && tabHolds[activePath])
   const counts = useMemo(() => countEntries(tree), [tree])
   const visibleTree = useMemo(() => filterTreeByTag(tree, tagFilter, new Map(Object.entries(tagIndex))), [tagFilter, tagIndex, tree])
   const knownTags = useMemo(() => collectVaultTags(Object.values(tagIndex).map((tags) => ({ content: tags.map((tag) => `#${tag}`).join(' ') }))), [tagIndex])
@@ -1222,7 +1305,9 @@ export default function App({ startupBootstrap }: AppProps) {
     relativePath: activeTab.path,
     markdown: visibleNoteContent(pendingWrites.current.get(activeTab.path) ?? activeTab.content),
   } : null, [activeTab, lmStudioOpen])
-  useEffect(() => {
+  // A layout effect: handwriting read before the switch (prepareDocumentOpen)
+  // mounts in the same commit as the note's text, not one paint later.
+  useLayoutEffect(() => {
     const requestId = ++drawingLoadRequestRef.current
     drawingDirtyRef.current = false
     const path = activeTab?.path
@@ -1230,18 +1315,38 @@ export default function App({ startupBootstrap }: AppProps) {
     const initialNoteLoad = Boolean(path && initialDrawingLoadRef.current)
     if (path) initialDrawingLoadRef.current = false
     if (!path) {
+      if (modePathRef.current) writeDocInputMode(modePathRef.current, drawingOpenRef.current)
+      modePathRef.current = null
       drawingOpenRef.current = false
       setDrawingOpen(false)
       setDrawingSession(EMPTY_DRAWING_SESSION)
       return
     }
+    // Each document returns to the input mode it was last left in; a document
+    // without a record keeps the mode carried over from the previous one.
+    const previousModePath = modePathRef.current
+    if (previousModePath && previousModePath !== path) writeDocInputMode(previousModePath, drawingOpenRef.current)
+    modePathRef.current = path
+    const rememberedPen = readDocInputMode(path)
     const switched = overlayAfterNoteSwitch({
       session: { key: 0, document: null },
-      drawingOpen: drawingOpenRef.current,
+      drawingOpen: rememberedPen ?? drawingOpenRef.current,
       host: null,
     }, requestId)
     drawingOpenRef.current = switched.drawingOpen
     setDrawingOpen(switched.drawingOpen)
+    const prepared = preparedInkRef.current
+    preparedInkRef.current = null
+    if (
+      !initialNoteLoad && prepared && prepared.path === path && prepared.content === content
+      && Date.now() - prepared.at <= PREPARED_INK_TTL_MS
+    ) {
+      setDrawingSession({
+        ...overlaySessionAfterInkReady(switched.drawingOpen, drawingSessionFromLoad(requestId, prepared.document)),
+        path,
+      })
+      return
+    }
     setDrawingSession({ ...overlaySessionAfterNoteSwitch(switched), path })
 
     // Saved handwriting loads in both input modes; keyboard mode mounts it
@@ -1613,8 +1718,107 @@ export default function App({ startupBootstrap }: AppProps) {
     treeRef.current = nextTree
     setTree(nextTree)
     syncEngine.notifyLocalChange()
+    lastOwnTreeRefreshRef.current = Date.now()
     return nextTree
   }, [])
+
+  // Files that arrived from outside FaNotes; the mark goes away when the note is opened.
+  useEffect(() => {
+    if (!window.fanotes?.onVaultChanged) return undefined
+    return window.fanotes.onVaultChanged((change) => {
+      const session = vaultSessionGenerationRef.current
+      const known = new Set(collectTreePaths(treeRef.current))
+      const ownRecently = Date.now() - lastOwnTreeRefreshRef.current < 4000
+      const active = activePathRef.current
+      const onlyActiveChanged = !change.truncated && !change.added.length && !change.removed.length &&
+        change.changed.every((entryPath) => entryPath === active)
+      // The open note's own autosave also shows up as a change: nothing to do then.
+      if (onlyActiveChanged) return
+      void window.fanotes.getTree({ fromWatcher: true }).then((nextTree) => {
+        // Only the tree is swapped. Open tabs, unsaved edits, selection, expanded
+        // folders and scroll position live elsewhere and stay untouched.
+        if (session !== vaultSessionGenerationRef.current) return
+        treeRef.current = nextTree
+        setTree(nextTree)
+        syncEngine.notifyLocalChange()
+        const present = new Set(collectTreePaths(nextTree))
+        // A truncated change list must not silently drop entries: derive arrivals from the full tree.
+        const addedPaths = change.truncated ? [...present] : change.added
+        const arrived = addedPaths.filter((entryPath) => !known.has(entryPath) && present.has(entryPath) && !tabsRef.current.some((tab) => tab.path === entryPath))
+        const fileSet = new Set(collectTreePaths(nextTree, true))
+        const now = Date.now()
+        // Sync-pulled files and our own writes are not "from outside": only the rest gets a dot and a toast.
+        const files = externalArrivals({
+          files: arrived.filter((entryPath) => fileSet.has(entryPath)),
+          now,
+          syncBusy: syncEngine.getState().status === 'syncing',
+          syncEndedAt: syncEndedAtRef.current,
+          syncWritten: syncWrittenRef.current,
+          ownRecently,
+        })
+        setNewArrivals((current) => {
+          const next = new Map([...current].filter(([entryPath]) => present.has(entryPath)))
+          for (const entryPath of files) next.set(entryPath, now)
+          return next.size === current.size && [...next.keys()].every((entryPath) => current.has(entryPath)) ? current : next
+        })
+        if (files.length) {
+          const folder = files[0].includes('/') ? files[0].slice(0, files[0].lastIndexOf('/')).split('/').pop() : ''
+          const sameFolder = files.every((entryPath) => entryPath.slice(0, Math.max(0, entryPath.lastIndexOf('/'))) === files[0].slice(0, Math.max(0, files[0].lastIndexOf('/'))))
+          const where = sameFolder && folder ? ` in ${folder}` : ''
+          toast(files.length === 1
+            ? `1 neue Datei${where}`
+            : `${files.length} neue Dateien${where}`, 'info')
+        }
+      }).catch(() => undefined)
+    })
+  }, [toast])
+
+  // Opening a note in either pane clears its mark.
+  useEffect(() => {
+    const opened = [activePath, splitPath].filter((entryPath): entryPath is string => Boolean(entryPath))
+    if (!opened.length) return
+    setNewArrivals((current) => {
+      if (!opened.some((entryPath) => current.has(entryPath))) return current
+      const next = new Map(current)
+      for (const entryPath of opened) next.delete(entryPath)
+      return next
+    })
+  }, [activePath, splitPath])
+
+  // Load the stored marks for the vault, and save every change back.
+  const arrivalsVaultPath = bootstrap?.vaultPath ?? null
+  useEffect(() => {
+    if (!arrivalsVaultPath || arrivalsVaultRef.current === arrivalsVaultPath) return
+    arrivalsVaultRef.current = arrivalsVaultPath
+    syncWrittenRef.current = new Map()
+    const stored = loadArrivals(typeof localStorage === 'undefined' ? null : localStorage, arrivalsVaultPath)
+    if (treeRef.current.length) {
+      const present = new Set(collectTreePaths(treeRef.current))
+      for (const entryPath of [...stored.keys()]) if (!present.has(entryPath)) stored.delete(entryPath)
+    }
+    setNewArrivals(stored)
+  }, [arrivalsVaultPath])
+  useEffect(() => {
+    if (!arrivalsVaultPath || arrivalsVaultRef.current !== arrivalsVaultPath) return
+    saveArrivals(typeof localStorage === 'undefined' ? null : localStorage, arrivalsVaultPath, newArrivals)
+  }, [arrivalsVaultPath, newArrivals])
+  // Marks for files that vanished while the app was closed go away once the tree is known.
+  useEffect(() => {
+    if (!tree.length) return
+    const present = new Set(collectTreePaths(tree))
+    setNewArrivals((current) => {
+      const next = new Map([...current].filter(([entryPath]) => present.has(entryPath)))
+      return next.size === current.size ? current : next
+    })
+  }, [tree])
+
+  // Remember when a sync run ends: its last file writes can surface in a watcher event a moment later.
+  const syncBusyNow = syncState.status === 'syncing'
+  const syncWasBusyRef = useRef(false)
+  useEffect(() => {
+    if (!syncBusyNow && syncWasBusyRef.current) syncEndedAtRef.current = Date.now()
+    syncWasBusyRef.current = syncBusyNow
+  }, [syncBusyNow])
 
   const rememberLastOpenNote = useCallback((path: string) => {
     if (!path || settingsRef.current.lastOpenNotePath === path) return
@@ -1709,6 +1913,31 @@ export default function App({ startupBootstrap }: AppProps) {
     void loadNoteCompanion(path)
   }, [activatePageStats, flushPageStats, loadNoteCompanion, rememberLastOpenNote])
 
+  /**
+   * Load what the next document shows in its first frame while the current
+   * one stays on screen: a PDF's parsed document (handed to PdfNoteView) and
+   * the note's handwriting (picked up by the drawing session effect). Capped
+   * at DOCUMENT_OPEN_PREPARE_MS; a slower load finishes after the switch.
+   */
+  const prepareDocumentOpen = useCallback(async (path: string, content: string) => {
+    const work: Promise<unknown>[] = []
+    if (isPdfNotePath(path)) {
+      work.push(Promise.all([loadPdfNoteViewModule(), import('./lib/pdfPrepare')])
+        .then(([, prepare]) => prepare.preparePdfDocument(path)))
+    }
+    work.push(readNoteInk(path, content).then((document) => {
+      preparedInkRef.current = { path, content, at: Date.now(), document }
+      if (document || drawingOpenRef.current) return loadDrawingBoardModule()
+      return undefined
+    }))
+    let timer = 0
+    await Promise.race([
+      Promise.all(work).catch(() => undefined),
+      new Promise<void>((resolve) => { timer = window.setTimeout(resolve, DOCUMENT_OPEN_PREPARE_MS) }),
+    ])
+    window.clearTimeout(timer)
+  }, [])
+
   const openNote = useCallback(async (path: string): Promise<boolean> => {
     if (activePathRef.current && activePathRef.current !== path) {
       // Book the last keystrokes under the note that is leaving before its editor unmounts.
@@ -1717,6 +1946,11 @@ export default function App({ startupBootstrap }: AppProps) {
       // or the new main editor opens the copy from before those keystrokes.
       if (splitPathRef.current === path) splitEditorRef.current?.flushChanges()
       if (!await flushDocumentLayers()) return false
+    }
+    if (/\.story$/iu.test(path)) {
+      // A story opens in the writing mode; the notes stay as they are underneath.
+      setWritingPath(path)
+      return true
     }
     const session = vaultSessionGenerationRef.current
     const structureRevision = vaultStructureRevisionRef.current
@@ -1729,9 +1963,13 @@ export default function App({ startupBootstrap }: AppProps) {
     const previousActive = activePathRef.current
     const swapIntoSplit = splitPathRef.current === path && previousActive && previousActive !== path
     const existing = tabsRef.current.find((tab) => tab.path === path)
+    // A later open wins; an earlier one still preparing must not switch back.
+    const sequence = ++openSequenceRef.current
     if (existing) {
       if (session !== vaultSessionGenerationRef.current) return false
       if (!isPdfNotePath(path)) await loadMarkdownEditor()
+      if (path !== previousActive) await prepareDocumentOpen(path, existing.content)
+      if (session !== vaultSessionGenerationRef.current || sequence !== openSequenceRef.current) return false
       revealOpenedNote(path, existing.content, swapIntoSplit ? previousActive : null)
       return true
     }
@@ -1746,6 +1984,12 @@ export default function App({ startupBootstrap }: AppProps) {
       ) return false
       const { content } = tab
       if (!isPdfNotePath(path)) await loadMarkdownEditor()
+      await prepareDocumentOpen(path, content)
+      if (
+        session !== vaultSessionGenerationRef.current ||
+        structureRevision !== vaultStructureRevisionRef.current ||
+        sequence !== openSequenceRef.current
+      ) return false
       setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
       setTabs((current) => current.some((item) => item.path === path) ? current : [...current, tab])
       revealOpenedNote(path, content, swapIntoSplit ? previousActive : null)
@@ -1761,7 +2005,7 @@ export default function App({ startupBootstrap }: AppProps) {
     } finally {
       openingNotesRef.current.delete(requestKey)
     }
-  }, [flushDocumentLayers, readNoteTab, revealOpenedNote, toast])
+  }, [flushDocumentLayers, prepareDocumentOpen, readNoteTab, revealOpenedNote, toast])
 
   /**
    * Bring back the tabs, pins and split the vault was left with. The active
@@ -1986,6 +2230,11 @@ export default function App({ startupBootstrap }: AppProps) {
     const timer = saveTimers.current.get(path)
     if (timer) window.clearTimeout(timer)
     saveTimers.current.delete(path)
+    // The file was deleted or edited outside FaNotes and nobody has decided yet: write nothing, keep the text.
+    if (tabHoldsRef.current[path]) {
+      if (!options?.quiet) toast('Speichern ist pausiert: Diese Notiz wurde ausserhalb von FaNotes verändert. Entscheide zuerst im Hinweis über dem Text.', 'info')
+      return false
+    }
     // A statistics-only write (no typing happened) must not flash "Speichern…".
     if (!options?.quiet) setSaveState('saving')
     try {
@@ -2008,6 +2257,8 @@ export default function App({ startupBootstrap }: AppProps) {
         }, famdEncodingForSave(nextContent))
       }
       const visibleContent = stripFamdPayload(nextContent)
+      // The vault watcher reports this write a moment later; it must not look like an outside edit.
+      noteOwnWrite(path, visibleContent)
       await window.fanotes.writeFile(isPdfNotePath(path) ? companionNotePath(path, '.famd') : path, nextContent)
       addonRuntime.emit('note:saved', { path, title: fileName(path).replace(/\.(md|markdown|pdf)$/iu, ''), length: visibleContent.length })
       // Document search re-reads changed notes in the background (debounced).
@@ -2059,9 +2310,11 @@ export default function App({ startupBootstrap }: AppProps) {
     } catch (error) {
       setSaveState('error')
       toast(error instanceof Error ? error.message : 'Speichern fehlgeschlagen.', 'error')
+      // The note may have been deleted, renamed or replaced outside FaNotes: reconcile the tab with its file.
+      void checkTabPathRef.current?.(path)
       return false
     }
-  }, [flushPageStats, pushEditableShare, toast])
+  }, [flushPageStats, noteOwnWrite, pushEditableShare, tabHoldsRef, toast])
 
   /** Writes statistics that moved on without any typing, without touching the save indicator. */
   const persistPageStatsQuietly = useCallback((path: string, minDwellDeltaMs: number) => {
@@ -2176,24 +2429,31 @@ export default function App({ startupBootstrap }: AppProps) {
     return window.fanotes.convertFamdNotes()
   }, [])
 
-  const flushPendingWrites = useCallback(async (): Promise<boolean> => {
+  const flushPendingWrites = useCallback(async (options?: { keepHeld?: boolean }): Promise<boolean> => {
     editorRef.current?.flushChanges()
     splitEditorRef.current?.flushChanges()
     saveTimers.current.forEach((timer) => window.clearTimeout(timer))
     saveTimers.current.clear()
+    // Paused tabs (their file was deleted or edited outside FaNotes) are not written. Whoever closes the
+    // app or the vault gets their unsaved text kept as conflict copies instead, so that neither side is lost.
+    if (!options?.keepHeld) {
+      for (const path of Object.keys(tabHoldsRef.current)) {
+        if (!await parkHeldTabRef.current(path)) return false
+      }
+    }
 
     // A new edit can arrive while an earlier IPC write is in flight. Repeat
     // with the latest snapshots instead of silently dropping that newer edit.
     // Open notes whose statistics moved on since their last write go along.
     for (const tab of tabsRef.current) queuePageStatsWrite(tab.path)
     for (let pass = 0; pass < 8; pass += 1) {
-      const pending = [...pendingWrites.current.entries()]
+      const pending = [...pendingWrites.current.entries()].filter(([path]) => !tabHoldsRef.current[path])
       if (!pending.length) return true
       const results = await Promise.all(pending.map(([path, content]) => saveContent(path, content)))
       if (results.some((saved) => !saved)) return false
     }
-    return pendingWrites.current.size === 0
-  }, [queuePageStatsWrite, saveContent])
+    return [...pendingWrites.current.keys()].every((path) => tabHoldsRef.current[path])
+  }, [queuePageStatsWrite, saveContent, tabHoldsRef])
 
   const saveCurrentWork = useCallback(async (announce = false): Promise<boolean> => {
     if (!activePathRef.current) {
@@ -2201,7 +2461,11 @@ export default function App({ startupBootstrap }: AppProps) {
       return false
     }
     const documentLayersSaved = await flushDocumentLayers()
-    const notesSaved = documentLayersSaved && await flushPendingWrites()
+    const notesSaved = documentLayersSaved && await flushPendingWrites({ keepHeld: true })
+    if (notesSaved && tabHoldsRef.current[activePathRef.current ?? '']) {
+      toast('Speichern ist pausiert: Diese Notiz wurde ausserhalb von FaNotes verändert. Entscheide zuerst im Hinweis über dem Text.', 'info')
+      return false
+    }
     if (notesSaved) {
       setSaveState('saved')
       if (announce) toast('Alles sicher gespeichert.', 'success')
@@ -2209,7 +2473,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     if (documentLayersSaved) toast('Die Notiz konnte nicht vollständig gespeichert werden.', 'error')
     return false
-  }, [flushDocumentLayers, flushPendingWrites, toast])
+  }, [flushDocumentLayers, flushPendingWrites, tabHoldsRef, toast])
 
   const flushPendingEntry = useCallback(async (entryPath: string): Promise<boolean> => {
     const belongsToEntry = (candidate: string) => candidate === entryPath || candidate.startsWith(`${entryPath}/`)
@@ -2220,14 +2484,18 @@ export default function App({ startupBootstrap }: AppProps) {
       window.clearTimeout(timer)
       saveTimers.current.delete(path)
     })
+    // Paused tabs inside the entry keep their unsaved text as conflict copies; nothing is written to their files.
+    for (const path of Object.keys(tabHoldsRef.current)) {
+      if (belongsToEntry(path) && !await parkHeldTabRef.current(path)) return false
+    }
     for (let pass = 0; pass < 8; pass += 1) {
-      const pending = [...pendingWrites.current.entries()].filter(([path]) => belongsToEntry(path))
+      const pending = [...pendingWrites.current.entries()].filter(([path]) => belongsToEntry(path) && !tabHoldsRef.current[path])
       if (!pending.length) return true
       const results = await Promise.all(pending.map(([path, content]) => saveContent(path, content)))
       if (results.some((saved) => !saved)) return false
     }
-    return ![...pendingWrites.current.keys()].some(belongsToEntry)
-  }, [saveContent])
+    return ![...pendingWrites.current.keys()].some((path) => belongsToEntry(path) && !tabHoldsRef.current[path])
+  }, [saveContent, tabHoldsRef])
 
   const flushSettings = useCallback(async (): Promise<boolean> => {
     for (let pass = 0; pass < 8; pass += 1) {
@@ -2283,18 +2551,37 @@ export default function App({ startupBootstrap }: AppProps) {
     if (session) pageStatsRef.current.set(path, touchPageModified(session, now))
     setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content } : tab))
     setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
+    // First keystroke after a save: the file may have changed outside FaNotes since; check before autosave can win.
+    const firstKeystroke = !pendingWrites.current.has(path) && !tabHoldsRef.current[path]
     pendingWrites.current.set(path, content)
+    if (firstKeystroke) void checkTabPathRef.current?.(path)
     addonNoteChangedRef.current?.(path, content)
+    // A paused tab (its file was deleted or edited outside FaNotes) keeps what is typed but saves nothing.
+    if (tabHoldsRef.current[path]) return
     setSaveState('saving')
     const existing = saveTimers.current.get(path)
     if (existing) window.clearTimeout(existing)
     const timer = window.setTimeout(() => { void saveContent(path, content) }, settings.autosaveDelay)
     saveTimers.current.set(path, timer)
-  }, [saveContent, settings.autosaveDelay])
+  }, [saveContent, settings.autosaveDelay, tabHoldsRef])
 
   const updateContent = useCallback((content: string) => {
     if (activePath) updateContentFor(activePath, content)
   }, [activePath, updateContentFor])
+
+  // The eraser in pen mode also takes PDF text highlights off, undoable with the ink.
+  const updateContentForRef = useRef(updateContentFor)
+  updateContentForRef.current = updateContentFor
+  const latestNoteContent = useCallback((path: string) => (
+    pendingWrites.current.get(path) ?? tabsRef.current.find((tab) => tab.path === path)?.content ?? null
+  ), [])
+  const pdfMarkEraseHost = useMemo(() => createPdfMarkEraseHost({
+    notePath: () => activePathRef.current || null,
+    pages: () => document.querySelector('.unified-note-view.is-main-pane .unified-paper.is-pdf-note')
+      ?? document.querySelector('.unified-paper.is-pdf-note'),
+    read: latestNoteContent,
+    write: (path, content) => updateContentForRef.current(path, content),
+  }), [latestNoteContent])
 
   const closeTab = useCallback(async (path: string) => {
     const session = pageStatsRef.current.get(path)
@@ -2314,10 +2601,13 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePathRef.current === path) editorRef.current?.flushChanges()
     if (splitPathRef.current === path) splitEditorRef.current?.flushChanges()
     if (activePathRef.current === path && !await flushDocumentLayers()) return
+    // A paused tab is not written. Its unsaved text is kept as a conflict copy before the tab goes.
+    const held = Boolean(tabHoldsRef.current[path])
+    if (held && !await parkHeldTabRef.current(path)) return
     const currentTabs = tabsRef.current
     const closing = currentTabs.find((tab) => tab.path === path)
     const latestContent = pendingWrites.current.get(path) ?? closing?.content
-    if (closing && latestContent !== undefined && (latestContent !== closing.savedContent || statsNeedWrite)) {
+    if (!held && closing && latestContent !== undefined && (latestContent !== closing.savedContent || statsNeedWrite)) {
       // pendingWrites is updated synchronously by CodeMirror and can be newer
       // than tabsRef until React's passive effect runs. Never overwrite it
       // with the stale tab snapshot during a rapid type-and-close gesture.
@@ -2326,6 +2616,13 @@ export default function App({ startupBootstrap }: AppProps) {
       // Keep the tab open after an I/O failure or if the user produced a newer
       // edit while this save was in flight.
       if (!saved || pendingWrites.current.has(closing.path)) return
+    }
+    if (activePathRef.current === path) {
+      // The neighbour that takes over opens like any other document: prepared first.
+      const index = tabsRef.current.findIndex((tab) => tab.path === path)
+      const remaining = tabsRef.current.filter((tab) => tab.path !== path)
+      const next = remaining[Math.min(Math.max(index, 0), remaining.length - 1)]
+      if (next) await prepareDocumentOpen(next.path, next.content)
     }
     closedTabsRef.current = rememberClosedTab(closedTabsRef.current, path)
     setTabs((current) => current.filter((tab) => tab.path !== path))
@@ -2337,23 +2634,76 @@ export default function App({ startupBootstrap }: AppProps) {
       const remaining = latestTabs.filter((tab) => tab.path !== path)
       return remaining[Math.min(Math.max(latestIndex, 0), remaining.length - 1)]?.path ?? null
     })
-  }, [flushDocumentLayers, saveContent])
+  }, [flushDocumentLayers, prepareDocumentOpen, saveContent, tabHoldsRef])
 
   /** True while this device holds unsaved work for a path – the sync engine then leaves that file alone until the next cycle. */
   const isSyncPathBusy = useCallback((path: string) => {
+    // The open story's files: the writing mode holds them in memory and saves from there.
+    // Its other files wait until it is closed (the sync then merges them paragraph by paragraph).
+    // Its scenes and manifest may be written while nothing is unsaved there; the editor then merges them live.
+    if (writingPathRef.current && path.startsWith(`${writingPathRef.current}/`)) return storySyncBusy(writingPathRef.current, path)
     const companionOwner = path.endsWith('.famd') ? tabsRef.current.find((tab) => companionNotePath(tab.path, '.famd') === path)?.path : undefined
     const notePath = companionOwner ?? path
     if (pendingWrites.current.has(notePath) || saveTimers.current.has(notePath)) return true
+    // Paused until the user decides what happens to the outside change: the sync must not decide it either.
+    if (tabHoldsRef.current[notePath]) return true
     const tab = tabsRef.current.find((candidate) => candidate.path === notePath)
     if (tab && tab.content !== tab.savedContent) return true
     // Ink and worksheet layers live in the .famd companion; while they are open here, the other device's copy waits.
     if (path.endsWith('.famd') && activePathRef.current === notePath && (drawingOpenRef.current || drawingDirtyRef.current)) return true
     return false
-  }, [])
+  }, [tabHoldsRef])
+
+  /**
+   * A file changed under an open tab (another device through the sync, another
+   * program through the vault watcher): take its text for a tab that holds
+   * nothing unsaved. `content` is the text when the caller already read it. A
+   * changed `.famd` also reloads the statistics and the handwriting. A tab with
+   * unsaved text is left alone: false.
+   */
+  const reloadCleanTab = useCallback(async (path: string, famdTouched: boolean, content?: string): Promise<boolean> => {
+    const tab = tabsRef.current.find((candidate) => candidate.path === path)
+    if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(path)) return false
+    try {
+      const fresh = content === undefined ? await readNoteTab(path) : { content }
+      const open = tabsRef.current.find((candidate) => candidate.path === path)
+      if (!open || open.content !== open.savedContent || pendingWrites.current.has(path)) return false
+      setTabs((current) => current.map((candidate) => candidate.path === path && candidate.content === candidate.savedContent ? { ...candidate, content: fresh.content, savedContent: fresh.content } : candidate))
+      setTagIndex((current) => ({ ...current, [path]: parseNoteTags(fresh.content) }))
+      // The file is there again with its own text: whatever paused this tab is over.
+      setTabHold(path, null)
+      if (!famdTouched || (activePathRef.current === path && drawingDirtyRef.current)) return true
+      // The open session was loaded from the previous companion. Keeping it
+      // would write those statistics and that ink back over the other device.
+      pageStatsRef.current.delete(path)
+      pageStatsUnreadableRef.current.delete(path)
+      await preparePageStats(path)
+      if (activePathRef.current === path && !pageStatsUnreadableRef.current.has(path)) {
+        activatePageStats(path, fresh.content)
+      }
+      if (activePathRef.current !== path || drawingDirtyRef.current) return true
+      const requestId = ++drawingLoadRequestRef.current
+      const document = await readNoteInk(path, fresh.content)
+      if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path || drawingDirtyRef.current) return true
+      setDrawingSession({
+        ...overlaySessionAfterInkReady(drawingOpenRef.current, drawingSessionFromLoad(requestId, document)),
+        path,
+      })
+      return true
+    } catch {
+      // The note vanished between the change list and the read; the next tree refresh reflects that.
+      return false
+    }
+  }, [activatePageStats, preparePageStats, readNoteTab, setTabHold])
 
   /** Files another device changed: refresh the tree, reload clean open tabs, drop tabs of deleted notes. */
   const applyRemoteChanges = useCallback(async ({ written, removed }: { written: string[]; removed: string[] }) => {
+    if (writingPathRef.current) notifyStoryWritten(writingPathRef.current, written)
+    const writtenAt = Date.now()
+    for (const entryPath of written) syncWrittenRef.current.set(entryPath, writtenAt)
     await refreshTree()
+    const stories = new Set([...written, ...removed].flatMap((path) => /^(.+?\.story)\//iu.exec(path)?.[1] ?? []))
+    if (stories.size) void import('./lib/docSearch/service').then(({ docSearch }) => { for (const story of stories) docSearch.notifyStoryChanged(story) })
     for (const path of removed) {
       if (!tabsRef.current.some((tab) => tab.path === path)) continue
       setTabs((current) => current.filter((tab) => tab.path !== path))
@@ -2380,38 +2730,10 @@ export default function App({ startupBootstrap }: AppProps) {
       }
     }
     for (const path of touched) {
-      const tab = tabsRef.current.find((candidate) => candidate.path === path)
-      if (!tab || tab.content !== tab.savedContent || pendingWrites.current.has(path)) continue
       const famdPath = companionNotePath(path, '.famd')
-      const famdTouched = written.includes(famdPath) || (isPdfNotePath(path) && written.includes(path))
-      try {
-        const fresh = await readNoteTab(path)
-        const open = tabsRef.current.find((candidate) => candidate.path === path)
-        if (!open || open.content !== open.savedContent || pendingWrites.current.has(path)) continue
-        setTabs((current) => current.map((candidate) => candidate.path === path && candidate.content === candidate.savedContent ? { ...candidate, content: fresh.content, savedContent: fresh.content } : candidate))
-        setTagIndex((current) => ({ ...current, [path]: parseNoteTags(fresh.content) }))
-        if (!famdTouched || (activePathRef.current === path && drawingDirtyRef.current)) continue
-        // The open session was loaded from the previous companion. Keeping it
-        // would write those statistics and that ink back over the other device.
-        pageStatsRef.current.delete(path)
-        pageStatsUnreadableRef.current.delete(path)
-        await preparePageStats(path)
-        if (activePathRef.current === path && !pageStatsUnreadableRef.current.has(path)) {
-          activatePageStats(path, fresh.content)
-        }
-        if (activePathRef.current !== path || drawingDirtyRef.current) continue
-        const requestId = ++drawingLoadRequestRef.current
-        const document = await readNoteInk(path, fresh.content)
-        if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path || drawingDirtyRef.current) continue
-        setDrawingSession({
-          ...overlaySessionAfterInkReady(drawingOpenRef.current, drawingSessionFromLoad(requestId, document)),
-          path,
-        })
-      } catch {
-        // The note vanished between the change list and the read; the next tree refresh reflects that.
-      }
+      await reloadCleanTab(path, written.includes(famdPath) || (isPdfNotePath(path) && written.includes(path)))
     }
-  }, [activatePageStats, preparePageStats, readNoteTab, refreshTree])
+  }, [reloadCleanTab, refreshTree])
 
   const syncDepsRef = useRef({ isSyncPathBusy, applyRemoteChanges, toast })
   syncDepsRef.current = { isSyncPathBusy, applyRemoteChanges, toast }
@@ -2560,6 +2882,38 @@ export default function App({ startupBootstrap }: AppProps) {
     setSplitLayout((current) => ({ ...current, orientation: current.orientation === 'columns' ? 'rows' : 'columns' }))
   }, [])
 
+  const createStory = useCallback(async (parent?: string) => {
+    const { storyHost, createProject } = await import('./writing/storage')
+    const { writerId } = await import('./writing/model/ids')
+    const host = storyHost()
+    if (!host) {
+      toast('Geschichten gibt es in dieser Version nicht.', 'error')
+      return
+    }
+    try {
+      const english = getUiLanguage() === 'en'
+      const path = await createProject(host, parent ?? '', { title: english ? 'New story' : 'Neue Geschichte', language: english ? 'en-US' : 'de', size: 'A5', deviceId: writerId() })
+      await refreshTree()
+      syncEngine.notifyLocalChange()
+      setWritingPath(path)
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Die Geschichte konnte nicht angelegt werden.', 'error')
+    }
+  }, [refreshTree, toast])
+
+  /** Folder an imported story goes into; undefined while the import dialog is closed. */
+  const [storyImportParent, setStoryImportParent] = useState<string | undefined>(undefined)
+  const importStoryFile = useCallback(async (story: import('./writing/import/build').ImportedStory) => {
+    const { storyHost, saveImportedProject } = await import('./writing/storage')
+    const host = storyHost()
+    if (!host) throw new Error('Geschichten gibt es in dieser Version nicht.')
+    const path = await saveImportedProject(host, storyImportParent ?? '', story)
+    setStoryImportParent(undefined)
+    await refreshTree()
+    syncEngine.notifyLocalChange()
+    setWritingPath(path)
+  }, [refreshTree, storyImportParent])
+
   const createNote = useCallback(async (parent?: string) => {
     const session = vaultSessionGenerationRef.current
     vaultStructureRevisionRef.current += 1
@@ -2611,6 +2965,19 @@ export default function App({ startupBootstrap }: AppProps) {
       )
     }
   }, [openNote, refreshTree, settings.defaultFolder, toast, tree])
+
+  const saveStudyNote = useCallback(async (title: string, markdown: string) => {
+    try {
+      const parent = activePathRef.current ? parentPath(activePathRef.current) : ''
+      const result = await window.fanotes.createNote(parent || undefined, title)
+      await saveContent(result.relativePath, markdown)
+      await refreshTree().catch(() => undefined)
+      await openNote(result.relativePath)
+      toast('Notiz mit den Markierungen erstellt.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Notiz konnte nicht erstellt werden.', 'error')
+    }
+  }, [openNote, refreshTree, saveContent, toast])
 
   const copyPlainText = useCallback(async (value: string, success: string) => {
     try {
@@ -3038,7 +3405,9 @@ export default function App({ startupBootstrap }: AppProps) {
       return
     }
     const field = placeNoteTextField(point)
-    rememberNoteTextFields(path, [...noteTextFieldsRef.current, field], true)
+    // Not committed yet: an empty box that is never typed into is dropped again
+    // by the layer and must not reach the disk.
+    rememberNoteTextFields(path, [...noteTextFieldsRef.current, field], false)
     setTextFieldPlacing(false)
     setTextFieldFocusId(field.id)
   }, [rememberNoteTextFields, toast])
@@ -3054,6 +3423,14 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!path) return
     rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), commit)
   }, [rememberNoteTextFields])
+
+  const changeTextFieldStyle = useCallback((id: string, patch: { fontSize?: number; color?: string | undefined; bold?: boolean | undefined }) => {
+    const path = activePathRef.current
+    if (!path) return
+    rememberNoteTextFields(path, patchNoteTextField(noteTextFieldsRef.current, id, patch), true)
+  }, [rememberNoteTextFields])
+
+  const finishTextFieldEdit = useCallback(() => { void flushNoteTextFieldsRef.current() }, [])
 
   const clearTextFieldFocus = useCallback(() => setTextFieldFocusId(null), [])
 
@@ -3237,6 +3614,22 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [refreshTree, toast])
 
+  const setFileColor = useCallback(async (path: string, color: string | null) => {
+    const session = vaultSessionGenerationRef.current
+    try {
+      if (!window.fanotes.setFileColor) throw new Error('Dokumentfarben gibt es in dieser Version nicht.')
+      await window.fanotes.setFileColor(path, color)
+      if (session !== vaultSessionGenerationRef.current) return
+      await refreshTree()
+      if (session !== vaultSessionGenerationRef.current) return
+      toast(color ? 'Dokumentfarbe gespeichert.' : 'Dokumentfarbe auf Standard zurückgesetzt.', 'success')
+    } catch (error) {
+      if (session === vaultSessionGenerationRef.current) {
+        toast(error instanceof Error ? error.message : 'Dokumentfarbe konnte nicht gespeichert werden.', 'error')
+      }
+    }
+  }, [refreshTree, toast])
+
   const createDailyNote = useCallback(async (when?: Date) => {
     const session = vaultSessionGenerationRef.current
     vaultStructureRevisionRef.current += 1
@@ -3395,6 +3788,65 @@ export default function App({ startupBootstrap }: AppProps) {
     await refreshTree()
     await Promise.all(renamedPending.map(([renamedPath, content]) => saveContent(renamedPath, content)))
   }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapPageStats, remapWorkspacePaths, saveContent, toast])
+
+  /**
+   * An open note whose file was renamed or moved outside FaNotes: the tab, the
+   * split, the history and the statistics follow it, as they do for a rename in
+   * the app (without the file operation, which already happened). Returns the
+   * unsaved text that now belongs to the new path; the caller saves it there.
+   */
+  const retargetOpenNote = useCallback((from: string, to: string): Array<[string, string]> => {
+    remapNotePaperPaths(from, to)
+    remapWorkspacePaths(from, to)
+    remapPageStats(from, to)
+    moveTabState(from, to)
+    vaultStructureRevisionRef.current += 1
+    const timer = saveTimers.current.get(from)
+    if (timer) window.clearTimeout(timer)
+    saveTimers.current.delete(from)
+    const title = stripExtension(fileName(to))
+    const follow = (tab: NoteTab): NoteTab => (tab.path === from ? { ...tab, path: to, title } : tab)
+    // The ref is behind the state until React has rendered; whatever runs next must already see the new path.
+    tabsRef.current = tabsRef.current.map(follow)
+    setTabs((current) => current.map(follow))
+    const moved: Array<[string, string]> = []
+    const unsaved = pendingWrites.current.get(from)
+    if (unsaved !== undefined) {
+      pendingWrites.current.delete(from)
+      pendingWrites.current.set(to, unsaved)
+      moved.push([to, unsaved])
+    }
+    if (activePathRef.current === from) activePathRef.current = to
+    setActivePath((current) => (current === from ? to : current))
+    return moved
+  }, [moveTabState, remapNotePaperPaths, remapPageStats, remapWorkspacePaths])
+
+  const externalTabs = useExternalTabChanges({
+    holdsRef: tabHoldsRef,
+    setHold: setTabHold,
+    ownWritesRef: tabOwnWritesRef,
+    tabsRef,
+    setTabs,
+    pendingWrites,
+    saveTimers,
+    treeRef,
+    mutatingEntryPathsRef,
+    vaultSessionGenerationRef,
+    activePathRef,
+    flushEditors: () => {
+      editorRef.current?.flushChanges()
+      splitEditorRef.current?.flushChanges()
+    },
+    flushDocumentLayers,
+    reloadCleanTab,
+    retargetOpenNote,
+    saveContent,
+    refreshTree,
+    toast,
+    deviceName: () => settingsRef.current.syncDeviceName ?? '',
+  })
+  parkHeldTabRef.current = externalTabs.parkHeldTab
+  checkTabPathRef.current = externalTabs.checkPath
 
   const moveEntry = useCallback(async (path: string, destFolder = '') => {
     const session = vaultSessionGenerationRef.current
@@ -4192,6 +4644,15 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!commandEditor()?.format(action)) toast('Die Formatierung konnte nicht angewandt werden.', 'error')
   }, [drawingOpen, homeworkOpen, overviewOpen, toast])
 
+  const insertStudyBlock = useCallback((kind: StudyKind) => {
+    const path = activePathRef.current
+    if (!path || drawingOpen || overviewOpen || homeworkOpen || isPdfNotePath(path)) {
+      toast('Öffne eine Markdown-Notiz im Editor, um ein Lernwerkzeug einzufügen.', 'info')
+      return
+    }
+    window.dispatchEvent(new CustomEvent(STUDY_EVENT.insert, { detail: { kind } }))
+  }, [drawingOpen, homeworkOpen, overviewOpen, toast])
+
   const handleDrawingDirtyChange = useMemo(() => {
     const session = noteDrawingSession.key
     return (dirty: boolean) => {
@@ -4268,6 +4729,10 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Öffne zuerst eine Notiz, um darauf handschriftlich zu schreiben.', 'info')
       return
     }
+    if (tabHoldsRef.current[activeTab.path]) {
+      toast('Diese Notiz ist pausiert, bis du den Hinweis über dem Text beantwortet hast.', 'info')
+      return
+    }
     drawingOpenRef.current = true
     setOverviewOpen(false)
     setHomeworkOpen(false)
@@ -4296,6 +4761,11 @@ export default function App({ startupBootstrap }: AppProps) {
       openDrawing()
     }
   }, [closeDrawing, openDrawing])
+
+  // The pen is put down while the note is paused: strokes could not be saved into a file that is gone or was edited elsewhere.
+  useEffect(() => {
+    if (drawingOpen && activePath && tabHolds[activePath]) closeDrawing()
+  }, [activePath, closeDrawing, drawingOpen, tabHolds])
 
   const openNoteRef = useRef(openNote)
   const openDrawingRef = useRef(openDrawing)
@@ -4400,6 +4870,27 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [remoteSupportSession, settings.experimentalRemoteSupport])
 
+  // Opt-in diagnostics: counters and the daily report run only while a toggle is on.
+  useEffect(() => {
+    configureDiagnostics({ usage: settings.diagnosticsUsage, logs: settings.diagnosticsLogs }, { vaultPath: bootstrap?.vaultPath })
+    if (!settings.diagnosticsUsage && !settings.diagnosticsLogs) return undefined
+    const first = window.setTimeout(() => { void sendDailyIfDue() }, 90_000)
+    const timer = window.setInterval(() => { void sendDailyIfDue() }, 3_600_000)
+    return () => { window.clearTimeout(first); window.clearInterval(timer) }
+  }, [settings.diagnosticsUsage, settings.diagnosticsLogs, bootstrap?.vaultPath])
+
+  useEffect(() => {
+    if (!bootstrap) return
+    markStartupReady()
+    let notes = 0
+    let bytes = 0
+    const walk = (entries: VaultEntry[]) => { for (const entry of entries) { if (entry.kind === 'folder') walk(entry.children ?? []); else { notes += 1; bytes += entry.size ?? 0 } } }
+    walk(tree)
+    setDiagnosticsVault(notes, bytes)
+  }, [bootstrap, tree])
+
+  useEffect(() => { if (settingsOpen) recordFeature(`view.settings-${settingsSection ?? 'open'}`) }, [settingsOpen, settingsSection])
+
   useEffect(() => {
     if (overviewOpen || glyphenWerkOpen) setSidebarToolsOpen(true)
   }, [overviewOpen, glyphenWerkOpen])
@@ -4409,6 +4900,11 @@ export default function App({ startupBootstrap }: AppProps) {
     const reveal = (path: string) => {
       if (!hit.inkAnchor) return
       setInkReveal({ path, y: hit.inkAnchor.y, token: Date.now() })
+    }
+    if (hit.unit === 'scene' && hit.sceneId) {
+      // A story hit opens the writing mode at that scene (and the paragraph with the words).
+      const { requestStoryReveal } = await import('./writing/reveal')
+      requestStoryReveal(hit.relativePath, { sceneId: hit.sceneId, query: hit.query ?? '' })
     }
     if (hit.kind !== 'drawing' || !hit.drawingId) {
       await openNote(hit.relativePath)
@@ -4561,6 +5057,10 @@ export default function App({ startupBootstrap }: AppProps) {
   const saveDrawingAsset = useCallback(async (payload: DrawingSavePayload, notePathOverride?: string | null) => {
     const session = vaultSessionGenerationRef.current
     const notePath = notePathOverride ?? activePath
+    // The note's file is gone: saving the strokes would create its handwriting file again as a note of its own.
+    if (notePath && tabHoldsRef.current[notePath]?.kind === 'deleted') {
+      throw new Error('Diese Notiz wurde ausserhalb von FaNotes gelöscht. Stelle sie wieder her oder speichere sie unter neuem Namen, damit die Handschrift gesichert werden kann.')
+    }
     const { inkSummary, ...drawing } = payload
     const asset = await window.fanotes.saveDrawing({
       ...drawing,
@@ -4618,7 +5118,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (activePathRef.current !== notePath) return result
     setDrawingSession((current) => current.path === notePath ? { ...current, document } : current)
     return result
-  }, [activePath, editableShareOwns, pushEditableShare, recordInkSnapshotFor, saveContent])
+  }, [activePath, editableShareOwns, pushEditableShare, recordInkSnapshotFor, saveContent, tabHoldsRef])
 
   const saveWorksheetDocument = useCallback(async (document: WorksheetDocument) => {
     const session = vaultSessionGenerationRef.current
@@ -4739,6 +5239,10 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [attachImportedWorksheet, toast])
 
   const openInSplit = useCallback(async (path: string) => {
+    if (/\.story$/iu.test(path)) {
+      setWritingPath(path)
+      return
+    }
     if (activePathRef.current === path) {
       // Splitting the note you are on: keep it on the left and put the last
       // other note on the right, like duplicating a browser tab side by side.
@@ -4982,6 +5486,8 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'new-note', label: 'Neue Notiz', detail: 'Markdown-Datei im Standardordner', shortcut: 'Ctrl N', group: 'Dateien', icon: <FilePlus2 size={15} />, run: () => void createNote() },
     { id: 'import-pdf-note', label: 'PDF importieren', detail: 'PDF wird selbst zur Notiz — mit Handschrift und Viewer', group: 'Dateien', keywords: 'pdf import notiz viewer', icon: <FileText size={15} />, run: () => void importPdfNote() },
     { id: 'new-folder', label: 'Neuer Ordner', detail: 'Fach auf oberster Ebene anlegen', group: 'Dateien', icon: <FolderPlus size={15} />, run: () => void createFolder() },
+    { id: 'new-story', label: 'Neue Geschichte', detail: 'Schreibmodus mit Seiten, Kapiteln und Szenen', group: 'Dateien', keywords: 'geschichte roman buch schreiben story novel writing kapitel', icon: <BookOpen size={15} />, run: () => void createStory() },
+    { id: 'import-story', label: 'Geschichte importieren …', detail: 'Word (.docx), Markdown oder Text als Geschichte öffnen', group: 'Dateien', keywords: 'import docx word markdown geschichte roman story', icon: <BookOpen size={15} />, run: () => setStoryImportParent('') },
     { id: 'new-subfolder', label: 'Unterordner anlegen', detail: activeTab ? `In ${parentPath(activeTab.path) || 'Vault-Wurzel'}` : 'Rechtsklick auf einen Ordner oder hier nach dem Öffnen einer Notiz', group: 'Dateien', keywords: 'unterordner ordner verschachteln fach', icon: <FolderPlus size={15} />, run: () => void createFolder(activeTab ? parentPath(activeTab.path) || undefined : undefined) },
     { id: 'save', label: 'Aktuelle Notiz speichern', detail: 'Text, Handschrift und Arbeitsblätter sichern', shortcut: 'Ctrl S', group: 'Dateien', icon: <Save size={15} />, run: () => { void saveCurrentWork(true) } },
     { id: 'search', label: 'Im Vault suchen', shortcut: 'Ctrl ⇧ F', group: 'Navigation', icon: <Search size={15} />, run: () => setSearchOpen(true) },
@@ -5003,6 +5509,9 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht', detail: 'Ordner und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
     { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
+    ...STUDY_KINDS.map((kind) => ({ id: `study-${kind}`, label: `Lernwerkzeug: ${STUDY_KIND_LABELS[kind]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'lernwerkzeuge auftrag tabelle schlüssel bestimmungsschlüssel sortieren board begriffsnetz concept map bildtafel definition karten', icon: <GraduationCap size={15} />, run: () => insertStudyBlock(kind) })),
+    { id: 'study-tasks', label: 'Lernwerkzeuge: Aufträge dieses PDFs', detail: 'Aufträge erkennen, abhaken und mit Timer bearbeiten', group: 'Lernwerkzeuge', keywords: 'auftrag aufgabe task exercise pdf arbeitsblatt timer fortschritt', icon: <ClipboardList size={15} />, run: () => { if (isPdfActive) setStudyPanel('tasks'); else toast('Öffne zuerst ein PDF.', 'info') } },
+    { id: 'study-marks', label: 'Lernwerkzeuge: Markierungen-Übersicht', detail: 'Alle Textmarker-Stellen des PDFs nach Seite', group: 'Lernwerkzeuge', keywords: 'markierungen textmarker highlight wesentliche punkte pdf zusammenfassung', icon: <BookMarked size={15} />, run: () => { if (isPdfActive) setStudyPanel('marks'); else toast('Öffne zuerst ein PDF.', 'info') } },
     { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => { editorRef.current?.flushChanges(); setCardsOpen(true) } },
     ...NOTE_TEMPLATES.map((template) => ({
       id: `template-${template.id}`,
@@ -5050,9 +5559,10 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'addon-store', label: 'Add-on-Store', detail: 'Add-ons aus GitHub entdecken, installieren und verwalten', group: 'FaNotes', keywords: 'addon add-on plugin erweiterung store extension', icon: <Puzzle size={15} />, run: () => setAddonStoreOpen(true) },
     ...addonPaletteActions,
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
+    ...(workRequestsAllowed ? [{ id: 'work-requests', label: 'Fehler & Wünsche', detail: 'Fehler oder Funktion melden und den Fortschritt verfolgen', shortcut: 'Ctrl ⇧ B', group: 'FaNotes', keywords: 'wunsch funktion anfrage claude fehler bug request', icon: <Lightbulb size={15} />, run: () => setWorkRequestsOpen(true) }] : []),
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentLatex, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, startTextFieldPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
+  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentLatex, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, workRequestsAllowed, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, startTextFieldPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
 
   // ---- Add-ons -------------------------------------------------------------
   // Everything add-ons may touch flows through this bridge. The deps object is
@@ -5407,6 +5917,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (mod && event.shiftKey && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true) }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'a') { event.preventDefault(); openLmStudio() }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'g') { event.preventDefault(); openGlyphenWerk() }
+      if (mod && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'b') { event.preventDefault(); openWorkRequestsOrBugReport() }
       if (mod && event.shiftKey && event.key.toLowerCase() === 'i') { event.preventDefault(); openWorksheetImport() }
       if (mod && !event.shiftKey && event.key.toLowerCase() === 'n') { event.preventDefault(); void createNote() }
       if (mod && event.key === ',') { event.preventDefault(); openSettings() }
@@ -5465,10 +5976,12 @@ export default function App({ startupBootstrap }: AppProps) {
       window.removeEventListener('keydown', handler)
       window.removeEventListener('mouseup', mouseNav)
     }
-  }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, duplicateNote, focusMode, glyphenWerkOpen, homeworkOpen, insertStamp, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, textFieldPlacing, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
+  }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, duplicateNote, focusMode, glyphenWerkOpen, homeworkOpen, insertStamp, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorkRequestsOrBugReport, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, textFieldPlacing, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
 
   useEffect(() => {
     const placeImage = (data: DataTransfer | null, event: Event, failure: string) => {
+      // The study editors take pictures for their own sheets.
+      if (studyModalOpen()) return
       const file = clipboardImageFile(data)
       if (!file) return
       event.preventDefault()
@@ -5487,6 +6000,20 @@ export default function App({ startupBootstrap }: AppProps) {
       window.removeEventListener('paste', onPaste, true)
       window.removeEventListener('drop', onDrop, true)
       window.removeEventListener('dragover', onDragOver)
+    }
+  }, [importImageBytes, toast])
+
+  useEffect(() => {
+    const onPlace = (event: Event) => {
+      const file = (event as CustomEvent<{ file?: File }>).detail?.file
+      if (file) void importImageBytes(file).catch((error) => toast(error instanceof Error ? error.message : 'Bild konnte nicht eingefügt werden.', 'error'))
+    }
+    const onCards = () => { editorRef.current?.flushChanges(); splitEditorRef.current?.flushChanges(); window.setTimeout(() => setCardsOpen(true), 60) }
+    window.addEventListener(STUDY_EVENT.placeImage, onPlace)
+    window.addEventListener(STUDY_EVENT.openCards, onCards)
+    return () => {
+      window.removeEventListener(STUDY_EVENT.placeImage, onPlace)
+      window.removeEventListener(STUDY_EVENT.openCards, onCards)
     }
   }, [importImageBytes, toast])
 
@@ -5516,6 +6043,25 @@ export default function App({ startupBootstrap }: AppProps) {
     } as React.CSSProperties
   }, [settings, sidebarVisible, theme])
 
+  // Portaled popovers, menus and dialogs render under document.body, outside .app-shell,
+  // so mirror the theme class and tokens there to keep them themed.
+  useEffect(() => {
+    const body = document.body
+    const themeClass = `app-theme-${theme}`
+    body.classList.add(themeClass)
+    const names = Object.keys(cssVars)
+    for (const name of names) body.style.setProperty(name, String((cssVars as Record<string, unknown>)[name]))
+    const root = document.documentElement
+    const scheme = getComputedStyle(body).colorScheme.includes('light') ? 'light' : 'dark'
+    root.dataset.theme = scheme
+    root.style.colorScheme = scheme
+    return () => {
+      body.classList.remove(themeClass)
+      for (const name of names) body.style.removeProperty(name)
+      document.documentElement.style.colorScheme = ''
+    }
+  }, [theme, cssVars])
+
   if (fatalError) return <div className="fatal-screen"><section className="fatal-card" role="alert"><div className="startup-mark is-error"><CircleAlert size={22} /></div><h1>FaNotes konnte nicht starten</h1><p>Deine Daten wurden nicht verändert. Prüfe den Vault und versuche es erneut.</p><code>{fatalError}</code><button className="primary-button" type="button" onClick={() => window.location.reload()}>Erneut versuchen</button></section></div>
   if (!bootstrap) return <div className="fatal-screen startup-screen"><section className="fatal-card startup-card" aria-live="polite"><div className="startup-mark"><PenLine size={22} /></div><h1>FaNotes öffnet deinen Schreibtisch</h1><p>Deine letzte Notiz erscheint gleich. Handschrift und weitere Werkzeuge werden danach im Hintergrund bereitgestellt.</p><div className="startup-progress" aria-hidden="true"><span /></div><small><LoaderCircle className="spin" size={12} /> Lokal und privat</small></section></div>
   if (popoutBookPath) {
@@ -5544,6 +6090,7 @@ export default function App({ startupBootstrap }: AppProps) {
     </div>
   )
   const editorToolbarVisible = !calendarOpen && !homeworkOpen && !overviewOpen && !glyphenWerkOpen
+  const sideToolbar = editorToolbarVisible && settings.toolbarPosition === 'side'
 
   return (
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
@@ -5582,7 +6129,7 @@ export default function App({ startupBootstrap }: AppProps) {
           {updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={12} /> Update {Math.round(updateState.progress * 100)} %</span>}
           {addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}
           {addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={12} /> {addonState.panels.length}</button>}
-          {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings(syncState.openConflicts > 0 ? 'conflicts' : 'sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : 'Synchron'}{syncState.openConflicts > 0 && <em title={`${syncState.openConflicts} Konflikt(e)`}>{syncState.openConflicts}</em>}</button>}
+          {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings(syncState.openConflicts > 0 ? 'conflicts' : 'sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : syncState.status === 'paused' ? <Clock size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : syncState.status === 'paused' ? 'Sync pausiert' : 'Synchron'}{syncState.openConflicts > 0 && <em title={`${syncState.openConflicts} Konflikt(e)`}>{syncState.openConflicts}</em>}</button>}
           <button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-label="Jetzt speichern" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={12} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={12} /> : <CircleAlert size={12} />}<span>{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</span></button>
         </div>
         <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={14} /><span className="ribbon-label">Einstellungen</span></button>
@@ -5650,6 +6197,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 entries={visibleTree}
                 activePath={activePath}
                 splitPath={splitPath}
+                newPaths={newMarkedPaths}
                 revealPath={revealPath}
                 expansionStorageKey={`fanotes.treeExpanded.v1:${bootstrap?.vaultPath || 'default'}`}
                 rootLabel="Notizen"
@@ -5659,12 +6207,15 @@ export default function App({ startupBootstrap }: AppProps) {
                 onCreateNote={createNote}
                 onCreateFolder={createFolder}
                 onImportPdf={importPdfNote}
+                onCreateStory={(parent) => void createStory(parent)}
+                onImportStory={window.fanotes?.storyCreate ? (parent) => setStoryImportParent(parent ?? '') : undefined}
                 onAttachBook={attachBookToSubject}
                 onDetachBook={detachBookFromSubject}
                 localOnlyPaths={syncPrefixesFromSetting(settings.syncExcludedFolders)}
                 onToggleLocalOnly={(folder) => applySettings({ ...settingsRef.current, syncExcludedFolders: toggleSyncPrefix(settingsRef.current.syncExcludedFolders, folder) })}
                 bookFolderPaths={subjectBooks.map((book) => book.subjectPath)}
                 onSetFolderColor={setFolderColor}
+                onSetFileColor={window.fanotes.setFileColor ? setFileColor : undefined}
                 onEditFolderPath={openFolderPath}
                 onRename={renameEntry}
                 onMove={moveEntry}
@@ -5680,7 +6231,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </>}
         </aside>
 
-        <main className="workspace">
+        <main className={`workspace ${sideToolbar ? 'has-side-toolbar' : ''}`}>
           <div className="tabs-bar">
             <div className="note-nav" role="group" aria-label="Verlauf">
               <button
@@ -5728,6 +6279,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   inSplit={tab.path === splitPath}
                   dirty={tab.content !== tab.savedContent}
                   pinned={Boolean(tab.pinned)}
+                  hold={tabHolds[tab.path]?.kind}
                   path={tab.path}
                   title={tab.title}
                   index={index}
@@ -5773,7 +6325,7 @@ export default function App({ startupBootstrap }: AppProps) {
               />
             )
           })()}
-          {editorToolbarVisible && <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'}`}>
+          {editorToolbarVisible && <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'} ${sideToolbar ? 'is-vertical' : ''}`}>
             <div className="mode-switch" role="group" aria-label="Eingabemodus">
               <button
                 type="button"
@@ -5800,10 +6352,12 @@ export default function App({ startupBootstrap }: AppProps) {
             </div>
             <div className="toolbar-context">
               {(() => {
+                const selectedTextField = selectedTextFieldId ? noteTextFields.find((field) => field.id === selectedTextFieldId) : undefined
+                if (selectedTextField) return <NoteTextFieldToolbar field={selectedTextField} onStyle={changeTextFieldStyle} onRemove={removePlacedTextField} />
                 const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
                 if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
                 if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
-                return <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} />
+                return <FormattingToolbar onInsertStudy={insertStudyBlock} disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating || activeHeld} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} />
               })()}
             </div>
             <div className="toolbar-group toolbar-end">
@@ -5816,7 +6370,7 @@ export default function App({ startupBootstrap }: AppProps) {
               {activeTab && !isPdfActive && !drawingOpen && (
                 <PaperStylePicker
                   value={activePaper}
-                  disabled={activeEntryMutating}
+                  disabled={activeEntryMutating || activeHeld}
                   onChange={(style) => { if (activeTab) void applyNotePaper(activeTab.path, style) }}
                 />
               )}
@@ -5836,6 +6390,11 @@ export default function App({ startupBootstrap }: AppProps) {
                     </div>
                   )}
                 </div>
+              )}
+              {activeTab && isPdfActive && (
+                <button type="button" className={`toolbar-button ${studyPanel ? 'active' : ''}`} title="Aufträge und Markierungen dieses PDFs" aria-label="Aufträge dieses PDFs" aria-pressed={Boolean(studyPanel)} onClick={() => setStudyPanel((value) => (value ? null : 'tasks'))}>
+                  <ClipboardList size={14} /><span>Aufträge</span>
+                </button>
               )}
               {bookPolicy.controlVisible && (
                 <div className="subject-book-control">
@@ -5961,6 +6520,17 @@ export default function App({ startupBootstrap }: AppProps) {
               >
                 <Type size={14} /><span>Textfeld</span>
               </button>
+              <button
+                type="button"
+                className={`toolbar-button ${studyToolsOpen ? 'active' : ''}`}
+                title="Lernwerkzeuge: Beschriften, Zeichen, Bilder, Messen"
+                aria-label="Lernwerkzeuge"
+                aria-pressed={studyToolsOpen}
+                disabled={!activeTab}
+                onClick={() => setStudyToolsOpen((open) => !open)}
+              >
+                <GraduationCap size={14} /><span>Lernen</span>
+              </button>
               {!isPdfActive && <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>}
               {hasConnectedAiProvider(settings) && (
                 <button type="button" className={`toolbar-button ai ${lmStudioOpen ? 'active' : ''}`} title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /><span>AI</span></button>
@@ -6004,6 +6574,24 @@ export default function App({ startupBootstrap }: AppProps) {
               )
             )}
             <div className="editor-stage-main">
+            {!(glyphenWerkOpen || calendarOpen || homeworkOpen || studyOpen || overviewOpen) && [activeTab, splitTab].map((tab, position) => {
+              const hold = tab ? tabHolds[tab.path] : undefined
+              if (!tab || !hold || (position === 1 && tab.path === activeTab?.path)) return null
+              return (
+                <ExternalChangeBanner
+                  key={tab.path}
+                  kind={hold.kind}
+                  title={tab.title}
+                  canRestore={!isPdfNotePath(tab.path)}
+                  busy={externalTabs.busyPath === tab.path}
+                  onRestore={() => void externalTabs.restoreTab(tab.path)}
+                  onSaveAs={(name) => void externalTabs.saveTabAs(tab.path, name)}
+                  onKeepMine={() => void externalTabs.keepMine(tab.path)}
+                  onLoadExternal={() => void externalTabs.loadExternal(tab.path)}
+                  onCloseTab={() => void closeTab(tab.path)}
+                />
+              )
+            })}
             <Suspense fallback={<div className="editor-module-loading"><LoaderCircle className="spin" size={20} /><span>Ansicht wird geladen …</span></div>}>
               {glyphenWerkOpen ? (
               <SafeBoundary name="GlyphenWerk" fallbackTitle="GlyphenWerk ist abgestürzt">
@@ -6056,11 +6644,16 @@ export default function App({ startupBootstrap }: AppProps) {
                         <PdfNoteView
                           path={activeTab.path}
                           title={activeTab.title}
-                          inputDisabled={drawingOpen || activeEntryMutating}
+                          inputDisabled={drawingOpen || activeEntryMutating || activeHeld}
                           quotes={readPdfMarks(activeTab.content)}
                           onMarkSelection={(quote, page) => {
                             const marks = addPdfMark(readPdfMarks(activeTab.content), { page, quote, kind: 'highlight' })
                             updateContentFor(activeTab.path, writePdfMarks(activeTab.content, marks))
+                          }}
+                          onUnmarkSpans={(hit) => {
+                            const content = latestNoteContent(activeTab.path)
+                            const result = content === null ? null : unmarkPdfNote(content, [hit])
+                            if (result) updateContentFor(activeTab.path, result.content)
                           }}
                         />
                       </SafeBoundary>
@@ -6068,7 +6661,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -6114,6 +6707,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         onTextFieldsExtent={remapPlacedTextFields}
                         onInkActivity={handleInkActivity}
                         onTrainingChanged={handleTrainingChanged}
+                        foreignErase={isPdfActive ? pdfMarkEraseHost : undefined}
                         onOpenGlyphenWerk={openGlyphenWerk}
                         onSectionFold={(index, collapsed) => {
                           const line = headingLineForSection(activeTab.content, index)
@@ -6145,8 +6739,17 @@ export default function App({ startupBootstrap }: AppProps) {
                     onPlace={placeTextFieldAt}
                     onText={changeTextFieldText}
                     onGeometry={changeTextFieldGeometry}
+                    onStyle={changeTextFieldStyle}
+                    onFinish={finishTextFieldEdit}
                     onRemove={removePlacedTextField}
                     onFocusHandled={clearTextFieldFocus}
+                    onSelectedChange={setSelectedTextFieldId}
+                  />
+                  <StudyAnnotationLayer
+                    path={activeTab.path}
+                    pdf={isPdfActive}
+                    open={studyToolsOpen}
+                    onClose={() => setStudyToolsOpen(false)}
                   />
                 </article>
               </PaperView>
@@ -6211,7 +6814,7 @@ export default function App({ startupBootstrap }: AppProps) {
                           onEditActivity={(activity) => recordEditActivityFor(splitTab.path, activity)}
                           settings={settings}
                           paperMode
-                          readOnly={drawingOpen && focusedPane === 'split'}
+                          readOnly={(drawingOpen && focusedPane === 'split') || Boolean(tabHolds[splitTab.path])}
                         />
                       </SafeBoundary>
                     </div>
@@ -6262,6 +6865,7 @@ export default function App({ startupBootstrap }: AppProps) {
         </main>
 
         {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
+        {studyPanel && isPdfActive && activeTab && <Suspense fallback={null}><SafeBoundary name="Lernwerkzeuge"><StudyPanel key={activeTab.path} path={activeTab.path} title={activeTab.title} content={activeTab.content} initialTab={studyPanel} onContentChange={(content) => updateContentFor(activeTab.path, content)} onSaveNote={(title, markdown) => { void saveStudyNote(title, markdown) }} onNotice={(message) => toast(message, 'info')} onClose={() => setStudyPanel(null)} /></SafeBoundary></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} failed={searchFailed} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
@@ -6308,6 +6912,19 @@ export default function App({ startupBootstrap }: AppProps) {
       )}
       {paletteOpen && <Suspense fallback={null}><SafeBoundary name="Befehlspalette"><CommandPalette actions={paletteActions} mode={paletteMode} rankNotes={rankNotesForPalette} activePath={activePath} onOpenNote={(path) => void openNote(path)} onOpenNoteInSplit={(path) => void openInSplit(path)} onClose={closePalette} /></SafeBoundary></Suspense>}
       <ProfileOverviewPublisher settings={settings} />
+      {storyImportParent !== undefined && <Suspense fallback={null}><SafeBoundary name="Import" fallbackTitle="Der Import ist abgestürzt"><StoryImportDialog onImport={(story) => importStoryFile(story)} onClose={() => setStoryImportParent(undefined)} /></SafeBoundary></Suspense>}
+      {writingPath && (
+        <Suspense fallback={<div className="editor-module-loading"><LoaderCircle className="spin" size={20} /><span>Schreibmodus wird geladen …</span></div>}>
+          <SafeBoundary name="Schreiben" fallbackTitle="Der Schreibmodus ist abgestürzt">
+            <WritingMode
+              key={writingPath}
+              path={writingPath}
+              onClose={() => { setWritingPath(null); void refreshTree(); syncEngine.notifyLocalChange() }}
+              onSaved={() => { syncEngine.notifyLocalChange(); void import('./lib/docSearch/service').then(({ docSearch }) => docSearch.notifyStoryChanged(writingPath)) }}
+            />
+          </SafeBoundary>
+        </Suspense>
+      )}
       {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} onConvertFamd={convertAllFamdNotes} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
       {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}
@@ -6382,6 +6999,7 @@ export default function App({ startupBootstrap }: AppProps) {
           setConfirmRequest(null)
         }}
       />
+      {workRequestsOpen && <Suspense fallback={null}><SafeBoundary name="Fehler & Wünsche"><WorkRequestsPanel client={workRequestsClient} version={updateState.currentVersion} platform={window.fanotes.platform} onClose={() => setWorkRequestsOpen(false)} onSent={() => toast('Anfrage wurde gesendet.', 'success')} /></SafeBoundary></Suspense>}
       {bugReportOpen && <Suspense fallback={null}><SafeBoundary name="Fehlerbericht"><BugReportModal version={updateState.currentVersion} platform={window.fanotes.platform} onClose={() => setBugReportOpen(false)} onSent={() => toast('Fehlerbericht wurde an fanotes.fasrv.ch gesendet.', 'success')} /></SafeBoundary></Suspense>}
       {lmStudioOpen && <Suspense fallback={null}><AiPanel settings={settings} note={lmStudioNote} vaultNotes={vaultNoteReferences} pdfPath={isPdfActive && activeTab ? activeTab.path : null} onSettingsChange={(changes) => applySettings({ ...settingsRef.current, ...changes })} onApply={applyLmStudioResult} onApplyMarks={(found) => {
         if (!activeTab || !isPdfActive) return

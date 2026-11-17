@@ -117,7 +117,8 @@ try {
   const pair = [leftLetter, rightLetter]
   const erasedLeft = applyToolErase(pair, [{ x: px(130), y: py(260) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
   assert.equal(erasedLeft.includes(rightLetter), true, 'the letter that was not touched stays the same object')
-  assert.equal(erasedLeft.some((stroke) => stroke.id === 'left'), false, 'the touched letter is removed whole')
+  assert.equal(erasedLeft.some((stroke) => stroke.id === 'left' && hasPointNear(stroke, 130, 260, 2)), false, 'the touched spot of the letter is gone')
+  assert.equal(erasedLeft.some((stroke) => stroke.id === 'left' && hasPointNear(stroke, 100, 220, 2)), true, 'the far end of the letter stays (erasing is local)')
 
   const nearMiss = applyToolErase(pair, [{ x: px(100), y: py(220 - 30) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
   assert.equal(nearMiss, pair, 'passing beside the ink does not delete the letter')
@@ -137,7 +138,7 @@ try {
   assert.equal(erasedWord.includes(rightLetter), true, 'a separate neighbour is untouched')
   const wordParts = erasedWord.filter((stroke) => stroke.id === 'word')
   assert.ok(wordParts.length >= 1, 'the rest of the connected word stays')
-  assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 140, 260, 18)), false, 'the touched letter of the word is gone')
+  assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 140, 260, 4)), false, 'the touched spot of the word is gone')
   assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 320, 250, 30)), true, 'the connected letter that was not touched stays')
 
   const stem = polyline([[px(100), py(230)], [px(100), py(310)]], { id: 'stem' })
@@ -145,10 +146,12 @@ try {
   const other = polyline([[px(220), py(230)], [px(220), py(310)]], { id: 'other' })
   const eyed = [stem, dot, other]
   const erasedStem = applyToolErase(eyed, [{ x: px(100), y: py(270) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
-  assert.deepEqual(idsOf(erasedStem), ['other'], 'touching the stem removes the whole i, including the dot')
-  assert.equal(erasedStem[0], other)
+  assert.equal(erasedStem.includes(dot), true, 'touching the stem leaves the dot (local erase)')
+  assert.equal(erasedStem.includes(other), true)
+  assert.equal(erasedStem.some((stroke) => stroke.id === 'stem' && hasPointNear(stroke, 100, 270, 2)), false)
   const erasedDot = applyToolErase(eyed, [{ x: px(100), y: py(198) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
-  assert.deepEqual(idsOf(erasedDot), ['other'], 'touching the dot removes the whole i')
+  assert.equal(erasedDot.includes(stem), true, 'touching the dot leaves the stem')
+  assert.equal(erasedDot.some((stroke) => stroke.id === 'dot'), false, 'the touched dot is gone')
 
   const wideM = polyline([
     [px(100), py(300)],
@@ -158,8 +161,9 @@ try {
     [px(250), py(300)],
   ], { id: 'em' })
   const afterM = applyToolErase([wideM, rightLetter], [{ x: px(100), y: py(260) }], RADIUS, SOURCE_WIDTH, SOURCE_HEIGHT)
-  assert.equal(afterM.some((stroke) => stroke.id === 'em'), false, 'a single wide letter is removed whole when touched')
-  assert.equal(afterM[0], rightLetter)
+  assert.equal(afterM.some((stroke) => stroke.id === 'em' && hasPointNear(stroke, 100, 260, 2)), false, 'the touched part of a wide letter is gone')
+  assert.equal(afterM.some((stroke) => stroke.id === 'em' && hasPointNear(stroke, 250, 300, 2)), true, 'the far end of a wide letter stays')
+  assert.equal(afterM.includes(rightLetter), true)
 
   const underline = polyline([
     [px(40), py(420)],
@@ -204,13 +208,13 @@ try {
   assert.equal(coverage.mask[16 + 5], 1, 'the column after the hole stays claimed')
   assert.equal(coverage.mask[24], 1, 'rows below the hole stay claimed')
 
-  assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 120, 220, 8)), false, 'the stem of the touched letter goes with the letter')
+  assert.equal(wordParts.some((stroke) => hasPointNear(stroke, 120, 220, 8)), true, 'the stem end outside the eraser stays')
 
   const fineStem = polyline([[px(100), py(230)], [px(100), py(310)]], { id: 'fine' })
   const fineNeighbor = polyline([[px(130), py(230)], [px(130), py(310)]], { id: 'fine-neighbor' })
   const finePair = [fineStem, fineNeighbor]
   const fineHit = applyToolErase(finePair, [{ x: px(100), y: py(270) }], 1, SOURCE_WIDTH, SOURCE_HEIGHT)
-  assert.equal(fineHit.some((stroke) => stroke.id === 'fine'), false, 'a 1 px eraser on the ink removes that stroke')
+  assert.equal(fineHit.some((stroke) => stroke.id === 'fine' && hasPointNear(stroke, 100, 270, 1)), false, 'a 1 px eraser on the ink cuts that spot')
   assert.equal(fineHit.includes(fineNeighbor), true, 'a 1 px eraser leaves the stroke a few pixels away')
   const fineMiss = applyToolErase(finePair, [{ x: px(108), y: py(270) }], 1, SOURCE_WIDTH, SOURCE_HEIGHT)
   assert.equal(fineMiss, finePair, 'a 1 px eraser that only passes near the ink deletes nothing')
@@ -225,7 +229,7 @@ try {
     SOURCE_WIDTH,
     SOURCE_HEIGHT,
   )
-  assert.equal(separated.some((stroke) => stroke.id === 'tall'), false, 'the touched stem is removed')
+  assert.equal(separated.some((stroke) => stroke.id === 'tall' && hasPointNear(stroke, 120, 300, 2)), false, 'the touched part of the stem is removed')
   assert.equal(separated.includes(stray), true, 'a short line well below the letter stays')
   assert.equal(separated.includes(farLine), true, 'a line elsewhere on the page stays')
 
@@ -330,7 +334,7 @@ try {
 
   const stalePage = scaleOpened(adopted.scaleX, adopted.scaleY)
   const staleHit = applyToolErase(stalePage, [letterTouch], RADIUS, drawing.sourceWidth, drawing.sourceHeight)
-  assert.equal(staleHit.some((stroke) => stroke.id === 'below'), false, 'the saved page after the layout scale deletes the neighbour the disk does not meet')
+  assert.equal(staleHit.some((stroke) => stroke.id === 'below' && stroke.points.some((e) => e.x === stalePage[1].points[0].x && e.y === stalePage[1].points[0].y)), false, 'the saved page after the layout scale deletes the neighbour the disk does not meet')
   const staleGap = Math.hypot(
     (stalePage[1].points[0].x - letterTouch.x) * drawing.sourceWidth,
     (stalePage[1].points[0].y - letterTouch.y) * drawing.sourceHeight,
@@ -342,7 +346,7 @@ try {
   const keptFar = erasedReopen.find((stroke) => stroke.id === 'far')
   assert.equal(keptBelow, reopened[1], 'the mark outside the disk stays, and it is the same stroke')
   assert.equal(keptFar, reopened[2], 'a mark far from the touch stays the same stroke')
-  assert.equal(erasedReopen.some((stroke) => stroke.id === 'letter'), false, 'the mark under the eraser is removed')
+  assert.equal(erasedReopen.some((stroke) => stroke.id === 'letter' && onAdopted(stroke, 135, 270, 2)), false, 'the ink under the eraser is removed')
   assert.equal(onAdopted(keptBelow, 135, 380), true, 'the neighbour keeps the ink that was saved')
 
   const lineTouch = { x: 200 / adopted.pageWidth, y: 720 / adopted.pageHeight }
@@ -560,6 +564,446 @@ try {
       missUnchanged: afterReopenMiss === missed,
     },
   }))
+  {
+    // Regression: "erasing also erases text I was not near". The eraser used
+    // to take the whole letter plus any dot or bar grouped to it, and to
+    // widen cuts by a letter width. Everything beyond the disk must stay.
+    const R = 10
+    const tall = polyline([[px(300), py(1000)], [px(300), py(1120)]], { id: 'tallStem' })
+    const dotAbove = polyline([[px(296), py(976)], [px(304), py(976)]], { id: 'dotAbove' })
+    const scribble = polyline([
+      [px(300), py(1000)], [px(330), py(1060)], [px(300), py(1120)], [px(270), py(1060)], [px(300), py(1000)],
+    ], { id: 'loop' })
+    const longWord = polyline(Array.from({ length: 41 }, (_, i) => [px(100 + i * 10), py(1300 + (i % 2) * 40)]), { id: 'cursive' })
+    const strokes = [tall, dotAbove, scribble, longWord]
+    const out = applyToolErase(strokes, [{ x: px(300), y: py(1115) }], R, SOURCE_WIDTH, SOURCE_HEIGHT)
+    assert.equal(out.includes(dotAbove), true, 'a dot 140 px from the eraser stays')
+    assert.equal(out.includes(longWord), true, 'a word on another line stays untouched')
+    const reach = (stroke) => stroke.points.every((entry) => Math.hypot(entry.x * SOURCE_WIDTH - 300, entry.y * SOURCE_HEIGHT - 1115) > R - 0.5)
+    for (const stroke of out) assert.equal(reach(stroke), true, `no kept ink of ${stroke.id} lies inside the eraser disk`)
+    assert.equal(out.some((stroke) => stroke.id === 'tallStem' && hasPointNear(stroke, 300, 1000, 2)), true, 'the top of the stem stays')
+    assert.equal(out.some((stroke) => stroke.id === 'loop' && hasPointNear(stroke, 330, 1060, 2)), true, 'the rest of the loop stays')
+    // Every removed vertex lies within the disk plus half a stroke width.
+    const before = strokes.flatMap((stroke) => stroke.points).length
+    const after = out.flatMap((stroke) => stroke.points).length
+    assert.ok(after >= before - 4, 'only a few vertices near the disk are dropped')
+    const longCut = applyToolErase([longWord], [{ x: px(300), y: py(1300) }], R, SOURCE_WIDTH, SOURCE_HEIGHT)
+    assert.equal(longCut.some((stroke) => hasPointNear(stroke, 140, 1300, 2)), true, 'a long word keeps ink 160 px from the eraser')
+    assert.equal(longCut.some((stroke) => hasPointNear(stroke, 460, 1300, 2)), true, 'a long word keeps ink 160 px away on the other side')
+  }
+  {
+    // The cut is closed-form geometry (review R2: E1 crossings, E2 mid-segment
+    // cuts, E6 crumbs). First the reviewer's repros with exact expectations,
+    // then random strokes and eraser paths checked against an oracle that
+    // samples the ink and measures every sample against the eraser path.
+    const W = 1000
+    const H = 1400
+    const TOL = 1e-6
+    const close = (left, right, tolerance = TOL) => Math.abs(left - right) <= tolerance
+    const ink = (coords, width = 3, pageH = H) => polyline(
+      coords.map(([x, y]) => [x / W, y / pageH]),
+      { baseWidth: width },
+    )
+    const erase = (strokes, samples, radius, pageW = W, pageH = H) => applyToolErase(
+      strokes,
+      samples.map(([x, y]) => ({ x: x / pageW, y: y / pageH })),
+      radius,
+      pageW,
+      pageH,
+    )
+    const coordsOf = (stroke, pageW = W, pageH = H) => stroke.points.map((entry) => [entry.x * pageW, entry.y * pageH])
+    const assertShape = (strokes, expected, label, pageH = H) => {
+      const got = strokes.map((stroke) => coordsOf(stroke, W, pageH))
+      assert.equal(got.length, expected.length, `${label}: expected ${expected.length} pieces, got ${JSON.stringify(got)}`)
+      got.forEach((piece, index) => {
+        assert.equal(piece.length, expected[index].length, `${label}: piece ${index} is ${JSON.stringify(piece)}`)
+        piece.forEach(([x, y], at) => {
+          assert.ok(
+            close(x, expected[index][at][0]) && close(y, expected[index][at][1]),
+            `${label}: piece ${index} point ${at} is ${x},${y}, expected ${expected[index][at]}`,
+          )
+        })
+      })
+    }
+    // Erasing the same place again must change nothing (no rim noise, no new objects).
+    const eraseTwice = (strokes, samples, radius, pageH = H) => {
+      const once = erase(strokes, samples, radius, W, pageH)
+      assert.equal(erase(once, samples, radius, W, pageH), once, 'a second pass over the same place changes nothing')
+      return once
+    }
+
+    // E1: a swipe that crosses a sparse stroke between its vertices. Width 3 and
+    // radius 6 reach the ink 7.5 px to either side of the swipe.
+    for (const x of [130, 200, 270]) {
+      assertShape(
+        eraseTwice([ink([[100, 500], [300, 500]])], [[x, 480], [x, 520]], 6),
+        [[[100, 500], [x - 7.5, 500]], [[x + 7.5, 500], [300, 500]]],
+        `a swipe across a 200 px segment at x=${x}`,
+      )
+    }
+    const denseLine = ink(Array.from({ length: 101 }, (_, index) => [100 + index * 2, 500]))
+    const denseCut = erase([denseLine], [[130, 480], [130, 520]], 6).map((stroke) => coordsOf(stroke))
+    assert.equal(denseCut.length, 2, 'a dense line is cut in two as well')
+    assert.ok(close(denseCut[0].at(-1)[0], 122.5) && close(denseCut[1][0][0], 137.5), 'and at the same places as the sparse one')
+    // A slanted stroke and a vertical swipe: the cut points are where the slab ends.
+    const slope = 20 / 300
+    assertShape(
+      eraseTwice([ink([[100, 500], [400, 520]])], [[250, 400], [250, 600]], 6),
+      [[[100, 500], [242.5, 500 + 142.5 * slope]], [[257.5, 500 + 157.5 * slope], [400, 520]]],
+      'a long swipe across a slanted stroke',
+    )
+    // A diagonal stroke and a disk on it: the cut is 11.5 px of ink either side.
+    const diagonal = 11.5 / Math.SQRT2
+    assertShape(
+      eraseTwice([ink([[100, 100], [400, 400]])], [[250, 250]], 10),
+      [[[100, 100], [250 - diagonal, 250 - diagonal]], [[250 + diagonal, 250 + diagonal], [400, 400]]],
+      'a disk on a diagonal stroke',
+    )
+    // A path along the ink and a path that crosses it twice.
+    assertShape(
+      eraseTwice([ink([[100, 500], [300, 500]])], [[150, 500], [250, 500]], 6),
+      [[[100, 500], [142.5, 500]], [[257.5, 500], [300, 500]]],
+      'an eraser path laid along the stroke',
+    )
+    assertShape(
+      eraseTwice([ink([[100, 500], [300, 500]])], [[130, 480], [130, 520], [270, 520], [270, 480]], 6),
+      [[[100, 500], [122.5, 500]], [[137.5, 500], [262.5, 500]], [[277.5, 500], [300, 500]]],
+      'a U-shaped eraser path that crosses the stroke twice',
+    )
+    // A radius of 1 px across a 4000 px segment: no vertex or probe lies near the cut.
+    assertShape(
+      eraseTwice([ink([[100, 100], [100, 4100]], 3, 9000)], [[90, 2000], [110, 2000]], 1, 9000),
+      [[[100, 100], [100, 1997.5]], [[100, 2002.5], [100, 4100]]],
+      'a 1 px swipe across a very long segment',
+      9000,
+    )
+
+    // E2: an eraser that sits on a long segment cuts out its own width and nothing else.
+    for (const x of [110, 130, 160, 200, 270, 290]) {
+      assertShape(
+        eraseTwice([ink([[100, 500], [300, 500]])], [[x, 500]], 6),
+        [[[100, 500], [x - 7.5, 500]], [[x + 7.5, 500], [300, 500]]],
+        `a stationary eraser at x=${x}`,
+      )
+    }
+    assertShape(
+      eraseTwice([ink([[100, 500], [160, 500], [220, 500]])], [[118, 500]], 3),
+      [[[100, 500], [113.5, 500]], [[122.5, 500], [160, 500], [220, 500]]],
+      'a small eraser on the first segment of a polyline',
+    )
+    assertShape(
+      eraseTwice([ink([[100, 500], [160, 500], [220, 500]])], [[160, 500]], 6),
+      [[[100, 500], [152.5, 500]], [[167.5, 500], [220, 500]]],
+      'an eraser on a vertex takes the vertex',
+    )
+    assertShape(
+      eraseTwice([ink([[100, 500], [152.5, 500], [220, 500]])], [[160, 500]], 6),
+      [[[100, 500], [152.5, 500]], [[167.5, 500], [220, 500]]],
+      'a cut that lands on a vertex does not repeat it',
+    )
+    assertShape(
+      eraseTwice([ink([[100, 500], [120, 500], [140, 500]])], [[128.4, 500]], 3),
+      [[[100, 500], [120, 500], [123.9, 500]], [[132.9, 500], [140, 500]]],
+      'an eraser between two vertices',
+    )
+    const dotStroke = ink([[100, 500]], 8)
+    assert.equal(erase([dotStroke], [[105, 500]], 2).length, 0, 'a dot is erased when the disk reaches its edge')
+    const dotList = [dotStroke]
+    assert.equal(erase(dotList, [[107, 500]], 2), dotList, 'and kept when the disk stops short of it')
+    assert.equal(erase([ink([[100, 500], [101, 500]])], [[100, 500]], 2).length, 0, 'a tiny two-point stroke under the eraser is gone')
+    assert.equal(erase([ink([[100, 500], [100, 500], [100, 500]])], [[103, 500]], 2).length, 0, 'a stroke of repeated samples is a dot')
+    // A broken sample (NaN) is never reached, and does not stop the rest of the stroke from being cut.
+    const broken = ink([[100, 500], [160, 500], [220, 500]])
+    broken.points[1].x = Number.NaN
+    const brokenList = [broken]
+    assert.equal(erase(brokenList, [[130, 500]], 6), brokenList, 'segments with a NaN end are not hit')
+    const brokenFar = ink([[100, 500], [140, 500], [160, 500], [400, 500]])
+    brokenFar.points[1].y = Number.NaN
+    const brokenCut = erase([brokenFar], [[300, 500]], 6)
+    assert.equal(brokenCut.length, 2, 'a NaN elsewhere in the stroke does not stop a cut')
+    assert.ok(close(coordsOf(brokenCut[0]).at(-1)[0], 292.5) && close(coordsOf(brokenCut[1])[0][0], 307.5), 'and the cut is still exact')
+
+    // E6: no crumbs. A remainder shorter than a quarter of the width (at least
+    // half a pixel) is dropped, a longer one stays.
+    assertShape(
+      eraseTwice([ink([[100, 500], [300, 500]])], [[292, 500]], 6),
+      [[[100, 500], [284.5, 500]]],
+      'a 0.5 px remainder at the far end is dropped',
+    )
+    assertShape(
+      eraseTwice([ink([[100, 500], [300, 500]])], [[108, 500]], 6),
+      [[[115.5, 500], [300, 500]]],
+      'a 0.5 px remainder at the near end is dropped',
+    )
+    assertShape(
+      eraseTwice([ink([[100, 500], [300, 500]])], [[291.5, 500]], 6),
+      [[[100, 500], [284, 500]], [[299, 500], [300, 500]]],
+      'a 1 px remainder is kept',
+    )
+    // The limit grows with the width: a quarter of 12 px is 3 px.
+    const wide = ink([[100, 500], [300, 500]], 12)
+    assertShape(erase([wide], [[200, 500]], 6), [[[100, 500], [188, 500]], [[212, 500], [300, 500]]], 'a wide stroke is cut by its own reach')
+    assertShape(erase([wide], [[286, 500]], 6), [[[100, 500], [274, 500]]], 'a 2 px stub of a wide stroke is dropped')
+    assertShape(erase([wide], [[284, 500]], 6), [[[100, 500], [272, 500]], [[296, 500], [300, 500]]], 'a 4 px stub of a wide stroke is kept')
+
+    // Touching without reaching: a miss by a hair keeps the same objects, a
+    // graze by 0.01 px cuts a hair of ink.
+    const hairLine = [ink([[100, 500], [300, 500]])]
+    assert.equal(erase(hairLine, [[200, 500 - 7.51]], 6), hairLine, 'an eraser 0.01 px short of the ink changes nothing')
+    const chord = Math.sqrt(7.5 * 7.5 - 7.49 * 7.49)
+    assertShape(
+      eraseTwice(hairLine, [[200, 500 - 7.49]], 6),
+      [[[100, 500], [200 - chord, 500]], [[200 + chord, 500], [300, 500]]],
+      'a graze cuts the chord and no more',
+    )
+
+    // Random strokes and eraser paths against a sampling oracle.
+    const seeded = (seed) => () => {
+      seed = (seed + 0x6d2b79f5) | 0
+      let mixed = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+      mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed
+      return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296
+    }
+    const rand = seeded(20261116)
+    const between = (low, high) => low + (high - low) * rand()
+    const clamp = (value, low, high) => Math.max(low, Math.min(high, value))
+    const distanceToSeg = (x, y, ax, ay, bx, by) => {
+      const dx = bx - ax
+      const dy = by - ay
+      const squared = dx * dx + dy * dy
+      const t = squared > 0 ? clamp(((x - ax) * dx + (y - ay) * dy) / squared, 0, 1) : 0
+      return Math.hypot(x - (ax + dx * t), y - (ay + dy * t))
+    }
+    const distanceToLine = (x, y, line) => {
+      if (line.length === 1) return Math.hypot(x - line[0][0], y - line[0][1])
+      let best = Number.POSITIVE_INFINITY
+      for (let index = 1; index < line.length; index += 1) {
+        best = Math.min(best, distanceToSeg(x, y, line[index - 1][0], line[index - 1][1], line[index][0], line[index][1]))
+      }
+      return best
+    }
+    // Points along a polyline no farther than `step` apart, vertices included.
+    const sampleLine = (line, step) => {
+      const found = [line[0]]
+      for (let index = 1; index < line.length; index += 1) {
+        const [ax, ay] = line[index - 1]
+        const [bx, by] = line[index]
+        const parts = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / step))
+        for (let part = 1; part <= parts; part += 1) found.push([ax + (bx - ax) * part / parts, ay + (by - ay) * part / parts])
+      }
+      return found
+    }
+    const lengthOf = (line) => line.slice(1).reduce((sum, entry, index) => sum + Math.hypot(entry[0] - line[index][0], entry[1] - line[index][1]), 0)
+    const coverIndex = (lines) => lines.flatMap((line) => line.slice(1).map((entry, index) => {
+      const [ax, ay] = line[index]
+      return {
+        ax,
+        ay,
+        bx: entry[0],
+        by: entry[1],
+        minX: Math.min(ax, entry[0]) - TOL,
+        maxX: Math.max(ax, entry[0]) + TOL,
+        minY: Math.min(ay, entry[1]) - TOL,
+        maxY: Math.max(ay, entry[1]) + TOL,
+      }
+    }))
+    const isCovered = (index, x, y) => index.some((segment) => (
+      x >= segment.minX && x <= segment.maxX && y >= segment.minY && y <= segment.maxY
+      && distanceToSeg(x, y, segment.ax, segment.ay, segment.bx, segment.by) <= TOL
+    ))
+    // Pressure and time are linear in the position, so a cut point must carry
+    // the value the line has there.
+    const fieldsAt = (x, y) => ({ t: 0.5 * x + 0.25 * y, pressure: 0.2 + 0.0004 * x + 0.0003 * y })
+    const makeStroke = (id, pageW, pageH, sparse = rand() < 0.5) => {
+      const count = sparse ? 2 + Math.floor(rand() * 7) : 20 + Math.floor(rand() * 100)
+      let x = between(30, pageW - 30)
+      let y = between(30, pageH - 30)
+      let heading = between(0, 2 * Math.PI)
+      const points = []
+      for (let index = 0; index < count; index += 1) {
+        points.push({ x: x / pageW, y: y / pageH, ...fieldsAt(x, y), tiltX: 0, tiltY: 0, pointerType: 'pen' })
+        heading += sparse ? between(-1.5, 1.5) : between(-0.4, 0.4)
+        const step = rand() < 0.05 ? 0 : sparse ? between(15, 260) : between(0.4, 3.5)
+        x = clamp(x + Math.cos(heading) * step, 2, pageW - 2)
+        y = clamp(y + Math.sin(heading) * step, 2, pageH - 2)
+      }
+      return { id, points, baseWidth: between(0.5, 14), pressureEnabled: true, color: '#191c24', purpose: 'handwriting' }
+    }
+    // The same line with extra points on its segments: it must be cut identically.
+    const densified = (stroke, pageW, pageH) => ({
+      ...stroke,
+      points: stroke.points.flatMap((entry, index, all) => {
+        if (index === 0) return [entry]
+        const before = all[index - 1]
+        const extra = Array.from({ length: Math.floor(rand() * 4) }, () => between(0.05, 0.95)).sort((left, right) => left - right)
+        return [
+          ...extra.map((t) => {
+            const x = before.x + (entry.x - before.x) * t
+            const y = before.y + (entry.y - before.y) * t
+            return { ...before, x, y, ...fieldsAt(x * pageW, y * pageH) }
+          }),
+          entry,
+        ]
+      }),
+    })
+    const makePath = (strokes, pageW, pageH) => {
+      const target = strokes[Math.floor(rand() * strokes.length)]
+      const hook = target.points[Math.floor(rand() * target.points.length)]
+      let x = clamp(hook.x * pageW + between(-30, 30), 1, pageW - 1)
+      let y = clamp(hook.y * pageH + between(-30, 30), 1, pageH - 1)
+      const samples = [[x, y]]
+      const wanted = 1 + Math.floor(rand() * 6)
+      const fast = rand() < 0.6
+      let heading = between(0, 2 * Math.PI)
+      for (let attempt = 0; attempt < 60 && samples.length < wanted; attempt += 1) {
+        heading += between(-1.2, 1.2)
+        const step = fast ? between(10, 320) : between(0.5, 6)
+        const nextX = clamp(x + Math.cos(heading) * step, 1, pageW - 1)
+        const nextY = clamp(y + Math.sin(heading) * step, 1, pageH - 1)
+        if (Math.hypot(nextX - x, nextY - y) < 0.6) continue
+        samples.push([nextX, nextY])
+        x = nextX
+        y = nextY
+      }
+      return samples
+    }
+
+    const stats = { trials: 0, strokesCut: 0, untouched: 0, pieces: 0, composed: 0 }
+    const checkErase = (name, strokes, samples, radius, pageW, pageH) => {
+      const out = erase(strokes, samples, radius, pageW, pageH)
+      const dense = strokes.map((stroke) => densified(stroke, pageW, pageH))
+      const outDense = erase(dense, samples, radius, pageW, pageH)
+      const middle = samples.length >= 3 ? Math.floor(samples.length / 2) : 0
+      const outSteps = middle
+        ? erase(erase(strokes, samples.slice(0, middle + 1), radius, pageW, pageH), samples.slice(middle), radius, pageW, pageH)
+        : null
+      stats.trials += 1
+
+      assert.equal(out.every((entry) => strokes.some((stroke) => stroke.id === entry.id)), true, `${name}: no stroke appears from nowhere`)
+      assert.equal(erase(out, samples, radius, pageW, pageH), out, `${name}: erasing the same path again changes nothing`)
+
+      for (const stroke of strokes) {
+        const label = `${name} ${stroke.id} (radius ${radius.toFixed(2)}, width ${stroke.baseWidth.toFixed(2)}, ${stroke.points.length} points)`
+        const original = coordsOf(stroke, pageW, pageH)
+        const reach = radius + stroke.baseWidth / 2
+        const crumb = Math.max(0.5, stroke.baseWidth / 4)
+        const inkSamples = sampleLine(original, 0.25)
+        const gaps = inkSamples.map(([x, y]) => distanceToLine(x, y, samples))
+        const nearest = Math.min(...gaps)
+        const pieces = out.filter((entry) => entry.id === stroke.id)
+        const lines = pieces.map((piece) => coordsOf(piece, pageW, pageH))
+        const kept = coverIndex(lines)
+
+        // 0.125 px is the most a point between two samples can be closer than the closest sample.
+        if (nearest > reach + 0.126) {
+          assert.equal(out.includes(stroke), true, `${label}: ink the path never reaches stays the same object`)
+          stats.untouched += 1
+          continue
+        }
+        if (nearest < reach - 0.01) {
+          assert.equal(out.includes(stroke), false, `${label}: ink the path reaches is cut`)
+          stats.strokesCut += 1
+        }
+        stats.pieces += pieces.length
+
+        lines.forEach((line, index) => {
+          assert.ok(line.length >= 2, `${label}: piece ${index} has one point`)
+          assert.ok(lengthOf(line) >= crumb - 1e-9, `${label}: piece ${index} is a crumb of ${lengthOf(line)} px`)
+          // Every piece is a stretch of the original line...
+          for (const [x, y] of sampleLine(line, 0.5)) {
+            assert.ok(distanceToLine(x, y, original) <= TOL, `${label}: piece ${index} leaves the drawn line at ${x},${y}`)
+          }
+          // ...that lies wholly outside the reach of the eraser.
+          for (const [x, y] of sampleLine(line, 0.25)) {
+            assert.ok(
+              distanceToLine(x, y, samples) >= reach - TOL,
+              `${label}: ink left at ${x},${y}, ${distanceToLine(x, y, samples)} px from the path (reach ${reach})`,
+            )
+          }
+          // Cut points carry the pressure and time the line has at that spot.
+          for (const entry of pieces[index].points) {
+            const expected = fieldsAt(entry.x * pageW, entry.y * pageH)
+            assert.ok(close(entry.pressure, expected.pressure, 1e-9) && close(entry.t, expected.t, 1e-9), `${label}: a cut point lost its pressure or time`)
+          }
+        })
+
+        // Only ink within reach goes, plus a crumb next to a cut.
+        inkSamples.forEach(([x, y], index) => {
+          if (gaps[index] > reach + crumb + TOL) {
+            assert.ok(isCovered(kept, x, y), `${label}: ink at ${x},${y} is ${gaps[index]} px from the path (reach ${reach}, crumb ${crumb}) and was removed`)
+          }
+        })
+
+        // Extra points on a segment make no difference to the cut. A sample on
+        // the rim itself can fall either way.
+        const denseKept = coverIndex(outDense.filter((entry) => entry.id === stroke.id).map((piece) => coordsOf(piece, pageW, pageH)))
+        inkSamples.forEach(([x, y], index) => {
+          if (close(gaps[index], reach, 1e-6)) return
+          assert.equal(isCovered(denseKept, x, y), isCovered(kept, x, y), `${label}: a stroke with extra points on its segments was cut differently at ${x},${y}`)
+        })
+        // Two erase passes along one path leave what a single pass does.
+        if (outSteps) {
+          const stepKept = coverIndex(outSteps.filter((entry) => entry.id === stroke.id).map((piece) => coordsOf(piece, pageW, pageH)))
+          stats.composed += 1
+          inkSamples.forEach(([x, y], index) => {
+            if (close(gaps[index], reach, 1e-6)) return
+            assert.equal(isCovered(stepKept, x, y), isCovered(kept, x, y), `${label}: erasing in two steps cut differently at ${x},${y}`)
+          })
+        }
+      }
+      return out
+    }
+
+    for (let trial = 0; trial < 300; trial += 1) {
+      const pageW = Math.round(between(500, 1300))
+      const pageH = Math.round(between(700, 2200))
+      const strokes = Array.from({ length: 1 + Math.floor(rand() * 3) }, (_, index) => makeStroke(`s${index}`, pageW, pageH))
+      const radius = rand() < 0.15 ? between(0.5, 3) : between(1, 40)
+      checkErase(`trial ${trial}`, strokes, makePath(strokes, pageW, pageH), radius, pageW, pageH)
+    }
+
+    // The far end of a long segment: the eraser stops `stub` px short of the
+    // end. The stub is a crumb up to a quarter of the width (at least 0.5 px).
+    let crumbsDropped = 0
+    let stubsKept = 0
+    for (let trial = 0; trial < 120; trial += 1) {
+      const pageW = Math.round(between(500, 1300))
+      const pageH = Math.round(between(700, 2200))
+      const radius = between(1, 30)
+      let stroke = makeStroke('end', pageW, pageH, true)
+      let line = coordsOf(stroke, pageW, pageH)
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const [end, before] = [line.at(-1), line.at(-2)]
+        if (Math.hypot(end[0] - before[0], end[1] - before[1]) > 4 * (radius + 7) + 20) break
+        stroke = makeStroke('end', pageW, pageH, true)
+        line = coordsOf(stroke, pageW, pageH)
+      }
+      const [end, before] = [line.at(-1), line.at(-2)]
+      const length = Math.hypot(end[0] - before[0], end[1] - before[1])
+      if (length <= 4 * (radius + 7) + 20) continue
+      const reach = radius + stroke.baseWidth / 2
+      const crumb = Math.max(0.5, stroke.baseWidth / 4)
+      const stub = between(0.05, crumb * 1.8)
+      if (close(stub, crumb, 1e-4)) continue
+      const aim = reach + stub
+      const sample = [end[0] - (end[0] - before[0]) / length * aim, end[1] - (end[1] - before[1]) / length * aim]
+      const out = checkErase(`end ${trial}`, [stroke], [sample], radius, pageW, pageH)
+      const tail = out.map((piece) => coordsOf(piece, pageW, pageH)).filter((piece) => close(piece.at(-1)[0], end[0], 1e-6) && close(piece.at(-1)[1], end[1], 1e-6))
+      if (stub < crumb) {
+        assert.equal(tail.length, 0, `end ${trial}: a stub of ${stub} px (crumb ${crumb}) is dropped`)
+        crumbsDropped += 1
+      } else {
+        assert.equal(tail.length, 1, `end ${trial}: a stub of ${stub} px (crumb ${crumb}) stays`)
+        assert.ok(close(lengthOf(tail[0]), stub, 1e-6), `end ${trial}: the stub keeps its length`)
+        stubsKept += 1
+      }
+    }
+    assert.ok(crumbsDropped > 20 && stubsKept > 20, `crumb trials cover both sides (${crumbsDropped} dropped, ${stubsKept} kept)`)
+    assert.ok(stats.strokesCut > 150, `the random trials cut ink (${stats.strokesCut} cut strokes)`)
+    assert.ok(stats.untouched > 50, `the random trials also miss (${stats.untouched} untouched strokes)`)
+    assert.ok(stats.pieces > stats.strokesCut, 'some random cuts leave more than one piece')
+    console.log(JSON.stringify({ randomErase: { ...stats, crumbsDropped, stubsKept } }))
+  }
   console.log('tool-erase ok')
 } finally {
   await server.close()

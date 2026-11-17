@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
+import { Children, isValidElement, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
 import ReactMarkdown, {
   defaultUrlTransform,
   type Components,
@@ -12,6 +12,9 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { defaultSchema, type Schema } from 'hast-util-sanitize'
 import type { Nodes, Root } from 'hast'
+import { renderStudyBlockHtml } from '../lib/study/registry'
+import type { StudyKind } from '../lib/study/blocks'
+import { hydrateVaultImages } from '../lib/study/imageTools'
 
 export type MarkdownLinkHandler = (href: string) => void | Promise<void>
 
@@ -193,9 +196,16 @@ function createComponents(onOpenLink?: MarkdownLinkHandler, resolveImage?: (src:
         type={type}
       />
     ),
-    pre: ({ node: _node, ...props }) => (
-      <pre className="markdown-code-block" tabIndex={0} {...props} />
-    ),
+    pre: ({ node: _node, ...props }) => {
+      // Study blocks (```fanotes-key etc.) render as diagrams; the JSON stays in the file.
+      const child = Children.toArray(props.children)[0]
+      const language = isValidElement<{ className?: string; children?: ReactNode }>(child) ? /language-fanotes-(key|sort|map|plate|term)\b/u.exec(child.props.className ?? '')?.[1] : undefined
+      if (language && isValidElement<{ children?: ReactNode }>(child)) {
+        const body = Children.toArray(child.props.children).map((part) => (typeof part === 'string' ? part : '')).join('')
+        return <div className="lw-block markdown-lw" ref={(node) => { if (node) hydrateVaultImages(node) }} dangerouslySetInnerHTML={{ __html: renderStudyBlockHtml(language as StudyKind, body) }} />
+      }
+      return <pre className="markdown-code-block" tabIndex={0} {...props} />
+    },
     table: ({ node: _node, ...props }) => (
       <div className="markdown-table-scroll" tabIndex={0}>
         <table className="markdown-table" {...props} />
@@ -231,7 +241,7 @@ export function MarkdownPreview({
           rehypeRaw,
           rehypeHeadingIds,
           [rehypeSanitize, markdownSanitizeSchema],
-          [rehypeKatex, { output: 'htmlAndMathml', strict: false, trust: false }],
+          [rehypeKatex, { output: 'htmlAndMathml', strict: false, trust: false, maxExpand: 1000 }],
         ]}
         remarkPlugins={[remarkGfm, remarkMath]}
         urlTransform={secureUrlTransform}

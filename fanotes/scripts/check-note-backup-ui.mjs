@@ -9,6 +9,7 @@ const defaultsSource = readFileSync(new URL('../src/defaults.ts', import.meta.ur
 const typesSource = readFileSync(new URL('../src/types.ts', import.meta.url), 'utf8')
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const mainSource = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8')
+const sanitizeSource = readFileSync(new URL('../electron/settings-sanitize.cjs', import.meta.url), 'utf8')
 
 const server = await createServer({
   root: appRoot,
@@ -26,7 +27,7 @@ const runOnce = () => {
   assert.match(settingsSource, /experimentalNoteBackup/)
   assert.match(defaultsSource, /experimentalNoteBackup: false/)
   assert.match(typesSource, /experimentalNoteBackup: boolean/)
-  assert.match(mainSource, /experimentalNoteBackup: \{ type: 'boolean' \}/)
+  assert.match(sanitizeSource, /experimentalNoteBackup: \{ type: 'boolean' \}/)
   assert.equal(defaultSettingsForPlatform('linux').experimentalNoteBackup, false)
   assert.equal(defaultSettingsForPlatform('win32').experimentalNoteBackup, false)
 

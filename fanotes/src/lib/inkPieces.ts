@@ -1,12 +1,15 @@
 /**
  * Letter-sized pieces of handwriting.
  *
- * A pen stroke is often a whole word. The eraser and the move tool treat a
- * letter (and its dot or crossbar) as the unit: the whole letter goes when
- * the pen really meets its ink, and the neighbouring letter stays.
+ * A pen stroke is often a whole word. The move tool treats a letter (and its
+ * dot or crossbar) as the unit: the whole letter goes when the pen really
+ * meets its ink, and the neighbouring letter stays.
  * A long straight mark, such as an underline, is not a letter — only the
  * span the pen actually covers is cut out.
  * A leap to ink that is not part of the letter starts a new piece.
+ *
+ * The eraser does not use letters: `cutPageStroke` below cuts away exactly the
+ * ink the eraser path reaches and nothing else.
  */
 
 export type InkPiecePoint = { x: number; y: number }
@@ -57,13 +60,6 @@ export const distanceToSegment = (
   const t = clamp01(((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
 }
-
-const segmentDistance = (a: Pixel, b: Pixel, c: Pixel, d: Pixel) => Math.min(
-  distanceToSegment(a.x, a.y, c.x, c.y, d.x, d.y),
-  distanceToSegment(b.x, b.y, c.x, c.y, d.x, d.y),
-  distanceToSegment(c.x, c.y, a.x, a.y, b.x, b.y),
-  distanceToSegment(d.x, d.y, a.x, a.y, b.x, b.y),
-)
 
 export const pixelsOf = (
   points: readonly InkPiecePoint[],
@@ -364,29 +360,35 @@ export const distanceToPath = (pixel: Pixel, path: readonly Pixel[]) => {
   return best
 }
 
-const segmentHitsPath = (start: Pixel, end: Pixel, path: readonly Pixel[], reach: number) => {
-  if (distanceToPath(start, path) <= reach || distanceToPath(end, path) <= reach) return true
-  if (path.length === 1) return distanceToSegment(path[0].x, path[0].y, start.x, start.y, end.x, end.y) <= reach
-  for (let index = 1; index < path.length; index += 1) {
-    if (segmentDistance(start, end, path[index - 1], path[index]) <= reach) return true
-  }
-  return false
-}
+/*
+ * Erasing.
+ *
+ * The eraser is a disk swept along a polyline of samples, and a stroke's ink is
+ * its centre line thickened by half the stroke width. So a point of a stroke is
+ * erased when it lies within `reach` (eraser radius plus half the stroke width)
+ * of the eraser path. The code below works segment by segment and solves the
+ * circle and slab intersections in closed form: cut points sit exactly on the
+ * rim of the eraser however sparse the stroke or the eraser path is, and a
+ * swipe that crosses a long segment between two vertices still cuts it.
+ */
 
-export const rangeHitsPath = (
-  pixels: readonly Pixel[],
-  start: number,
-  end: number,
-  reach: number,
-  path: readonly Pixel[],
-) => {
-  if (!pixels.length || !path.length || end < start) return false
-  if (start === end) return distanceToPath(pixels[start], path) <= reach
-  for (let index = start + 1; index <= end; index += 1) {
-    if (segmentHitsPath(pixels[index - 1], pixels[index], path, reach)) return true
-  }
-  return false
-}
+/** Rounding level: squared px for a segment length, px for a change along an axis. */
+const EPSILON = 1e-12
+/**
+ * A stretch shorter than this many px is the rim of an earlier cut met again
+ * through rounding, not ink to cut. Erasing the same place twice changes nothing.
+ */
+const MIN_CUT_LENGTH = 1e-3
+/** A cut this close (in "vertex index + fraction") to a vertex is that vertex. */
+const VERTEX_SNAP = 1e-9
+
+/**
+ * Shortest piece worth keeping after a cut, in px. A shorter remainder is a
+ * crumb: a dot as wide as the stroke that nobody drew and that is hard to hit.
+ */
+const crumbLength = (baseWidth: number) => (
+  Math.max(0.5, (Number.isFinite(baseWidth) ? baseWidth : 0) / 4)
+)
 
 const lerpPoint = <P extends InkPiecePoint>(start: P, end: P, t: number): P => {
   const next = { ...start }
@@ -400,172 +402,295 @@ const lerpPoint = <P extends InkPiecePoint>(start: P, end: P, t: number): P => {
   return next
 }
 
-const hitParameter = (start: Pixel, end: Pixel, path: readonly Pixel[], reach: number, entering: boolean) => {
-  let lo = 0
-  let hi = 1
-  for (let step = 0; step < 14; step += 1) {
-    const mid = (lo + hi) / 2
-    const pixel = {
-      x: start.x + (end.x - start.x) * mid,
-      y: start.y + (end.y - start.y) * mid,
-    }
-    const inside = distanceToPath(pixel, path) <= reach
-    if (inside === entering) hi = mid
-    else lo = mid
+/**
+ * Narrows `span` (a [from, to] pair of positions t along a segment) to where
+ * `start + rate * t` lies between `min` and `max`. False when nothing is left.
+ */
+const clipSpan = (span: number[], start: number, rate: number, min: number, max: number) => {
+  if (rate > -EPSILON && rate < EPSILON) return start >= min && start <= max
+  let enter = (min - start) / rate
+  let leave = (max - start) / rate
+  if (enter > leave) {
+    const swap = enter
+    enter = leave
+    leave = swap
   }
-  return entering ? hi : lo
+  if (enter > span[0]) span[0] = enter
+  if (leave < span[1]) span[1] = leave
+  return span[0] <= span[1]
 }
 
-/** Cuts a stroke down to the ink the eraser disk did not cover. */
-export const cutPageStroke = <T extends InkPieceStroke>(
-  stroke: T,
-  pagePixels: readonly Pixel[],
-  path: readonly Pixel[],
+/** Where the segment a + t*d (t in 0..1) is inside the disk around (cx, cy). */
+const diskSpan = (
+  ax: number,
+  ay: number,
+  dx: number,
+  dy: number,
+  cx: number,
+  cy: number,
   reach: number,
-  letterWidth: number,
-  start = 0,
-  end = stroke.points.length - 1,
-): T[] => cutPrepared(stroke, pagePixels, path, reach, letterWidth, start, end)
-
-const cutPrepared = <T extends InkPieceStroke>(
-  stroke: T,
-  pagePixels: readonly Pixel[],
-  path: readonly Pixel[],
-  reach: number,
-  letterWidth: number,
-  start: number,
-  end: number,
-): T[] => {
-  const count = end - start + 1
-  if (count <= 0) return []
-  const local = pagePixels.slice(start, end + 1)
-  const points = stroke.points.slice(start, end + 1)
-  if (count === 1) {
-    return distanceToPath(local[0], path) <= reach ? [] : [stroke]
+  span: number[],
+) => {
+  const fx = ax - cx
+  const fy = ay - cy
+  const squared = dx * dx + dy * dy
+  if (squared < EPSILON) {
+    // The segment is a point (a repeated sample).
+    if (!(fx * fx + fy * fy <= reach * reach)) return false
+    span[0] = 0
+    span[1] = 1
+    return true
   }
-
-  const vertexHit = local.map((pixel) => distanceToPath(pixel, path) <= reach)
-  if (letterWidth > 0) expandHits(local, vertexHit, letterWidth, path, reach)
-
-  const emit = (slice: T['points'][]) => slice
-    .filter((entry) => entry.length > 0)
-    .map((entry) => ({ ...stroke, points: entry }))
-
-  const kept: Array<T['points']> = []
-  let run: T['points'] = []
-  const flush = () => {
-    if (run.length) kept.push(run)
-    run = []
-  }
-  const pushRun = (point: T['points'][number]) => {
-    run.push(point)
-  }
-  const ensureStart = (index: number) => {
-    if (!run.length || run[run.length - 1] !== points[index]) pushRun(points[index])
-  }
-
-  for (let index = 0; index < count - 1; index += 1) {
-    const startHit = vertexHit[index]
-    const endHit = vertexHit[index + 1]
-    const segmentHit = segmentHitsPath(local[index], local[index + 1], path, reach)
-    if (!startHit && !endHit && !segmentHit) {
-      ensureStart(index)
-      pushRun(points[index + 1])
-      continue
-    }
-    if (!startHit && !endHit && segmentHit) {
-      const enter = hitParameter(local[index], local[index + 1], path, reach, true)
-      const after = {
-        x: local[index].x + (local[index + 1].x - local[index].x) * enter,
-        y: local[index].y + (local[index + 1].y - local[index].y) * enter,
-      }
-      const exitLocal = hitParameter(after, local[index + 1], path, reach, false)
-      const exit = enter + (1 - enter) * exitLocal
-      ensureStart(index)
-      if (enter > 0.02) pushRun(lerpPoint(points[index], points[index + 1], enter))
-      flush()
-      if (exit < 0.98) pushRun(lerpPoint(points[index], points[index + 1], exit))
-      continue
-    }
-    if (!startHit && endHit) {
-      ensureStart(index)
-      if (segmentHit || distanceToPath(local[index + 1], path) <= reach) {
-        const t = hitParameter(local[index], local[index + 1], path, reach, true)
-        if (t > 0.02 && t < 0.98) pushRun(lerpPoint(points[index], points[index + 1], t))
-      }
-      flush()
-      continue
-    }
-    if (startHit && !endHit) {
-      if (segmentHit || distanceToPath(local[index], path) <= reach) {
-        const t = hitParameter(local[index], local[index + 1], path, reach, false)
-        if (t > 0.02 && t < 0.98) pushRun(lerpPoint(points[index], points[index + 1], t))
-      }
-      pushRun(points[index + 1])
-      continue
-    }
-    flush()
-  }
-  if (!vertexHit[count - 1]) {
-    const last = points[count - 1]
-    if (!run.length || run[run.length - 1] !== last) pushRun(last)
-  }
-  flush()
-  return emit(kept)
+  const length = Math.sqrt(squared)
+  // The closest approach to the centre, and how far the line passes from it.
+  const closest = -(fx * dx + fy * dy) / squared
+  const offset = (fx * dy - fy * dx) / length
+  const rest = reach * reach - offset * offset
+  if (!(rest >= 0)) return false
+  const half = Math.sqrt(rest) / length
+  const enter = Math.max(0, closest - half)
+  const leave = Math.min(1, closest + half)
+  if (!(enter <= leave)) return false
+  span[0] = enter
+  span[1] = leave
+  return true
 }
 
-const expandHits = (
-  pixels: readonly Pixel[],
-  vertexHit: boolean[],
-  letterWidth: number,
+/**
+ * Where the segment a + t*d (t in 0..1) is inside the straight part of a swept
+ * disk: the rectangle `reach` to either side of the line from q to e.
+ */
+const slabSpan = (
+  ax: number,
+  ay: number,
+  dx: number,
+  dy: number,
+  qx: number,
+  qy: number,
+  ex: number,
+  ey: number,
+  reach: number,
+  span: number[],
+) => {
+  const length = Math.hypot(ex - qx, ey - qy)
+  if (!(length > EPSILON)) return false
+  const ux = (ex - qx) / length
+  const uy = (ey - qy) / length
+  const rx = ax - qx
+  const ry = ay - qy
+  span[0] = 0
+  span[1] = 1
+  return clipSpan(span, rx * ux + ry * uy, dx * ux + dy * uy, 0, length)
+    && clipSpan(span, ux * ry - uy * rx, ux * dy - uy * dx, -reach, reach)
+}
+
+/** Sorts [from, to] pairs by `from` and joins the ones that touch. */
+const mergeSpans = (spans: number[]) => {
+  if (spans.length <= 2) return spans
+  for (let index = 2; index < spans.length; index += 2) {
+    const from = spans[index]
+    const to = spans[index + 1]
+    let before = index - 2
+    while (before >= 0 && spans[before] > from) {
+      spans[before + 2] = spans[before]
+      spans[before + 3] = spans[before + 1]
+      before -= 2
+    }
+    spans[before + 2] = from
+    spans[before + 3] = to
+  }
+  const merged = [spans[0], spans[1]]
+  for (let index = 2; index < spans.length; index += 2) {
+    const last = merged.length - 1
+    if (spans[index] <= merged[last] + EPSILON) {
+      if (spans[index + 1] > merged[last]) merged[last] = spans[index + 1]
+    } else {
+      merged.push(spans[index], spans[index + 1])
+    }
+  }
+  return merged
+}
+
+/**
+ * The parts of the stroke segment (ax, ay) to (bx, by) that lie within `reach`
+ * of the eraser path, as ascending, disjoint [from, to] pairs of t in 0..1; null
+ * when the segment stays clear. The swept disk is the union of one disk per
+ * path vertex and one rectangle per path segment, so a segment that crosses the
+ * path between two vertices of either one is found exactly.
+ */
+const segmentSpans = (
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  path: readonly Pixel[],
+  reach: number,
+): number[] | null => {
+  const dx = bx - ax
+  const dy = by - ay
+  const left = Math.min(ax, bx)
+  const right = Math.max(ax, bx)
+  const top = Math.min(ay, by)
+  const bottom = Math.max(ay, by)
+  const span = [0, 0]
+  let found: number[] | null = null
+  for (let index = 0; index < path.length; index += 1) {
+    const from = path[index]
+    if (
+      from.x + reach >= left && from.x - reach <= right
+      && from.y + reach >= top && from.y - reach <= bottom
+      && diskSpan(ax, ay, dx, dy, from.x, from.y, reach, span)
+    ) (found ??= []).push(span[0], span[1])
+    const to = path[index + 1]
+    if (!to) continue
+    if (
+      Math.max(from.x, to.x) + reach >= left && Math.min(from.x, to.x) - reach <= right
+      && Math.max(from.y, to.y) + reach >= top && Math.min(from.y, to.y) - reach <= bottom
+      && slabSpan(ax, ay, dx, dy, from.x, from.y, to.x, to.y, reach, span)
+    ) (found ??= []).push(span[0], span[1])
+  }
+  return found && mergeSpans(found)
+}
+
+type Stretch = {
+  /** First and last erased position, as "vertex index + fraction of the next segment". */
+  from: number
+  to: number
+  /** Length of ink the stretch covers, in px. */
+  ink: number
+}
+
+/** Every stretch of the stroke the eraser path reaches, in order and apart. */
+const erasedStretches = (
+  points: readonly InkPiecePoint[],
+  sourceWidth: number,
+  sourceHeight: number,
   path: readonly Pixel[],
   reach: number,
 ) => {
-  const hitIndexes: number[] = []
-  vertexHit.forEach((hit, index) => {
-    if (hit) hitIndexes.push(index)
-  })
-  for (let index = 1; index < pixels.length; index += 1) {
-    if (vertexHit[index] || vertexHit[index - 1]) continue
-    if (segmentHitsPath(pixels[index - 1], pixels[index], path, reach)) {
-      vertexHit[index - 1] = true
-      vertexHit[index] = true
-      hitIndexes.push(index - 1, index)
-    }
+  let pathLeft = Number.POSITIVE_INFINITY
+  let pathTop = Number.POSITIVE_INFINITY
+  let pathRight = Number.NEGATIVE_INFINITY
+  let pathBottom = Number.NEGATIVE_INFINITY
+  for (const vertex of path) {
+    if (vertex.x < pathLeft) pathLeft = vertex.x
+    if (vertex.x > pathRight) pathRight = vertex.x
+    if (vertex.y < pathTop) pathTop = vertex.y
+    if (vertex.y > pathBottom) pathBottom = vertex.y
   }
-  if (!hitIndexes.length) return
-  hitIndexes.sort((left, right) => left - right)
-  const runs: Array<[number, number]> = []
-  let runStart = hitIndexes[0]
-  let previous = hitIndexes[0]
-  for (let index = 1; index < hitIndexes.length; index += 1) {
-    if (hitIndexes[index] > previous + 1) {
-      runs.push([runStart, previous])
-      runStart = hitIndexes[index]
-    }
-    previous = hitIndexes[index]
-  }
-  runs.push([runStart, previous])
+  pathLeft -= reach
+  pathTop -= reach
+  pathRight += reach
+  pathBottom += reach
 
-  for (const [from, to] of runs) {
-    let centerX = 0
-    for (let index = from; index <= to; index += 1) centerX += pixels[index].x
-    centerX /= Math.max(1, to - from + 1)
-    let arc = 0
-    for (let index = from - 1; index >= 0; index -= 1) {
-      arc += Math.hypot(pixels[index + 1].x - pixels[index].x, pixels[index + 1].y - pixels[index].y)
-      if (arc > letterWidth) break
-      if (arc > letterWidth * 0.55 && Math.abs(pixels[index].x - centerX) > letterWidth * 0.55) break
-      vertexHit[index] = true
+  const stretches: Stretch[] = []
+  let ax = points[0].x * sourceWidth
+  let ay = points[0].y * sourceHeight
+  for (let index = 1; index < points.length; index += 1) {
+    const bx = points[index].x * sourceWidth
+    const by = points[index].y * sourceHeight
+    // Comparisons are written so that a NaN coordinate never passes.
+    const spans = Math.max(ax, bx) >= pathLeft && Math.min(ax, bx) <= pathRight
+      && Math.max(ay, by) >= pathTop && Math.min(ay, by) <= pathBottom
+      ? segmentSpans(ax, ay, bx, by, path, reach)
+      : null
+    if (spans) {
+      const length = Math.hypot(bx - ax, by - ay)
+      for (let at = 0; at < spans.length; at += 2) {
+        const from = index - 1 + spans[at]
+        const to = index - 1 + spans[at + 1]
+        // A segment covered end to end counts even when it is a repeated sample.
+        const ink = spans[at] <= 0 && spans[at + 1] >= 1
+          ? Math.max(length, MIN_CUT_LENGTH)
+          : (spans[at + 1] - spans[at]) * length
+        const previous = stretches[stretches.length - 1]
+        if (previous && from <= previous.to + VERTEX_SNAP) {
+          if (to > previous.to) previous.to = to
+          previous.ink += ink
+        } else {
+          stretches.push({ from, to, ink })
+        }
+      }
     }
-    arc = 0
-    for (let index = to + 1; index < pixels.length; index += 1) {
-      arc += Math.hypot(pixels[index].x - pixels[index - 1].x, pixels[index].y - pixels[index - 1].y)
-      if (arc > letterWidth) break
-      if (arc > letterWidth * 0.55 && Math.abs(pixels[index].x - centerX) > letterWidth * 0.55) break
-      vertexHit[index] = true
-    }
+    ax = bx
+    ay = by
   }
+  return stretches.filter((stretch) => stretch.ink >= MIN_CUT_LENGTH)
+}
+
+/** The ink between the stretches, with new end points exactly where the cuts are. */
+const keptPieces = <T extends InkPieceStroke>(
+  stroke: T,
+  sourceWidth: number,
+  sourceHeight: number,
+  stretches: readonly Stretch[],
+): T[] => {
+  const points = stroke.points
+  const lastIndex = points.length - 1
+  const minLength = crumbLength(stroke.baseWidth)
+  const pieces: T[] = []
+  const vertexAt = (position: number) => {
+    const nearest = Math.round(position)
+    return Math.abs(position - nearest) <= VERTEX_SNAP ? nearest : -1
+  }
+  const pointAt = (position: number) => {
+    const index = Math.floor(position)
+    return lerpPoint(points[index], points[index + 1], position - index)
+  }
+  const keep = (from: number, to: number) => {
+    if (!(to - from > VERTEX_SNAP)) return
+    const firstVertex = vertexAt(from)
+    const lastVertex = vertexAt(to)
+    const run: T['points'] = []
+    if (firstVertex < 0) run.push(pointAt(from))
+    const inner = lastVertex < 0 ? Math.floor(to) : lastVertex
+    for (let index = firstVertex < 0 ? Math.ceil(from) : firstVertex; index <= inner; index += 1) {
+      run.push(points[index])
+    }
+    if (lastVertex < 0) run.push(pointAt(to))
+    if (run.length < 2) return
+    let length = 0
+    for (let index = 1; index < run.length; index += 1) {
+      length += Math.hypot(
+        (run[index].x - run[index - 1].x) * sourceWidth,
+        (run[index].y - run[index - 1].y) * sourceHeight,
+      )
+    }
+    if (length < minLength) return
+    pieces.push({ ...stroke, points: run })
+  }
+  let start = 0
+  for (const stretch of stretches) {
+    keep(start, stretch.from)
+    start = stretch.to
+  }
+  keep(start, lastIndex)
+  return pieces
+}
+
+/**
+ * Cuts out the ink of `stroke` that lies within `reach` of the eraser `path`
+ * (page pixels) and returns what is left: no piece, one or several. Returns
+ * null when the path does not touch the stroke, so callers keep the original.
+ * A remainder shorter than a crumb (a quarter of the stroke width, at least
+ * half a pixel) is dropped.
+ */
+export const cutPageStroke = <T extends InkPieceStroke>(
+  stroke: T,
+  sourceWidth: number,
+  sourceHeight: number,
+  path: readonly Pixel[],
+  reach: number,
+): T[] | null => {
+  const points = stroke.points
+  if (!points.length || !path.length) return null
+  if (points.length === 1) {
+    const dot = { x: points[0].x * sourceWidth, y: points[0].y * sourceHeight }
+    return distanceToPath(dot, path) <= reach ? [] : null
+  }
+  const stretches = erasedStretches(points, sourceWidth, sourceHeight, path, reach)
+  if (!stretches.length) return null
+  return keptPieces(stroke, sourceWidth, sourceHeight, stretches)
 }
 
 export const sliceStroke = <T extends InkPieceStroke>(stroke: T, start: number, end: number): T => {

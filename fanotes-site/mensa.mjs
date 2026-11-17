@@ -4,6 +4,7 @@
 // Fallback: the page is an Angular app that is server-rendered for the current day only (the active
 // tab "Heute" carries a date and its menus); we parse that. Either result is merged into the last
 // good result and served from a cache.
+import { randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServiceLog, routeOf } from './service-log.mjs'
@@ -18,7 +19,7 @@ export const MENSA_PATHS = ['/api/v1/schulnetz/mensa', '/api/v1/kanti-web/mensa'
 const TIME_ZONE = 'Europe/Zurich'
 const WEEKDAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa']
 const FETCH_TIMEOUT_MS = 15_000
-const MAX_HTML_BYTES = 2 * 1024 * 1024
+export const MAX_HTML_BYTES = 2 * 1024 * 1024
 const HOUR_MS = 3_600_000
 const RETRY_AFTER_FAILURE_MS = 10 * 60_000
 const KEEP_DAYS_MS = 7 * 24 * HOUR_MS
@@ -26,6 +27,35 @@ const KEEP_DAYS_MS = 7 * 24 * HOUR_MS
 const UPSTREAM_ATTEMPTS = 2
 const UPSTREAM_RETRY_MS = 250
 const RETRY_STATUS = new Set([408, 429, 500, 502, 503, 504])
+
+// Stop once the cap is passed. The rest of the body is never stored.
+const readLimitedText = async (response, max) => {
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const body = typeof response.text === 'function' ? await response.text() : ''
+    if (body.length > max) throw new Error('page too large')
+    return body
+  }
+  const decoder = new TextDecoder('utf-8')
+  let size = 0
+  let body = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return body + decoder.decode()
+    const bytes = value?.byteLength || 0
+    size += bytes
+    if (size > max) {
+      if (typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+      throw new Error('page too large')
+    }
+    if (bytes) body += decoder.decode(value, { stream: true })
+  }
+}
+// An error page is not parsed. Cancel it so the rest is not kept.
+const releaseUnread = async (response) => {
+  const reader = response?.body?.getReader?.()
+  if (reader && typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+}
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', auml: 'ä', ouml: 'ö', uuml: 'ü', Auml: 'Ä', Ouml: 'Ö', Uuml: 'Ü', szlig: 'ß', eacute: 'é', egrave: 'è', agrave: 'à' }
 const decode = (value) => value.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/giu, (whole, name) => {
@@ -172,6 +202,7 @@ const needsRefresh = (fetchedAtMs, nowDate) => {
 
 export const createMensa = (options = {}) => {
   const fetchImpl = options.fetch || globalThis.fetch
+  const readFile = options.readFile || ((path, encoding) => fs.readFile(path, encoding))
   const now = options.now || (() => new Date())
   const sleep = options.sleep || ((ms) => new Promise((done) => setTimeout(done, ms)))
   const root = resolve(options.root || process.env.FANOTES_SCHULNETZ_DIR || '/var/lib/fanotes-schulnetz')
@@ -183,26 +214,67 @@ export const createMensa = (options = {}) => {
   const file = join(root, 'mensa.json')
   let cache = null // { fetchedAt, days }
   let loaded = false
+  let loading = null
+  let diskBlocked = false
   let lastFailureAt = 0
   let lastFailed = false
   let inflight = null
 
-  const load = async () => {
-    if (loaded) return
-    loaded = true
-    try {
-      const value = JSON.parse(await fs.readFile(file, 'utf8'))
-      if (value && Array.isArray(value.days) && typeof value.fetchedAt === 'string') cache = { fetchedAt: value.fetchedAt, days: value.days }
-    } catch { /* no cache yet */ }
+  const mergeDisk = (value) => {
+    const merged = new Map()
+    for (const day of value.days) if (day?.date) merged.set(day.date, day)
+    for (const day of cache.days) if (day?.date) merged.set(day.date, day)
+    cache = {
+      fetchedAt: cache.fetchedAt || value.fetchedAt,
+      days: [...merged.values()].sort((left, right) => left.date.localeCompare(right.date)),
+    }
+  }
+
+  // One load at a time. A refresh that finishes first must not be replaced by the older disk copy.
+  const load = () => {
+    if (loaded) return Promise.resolve()
+    if (!loading) {
+      loading = (async () => {
+        try {
+          const value = JSON.parse(await readFile(file, 'utf8'))
+          const plain = (item) => typeof item === 'object' && item !== null && !Array.isArray(item)
+          const dayKnown = (day) => plain(day) && typeof day.date === 'string' && day.date && (day.menus == null || (Array.isArray(day.menus) && day.menus.every(plain)))
+          const known = plain(value) && Array.isArray(value.days) && typeof value.fetchedAt === 'string' && value.days.every(dayKnown)
+          // A missing or broken file can start again. A file that is there but not this menu must not look empty, or the next refresh replaces it.
+          if (!known) {
+            diskBlocked = true
+            return
+          }
+          const blocked = diskBlocked
+          if (!cache) cache = { fetchedAt: value.fetchedAt, days: value.days }
+          else if (blocked) mergeDisk(value)
+          diskBlocked = false
+          loaded = true
+        } catch (error) {
+          // A missing or broken file can start again. A read error must not be replaced by a new menu.
+          if (error?.code === 'ENOENT' || error instanceof SyntaxError) {
+            diskBlocked = false
+            loaded = true
+          } else {
+            diskBlocked = true
+          }
+        } finally {
+          loading = null
+        }
+      })()
+    }
+    return loading
   }
 
   const save = async () => {
+    if (diskBlocked) return
+    const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
     try {
       await fs.mkdir(root, { recursive: true })
-      const temporary = `${file}.${process.pid}.tmp`
-      await fs.writeFile(temporary, JSON.stringify(cache), { mode: 0o640 })
+      await fs.writeFile(temporary, JSON.stringify(cache), { mode: 0o600 })
       await fs.rename(temporary, file)
     } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
       log('warn', `cache not saved: ${error?.code || 'error'}`)
     }
   }
@@ -221,16 +293,17 @@ export const createMensa = (options = {}) => {
       try {
         const response = await fetchImpl(url, {
           method: 'GET',
+          redirect: 'manual',
           headers: { 'User-Agent': MENSA_USER_AGENT, Accept: 'text/html,application/json' },
           signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         })
         if (!response.ok) {
+          await releaseUnread(response)
           last = Object.assign(new Error(`HTTP ${response.status}`), { status: response.status })
           events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!RETRY_STATUS.has(response.status) || attempt === UPSTREAM_ATTEMPTS) throw last
         } else {
-          const body = await response.text()
-          if (body.length > MAX_HTML_BYTES) throw new Error('page too large')
+          const body = await readLimitedText(response, MAX_HTML_BYTES)
           events.info({ requestId, method: 'GET', route, status: response.status || 200, attempt, ms: elapsed() })
           return body
         }
@@ -279,7 +352,7 @@ export const createMensa = (options = {}) => {
     try {
       return await downloadApi()
     } catch (error) {
-      log('warn', `menu API failed, using the page: ${String(error?.message || error).slice(0, 80)}`)
+      log('warn', `menu API failed, using the page: ${error?.name || 'error'}`)
       return parseMensaHtml(await download())
     }
   }
@@ -301,7 +374,7 @@ export const createMensa = (options = {}) => {
       } catch (error) {
         lastFailed = true
         lastFailureAt = now().getTime()
-        log('warn', `refresh failed: ${String(error?.message || error).slice(0, 120)}`)
+        log('warn', `refresh failed: ${error?.name || 'error'}`)
       } finally {
         inflight = null
       }

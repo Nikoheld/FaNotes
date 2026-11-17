@@ -3,6 +3,7 @@ import {
   Braces,
   Code,
   Heading1,
+  GraduationCap,
   Heading2,
   Italic,
   Link2,
@@ -16,15 +17,17 @@ import {
   Strikethrough,
   Table2,
 } from 'lucide-react'
-import { memo, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { operandsForButton, simpleLatexSnippet, type SimpleLatexButton, type SimpleLatexOperands } from '../lib/simpleLatex'
 import type { MarkdownFormatAction } from './MarkdownEditor'
+import { STUDY_KINDS, STUDY_KIND_LABELS, type StudyKind } from '../lib/study/blocks'
 
 type FormattingToolbarProps = {
   disabled?: boolean
   onFormat: (action: MarkdownFormatAction) => void
   onInsertLatex: (button: SimpleLatexButton, operands: SimpleLatexOperands) => void
   onLatexError?: (message: string) => void
+  onInsertStudy?: (kind: StudyKind) => void
 }
 
 const LATEX_BUTTONS: Array<{ id: SimpleLatexButton; label: string; glyph: string }> = [
@@ -69,7 +72,18 @@ export const FormattingToolbar = memo(function FormattingToolbar({
   onFormat,
   onInsertLatex,
   onLatexError,
+  onInsertStudy,
 }: FormattingToolbarProps) {
+  const [studyOpen, setStudyOpen] = useState(false)
+  const studyRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!studyOpen) return undefined
+    const close = (event: PointerEvent) => { if (!studyRef.current?.contains(event.target as Node)) setStudyOpen(false) }
+    const key = (event: KeyboardEvent) => { if (event.key === 'Escape') setStudyOpen(false) }
+    document.addEventListener('pointerdown', close)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', key) }
+  }, [studyOpen])
   const [firstPiece, setFirstPiece] = useState('')
   const [secondPiece, setSecondPiece] = useState('')
   const insertLatex = (button: SimpleLatexButton) => {
@@ -96,6 +110,18 @@ export const FormattingToolbar = memo(function FormattingToolbar({
           <Icon aria-hidden="true" size={14} strokeWidth={2} />
         </button>
       ))}
+      {onInsertStudy && (
+        <div className="lw-insert-menu has-divider" ref={studyRef}>
+          <button type="button" aria-label="Lernblöcke einfügen" aria-haspopup="menu" aria-expanded={studyOpen} disabled={disabled} title="Lernwerkzeuge: Tabelle und Schlüssel, Sortier-Board, Begriffsnetz, Bildtafel, Definitionen" onClick={() => setStudyOpen((open) => !open)}>
+            <GraduationCap aria-hidden="true" size={14} strokeWidth={2} />
+          </button>
+          {studyOpen && (
+            <div className="lw-insert-popover" role="menu" aria-label="Lernblöcke einfügen">
+              {STUDY_KINDS.map((kind) => <button key={kind} type="button" role="menuitem" onClick={() => { setStudyOpen(false); onInsertStudy(kind) }}>{STUDY_KIND_LABELS[kind]}</button>)}
+            </div>
+          )}
+        </div>
+      )}
       <div className="simple-latex-tools" role="group" aria-label="Einfaches LaTeX" title="Zahlen oder Wörter. Die Schaltflächen setzen die Formel.">
         <input
           aria-label="Erstes Stück"

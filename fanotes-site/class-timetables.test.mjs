@@ -3,8 +3,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { createServer } from 'node:http'
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer, request as httpRequest } from 'node:http'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -194,6 +194,50 @@ test('ingest stores a version, switches the pointer, keeps three versions and re
     await assert.rejects(broken.ingest(PDF), { status: 422 })
     assert.deepEqual((await readdir(store.root)).sort(), before)
     assert.equal((await store.summary()).available, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a PDF with too many pages is refused before text extraction', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetables-pages-'))
+  const calls = []
+  const store = createClassTimetables({
+    root,
+    log: () => {},
+    now: () => new Date(Date.UTC(2026, 10, 11, 8, 0, 0)),
+    run: async (command, args) => {
+      calls.push(command)
+      if (command === 'pdfinfo') return { stdout: 'Title: Stundenplan\nPages:          201\n' }
+      return fakeRun(BBOX, [])(command, args)
+    },
+  })
+  try {
+    await assert.rejects(store.ingest(PDF), (error) => error.status === 413 && error.publicMessage.includes('200'))
+    assert.deepEqual(calls, ['pdfinfo'])
+    assert.deepEqual(await readdir(store.root), [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a failure after the pointer switches leaves the new timetable in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetables-keep-'))
+  const store = createClassTimetables({
+    root,
+    run: fakeRun(BBOX, []),
+    log: (level) => { if (level === 'info') throw new Error('log failed') },
+    now: () => new Date(Date.UTC(2026, 10, 11, 8, 0, 0)),
+  })
+  try {
+    await assert.rejects(() => store.ingest(PDF), /log failed/u)
+    const pointer = JSON.parse(await readFile(join(store.root, 'current.json'), 'utf8'))
+    assert.equal((await stat(join(store.root, pointer.version))).isDirectory(), true)
+    assert.equal((await readdir(store.root)).some((name) => name.endsWith('.tmp')), false)
+    const summary = await store.summary()
+    assert.equal(summary.available, true)
+    assert.equal(summary.classes.length, 3)
+    assert.equal((await store.classPdf('G26D')).toString().startsWith('%PDF-fake'), true)
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -395,6 +439,42 @@ test('admin route: token hash, origin, content type, rate limit, upload and inde
   }
 })
 
+test('an oversized timetable upload is refused before the rest of the file is read', async () => {
+  const env = await startServer()
+  try {
+    const url = new URL(`${env.base}/api/v1/kanti-web/admin/timetable-pdf`)
+    const result = await new Promise((resolve) => {
+      let settled = false
+      const done = (value) => { if (!settled) { settled = true; resolve(value) } }
+      const req = httpRequest({
+        hostname: '127.0.0.1',
+        port: url.port,
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'X-Forwarded-Host': WEB,
+          Authorization: `Bearer ${TOKEN}`,
+          Origin: ORIGIN,
+          'Content-Type': 'application/pdf',
+          'Content-Length': String(30 * 1024 * 1024),
+        },
+      }, (res) => {
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('end', () => setTimeout(() => done({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8'), destroyed: req.destroyed }), 50))
+      })
+      req.on('error', () => done({ status: 0, body: '', destroyed: req.destroyed }))
+      req.write(Buffer.alloc(1024, 1))
+      setTimeout(() => done({ status: 0, body: '', destroyed: req.destroyed }), 2000)
+    })
+    assert.equal(result.status, 413)
+    assert.equal(JSON.parse(result.body).error, 'Die Datei ist zu gross (höchstens 25 MB).')
+    assert.equal(result.destroyed, true)
+  } finally {
+    await env.close()
+  }
+})
+
 test('admin route answers 503 without a configured token hash', async () => {
   for (const adminHash of [null, '', 'not-hex']) {
     const env = await startServer({ adminHash })
@@ -512,6 +592,278 @@ test('an upload is logged as JSON with counts and without class codes or names',
     assert.equal(denied.route, '/timetables')
     assert.equal(lines[0].includes('not a pdf'), false)
   } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a timetable read is logged without the class code or the room name', async () => {
+  const lines = []
+  const jsonLog = createServiceLog('class-timetables', (line) => lines.push(line), () => new Date('2026-11-15T11:00:00.000Z'))
+  const root = await mkdtemp(join(tmpdir(), 'timetables-read-'))
+  try {
+    const store = createClassTimetables({ root, log: () => {}, jsonLog, now: () => new Date('2026-11-15T11:00:00.000Z') })
+    assert.deepEqual(await store.summary(), { available: false })
+    assert.equal(await store.classWeek('G26D'), null)
+    assert.equal(await store.room('Telli'), null)
+    assert.equal(lines.length, 3)
+    const rows = lines.map((line) => JSON.parse(line))
+    assert.deepEqual(rows.map((row) => [row.method, row.route, row.status, row.level]), [
+      ['GET', '/timetables', 200, 'info'],
+      ['GET', '/timetables/class', 404, 'warn'],
+      ['GET', '/timetables/room', 404, 'warn'],
+    ])
+    assert.equal(rows.every((row) => row.service === 'class-timetables' && typeof row.ms === 'number' && row.requestId), true)
+    const text = lines.join('\n')
+    assert.equal(text.includes('G26'), false)
+    assert.equal(text.includes('Telli'), false)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable timetable file is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-read-'))
+  const runs = []
+  const store = createClassTimetables({
+    root,
+    run: async (tool) => { runs.push(tool); throw new Error('pdf tool') },
+    now: () => new Date('2026-11-15T12:00:00.000Z'),
+  })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const classesFile = join(dir, 'classes.json')
+  const pointer = join(store.root, 'current.json')
+  const classes = { G26A: { teacher: 'Tst', semester: 'SJ', entries: [{ day: 1 }], footnotes: [] } }
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(classesFile, JSON.stringify(classes), { mode: 0o600 })
+  await writeFile(join(dir, 'index.json'), JSON.stringify({
+    uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+    classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: ['T01'], warnings: [],
+  }), { mode: 0o600 })
+  await writeFile(pointer, JSON.stringify({ version }), { mode: 0o600 })
+  const beforeClasses = await readFile(classesFile)
+  const beforePointer = await readFile(pointer)
+  try {
+    await chmod(pointer, 0o000)
+    await assert.rejects(() => store.summary(), (error) => error?.code === 'EACCES')
+    await chmod(pointer, 0o600)
+    assert.deepEqual(await readFile(pointer), beforePointer)
+    await chmod(classesFile, 0o000)
+    await assert.rejects(() => store.classWeek('G26A'), (error) => error?.code === 'EACCES')
+    assert.deepEqual(runs, [])
+    await chmod(classesFile, 0o600)
+    assert.deepEqual(await readFile(classesFile), beforeClasses)
+  } finally {
+    await chmod(pointer, 0o600).catch(() => undefined)
+    await chmod(classesFile, 0o600).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a timetable pointer that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-pointer-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const pointer = join(store.root, 'current.json')
+  const stored = '{"published":"20261115T120000Z-abc123"}\n'
+  await mkdir(store.root, { recursive: true, mode: 0o700 })
+  await writeFile(pointer, stored, { mode: 0o600 })
+  try {
+    await assert.rejects(() => store.summary(), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(pointer, 'utf8'), stored)
+    await rm(pointer)
+    assert.deepEqual(await store.summary(), { available: false })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a timetable class file that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-classes-'))
+  const runs = []
+  const store = createClassTimetables({
+    root,
+    run: async (tool) => { runs.push(tool); throw new Error('pdf tool') },
+    now: () => new Date('2026-11-15T12:00:00.000Z'),
+  })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const classesFile = join(dir, 'classes.json')
+  const stored = '{"weeks":{"G26A":{"teacher":"Tst","semester":"SJ","entries":[],"footnotes":[]}}}\n'
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  await writeFile(join(dir, 'index.json'), JSON.stringify({
+    uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+    classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: [], warnings: [],
+  }), { mode: 0o600 })
+  await writeFile(classesFile, stored, { mode: 0o600 })
+  try {
+    await assert.rejects(() => store.classWeek('G26A'), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(classesFile, 'utf8'), stored)
+    assert.deepEqual(runs, [])
+    await rm(classesFile)
+    assert.equal(await store.classWeek('G26A'), null)
+    assert.deepEqual(runs, ['pdftotext'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a class week that is not a week is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-week-'))
+  const runs = []
+  const store = createClassTimetables({
+    root,
+    run: async (tool) => { runs.push(tool); throw new Error('pdf tool') },
+    now: () => new Date('2026-11-15T12:00:00.000Z'),
+  })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const classesFile = join(dir, 'classes.json')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  await writeFile(join(dir, 'index.json'), JSON.stringify({
+    uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+    classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: [], warnings: [],
+  }), { mode: 0o600 })
+  const keep = async (week) => {
+    const stored = `${JSON.stringify({ G26A: week })}\n`
+    await writeFile(classesFile, stored, { mode: 0o600 })
+    await assert.rejects(() => store.classWeek('G26A'), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(classesFile, 'utf8'), stored)
+    assert.deepEqual(runs, [])
+  }
+  try {
+    await keep('kept')
+    await keep(['kept'])
+    await keep({ teacher: 'Tst', semester: 'SJ', entries: 'kept', footnotes: [] })
+    await keep({ teacher: 'Tst', semester: 'SJ', entries: [], footnotes: 'kept' })
+    const good = { teacher: 'Tst', semester: 'SJ', entries: [{ day: 1, subject: 'kept' }], footnotes: [] }
+    await writeFile(classesFile, `${JSON.stringify({ G26A: good })}\n`, { mode: 0o600 })
+    const opened = await store.classWeek('G26A')
+    assert.equal(opened.class, 'G26A')
+    assert.equal(opened.teacher, 'Tst')
+    assert.equal(opened.entries[0].subject, 'kept')
+    assert.deepEqual(runs, [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a timetable room file that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-rooms-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const roomsFile = join(dir, 'rooms.json')
+  const stored = '{"rooms":{"T01":[{"subject":"kept"}]}}\n'
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  await writeFile(roomsFile, stored, { mode: 0o600 })
+  try {
+    await assert.rejects(() => store.room('T01'), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(roomsFile, 'utf8'), stored)
+    await writeFile(roomsFile, '{"T01":[{"subject":"mat"}]}\n', { mode: 0o600 })
+    assert.deepEqual(await store.room('T01'), { room: 'T01', entries: [{ subject: 'mat' }] })
+    await rm(roomsFile)
+    assert.equal(await store.room('T01'), null)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a timetable index that is not the known shape is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-index-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const indexFile = join(dir, 'index.json')
+  const stored = '{"catalog":{"classes":[{"code":"G26A","teacher":"Tst"}]}}\n'
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  await writeFile(indexFile, stored, { mode: 0o600 })
+  try {
+    await assert.rejects(() => store.summary(), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(indexFile, 'utf8'), stored)
+    await writeFile(indexFile, JSON.stringify({
+      uploadedAt: '2026-11-15T12:00:00.000Z',
+      semester: 'SJ',
+      classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }],
+      rooms: ['T01'],
+      warnings: [],
+    }))
+    const summary = await store.summary()
+    assert.equal(summary.available, true)
+    assert.equal(summary.classes.length, 1)
+    assert.deepEqual(summary.rooms, ['T01'])
+    await rm(indexFile)
+    const again = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+    assert.deepEqual(await again.summary(), { available: false })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('a catalog entry that is not a class or room is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-catalog-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const indexFile = join(dir, 'index.json')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  const keep = async (classes, rooms) => {
+    const stored = `${JSON.stringify({
+      uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ', classes, rooms, warnings: [],
+    })}\n`
+    await writeFile(indexFile, stored, { mode: 0o600 })
+    await assert.rejects(() => store.summary(), (error) => error?.code === 'EBADMSG')
+    assert.equal(await readFile(indexFile, 'utf8'), stored)
+  }
+  try {
+    await keep(['kept'], ['T01'])
+    await keep([{ code: 'kept', teacher: 'Tst' }], ['T01'])
+    await keep([{ code: 'G26A', teacher: 1 }], ['T01'])
+    await keep([{ code: 'G26A' }], ['T01'])
+    await keep([{ code: 'G26A', teacher: 'Tst' }], [1])
+    await keep([{ code: 'G26A', teacher: 'Tst' }], ['bad/room'])
+    await writeFile(indexFile, `${JSON.stringify({
+      uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+      classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: ['T01'], warnings: [],
+    })}\n`, { mode: 0o600 })
+    const summary = await store.summary()
+    assert.equal(summary.available, true)
+    assert.equal(summary.classes[0].code, 'G26A')
+    assert.equal(summary.classes[0].teacher, 'Tst')
+    assert.deepEqual(summary.rooms, ['T01'])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable timetable page is left in place', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetable-page-'))
+  const store = createClassTimetables({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const version = '20261115T120000Z-abc123'
+  const dir = join(store.root, version)
+  const pdfFile = join(dir, 'G26A.pdf')
+  const pdf = Buffer.from('%PDF-1.4 keep')
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  await writeFile(join(dir, 'index.json'), JSON.stringify({
+    uploadedAt: '2026-11-15T12:00:00.000Z', semester: 'SJ',
+    classes: [{ code: 'G26A', teacher: 'Tst', page: 1 }], rooms: [], warnings: [],
+  }), { mode: 0o600 })
+  await writeFile(join(store.root, 'current.json'), JSON.stringify({ version }), { mode: 0o600 })
+  await writeFile(pdfFile, pdf, { mode: 0o600 })
+  try {
+    assert.deepEqual(await store.classPdf('G26A'), pdf)
+    await chmod(pdfFile, 0o000)
+    await assert.rejects(() => store.classPdf('G26A'), (error) => error?.code === 'EACCES')
+    await chmod(pdfFile, 0o600)
+    assert.deepEqual(await readFile(pdfFile), pdf)
+    await rm(pdfFile)
+    assert.equal(await store.classPdf('G26A'), null)
+  } finally {
+    await chmod(pdfFile, 0o600).catch(() => undefined)
     await rm(root, { recursive: true, force: true })
   }
 })

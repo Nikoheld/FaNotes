@@ -3,6 +3,7 @@
 // Nothing here writes; resolving is the sync engine's job.
 import { parseFamd, stripFamdPayload } from '../famd'
 import { diffLines } from './markdownConflict'
+import { storyRoleOf } from '../../writing/syncMerge'
 
 export type ConflictFileBytes = { path: string; bytes: Uint8Array | null }
 
@@ -14,6 +15,8 @@ export type ConflictPreview =
   | { kind: 'pdf'; bytes: Uint8Array; size: number }
   | { kind: 'image'; bytes: Uint8Array; mime: string; size: number }
   | { kind: 'text'; lines: string[]; size: number }
+  /** A writing-mode file as the writer reads it: paragraphs, chapter and scene titles, a bible sheet. */
+  | { kind: 'story'; role: 'scene' | 'manifest' | 'bible'; lines: string[]; words: number; paragraphs: number; size: number }
   | { kind: 'binary'; size: number }
 
 const IMAGE_TYPES: Record<string, string> = {
@@ -61,6 +64,78 @@ const inkJsonOf = (ink: unknown) => {
 
 const wordsIn = (text: string) => (text.match(/[\p{L}\p{N}]+/gu) ?? []).length
 
+const record = (value: unknown): Record<string, unknown> | null => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null)
+const str = (value: unknown) => (typeof value === 'string' ? value : '')
+const runsText = (runs: unknown) => (Array.isArray(runs) ? runs.map((run) => str(record(run)?.text)).join('') : '')
+const oneLine = (text: string) => text.replace(/\s*\n\s*/gu, ' ').trim()
+/** Paragraph styles that read as headings in the preview (the page styles `#` lines as headings). */
+const HEADING_STYLES: Record<string, string> = { chapter: '# ', heading: '## ', subheading: '### ' }
+
+/**
+ * Scenes, `story.json` and bible sheets as readable text, never raw JSON:
+ * paragraphs one per line (deleted ones left out, ones kept from a merge
+ * marked), the binder as an outline, a sheet as name, fields and notes.
+ */
+export const storyPreview = (path: string, bytes: Uint8Array): ConflictPreview | null => {
+  const role = storyRoleOf(path)
+  if (role !== 'scene' && role !== 'manifest' && role !== 'entity') return null
+  const source = decode(bytes)
+  let value: Record<string, unknown> | null = null
+  try {
+    value = source === null ? null : record(JSON.parse(source))
+  } catch {
+    value = null
+  }
+  if (!value) return { kind: 'damaged', size: bytes.byteLength }
+  const lines: string[] = []
+  let paragraphs = 0
+  if (role === 'scene') {
+    for (const entry of Array.isArray(value.paragraphs) ? value.paragraphs : []) {
+      const paragraph = record(entry)
+      if (!paragraph || paragraph.deleted === true) continue
+      const text = runsText(paragraph.runs)
+      paragraphs += 1
+      const prefix = HEADING_STYLES[str(paragraph.style)] ?? (paragraph.style === 'quote' ? '> ' : '')
+      lines.push(`${prefix}${paragraph.conflictOf ? '» ' : ''}${oneLine(text)}`)
+    }
+  } else if (role === 'manifest') {
+    lines.push(`# ${oneLine(str(value.title))}`)
+    if (str(value.subtitle)) lines.push(oneLine(str(value.subtitle)))
+    if (str(value.author)) lines.push(oneLine(str(value.author)))
+    const walk = (nodes: unknown, depth: number) => {
+      for (const entry of Array.isArray(nodes) ? nodes : []) {
+        const node = record(entry)
+        if (!node || depth > 8) continue
+        paragraphs += 1
+        const title = oneLine(str(node.title))
+        const synopsis = oneLine(str(node.synopsis))
+        if (node.kind === 'scene') lines.push(`${'  '.repeat(Math.max(0, depth - 1))}- ${title}${synopsis ? ` – ${synopsis}` : ''}`)
+        else {
+          lines.push(`${depth === 0 ? '## ' : '### '}${title}${synopsis ? ` – ${synopsis}` : ''}`)
+          walk(node.children, depth + 1)
+        }
+      }
+    }
+    walk(value.binder, 0)
+    const dictionary = Array.isArray(value.dictionary) ? value.dictionary.filter((word): word is string => typeof word === 'string') : []
+    if (dictionary.length) lines.push('', `${dictionary.slice(0, 200).join(', ')}${dictionary.length > 200 ? ' …' : ''}`)
+  } else {
+    lines.push(`# ${oneLine(str(value.name))}${value.archived === true ? ' (archiviert / archived)' : ''}`)
+    if (str(value.role)) lines.push(oneLine(str(value.role)))
+    const aliases = Array.isArray(value.aliases) ? value.aliases.filter((alias): alias is string => typeof alias === 'string') : []
+    if (aliases.length) lines.push(aliases.join(', '))
+    if (str(value.when)) lines.push(oneLine(str(value.when)))
+    for (const entry of Array.isArray(value.fields) ? value.fields : []) {
+      const field = record(entry)
+      if (field && str(field.value).trim()) lines.push(`- ${oneLine(str(field.label))}: ${oneLine(str(field.value))}`)
+    }
+    if (str(value.notes).trim()) lines.push('', ...str(value.notes).replace(/\r\n/gu, '\n').split('\n'))
+    paragraphs = lines.length
+  }
+  const text = lines.join('\n')
+  return { kind: 'story', role: role === 'entity' ? 'bible' : role, lines: lines.slice(0, MAX_PREVIEW_LINES), words: wordsIn(text.replace(/^#+\s|^-\s/gmu, '')), paragraphs, size: bytes.byteLength }
+}
+
 /**
  * One version of a document from its files: a note's `.md` (text) and `.famd`
  * (text, handwriting, fields) are read together.
@@ -69,6 +144,8 @@ export const previewOfVersion = (files: ConflictFileBytes[]): ConflictPreview =>
   const present = files.filter((file): file is { path: string; bytes: Uint8Array } => Boolean(file.bytes))
   if (!present.length) return { kind: 'missing' }
   const size = present.reduce((sum, file) => sum + file.bytes.byteLength, 0)
+  const story = present.length === 1 ? storyPreview(present[0].path, present[0].bytes) : null
+  if (story) return story
   const markdown = present.find((file) => /^(md|markdown)$/u.test(extensionOf(file.path)))
   const famd = present.find((file) => extensionOf(file.path) === 'famd')
   if (markdown || famd) {

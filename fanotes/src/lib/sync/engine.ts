@@ -19,6 +19,7 @@ const syncText = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
 /** Sign-in, network, rate-limit and server errors concern every entry, so they end the cycle instead of skipping one file. */
 const cycleWide = (error: unknown) => error instanceof SyncApiError && (error.unauthorized || error.offline || error.status === 429 || error.status >= 500)
 import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
+import { judgeStoryShrink, mergeStoryFile, storyRoleOf } from '../../writing/syncMerge'
 import { conflictFingerprint, groupConflicts, keptVersionPath, numberedVariant, type ConflictGroup, type ConflictKeep } from './conflicts'
 import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncRemoteEntry, type SyncSession } from './api'
 import { mcpReaderRequest, newReaderKey, type McpGrantInfo } from '../mcp/client'
@@ -39,8 +40,12 @@ export type SyncPublicState = {
   lastSyncAt: string | null
   error: string | null
   progress: { phase: 'pull' | 'scan' | 'push'; done: number; total: number } | null
+  /** While `status` is 'paused' (the server throttles): when the sync goes on by itself, as epoch milliseconds. Otherwise null. */
+  pausedUntil: number | null
   pendingLocal: number
   trackedFiles: number
+  /** Changes from other devices that wait: the note is open with unsaved edits here, or the local file cannot be read. They are tried again every cycle. */
+  heldRemote: number
   conflicts: SyncConflict[]
   /** Documents with a conflict copy in this vault, from any device. */
   openConflicts: number
@@ -51,7 +56,11 @@ export type SyncPublicState = {
 }
 
 type LocalBase = { id: string; revision: number; sha256: string; size: number; mtimeMs: number; contentSha256?: string; blank?: boolean }
-type PersistedState = { version: 1; accountId: string; cursor: number; lastSyncAt: string | null; files: Record<string, LocalBase>; conflicts: SyncConflict[]; pendingDeletes: string[]; skipped: SyncRemoteEntry[] }
+/** A remote entry that is tried again on every pull. `held`: it was put off because the note is open or unreadable here (not because its folder stays on another device). */
+type SkippedEntry = SyncRemoteEntry & { held?: true }
+type PersistedState = { version: 1; accountId: string; cursor: number; lastSyncAt: string | null; files: Record<string, LocalBase>; conflicts: SyncConflict[]; pendingDeletes: string[]; skipped: SkippedEntry[] }
+/** What `applyRemote` did with one entry. `unreadable`: it was put off because the local file exists but cannot be read. */
+type RemoteOutcome = { result: 'written' | 'removed' | 'conflict' | 'skipped' | 'deferred' | 'noop'; path: string | null; unreadable?: true }
 type Secrets = { v: 1; accountId: string; deviceId: string; token: string; expiresAt: string; email: string; vaultSecret: string; mcpReader?: string }
 
 export type SyncEngineOptions = {
@@ -76,7 +85,11 @@ export type SyncEngineOptions = {
 const AUTO_INTERVAL_MS = 60_000
 const LOCAL_DEBOUNCE_MS = 2_500
 const OFFLINE_RETRY_MS = 30_000
+/** Without a hint from the server, a throttled cycle goes on after this long. */
+const THROTTLE_RETRY_MS = 20_000
+const THROTTLE_MAX_MS = 65_000
 const MAX_LOG = 120
+const MAX_SKIPPED = 200
 const MAX_FILE_BYTES = 100 * 1024 * 1024
 const CONCURRENCY = 3
 
@@ -160,7 +173,7 @@ export const loadPersistedSyncState = (raw: string | null, accountId: string): P
       files,
       conflicts: Array.isArray(parsed.conflicts) ? parsed.conflicts.filter((item): item is SyncConflict => Boolean(item) && typeof item.path === 'string' && typeof item.copyPath === 'string').slice(-50) : [],
       pendingDeletes: Array.isArray(parsed.pendingDeletes) ? parsed.pendingDeletes.filter((item): item is string => typeof item === 'string' && item.length > 0 && item.length <= 1024).slice(-500) : [],
-      skipped: Array.isArray(parsed.skipped) ? parsed.skipped.filter((item): item is SyncRemoteEntry => Boolean(item) && typeof item.id === 'string' && typeof item.revision === 'number').slice(-200) : [],
+      skipped: Array.isArray(parsed.skipped) ? parsed.skipped.filter((item): item is SkippedEntry => Boolean(item) && typeof item.id === 'string' && typeof item.revision === 'number').slice(-MAX_SKIPPED) : [],
     }
   } catch {
     return emptyState(accountId)
@@ -168,6 +181,8 @@ export const loadPersistedSyncState = (raw: string | null, accountId: string): P
 }
 
 const parseState = loadPersistedSyncState
+
+const heldCount = (state: PersistedState) => state.skipped.reduce((count, item) => count + (item.held ? 1 : 0), 0)
 
 const parseSecrets = (raw: string | null): Secrets | null => {
   if (!raw) return null
@@ -181,16 +196,31 @@ const parseSecrets = (raw: string | null): Secrets | null => {
   }
 }
 
+/**
+ * Runs `task` for every item, `limit` at a time. After the first failure no worker takes another item, and the
+ * call settles only once every worker has finished the one it holds, with that first error. A cycle that failed
+ * must not leave workers behind that still write files and change the sync state: the state is saved and a new
+ * cycle can start right after, and a crash in between would leave new disk content with an old base.
+ */
 const runLimited = async <T>(items: T[], limit: number, task: (item: T) => Promise<void>) => {
   let index = 0
+  let failed = false
+  let failure: unknown
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (index < items.length) {
+    while (!failed && index < items.length) {
       const item = items[index]
       index += 1
-      await task(item)
+      try {
+        await task(item)
+      } catch (error) {
+        if (!failed) failure = error
+        failed = true
+        return
+      }
     }
   })
   await Promise.all(workers)
+  if (failed) throw failure
 }
 
 export class SyncEngine {
@@ -209,14 +239,26 @@ export class SyncEngine {
   private inFlight: Promise<void> | null = null
   private queued = false
   private timer: number | null = null
+  /** While the server throttles, nothing starts a request: only the scheduled resume runs, at this time (epoch ms). A manual sync waits for it too. */
+  private throttledUntil = 0
   private debounce: number | null = null
+  /** Local files already reported as unreadable. A file that stays unreadable is reported once, not on every cycle. */
+  private readonly unreadableLogged = new Set<string>()
   private readonly cleared = new Set<string>()
+  /** Server copies of story scenes this session saw (revision and plain bytes), to check uploads against without a download. */
+  private readonly storyBases = new Map<string, { revision: number; bytes: Uint8Array }>()
+  private rememberStoryBase(path: string, revision: number, bytes: Uint8Array) {
+    if (storyRoleOf(path) !== 'scene') return
+    this.storyBases.delete(path)
+    this.storyBases.set(path, { revision, bytes })
+    if (this.storyBases.size > 400) this.storyBases.delete(this.storyBases.keys().next().value!)
+  }
   private disposed = false
   private windowListeners: Array<() => void> = []
 
   constructor(api?: SyncApi) {
     this.api = api ?? new SyncApi()
-    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pendingLocal: 0, trackedFiles: 0, conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false }
+    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false }
   }
 
   // ── External store API ──────────────────────────────────────────────────
@@ -292,6 +334,7 @@ export class SyncEngine {
     this.vaultId = await this.host.vaultId()
     if (this.session) {
       this.state = parseState(await this.host.readState(this.vaultId), this.session.accountId)
+      this.unreadableLogged.clear()
       this.publishCounts()
       this.setState({ vaultId: this.vaultId, lastSyncAt: this.state.lastSyncAt })
       this.schedule(0)
@@ -316,6 +359,9 @@ export class SyncEngine {
     this.mcpReader = secrets.mcpReader ?? null
     this.vaultId ??= await this.host.vaultId()
     this.state = parseState(await this.host.readState(this.vaultId), secrets.accountId)
+    // A new session starts without the previous one's pause and without its unreadable-file reports.
+    this.throttledUntil = 0
+    this.unreadableLogged.clear()
     this.setState({
       status: 'idle',
       account: { email: secrets.email, accountId: secrets.accountId, deviceId: secrets.deviceId },
@@ -324,7 +370,9 @@ export class SyncEngine {
       lastSyncAt: this.state.lastSyncAt,
       conflicts: this.state.conflicts,
       error: null,
+      pausedUntil: null,
       trackedFiles: Object.keys(this.state.files).length,
+      heldRemote: heldCount(this.state),
     })
   }
 
@@ -341,7 +389,7 @@ export class SyncEngine {
 
   private publishCounts() {
     if (!this.state) return
-    this.setState({ trackedFiles: Object.keys(this.state.files).length, conflicts: this.state.conflicts, lastSyncAt: this.state.lastSyncAt })
+    this.setState({ trackedFiles: Object.keys(this.state.files).length, heldRemote: heldCount(this.state), conflicts: this.state.conflicts, lastSyncAt: this.state.lastSyncAt })
   }
 
   private deviceInfo() {
@@ -402,11 +450,14 @@ export class SyncEngine {
     this.mcpReader = null
     this.mcpGrantSnapshot = []
     this.state = null
+    // The pause belonged to this session. Whoever signs in next starts with an open gate.
+    this.throttledUntil = 0
+    this.unreadableLogged.clear()
     if (this.timer !== null) window.clearTimeout(this.timer)
     this.timer = null
     await this.persistSecrets(null)
     if (this.host && this.vaultId) await this.host.writeState(this.vaultId, null)
-    this.setState({ status: 'signed-out', account: null, info: null, progress: null, pendingLocal: 0, trackedFiles: 0, conflicts: [], openConflicts: 0, error: null, mcpReader: false })
+    this.setState({ status: 'signed-out', account: null, info: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, error: null, mcpReader: false })
   }
 
   async refreshAccount() {
@@ -577,12 +628,13 @@ export class SyncEngine {
     this.notifyLocalChange()
   }
 
-  private schedule(delay: number) {
+  /** `resume`: go on with an interrupted cycle even when automatic sync is off (it was started on purpose). */
+  private schedule(delay: number, resume = false) {
     if (this.disposed || !this.session) return
     if (this.timer !== null) window.clearTimeout(this.timer)
     this.timer = window.setTimeout(() => {
       this.timer = null
-      if (this.options?.automatic() || delay === 0) void this.syncNow('timer')
+      if (this.options?.automatic() || delay === 0 || resume) void this.syncNow(resume ? 'resume' : 'timer')
       else this.schedule(AUTO_INTERVAL_MS)
     }, delay)
   }
@@ -592,9 +644,39 @@ export class SyncEngine {
     return this.inFlight ? this.inFlight.then(() => this.waitIdle()) : Promise.resolve()
   }
 
+  /**
+   * How long the server's pause still lasts, in milliseconds (0: no pause). A pause is never longer than the
+   * server can ask for: a clock that jumped back since it began must not keep the gate shut for the size of the jump.
+   */
+  private pauseRemaining() {
+    if (!this.throttledUntil) return 0
+    const now = Date.now()
+    if (this.throttledUntil - now > THROTTLE_MAX_MS) {
+      this.throttledUntil = now + THROTTLE_MAX_MS
+      if (this.snapshot.status === 'paused') this.setState({ pausedUntil: this.throttledUntil })
+    }
+    return Math.max(0, this.throttledUntil - now)
+  }
+
+  /** The status after work that runs outside a cycle: still 'paused' while the server's pause lasts. */
+  private restingStatus(): SyncStatus {
+    return this.pauseRemaining() > 0 ? 'paused' : 'idle'
+  }
+
   /** Runs one full cycle; concurrent calls coalesce into at most one follow-up cycle. The promise settles when the engine is idle again. */
   syncNow(reason = 'manual'): Promise<void> {
     if (!this.session || !this.host) return Promise.resolve()
+    if (reason !== 'resume') {
+      const wait = this.pauseRemaining()
+      if (wait > 0) {
+        // The server throttles: no request goes out before the pause is over, then the sync goes on. A manual sync
+        // asks for exactly that. Any other trigger leaves a pending timer alone; when there is none, the pause
+        // swallowed the timer that keeps the periodic sync alive (a vault switch or a sign-in replaced the resume
+        // timer by an immediate one) and it is armed again, or nothing would ever sync by itself.
+        if (reason === 'manual' || this.timer === null) this.schedule(wait, true)
+        return Promise.resolve()
+      }
+    }
     if (this.inFlight) {
       this.queued = true
       return this.waitIdle()
@@ -611,7 +693,11 @@ export class SyncEngine {
 
   private async runCycle(reason: string) {
     if (!this.session || !this.host || !this.state || !this.keys) return
-    this.setState({ status: 'syncing', error: null, progress: null })
+    // A cycle starts outside a pause, or as its end: the server's window is over. What this cycle meets decides
+    // what comes next (a new 429 sets the pause again). The file listing of an earlier cycle is out of date too.
+    this.throttledUntil = 0
+    this.scanCache = null
+    this.setState({ status: 'syncing', error: null, progress: null, pausedUntil: null })
     try {
       let conflicts = await this.pull()
       const pushed = await this.push()
@@ -627,11 +713,24 @@ export class SyncEngine {
         await this.handleUnauthorized()
         return
       }
+      if (error instanceof SyncApiError && error.throttled) {
+        // A large first sync uses up the server's request budget. What is done so far is saved,
+        // so the next cycle goes on from there; this is a pause, not an error.
+        const wait = Math.min(THROTTLE_MAX_MS, Math.max(1_000, error.retryAfterMs ?? THROTTLE_RETRY_MS))
+        this.throttledUntil = Date.now() + wait
+        this.setState({ status: 'paused', error: null, progress: null, pausedUntil: this.throttledUntil })
+        this.log('info', `Der Server bremst kurz. Der Sync geht in ${Math.round(wait / 1000)} s weiter.`)
+        this.schedule(wait, true)
+        return
+      }
       const offline = error instanceof SyncApiError && error.offline
       const message = error instanceof Error ? error.message : 'Sync fehlgeschlagen.'
       this.setState({ status: offline ? 'offline' : 'error', error: message, progress: null })
       this.log(offline ? 'warn' : 'error', message)
       this.schedule(offline ? OFFLINE_RETRY_MS : AUTO_INTERVAL_MS)
+    } finally {
+      // A push that failed halfway leaves its listing of the vault behind; the next cycle must look at the vault as it is then.
+      this.scanCache = null
     }
   }
 
@@ -667,6 +766,8 @@ export class SyncEngine {
       since = changes.nextSince
       if (!changes.more) break
     }
+    // The entries listed just now. The cursor moves past one only once it has been dealt with.
+    const unfinished = new Set(pending)
     const seen = new Set(pending.map((entry) => entry.id))
     for (const entry of this.state.skipped) {
       if (!seen.has(entry.id)) pending.push(entry)
@@ -675,34 +776,57 @@ export class SyncEngine {
     this.setState({ progress: { phase: 'pull', done: 0, total: pending.length } })
     const idIndex = new Map(Object.entries(this.state.files).map(([path, base]) => [base.id, path]))
     let done = 0
-    // A change to a note that is being edited right now is not applied; the
-    // cursor stays in front of it so the next cycle fetches it again.
-    let holdCursor = Number.POSITIVE_INFINITY
-    await runLimited(pending, CONCURRENCY, async (entry) => {
-      const { result, path } = await this.applyRemote(entry, idIndex).catch((error: unknown) => {
-        // Sign-in and network errors end the cycle. One damaged or undecryptable
-        // entry must not keep every local edit on this device from uploading:
-        // it waits on the skip list and is tried again on the next pull.
-        if (cycleWide(error)) throw error
-        this.log('warn', `Ein Eintrag konnte nicht übernommen werden und wird später erneut versucht (${error instanceof Error ? error.message : 'unbekannt'}).`)
-        return { result: 'skipped' as const, path: null }
+    let completed = false
+    try {
+      await runLimited(pending, CONCURRENCY, async (entry) => {
+        const { result, path, unreadable } = await this.applyRemote(entry, idIndex).catch((error: unknown): RemoteOutcome => {
+          // Sign-in and network errors end the cycle. One damaged or undecryptable
+          // entry must not keep every local edit on this device from uploading:
+          // it waits on the skip list and is tried again on the next pull.
+          if (cycleWide(error)) throw error
+          this.log('warn', `Ein Eintrag konnte nicht übernommen werden und wird später erneut versucht (${error instanceof Error ? error.message : 'unbekannt'}).`)
+          return { result: 'skipped', path: null }
+        })
+        if (result === 'conflict') conflicts += 1
+        if ((result === 'written' || result === 'conflict') && path) written.push(path)
+        if (result === 'removed' && path) removed.push(path)
+        // A change to a note that is open with unsaved edits, or to a file that cannot be read here, is put
+        // off: it waits on the skip list and is tried again on every pull, while the cursor moves on. Holding
+        // the cursor back instead would list everything after it again on every cycle, for as long as the
+        // note stays open or locked.
+        if (result === 'deferred') this.rememberSkip(entry, true)
+        else if (result === 'skipped') this.rememberSkip(entry)
+        else this.forgetSkip(entry.id)
+        if (path && !unreadable) this.unreadableLogged.delete(path)
+        unfinished.delete(entry)
+        done += 1
+        this.setState({ progress: { phase: 'pull', done, total: pending.length } })
       })
-      if (result === 'conflict') conflicts += 1
-      if ((result === 'written' || result === 'conflict') && path) written.push(path)
-      if (result === 'removed' && path) removed.push(path)
-      if (result === 'deferred') holdCursor = Math.min(holdCursor, entry.revision - 1)
-      else if (result === 'skipped') this.rememberSkip(entry)
-      else this.forgetSkip(entry.id)
-      done += 1
-      this.setState({ progress: { phase: 'pull', done, total: pending.length } })
-    })
-    this.state.cursor = Math.max(this.state.cursor, Math.min(since, holdCursor))
-    await this.persistState()
-    if (written.length || removed.length) this.options?.onApplied?.({ written, removed })
+      completed = true
+    } finally {
+      if (this.state) {
+        // Everything before the first entry that is still open has been dealt with. After a failure that is where
+        // the next pull goes on: it neither skips an entry nor lists the finished ones again.
+        let reachable = since
+        for (const entry of unfinished) reachable = Math.min(reachable, entry.revision - 1)
+        this.state.cursor = Math.max(this.state.cursor, reachable)
+      }
+      // Files written before a failure are on disk. Their bookkeeping is saved and the app is told, so the file
+      // tree and open tabs show them; otherwise the next cycle sees them as unchanged and nobody refreshes, and
+      // an open editor would keep the old text and save it over the newer one. After a failure the error that
+      // ended the pull is the one to report, so a state that cannot be saved is reported only after a good run.
+      try {
+        await this.persistState()
+      } catch (error) {
+        if (completed) throw error
+      } finally {
+        if (written.length || removed.length) this.options?.onApplied?.({ written, removed })
+      }
+    }
     return conflicts
   }
 
-  private async applyRemote(entry: SyncRemoteEntry, idIndex: Map<string, string>): Promise<{ result: 'written' | 'removed' | 'conflict' | 'skipped' | 'deferred' | 'noop'; path: string | null }> {
+  private async applyRemote(entry: SyncRemoteEntry, idIndex: Map<string, string>): Promise<RemoteOutcome> {
     if (!this.session || !this.host || !this.state || !this.keys) return { result: 'skipped', path: null }
     const knownPath = idIndex.get(entry.id) ?? null
 
@@ -712,6 +836,7 @@ export class SyncEngine {
       if (!base || entry.revision <= base.revision) return { result: 'noop', path: knownPath }
       if (this.options?.isPathBusy?.(knownPath)) return { result: 'deferred', path: knownPath }
       const local = await this.localSnapshot(knownPath)
+      if (!local && (await this.presentHere(knownPath))) return this.unreadableHere(knownPath)
       if (!local) {
         delete this.state.files[knownPath]
         idIndex.delete(entry.id)
@@ -744,6 +869,9 @@ export class SyncEngine {
     if (base && base.id === entry.id && entry.revision <= base.revision) return { result: 'noop', path }
     if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
     const local = await this.localSnapshot(path)
+    // A file that is here but cannot be read (permissions, locked, too large) is not
+    // "missing": writing the server's version would replace it without a copy.
+    if (!local && (await this.presentHere(path))) return this.unreadableHere(path)
     // Match the server hash only. The stored identity says the local file still
     // matches the previous revision, which is exactly when a newer remote edit must be applied.
     if (local && local.kind !== 'unreadable' && (local.sha256 === meta.sha256 || local.rawSha256 === meta.sha256)) {
@@ -802,6 +930,8 @@ export class SyncEngine {
       // Task-by-task merge instead of a conflict copy. The base stays the remote revision, so the next push uploads the merge.
       const merged = mergeHomeworkMarkdownBytes(local.bytes, plain)
       if (merged) {
+        // The download took a while: an editor may have started on this file meanwhile (writing mode).
+        if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
         await this.host.write(path, merged, Date.now())
         // Size and mtime of the remote copy, so the push scan sees the merged file as changed.
         this.state.files[path] = {
@@ -817,7 +947,49 @@ export class SyncEngine {
         return { result: 'written', path }
       }
     }
-    if (local && (localChanged || (remoteKind === 'blank' && local.kind !== 'blank'))) {
+    let storyAdopt = false
+    if (storyRoleOf(path) && local && localChanged && local.kind === 'present') {
+      // Story files merge instead of becoming whole-file conflict copies (see src/writing/syncMerge.ts).
+      const localStat = await this.statOf(path)
+      const outcome = mergeStoryFile(path, local.bytes, plain, { localMtimeMs: localStat?.mtimeMs ?? 0, remoteMtimeMs: meta.mtimeMs || 0 })
+      // The base becomes the remote revision with the remote size and no mtime, so the push uploads what stays here.
+      const remoteBase = (): LocalBase => ({ id: entry.id, revision: download.revision, sha256: meta.sha256, size: plain.byteLength, mtimeMs: 0, ...(plainIdentity ? { contentSha256: plainIdentity } : {}) })
+      if (outcome?.kind === 'merged' && outcome.sameAsRemote) {
+        // Everything this device had is in the remote version already.
+        storyAdopt = true
+      } else if (outcome?.kind === 'merged') {
+        // The download took a while: an editor may have started on this file meanwhile (writing mode).
+        if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
+        if (!outcome.sameAsLocal) await this.host.write(path, outcome.bytes, Date.now())
+        this.state.files[path] = remoteBase()
+        idIndex.set(entry.id, path)
+        this.log('info', outcome.conflicts
+          ? `„${path}“ wurde Absatz für Absatz zusammengeführt; ${outcome.conflicts} Absatz/Absätze waren auf beiden Geräten geändert und stehen jetzt doppelt da.`
+          : `„${path}“ wurde Absatz für Absatz zusammengeführt.`)
+        return { result: 'written', path }
+      } else if (outcome?.kind === 'keep-local' || (outcome?.kind === 'pick' && outcome.keep === 'local')) {
+        // The local version keeps the path; the remote one is kept beside it (when it holds anything).
+        let result: 'written' | 'conflict' = 'written'
+        if (remoteKind === 'present') {
+          const at = new Date(this.options?.now?.() ?? Date.now())
+          const copyPath = await this.freeConflictCopyPath(path, at)
+          await this.host.write(copyPath, plain, meta.mtimeMs || at.getTime())
+          const conflict = { path, copyPath, at: at.toISOString() }
+          this.state.conflicts = [...this.state.conflicts, conflict].slice(-50)
+          this.log('warn', `Konflikt bei „${path}“: die neuere Fassung dieses Geräts bleibt, die andere liegt unter „${copyPath}“.`)
+          this.options?.onConflict?.(conflict)
+          result = 'conflict'
+        }
+        this.state.files[path] = remoteBase()
+        idIndex.set(entry.id, path)
+        return { result, path }
+      }
+    }
+    if (local && !storyAdopt && (localChanged || (remoteKind === 'blank' && local.kind !== 'blank'))) {
+      // The download took a while: an editor may have started on this file meanwhile (writing mode). Ask before the
+      // copy is written, not after: a deferral that leaves a copy and a conflict entry behind would write a second
+      // copy and a second entry for the same remote version when it is tried again.
+      if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
       const at = new Date(this.options?.now?.() ?? Date.now())
       const copyPath = await this.freeConflictCopyPath(path, at)
       await this.host.write(copyPath, local.bytes, at.getTime())
@@ -832,7 +1004,10 @@ export class SyncEngine {
       const spliced = withLocalPageStats(syncText(plain), syncText(local.bytes))
       body = new TextEncoder().encode(spliced)
     }
+    // The download took a while: an editor may have started on this file meanwhile (writing mode).
+    if (this.options?.isPathBusy?.(path)) return { result: 'deferred', path }
     const stat = await this.host.write(path, body, meta.mtimeMs || Date.now())
+    this.rememberStoryBase(path, download.revision, plain)
     const storedKind = noteSyncKind(path, body)
     const storedIdentity = identitySyncBytes(path, body)
     this.state.files[path] = {
@@ -849,6 +1024,23 @@ export class SyncEngine {
   }
 
   private scanCache: Map<string, SyncScanEntry> | null = null
+
+  /** The file is listed here (the scan needs no read access), even if reading it fails. */
+  private async presentHere(path: string) {
+    return (await this.statOf(path)) !== null || (await this.exists(path))
+  }
+
+  /**
+   * Leaves a file this device cannot read alone (retried next cycle, like a busy file). It is reported once:
+   * a file that stays locked for hours would otherwise push every real message out of the log.
+   */
+  private unreadableHere(path: string): RemoteOutcome {
+    if (!this.unreadableLogged.has(path)) {
+      this.unreadableLogged.add(path)
+      this.log('warn', `„${path}“ ist auf diesem Gerät vorhanden, lässt sich aber nicht lesen. Die Fassung vom Server wird nicht darübergeschrieben; der Abgleich versucht es später erneut.`)
+    }
+    return { result: 'deferred', path, unreadable: true }
+  }
 
   private async statOf(path: string) {
     if (!this.host) return null
@@ -909,7 +1101,7 @@ export class SyncEngine {
     return { uploads, deletes, conflicts }
   }
 
-  private async uploadPath(entry: SyncScanEntry): Promise<'uploaded' | 'unchanged' | 'conflict' | 'skipped'> {
+  private async uploadPath(entry: SyncScanEntry, depth = 0): Promise<'uploaded' | 'unchanged' | 'conflict' | 'skipped'> {
     if (!this.session || !this.host || !this.state || !this.keys) return 'skipped'
     const raw = await this.host.read(entry.path).catch(() => null)
     if (!raw) return 'skipped'
@@ -947,7 +1139,25 @@ export class SyncEngine {
     const clearing = this.cleared.has(entry.path)
     const severeShrink = Boolean(base) && !base?.blank && base!.size >= 4096 && (raw.byteLength <= 1024 || raw.byteLength * 4 < base!.size)
     const baseHoldsContent = Boolean(base) && !base?.blank && (base!.size > raw.byteLength + 64 || kind === 'blank' || severeShrink)
-    if ((kind === 'blank' || severeShrink) && baseHoldsContent && !clearing) {
+    // A scene or manifest that shrank a lot is checked against the server's version:
+    // a cut the writer made (every paragraph still there, deleted ones as tombstones)
+    // is uploaded; one that lost paragraphs is merged with the server's version first.
+    const storyRole = storyRoleOf(entry.path)
+    const storyShrinkable = kind === 'present' && (storyRole === 'scene' || storyRole === 'manifest')
+    let storyClear = false
+    if (storyRole === 'scene' && kind === 'present' && base && !base.blank && !clearing && !(severeShrink && baseHoldsContent)) {
+      // Every scene upload keeps every paragraph of the server's version (deleted ones as
+      // tombstones). A file that lost paragraphs without a trace is merged back first.
+      const verdict = await this.judgeStoryShrink(entry, base, raw)
+      if (verdict.kind === 'merge') return this.rewriteStory(entry, verdict.bytes, depth)
+    }
+    if (severeShrink && baseHoldsContent && !clearing && storyShrinkable && base) {
+      const verdict = await this.judgeStoryShrink(entry, base, raw)
+      if (verdict.kind === 'merge') return this.rewriteStory(entry, verdict.bytes, depth)
+      if (verdict.kind === 'guard') return this.restoreInstead(entry, base, raw)
+      // 'cut' uploads with the clear flag; 'stale' (a newer version exists) is refused as stale and merged below.
+      storyClear = verdict.kind === 'cut'
+    } else if ((kind === 'blank' || severeShrink) && baseHoldsContent && !clearing) {
       this.log('warn', `„${entry.path}“ ist leer und wird nicht über die vorhandene Fassung hochgeladen.`)
       return this.restoreInstead(entry, base!, raw)
     }
@@ -962,8 +1172,9 @@ export class SyncEngine {
     // upload would be refused on every cycle and the note would never sync.
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const revision = await this.api.upload(this.session, id, baseRevision, meta, blobSha256, blob, { blank: kind === 'blank', clear: clearing && kind === 'blank' })
+        const revision = await this.api.upload(this.session, id, baseRevision, meta, blobSha256, blob, { blank: kind === 'blank', clear: (clearing && kind === 'blank') || storyClear })
         this.cleared.delete(entry.path)
+        this.rememberStoryBase(entry.path, revision, bytes)
         this.state.files[entry.path] = {
           id,
           revision,
@@ -987,6 +1198,15 @@ export class SyncEngine {
         // collapsed (older servers send no reason). Sending it again cannot help:
         // keep this file beside the note and put the server copy back.
         if (error.guarded || (current && !current.deleted && current.revision === baseRevision)) {
+          if (storyShrinkable && base && !storyClear && attempt === 0) {
+            // The server's guard counts encrypted bytes; check the story file the same way as above.
+            const verdict = await this.judgeStoryShrink(entry, { ...base, revision: current?.revision ?? base.revision }, raw)
+            if (verdict.kind === 'merge') return this.rewriteStory(entry, verdict.bytes, depth)
+            if (verdict.kind === 'cut') {
+              storyClear = true
+              continue
+            }
+          }
           if (base) return this.restoreInstead(entry, { ...base, revision: current?.revision ?? base.revision }, raw, 'guard')
           return 'skipped'
         }
@@ -1011,6 +1231,14 @@ export class SyncEngine {
           try {
             const applied = await this.applyRemote(current, idIndex)
             if ((applied.result === 'written' || applied.result === 'conflict') && applied.path) this.options?.onApplied?.({ written: [applied.path], removed: [] })
+            if (applied.result === 'written' && applied.path === entry.path && storyRole && depth === 0) {
+              // A story file was merged with the newer version: upload the merge in this cycle.
+              const fresh = (await this.host.scan()).find((item) => item.path === entry.path)
+              if (fresh) {
+                const again = await this.uploadPath(fresh, depth + 1)
+                return again === 'uploaded' ? 'uploaded' : 'conflict'
+              }
+            }
           } catch (applyError) {
             if (cycleWide(applyError)) throw applyError
             this.log('warn', `„${entry.path}“ konnte nicht abgeglichen werden und wird später erneut versucht (${applyError instanceof Error ? applyError.message : 'unbekannt'}).`)
@@ -1022,6 +1250,36 @@ export class SyncEngine {
       }
     }
     return 'conflict'
+  }
+
+  /** What the server's version says about a much smaller story file (see `judgeStoryShrink`). */
+  private async judgeStoryShrink(entry: SyncScanEntry, base: LocalBase, raw: Uint8Array): Promise<{ kind: 'cut' } | { kind: 'merge'; bytes: Uint8Array } | { kind: 'guard' } | { kind: 'stale' }> {
+    if (!this.session || !this.keys) return { kind: 'guard' }
+    const cached = this.storyBases.get(entry.path)
+    if (cached && cached.revision === base.revision) {
+      const verdict = judgeStoryShrink(entry.path, raw, cached.bytes)
+      if (verdict.kind === 'merge') this.log('warn', `„${entry.path}“ fehlten Absätze der Fassung auf dem Server; sie wurden wieder eingefügt.`)
+      return verdict
+    }
+    const download = await this.api.download(this.session, base.id)
+    if ('deleted' in download) return { kind: 'stale' }
+    if (download.revision !== base.revision) return { kind: 'stale' }
+    if (await sha256Hex(download.blob) !== download.sha256) return { kind: 'guard' }
+    const plain = await decryptBytes(this.keys, base.id, download.blob)
+    this.rememberStoryBase(entry.path, download.revision, plain)
+    const verdict = judgeStoryShrink(entry.path, raw, plain)
+    if (verdict.kind === 'cut') this.log('info', `„${entry.path}“ wurde stark gekürzt; alle Absätze sind als gelöscht vermerkt, die Kürzung wird hochgeladen.`)
+    if (verdict.kind === 'merge') this.log('warn', `„${entry.path}“ fehlten Absätze der Fassung auf dem Server; sie wurden wieder eingefügt.`)
+    return verdict
+  }
+
+  /** Writes a merged story file here and uploads it (once per push). The editor still holding the file waits for the next cycle. */
+  private async rewriteStory(entry: SyncScanEntry, bytes: Uint8Array, depth: number): Promise<'uploaded' | 'conflict' | 'skipped' | 'unchanged'> {
+    if (!this.host || this.options?.isPathBusy?.(entry.path)) return 'skipped'
+    const stat = await this.host.write(entry.path, bytes, Date.now())
+    this.options?.onApplied?.({ written: [entry.path], removed: [] })
+    if (depth > 0) return 'conflict'
+    return this.uploadPath(stat, depth + 1)
   }
 
   /** The blank (or, after a guard rejection, collapsed) local file is kept beside the note. The server copy is written back. */
@@ -1134,10 +1392,11 @@ export class SyncEngine {
     return this.state.pendingDeletes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
   }
 
-  private rememberSkip(entry: SyncRemoteEntry) {
+  /** `held`: a change from another device that waits because the note is open or unreadable here (it counts in `heldRemote`). */
+  private rememberSkip(entry: SyncRemoteEntry, held = false) {
     if (!this.state || !entry.id) return
     const rest = this.state.skipped.filter((item) => item.id !== entry.id)
-    this.state.skipped = [...rest, {
+    const next: SkippedEntry[] = [...rest, {
       id: entry.id,
       revision: entry.revision,
       deleted: Boolean(entry.deleted),
@@ -1146,7 +1405,17 @@ export class SyncEngine {
       meta: entry.meta,
       updatedAt: entry.updatedAt,
       deviceId: entry.deviceId,
-    }].slice(-200)
+      ...(held ? { held: true as const } : {}),
+    }]
+    // The list is capped. A held entry carries a change that must still arrive, so the oldest entries of
+    // folders that stay on another device on purpose go first.
+    let excess = next.length - MAX_SKIPPED
+    const kept: SkippedEntry[] = []
+    for (const item of next) {
+      if (excess > 0 && !item.held) excess -= 1
+      else kept.push(item)
+    }
+    this.state.skipped = excess > 0 ? kept.slice(excess) : kept
   }
 
   private forgetSkip(id: string) {
@@ -1203,9 +1472,11 @@ export class SyncEngine {
     while (this.inFlight) await this.waitIdle()
     let release!: () => void
     this.inFlight = new Promise<void>((resolve) => { release = resolve })
+    this.scanCache = null
     try {
       return await task()
     } finally {
+      this.scanCache = null
       this.inFlight = null
       release()
       if (this.queued && !this.disposed) {
@@ -1384,7 +1655,8 @@ export class SyncEngine {
         throw error
       } finally {
         await this.persistState().catch(() => undefined)
-        this.setState({ status: !this.session ? this.snapshot.status : offline ? 'offline' : 'idle', progress: null })
+        const resting: SyncStatus = !this.session ? this.snapshot.status : offline ? 'offline' : this.restingStatus()
+        this.setState({ status: resting, progress: null, pausedUntil: resting === 'paused' ? this.throttledUntil : null })
         void this.listConflicts().catch(() => undefined)
       }
     })

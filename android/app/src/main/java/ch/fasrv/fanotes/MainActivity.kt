@@ -54,6 +54,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -148,6 +149,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import ch.fasrv.fanotes.desk.solveMathExpression
 import ch.fasrv.fanotes.sync.localFolderAction
 import ch.fasrv.fanotes.sync.pathIsSyncExcluded
@@ -350,7 +352,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // The task timer counts the time the app was away (up to its limit) and stops when it was gone for longer.
+        model.flushStudyTimer()
+    }
+
     override fun onPause() {
+        model.flushStudyTimer()
         try {
             kotlinx.coroutines.runBlocking {
                 kotlinx.coroutines.withTimeout(4_000) { model.saveNow() }
@@ -515,6 +524,7 @@ fun FaNotesScreen(
     onDismissWorksheet: () -> Unit = {},
 ) {
     val tree by model.tree.collectAsStateWithLifecycle()
+    val newPaths by model.newPaths.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
     val tool by model.tool.collectAsStateWithLifecycle()
     val style by model.style.collectAsStateWithLifecycle()
@@ -547,6 +557,7 @@ fun FaNotesScreen(
     val palette by model.paletteOpen.collectAsStateWithLifecycle()
     val paletteNotes by model.paletteNotes.collectAsStateWithLifecycle()
     val bugReportOpen by model.bugReportOpen.collectAsStateWithLifecycle()
+    val workRequestsOpen by model.workRequestsOpen.collectAsStateWithLifecycle()
     val historyOpen by model.historyOpen.collectAsStateWithLifecycle()
     val aiOpen by model.aiOpen.collectAsStateWithLifecycle()
     val settingsOpen by model.settingsOpen.collectAsStateWithLifecycle()
@@ -589,6 +600,21 @@ fun FaNotesScreen(
 
     LaunchedEffect(Unit) {
         if (desk["update-check"] != "off") model.checkUpdate()
+    }
+
+    // New files from outside: look again on resume and every 60 s while the app is in front (slow
+    // rescans back off, see RescanPolicy).
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner, model) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            // Every resume rescans once; after a slow scan the timer stays off until the next resume.
+            model.rescanTree()
+            while (true) {
+                kotlinx.coroutines.delay(model.rescanPolicy.intervalMs)
+                if (model.rescanPolicy.resumeOnly) break
+                model.rescanTree()
+            }
+        }
     }
 
     LaunchedEffect(signedIn) {
@@ -706,6 +732,7 @@ fun FaNotesScreen(
                         ch.fasrv.fanotes.desk.EscapeLayer(
                             confirm = confirm != null,
                             bugReport = bugReportOpen,
+                            workRequests = workRequestsOpen,
                             history = historyOpen,
                             gotoLine = gotoLine != null,
                             math = mathOpen,
@@ -735,6 +762,7 @@ fun FaNotesScreen(
                     when (target) {
                         "confirm" -> model.dismissConfirm()
                         "bug-report" -> model.closeBugReport()
+                        "work-requests" -> model.closeWorkRequests()
                         "history" -> model.closeHistory()
                         "goto-line" -> model.closeGotoLine()
                         "math" -> mathOpen = false
@@ -791,6 +819,7 @@ fun FaNotesScreen(
                     Key.P -> "p"
                     Key.F -> "f"
                     Key.A -> "a"
+                    Key.B -> "b"
                     Key.I -> "i"
                     Key.N -> "n"
                     Key.Comma -> ","
@@ -907,6 +936,7 @@ fun FaNotesScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
         Row(Modifier.fillMaxSize()) {
             if (panels.sidebar) {
+                CompositionLocalProvider(LocalNewPaths provides ch.fasrv.fanotes.vault.withParentFolders(newPaths)) {
                 VaultPane(
                     modifier = Modifier.width((chrome.sidebarDp ?: ch.fasrv.fanotes.desk.sidebarWidthDp(desk["sidebar-width"])).dp).fillMaxHeight(),
                     tree = filterVaultByTag(tree, tagFilter, tagIndex),
@@ -963,6 +993,7 @@ fun FaNotesScreen(
                     onResolve = { conflict, choice -> model.resolveConflict(conflict, choice) },
                     onCollapse = { model.setSidebarOpen(false) },
                 )
+                }
             }
             if (focus || wide || !showList || destination != "notes") {
                 if (destination != "notes" && destination != "search") {
@@ -1068,12 +1099,12 @@ fun FaNotesScreen(
             }
             if (!toast.isNullOrBlank()) {
                 FaNotesToast(
-                    toast,
+                    ch.fasrv.fanotes.desk.ChromeText.ui(toast),
                 onDismiss = {
                     model.undoTrash.value = null
                     model.message.value = null
                 },
-                actionLabel = if (undoTrash != null && toast == ch.fasrv.fanotes.vault.TRASH_NOTICE) ch.fasrv.fanotes.vault.TRASH_UNDO else null,
+                actionLabel = if (undoTrash != null && toast == ch.fasrv.fanotes.vault.TRASH_NOTICE) ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.vault.TRASH_UNDO) else null,
                 onAction = { model.undoLastTrash() },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -1157,6 +1188,7 @@ fun FaNotesScreen(
                 dailyFolder = desk["daily-folder"].orEmpty(),
                 penOpen = !showText,
                 bookOpen = model.bookOpen.collectAsStateWithLifecycle().value,
+                workRequests = model.workRequestsAllowed.collectAsStateWithLifecycle().value,
             ) { id ->
                 val outcome = model.performDesktopCommand(id)
                 dispatchCommandPlatform(context, model, outcome, onImportPdf, onImportSheet, onExportPdf, onDownload, ::revealOpenNote)
@@ -1168,6 +1200,7 @@ fun FaNotesScreen(
     if (aiOpen) AiScreen(model)
     if (settingsOpen) SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
     if (bugReportOpen) BugReportDialog(model)
+    if (workRequestsOpen) WorkRequestsDialog(model)
     if (historyOpen) HistoryDialog(
         model,
         themeId = ch.fasrv.fanotes.desk.themePalette(desk["theme"], androidx.compose.foundation.isSystemInDarkTheme()).id,
@@ -1588,6 +1621,9 @@ private fun TagFilterChip(label: String, active: Boolean, onClick: () -> Unit) {
             .wrapContentHeight(Alignment.CenterVertically),
     )
 }
+
+/** Tree entries (and their folders) that arrived from outside and were not opened yet. */
+private val LocalNewPaths = androidx.compose.runtime.staticCompositionLocalOf<Set<String>> { emptySet() }
 
 @Composable
 private fun VaultPane(
@@ -2010,6 +2046,15 @@ private fun NoteRow(
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (node.path != selected && node.path in LocalNewPaths.current) {
+            Box(
+                Modifier
+                    .padding(end = 4.dp)
+                    .size(7.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+            )
+        }
         if (ch.fasrv.fanotes.desk.treeRowShowsMark() && (node.path == selected || inSplit)) {
             Box(
                 Modifier
@@ -2047,6 +2092,7 @@ private fun NoteRow(
             Icon(
                 when (node.kind) {
                     NoteKind.PDF -> Icons.Filled.PictureAsPdf
+                    NoteKind.STORY -> Icons.AutoMirrored.Filled.MenuBook
                     else -> Icons.Filled.Description
                 },
                 contentDescription = null,
@@ -2972,7 +3018,9 @@ private fun NotePage(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (path != null && editorMenu != null) {
+        if (path != null && (editorMenu == "study-tasks" || editorMenu == "study-marks")) {
+            StudySheet(model, editorMenu.orEmpty(), Modifier.align(Alignment.BottomCenter))
+        } else if (path != null && editorMenu != null) {
             Column(
                 Modifier
                     .align(Alignment.TopCenter)
@@ -3007,6 +3055,7 @@ private fun NotePage(
                 if (noteKind == NoteKind.PDF && editorMenu == "pdf-search") PdfQuoteMarks(model)
             }
         }
+        StudyBlockDialog(model)
         if (showGoto) {
             GotoLineDialog { input ->
                 model.closeGotoLine()
@@ -3100,7 +3149,48 @@ private fun PageSurface(
     val worksheetTextRequest by model.worksheetTextRequest.collectAsStateWithLifecycle()
     val noteFields by model.noteTextFields.collectAsStateWithLifecycle()
     val noteFieldFocus by model.noteTextFieldFocus.collectAsStateWithLifecycle()
+    val studyItems by model.studyAnnotations.collectAsStateWithLifecycle()
+    val studyHistory by model.studyHistory.collectAsStateWithLifecycle()
+    val studyPageRef = remember { arrayOfNulls<NotePageView>(1) }
+    // Tool, selection, measure points, crop and open label editor of the Lernen menu survive a recreated activity.
+    val studyState = androidx.compose.runtime.saveable.rememberSaveable(saver = StudyStateBox.Saver) { StudyStateBox() }
+    val pickStudyImage = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val target = studyPageRef[0]
+        if (uri != null && target != null) model.importStudyImage(uri, target.ink.study.visiblePage())
+    }
+    val appContext = androidx.compose.ui.platform.LocalContext.current
+    // "path|page" of a photo being taken; saved so a recreated activity can still import it.
+    var cameraTarget by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        // Drop photos left by an interrupted capture (the pending one is kept).
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val keep = cameraTarget.substringBeforeLast('|', "")
+            java.io.File(appContext.cacheDir, "study-camera").listFiles()?.forEach { if (it.path != keep) it.delete() }
+        }
+    }
+    val takeStudyPhoto = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
+        val target = cameraTarget
+        cameraTarget = ""
+        val file = java.io.File(target.substringBeforeLast('|', ""))
+        val pageNumber = target.substringAfterLast('|', "").toIntOrNull() ?: return@rememberLauncherForActivityResult
+        if (file.path.isEmpty() || file.parentFile?.name != "study-camera") return@rememberLauncherForActivityResult
+        if (!saved) {
+            file.delete()
+            return@rememberLauncherForActivityResult
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(appContext, "${appContext.packageName}.files", file)
+        model.importStudyImage(uri, pageNumber, "Foto") { file.delete() }
+    }
     val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
+    val studyTimer by model.studyTimer.collectAsStateWithLifecycle()
+    val timerChip = remember(studyTimer, markdown) {
+        studyTimer?.let { run ->
+            ch.fasrv.fanotes.study.readTaskList(markdown)?.tasks?.firstOrNull { it.id == run.taskId }?.let { task ->
+                val name = ch.fasrv.fanotes.desk.ChromeText.ui("Auftrag")
+                StudyTimerChip(if (task.number.isNotEmpty()) "$name ${task.number}" else name, task.spentSec, run)
+            }
+        }
+    }
     val sheetReset by model.sheetReset.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
     var appliedPlaceLink by remember { mutableStateOf(0) }
@@ -3114,6 +3204,8 @@ private fun PageSurface(
         modifier = Modifier.matchParentSize(),
         factory = { context ->
             NotePageView(context).apply {
+                restoreStudyState(studyState.raw)
+                studyState.provider = { studyStateSnapshot() }
                 attachSession(model.session)
                 ink.onChanged = { model.noteChanged() }
                 ink.onStroke = { model.recordFinishedStroke(it) }
@@ -3160,6 +3252,7 @@ private fun PageSurface(
                         "backup" -> model.performDesktopCommand("history")
                         "pdf-prev" -> model.goToPdfPage(model.pdfThumbPage.value - 1)
                         "pdf-next" -> model.goToPdfPage(model.pdfThumbPage.value + 1)
+                        "study-timer-stop" -> model.stopStudyTimer()
                         "tags", "search", "more", "pdf-search", "pdf-thumbs", "pdf-password" -> model.openEditorMenu(action)
                         else -> model.openEditorMenu(action)
                     }
@@ -3189,6 +3282,7 @@ private fun PageSurface(
             )
             page.onPasteImage = { name, bytes, mime -> model.importBytes(name, bytes, pdf = false, mime = mime) }
             page.onFollowLink = { target, web, anchor -> openFollowedLink(page.context, model, target, web, anchor) }
+            page.onStudyBlock = { kind, from, hash -> model.openStudyBlock(kind, from, hash) }
             page.onVisibleMarkdown = { previous, next -> model.updateVisibleMarkdown(previous, next) }
             val pendingStamp = model.stampRequest.value
             if (!pendingStamp.isNullOrEmpty()) {
@@ -3249,6 +3343,29 @@ private fun PageSurface(
                 page.ink.invalidate()
             }
             page.ink.onPlaceLink = { linkPage, x, y -> model.placeNoteLink(linkPage, x, y, page.ink.noteLinkStyle) }
+            studyPageRef[0] = page
+            if (page.ink.study.items != studyItems) page.ink.study.items = studyItems
+            if (page.ink.study.openDialog != null) page.resumeStudyDialog()
+            page.ink.study.onChange = { before, next -> model.commitStudy(before, next) }
+            page.studyCanUndo = studyHistory.canUndo
+            page.studyCanRedo = studyHistory.canRedo
+            page.onStudyUndo = { model.undoStudy() }
+            page.onStudyRedo = { model.redoStudy() }
+            page.onStudyCamera = {
+                val dir = java.io.File(appContext.cacheDir, "study-camera").apply { mkdirs() }
+                val file = java.io.File(dir, "photo-${System.currentTimeMillis()}.jpg")
+                cameraTarget = "${file.path}|${page.ink.study.visiblePage()}"
+                try {
+                    takeStudyPhoto.launch(androidx.core.content.FileProvider.getUriForFile(appContext, "${appContext.packageName}.files", file))
+                } catch (_: Exception) {
+                    cameraTarget = ""
+                    file.delete()
+                    model.message.value = "Keine Kamera-App gefunden."
+                }
+            }
+            page.onStudyCrop = { pageNumber, rect -> model.cropStudyPdfRegion(pageNumber, rect) }
+            page.syncCompare()
+            page.onStudyImage = { pickStudyImage.launch(arrayOf("image/png", "image/jpeg", "image/webp", "image/*")) }
             page.ink.noteTextFields = noteFields
             page.ink.onPlaceTextField = { model.storePlacedTextField(it) }
             page.ink.onTextFieldMessage = { model.message.value = it }
@@ -3265,6 +3382,7 @@ private fun PageSurface(
             page.onMath = onMath
             page.onTextHand = { model.openTextHand() }
             page.pdfNote = model.open.value?.kind == NoteKind.PDF
+            page.studyTimerChip = timerChip
             page.onPdfKey = { action ->
                 when (action) {
                     "next" -> model.goToPdfPage(model.pdfThumbPage.value + 1)

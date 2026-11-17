@@ -122,6 +122,9 @@ fun applyDesktopCommand(before: DeskWork, rawId: String, extras: CommandExtras =
 private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWork = when (id) {
     "new-note" -> addNote(work, parentOf(work.openPath), "Unbenannte Notiz", "# Unbenannte Notiz\n\n")
     "import-pdf-note" -> importPdf(work, extras)
+    // Stories open in the writing screen (a WebView with the shared editor).
+    "new-story" -> work.copy(destination = "writing", message = null)
+    "import-story" -> work.copy(destination = "writing", overlays = work.overlays + "import-story", message = null)
     "new-folder" -> addFolder(work, "", "Neuer Ordner")
     "new-subfolder" -> addFolder(work, parentOf(work.openPath), "Neuer Ordner")
     "save" -> work.copy(saveGeneration = work.saveGeneration + 1, message = null)
@@ -138,6 +141,13 @@ private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWor
     "study" -> work.copy(destination = "study", message = null)
     "flashcards" -> work.copy(overlays = work.overlays + "flashcards", destination = "notes", message = null)
     "homework" -> work.copy(destination = "homework", message = null)
+    // Assignments and highlights open as a panel of the open PDF; sorting boards and definition cards are inserted
+    // and edited on the tablet. Key tables, concept maps and picture sheets are drawn here but built on the computer.
+    "study-tasks", "study-marks" -> work.copy(overlays = work.overlays + id, message = null)
+    "study-sort" -> insertStudyTemplate(work, ch.fasrv.fanotes.study.StudyKind.SORT, ch.fasrv.fanotes.study.sortDataJson(ch.fasrv.fanotes.study.defaultSortData()))
+    "study-term" -> insertStudyTemplate(work, ch.fasrv.fanotes.study.StudyKind.TERM, ch.fasrv.fanotes.study.termDataJson(ch.fasrv.fanotes.study.defaultTermData()))
+    "study-key", "study-map", "study-plate" ->
+        work.copy(message = "Diesen Block legst du am Computer an. Auf dem Tablet siehst du ihn in der Notiz.")
     "calendar" -> work.copy(destination = "calendar", message = null)
     "daily" -> openDaily(work, extras.today, extras)
     "daily-previous" -> openAdjacentDaily(work, extras, -1)
@@ -166,6 +176,7 @@ private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWor
     "addon-store" -> installAddon(work, extras)
     "reveal" -> reveal(work)
     "bug-report" -> work.copy(overlays = work.overlays + "bug", message = null)
+    "work-requests" -> work.copy(overlays = work.overlays + "work-requests", message = null)
     "note-here" -> addNote(work, parentOf(work.openPath), "Unbenannte Notiz", "# Unbenannte Notiz\n\n")
     "download-note" -> exportCurrent(work, "md", "text/markdown")
     "trash" -> work.copy(destination = "trash", overlays = work.overlays + "trash", message = null)
@@ -391,6 +402,11 @@ private fun insertStamp(work: DeskWork, stamp: String): DeskWork {
     val index = work.cursorLine.coerceIn(0, lines.lastIndex.coerceAtLeast(0))
     if (lines.isEmpty()) lines += inserted else lines[index] = lines[index] + inserted
     return replaceOpen(work, lines.joinToString("\n"))
+}
+
+private fun insertStudyTemplate(work: DeskWork, kind: ch.fasrv.fanotes.study.StudyKind, data: ch.fasrv.fanotes.json.JsonValue): DeskWork {
+    if (work.openPath == null) return work.copy(message = "Öffne zuerst eine Notiz.")
+    return replaceOpen(work, ch.fasrv.fanotes.study.insertStudyBlock(work.markdown, kind, data))
 }
 
 private fun toggleOpenTask(work: DeskWork): DeskWork {

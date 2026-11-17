@@ -176,6 +176,7 @@ fun paletteCommands(
     splitRows: Boolean = false,
     focus: Boolean = false,
     dailyFolder: String = "",
+    workRequests: Boolean = true,
 ): List<PaletteCommand> {
     val commands = listOf(
         PaletteCommand("new-note", "Neue Notiz", "Dateien", "Markdown-Datei im Standardordner", "Ctrl N"),
@@ -229,7 +230,10 @@ fun paletteCommands(
         PaletteCommand("sync", "Jetzt synchronisieren", "FaNotes", keywords = "sync synchronisieren cloud server geräte"),
         PaletteCommand("sync-settings", "Sync einrichten", "FaNotes", "Konto erstellen oder anmelden", keywords = "sync konto anmelden cloud geräte"),
         PaletteCommand("bug-report", "Fehler melden", "FaNotes", "Kurz beschreiben; die letzten fünf Minuten werden angehängt", keywords = "bug report fehler logs support"),
+        PaletteCommand("work-requests", "Fehler & Wünsche", "FaNotes", "Fehler oder Funktion melden und den Fortschritt verfolgen", "Ctrl ⇧ B", "wunsch funktion anfrage claude fehler bug request"),
         PaletteCommand("import-pdf-note", "PDF importieren", "Dateien", "PDF wird selbst zur Notiz — mit Handschrift und Viewer", keywords = "pdf import notiz viewer"),
+        PaletteCommand("new-story", "Neue Geschichte", "Dateien", "Schreibmodus mit Seiten, Kapiteln und Szenen", keywords = "geschichte roman buch schreiben story novel writing kapitel"),
+        PaletteCommand("import-story", "Geschichte importieren …", "Dateien", "Word (.docx), Markdown oder Text als Geschichte öffnen", keywords = "import docx word markdown geschichte roman story"),
         PaletteCommand("new-subfolder", "Unterordner anlegen", "Dateien", "Im Ordner der offenen Notiz", keywords = "unterordner ordner verschachteln fach"),
         PaletteCommand("drawing", if (penOpen) "Zur Tastatur wechseln" else "Mit Stift schreiben", "Werkzeuge", "Eingabeart auf derselben Notizseite wechseln", "Ctrl D", "tablet stift erkennen"),
         PaletteCommand("text-field", "Textfeld einfügen", "Werkzeuge", "Irgendwo auf der Seite mit der Tastatur schreiben", keywords = "textfeld text tastatur pdf schreiben"),
@@ -238,6 +242,13 @@ fun paletteCommands(
         PaletteCommand("ai-assistant", "AI-Assistent", "Werkzeuge", "LM Studio, Ollama, OpenAI, Gemini, Anthropic oder OpenCode nutzen", "Ctrl ⇧ A", "ki ai rechtschreibung fakten"),
         PaletteCommand("glyphenwerk", "GlyphenWerk öffnen", "Werkzeuge", "Handschrift trainieren, live testen, korrigieren und verwalten", "Ctrl ⇧ G", "training erkennung symbole test datensatz"),
         PaletteCommand("flashcards", "Karteikarten", "Lernen", "Lernfragen dieser Notiz wiederholen", keywords = "flashcards karten spaced"),
+        PaletteCommand("study-key", "Lernwerkzeug: Tabelle und Bestimmungsschlüssel", "Lernwerkzeuge", "Als Block in die Notiz einfügen (Computer und Browser)", keywords = "lernwerkzeuge tabelle schlüssel bestimmungsschlüssel"),
+        PaletteCommand("study-sort", "Lernwerkzeug: Sortier-Board", "Lernwerkzeuge", "Karten in Gruppen oder eine Reihenfolge ziehen", keywords = "lernwerkzeuge sortieren board"),
+        PaletteCommand("study-map", "Lernwerkzeug: Begriffsnetz (Ursache und Wirkung)", "Lernwerkzeuge", "Boxen und beschriftete Pfeile", keywords = "lernwerkzeuge begriffsnetz concept map"),
+        PaletteCommand("study-plate", "Lernwerkzeug: Bildtafel", "Lernwerkzeuge", "Bilder mit Namen, auch als Karteikarten", keywords = "lernwerkzeuge bildtafel arten bilder"),
+        PaletteCommand("study-term", "Lernwerkzeug: Definitionskarten", "Lernwerkzeuge", "Begriff, Definition, Beispiel, Quelle", keywords = "lernwerkzeuge definition begriff karten"),
+        PaletteCommand("study-tasks", "Lernwerkzeuge: Aufträge dieses PDFs", "Lernwerkzeuge", "Aufträge erkennen, abhaken und mit Timer bearbeiten", keywords = "auftrag aufgabe pdf arbeitsblatt timer"),
+        PaletteCommand("study-marks", "Lernwerkzeuge: Markierungen-Übersicht", "Lernwerkzeuge", "Alle Textmarker-Stellen des PDFs nach Seite", keywords = "markierungen textmarker highlight pdf"),
         PaletteCommand("homework", "Hausaufgaben & Termine", "Navigation", "To-dos, Hausaufgaben und Termine mit Fälligkeit", keywords = "todo hausaufgaben schule termin fällig aufgabe"),
         PaletteCommand("duplicate-note", "Notiz duplizieren", "Dateien", "Text, Handschrift und Verlinkungen als neue Notiz", keywords = "duplizieren kopie copy duplicate klonen"),
         PaletteCommand("export-latex", "Notiz als LaTeX-Code exportieren", "Dateien", "LaTeX-Code der Notiz", keywords = "latex tex export formel"),
@@ -254,7 +265,7 @@ fun paletteCommands(
             keywords = "vorlage template ${template.profile} ${template.title}",
         )
     }
-    return commands + templates
+    return commands.filter { workRequests || it.id != "work-requests" } + templates
 }
 
 /** Every typed word must appear in the label, detail, group, or keywords. */

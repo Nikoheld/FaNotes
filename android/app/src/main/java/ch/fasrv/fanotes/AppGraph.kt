@@ -26,6 +26,7 @@ class FaNotesApplication : Application() {
         super.onCreate()
         graph = AppGraph(this)
         graph.handwritingLearning.attach()
+        graph.installDiagnosticsHook()
         if (Build.VERSION.SDK_INT >= 26) {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
@@ -47,11 +48,70 @@ class AppGraph(context: Context) {
     private val secrets = VaultSecrets(context)
     val defaultRoot: File = File(context.filesDir, "vault").apply { mkdirs() }
     var vault: VaultIo = DirectoryVault(defaultRoot.toPath())
+    /** Opt-in diagnostics. Both toggles are off until the user switches them on in Settings → Statistik. */
+    val diagnostics: ch.fasrv.fanotes.desk.DiagnosticsClient = ch.fasrv.fanotes.desk.DiagnosticsClient(
+        PrefsDiagnosticsStorage(context.getSharedPreferences("fanotes-diagnostics", Context.MODE_PRIVATE)),
+        OkHttpDiagnosticsTransport(),
+        {
+            ch.fasrv.fanotes.desk.DiagnosticsApp(
+                version = installedAppVersion(context),
+                platform = "android",
+                arch = Build.SUPPORTED_ABIS.firstOrNull().orEmpty(),
+                language = java.util.Locale.getDefault().language,
+            )
+        },
+    )
+    private val appContext = context.applicationContext
+
+    /** The real vault path, the SAF tree URI and its display name, the device model and the device name, so none of them survives scrubbing. */
+    private fun diagnosticsContext(): ch.fasrv.fanotes.desk.DiagnosticsContext {
+        val tree = prefs.getString("vault-uri", null)?.takeIf { it.isNotBlank() }
+        val treeName = tree?.let { treeDisplayName(it) }
+        val deviceName = runCatching { android.provider.Settings.Global.getString(appContext.contentResolver, "device_name") }.getOrNull()
+        return ch.fasrv.fanotes.desk.DiagnosticsContext(
+            vaultPath = defaultRoot.absolutePath,
+            homeDir = appContext.filesDir.parent.orEmpty(),
+            extraPaths = listOfNotNull(tree),
+            extraNames = listOfNotNull(treeName, Build.MODEL, Build.DEVICE, deviceName, prefs.getString("device-name", null))
+                .map { it.trim() }.filter { it.length >= 3 },
+        )
+    }
+
+    private fun treeDisplayName(tree: String): String? = runCatching {
+        val uri = android.net.Uri.parse(tree)
+        val doc = android.provider.DocumentsContract.buildDocumentUriUsingTree(uri, android.provider.DocumentsContract.getTreeDocumentId(uri))
+        appContext.contentResolver.query(doc, arrayOf(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    }.getOrNull()
+
+    fun configureDiagnostics(settings: Map<String, String> = readDesk()) {
+        diagnostics.configure(
+            ch.fasrv.fanotes.desk.DiagnosticsConsent(usage = settings["diagnostics-usage"] == "on", logs = settings["diagnostics-logs"] == "on"),
+            diagnosticsContext(),
+        )
+    }
+
+    /** Uncaught errors go to the diagnostics ring (class, code, app frames, hash only) and then on to the system handler. */
+    fun installDiagnosticsHook() {
+        configureDiagnostics()
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                diagnostics.recordError(error)
+                diagnostics.flush()
+            }
+            previous?.uncaughtException(thread, error)
+        }
+    }
+
     val handwritingLearning by lazy { HandwritingLearning(context.applicationContext, this) }
     var store: NoteStore = NoteStore(vault) { path -> handwritingLearning.changed(path) }
     var vaultId: String = fingerprint(defaultRoot.absolutePath)
     var initialVaultLabel: String = "Auf diesem Tablet"
     @Volatile var busyPaths: Set<String> = emptySet()
+    /** Stories open in the writing mode: sync waits for their files as the gate says (OpenStoryGate). */
+    @Volatile var openStories: Set<ch.fasrv.fanotes.sync.OpenStoryGate> = emptySet()
     val remoteListeners = mutableListOf<(List<String>, List<String>) -> Unit>()
     private val stateDir = File(context.filesDir, "sync-state").apply { mkdirs() }
     private val glyphFile = File(context.filesDir, "glyph-samples.json")
@@ -78,7 +138,7 @@ class AppGraph(context: Context) {
                 platform = "android",
                 deviceName = { prefs.getString("device-name", null)?.ifBlank { null } ?: android.os.Build.MODEL.ifBlank { "Android tablet" } },
                 automatic = { prefs.getBoolean("sync-automatic", true) },
-                isPathBusy = { path -> path in busyPaths },
+                isPathBusy = { path -> path in busyPaths || openStories.any { it.isBusy(path) } },
                 excludedPrefixes = { syncPrefixesFromSetting(readDesk()["sync-excluded"]) },
                 includeHistory = { readDesk()["sync-history"] == "on" },
                 onApplied = { written, removed ->
@@ -105,6 +165,13 @@ class AppGraph(context: Context) {
         engine.attach(host())
         handwritingLearning.attach()
     }
+
+    /**
+     * Where the Statistik page keeps what it read from each note of the open vault, so opening it again
+     * (or after the app restarted) does not read the vault again. One file per vault, in private storage.
+     */
+    fun statsCache(): ch.fasrv.fanotes.desk.StatsCacheStore =
+        ch.fasrv.fanotes.desk.FileStatsCacheStore(File(File(appContext.filesDir, "stats-cache"), fingerprint(vaultId) + ".jsonl"))
 
     fun rememberTree(uri: String?) {
         prefs.edit().putString("vault-uri", uri).apply()
@@ -147,6 +214,16 @@ class AppGraph(context: Context) {
 
     fun writeWorkspace(vaultId: String, json: String) {
         prefs.edit().putString("workspace-$vaultId", json).apply()
+    }
+
+    /** The running task timer of this vault (see `StudyTimerRecord`), kept so it survives a killed process. */
+    fun readStudyTimer(vaultId: String): String? = prefs.getString("study-timer-$vaultId", null)
+
+    /** Stores the running task timer; null removes it. */
+    fun writeStudyTimer(vaultId: String, json: String?) {
+        val edit = prefs.edit()
+        if (json == null) edit.remove("study-timer-$vaultId") else edit.putString("study-timer-$vaultId", json)
+        edit.apply()
     }
 
     fun readExpandedFolders(vaultId: String): String? = prefs.getString("fanotes.treeExpanded.v1-$vaultId", null)

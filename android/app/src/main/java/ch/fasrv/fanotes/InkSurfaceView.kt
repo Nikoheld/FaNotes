@@ -92,6 +92,7 @@ import ch.fasrv.fanotes.input.PointerAction
 import ch.fasrv.fanotes.input.PointerSample
 import ch.fasrv.fanotes.input.PointerTool
 import ch.fasrv.fanotes.input.fingerMayNavigate
+import ch.fasrv.fanotes.input.palmAfterContactEnd
 import ch.fasrv.fanotes.input.isPenTool
 import ch.fasrv.fanotes.input.shouldRejectFinger
 import ch.fasrv.fanotes.input.shouldRejectNonPenInk
@@ -156,6 +157,8 @@ class InkSurfaceView @JvmOverloads constructor(
     var onEdgeHistory: (Int) -> Unit = {}
     var onTogglePaperTask: (Int) -> Unit = {}
     var onFollowMarkdown: (String, Boolean, String?) -> Unit = { _, _, _ -> }
+    /** A tap on a drawn study block: its kind and its position among the note's study blocks. */
+    var onStudyBlock: (String, Int) -> Unit = { _, _ -> }
     var onCamera: (Float, Float, Float) -> Unit = { _, _, _ -> }
     var onPenActive: (Boolean) -> Unit = {}
     var placingSection = false
@@ -195,6 +198,28 @@ class InkSurfaceView @JvmOverloads constructor(
             field = value
             reportedPdfPage = 0
         }
+    /** Study annotations ("Lernen" tools): drawing, hit testing and editing live in [StudyController]. */
+    private val studyImages = StudyImageCache { postInvalidate() }
+    val study = StudyController(
+        object : StudyController.Host {
+            override fun studyBox(page: Int) = ch.fasrv.fanotes.study.studyPageBox(
+                page, pageFrames, pageLeft.toDouble(), pageTop.toDouble(), pixelsPerPageUnit().toDouble(), sessionWidth(), sessionHeight(),
+            )
+            override fun studyPages(): List<Pair<Int, ch.fasrv.fanotes.study.PageBox>> =
+                (if (pageFrames.isEmpty()) listOf(1) else pageFrames.map { it.page }).mapNotNull { page -> studyBox(page)?.let { page to it } }
+            override fun studyDensity() = resources.displayMetrics.density
+            override fun studyRedraw() = invalidate()
+            override fun studyChrome() = onStudyChrome()
+            override fun studyVisiblePage(): Int = studyPages().maxByOrNull { (_, box) ->
+                minOf(box.top + box.height, height.toDouble()) - maxOf(box.top, 0.0)
+            }?.first ?: 1
+        },
+        studyImages,
+    ) { accentColor }
+    var onStudyChrome: () -> Unit = {}
+    private var studyLastX = 0.0
+    private var studyLastY = 0.0
+
     var placingHighlight = false
     var placingText = false
 
@@ -877,22 +902,35 @@ class InkSurfaceView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
-                if (id == tabletPanId || action == MotionEvent.ACTION_CANCEL) tabletPanId = MotionEvent.INVALID_POINTER_ID
-                if (guideDrag?.pointerId == id || action == MotionEvent.ACTION_CANCEL) guideDrag = null
-                val endingInk = id == inkPointer || action == MotionEvent.ACTION_CANCEL
+                val cancelled = action == MotionEvent.ACTION_CANCEL
+                // A pointer the system rejected after delivering it (palm rejection, API 33+) comes up flagged
+                // instead of cancelled. It must not commit a stamp, a link tap or a stroke either.
+                val revoked = cancelled || (Build.VERSION.SDK_INT >= 33 && (event.flags and MotionEvent.FLAG_CANCELED) != 0)
+                // The pen is released whether or not it started ink: mapped tablet buttons, tap tools and a
+                // second pointer all return before an ink pointer exists, and a stuck lock blocks finger pan and zoom.
+                palm = palmAfterContactEnd(
+                    palm,
+                    tool,
+                    cancelled,
+                    if (cancelled) List(event.pointerCount) { toolOf(event, it) } else emptyList(),
+                    event.eventTime,
+                )
+                if (id == tabletPanId || cancelled) tabletPanId = MotionEvent.INVALID_POINTER_ID
+                if (guideDrag?.pointerId == id || cancelled) guideDrag = null
+                val endingInk = id == inkPointer || cancelled
                 if (endingInk && inkPointer != MotionEvent.INVALID_POINTER_ID) {
                     val inkIndex = event.findPointerIndex(inkPointer).coerceAtLeast(0)
-                    if (action != MotionEvent.ACTION_CANCEL && inkIndex < event.pointerCount) {
+                    if (!revoked && inkIndex < event.pointerCount) {
                         moveInk(event, inkIndex)
                     }
-                    finishInk(action == MotionEvent.ACTION_CANCEL)
-                    palm = touchPalmState(palm, sample(event, inkIndex.coerceAtMost(event.pointerCount - 1), PointerAction.UP))
+                    finishInk(revoked)
                     inkPointer = MotionEvent.INVALID_POINTER_ID
                 }
-                val taskTap = navTap && fingers.size == 1 && fingers.containsKey(id) && action != MotionEvent.ACTION_CANCEL
-                if (fingers.remove(id) != null && fingers.size < 2 && action != MotionEvent.ACTION_CANCEL) {
+                val taskTap = navTap && fingers.size == 1 && fingers.containsKey(id) && !revoked
+                if (fingers.remove(id) != null && fingers.size < 2 && !revoked) {
                     if (taskTap && tryTogglePaperTask(event.getX(index), event.getY(index))) navTap = false
                     else if (taskTap && tryFollowPaperLink(event.getX(index), event.getY(index))) navTap = false
+                    else if (taskTap && tryOpenStudyBlock(event.getX(index), event.getY(index))) navTap = false
                     else maybeSwipe(event)
                     settleZoom()
                 }
@@ -930,6 +968,15 @@ class InkSurfaceView @JvmOverloads constructor(
                 onChanged()
                 onPenActive(false)
                 inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
+            study.active && !eraser -> {
+                val (ux, uy) = unrotate(event.getX(index), event.getY(index))
+                studyLastX = ux.toDouble()
+                studyLastY = uy.toDouble()
+                if (!study.down(studyLastX, studyLastY)) {
+                    onPenActive(false)
+                    inkPointer = MotionEvent.INVALID_POINTER_ID
+                }
             }
             sectionHit != null && !eraser -> {
                 onToggleSection(sectionHit.id)
@@ -1017,7 +1064,7 @@ class InkSurfaceView @JvmOverloads constructor(
             eraser -> {
                 erasing = true
                 current.beginErase()
-                current.eraseSamples(listOf(point(event, index, x, y)), eraserRadius(), nowIso())
+                if (current.eraseSamples(listOf(point(event, index, x, y)), eraserRadius(), nowIso())) current.erasedBounds?.let { dropTilesIn(it) }
                 onChanged()
             }
             placingHighlight -> {
@@ -1054,6 +1101,13 @@ class InkSurfaceView @JvmOverloads constructor(
         val current = session ?: return
         trackNib(event, index)
         predictor?.record(event)
+        if (study.dragging) {
+            val (ux, uy) = unrotate(event.getX(index), event.getY(index))
+            studyLastX = ux.toDouble()
+            studyLastY = uy.toDouble()
+            study.move(studyLastX, studyLastY)
+            return
+        }
         val history = event.historySize
         if (highlighting) {
             val (x, y) = screenToNorm(event.getX(index), event.getY(index))
@@ -1067,7 +1121,7 @@ class InkSurfaceView @JvmOverloads constructor(
             for (h in 0 until history) samples += point(event, index, historical = h)
             samples += point(event, index)
             if (current.eraseSamples(samples, eraserRadius(), nowIso())) {
-                dropTilesNear(event, index)
+                current.erasedBounds?.let { dropTilesIn(it) }
                 onChanged()
             }
         } else if (selecting) {
@@ -1105,6 +1159,10 @@ class InkSurfaceView @JvmOverloads constructor(
         predicted = emptyList()
         snapLock = null
         onPenActive(false)
+        if (study.dragging) {
+            study.up(studyLastX, studyLastY, cancel)
+            return
+        }
         if (highlighting) {
             highlighting = false
             if (!cancel) commitHighlight()
@@ -1303,6 +1361,7 @@ class InkSurfaceView @JvmOverloads constructor(
                     top += height
                 }
                 is PaperBlock.Image -> top += block.frameHeight + 24f * scale
+                is PaperBlock.Study -> top += block.height
             }
         }
         return false
@@ -1351,7 +1410,37 @@ class InkSurfaceView @JvmOverloads constructor(
                     top += height
                 }
                 is PaperBlock.Image -> top += block.frameHeight + 24f * scale
+                is PaperBlock.Study -> top += block.height
             }
+        }
+        return false
+    }
+
+    /** A stationary tap on a drawn study block opens its editor (sorting board, definition cards) or the hint. */
+    private fun tryOpenStudyBlock(x: Float, y: Float): Boolean {
+        if (!showMarkdown || markdown.isBlank() || !markdown.contains("fanotes-")) return false
+        val scale = pixelsPerPageUnit()
+        if (scale <= 0f) return false
+        val point = unrotated(x, y)
+        val originX = (session?.document?.originX ?: 0.0).toFloat()
+        val originY = (session?.document?.originY ?: 0.0).toFloat()
+        val textX = point.first - pageLeft - (TEXT_PAD_X + originX) * scale
+        val textY = point.second - pageTop - (TEXT_PAD_Y + originY) * scale
+        if (textX < -8f || textY < 0f || textX > TEXT_COLUMN * scale + 8f) return false
+        var top = 0f
+        for (block in paperBlocks(scale)) {
+            val height = when (block) {
+                is PaperBlock.Text -> block.layout.height.toFloat()
+                is PaperBlock.Table -> block.rowHeights.sum() + 10f * scale
+                is PaperBlock.Image -> block.frameHeight + 24f * scale
+                is PaperBlock.Study -> block.height
+            }
+            if (textY >= top && textY < top + height) {
+                if (block !is PaperBlock.Study) return false
+                onStudyBlock(block.kindId, block.index)
+                return true
+            }
+            top += height
         }
         return false
     }
@@ -1483,13 +1572,20 @@ class InkSurfaceView @JvmOverloads constructor(
             canvas.drawRoundRect(sx, sy, sx + boxWidth, sy + boxHeight, 6f * density, 6f * density, cardEdge)
             cardEdge.alpha = edgeAlpha
             cardFill.color = Color.WHITE
-            textPaint.color = if (field.text.isEmpty()) Color.parseColor("#747887") else Color.parseColor("#20222B")
+            textPaint.color = when {
+                field.text.isEmpty() -> Color.parseColor("#747887")
+                field.color != null -> Color.parseColor(field.color)
+                else -> Color.parseColor("#20222B")
+            }
+            val regularFace = textPaint.typeface
+            if (field.bold) textPaint.typeface = android.graphics.Typeface.create(regularFace, android.graphics.Typeface.BOLD)
             textPaint.textSize = fontSize
             var baseline = sy + 6f * scale + fontSize
             for (line in lines) {
                 canvas.drawText(line, sx + 8f * scale, baseline, textPaint)
                 baseline += lineHeight
             }
+            textPaint.typeface = regularFace
             textPaint.color = Color.parseColor("#252630")
         }
         linkMarks.forEach { link ->
@@ -1533,6 +1629,7 @@ class InkSurfaceView @JvmOverloads constructor(
             }
             textPaint.color = Color.parseColor("#252630")
         }
+        study.draw(canvas)
         if (lassoPoints.size > 1) {
             val path = Path()
             val first = lassoPoints.first()
@@ -1695,15 +1792,17 @@ class InkSurfaceView @JvmOverloads constructor(
         for (key in stale) tiles.remove(key)?.recycle()
     }
 
-    private fun dropTilesNear(event: MotionEvent, index: Int) {
-        val scale = pixelsPerPageUnit().toDouble().coerceAtLeast(0.0001)
-        val pageX = (event.getX(index) - pageLeft) / scale
-        val pageY = (event.getY(index) - pageTop) / scale
-        val radius = eraserRadius() + TILE_PAGE
+    /**
+     * Drops the cached tiles under [bounds] (page px: left, top, right, bottom), the box the last erase call changed.
+     * It spans the whole swept path of the frame, not only the event point, so ink erased between two
+     * frames does not stay painted from a stale tile.
+     */
+    private fun dropTilesIn(bounds: DoubleArray) {
+        val margin = TILE_PAGE.toDouble()
         val stale = tiles.keys.filter { key ->
             val x = (key shr 32).toInt()
             val y = (key and 0xffffffffL).toInt()
-            pageX + radius >= x && pageX - radius <= x + TILE_PAGE && pageY + radius >= y && pageY - radius <= y + TILE_PAGE
+            bounds[2] + margin >= x && bounds[0] - margin <= x + TILE_PAGE && bounds[3] + margin >= y && bounds[1] - margin <= y + TILE_PAGE
         }
         for (key in stale) tiles.remove(key)?.recycle()
     }
@@ -2175,6 +2274,16 @@ class InkSurfaceView @JvmOverloads constructor(
                     number += 1
                     drawImageCard(canvas, block, scale)
                 }
+                is PaperBlock.Study -> {
+                    if (showLineNumbers) drawNumber(canvas, number.toString(), editorFontPx * scale, scale)
+                    number += 1
+                    canvas.save()
+                    canvas.translate(0f, 6f * scale)
+                    canvas.scale(block.unit, block.unit)
+                    blockPainterFor(accentColor).draw(canvas, block.scene, paperImages)
+                    canvas.restore()
+                    canvas.translate(0f, block.height)
+                }
             }
         }
         canvas.restore()
@@ -2191,8 +2300,11 @@ class InkSurfaceView @JvmOverloads constructor(
             built += PaperBlock.Text(textLayoutFor(styled.text, scale), styled.starts, styled.tasks, styled.links)
             textLines.clear()
         }
-        for (line in paperLines(markdown)) {
-            if (line.kind == PaperKind.TABLE) {
+        for (line in paperLines(markdown, studyBlocks = true)) {
+            if (line.kind == PaperKind.STUDY) {
+                flush()
+                studyBlock(line.text, scale)?.let { built += it }
+            } else if (line.kind == PaperKind.TABLE) {
                 flush()
                 built += tableBlock(line.text, scale)
             } else if (line.kind == PaperKind.IMAGE) {
@@ -2211,6 +2323,29 @@ class InkSurfaceView @JvmOverloads constructor(
         cachedImageEpoch = imageEpoch
         textStamp = scale
         return built
+    }
+
+    private var blockPainter: LwBlockPainter? = null
+    private var blockPainterAccent = 0
+
+    private fun blockPainterFor(accent: Int): LwBlockPainter {
+        val current = blockPainter
+        if (current != null && blockPainterAccent == accent) return current
+        return LwBlockPainter(accent).also {
+            blockPainter = it
+            blockPainterAccent = accent
+        }
+    }
+
+    /** Lays a study block out for the text column; the block's text follows the editor font size. */
+    private fun studyBlock(text: String, scale: Float): PaperBlock.Study? {
+        val parts = text.split('\u001f', limit = 3)
+        if (parts.size < 3) return null
+        val kind = ch.fasrv.fanotes.study.StudyKind.of(parts[0]) ?: return null
+        val fontScale = (editorFontPx / 16f).coerceAtLeast(0.5f)
+        val scene = cachedStudyScene(kind.id, parts[2], (TEXT_COLUMN / fontScale).toDouble()) ?: return null
+        val unit = scale * fontScale
+        return PaperBlock.Study(parts[0], parts[1].toIntOrNull() ?: 0, scene, unit, (scene.height * unit).toFloat() + 12f * scale)
     }
 
     private fun textLayoutFor(text: CharSequence, scale: Float): StaticLayout {
@@ -2551,6 +2686,7 @@ class InkSurfaceView @JvmOverloads constructor(
         fieldShadow.clear()
         removeShadow.clear()
         clearShapeWatch()
+        studyImages.clear()
         super.onDetachedFromWindow()
     }
 
@@ -2764,6 +2900,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 is PaperBlock.Text -> block.layout.height.toFloat()
                 is PaperBlock.Table -> block.rowHeights.sum() + 10f * scale
                 is PaperBlock.Image -> block.frameHeight + 24f * scale
+                is PaperBlock.Study -> block.height
             }
         }
         val originY = session?.document?.originY ?: 0.0
@@ -2962,6 +3099,7 @@ private sealed class PaperBlock {
     ) : PaperBlock()
     class Table(val rows: List<List<String>>, val rowHeights: FloatArray, val cellLayouts: List<List<StaticLayout>>) : PaperBlock()
     class Image(val caption: String, val source: String, val frameHeight: Float, val bitmap: android.graphics.Bitmap?) : PaperBlock()
+    class Study(val kindId: String, val index: Int, val scene: ch.fasrv.fanotes.study.StudyScene, val unit: Float, val height: Float) : PaperBlock()
 }
 
 private data class GuideDrag(

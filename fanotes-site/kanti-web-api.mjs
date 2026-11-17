@@ -49,6 +49,12 @@ const webError = (status, message) => {
   return error
 }
 const fail = (status, message) => { throw webError(status, message) }
+// The response is sent by the caller. The request is closed after that, so the rest of the body is not read.
+const failLarge = (request, message) => {
+  const error = webError(413, message)
+  error.releaseRequest = request
+  throw error
+}
 const BAD_QUERY = 'Ungültige Anfrage.'
 const REVEAL_ID = /^[A-Za-z0-9_-]{1,64}$/u
 const ROUTE_ID = /^[a-f0-9]{12}$/u
@@ -145,6 +151,15 @@ const cleanLabel = (raw, fallback) => {
   return text || fallback
 }
 
+// Only the fields a session connection is allowed to keep. A saved id or addedAt must not replace the new ones.
+const pairedConnection = (connection) => ({
+  accountId: connection.accountId,
+  provider: connection.provider === 'tam' ? 'tam' : 'schulnetz',
+  label: cleanLabel(connection.label, connection.provider === 'tam' ? 'TAM' : 'Schulnetz'),
+  baseUrl: typeof connection.baseUrl === 'string' ? connection.baseUrl.slice(0, 200) : '',
+  source: 'pair',
+})
+
 export const parseCookies = (header) => {
   const out = {}
   for (const part of String(header || '').split(';')) {
@@ -173,7 +188,13 @@ export const createKantiWebStore = (options = {}) => {
   }
 
   const readJson = async (file) => {
-    try { return JSON.parse(await fs.readFile(file, 'utf8')) } catch { return null }
+    try {
+      return JSON.parse(await fs.readFile(file, 'utf8'))
+    } catch (error) {
+      // A missing or broken file is absent. Any other read error must not look the same, or a live session is deleted.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
   }
   const writeJson = async (file, value, flag) => {
     await fs.mkdir(resolve(file, '..'), { recursive: true, mode: 0o700 })
@@ -181,9 +202,14 @@ export const createKantiWebStore = (options = {}) => {
       await fs.writeFile(file, JSON.stringify(value), { mode: 0o600, flag: 'wx' })
       return
     }
-    const temporary = `${file}.${randomBytes(6).toString('hex')}.tmp`
-    await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
-    await fs.rename(temporary, file)
+    const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+    try {
+      await fs.writeFile(temporary, JSON.stringify(value), { mode: 0o600 })
+      await fs.rename(temporary, file)
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+      throw error
+    }
   }
   const sessionPath = (hash) => {
     if (!HASH_PATTERN.test(hash)) fail(400, 'Ungültige Sitzung.')
@@ -195,6 +221,26 @@ export const createKantiWebStore = (options = {}) => {
   }
   const nowMs = () => now().getTime()
   const alive = (session) => Boolean(session && session.v === 1 && Date.parse(session.expiresAt) > nowMs() && Date.parse(session.maxUntil) > nowMs())
+  // A missing expiry can still end the session. A value that is not a time must not look finished.
+  const instantKnown = (value) => value == null || value === '' || (typeof value === 'string' && Number.isFinite(Date.parse(value)))
+  const expiryKnown = (session) => instantKnown(session?.expiresAt) && instantKnown(session?.maxUntil)
+  // A missing version can go. Any other version, including one that is not a number, must not look dead.
+  const otherVersion = (session) => Boolean(session) && Object.hasOwn(session, 'v') && session.v != null && session.v !== 1
+  const plainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+  const ACCOUNT_ID = /^[a-f0-9]{32}$/u
+  const connectionKnown = (item) => plainObject(item)
+    && typeof item.id === 'string' && CONNECTION_ID.test(item.id)
+    && typeof item.accountId === 'string' && ACCOUNT_ID.test(item.accountId)
+    && typeof item.source === 'string' && item.source.length > 0 && item.source.length <= 32
+  // An empty list is a real session with nothing left in it. A list or sign-in of another shape is not.
+  const sessionShapeKnown = (session) => plainObject(session)
+    && Array.isArray(session.connections)
+    && session.connections.every(connectionKnown)
+    && (session.fanotes == null || (
+      plainObject(session.fanotes)
+      && typeof session.fanotes.accountId === 'string' && ACCOUNT_ID.test(session.fanotes.accountId)
+      && typeof session.fanotes.stamp === 'string' && session.fanotes.stamp.length > 0 && session.fanotes.stamp.length <= 200
+    ))
 
   // Which sessions read which identity, so the app's status call does not scan the directory.
   let index = null
@@ -209,8 +255,15 @@ export const createKantiWebStore = (options = {}) => {
     const built = new Map()
     const names = await fs.readdir(sessionsDir).catch(() => [])
     for (const name of names.filter((item) => /^[a-f0-9]{64}\.json$/u.test(item)).slice(0, MAX_SESSIONS)) {
-      const session = await readJson(resolve(sessionsDir, name))
-      if (alive(session)) built.set(name.slice(0, 64), indexEntry(session))
+      let session
+      try {
+        session = await readJson(resolve(sessionsDir, name))
+      } catch {
+        // Leave an unreadable session out of this pass. The file stays, and a later start can read it.
+        continue
+      }
+      // A version 1 session whose connections are not connections stays on disk and out of this index.
+      if (alive(session) && sessionShapeKnown(session)) built.set(name.slice(0, 64), indexEntry(session))
     }
     index ??= built
     return index
@@ -218,6 +271,12 @@ export const createKantiWebStore = (options = {}) => {
 
   const readSession = async (hash) => {
     const session = await readJson(sessionPath(hash))
+    // A missing, broken, or expired session can go. A file of another version must not look dead, or the next request deletes it.
+    if (otherVersion(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
+    // A connection list or sign-in that is not the known shape must not look empty, or the next request deletes the session or drops that field.
+    if (session && session.v === 1 && !sessionShapeKnown(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
+    // A saved expiry that is not a time must not look finished, or the next request deletes the session.
+    if (session && session.v === 1 && !expiryKnown(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
     return alive(session) ? session : null
   }
   const saveSession = async (hash, session) => {
@@ -291,12 +350,25 @@ export const createKantiWebStore = (options = {}) => {
 
   // ── Pairing codes ─────────────────────────────────────────────────────────
 
+  // A missing version can go. Any other version must not look unused, or the sweep deletes it once its old expiry has passed.
+  const otherPairingVersion = (record) => Boolean(record) && typeof record === 'object' && Object.hasOwn(record, 'v') && record.v != null && record.v !== 1
+  // A missing or unreadable expiry must not look still open, or the code never expires.
+  const pairingExpiryKnown = (value) => typeof value === 'string' && value !== '' && Number.isFinite(Date.parse(value))
+  // A connection list that is not a list must not be claimed, or the claim deletes the code and then fails.
+  const pairingShapeKnown = (record) => Array.isArray(record?.connections)
+    && record.connections.every((item) => item && typeof item === 'object' && !Array.isArray(item) && typeof item.accountId === 'string' && ACCOUNT_ID.test(item.accountId))
+    && (record.finished == null || typeof record.finished === 'boolean')
+    && (record.offer == null || typeof record.offer === 'boolean')
   const readPairing = async (rawCode) => {
     const code = normalizePairingCode(rawCode)
     if (!code) return null
     const file = pairingPath(sha256(`code:${code}`))
     const record = await readJson(file)
-    if (!record || record.v !== 1) return null
+    if (!record) return null
+    if (otherPairingVersion(record)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
+    if (record.v !== 1) return null
+    if (!pairingExpiryKnown(record.expiresAt)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
+    if (!pairingShapeKnown(record)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
     if (Date.parse(record.expiresAt) <= nowMs()) {
       await fs.rm(file, { force: true })
       return null
@@ -386,7 +458,7 @@ export const createKantiWebStore = (options = {}) => {
       if (!fresh || fresh.record.offer !== true) return null
       if (!fresh.record.finished) return { waiting: true }
       await deletePairing(fresh)
-      const incoming = fresh.record.connections.map((connection) => ({ ...connection, source: 'pair' }))
+      const incoming = fresh.record.connections.map(pairedConnection)
       if (!incoming.length) return null
       if (current) {
         const updated = await updateSession(current.hash, (session) => ({ ...session, connections: mergeConnections(session, incoming) }))
@@ -402,7 +474,7 @@ export const createKantiWebStore = (options = {}) => {
     const fresh = await readPairing(found.code)
     if (!fresh || !fresh.record.finished || !sameText(fresh.record.secretHash, found.record.secretHash)) return null
     await deletePairing(fresh)
-    const incoming = fresh.record.connections.map((connection) => ({ ...connection, source: 'pair' }))
+    const incoming = fresh.record.connections.map(pairedConnection)
     if (!incoming.length) return null
     if (current) {
       const updated = await updateSession(current.hash, (session) => ({ ...session, connections: mergeConnections(session, incoming) }))
@@ -471,13 +543,29 @@ export const createKantiWebStore = (options = {}) => {
     lastSweep = nowMs()
     for (const name of await fs.readdir(pairingsDir).catch(() => [])) {
       if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue
-      const record = await readJson(resolve(pairingsDir, name))
+      let record
+      try {
+        record = await readJson(resolve(pairingsDir, name))
+      } catch {
+        continue
+      }
+      if (otherPairingVersion(record)) continue
+      // A version 1 expiry that is not a time, or a connection list that is not a list, stays. Sweep only removes a missing, broken, or expired code.
+      if (record?.v === 1 && (!pairingExpiryKnown(record.expiresAt) || !pairingShapeKnown(record))) continue
       if (!record || Date.parse(record.expiresAt) <= nowMs()) await fs.rm(resolve(pairingsDir, name), { force: true })
     }
     for (const name of await fs.readdir(sessionsDir).catch(() => [])) {
       if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue
       const hash = name.slice(0, 64)
-      const session = await readJson(resolve(sessionsDir, name))
+      let session
+      try {
+        session = await readJson(resolve(sessionsDir, name))
+      } catch {
+        continue
+      }
+      // A session of another version stays. A version 1 expiry that is not a time stays. Sweep only removes a missing, broken, or expired version 1 file.
+      if (otherVersion(session)) continue
+      if (session && session.v === 1 && !expiryKnown(session)) continue
       if (!alive(session)) await locked(`session:${hash}`, () => deleteSession(hash))
     }
   }
@@ -654,11 +742,12 @@ export const createKantiWebApi = (options = {}) => {
   }
 
   const readBody = async (request) => {
+    if (Number(request.headers['content-length']) > MAX_BODY) failLarge(request, 'Die Anfrage ist zu gross.')
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > MAX_BODY) fail(413, 'Die Anfrage ist zu gross.')
+      if (size > MAX_BODY) failLarge(request, 'Die Anfrage ist zu gross.')
       chunks.push(chunk)
     }
     if (!chunks.length) return {}
@@ -672,12 +761,12 @@ export const createKantiWebApi = (options = {}) => {
 
 
   const readRaw = async (request, limit) => {
-    if (Number(request.headers['content-length']) > limit) fail(413, 'Die Datei ist zu gross (höchstens 25 MB).')
+    if (Number(request.headers['content-length']) > limit) failLarge(request, 'Die Datei ist zu gross (höchstens 25 MB).')
     const chunks = []
     let size = 0
     for await (const chunk of request) {
       size += chunk.length
-      if (size > limit) fail(413, 'Die Datei ist zu gross (höchstens 25 MB).')
+      if (size > limit) failLarge(request, 'Die Datei ist zu gross (höchstens 25 MB).')
       chunks.push(chunk)
     }
     return Buffer.concat(chunks)
@@ -883,7 +972,13 @@ export const createKantiWebApi = (options = {}) => {
   }
 
   const optionalSession = async (request) => {
-    try { return await authorize(request) } catch { return null }
+    try {
+      return await authorize(request)
+    } catch (error) {
+      // A refused sign-in is "no session". A read error must keep the cookie so the browser can try again.
+      if (error?.status) return null
+      throw error
+    }
   }
 
   const connectionOf = (session, id) => {
@@ -1196,6 +1291,8 @@ export const createKantiWebApi = (options = {}) => {
       if (status >= 500) log('warn', `Anfrage fehlgeschlagen (${error?.name || 'error'})`)
       const cookies = status === 401 ? [clearCookie(SESSION_COOKIE)] : []
       send(response, status, { error: error?.publicMessage || 'Kanti+ ist vorübergehend nicht erreichbar.' }, cookies)
+      const release = error?.releaseRequest
+      if (release && typeof release.destroy === 'function') response.on('finish', () => release.destroy())
     }
     return true
   }

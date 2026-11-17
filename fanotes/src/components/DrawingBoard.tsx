@@ -12,6 +12,7 @@ import {
   CircleAlert,
   Eraser,
   FileInput,
+  Highlighter,
   GripVertical,
   LoaderCircle,
   ListChecks,
@@ -62,6 +63,13 @@ import { pdfFromRgbaPages, type CanvasPdfPage } from '../lib/canvasPdf'
 import { rasterizePaperLayers, scrollPaperTo, waitForPaperPaint } from '../lib/canvasSnapshot'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
+import { PenQuickMenu } from './PenQuickMenu'
+import {
+  PEN_TIP_MASK,
+  quickMenuChordOnDown,
+  quickMenuChordOnMove,
+  type QuickMenuPanState,
+} from '../lib/penQuickMenu'
 import type {
   RecognitionResources,
 } from '../lib/handwritingDb'
@@ -125,6 +133,18 @@ import { MarginTranscript } from './MarginTranscript'
 import { addPersonalWord } from '../lib/spellingSuggest'
 import { replaceTranscriptWord } from '../lib/marginTranscript'
 import { detectScribbleErase } from '../lib/scribbleErase'
+import { mayCommitStrokeToBitmap, mayWipeLiveInk, mayWipeLiveInkAfterRedraw } from '../lib/liveInkHandoff'
+import {
+  createInkBufferHolder,
+  inkContextUsable,
+  keepsInkPaintJob,
+  prepareInkBuffer,
+  stepInkRepaint,
+  swapInkBuffer,
+  type InkBufferHolder,
+  type InkRepaintHost,
+  type InkSliceResult,
+} from '../lib/inkRepaintJob'
 import {
   applyInkNoticeOp,
   inkNoticeAutoClearDelayMs,
@@ -149,7 +169,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, decideCommittedEraseHole, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkBudgetSliceClearsBitmap, inkStrokeIsTranslucent, inkStrokePaintMargin, noteBudgetSliceCleared, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, decideCommittedEraseHole, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkBudgetSliceClearsBitmap, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
 import { paperNoteTextOf } from '../lib/noteTextStay'
 import { liveTranslucentCanGrow, paintGrowingTranslucentStroke, type LiveTranslucentSession } from '../lib/liveTranslucentInk'
 import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
@@ -230,6 +250,7 @@ import {
   tabletButtonActionFromPointer,
   tabletButtonIdentityFromPointer,
 } from '../lib/tabletButtons'
+import { nextPenEraserHold, penEraserHeldFor, type PenEraserHold } from '../lib/penEraserHold'
 import {
   type InkSection,
   type SerializedSection,
@@ -805,6 +826,16 @@ export type DrawingBoardHandle = {
   finishCanvasExport: () => void
 }
 
+/** See `DrawingBoardProps.foreignErase`. Points and radius are client pixels. */
+export type ForeignEraseHost = {
+  /** Erases what lies under the eraser path; true when anything went. */
+  erase: (path: ReadonlyArray<{ x: number; y: number }>, radius: number) => boolean
+  /** Seals what this gesture erased into one undo step; null when nothing was erased. */
+  commit: () => number | null
+  undo: (step: number) => void
+  redo: (step: number) => void
+}
+
 export type DrawingBoardProps = {
   settings: Pick<
     AppSettings,
@@ -851,6 +882,11 @@ export type DrawingBoardProps = {
   /** Reports finished strokes and erased strokes for the note's quiet statistics. */
   onInkActivity?: (activity: InkActivity) => void
   onTrainingChanged?: (sampleCount: number) => void
+  /**
+   * Marks under the ink that are not strokes (PDF text highlights). The
+   * eraser takes them off too, and one undo step brings back both.
+   */
+  foreignErase?: ForeignEraseHost
   onOpenGlyphenWerk?: () => void
   onClose?: () => void
   pagePaperStyle?: PaperStyle
@@ -960,6 +996,8 @@ const paperLabel: Record<PaperStyle, string> = Object.fromEntries(
 ) as Record<PaperStyle, string>
 
 const colorChoices = ['#191c24', '#3d52d5', '#7654d6', '#d74769', '#df7627', '#138d75']
+/** Drawing colours for the Wacom quick menu ring (Textmarker yellow first). */
+const QUICK_ART_COLORS = ['#f2b735', '#77ad3a', '#21a8c7', '#e5489a', '#f06c32', '#6548dc', '#d83b52', '#17191f']
 const artColorChoices = [
   '#17191f', '#ffffff', '#6c727f', '#d83b52', '#f06c32', '#f2b735', '#77ad3a',
   '#1ca982', '#21a8c7', '#3478df', '#6548dc', '#a444cf', '#e5489a', '#8b5a3c',
@@ -1280,20 +1318,38 @@ type InkPaintSlice = {
   includePaper: boolean
 }
 
+/** A heavy-page repaint in flight (see lib/inkRepaintJob). */
+type InkPaintJob = {
+  key: string
+  strokes: readonly InkStroke[]
+  /** Queued frame of the next slice; 0 when none is queued (a dead job). */
+  frame: number
+  /** True after the first slice clearRect'd the offscreen page. The job has not sealed anything. */
+  cleared: boolean
+  /** Offscreen page the slices paint into; the visible bitmap is swapped once, when it is full. */
+  buffer: HTMLCanvasElement
+  /** Pixel size of the page this job paints. The visible canvas takes it at the swap. */
+  width: number
+  height: number
+  /** Marker coverage of the offscreen page; it replaces the visible one at the swap. */
+  coverage: MarkerCoverage | null
+}
+
 /**
  * Paints a heavy page a few strokes at a time. The first call clears the
  * bitmap; later calls only add strokes, so a scroll frame can leave the job
- * running instead of starting over.
+ * running instead of starting over. `failed` means nothing could be painted
+ * (no usable context): the page is not finished and must not be shown.
  */
 const paintInkBudgetSlice = (
   canvas: HTMLCanvasElement,
   slice: InkPaintSlice,
   coverage: MarkerCoverage | null,
   from: number,
-): { next: number; coverage: MarkerCoverage | null } => {
+): InkSliceResult<MarkerCoverage> => {
   const context = canvas.getContext('2d')
   const strokes = slice.strokes
-  if (!context) return { next: strokes.length, coverage }
+  if (!inkContextUsable(context)) return { next: from, coverage, failed: true }
   const span = inkWindowSpan(slice.inkWindow)
   const virtualHeight = slice.pixelHeight / span
   const topPx = slice.inkWindow.y0 * virtualHeight
@@ -1305,25 +1361,29 @@ const paintInkBudgetSlice = (
     if (!active || active.width !== canvas.width || active.height !== canvas.height) active = createMarkerCoverage(canvas.width, canvas.height)
     else active.mask.fill(0)
   }
-  context.save()
-  context.beginPath()
-  context.rect(0, 0, slice.pixelWidth, slice.pixelHeight)
-  context.clip()
-  context.setTransform(1, 0, 0, 1, 0, -topPx)
-  const full = isFullInkWindow(slice.inkWindow)
-  const paintOptions = active ? { coverage: active, stamp: true as const } : undefined
-  const started = performance.now()
   let index = from
-  let painted = 0
-  while (index < strokes.length && frameBudgetOpen(started, performance.now(), painted)) {
-    const stroke = strokes[index]
-    index += 1
-    painted += 1
-    if (!stroke) continue
-    if (!full && !strokeIntersectsWindow(stroke, slice.inkWindow)) continue
-    drawInkStroke(context, stroke, slice.pixelWidth, virtualHeight, slice.smoothing, 1, slice.sourceWidth, slice.layoutWidth, stroke.points.length, paintOptions)
+  context.save()
+  try {
+    context.beginPath()
+    context.rect(0, 0, slice.pixelWidth, slice.pixelHeight)
+    context.clip()
+    context.setTransform(1, 0, 0, 1, 0, -topPx)
+    const full = isFullInkWindow(slice.inkWindow)
+    const paintOptions = active ? { coverage: active, stamp: true as const } : undefined
+    const started = performance.now()
+    let painted = 0
+    while (index < strokes.length && frameBudgetOpen(started, performance.now(), painted)) {
+      const stroke = strokes[index]
+      index += 1
+      painted += 1
+      if (!stroke) continue
+      if (!full && !strokeIntersectsWindow(stroke, slice.inkWindow)) continue
+      drawInkStroke(context, stroke, slice.pixelWidth, virtualHeight, slice.smoothing, 1, slice.sourceWidth, slice.layoutWidth, stroke.points.length, paintOptions)
+    }
+  } finally {
+    // A throwing stroke must not leave its clip and transform on a context the next job reuses.
+    context.restore()
   }
-  context.restore()
   return { next: index, coverage: active }
 }
 
@@ -1337,11 +1397,15 @@ const shiftInkWindowBitmap = (canvas: HTMLCanvasElement, dy: number) => {
   const context = canvas.getContext('2d')
   if (!context) return
   context.save()
-  context.setTransform(1, 0, 0, 1, 0, 0)
-  context.globalCompositeOperation = 'copy'
-  context.imageSmoothingEnabled = false
-  context.drawImage(canvas, 0, dy)
-  context.restore()
+  try {
+    context.setTransform(1, 0, 0, 1, 0, 0)
+    context.globalCompositeOperation = 'copy'
+    context.imageSmoothingEnabled = false
+    context.drawImage(canvas, 0, dy)
+  } finally {
+    // `copy` must never outlive this move: the next stroke would replace the whole bitmap.
+    context.restore()
+  }
 }
 
 /** Viewport raster: the same whole-pixel copy on both axes; the uncovered strips are painted after. */
@@ -1350,11 +1414,14 @@ const shiftCanvasBitmap = (canvas: HTMLCanvasElement, dx: number, dy: number) =>
   const context = canvas.getContext('2d')
   if (!context) return
   context.save()
-  context.setTransform(1, 0, 0, 1, 0, 0)
-  context.globalCompositeOperation = 'copy'
-  context.imageSmoothingEnabled = false
-  context.drawImage(canvas, dx, dy)
-  context.restore()
+  try {
+    context.setTransform(1, 0, 0, 1, 0, 0)
+    context.globalCompositeOperation = 'copy'
+    context.imageSmoothingEnabled = false
+    context.drawImage(canvas, dx, dy)
+  } finally {
+    context.restore()
+  }
 }
 
 /**
@@ -1476,6 +1543,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onDirtyChange,
   onInkActivity,
   onTrainingChanged,
+  foreignErase,
   onOpenGlyphenWerk,
   onClose,
   pagePaperStyle,
@@ -1540,13 +1608,22 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** What the committed bitmap holds right now, so a slice move can reuse it. */
   const committedBitmapRef = useRef<{ key: string; topPx: number } | null>(null)
   /** Heavy pages paint across frames. A scroll keeps this job; a new page replaces it. */
-  const inkPaintJobRef = useRef<{
-    key: string
-    strokes: readonly InkStroke[]
-    frame: number
-    /** True after the first slice clearRect'd the bitmap. The job has not sealed it. */
-    cleared: boolean
-  } | null>(null)
+  const inkPaintJobRef = useRef<InkPaintJob | null>(null)
+  const redrawRef = useRef<(measureLayout?: boolean) => void>(() => {})
+  /** Mask of a cancelled job, kept for the next one: an erase storm or a zoom restarts the job every frame. Never a mask the page shows. */
+  const spareInkCoverageRef = useRef<MarkerCoverage | null>(null)
+  /** The offscreen page of the heavy repaint: reused by size, freed after an idle spell and on unmount. */
+  const inkBufferRef = useRef<InkBufferHolder<HTMLCanvasElement> | null>(null)
+  if (!inkBufferRef.current) {
+    inkBufferRef.current = createInkBufferHolder<HTMLCanvasElement>({
+      create: () => document.createElement('canvas'),
+      prepare: prepareInkBuffer,
+      setTimer: (run, ms) => window.setTimeout(run, ms),
+      clearTimer: (id) => window.clearTimeout(id),
+      busy: () => Boolean(inkPaintJobRef.current),
+      onRelease: () => { spareInkCoverageRef.current = null },
+    })
+  }
   /** False while a packed page is still becoming strokes, and until its first paint finishes. */
   const inkReadyRef = useRef(true)
   const inkHydratingRef = useRef(false)
@@ -1624,6 +1701,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const activeStrokeRef = useRef<InkStroke | null>(null)
   const activePointerRef = useRef<number | null>(null)
   const inkSessionRef = useRef<InkPointerSessionSnapshot | null>(null)
+  // Eraser-mapped pen button held over the sheet, and whether the live gesture
+  // is such a button erase. That gesture survives tip lifts and hover moves.
+  const penEraserHoldRef = useRef<PenEraserHold | null>(null)
+  const buttonEraserGestureRef = useRef(false)
   const pendingSolverTapRef = useRef<PendingSolverTap | null>(null)
   const solverDoubleTapPointRef = useRef<Pick<StrokePoint, 'x' | 'y'> | null>(null)
   const mathSolverRunRef = useRef(0)
@@ -1636,6 +1717,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const gestureChangedRef = useRef(false)
   const undoRef = useRef<InkStroke[][]>([])
   const redoRef = useRef<InkStroke[][]>([])
+  const foreignEraseRef = useRef(foreignErase)
+  foreignEraseRef.current = foreignErase
+  /** Foreign erase step of an undo or redo entry (see ForeignEraseHost). */
+  const foreignStepsRef = useRef(new WeakMap<InkStroke[], number>())
   const drawFrameRef = useRef<number | null>(null)
   const activeRenderedPointCountRef = useRef(0)
   const liveCanvasHasInkRef = useRef(false)
@@ -1657,7 +1742,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     y: number
     pointerType: string
     samples: FingerPanSample[]
-  } | null>(null)
+  } & QuickMenuPanState | null>(null)
+  const openPenQuickMenuRef = useRef<(x: number, y: number, pointerId: number) => void>(() => {})
   const fingerPanFlingRef = useRef(0)
   const lastFingerPanAtRef = useRef(0)
   const undoNowRef = useRef<() => void>(() => {})
@@ -1703,6 +1789,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [tool, setTool] = useState<DrawingTool>(initialToolMemory.tool)
   const [inkMode, setInkMode] = useState<InkMode>(initialToolMemory.inkMode)
   const [artPanelOpen, setArtPanelOpen] = useState(false)
+  const [penQuickMenu, setPenQuickMenu] = useState<{ x: number; y: number; pointerId: number } | null>(null)
   const [artStudioTab, setArtStudioTab] = useState<ArtStudioTab>('brushes')
   const [artBrush, setArtBrush] = useState<ArtBrush>(initialArtPreferences.brush)
   const [artColor, setArtColor] = useState(initialArtPreferences.color)
@@ -1971,6 +2058,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         displayMode: true,
         throwOnError: false,
         strict: false,
+        trust: false,
+        maxExpand: 1000,
         output: 'htmlAndMathml',
       })
     } catch {
@@ -2270,6 +2359,20 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     liveTranslucentRef.current = null
   }, [])
 
+  /**
+   * Drops the running heavy repaint. A cancelled job never swaps its page in,
+   * its mask is kept for the next job, and the offscreen page is freed after an
+   * idle spell unless a new job takes it first.
+   */
+  const cancelInkPaint = useCallback(() => {
+    const job = inkPaintJobRef.current
+    if (!job) return
+    if (job.frame) cancelAnimationFrame(job.frame)
+    inkPaintJobRef.current = null
+    if (job.coverage) spareInkCoverageRef.current = job.coverage
+    inkBufferRef.current?.settle()
+  }, [])
+
   /** Brings the Rust page up to date. Strokes that did not change keep their tiles. */
   const syncViewportScene = useCallback((layoutWidth: number, layoutHeight: number) => {
     const raster = viewportRasterRef.current
@@ -2322,6 +2425,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const canvas = canvasRef.current
     const committedCanvas = committedCanvasRef.current
     if (!canvas || !committedCanvas || !viewportRasterRef.current) return
+    // The raster owns this bitmap now (it is resized to the viewport below). A
+    // heavy slice job still running would swap a page-sized page over the tiles
+    // and wipe the live stroke, so it ends here.
+    cancelInkPaint()
     const next = placeViewportRaster(
       liveWindowLayoutRef.current,
       { width: layoutWidth, height: layoutHeight },
@@ -2380,6 +2487,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.imageSmoothingQuality = activeStrokeRef.current ? 'low' : 'high'
     const activeStroke = activeStrokeRef.current
     if (!activeStroke) {
+      // The tiles above already show every stroke, and no slice job is left to
+      // swap later (it was cancelled on entry): the live copy can go now.
       if (liveCanvasHasInkRef.current) {
         context.setTransform(1, 0, 0, 1, 0, 0)
         context.clearRect(0, 0, canvas.width, canvas.height)
@@ -2391,7 +2500,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     paintLiveInk(context, activeStroke, [])
-  }, [paintLiveInk, paintViewportCommitted, syncViewportScene])
+  }, [cancelInkPaint, paintLiveInk, paintViewportCommitted, syncViewportScene])
 
   const redraw = useCallback((measureLayout = false) => {
     const canvas = canvasRef.current
@@ -2526,9 +2635,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         fresh.clearRect(0, 0, 1, 1)
       }
     }
+    // A canvas resize clears its bitmap, so the visible canvas is only resized in
+    // the task that paints it: `paintInPlace` for a synchronous repaint, the swap
+    // for a heavy page. Until then the old picture stays on screen and the CSS
+    // box stretches it, instead of a blank page for the whole job.
     const committedResized = committedCanvas.width !== pixelWidth || committedCanvas.height !== pixelHeight
-    if (committedCanvas.width !== pixelWidth) committedCanvas.width = pixelWidth
-    if (committedCanvas.height !== pixelHeight) committedCanvas.height = pixelHeight
     if (committedResized) committedBitmapRef.current = null
 
     // Content the committed bitmap depends on. The slice top is not part of
@@ -2554,22 +2665,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const shift = held && !committedCanvasDirtyRef.current && held.key === contentKey
       ? inkWindowShift(held.topPx, topPx, pixelHeight)
       : null
-    const cancelInkPaint = () => {
-      const job = inkPaintJobRef.current
-      if (job?.frame) cancelAnimationFrame(job.frame)
-      inkPaintJobRef.current = null
-    }
     const markInkPainted = () => {
       if (!inkHydratingRef.current) inkReadyRef.current = true
     }
     const painting = inkPaintJobRef.current
-    const samePaint = Boolean(
-      painting
-      && painting.key === contentKey
-      && painting.strokes === strokesRef.current
-      && !committedCanvasDirtyRef.current
-      && !activeStrokeRef.current,
-    )
+    // A job without a queued frame is dead: it must not stand in for a repaint.
+    const samePaint = keepsInkPaintJob(painting, {
+      key: contentKey,
+      strokes: strokesRef.current,
+      dirty: committedCanvasDirtyRef.current,
+      activeStroke: Boolean(activeStrokeRef.current),
+    })
     const pendingErase = committedPatchRef.current
     committedPatchRef.current = null
     const eraseHole = decideCommittedEraseHole({
@@ -2592,6 +2698,40 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (x1 - x0 >= 1 && y1 - y0 >= 1) erasePatch = { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
       else eraseOutside = true
     }
+    /**
+     * The whole page in one pass on the visible bitmap, which is resized (and
+     * cleared) first: every repaint that is not a heavy job, and the way out
+     * when the offscreen page cannot be had or a job fails.
+     */
+    const paintInPlace = () => {
+      cancelInkPaint()
+      if (committedCanvas.width !== pixelWidth) committedCanvas.width = pixelWidth
+      if (committedCanvas.height !== pixelHeight) committedCanvas.height = pixelHeight
+      markerCoverageRef.current = renderDocument(
+        committedCanvas,
+        strokesRef.current,
+        paperStyle,
+        settings.smoothing,
+        pixelWidth,
+        pixelHeight,
+        !inline,
+        sourceWidth,
+        inkWindow,
+        paintLayoutWidth || layoutWidth,
+        null,
+        settings.paperSquareMm,
+        markerCoverageRef.current,
+      )
+      committedBitmapRef.current = { key: contentKey, topPx }
+      committedCanvasDirtyRef.current = false
+      markInkPainted()
+    }
+    const heavyRepaint = !samePaint
+      && !shift
+      && !erasePatch
+      && !eraseOutside
+      && !activeStrokeRef.current
+      && inkPageIsHeavy(strokesRef.current)
     if (samePaint) {
       // This page is still filling in across frames. A scroll uses the same
       // picture, so it must not clear the bitmap and start again.
@@ -2649,7 +2789,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (eraseHole.seal) committedBitmapRef.current = { key: contentKey, topPx }
       committedCanvasDirtyRef.current = false
       markInkPainted()
-    } else if (!activeStrokeRef.current && inkPageIsHeavy(strokesRef.current)) {
+    } else if (heavyRepaint) {
       cancelInkPaint()
       const strokes = strokesRef.current
       committedCanvasDirtyRef.current = false
@@ -2665,44 +2805,73 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         squareMm: settings.paperSquareMm,
         includePaper: !inline,
       }
-      const job = { key: contentKey, strokes, frame: 0, cleared: false }
-      inkPaintJobRef.current = job
-      const step = (from: number) => {
-        if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
-        job.cleared = noteBudgetSliceCleared(job.cleared, from)
-        const painted = paintInkBudgetSlice(committedCanvas, slice, markerCoverageRef.current, from)
-        if (inkPaintJobRef.current !== job || committedCanvasDirtyRef.current) return
-        markerCoverageRef.current = painted.coverage
-        if (painted.next >= strokes.length) {
-          committedBitmapRef.current = { key: contentKey, topPx }
-          inkPaintJobRef.current = null
-          markInkPainted()
-          if (canvasPixelSizeRef.current.topPx !== topPx) requestAnimationFrame(() => redraw())
-          return
+      // Slices paint into an offscreen page; the visible bitmap keeps showing
+      // the last full page (at its old size) and is replaced in one step when
+      // the job is done.
+      const buffer = inkBufferRef.current?.acquire(pixelWidth, pixelHeight) ?? null
+      if (!buffer) {
+        // No offscreen page to be had (no usable 2D context, out of memory):
+        // one pass on the visible bitmap, as before the double buffer.
+        paintInPlace()
+      } else {
+        // The visible bitmap is stale until the swap: never trust its seal.
+        committedBitmapRef.current = null
+        const spare = spareInkCoverageRef.current
+        spareInkCoverageRef.current = null
+        const job: InkPaintJob = {
+          key: contentKey,
+          strokes,
+          frame: 0,
+          cleared: true,
+          buffer,
+          width: pixelWidth,
+          height: pixelHeight,
+          coverage: spare,
         }
-        job.frame = requestAnimationFrame(() => step(painted.next))
+        inkPaintJobRef.current = job
+        const host: InkRepaintHost<MarkerCoverage, InkPaintJob> = {
+          isCurrent: (running) => inkPaintJobRef.current === running,
+          strokes: () => strokesRef.current,
+          size: () => canvasPixelSizeRef.current,
+          dirty: () => committedCanvasDirtyRef.current,
+          paint: (running, from) => paintInkBudgetSlice(running.buffer, slice, running.coverage, from),
+          swap: (running) => swapInkBuffer(committedCanvas, running.buffer),
+          schedule: (run) => requestAnimationFrame(run),
+          finished: (done) => {
+            markerCoverageRef.current = done.coverage
+            committedBitmapRef.current = { key: contentKey, topPx }
+            inkPaintJobRef.current = null
+            inkBufferRef.current?.settle()
+            markInkPainted()
+            if (!activeStrokeRef.current && liveCanvasHasInkRef.current) wipeLiveInk()
+            if (canvasPixelSizeRef.current.topPx !== topPx) requestAnimationFrame(() => redrawRef.current())
+          },
+          dropped: (stale) => {
+            // The page changed under the job (or its stroke list was replaced):
+            // leave no dead job behind and paint what is on the page now.
+            if (inkPaintJobRef.current === stale) cancelInkPaint()
+            requestAnimationFrame(() => redrawRef.current())
+          },
+          failed: (broken, error) => {
+            console.error('The heavy ink repaint failed; painting the page in one pass.', error)
+            if (inkPaintJobRef.current === broken) cancelInkPaint()
+            // Whatever the offscreen page holds is not the page: free it, show nothing from it.
+            inkBufferRef.current?.release()
+            try {
+              paintInPlace()
+            } catch (paintError) {
+              committedCanvasDirtyRef.current = true
+              committedBitmapRef.current = null
+              console.error('The ink page could not be painted in one pass either.', paintError)
+              return
+            }
+            if (!activeStrokeRef.current && liveCanvasHasInkRef.current) wipeLiveInk()
+          },
+        }
+        stepInkRepaint(job, 0, host)
       }
-      step(0)
     } else {
-      cancelInkPaint()
-      markerCoverageRef.current = renderDocument(
-        committedCanvas,
-        strokesRef.current,
-        paperStyle,
-        settings.smoothing,
-        pixelWidth,
-        pixelHeight,
-        !inline,
-        sourceWidth,
-        inkWindow,
-        paintLayoutWidth || layoutWidth,
-        null,
-        settings.paperSquareMm,
-        markerCoverageRef.current,
-      )
-      committedBitmapRef.current = { key: contentKey, topPx }
-      committedCanvasDirtyRef.current = false
-      markInkPainted()
+      paintInPlace()
     }
 
     const context = canvas.getContext('2d', { alpha: true })
@@ -2711,6 +2880,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     context.imageSmoothingQuality = activeStrokeRef.current ? 'low' : 'high'
     const activeStroke = activeStrokeRef.current
     if (!activeStroke) {
+      // A heavy page is still filling the offscreen page: the visible bitmap
+      // does not show the last stroke yet (a direct commit was refused or
+      // failed), so the live copy stays and the swap wipes it.
+      if (liveCanvasHasInkRef.current && !mayWipeLiveInkAfterRedraw({ committedPaintRunning: Boolean(inkPaintJobRef.current) })) return
       // Nothing live: the layer is already blank unless something painted
       // since the last wipe — clearing a multi-viewport bitmap is not free.
       if (liveCanvasHasInkRef.current) {
@@ -2724,7 +2897,9 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     paintLiveInk(context, activeStroke, [])
-  }, [inline, paintLiveInk, paperStyle, redrawViewportRaster, settings.paperSquareMm, settings.smoothing, sourceHeight, sourceWidth])
+  }, [cancelInkPaint, inline, paintLiveInk, paperStyle, redrawViewportRaster, settings.paperSquareMm, settings.smoothing, sourceHeight, sourceWidth, wipeLiveInk])
+  // Frames that outlive a render (a job's follow-up repaint) call the newest redraw.
+  redrawRef.current = redraw
 
   const onInkActivityRef = useRef(onInkActivity)
   onInkActivityRef.current = onInkActivity
@@ -2760,44 +2935,55 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (removed > 0) onInkActivityRef.current?.({ kind: 'erase', removed })
   }, [])
 
-  const commitStrokeToCanvas = useCallback((stroke: InkStroke) => {
+  const commitStrokeToCanvas = useCallback((stroke: InkStroke): boolean => {
     noteStrokeDrawn(stroke)
     if (viewportRasterRef.current) {
       // The stroke is already in strokesRef: the scene diff sees one appended
       // stroke and paints only its region, in this same event.
       committedCanvasDirtyRef.current = true
       const placement = viewportPlacementRef.current
-      if (!placement) return
+      if (!placement) return false
       syncViewportScene(canvasPixelSizeRef.current.layoutWidth, canvasPixelSizeRef.current.layoutHeight)
       paintViewportCommitted(placement)
-      return
+      return true
     }
     const canvas = committedCanvasRef.current
     const { width, height, virtualHeight, layoutWidth } = canvasPixelSizeRef.current
-    if (!canvas || !width || !height || !virtualHeight || committedCanvasDirtyRef.current) return
+    // While a heavy repaint runs, the visible bitmap is the old page (maybe at
+    // the old pixel size or slice): the stroke stays on the live layer and the
+    // repaint paints it into the new page.
+    if (!canvas || !mayCommitStrokeToBitmap({
+      placed: Boolean(width && height && virtualHeight),
+      dirty: committedCanvasDirtyRef.current,
+      committedPaintRunning: Boolean(inkPaintJobRef.current),
+    })) return false
     const inkWindow = inkWindowRef.current
-    if (!strokeIntersectsWindow(stroke, inkWindow)) return
+    if (!strokeIntersectsWindow(stroke, inkWindow)) return true
     const context = canvas.getContext('2d')
-    if (!context) return
+    if (!context) return false
     context.save()
-    context.beginPath()
-    context.rect(0, 0, width, height)
-    context.clip()
-    context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-    const coverage = markerCoverageRef.current
-    drawInkStroke(
-      context,
-      stroke,
-      width,
-      virtualHeight,
-      settings.smoothing,
-      1,
-      sourceWidth,
-      layoutWidth,
-      stroke.points.length,
-      coverage && coverage.width === canvas.width && coverage.height === canvas.height ? { coverage, stamp: true } : undefined,
-    )
-    context.restore()
+    try {
+      context.beginPath()
+      context.rect(0, 0, width, height)
+      context.clip()
+      context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
+      const coverage = markerCoverageRef.current
+      drawInkStroke(
+        context,
+        stroke,
+        width,
+        virtualHeight,
+        settings.smoothing,
+        1,
+        sourceWidth,
+        layoutWidth,
+        stroke.points.length,
+        coverage && coverage.width === canvas.width && coverage.height === canvas.height ? { coverage, stamp: true } : undefined,
+      )
+    } finally {
+      context.restore()
+    }
+    return true
   }, [noteStrokeDrawn, paintViewportCommitted, settings.smoothing, sourceWidth, syncViewportScene])
 
   useEffect(() => {
@@ -2846,10 +3032,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [redraw, revision])
 
   useEffect(() => () => {
-    const job = inkPaintJobRef.current
-    if (job?.frame) cancelAnimationFrame(job.frame)
-    inkPaintJobRef.current = null
-  }, [])
+    // The board is gone: no job may swap into it, and the offscreen page (a
+    // second page-sized bitmap) goes back to the browser with it.
+    cancelInkPaint()
+    inkBufferRef.current?.release()
+  }, [cancelInkPaint])
 
   useEffect(() => {
     if (!initialDrawingJson) return
@@ -4218,6 +4405,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     )
     const last = points.at(-1)
     if (last) eraserAnchorRef.current = last
+    const foreign = foreignEraseRef.current
+    if (foreign) {
+      const surface = canvasRef.current?.closest('.unified-paper') as HTMLElement | null
+      const box = surface?.getBoundingClientRect()
+      if (box && box.width > 0 && sourceWidthRef.current > 0) {
+        const path = samples.map((sample) => ({ x: box.left + sample.x * box.width, y: box.top + sample.y * box.height }))
+        if (foreign.erase(path, eraserSize * box.width / sourceWidthRef.current)) gestureChangedRef.current = true
+      }
+    }
     if (next === before) return
     noteErasedInkRef.current(before, next)
     noteStrokesErased(Math.max(1, before.length - next.length))
@@ -5039,7 +5235,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     return true
   }, [startFingerPanFling])
-  const beginTabletPan = (pointerId: number, clientX: number, clientY: number, pointerType: string, now: number) => {
+  const beginTabletPan = (
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+    pointerType: string,
+    now: number,
+    stylusButton = false,
+    buttons = 0,
+  ) => {
     cancelFingerPanFling()
     tabletPanRef.current = {
       pointerId,
@@ -5047,14 +5251,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       y: clientY,
       pointerType,
       samples: [{ t: now, x: clientX, y: clientY }],
+      stylusButton,
+      tipDown: (buttons & PEN_TIP_MASK) !== 0,
+      menu: false,
+      lastAt: now,
     }
   }
-  const dragSheetWithPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
+  const dragSheetWithPointer = useCallback((pointerId: number, clientX: number, clientY: number, buttons?: number) => {
     const pan = tabletPanRef.current
     if (!pan || pan.pointerId !== pointerId) return false
+    const now = performance.now()
+    // Pan button held, then the tip: open the quick menu and freeze the sheet.
+    if (quickMenuChordOnMove(pan, pointerId, buttons, now)) {
+      pan.menu = true
+      openPenQuickMenuRef.current(clientX, clientY, pointerId)
+    }
+    if (pan.menu) return true
     const dx = clientX - pan.x
     const dy = clientY - pan.y
-    const now = performance.now()
     pan.x = clientX
     pan.y = clientY
     pan.samples = pushFingerPanSample(pan.samples, { t: now, x: clientX, y: clientY }, now)
@@ -5192,13 +5406,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // A new contact stops a coasting finger pan. The mouse event a touch lift
     // synthesizes must not, or the coast would die in the same gesture.
     if (!(event.pointerType === 'mouse' && performance.now() - lastFingerPanAtRef.current < 500)) cancelFingerPanFling()
-    if (event.pointerType === 'pen') tabletPanRef.current = null
     const now = performance.now()
+    if (quickMenuChordOnDown(tabletPanRef.current, event.nativeEvent, now)) {
+      // The tip arrived as its own pointer while a mouse-labelled pan button is held.
+      event.preventDefault()
+      const pan = tabletPanRef.current
+      if (pan) pan.menu = true
+      openPenQuickMenuRef.current(event.clientX, event.clientY, event.pointerId)
+      return
+    }
+    if (event.pointerType === 'pen') tabletPanRef.current = null
     const asStylus = event.pointerType === 'pen' || (
       lastPenContactRef.current > 0 && now - lastPenContactRef.current < POST_PEN_IGNORE_MS
     )
     const buttonIdentity = tabletButtonIdentityFromPointer(event.nativeEvent, asStylus)
-    const buttonAction = tabletButtonActionFromPointer(settings.tabletButtons, event.nativeEvent, asStylus)
+    // A still-held eraser button wins even when the sample dropped its bit.
+    const buttonAction = event.pointerType === 'pen' && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
+      ? 'eraser'
+      : tabletButtonActionFromPointer(settings.tabletButtons, event.nativeEvent, asStylus)
     if (!buttonIdentity && event.button !== 0 && event.pointerType !== 'pen') return
     if (buttonIdentity && buttonAction === 'os') return
     if (buttonIdentity && (buttonAction === 'none' || buttonAction === 'undo' || buttonAction === 'redo' || buttonAction === 'pan')) {
@@ -5206,7 +5431,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (buttonAction === 'undo') undoNowRef.current()
       if (buttonAction === 'redo') redoNowRef.current()
       if (buttonAction === 'pan') {
-        beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now)
+        beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now, true, event.buttons)
         activePointerRef.current = event.pointerId
         if (event.pointerType === 'pen') {
           lastPenContactRef.current = now
@@ -5520,6 +5745,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     gestureChangedRef.current = false
     eraserAnchorRef.current = null
     gestureToolRef.current = pointerEraser ? 'eraser' : tool
+    buttonEraserGestureRef.current = pointerEraser
     if (gestureToolRef.current === 'pen') {
       activeRenderedPointCountRef.current = 0
       activeStrokeRef.current = inkMode === 'drawing' ? {
@@ -5554,7 +5780,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, cancelFingerPanFling, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, selectionPurpose, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY)) {
+    if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY, event.buttons)) {
       if (event.cancelable) event.preventDefault()
       return
     }
@@ -5563,15 +5789,31 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       settings.penOnly,
       activePointerRef.current === event.pointerId,
     )) return
+    if (
+      activePointerRef.current === null
+      && event.pointerType === 'pen'
+      && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
+    ) {
+      // Chromium sends no new pointerdown while a pen button stays pressed:
+      // touching down again or hovering in with the eraser button held only
+      // moves. Re-open the button erase here instead of ignoring the pen.
+      handlePointerDown(event)
+      return
+    }
     if (activePointerRef.current !== event.pointerId) return
     const now = performance.now()
+    const heldEraser = buttonEraserGestureRef.current && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
     // End only when the helper says so — not because a few seconds elapsed
     // or Linux Wacom sent pressure 0 while the tip button is still down.
-    if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event.nativeEvent)) {
+    // A held eraser button keeps erasing through lifts and hover.
+    if (!heldEraser && shouldHardEndInkPointerSession(inkSessionRef.current, now, event.nativeEvent)) {
       forceEndActivePointerRef.current('watchdog', event.nativeEvent)
       return
     }
-    if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event.nativeEvent, now)
+    if (inkSessionRef.current) {
+      inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event.nativeEvent, now)
+      if (heldEraser) inkSessionRef.current = { ...inkSessionRef.current, lastContactAt: now }
+    }
     event.preventDefault()
     if (selectionLoopRef.current) {
       const samples = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
@@ -5606,7 +5848,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const latest = activeStrokeRef.current?.points.at(-1)
       if (latest) ensureWriteRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
+  }, [appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, handlePointerDown, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
@@ -5636,6 +5878,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
       pointerBoundsRef.current = null
       eraserAnchorRef.current = null
+      buttonEraserGestureRef.current = false
       activePointerRef.current = cleanup.session.activePointerId
       inkSessionRef.current = null
       activePointerTargetRef.current = null
@@ -5785,6 +6028,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     let scribbleDeleted = 0
+    let committedHasStroke = true
     if (gestureToolRef.current === 'pen' && activeStroke?.points.length) {
       const handwritingEntries = beforeGestureRef.current
         .map((stroke, index) => ({ stroke, index }))
@@ -5806,12 +6050,14 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         gestureChangedRef.current = scribbleDeleted > 0
       } else {
         strokesRef.current.push(activeStroke)
-        commitStrokeToCanvas(activeStroke)
+        committedHasStroke = commitStrokeToCanvas(activeStroke)
         gestureChangedRef.current = true
       }
     }
     activeStrokeRef.current = null
-    wipeLiveInk()
+    // Keep the live stroke on screen until the committed bitmap shows it.
+    // The redraw below clears the live layer once that has happened.
+    if (mayWipeLiveInk({ committedHasStroke, committedPaintRunning: Boolean(inkPaintJobRef.current) })) wipeLiveInk()
     activeRenderedPointCountRef.current = 0
     shapeSnappedRef.current = false
     endInteraction()
@@ -5826,6 +6072,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     })
     if (gestureChangedRef.current) {
       undoRef.current.push(beforeGestureRef.current)
+      const foreignStep = gestureToolRef.current === 'eraser' ? foreignEraseRef.current?.commit() ?? null : null
+      if (foreignStep !== null) foreignStepsRef.current.set(beforeGestureRef.current, foreignStep)
       if (undoRef.current.length > 80) undoRef.current.shift()
       redoRef.current = []
       setTokens([])
@@ -6204,6 +6452,36 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [cancelFingerPanFling, finishPointer, markPenContact, scheduleRedraw])
   forceEndActivePointerRef.current = forceEndActivePointer
 
+  // Track the eraser-mapped pen button on every pen sample, before the board
+  // handlers read it (window capture runs first). Releasing the button, a
+  // cancel, or the pen leaving the sheet ends a held-button erase.
+  const tabletButtonsRef = useRef(settings.tabletButtons)
+  tabletButtonsRef.current = settings.tabletButtons
+  useEffect(() => {
+    const overOwnSheet = (target: EventTarget | null) => (
+      target instanceof Element
+      && Boolean(boardRef.current?.contains(target))
+      && isInkSurfaceTarget(target)
+    )
+    const onPenSample = (event: PointerEvent) => {
+      if (event.pointerType !== 'pen') return
+      const overSheet = event.type !== 'pointercancel'
+        && overOwnSheet(event.type === 'pointerout' ? event.relatedTarget : event.target)
+      const hold = nextPenEraserHold(penEraserHoldRef.current, event, tabletButtonsRef.current, overSheet)
+      penEraserHoldRef.current = hold
+      if (!buttonEraserGestureRef.current || activePointerRef.current !== event.pointerId) return
+      if (penEraserHeldFor(hold, event.pointerId)) return
+      // No sample point: a release or leave must not erase where the pen went.
+      forceEndActivePointerRef.current('watchdog')
+    }
+    const types = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerout'] as const
+    for (const type of types) window.addEventListener(type, onPenSample, true)
+    return () => {
+      for (const type of types) window.removeEventListener(type, onPenSample, true)
+      penEraserHoldRef.current = null
+    }
+  }, [])
+
   const discardHandGestureRef = useRef(() => {})
   discardHandGestureRef.current = () => {
     // Two fingers take the sheet. The one-finger pan must stop or both would scroll.
@@ -6294,15 +6572,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     const onWindowPointerMove = (event: PointerEvent) => {
-      if (dragSheetWithPointerRef.current(event.pointerId, event.clientX, event.clientY)) return
+      if (dragSheetWithPointerRef.current(event.pointerId, event.clientX, event.clientY, event.buttons)) return
       if (!inputActive || activePointerRef.current !== event.pointerId) return
       const now = performance.now()
+      const heldEraser = buttonEraserGestureRef.current && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
       // Same helper as canvas move: pressure flicker must not cut a live stroke.
-      if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event)) {
+      if (!heldEraser && shouldHardEndInkPointerSession(inkSessionRef.current, now, event)) {
         forceEndActivePointer('watchdog', event)
         return
       }
-      if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event, now)
+      if (inkSessionRef.current) {
+        inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event, now)
+        if (heldEraser) inkSessionRef.current = { ...inkSessionRef.current, lastContactAt: now }
+      }
       const canvas = canvasRef.current
       const hitTarget = inline ? surfaceRef.current : canvas
       if (hitTarget && (event.target === hitTarget || (event.target instanceof Node && hitTarget.contains(event.target)))) {
@@ -6408,7 +6690,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const onWatchdog = () => {
       const now = performance.now()
-      if (shouldHardEndInkPointerSession(inkSessionRef.current, now)) {
+      // A pen hovering still with the eraser button held sends no samples.
+      const heldEraser = buttonEraserGestureRef.current
+        && activePointerRef.current !== null
+        && penEraserHeldFor(penEraserHoldRef.current, activePointerRef.current)
+      if (!heldEraser && shouldHardEndInkPointerSession(inkSessionRef.current, now)) {
         forceEndActivePointer('watchdog')
         return
       }
@@ -6487,7 +6773,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
-    redoRef.current.push(snapshotStrokes(strokesRef.current))
+    const redoEntry = snapshotStrokes(strokesRef.current)
+    redoRef.current.push(redoEntry)
+    const foreignStep = foreignStepsRef.current.get(previous)
+    if (foreignStep !== undefined) {
+      foreignStepsRef.current.set(redoEntry, foreignStep)
+      foreignEraseRef.current?.undo(foreignStep)
+    }
     strokesRef.current = snapshotStrokes(previous)
     setTokens([])
     setCorrection('')
@@ -6505,7 +6797,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
-    undoRef.current.push(snapshotStrokes(strokesRef.current))
+    const undoEntry = snapshotStrokes(strokesRef.current)
+    undoRef.current.push(undoEntry)
+    const foreignStep = foreignStepsRef.current.get(next)
+    if (foreignStep !== undefined) {
+      foreignStepsRef.current.set(undoEntry, foreignStep)
+      foreignEraseRef.current?.redo(foreignStep)
+    }
     strokesRef.current = snapshotStrokes(next)
     setTokens([])
     setCorrection('')
@@ -6781,9 +7079,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         cancelAnimationFrame(visualGrowFrameRef.current)
         visualGrowFrameRef.current = null
       }
-      const paintJob = inkPaintJobRef.current
-      if (paintJob?.frame) cancelAnimationFrame(paintJob.frame)
-      inkPaintJobRef.current = null
+      cancelInkPaint()
+      inkBufferRef.current?.release()
       strokesRef.current = saved.strokes
       sectionsRef.current = saved.sections
       undoRef.current = saved.undo
@@ -6929,7 +7226,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         requestAnimationFrame(() => finishCanvasExport())
       })
     }
-  }, [applyInkExtentStyles, finishCanvasExport, paperStyle, resolvePaperElement, settings.paperSquareMm, settings.smoothing, title, toggleSection])
+  }, [applyInkExtentStyles, cancelInkPaint, finishCanvasExport, paperStyle, resolvePaperElement, settings.paperSquareMm, settings.smoothing, title, toggleSection])
 
   const saveDrawing = useCallback((insertAfterSave: boolean, silent = false) => {
     // Every board save comes through here: autosave, unmount, retry, the
@@ -7906,6 +8203,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         displayMode: true,
         throwOnError: false,
         strict: false,
+        trust: false,
+        maxExpand: 1000,
         output: 'htmlAndMathml',
       })
     } catch {
@@ -8423,6 +8722,47 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     else setArtColor(color)
   }
 
+  // Wacom quick menu (pan button + tip): the same actions as the toolbar.
+  openPenQuickMenuRef.current = (x, y, pointerId) => {
+    setArtPanelOpen(false)
+    setPenQuickMenu({ x, y, pointerId })
+  }
+  const quickMenuUsesStrip = tool === 'pen' && inkMode === 'drawing'
+  const quickMenuColors = quickMenuUsesStrip && !stripUsesPenColor ? QUICK_ART_COLORS : colorChoices
+  const quickMenuColor = quickMenuUsesStrip ? stripColor : penColor
+  const quickMenuTools = [
+    { id: 'write', label: 'Schreiben', icon: <PenLine size={18} />, active: tool === 'pen' && inkMode === 'writing' },
+    { id: 'highlighter', label: 'Textmarker', icon: <Highlighter size={18} />, active: tool === 'pen' && inkMode === 'drawing' && artBrush === 'highlighter' },
+    { id: 'eraser', label: 'Radierer', icon: <Eraser size={18} />, active: tool === 'eraser' },
+    { id: 'select', label: 'Verschieben', icon: <Move size={18} />, active: tool === 'select' },
+    { id: 'laser', label: 'Laserpointer', icon: <Crosshair size={18} />, active: tool === 'laser' },
+  ]
+  const closePenQuickMenu = () => {
+    setPenQuickMenu(null)
+    requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
+  }
+  const chooseQuickMenuTool = (id: string) => {
+    if (id === 'write') activateWriting()
+    else if (id === 'highlighter') {
+      const brush = ART_BRUSHES.find((item) => item.id === 'highlighter')
+      if (brush) chooseArtBrush(brush)
+      activateDrawing()
+      setArtPanelOpen(false)
+    } else if (id === 'eraser') activateEraser()
+    else if (id === 'select') beginInkEdit()
+    else if (id === 'laser') activateLaser()
+    closePenQuickMenu()
+  }
+  const chooseQuickMenuColor = (color: string) => {
+    if (quickMenuUsesStrip) chooseStripColor(color)
+    else {
+      choosePenColor(color)
+      // A colour is for writing: leave the eraser, laser or selection.
+      if (tool !== 'pen') activateWriting()
+    }
+    closePenQuickMenu()
+  }
+
   const mergeActions = (labeled: boolean) => (
     sectionsEnabled && inkMode === 'writing' && sections.length > 1 ? <>
       <button
@@ -8906,6 +9246,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         if (inline) return portalInkToolbar(createPortal, toolbar, inkToolbarHost, inputActive)
         return toolbar
       })()}
+
+      {penQuickMenu && createPortal(
+        <PenQuickMenu
+          x={penQuickMenu.x}
+          y={penQuickMenu.y}
+          pointerId={penQuickMenu.pointerId}
+          tools={quickMenuTools}
+          colors={quickMenuColors}
+          activeColor={quickMenuColor}
+          onTool={chooseQuickMenuTool}
+          onColor={chooseQuickMenuColor}
+          onClose={closePenQuickMenu}
+        />,
+        document.body,
+      )}
 
       {(rulerPose || setSquarePose || compassPose)
         && draftingSettings.panelOpen

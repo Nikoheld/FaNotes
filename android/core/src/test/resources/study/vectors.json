@@ -1,0 +1,1210 @@
+{
+ "detect": {
+  "pages": [
+   {
+    "page": 3,
+    "lines": [
+     "Rechercheauftrag (erweitertes Lernziel): Der Stamm der Gliederfüsser",
+     "Auftrag 1: Zeichnen Sie ein Insekt oder Ausschnitte davon ab und achten Sie auf die im",
+     "Grundbauplan beschriebenen Details! Schreiben Sie diese Details an! (ca. 1 Lektion)",
+     "",
+     "Auftrag 2: Zeichnen Sie die einzelnen Teile der Mundwerkzeuge einer Biene so genau wie",
+     "möglich unter dem Binokular ab. Vergleichen Sie dann Ihre Skizze mit der Abbildung (Ca. 20",
+     "Minuten)",
+     "Aufgabe der Hormone ist die Steuerung der Häutung."
+    ]
+   },
+   {
+    "page": 4,
+    "lines": [
+     "Auftrag 4: Lesen Sie die folgenden Texte durch und markieren Sie die wesentlichen Punkte!",
+     "(Ca. 20 Minuten)",
+     "   Auftrag 5 (ca. 60 Minuten): In der Powerpoint-Präsentation zu den Gliederfüssern finden Sie",
+     "auf der letzten Folie eine Zusammenstellung mit 15 Insektenordnungen.",
+     "Auftrag 7: Recherchieren Sie im Internet, was man unter Mimikry versteht. (10 Minuten)",
+     "Auftrag 10: Studieren Sie zur Hemi- und Holometablie die Seiten 48 und 49 in Ihrem Biolo-",
+     "giebuch",
+     "Auftrag 12: Erklären Sie den Zusam-",
+     "menhang zwischen den beiden Hor-",
+     "monen und den Häutungen. Task 3 ist ein Hinweis."
+    ]
+   },
+   {
+    "page": 6,
+    "lines": [
+     "Auftrag 4 beantwortet die Frage nicht.",
+     "Auftrag: Nennen Sie die Nützlinge aus dem Film. Weshalb ist es von Vorteil? (ca. 1,5 h)",
+     "Exercise 9: Übung für Fortgeschrittene (15 min)"
+    ]
+   },
+   {
+    "page": 7,
+    "lines": [
+     "Hier steht alles in einer Zeile. Auftrag 14: Beobachten Sie die Grillen (ca. 15 Minuten) und schreiben Sie auf. Auftrag 15: Fassen Sie die Bienensprache zusammen (ca. 15 Minuten). Das war es."
+    ]
+   },
+   {
+    "page": 8,
+    "lines": [
+     "Aufgabe 3a) Skizzieren Sie den Körper (2 Doppellektionen)",
+     "Übung 4. Weiter so",
+     "Arbeitsauftrag 6 – Lesen Sie den Text ½ Std."
+    ]
+   }
+  ],
+  "tasks": [
+   {
+    "id": "auftrag-1",
+    "number": "1",
+    "title": "Zeichnen Sie ein Insekt oder Ausschnitte davon ab und achten Sie auf die im Grundbauplan beschriebenen Details! Schreiben Sie diese Details …",
+    "minutes": 45,
+    "page": 3,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-2",
+    "number": "2",
+    "title": "Zeichnen Sie die einzelnen Teile der Mundwerkzeuge einer Biene so genau wie möglich unter dem Binokular ab. Vergleichen Sie dann Ihre …",
+    "minutes": 20,
+    "page": 3,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-4",
+    "number": "4",
+    "title": "Lesen Sie die folgenden Texte durch und markieren Sie die wesentlichen Punkte!",
+    "minutes": 20,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-5",
+    "number": "5",
+    "title": "In der Powerpoint-Präsentation zu den Gliederfüssern finden Sie auf der letzten Folie eine Zusammenstellung mit 15 Insektenordnungen.",
+    "minutes": 60,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-7",
+    "number": "7",
+    "title": "Recherchieren Sie im Internet, was man unter Mimikry versteht.",
+    "minutes": 10,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-10",
+    "number": "10",
+    "title": "Studieren Sie zur Hemi- und Holometablie die Seiten 48 und 49 in Ihrem Biologiebuch",
+    "minutes": 0,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-12",
+    "number": "12",
+    "title": "Erklären Sie den Zusammenhang zwischen den beiden Hormonen und den Häutungen. Task 3 ist ein Hinweis.",
+    "minutes": 0,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-p6-1",
+    "number": "",
+    "title": "Nennen Sie die Nützlinge aus dem Film. Weshalb ist es von Vorteil?",
+    "minutes": 90,
+    "page": 6,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-9",
+    "number": "9",
+    "title": "Übung für Fortgeschrittene",
+    "minutes": 15,
+    "page": 6,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-14",
+    "number": "14",
+    "title": "Beobachten Sie die Grillen und schreiben Sie auf.",
+    "minutes": 15,
+    "page": 7,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-15",
+    "number": "15",
+    "title": "Fassen Sie die Bienensprache zusammen . Das war es.",
+    "minutes": 15,
+    "page": 7,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-3",
+    "number": "3",
+    "title": "Skizzieren Sie den Körper (2 Doppellektionen)",
+    "minutes": 180,
+    "page": 8,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-6",
+    "number": "6",
+    "title": "Lesen Sie den Text ½ Std.",
+    "minutes": 0,
+    "page": 8,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   }
+  ]
+ },
+ "timeHints": [
+  [
+   "(ca. 20 Minuten)",
+   20
+  ],
+  [
+   "1 Lektion",
+   0
+  ],
+  [
+   "siehe Abb. 9 h",
+   0
+  ],
+  [
+   "(10-20 Min.)",
+   15
+  ],
+  [
+   "Doppellektion",
+   0
+  ],
+  [
+   "(2 Doppellektionen)",
+   180
+  ],
+  [
+   "ca. 1,5 h",
+   90
+  ],
+  [
+   "(45 min)",
+   45
+  ],
+  [
+   "(5')",
+   5
+  ],
+  [
+   "30 Minuten",
+   0
+  ],
+  [
+   "(ca. 2 Stunden)",
+   120
+  ],
+  [
+   "etwa 90 min",
+   90
+  ],
+  [
+   "(1000 Min.)",
+   0
+  ]
+ ],
+ "dehyphenate": [
+  [
+   [
+    "Beob-",
+    "achte",
+    "Ein-",
+    "Zahl"
+   ],
+   [
+    "Beobachte",
+    "Ein-",
+    "Zahl"
+   ]
+  ],
+  [
+   [
+    "Hemi-",
+    "und Holo",
+    "Hor-",
+    "monen und"
+   ],
+   [
+    "Hemi-",
+    "und Holo",
+    "Hormonen",
+    "und"
+   ]
+  ]
+ ],
+ "clocks": [
+  [
+   0,
+   "00:00"
+  ],
+  [
+   65,
+   "01:05"
+  ],
+  [
+   3725,
+   "1:02:05"
+  ],
+  [
+   86399,
+   "23:59:59"
+  ]
+ ],
+ "pdfNote": "Notiz\n<!-- fanotes-pdf-marks-v1\n{\"marks\":[]}\n-->\n<!-- fanotes-tasks-v1\n{\n \"tasks\": [\n  {\n   \"id\": \"auftrag-1\",\n   \"number\": \"1\",\n   \"title\": \"Mit --> im Titel\",\n   \"minutes\": 45,\n   \"page\": 3,\n   \"done\": true,\n   \"spentSec\": 125,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-2\",\n   \"number\": \"2\",\n   \"title\": \"Mein \\\"Text\\\"\\nzweite Zeile\",\n   \"minutes\": 30,\n   \"page\": 3,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": true\n  },\n  {\n   \"id\": \"auftrag-4\",\n   \"number\": \"4\",\n   \"title\": \"Lesen Sie die folgenden Texte durch und markieren Sie die wesentlichen Punkte!\",\n   \"minutes\": 20,\n   \"page\": 4,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-5\",\n   \"number\": \"5\",\n   \"title\": \"In der Powerpoint-Präsentation zu den Gliederfüssern finden Sie auf der letzten Folie eine Zusammenstellung mit 15 Insektenordnungen.\",\n   \"minutes\": 60,\n   \"page\": 4,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-7\",\n   \"number\": \"7\",\n   \"title\": \"Recherchieren Sie im Internet, was man unter Mimikry versteht.\",\n   \"minutes\": 10,\n   \"page\": 4,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-10\",\n   \"number\": \"10\",\n   \"title\": \"Studieren Sie zur Hemi- und Holometablie die Seiten 48 und 49 in Ihrem Biologiebuch\",\n   \"minutes\": 0,\n   \"page\": 4,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-12\",\n   \"number\": \"12\",\n   \"title\": \"Erklären Sie den Zusammenhang zwischen den beiden Hormonen und den Häutungen. Task 3 ist ein Hinweis.\",\n   \"minutes\": 0,\n   \"page\": 4,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-9\",\n   \"number\": \"9\",\n   \"title\": \"Übung für Fortgeschrittene\",\n   \"minutes\": 15,\n   \"page\": 6,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-p6-1\",\n   \"number\": \"\",\n   \"title\": \"Nennen Sie die Nützlinge aus dem Film. Weshalb ist es von Vorteil?\",\n   \"minutes\": 90,\n   \"page\": 6,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-14\",\n   \"number\": \"14\",\n   \"title\": \"Beobachten Sie die Grillen und schreiben Sie auf.\",\n   \"minutes\": 15,\n   \"page\": 7,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-15\",\n   \"number\": \"15\",\n   \"title\": \"Fassen Sie die Bienensprache zusammen . Das war es.\",\n   \"minutes\": 15,\n   \"page\": 7,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-3\",\n   \"number\": \"3\",\n   \"title\": \"Skizzieren Sie den Körper (2 Doppellektionen)\",\n   \"minutes\": 180,\n   \"page\": 8,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  },\n  {\n   \"id\": \"auftrag-6\",\n   \"number\": \"6\",\n   \"title\": \"Lesen Sie den Text ½ Std.\",\n   \"minutes\": 0,\n   \"page\": 8,\n   \"done\": false,\n   \"spentSec\": 0,\n   \"manual\": false\n  }\n ],\n \"removed\": [\n  \"auftrag-7\"\n ]\n}\n-->\n",
+ "stored": {
+  "tasks": [
+   {
+    "id": "auftrag-1",
+    "number": "1",
+    "title": "Mit --> im Titel",
+    "minutes": 45,
+    "page": 3,
+    "done": true,
+    "spentSec": 125,
+    "manual": false
+   },
+   {
+    "id": "auftrag-2",
+    "number": "2",
+    "title": "Mein \"Text\"\nzweite Zeile",
+    "minutes": 30,
+    "page": 3,
+    "done": false,
+    "spentSec": 0,
+    "manual": true
+   },
+   {
+    "id": "auftrag-4",
+    "number": "4",
+    "title": "Lesen Sie die folgenden Texte durch und markieren Sie die wesentlichen Punkte!",
+    "minutes": 20,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-5",
+    "number": "5",
+    "title": "In der Powerpoint-Präsentation zu den Gliederfüssern finden Sie auf der letzten Folie eine Zusammenstellung mit 15 Insektenordnungen.",
+    "minutes": 60,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-7",
+    "number": "7",
+    "title": "Recherchieren Sie im Internet, was man unter Mimikry versteht.",
+    "minutes": 10,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-10",
+    "number": "10",
+    "title": "Studieren Sie zur Hemi- und Holometablie die Seiten 48 und 49 in Ihrem Biologiebuch",
+    "minutes": 0,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-12",
+    "number": "12",
+    "title": "Erklären Sie den Zusammenhang zwischen den beiden Hormonen und den Häutungen. Task 3 ist ein Hinweis.",
+    "minutes": 0,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-9",
+    "number": "9",
+    "title": "Übung für Fortgeschrittene",
+    "minutes": 15,
+    "page": 6,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-p6-1",
+    "number": "",
+    "title": "Nennen Sie die Nützlinge aus dem Film. Weshalb ist es von Vorteil?",
+    "minutes": 90,
+    "page": 6,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-14",
+    "number": "14",
+    "title": "Beobachten Sie die Grillen und schreiben Sie auf.",
+    "minutes": 15,
+    "page": 7,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-15",
+    "number": "15",
+    "title": "Fassen Sie die Bienensprache zusammen . Das war es.",
+    "minutes": 15,
+    "page": 7,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-3",
+    "number": "3",
+    "title": "Skizzieren Sie den Körper (2 Doppellektionen)",
+    "minutes": 180,
+    "page": 8,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-6",
+    "number": "6",
+    "title": "Lesen Sie den Text ½ Std.",
+    "minutes": 0,
+    "page": 8,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   }
+  ],
+  "removed": [
+   "auftrag-7"
+  ]
+ },
+ "rescan": {
+  "tasks": [
+   {
+    "id": "auftrag-1",
+    "number": "1",
+    "title": "Zeichnen Sie ein Insekt oder Ausschnitte davon ab und achten Sie auf die im Grundbauplan beschriebenen Details! Schreiben Sie diese Details …",
+    "minutes": 45,
+    "page": 3,
+    "done": true,
+    "spentSec": 125,
+    "manual": false
+   },
+   {
+    "id": "auftrag-2",
+    "number": "2",
+    "title": "Mein \"Text\"\nzweite Zeile",
+    "minutes": 30,
+    "page": 3,
+    "done": false,
+    "spentSec": 0,
+    "manual": true
+   },
+   {
+    "id": "auftrag-4",
+    "number": "4",
+    "title": "Lesen Sie die folgenden Texte durch und markieren Sie die wesentlichen Punkte!",
+    "minutes": 20,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-5",
+    "number": "5",
+    "title": "In der Powerpoint-Präsentation zu den Gliederfüssern finden Sie auf der letzten Folie eine Zusammenstellung mit 15 Insektenordnungen.",
+    "minutes": 60,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-10",
+    "number": "10",
+    "title": "Studieren Sie zur Hemi- und Holometablie die Seiten 48 und 49 in Ihrem Biologiebuch",
+    "minutes": 0,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-12",
+    "number": "12",
+    "title": "Erklären Sie den Zusammenhang zwischen den beiden Hormonen und den Häutungen. Task 3 ist ein Hinweis.",
+    "minutes": 0,
+    "page": 4,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-9",
+    "number": "9",
+    "title": "Übung für Fortgeschrittene",
+    "minutes": 15,
+    "page": 6,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-p6-1",
+    "number": "",
+    "title": "Nennen Sie die Nützlinge aus dem Film. Weshalb ist es von Vorteil?",
+    "minutes": 90,
+    "page": 6,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-14",
+    "number": "14",
+    "title": "Beobachten Sie die Grillen und schreiben Sie auf.",
+    "minutes": 15,
+    "page": 7,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-15",
+    "number": "15",
+    "title": "Fassen Sie die Bienensprache zusammen . Das war es.",
+    "minutes": 15,
+    "page": 7,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-3",
+    "number": "3",
+    "title": "Skizzieren Sie den Körper (2 Doppellektionen)",
+    "minutes": 180,
+    "page": 8,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   },
+   {
+    "id": "auftrag-6",
+    "number": "6",
+    "title": "Lesen Sie den Text ½ Std.",
+    "minutes": 0,
+    "page": 8,
+    "done": false,
+    "spentSec": 0,
+    "manual": false
+   }
+  ],
+  "removed": [
+   "auftrag-7"
+  ]
+ },
+ "progress": {
+  "total": 13,
+  "done": 1,
+  "ratio": 0.07692307692307693,
+  "plannedMinutes": 480,
+  "remainingMinutes": 435
+ },
+ "blocks": {
+  "key": {
+   "raw": {
+    "title": "Schlüssel",
+    "junk": 1,
+    "table": {
+     "features": [
+      "Flügel",
+      "Mundwerkzeuge saugend",
+      "Verwandlung"
+     ],
+     "items": [
+      {
+       "id": "a",
+       "name": "Käfer",
+       "values": [
+        "ja",
+        "nein",
+        "holometabol"
+       ]
+      },
+      {
+       "id": "b",
+       "name": "Schmetterlinge",
+       "values": [
+        "ja",
+        "ja",
+        "holometabol"
+       ]
+      },
+      {
+       "id": "c",
+       "name": "Wanzen",
+       "values": [
+        "ja",
+        "ja",
+        "hemimetabol"
+       ]
+      },
+      {
+       "id": "d",
+       "name": "Flöhe",
+       "values": [
+        "nein",
+        "ja",
+        "holometabol"
+       ]
+      },
+      {
+       "id": "e",
+       "name": "Silberfischchen",
+       "values": [
+        "nein",
+        "nein",
+        "ametabol"
+       ]
+      },
+      {
+       "id": "f",
+       "name": "Biene",
+       "values": [
+        "ja"
+       ]
+      }
+     ]
+    },
+    "tree": {
+     "root": "n1",
+     "nodes": [
+      {
+       "id": "n1",
+       "kind": "question",
+       "text": "Flügel?",
+       "branches": [
+        {
+         "label": "ja",
+         "to": "n2"
+        },
+        {
+         "label": "nein",
+         "to": "n7"
+        }
+       ]
+      },
+      {
+       "id": "n2",
+       "kind": "question",
+       "text": "Mundwerkzeuge saugend?",
+       "branches": [
+        {
+         "label": "ja",
+         "to": "n3"
+        },
+        {
+         "label": "nein",
+         "to": "n6"
+        }
+       ]
+      },
+      {
+       "id": "n3",
+       "kind": "question",
+       "text": "Verwandlung",
+       "branches": [
+        {
+         "label": "holometabol",
+         "to": "n4"
+        },
+        {
+         "label": "hemimetabol",
+         "to": "n5"
+        }
+       ]
+      },
+      {
+       "id": "n4",
+       "kind": "leaf",
+       "text": "Schmetterlinge",
+       "branches": []
+      },
+      {
+       "id": "n5",
+       "kind": "leaf",
+       "text": "Wanzen",
+       "branches": []
+      },
+      {
+       "id": "n6",
+       "kind": "leaf",
+       "text": "Käfer",
+       "branches": []
+      },
+      {
+       "id": "n7",
+       "kind": "question",
+       "text": "Mundwerkzeuge saugend?",
+       "branches": [
+        {
+         "label": "ja",
+         "to": "n8"
+        },
+        {
+         "label": "nein",
+         "to": "n9"
+        }
+       ]
+      },
+      {
+       "id": "n8",
+       "kind": "leaf",
+       "text": "Flöhe",
+       "branches": []
+      },
+      {
+       "id": "n9",
+       "kind": "leaf",
+       "text": "Silberfischchen",
+       "branches": []
+      }
+     ]
+    },
+    "compareImage": ".fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg",
+    "compareLabel": "Buch S. 12"
+   },
+   "expectedBlock": "```fanotes-key\n{\n \"v\": 1,\n \"title\": \"Schlüssel\",\n \"table\": {\n  \"features\": [\n   \"Flügel\",\n   \"Mundwerkzeuge saugend\",\n   \"Verwandlung\"\n  ],\n  \"items\": [\n   {\n    \"id\": \"a\",\n    \"name\": \"Käfer\",\n    \"values\": [\n     \"ja\",\n     \"nein\",\n     \"holometabol\"\n    ]\n   },\n   {\n    \"id\": \"b\",\n    \"name\": \"Schmetterlinge\",\n    \"values\": [\n     \"ja\",\n     \"ja\",\n     \"holometabol\"\n    ]\n   },\n   {\n    \"id\": \"c\",\n    \"name\": \"Wanzen\",\n    \"values\": [\n     \"ja\",\n     \"ja\",\n     \"hemimetabol\"\n    ]\n   },\n   {\n    \"id\": \"d\",\n    \"name\": \"Flöhe\",\n    \"values\": [\n     \"nein\",\n     \"ja\",\n     \"holometabol\"\n    ]\n   },\n   {\n    \"id\": \"e\",\n    \"name\": \"Silberfischchen\",\n    \"values\": [\n     \"nein\",\n     \"nein\",\n     \"ametabol\"\n    ]\n   },\n   {\n    \"id\": \"f\",\n    \"name\": \"Biene\",\n    \"values\": [\n     \"ja\",\n     \"\",\n     \"\"\n    ]\n   }\n  ]\n },\n \"tree\": {\n  \"root\": \"n1\",\n  \"nodes\": [\n   {\n    \"id\": \"n1\",\n    \"kind\": \"question\",\n    \"text\": \"Flügel?\",\n    \"branches\": [\n     {\n      \"label\": \"ja\",\n      \"to\": \"n2\"\n     },\n     {\n      \"label\": \"nein\",\n      \"to\": \"n7\"\n     }\n    ]\n   },\n   {\n    \"id\": \"n2\",\n    \"kind\": \"question\",\n    \"text\": \"Mundwerkzeuge saugend?\",\n    \"branches\": [\n     {\n      \"label\": \"ja\",\n      \"to\": \"n3\"\n     },\n     {\n      \"label\": \"nein\",\n      \"to\": \"n6\"\n     }\n    ]\n   },\n   {\n    \"id\": \"n3\",\n    \"kind\": \"question\",\n    \"text\": \"Verwandlung\",\n    \"branches\": [\n     {\n      \"label\": \"holometabol\",\n      \"to\": \"n4\"\n     },\n     {\n      \"label\": \"hemimetabol\",\n      \"to\": \"n5\"\n     }\n    ]\n   },\n   {\n    \"id\": \"n4\",\n    \"kind\": \"leaf\",\n    \"text\": \"Schmetterlinge\",\n    \"branches\": []\n   },\n   {\n    \"id\": \"n5\",\n    \"kind\": \"leaf\",\n    \"text\": \"Wanzen\",\n    \"branches\": []\n   },\n   {\n    \"id\": \"n6\",\n    \"kind\": \"leaf\",\n    \"text\": \"Käfer\",\n    \"branches\": []\n   },\n   {\n    \"id\": \"n7\",\n    \"kind\": \"question\",\n    \"text\": \"Mundwerkzeuge saugend?\",\n    \"branches\": [\n     {\n      \"label\": \"ja\",\n      \"to\": \"n8\"\n     },\n     {\n      \"label\": \"nein\",\n      \"to\": \"n9\"\n     }\n    ]\n   },\n   {\n    \"id\": \"n8\",\n    \"kind\": \"leaf\",\n    \"text\": \"Flöhe\",\n    \"branches\": []\n   },\n   {\n    \"id\": \"n9\",\n    \"kind\": \"leaf\",\n    \"text\": \"Silberfischchen\",\n    \"branches\": []\n   }\n  ]\n },\n \"compareImage\": \".fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg\",\n \"compareLabel\": \"Buch S. 12\"\n}\n```"
+  },
+  "sort": {
+   "raw": {
+    "title": "Verwandlung",
+    "mode": "groups",
+    "cards": [
+     {
+      "id": "c1",
+      "text": "Käfer"
+     },
+     {
+      "id": "c2",
+      "text": "Wanzen"
+     },
+     {
+      "id": "c3",
+      "text": "Flöhe"
+     },
+     {
+      "id": "c4",
+      "text": ""
+     },
+     {
+      "id": "c5",
+      "text": "Fünfte Karte"
+     }
+    ],
+    "groups": [
+     {
+      "id": "g1",
+      "title": "hemimetabol",
+      "cards": [
+       "c2",
+       "zzz"
+      ]
+     },
+     {
+      "id": "g2",
+      "title": "holometabol",
+      "cards": [
+       "c1",
+       "c2"
+      ]
+     },
+     {
+      "id": "g3",
+      "title": "ametabol",
+      "cards": []
+     }
+    ]
+   },
+   "expectedBlock": "```fanotes-sort\n{\n \"v\": 1,\n \"title\": \"Verwandlung\",\n \"mode\": \"groups\",\n \"cards\": [\n  {\n   \"id\": \"c1\",\n   \"text\": \"Käfer\"\n  },\n  {\n   \"id\": \"c2\",\n   \"text\": \"Wanzen\"\n  },\n  {\n   \"id\": \"c3\",\n   \"text\": \"Flöhe\"\n  },\n  {\n   \"id\": \"c5\",\n   \"text\": \"Fünfte Karte\"\n  }\n ],\n \"groups\": [\n  {\n   \"id\": \"g1\",\n   \"title\": \"hemimetabol\",\n   \"cards\": [\n    \"c2\"\n   ]\n  },\n  {\n   \"id\": \"g2\",\n   \"title\": \"holometabol\",\n   \"cards\": [\n    \"c1\"\n   ]\n  },\n  {\n   \"id\": \"g3\",\n   \"title\": \"ametabol\",\n   \"cards\": []\n  }\n ]\n}\n```"
+  },
+  "map": {
+   "raw": {
+    "title": "Häutung",
+    "dir": "LR",
+    "nodes": [
+     {
+      "id": "a",
+      "text": "Häutungshormon"
+     },
+     {
+      "id": "b",
+      "text": "Häutung"
+     },
+     {
+      "id": "c",
+      "text": "Wachstum bei Insekten mit langem Namen"
+     },
+     {
+      "id": "a",
+      "text": "dup"
+     }
+    ],
+    "edges": [
+     {
+      "id": "e1",
+      "from": "a",
+      "to": "b",
+      "label": "löst aus"
+     },
+     {
+      "id": "e2",
+      "from": "b",
+      "to": "c",
+      "label": ""
+     },
+     {
+      "id": "e3",
+      "from": "c",
+      "to": "a",
+      "label": "hemmt"
+     },
+     {
+      "id": "e4",
+      "from": "a",
+      "to": "a"
+     },
+     {
+      "id": "e5",
+      "from": "a",
+      "to": "zz"
+     }
+    ]
+   },
+   "expectedBlock": "```fanotes-map\n{\n \"v\": 1,\n \"title\": \"Häutung\",\n \"dir\": \"LR\",\n \"nodes\": [\n  {\n   \"id\": \"a\",\n   \"text\": \"Häutungshormon\"\n  },\n  {\n   \"id\": \"b\",\n   \"text\": \"Häutung\"\n  },\n  {\n   \"id\": \"c\",\n   \"text\": \"Wachstum bei Insekten mit langem Namen\"\n  }\n ],\n \"edges\": [\n  {\n   \"id\": \"e1\",\n   \"from\": \"a\",\n   \"to\": \"b\",\n   \"label\": \"löst aus\"\n  },\n  {\n   \"id\": \"e2\",\n   \"from\": \"b\",\n   \"to\": \"c\",\n   \"label\": \"\"\n  },\n  {\n   \"id\": \"e3\",\n   \"from\": \"c\",\n   \"to\": \"a\",\n   \"label\": \"hemmt\"\n  }\n ]\n}\n```"
+  },
+  "plate": {
+   "raw": {
+    "title": "Schmetterlinge",
+    "cols": 3,
+    "items": [
+     {
+      "id": "p1",
+      "label": "Distelfalter",
+      "note": "wandert",
+      "img": ".fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg"
+     },
+     {
+      "id": "p2",
+      "label": "Admiral",
+      "img": "http://evil/x.png"
+     },
+     {
+      "id": "p3",
+      "label": "",
+      "img": "data:image/jpeg;base64,/9j/4AAQSkZJRg=="
+     }
+    ],
+    "showLabels": false
+   },
+   "expectedBlock": "```fanotes-plate\n{\n \"v\": 1,\n \"title\": \"Schmetterlinge\",\n \"cols\": 3,\n \"showLabels\": false,\n \"items\": [\n  {\n   \"id\": \"p1\",\n   \"label\": \"Distelfalter\",\n   \"note\": \"wandert\",\n   \"img\": \".fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg\"\n  },\n  {\n   \"id\": \"p2\",\n   \"label\": \"Admiral\",\n   \"note\": \"\",\n   \"img\": \"\"\n  },\n  {\n   \"id\": \"p3\",\n   \"label\": \"\",\n   \"note\": \"\",\n   \"img\": \"data:image/jpeg;base64,/9j/4AAQSkZJRg==\"\n  }\n ]\n}\n```"
+  },
+  "term": {
+   "raw": {
+    "terms": [
+     {
+      "id": "t1",
+      "term": "Mimikry",
+      "definition": "Nachahmung einer wehrhaften Art.",
+      "example": "Schwebfliege",
+      "source": "Buch S. 52"
+     },
+     {
+      "id": "t2",
+      "term": "Mimese",
+      "definition": ""
+     },
+     {
+      "id": "t3",
+      "term": "Dritter",
+      "definition": "x"
+     }
+    ]
+   },
+   "expectedBlock": "```fanotes-term\n{\n \"v\": 1,\n \"terms\": [\n  {\n   \"id\": \"t1\",\n   \"term\": \"Mimikry\",\n   \"definition\": \"Nachahmung einer wehrhaften Art.\",\n   \"example\": \"Schwebfliege\",\n   \"source\": \"Buch S. 52\"\n  },\n  {\n   \"id\": \"t2\",\n   \"term\": \"Mimese\",\n   \"definition\": \"\",\n   \"example\": \"\",\n   \"source\": \"\"\n  },\n  {\n   \"id\": \"t3\",\n   \"term\": \"Dritter\",\n   \"definition\": \"x\",\n   \"example\": \"\",\n   \"source\": \"\"\n  }\n ]\n}\n```"
+  }
+ },
+ "note": "# Biologie\n\n```fanotes-key\n{\"title\":\"Schlüssel\",\"junk\":1,\"table\":{\"features\":[\"Flügel\",\"Mundwerkzeuge saugend\",\"Verwandlung\"],\"items\":[{\"id\":\"a\",\"name\":\"Käfer\",\"values\":[\"ja\",\"nein\",\"holometabol\"]},{\"id\":\"b\",\"name\":\"Schmetterlinge\",\"values\":[\"ja\",\"ja\",\"holometabol\"]},{\"id\":\"c\",\"name\":\"Wanzen\",\"values\":[\"ja\",\"ja\",\"hemimetabol\"]},{\"id\":\"d\",\"name\":\"Flöhe\",\"values\":[\"nein\",\"ja\",\"holometabol\"]},{\"id\":\"e\",\"name\":\"Silberfischchen\",\"values\":[\"nein\",\"nein\",\"ametabol\"]},{\"id\":\"f\",\"name\":\"Biene\",\"values\":[\"ja\"]}]},\"tree\":{\"root\":\"n1\",\"nodes\":[{\"id\":\"n1\",\"kind\":\"question\",\"text\":\"Flügel?\",\"branches\":[{\"label\":\"ja\",\"to\":\"n2\"},{\"label\":\"nein\",\"to\":\"n7\"}]},{\"id\":\"n2\",\"kind\":\"question\",\"text\":\"Mundwerkzeuge saugend?\",\"branches\":[{\"label\":\"ja\",\"to\":\"n3\"},{\"label\":\"nein\",\"to\":\"n6\"}]},{\"id\":\"n3\",\"kind\":\"question\",\"text\":\"Verwandlung\",\"branches\":[{\"label\":\"holometabol\",\"to\":\"n4\"},{\"label\":\"hemimetabol\",\"to\":\"n5\"}]},{\"id\":\"n4\",\"kind\":\"leaf\",\"text\":\"Schmetterlinge\",\"branches\":[]},{\"id\":\"n5\",\"kind\":\"leaf\",\"text\":\"Wanzen\",\"branches\":[]},{\"id\":\"n6\",\"kind\":\"leaf\",\"text\":\"Käfer\",\"branches\":[]},{\"id\":\"n7\",\"kind\":\"question\",\"text\":\"Mundwerkzeuge saugend?\",\"branches\":[{\"label\":\"ja\",\"to\":\"n8\"},{\"label\":\"nein\",\"to\":\"n9\"}]},{\"id\":\"n8\",\"kind\":\"leaf\",\"text\":\"Flöhe\",\"branches\":[]},{\"id\":\"n9\",\"kind\":\"leaf\",\"text\":\"Silberfischchen\",\"branches\":[]}]},\"compareImage\":\".fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg\",\"compareLabel\":\"Buch S. 12\"}\n```\n\n```fanotes-sort\n{\"title\":\"Verwandlung\",\"mode\":\"groups\",\"cards\":[{\"id\":\"c1\",\"text\":\"Käfer\"},{\"id\":\"c2\",\"text\":\"Wanzen\"},{\"id\":\"c3\",\"text\":\"Flöhe\"},{\"id\":\"c4\",\"text\":\"\"},{\"id\":\"c5\",\"text\":\"Fünfte Karte\"}],\"groups\":[{\"id\":\"g1\",\"title\":\"hemimetabol\",\"cards\":[\"c2\",\"zzz\"]},{\"id\":\"g2\",\"title\":\"holometabol\",\"cards\":[\"c1\",\"c2\"]},{\"id\":\"g3\",\"title\":\"ametabol\",\"cards\":[]}]}\n```\n\n```fanotes-map\n{\"title\":\"Häutung\",\"dir\":\"LR\",\"nodes\":[{\"id\":\"a\",\"text\":\"Häutungshormon\"},{\"id\":\"b\",\"text\":\"Häutung\"},{\"id\":\"c\",\"text\":\"Wachstum bei Insekten mit langem Namen\"},{\"id\":\"a\",\"text\":\"dup\"}],\"edges\":[{\"id\":\"e1\",\"from\":\"a\",\"to\":\"b\",\"label\":\"löst aus\"},{\"id\":\"e2\",\"from\":\"b\",\"to\":\"c\",\"label\":\"\"},{\"id\":\"e3\",\"from\":\"c\",\"to\":\"a\",\"label\":\"hemmt\"},{\"id\":\"e4\",\"from\":\"a\",\"to\":\"a\"},{\"id\":\"e5\",\"from\":\"a\",\"to\":\"zz\"}]}\n```\n\n```fanotes-plate\n{\"title\":\"Schmetterlinge\",\"cols\":3,\"items\":[{\"id\":\"p1\",\"label\":\"Distelfalter\",\"note\":\"wandert\",\"img\":\".fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg\"},{\"id\":\"p2\",\"label\":\"Admiral\",\"img\":\"http://evil/x.png\"},{\"id\":\"p3\",\"label\":\"\",\"img\":\"data:image/jpeg;base64,/9j/4AAQSkZJRg==\"}],\"showLabels\":false}\n```\n\n```fanotes-term\n{\"terms\":[{\"id\":\"t1\",\"term\":\"Mimikry\",\"definition\":\"Nachahmung einer wehrhaften Art.\",\"example\":\"Schwebfliege\",\"source\":\"Buch S. 52\"},{\"id\":\"t2\",\"term\":\"Mimese\",\"definition\":\"\"},{\"id\":\"t3\",\"term\":\"Dritter\",\"definition\":\"x\"}]}\n```\n\n```js\n```fanotes-key\nnot a block\n```\n\nEnde\n",
+ "desktopNote": "# Biologie\n\n```fanotes-key\n{\n \"v\": 1,\n \"title\": \"Schlüssel\",\n \"table\": {\n  \"features\": [\n   \"Flügel\",\n   \"Mundwerkzeuge saugend\",\n   \"Verwandlung\"\n  ],\n  \"items\": [\n   {\n    \"id\": \"a\",\n    \"name\": \"Käfer\",\n    \"values\": [\n     \"ja\",\n     \"nein\",\n     \"holometabol\"\n    ]\n   },\n   {\n    \"id\": \"b\",\n    \"name\": \"Schmetterlinge\",\n    \"values\": [\n     \"ja\",\n     \"ja\",\n     \"holometabol\"\n    ]\n   },\n   {\n    \"id\": \"c\",\n    \"name\": \"Wanzen\",\n    \"values\": [\n     \"ja\",\n     \"ja\",\n     \"hemimetabol\"\n    ]\n   },\n   {\n    \"id\": \"d\",\n    \"name\": \"Flöhe\",\n    \"values\": [\n     \"nein\",\n     \"ja\",\n     \"holometabol\"\n    ]\n   },\n   {\n    \"id\": \"e\",\n    \"name\": \"Silberfischchen\",\n    \"values\": [\n     \"nein\",\n     \"nein\",\n     \"ametabol\"\n    ]\n   },\n   {\n    \"id\": \"f\",\n    \"name\": \"Biene\",\n    \"values\": [\n     \"ja\",\n     \"\",\n     \"\"\n    ]\n   }\n  ]\n },\n \"tree\": {\n  \"root\": \"n1\",\n  \"nodes\": [\n   {\n    \"id\": \"n1\",\n    \"kind\": \"question\",\n    \"text\": \"Flügel?\",\n    \"branches\": [\n     {\n      \"label\": \"ja\",\n      \"to\": \"n2\"\n     },\n     {\n      \"label\": \"nein\",\n      \"to\": \"n7\"\n     }\n    ]\n   },\n   {\n    \"id\": \"n2\",\n    \"kind\": \"question\",\n    \"text\": \"Mundwerkzeuge saugend?\",\n    \"branches\": [\n     {\n      \"label\": \"ja\",\n      \"to\": \"n3\"\n     },\n     {\n      \"label\": \"nein\",\n      \"to\": \"n6\"\n     }\n    ]\n   },\n   {\n    \"id\": \"n3\",\n    \"kind\": \"question\",\n    \"text\": \"Verwandlung\",\n    \"branches\": [\n     {\n      \"label\": \"holometabol\",\n      \"to\": \"n4\"\n     },\n     {\n      \"label\": \"hemimetabol\",\n      \"to\": \"n5\"\n     }\n    ]\n   },\n   {\n    \"id\": \"n4\",\n    \"kind\": \"leaf\",\n    \"text\": \"Schmetterlinge\",\n    \"branches\": []\n   },\n   {\n    \"id\": \"n5\",\n    \"kind\": \"leaf\",\n    \"text\": \"Wanzen\",\n    \"branches\": []\n   },\n   {\n    \"id\": \"n6\",\n    \"kind\": \"leaf\",\n    \"text\": \"Käfer\",\n    \"branches\": []\n   },\n   {\n    \"id\": \"n7\",\n    \"kind\": \"question\",\n    \"text\": \"Mundwerkzeuge saugend?\",\n    \"branches\": [\n     {\n      \"label\": \"ja\",\n      \"to\": \"n8\"\n     },\n     {\n      \"label\": \"nein\",\n      \"to\": \"n9\"\n     }\n    ]\n   },\n   {\n    \"id\": \"n8\",\n    \"kind\": \"leaf\",\n    \"text\": \"Flöhe\",\n    \"branches\": []\n   },\n   {\n    \"id\": \"n9\",\n    \"kind\": \"leaf\",\n    \"text\": \"Silberfischchen\",\n    \"branches\": []\n   }\n  ]\n },\n \"compareImage\": \".fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg\",\n \"compareLabel\": \"Buch S. 12\"\n}\n```\n\n```fanotes-sort\n{\n \"v\": 1,\n \"title\": \"Verwandlung\",\n \"mode\": \"groups\",\n \"cards\": [\n  {\n   \"id\": \"c1\",\n   \"text\": \"Käfer\"\n  },\n  {\n   \"id\": \"c2\",\n   \"text\": \"Wanzen\"\n  },\n  {\n   \"id\": \"c3\",\n   \"text\": \"Flöhe\"\n  },\n  {\n   \"id\": \"c5\",\n   \"text\": \"Fünfte Karte\"\n  }\n ],\n \"groups\": [\n  {\n   \"id\": \"g1\",\n   \"title\": \"hemimetabol\",\n   \"cards\": [\n    \"c2\"\n   ]\n  },\n  {\n   \"id\": \"g2\",\n   \"title\": \"holometabol\",\n   \"cards\": [\n    \"c1\"\n   ]\n  },\n  {\n   \"id\": \"g3\",\n   \"title\": \"ametabol\",\n   \"cards\": []\n  }\n ]\n}\n```\n\n```fanotes-map\n{\n \"v\": 1,\n \"title\": \"Häutung\",\n \"dir\": \"LR\",\n \"nodes\": [\n  {\n   \"id\": \"a\",\n   \"text\": \"Häutungshormon\"\n  },\n  {\n   \"id\": \"b\",\n   \"text\": \"Häutung\"\n  },\n  {\n   \"id\": \"c\",\n   \"text\": \"Wachstum bei Insekten mit langem Namen\"\n  }\n ],\n \"edges\": [\n  {\n   \"id\": \"e1\",\n   \"from\": \"a\",\n   \"to\": \"b\",\n   \"label\": \"löst aus\"\n  },\n  {\n   \"id\": \"e2\",\n   \"from\": \"b\",\n   \"to\": \"c\",\n   \"label\": \"\"\n  },\n  {\n   \"id\": \"e3\",\n   \"from\": \"c\",\n   \"to\": \"a\",\n   \"label\": \"hemmt\"\n  }\n ]\n}\n```\n\n```fanotes-plate\n{\n \"v\": 1,\n \"title\": \"Schmetterlinge\",\n \"cols\": 3,\n \"showLabels\": false,\n \"items\": [\n  {\n   \"id\": \"p1\",\n   \"label\": \"Distelfalter\",\n   \"note\": \"wandert\",\n   \"img\": \".fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg\"\n  },\n  {\n   \"id\": \"p2\",\n   \"label\": \"Admiral\",\n   \"note\": \"\",\n   \"img\": \"\"\n  },\n  {\n   \"id\": \"p3\",\n   \"label\": \"\",\n   \"note\": \"\",\n   \"img\": \"data:image/jpeg;base64,/9j/4AAQSkZJRg==\"\n  }\n ]\n}\n```\n\n```fanotes-term\n{\n \"v\": 1,\n \"terms\": [\n  {\n   \"id\": \"t1\",\n   \"term\": \"Mimikry\",\n   \"definition\": \"Nachahmung einer wehrhaften Art.\",\n   \"example\": \"Schwebfliege\",\n   \"source\": \"Buch S. 52\"\n  },\n  {\n   \"id\": \"t2\",\n   \"term\": \"Mimese\",\n   \"definition\": \"\",\n   \"example\": \"\",\n   \"source\": \"\"\n  },\n  {\n   \"id\": \"t3\",\n   \"term\": \"Dritter\",\n   \"definition\": \"x\",\n   \"example\": \"\",\n   \"source\": \"\"\n  }\n ]\n}\n```\n\nEnde\n",
+ "keyLayout": {
+  "nodes": [
+   {
+    "id": "n4",
+    "kind": "leaf",
+    "lines": [
+     "Schmetterlinge"
+    ],
+    "x": 8,
+    "y": 270,
+    "w": 122,
+    "h": 28
+   },
+   {
+    "id": "n5",
+    "kind": "leaf",
+    "lines": [
+     "Wanzen"
+    ],
+    "x": 148,
+    "y": 270,
+    "w": 64,
+    "h": 28
+   },
+   {
+    "id": "n3",
+    "kind": "question",
+    "lines": [
+     "Verwandlung"
+    ],
+    "x": 75,
+    "y": 188,
+    "w": 100,
+    "h": 28
+   },
+   {
+    "id": "n6",
+    "kind": "leaf",
+    "lines": [
+     "Käfer"
+    ],
+    "x": 230,
+    "y": 188,
+    "w": 57,
+    "h": 28
+   },
+   {
+    "id": "n2",
+    "kind": "question",
+    "lines": [
+     "Mundwerkzeuge",
+     "saugend?"
+    ],
+    "x": 134,
+    "y": 90,
+    "w": 115,
+    "h": 44
+   },
+   {
+    "id": "n8",
+    "kind": "leaf",
+    "lines": [
+     "Flöhe"
+    ],
+    "x": 305,
+    "y": 188,
+    "w": 57,
+    "h": 28
+   },
+   {
+    "id": "n9",
+    "kind": "leaf",
+    "lines": [
+     "Silberfischchen"
+    ],
+    "x": 380,
+    "y": 188,
+    "w": 130,
+    "h": 28
+   },
+   {
+    "id": "n7",
+    "kind": "question",
+    "lines": [
+     "Mundwerkzeuge",
+     "saugend?"
+    ],
+    "x": 332,
+    "y": 90,
+    "w": 115,
+    "h": 44
+   },
+   {
+    "id": "n1",
+    "kind": "question",
+    "lines": [
+     "Flügel?"
+    ],
+    "x": 255,
+    "y": 8,
+    "w": 71,
+    "h": 28
+   }
+  ],
+  "edges": [
+   {
+    "from": "n3",
+    "to": "n4",
+    "label": "holometabol",
+    "x1": 125,
+    "y1": 216,
+    "x2": 69,
+    "y2": 270
+   },
+   {
+    "from": "n3",
+    "to": "n5",
+    "label": "hemimetabol",
+    "x1": 125,
+    "y1": 216,
+    "x2": 180,
+    "y2": 270
+   },
+   {
+    "from": "n2",
+    "to": "n3",
+    "label": "ja",
+    "x1": 191.5,
+    "y1": 134,
+    "x2": 125,
+    "y2": 188
+   },
+   {
+    "from": "n2",
+    "to": "n6",
+    "label": "nein",
+    "x1": 191.5,
+    "y1": 134,
+    "x2": 258.5,
+    "y2": 188
+   },
+   {
+    "from": "n7",
+    "to": "n8",
+    "label": "ja",
+    "x1": 389.5,
+    "y1": 134,
+    "x2": 333.5,
+    "y2": 188
+   },
+   {
+    "from": "n7",
+    "to": "n9",
+    "label": "nein",
+    "x1": 389.5,
+    "y1": 134,
+    "x2": 445,
+    "y2": 188
+   },
+   {
+    "from": "n1",
+    "to": "n2",
+    "label": "ja",
+    "x1": 290.5,
+    "y1": 36,
+    "x2": 191.5,
+    "y2": 90
+   },
+   {
+    "from": "n1",
+    "to": "n7",
+    "label": "nein",
+    "x1": 290.5,
+    "y1": 36,
+    "x2": 389.5,
+    "y2": 90
+   }
+  ],
+  "width": 518,
+  "height": 306
+ },
+ "mapLayout": {
+  "nodes": [
+   {
+    "id": "a",
+    "lines": [
+     "Häutungshormon"
+    ],
+    "x": 12,
+    "y": 20,
+    "w": 122,
+    "h": 28
+   },
+   {
+    "id": "b",
+    "lines": [
+     "Häutung"
+    ],
+    "x": 204,
+    "y": 20,
+    "w": 71,
+    "h": 28
+   },
+   {
+    "id": "c",
+    "lines": [
+     "Wachstum bei Insekten",
+     "mit langem Namen"
+    ],
+    "x": 345,
+    "y": 12,
+    "w": 173,
+    "h": 44
+   }
+  ],
+  "edges": [
+   {
+    "id": "e1",
+    "from": "a",
+    "to": "b",
+    "label": "löst aus",
+    "path": "M134 34 C169 34 169 34 204 34",
+    "lx": 169,
+    "ly": 34
+   },
+   {
+    "id": "e2",
+    "from": "b",
+    "to": "c",
+    "label": "",
+    "path": "M275 34 C310 34 310 34 345 34",
+    "lx": 310,
+    "ly": 34
+   },
+   {
+    "id": "e3",
+    "from": "c",
+    "to": "a",
+    "label": "hemmt",
+    "path": "M345 34 C239.5 34 239.5 34 134 34",
+    "lx": 239.5,
+    "ly": 34
+   }
+  ],
+  "width": 530,
+  "height": 72,
+  "layers": [
+   [
+    "a"
+   ],
+   [
+    "b"
+   ],
+   [
+    "c"
+   ]
+  ]
+ },
+ "mapLayers": [
+  [
+   "a"
+  ],
+  [
+   "b"
+  ],
+  [
+   "c"
+  ]
+ ],
+ "sortMoved": {
+  "block": "```fanotes-sort\n{\n \"v\": 1,\n \"title\": \"Verwandlung\",\n \"mode\": \"groups\",\n \"cards\": [\n  {\n   \"id\": \"c1\",\n   \"text\": \"Käfer\"\n  },\n  {\n   \"id\": \"c2\",\n   \"text\": \"Wanzen\"\n  },\n  {\n   \"id\": \"c3\",\n   \"text\": \"Flöhe\"\n  },\n  {\n   \"id\": \"c5\",\n   \"text\": \"Fünfte Karte\"\n  }\n ],\n \"groups\": [\n  {\n   \"id\": \"g1\",\n   \"title\": \"hemimetabol\",\n   \"cards\": [\n    \"c3\",\n    \"c2\"\n   ]\n  },\n  {\n   \"id\": \"g2\",\n   \"title\": \"holometabol\",\n   \"cards\": []\n  },\n  {\n   \"id\": \"g3\",\n   \"title\": \"ametabol\",\n   \"cards\": []\n  }\n ]\n}\n```",
+  "unsorted": [
+   "c1",
+   "c5"
+  ]
+ },
+ "cardSources": [
+  {
+   "id": "plate:p1",
+   "front": "Schmetterlinge: Wie heißt das?",
+   "back": "Distelfalter\nwandert",
+   "frontImage": ".fanotes/worksheets/0b3e4f5a-1111-4222-8333-444455556666.jpg"
+  },
+  {
+   "id": "term:t1",
+   "front": "Mimikry",
+   "back": "Nachahmung einer wehrhaften Art.\nBeispiel: Schwebfliege\nQuelle: Buch S. 52"
+  },
+  {
+   "id": "term:t3",
+   "front": "Dritter",
+   "back": "x"
+  }
+ ],
+ "wrap": [
+  [
+   "Mundwerkzeuge saugend leckend",
+   14,
+   [
+    "Mundwerkzeuge",
+    "saugend",
+    "leckend"
+   ]
+  ],
+  [
+   "Superlangeswortohnezwischenraumdasumgebrochenwerdenmuss",
+   10,
+   [
+    "Superlange-",
+    "swortohnez-",
+    "wischenrau-",
+    "mdasumgebr-",
+    "ochenwerdenmuss"
+   ]
+  ],
+  [
+   "",
+   5,
+   [
+    ""
+   ]
+  ]
+ ]
+}

@@ -155,11 +155,12 @@ export const recordBugReportEvent = (
   windowMs = BUG_REPORT_WINDOW_MS,
 ) => pruneBugReportWindow([...events, event], now, windowMs)
 
-export const createBugReportLog = (windowMs = BUG_REPORT_WINDOW_MS) => {
+export const createBugReportLog = (windowMs = BUG_REPORT_WINDOW_MS, onRecord?: (event: BugReportEvent) => void) => {
   let events: BugReportEvent[] = []
   return {
     record(event: BugReportEvent, now = Date.now()) {
       events = recordBugReportEvent(events, event, now, windowMs)
+      if (onRecord) { try { onRecord(event) } catch { /* diagnostics must never break recording */ } }
       return events
     },
     snapshot(now = Date.now()) {
@@ -169,7 +170,10 @@ export const createBugReportLog = (windowMs = BUG_REPORT_WINDOW_MS) => {
   }
 }
 
-export const diagnosticLog = createBugReportLog()
+/** Opt-in diagnostics counters subscribe here. Nothing listens while sharing is off. */
+export const diagnosticListeners = new Set<(event: BugReportEvent) => void>()
+
+export const diagnosticLog = createBugReportLog(BUG_REPORT_WINDOW_MS, (event) => { for (const listener of diagnosticListeners) listener(event) })
 
 let lastTextMotionDiagAt = 0
 

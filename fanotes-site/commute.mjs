@@ -5,8 +5,8 @@ import { promises as fs } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
-  CHAIN_TRANSFER_MIN, CHECK_IMMINENT_MS, MAX_VIAS, chainSegments, hasViaLoop, passesVias, sameViaStop, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
-  parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizeRoutes,
+  CHAIN_TRANSFER_MIN, CHECK_IMMINENT_MS, MAX_PINS, MAX_TIMES, MAX_VIAS, chainSegments, hasViaLoop, passesVias, sameViaStop, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
+  parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizePins, sanitizeRoutes, sanitizeSchedule, sanitizeVias,
   sanitizeSettings, sanitizeStop, tripAlerts, usable, zurichWall,
 } from './commute-logic.mjs'
 import { createServiceLog, routeOf } from './service-log.mjs'
@@ -27,6 +27,42 @@ export const UPSTREAM_TIMEOUT_MS = 12_000
 export const UPSTREAM_ATTEMPTS = 3
 /** Wait before the second and third attempt. A 4xx is not retried. */
 export const UPSTREAM_RETRY_MS = [200, 800]
+/** A timetable or stop answer larger than this is dropped. It is not parsed and not retried. */
+export const UPSTREAM_BODY_MAX = 1024 * 1024
+
+// Stop once the cap is passed. The rest of the body is never stored.
+const readLimitedText = async (response, max) => {
+  const reader = response.body?.getReader?.()
+  if (!reader) {
+    const body = typeof response.text === 'function' ? await response.text() : ''
+    if (body.length > max) throw new Error('page too large')
+    return body
+  }
+  const decoder = new TextDecoder('utf-8')
+  let size = 0
+  let body = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return body + decoder.decode()
+    const bytes = value?.byteLength || 0
+    size += bytes
+    if (size > max) {
+      if (typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+      throw new Error('page too large')
+    }
+    if (bytes) body += decoder.decode(value, { stream: true })
+  }
+}
+const readUpstreamJson = async (response) => {
+  const hasReader = typeof response.body?.getReader === 'function'
+  if (!hasReader && typeof response.text !== 'function' && typeof response.json === 'function') return response.json()
+  return JSON.parse(await readLimitedText(response, UPSTREAM_BODY_MAX))
+}
+// An error page is not parsed. Cancel it so the rest is not kept.
+const releaseUnread = async (response) => {
+  const reader = response?.body?.getReader?.()
+  if (reader && typeof reader.cancel === 'function') await Promise.resolve(reader.cancel()).catch(() => undefined)
+}
 const USER_AGENT = 'KantiPlus/1.0 (+https://fanotes.fasrv.ch; commute)'
 const PROVIDERS = {
   'search.ch': { name: 'search.ch', occupancy: 'train-class', formation: false },
@@ -64,55 +100,113 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   const inflight = new Map()
   let budget = { day: '', route: 0, completion: 0, fallback: 0, detail: 0 }
   let budgetLoaded = false
+  let budgetBlocked = false
+  let budgetQueue = Promise.resolve()
+  const withBudget = (task) => {
+    const run = budgetQueue.then(task, task)
+    budgetQueue = run.then(() => undefined, () => undefined)
+    return run
+  }
+  const budgetCounts = ['route', 'completion', 'fallback', 'detail']
   const loadBudget = async () => {
     if (budgetLoaded || !budgetFile) return
+    try {
+      const parsed = JSON.parse(await fs.readFile(budgetFile, 'utf8'))
+      // A missing or broken file can start again. A file that is there but not today's counts must not look empty, or the next lookup replaces it with zeros.
+      if (!parsed || typeof parsed.day !== 'string' || budgetCounts.some((key) => !Number.isFinite(parsed[key]))) {
+        budgetBlocked = true
+        return
+      }
+      budget = { ...budget, ...parsed }
+      budgetBlocked = false
+    } catch (error) {
+      // A missing or broken file can start again. A read error must not replace today's count with zeros.
+      if (error?.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+    }
     budgetLoaded = true
-    try { budget = { ...budget, ...JSON.parse(await fs.readFile(budgetFile, 'utf8')) } } catch { /* first run */ }
   }
-  const spend = async (kind) => {
-    await loadBudget()
+  const rollBudget = () => {
     const day = zurichWall(now().getTime()).day
     if (budget.day !== day) budget = { day, route: 0, completion: 0, fallback: 0, detail: 0 }
-    budget[kind] += 1
-    if (budgetFile) await fs.writeFile(budgetFile, JSON.stringify(budget), { mode: 0o600 }).catch(() => undefined)
   }
-  const left = async (kind, limit) => {
+  const writeBudget = async () => {
+    if (!budgetFile) return
+    const temporary = `${budgetFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+    try {
+      await fs.mkdir(dirname(budgetFile), { recursive: true })
+      await fs.writeFile(temporary, JSON.stringify(budget), { mode: 0o600 })
+      await fs.rename(temporary, budgetFile)
+    } catch {
+      await fs.rm(temporary, { force: true }).catch(() => undefined)
+    }
+  }
+  // Check and increment under one lock. Two requests must not both pass the daily cap.
+  const reserve = (kind, limit) => withBudget(async () => {
     await loadBudget()
-    const day = zurichWall(now().getTime()).day
-    return budget.day !== day || budget[kind] < limit
-  }
+    if (budgetBlocked) return false
+    rollBudget()
+    if (budget[kind] >= limit) return false
+    budget[kind] += 1
+    await writeBudget()
+    return true
+  })
+  const spend = (kind) => withBudget(async () => {
+    await loadBudget()
+    if (budgetBlocked) return
+    rollBudget()
+    budget[kind] += 1
+    await writeBudget()
+  })
   const DISK_LIMIT = 40
   let disk = { entries: [] }
   let diskLoading = null
+  let diskBlocked = false
   const loadDisk = () => {
     if (!routeFile) return Promise.resolve()
     if (!diskLoading) {
       diskLoading = (async () => {
         try {
           const parsed = JSON.parse(await fs.readFile(routeFile, 'utf8'))
-          if (parsed?.version === 1 && Array.isArray(parsed.entries)) {
-            disk.entries = parsed.entries.filter((entry) => (
-              entry && typeof entry.key === 'string' && entry.key.startsWith('route:') && entry.key.length <= 300
-              && Number.isFinite(entry.at) && entry.value && Array.isArray(entry.value.trips)
-            )).slice(-DISK_LIMIT)
+          const entryKnown = (entry) => Boolean(entry) && typeof entry.key === 'string' && entry.key.startsWith('route:') && entry.key.length <= 300
+            && Number.isFinite(entry.at) && entry.value && Array.isArray(entry.value.trips)
+          // A missing or broken file can start again. A file that is there but not this timetable must not look empty, or the next route replaces it.
+          // An entry that is not a stored trip must not be dropped, or the next route replaces the timetable.
+          if (parsed?.version === 1 && Array.isArray(parsed.entries) && parsed.entries.every(entryKnown)) {
+            disk.entries = parsed.entries.slice(-DISK_LIMIT)
+            diskBlocked = false
+          } else {
+            diskBlocked = true
           }
-        } catch { /* first run */ }
+        } catch (error) {
+          if (error?.code === 'ENOENT' || error instanceof SyntaxError) return
+          diskLoading = null
+          throw error
+        }
       })()
     }
     return diskLoading
   }
-  const remember = async (key, at, value) => {
-    if (!routeFile || !key.startsWith('route:') || !Array.isArray(value?.trips) || !value.trips.length) return
-    await loadDisk()
-    disk.entries = [...disk.entries.filter((entry) => entry.key !== key), { key, at, value }].slice(-DISK_LIMIT)
-    const temporary = `${routeFile}.${process.pid}.tmp`
-    try {
-      await fs.mkdir(dirname(routeFile), { recursive: true })
-      await fs.writeFile(temporary, JSON.stringify({ version: 1, entries: disk.entries }), { mode: 0o600 })
-      await fs.rename(temporary, routeFile)
-    } catch {
-      await fs.rm(temporary, { force: true }).catch(() => undefined)
-    }
+  // Different routes finish together. Writes run one at a time, each into its own temp file,
+  // so one rename cannot replace the file with the other route missing.
+  let diskQueue = Promise.resolve()
+  const remember = (key, at, value) => {
+    const run = diskQueue.then(async () => {
+      if (!routeFile || !key.startsWith('route:') || !Array.isArray(value?.trips) || !value.trips.length) return
+      // Leave an unreadable timetable file as it is. The live answer is still returned.
+      try { await loadDisk() } catch { return }
+      if (diskBlocked) return
+      disk.entries = [...disk.entries.filter((entry) => entry.key !== key), { key, at, value }].slice(-DISK_LIMIT)
+      const temporary = `${routeFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
+      try {
+        await fs.mkdir(dirname(routeFile), { recursive: true })
+        await fs.writeFile(temporary, JSON.stringify({ version: 1, entries: disk.entries }), { mode: 0o600 })
+        await fs.rename(temporary, routeFile)
+      } catch {
+        await fs.rm(temporary, { force: true }).catch(() => undefined)
+      }
+    })
+    diskQueue = run.then(() => undefined, () => undefined)
+    return run
   }
   const recall = async (key) => {
     if (!routeFile || !key.startsWith('route:')) return null
@@ -131,11 +225,12 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
       try {
         const response = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json', 'User-Agent': USER_AGENT }, redirect: 'error', signal: AbortSignal.timeout?.(UPSTREAM_TIMEOUT_MS) })
         if (!response.ok && response.status !== 200) {
+          await releaseUnread(response)
           last = Object.assign(new Error('provider'), { status: response.status })
           events.warn({ requestId, method: 'GET', route, status: response.status, attempt, error: 'Error', ms: elapsed() })
           if (!upstreamRetryable(last) || attempt === UPSTREAM_ATTEMPTS) throw last
         } else {
-          const body = await response.json()
+          const body = await readUpstreamJson(response)
           events.info({ requestId, method: 'GET', route, status: response.status || 200, attempt, ms: elapsed() })
           return body
         }
@@ -181,9 +276,8 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     const term = String(query || '').trim().slice(0, 60)
     if (term.length < 2) return Promise.resolve({ stops: [] })
     return cached(`stops:${term.toLowerCase()}`, STOP_CACHE_MS, async () => {
-      if (await left('completion', COMPLETION_BUDGET)) {
+      if (await reserve('completion', COMPLETION_BUDGET)) {
         try {
-          await spend('completion')
           return { stops: parseCompletion(await getJson(`${SEARCH_CH}/completion.json?term=${encodeURIComponent(term)}&show_ids=1&nofavorites=1`)) }
         } catch (error) { log('warn', `Haltestellensuche search.ch fehlgeschlagen (${error?.status || error?.name || 'error'})`) }
       }
@@ -205,9 +299,8 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
   /** One timetable query (search.ch, then transport.opendata.ch) for from → to through [vias] in order; no guard, no cache. */
   const fetchTrips = async ({ from, to, vias, at, timeType, num }) => {
     const when = searchDate(at)
-    if (await left('route', ROUTE_BUDGET)) {
+    if (await reserve('route', ROUTE_BUDGET)) {
       try {
-        await spend('route')
         // search.ch reads an arrival time as the earliest arrival; `pre` adds the trips that arrive in time.
         const params = new URLSearchParams({ from: stopKey(from), to: stopKey(to), date: when.date, time: when.time, time_type: timeType === 'arrive' ? 'arrival' : 'depart', num: String(num || (timeType === 'arrive' ? 2 : 5)), pre: timeType === 'arrive' ? '4' : '1', show_delays: '1', show_trackchanges: '1' })
         // search.ch reads repeated via[] in order (a plain repeated via keeps only the last one).
@@ -317,8 +410,7 @@ export const createCommuteProvider = ({ fetchImpl = fetch, now = () => new Date(
     const key = `detail:${leg.from.stopId || leg.from.name}>${leg.to.stopId || leg.to.name}@${when.isoDay}T${when.time}:${leg.trainNo || leg.line}`
     try {
       const answer = await cached(key, ROUTE_CACHE_MS, async () => {
-        if (!(await left('detail', DETAIL_BUDGET))) throw Object.assign(new Error('budget'), { status: 429 })
-        await spend('detail')
+        if (!(await reserve('detail', DETAIL_BUDGET))) throw Object.assign(new Error('budget'), { status: 429 })
         const params = new URLSearchParams({ from: leg.from.stopId || leg.from.name, to: leg.to.stopId || leg.to.name, date: when.isoDay, time: when.time, limit: '3' })
         return { trips: parseTransportRoute(await getJson(`${TRANSPORT}/connections?${params}`)) }
       })
@@ -358,17 +450,127 @@ export const createCommute = (options = {}) => {
   const file = (accountId) => resolve(accountDir(accountId), 'commute.json')
   const stateFile = (accountId) => resolve(accountDir(accountId), 'commute-state.json')
   const due = new Map()
+  // Saves and removals for one account run one at a time. Two clients otherwise both read the
+  // old pins, and the slower write puts those pins back over the newer ones.
+  const accountQueues = new Map()
+  const withAccount = (accountId, task) => {
+    const previous = accountQueues.get(accountId) || Promise.resolve()
+    const run = previous.then(task, task)
+    const tail = run.then(() => undefined, () => undefined)
+    accountQueues.set(accountId, tail)
+    tail.then(() => { if (accountQueues.get(accountId) === tail) accountQueues.delete(accountId) })
+    return run
+  }
 
-  const readJson = async (path) => { try { return JSON.parse(await fs.readFile(path, 'utf8')) } catch { return null } }
+  const readJson = async (path) => {
+    try {
+      return JSON.parse(await fs.readFile(path, 'utf8'))
+    } catch (error) {
+      // A missing or broken file can start again. A read error must not look empty, or the next save replaces the route.
+      if (error?.code === 'ENOENT' || error instanceof SyntaxError) return null
+      throw error
+    }
+  }
   const writeJson = async (path, value) => {
-    const temp = `${path}.${randomBytes(4).toString('hex')}.tmp`
+    const temp = `${path}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
     await fs.mkdir(resolve(path, '..'), { recursive: true, mode: 0o700 })
-    await fs.writeFile(temp, JSON.stringify(value), { mode: 0o600 })
-    await fs.rename(temp, path)
+    try {
+      await fs.writeFile(temp, JSON.stringify(value), { mode: 0o600 })
+      await fs.rename(temp, path)
+    } catch (error) {
+      await fs.rm(temp, { force: true }).catch(() => undefined)
+      throw error
+    }
+  }
+  const readState = async (accountId) => {
+    const stored = await readJson(stateFile(accountId))
+    // A missing or broken file can start again. A file that is there but not this alert state must not look empty, or the next check replaces it.
+    if (stored == null) return null
+    const routes = stored.routes
+    const plainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+    // An entry that is not an alert record must not look absent, or the next check replaces it.
+    const known = plainObject(stored) && plainObject(routes) && Object.values(routes).every(plainObject)
+    if (!known) throw Object.assign(new Error('commute state'), { code: 'EBADMSG' })
+    return stored
   }
 
   const read = async (accountId) => {
     const stored = await readJson(file(accountId))
+    // A missing or broken file can start again. A file that is there but not this route list must not look empty, or the next save replaces it.
+    if (stored != null) {
+      const known = typeof stored === 'object' && !Array.isArray(stored) && Array.isArray(stored.routes)
+      if (!known) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      // An entry the sanitizer would skip must not look absent, or the next check deletes its alert state and the next save drops the route.
+      if (sanitizeRoutes(stored.routes).length !== stored.routes.length) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      const weekdayKept = (day) => {
+        const number = Number(day)
+        return Number.isInteger(number) && number >= 1 && number <= 7
+      }
+      const STOP_TYPES = ['train', 'bus', 'tram', 'ship', 'cableway', 'other']
+      const stopTypeKnown = (stop) => stop == null || typeof stop !== 'object' || Array.isArray(stop) || stop.type == null || STOP_TYPES.includes(stop.type)
+      const thresholdKept = (value) => value == null || (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 30)
+      const minutesKept = (value, min, max) => typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
+      const transfersKept = (value) => {
+        if (value == null) return true
+        const number = Number(value)
+        return Number.isInteger(number) && number >= 0 && number <= 9
+      }
+      const stopIdKept = (value) => {
+        if (value == null || value === '') return true
+        const stopId = String(value).replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 32)
+        return /^[A-Za-z0-9:_.-]{1,32}$/u.test(stopId)
+      }
+      const arrivalKept = (value) => {
+        if (value == null || value === '') return true
+        const match = /^(\d{1,2}):(\d{2})$/u.exec(String(value || '').trim())
+        return Boolean(match) && Number(match[1]) <= 23 && Number(match[2]) <= 59
+      }
+      const detailKnown = (route) => {
+        const pins = route?.pins
+        const vias = route?.vias
+        const schedule = route?.schedule
+        const times = schedule?.times
+        const days = schedule?.days
+        const mode = schedule?.mode
+        const buffer = schedule?.bufferMinutes
+        if (pins != null && !Array.isArray(pins)) return false
+        if (Array.isArray(pins) && sanitizePins(pins.slice(0, MAX_PINS)).length !== Math.min(pins.length, MAX_PINS)) return false
+        if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin) => Array.isArray(pin?.days) && pin.days.some((day) => !weekdayKept(day)))) return false
+        if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin, index, list) => {
+          if (!Array.isArray(pin?.days)) return false
+          const earlier = new Set(list.slice(0, index).flatMap((item) => Array.isArray(item?.days) ? item.days.map(Number) : []))
+          return pin.days.some((day) => earlier.has(Number(day)))
+        })) return false
+        if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin) => pin && typeof pin === 'object' && (!transfersKept(pin.transfers) || !stopIdKept(pin.stopId) || !arrivalKept(pin.arrival)))) return false
+        if (vias != null && !Array.isArray(vias)) return false
+        if (Array.isArray(vias) && sanitizeVias({ vias: vias.slice(0, MAX_VIAS) }).length !== Math.min(vias.length, MAX_VIAS)) return false
+        if (Array.isArray(vias) && vias.slice(0, MAX_VIAS).some((via) => !stopTypeKnown(via))) return false
+        if (!stopTypeKnown(route?.from) || !stopTypeKnown(route?.to)) return false
+        if (route?.notify != null && typeof route.notify !== 'boolean') return false
+        if (!thresholdKept(route?.delayThreshold)) return false
+        if (schedule != null && (typeof schedule !== 'object' || Array.isArray(schedule))) return false
+        if (days != null && !Array.isArray(days)) return false
+        if (Array.isArray(days) && days.some((day) => !weekdayKept(day))) return false
+        if (mode != null && !['none', 'times', 'firstLesson', 'lastLesson'].includes(mode)) return false
+        if (mode === 'times' && sanitizeSchedule({ mode: 'times', times: Array.isArray(times) ? times : [] }).times.length === 0) return false
+        if (buffer != null && buffer !== '' && !minutesKept(buffer, 0, 60)) return false
+        if (times != null && !Array.isArray(times)) return false
+        if (route?.schedule?.mode === 'times' && Array.isArray(times) && sanitizeSchedule({ mode: 'times', times: times.slice(0, MAX_TIMES) }).times.length !== Math.min(times.length, MAX_TIMES)) return false
+        return true
+      }
+      // A pin, via, time, weekday, shared pin day, walking time, schedule, stop type, threshold, notify flag, or arrival the sanitizer would replace must not look absent, or the next save drops it. The caps stay.
+      if (!stored.routes.every(detailKnown)) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      // Hidden labels or a threshold that are not the known shape must not look like the defaults, or the next save clears them.
+      const settings = stored.settings
+      if (settings != null) {
+        const labels = settings.hiddenLabels
+        const threshold = settings.delayThreshold
+        const settingsKnown = typeof settings === 'object' && !Array.isArray(settings)
+          && (labels == null || (Array.isArray(labels) && labels.every((label) => typeof label === 'string')))
+          && (threshold == null || minutesKept(threshold, 1, 30))
+        if (!settingsKnown) throw Object.assign(new Error('commute settings'), { code: 'EBADMSG' })
+      }
+    }
     const settings = sanitizeSettings(stored?.settings)
     // Version 1 hidden labels mixed half-class choices (removed) with hidden lessons; the app sends
     // the hidden lessons again, so no lesson stays left out of the first/last lesson.
@@ -376,7 +578,7 @@ export const createCommute = (options = {}) => {
     return { routes: sanitizeRoutes(stored?.routes), settings }
   }
   const view = async (accountId) => ({ ...(await read(accountId)), provider: PROVIDERS['search.ch'] })
-  const save = async (accountId, body) => {
+  const save = (accountId, body) => withAccount(accountId, async () => {
     // A client older than pins/two vias sends routes without those keys: keep what is stored.
     const known = new Map((await read(accountId)).routes.map((route) => [route.id, route]))
     const incoming = (Array.isArray(body?.routes) ? body.routes : []).map((raw) => {
@@ -394,7 +596,7 @@ export const createCommute = (options = {}) => {
     await writeJson(file(accountId), { version: 2, routes, settings, updatedAt: now().toISOString() })
     due.delete(accountId)
     return { routes, settings, provider: PROVIDERS['search.ch'] }
-  }
+  })
 
   /**
    * The live board of one route: target, ranked trips, alternatives when the first is unusable. A
@@ -484,7 +686,7 @@ export const createCommute = (options = {}) => {
     const { routes, settings } = await read(accountId)
     const events = await lessonsFor(accountId).catch(() => [])
     const chosen = routeId ? routes.filter((route) => route.id === routeId) : routes
-    const state = chosen.some((route) => route.pins.length) ? (await readJson(stateFile(accountId))) : null
+    const state = chosen.some((route) => route.pins.length) ? await readState(accountId) : null
     const boards = []
     for (const route of chosen) boards.push(await routeBoard(route, settings, events, state?.routes?.[route.id]?.pinSeen || null))
     return { boards, provider: PROVIDERS['search.ch'] }
@@ -530,7 +732,7 @@ export const createCommute = (options = {}) => {
     const { routes, settings } = await read(accountId)
     if (!routes.length) { due.set(accountId, at + 15 * 60_000); return { checked: 0 } }
     const events = await lessonsFor(accountId).catch(() => [])
-    const state = (await readJson(stateFile(accountId))) || { version: 1, routes: {} }
+    const state = (await readState(accountId)) || { version: 1, routes: {} }
     let next = Number.POSITIVE_INFINITY
     let checked = 0
     const alerts = []
@@ -583,7 +785,16 @@ export const createCommute = (options = {}) => {
       next = Math.min(next, nextCheckAt(target, tracked || (live.pinned ? { departure: target.at, arrival: target.at } : null), at))
     }
     for (const id of Object.keys(state.routes)) if (!routes.some((route) => route.id === id)) delete state.routes[id]
-    await writeJson(stateFile(accountId), state)
+    // A removal that finished during this check must not bring the state file back.
+    const kept = await withAccount(accountId, async () => {
+      try { await fs.stat(file(accountId)) } catch { return false }
+      await writeJson(stateFile(accountId), state)
+      return true
+    })
+    if (!kept) {
+      due.delete(accountId)
+      return { checked, alerts: 0 }
+    }
     if (alerts.length) await publish(accountId, alerts)
     // The widget and the open app follow the tracked trip; a silent push when it changed.
     else if (moved) await ping(accountId)
@@ -609,11 +820,11 @@ export const createCommute = (options = {}) => {
     return checked
   }
 
-  const remove = async (accountId) => {
+  const remove = (accountId) => withAccount(accountId, async () => {
     await fs.rm(file(accountId), { force: true })
     await fs.rm(stateFile(accountId), { force: true })
     due.delete(accountId)
-  }
+  })
 
   /**
    * The connection detail: one trip of a route with every leg, every intermediate stop, real times,

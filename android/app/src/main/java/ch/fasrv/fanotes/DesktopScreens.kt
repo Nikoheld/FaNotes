@@ -65,6 +65,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.outlined.Circle
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
@@ -4347,7 +4348,11 @@ fun CardsScreen(model: FaNotesViewModel) {
         if (card == null) {
             Text("In dieser Notiz sind keine Karten fällig.")
         } else {
+            val picture by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, card.frontImage) {
+                value = card.frontImage?.let { model.readStudyBitmap(it) }?.asImageBitmap()
+            }
             Text(if (showBack) card.back.ifBlank { "Keine Antwort" } else card.front, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.clickable { showBack = !showBack }.padding(vertical = 24.dp))
+            picture?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) }
             Row {
                 listOf("again" to "Nochmal", "hard" to "Schwer", "good" to "Gut", "easy" to "Leicht").forEach { (grade, label) ->
                     TextButton(onClick = {
@@ -7167,7 +7172,7 @@ private fun TabletButtonMap(raw: String?, modifier: Modifier = Modifier, onChang
 }
 
 @Composable
-private fun SettingCard(
+internal fun SettingCard(
     title: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     modifier: Modifier = Modifier,
@@ -7211,7 +7216,7 @@ private fun SettingCard(
 }
 
 @Composable
-private fun SettingRow(
+internal fun SettingRow(
     title: String,
     description: String? = null,
     divider: Boolean = true,
@@ -7498,6 +7503,7 @@ private fun settingsSectionIcon(section: String) = when (section) {
     "drawing" -> Icons.Filled.Brush
     "files" -> Icons.Filled.Folder
     "sync" -> Icons.Filled.Cloud
+    "statistics" -> Icons.Filled.BarChart
     "addons" -> Icons.Filled.Extension
     "updates" -> Icons.Filled.SystemUpdate
     "accessibility" -> Icons.Filled.Accessibility
@@ -7988,7 +7994,7 @@ private fun SettingsPage(
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
-                        ch.fasrv.fanotes.desk.settingsEyebrow(current.count),
+                        if (current.id == "statistics") ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.desk.SETTINGS_STATISTICS_EYEBROW) else ch.fasrv.fanotes.desk.settingsEyebrow(current.count),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_EYEBROW_TRACKING.em,
@@ -8497,6 +8503,7 @@ private fun SettingsPage(
                     ConflictList(model)
                     SyncLogCard(sync.log)
                 }
+                "statistics" -> StatisticsSection(model, viewportWidth, anchorY)
                 "addons" -> SettingCard("Add-ons", Icons.Filled.Extension) {
                     SettingRow("Erweiterungen", "Add-ons des Desktops bleiben Dateien im Vault. Andere Erweiterungen werden nicht ausgeführt.", divider = false) {}
                 }
@@ -8628,7 +8635,7 @@ private fun SettingsPage(
     }
 }
 
-private fun Modifier.settingsAnchor(section: String, id: String, positions: MutableMap<String, Int>): Modifier =
+internal fun Modifier.settingsAnchor(section: String, id: String, positions: MutableMap<String, Int>): Modifier =
     onGloballyPositioned { positions["$section:$id"] = it.positionInParent().y.toInt().coerceAtLeast(0) }
 
 @Composable
@@ -9359,12 +9366,13 @@ fun CommandPalette(
     reduceMotion: Boolean = false,
     penOpen: Boolean = false,
     bookOpen: Boolean = false,
+    workRequests: Boolean = false,
     onRun: (String) -> Unit,
 ) {
     var query by remember(notesOnly) { mutableStateOf("") }
     var selected by remember { mutableIntStateOf(0) }
     val notes = if (notesOnly) rankNotes(query, 40) else if (query.isBlank()) emptyList() else rankNotes(query, 6)
-    val actions = ch.fasrv.fanotes.desk.paletteCommands(penOpen, bookOpen, splitOpen, splitRows, focus, dailyFolder)
+    val actions = ch.fasrv.fanotes.desk.paletteCommands(penOpen, bookOpen, splitOpen, splitRows, focus, dailyFolder, workRequests)
     val commands = if (notesOnly) emptyList() else actions.filter { ch.fasrv.fanotes.desk.paletteCommandMatches(it, query) }
     val rows = commands.map { PaletteRow.Command(it) } + notes.map { PaletteRow.Note(it.path, it.title, it.folder) }
     androidx.compose.runtime.LaunchedEffect(query, notesOnly) { selected = 0 }

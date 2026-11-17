@@ -18,6 +18,7 @@ import ch.fasrv.fanotes.desk.homeworkSecretReady
 import ch.fasrv.fanotes.desk.homeworkTasksFromApiJson
 import ch.fasrv.fanotes.desk.mergeHomeworkFromRemote
 import ch.fasrv.fanotes.desk.rememberPublishedHomeworkIds
+import ch.fasrv.fanotes.desk.runDailyCheck
 import ch.fasrv.fanotes.desk.newHomeworkChannelId
 import ch.fasrv.fanotes.desk.newHomeworkSecret
 import ch.fasrv.fanotes.desk.SearchHit
@@ -127,6 +128,10 @@ import ch.fasrv.fanotes.famd.companionPath
 import ch.fasrv.fanotes.famd.parseFamd
 import ch.fasrv.fanotes.famd.stripFamdPayload
 import ch.fasrv.fanotes.famd.isoNow
+import ch.fasrv.fanotes.study.afterCheckpoint
+import ch.fasrv.fanotes.study.creditAt
+import ch.fasrv.fanotes.study.resumed
+import ch.fasrv.fanotes.study.toJson
 import ch.fasrv.fanotes.ink.InkSession
 import ch.fasrv.fanotes.ink.keepMarkOnPage
 import ch.fasrv.fanotes.ink.InkTool
@@ -162,6 +167,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -187,7 +193,29 @@ data class BookPaneState(
 private const val HOMEWORK_UNREADABLE = "Hausaufgaben.md konnte nicht gelesen werden. Die Datei bleibt unverändert."
 private const val CALENDAR_UNREADABLE = "Kalender.md konnte nicht gelesen werden. Die Datei bleibt unverändert."
 
+/** A Statistik run that finished this recently is shown as it is when the page opens again. */
+private const val STATS_FRESH_MS = 60_000L
+
 class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
+    /** Opens a `.story` folder in the writing mode (a WebView with the shared editor). */
+    fun openStory(path: String) {
+        viewModelScope.launch { saveNow() }
+        val context = getApplication<Application>()
+        context.startActivity(WritingActivity.intent(context, path).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** Imports a Word, Markdown or text file as a new story in a folder. */
+    fun importStory(parent: String) {
+        val context = getApplication<Application>()
+        context.startActivity(WritingActivity.importIntent(context, parent).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** Creates a story in a folder and opens it. */
+    fun createStory(parent: String) {
+        val context = getApplication<Application>()
+        context.startActivity(WritingActivity.createIntent(context, parent).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     private val graph = (app as FaNotesApplication).graph
     val session = InkSession(newInkDocument("Note", "dots", isoNow()))
     val tree = MutableStateFlow<List<VaultNode>>(emptyList())
@@ -226,6 +254,19 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var previewImageTicket = 0
     private var splitImageTicket = 0
     val sync = graph.engine.state.stateIn(viewModelScope, SharingStarted.Eagerly, graph.engine.state.value)
+    val workRequestsOpen = MutableStateFlow(false)
+    /** True only when the server says the signed-in sync account may send work requests. */
+    val workRequestsAllowed = MutableStateFlow(false)
+    val workRequests = ch.fasrv.fanotes.desk.WorkRequestsClient(OkHttpWorkRequestsTransport(), { graph.engine.currentSession() })
+
+    init {
+        viewModelScope.launch {
+            sync.map { it.account?.accountId }.distinctUntilChanged().collect { account ->
+                workRequestsAllowed.value = false
+                if (account != null) workRequestsAllowed.value = withContext(Dispatchers.IO) { workRequests.capabilities() }
+            }
+        }
+    }
     private val _vaultLabel = MutableStateFlow(graph.initialVaultLabel)
     val vaultLabel = _vaultLabel.asStateFlow()
     val canvasToken = MutableStateFlow(0)
@@ -347,9 +388,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadPaperImages(path: String, text: String): Map<String, Bitmap> {
         if (path.isEmpty() || text.isEmpty()) return emptyMap()
-        return ch.fasrv.fanotes.text.paperImageSources(text).mapNotNull { source ->
-            val bytes = ch.fasrv.fanotes.text.resolvePaperImagePaths(path, source)
-                .firstNotNullOfOrNull { candidate -> runCatching { graph.vault.read(candidate) }.getOrNull() }
+        return (ch.fasrv.fanotes.text.paperImageSources(text) + ch.fasrv.fanotes.study.studyImageRefs(text)).distinct().mapNotNull { source ->
+            val bytes = if (source.startsWith("data:image/")) {
+                runCatching { android.util.Base64.decode(source.substringAfter("base64,"), android.util.Base64.DEFAULT) }.getOrNull()
+            } else {
+                ch.fasrv.fanotes.text.resolvePaperImagePaths(path, source)
+                    .firstNotNullOfOrNull { candidate -> runCatching { graph.vault.read(candidate) }.getOrNull() }
+            }
             val bitmap = bytes?.let { decodePaperImage(it) } ?: return@mapNotNull null
             source to bitmap
         }.toMap()
@@ -380,6 +425,45 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
         tree.value = loaded.first
         folderColors.value = loaded.second
+        lastOwnTreeLoadMs = System.currentTimeMillis()
+        treeLoaded = true
+    }
+
+    /** Files that arrived from outside (Files app, another sync tool) and were not opened yet. */
+    val newPaths = MutableStateFlow<Set<String>>(emptySet())
+    private var lastOwnTreeLoadMs = 0L
+    private var treeLoaded = false
+    private val rescanMutex = Mutex()
+    val rescanPolicy = ch.fasrv.fanotes.vault.RescanPolicy()
+
+    /**
+     * Cheap rescan for resume and the foreground timer. Replaces only the tree state, so an
+     * open note and its unsaved edits are never reloaded.
+     */
+    fun rescanTree() {
+        viewModelScope.launch {
+            if (!treeLoaded || !rescanMutex.tryLock()) return@launch
+            try {
+                val startedAt = android.os.SystemClock.elapsedRealtime()
+                val loaded = withContext(Dispatchers.IO) {
+                    runCatching { graph.store.tree() }.getOrNull()
+                }
+                rescanPolicy.record(android.os.SystemClock.elapsedRealtime() - startedAt)
+                if (loaded == null) return@launch
+                val change = ch.fasrv.fanotes.vault.diffTrees(tree.value, loaded)
+                if (change.isEmpty) return@launch
+                val own = System.currentTimeMillis() - lastOwnTreeLoadMs < 4000
+                tree.value = loaded
+                val marks = ch.fasrv.fanotes.vault.updateArrivals(newPaths.value, change, loaded, open.value?.path, own)
+                newPaths.value = marks
+                if (!own) {
+                    val arrived = change.added.filter { it in marks }
+                    ch.fasrv.fanotes.vault.arrivalMessage(arrived)?.let { message.value = it }
+                }
+            } finally {
+                rescanMutex.unlock()
+            }
+        }
     }
 
     private suspend fun refreshTagIndex() {
@@ -415,6 +499,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private var openGeneration = 0
 
     fun openPath(path: String, force: Boolean = false, fromHistory: NoteTrail? = null, headingAnchor: String? = null) {
+        if (ch.fasrv.fanotes.vault.StoryFiles.isStoryFolder(path)) {
+            openStory(path)
+            return
+        }
         val generation = ++openGeneration
         viewModelScope.launch {
             try {
@@ -423,6 +511,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     jumpToHeading(markdown.value, headingAnchor)
                     return@launch
                 }
+                // A reload of the same note (sync, history) keeps the timer; moving to another note stops it.
+                if (open.value?.path != path) stopStudyTimer()
                 if (!force) saveNow()
                 val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
                 if (generation != openGeneration) return@launch
@@ -449,6 +539,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 savePhase.value = "saved"
                 persistWorkspace()
                 recordBug("note", path)
+                if (generation == openGeneration && open.value?.path == path) resumeStudyTimer(path)
             } catch (error: Exception) {
                 if (generation == openGeneration && fromHistory != null) noteTrail.value = fromHistory
                 message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Notiz konnte nicht geöffnet werden.")
@@ -488,6 +579,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
                 open.value = source.copy(payload = payload)
+            }
+            if (source != null && studyAnnotations.value.isNotEmpty()) {
+                val moved = ch.fasrv.fanotes.study.studyAfterSheetGrow(studyAnnotations.value, prevWidth, prevHeight, nextWidth, nextHeight, padX, padY)
+                if (moved !== studyAnnotations.value) {
+                    val current = open.value ?: source
+                    open.value = current.copy(payload = ch.fasrv.fanotes.study.writeStudyAnnotations(current.payload, moved))
+                    studyAnnotations.value = moved
+                }
             }
         }
         noteChanged()
@@ -543,6 +642,14 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         openedAtMs = now
         lastTypedAtMs = null
         lastStrokeEndedAtMs = null
+        if (studyTimer.value?.path != note.path) {
+            studyTimerJob?.cancel()
+            studyTimer.value = null
+        }
+        autoScannedPath = null
+        studyDetectionAvailable.value = true
+        pdfSearchNoticePath = null
+        studyEdit.value = null
         pdfSearchJob?.cancel()
         pdfSearchQuery.value = ""
         pdfSearchHits.value = emptyList()
@@ -578,7 +685,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val bookPasswordRejected = MutableStateFlow(false)
     private val bookPasswords = mutableMapOf<String, String>()
     private var pdfSearchJob: kotlinx.coroutines.Job? = null
-    private var pdfTextCache: Pair<String, List<String>>? = null
+    /** The text read of the open PDF: its path, how many pages were read and what came of it. */
+    private var pdfTextCache: Triple<String, Int, ch.fasrv.fanotes.study.PdfTextSnapshot>? = null
+    private var pdfSearchNoticePath: String? = null
 
     /** Desktop PDF find: German case fold, excerpts, at most 400 hits, then jump to the page. */
     fun updatePdfSearch(query: String) {
@@ -592,15 +701,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
         val note = open.value
         if (note == null || note.kind != NoteKind.PDF) return
-        if (android.os.Build.VERSION.SDK_INT < 35) {
-            message.value = "Die PDF-Suche braucht Android 15."
-            return
-        }
         pdfSearchJob = viewModelScope.launch {
             pdfSearchBusy.value = true
             kotlinx.coroutines.delay(180)
-            val pages = withContext(Dispatchers.IO) { readPdfTexts(note.path) }
+            val snapshot = withContext(Dispatchers.IO) { pdfTextSnapshot(note.path, ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP) }
             if (pdfSearchQuery.value.trim() != query.trim()) return@launch
+            explainPdfSearch(note.path, snapshot?.let { ch.fasrv.fanotes.study.pdfTextProblem(it, ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP) } ?: ch.fasrv.fanotes.study.PdfTextProblem.UNREADABLE)
+            val pages = snapshot?.let { ch.fasrv.fanotes.study.searchPageTexts(it, ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP) }.orEmpty()
             val hits = ch.fasrv.fanotes.desk.searchPdfPages(pages, query)
             pdfSearchHits.value = hits
             pdfSearchIndex.value = 0
@@ -631,35 +738,358 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         canvasToken.value += 1
     }
 
-    @androidx.annotation.RequiresApi(35)
-    private fun readPdfTexts(path: String): List<String> {
+    /** Says once per PDF why the search finds nothing, not on every keystroke. */
+    private fun explainPdfSearch(path: String, problem: ch.fasrv.fanotes.study.PdfTextProblem) {
+        if (problem == ch.fasrv.fanotes.study.PdfTextProblem.NONE || pdfSearchNoticePath == path) return
+        pdfSearchNoticePath = path
+        message.value = ch.fasrv.fanotes.desk.ChromeText.ui(
+            when (problem) {
+                ch.fasrv.fanotes.study.PdfTextProblem.NO_TEXT_SOURCE -> "Auf diesem Gerät fehlt die PDF-Textfunktion. Die PDF-Suche braucht Android 15 oder das Systemupdate mit der PDF-Erweiterung."
+                ch.fasrv.fanotes.study.PdfTextProblem.SCAN_WITHOUT_TEXT -> "Dieses PDF ist ein Scan ohne Text. Die Suche findet darin nichts."
+                else -> "Der PDF-Text konnte nicht gelesen werden."
+            },
+        )
+    }
+
+    /**
+     * What this device can read of the PDF's text, for the first [maxPages] pages: its own text layer, through the API
+     * it has ([PdfTextLayer]), and the text the desktop synced next to the file (page-text and OCR files). Search keeps
+     * the result per note; null when the PDF cannot be read from the vault.
+     */
+    private fun pdfTextSnapshot(path: String, maxPages: Int): ch.fasrv.fanotes.study.PdfTextSnapshot? {
         val cached = pdfTextCache
-        if (cached != null && cached.first == path) return cached.second
-        val bytes = graph.vault.read(path) ?: return emptyList()
-        val file = java.io.File.createTempFile("fanotes-pdf-text", ".pdf")
-        return try {
-            file.writeBytes(bytes)
-            val pages = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-                openNotePdf(descriptor).use { renderer ->
-                    val count = renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)
-                    (0 until count).map { index ->
-                        try {
-                            renderer.openPage(index).use { page ->
-                                page.textContents.joinToString(" ") { it.text }
-                            }
-                        } catch (_: Exception) {
-                            ""
-                        }
-                    }
+        if (cached != null && cached.first == path && cached.second >= maxPages) return cached.third
+        val snapshot = readPdfTextSnapshot(path, maxPages) ?: return null
+        pdfTextCache = Triple(path, maxPages, snapshot)
+        return snapshot
+    }
+
+    private fun readPdfTextSnapshot(path: String, maxPages: Int): ch.fasrv.fanotes.study.PdfTextSnapshot? {
+        val bytes = graph.vault.read(path) ?: return null
+        val synced = syncedPdfText(path, bytes)
+        var api = PdfTextLayer.api()
+        var lines: List<List<String>>? = null
+        if (api != ch.fasrv.fanotes.study.PdfTextApi.NONE) {
+            val file = java.io.File.createTempFile("fanotes-pdf-text", ".pdf")
+            try {
+                file.writeBytes(bytes)
+                lines = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                    PdfTextLayer.read(api, descriptor, maxPages, ::openNotePdf)?.map { ch.fasrv.fanotes.study.linesFromRuns(it) }
+                }
+            } catch (_: LinkageError) {
+                // The system does not have the class or method after all (a build without the extension). Remember it.
+                PdfTextLayer.markMissing()
+                api = ch.fasrv.fanotes.study.PdfTextApi.NONE
+            } catch (_: Exception) {
+                lines = null
+            } finally {
+                file.delete()
+            }
+        }
+        return ch.fasrv.fanotes.study.PdfTextSnapshot(api, lines, synced)
+    }
+
+    /** The desktop's text of this exact PDF: the page-text record and the OCR transcript, if sync brought them. */
+    private fun syncedPdfText(path: String, bytes: ByteArray): Map<Int, String> {
+        val size = bytes.size.toLong()
+        val stamp = ch.fasrv.fanotes.desk.pdfByteStamp(bytes)
+        fun text(sidecar: String) = try {
+            graph.vault.read(sidecar)?.decodeToString()
+        } catch (_: Exception) {
+            null
+        }
+        return ch.fasrv.fanotes.desk.syncedPdfPages(
+            ch.fasrv.fanotes.desk.desktopPageTextPages(text(ch.fasrv.fanotes.desk.desktopPageTextSidecar(path)), path, size, stamp),
+            ch.fasrv.fanotes.desk.desktopPdfOcrPages(text(ch.fasrv.fanotes.desk.desktopPdfOcrSidecar(path)), path, size, stamp),
+        )
+    }
+
+    // -- Lernwerkzeuge: Aufträge, Markierungen, Blöcke ------------------------------------------
+
+    /**
+     * The running task timer: note, task and the clocks at its last checkpoint. It keeps running when the panel closes and
+     * when the app goes to the background, and it is stored with the vault so a killed process picks it up again.
+     */
+    val studyTimer = MutableStateFlow<ch.fasrv.fanotes.study.StudyTimerRun?>(null)
+    val studyScanning = MutableStateFlow(false)
+
+    /** False when this device cannot detect assignments at all: no PDF text API and no text from the desktop next to the PDF. */
+    val studyDetectionAvailable = MutableStateFlow(true)
+    private var autoScannedPath: String? = null
+    private var studyTimerJob: Job? = null
+    private val STUDY_TIMER_SAVE_MS = 60_000L
+
+    /** Kind id and index of the study block whose editor is open. */
+    val studyEdit = MutableStateFlow<StudyEditTarget?>(null)
+
+    private fun storedTasks(): ch.fasrv.fanotes.study.StudyTaskList =
+        ch.fasrv.fanotes.study.readTaskList(markdown.value) ?: ch.fasrv.fanotes.study.StudyTaskList(emptyList(), emptyList())
+
+    private fun commitTasks(list: ch.fasrv.fanotes.study.StudyTaskList, typed: Boolean = true) {
+        if (open.value?.kind != NoteKind.PDF) return
+        updateMarkdown(ch.fasrv.fanotes.study.writeTaskList(markdown.value, list), typed)
+    }
+
+    fun updateStudyTask(id: String, typed: Boolean = true, change: (ch.fasrv.fanotes.study.StudyTask) -> ch.fasrv.fanotes.study.StudyTask) {
+        commitTasks(ch.fasrv.fanotes.study.updateTask(storedTasks(), id, change), typed)
+    }
+
+    fun addStudyTask() {
+        val list = storedTasks()
+        val task = ch.fasrv.fanotes.study.newManualTask(list.tasks, pdfThumbPage.value)
+        commitTasks(list.copy(tasks = ch.fasrv.fanotes.study.sortTasks(list.tasks + task)))
+        studyEditingTask.value = task.id
+    }
+
+    /** Id of the task whose fields are open for editing. */
+    val studyEditingTask = MutableStateFlow<String?>(null)
+
+    fun removeStudyTask(id: String) {
+        if (studyTimer.value?.taskId == id) stopStudyTimer()
+        commitTasks(ch.fasrv.fanotes.study.removeTask(storedTasks(), id))
+    }
+
+    /** Scrolls the PDF to [page]. False, with a notice, while the PDF's pages are not on screen yet. */
+    fun jumpToStudyPage(page: Int): Boolean {
+        if (backdrop.value.none { it.bitmap != null && it.worksheetId.isEmpty() }) {
+            message.value = ch.fasrv.fanotes.desk.ChromeText.ui("Das PDF wird noch geladen …")
+            return false
+        }
+        goToPdfPage(page)
+        return true
+    }
+
+    /** Whether "Neu erkennen" can work on this PDF at all; the Aufträge panel asks when it opens. */
+    private fun refreshStudyDetection() {
+        val note = open.value ?: return
+        if (note.kind != NoteKind.PDF) return
+        viewModelScope.launch {
+            val possible = withContext(Dispatchers.IO) {
+                val synced = try {
+                    graph.vault.exists(ch.fasrv.fanotes.desk.desktopPageTextSidecar(note.path)) || graph.vault.exists(ch.fasrv.fanotes.desk.desktopPdfOcrSidecar(note.path))
+                } catch (_: Exception) {
+                    false
+                }
+                ch.fasrv.fanotes.study.taskDetectionPossible(PdfTextLayer.api(), synced)
+            }
+            if (open.value?.path == note.path) studyDetectionAvailable.value = possible
+        }
+    }
+
+    /**
+     * Re-reads the PDF text and merges the assignments into the stored list; ticks, timers and manual edits stay.
+     * The text comes from the device's PDF text API (Android 15, or Android 12 to 14 with the system extension) and,
+     * for scans and devices without it, from the text the desktop synced. [automatic] is the scan the panel starts
+     * by itself on the first visit: it runs once per note and stays quiet when the device cannot scan at all.
+     */
+    fun scanStudyTasks(automatic: Boolean = false) {
+        val note = open.value ?: return
+        if (note.kind != NoteKind.PDF || studyScanning.value) return
+        if (automatic) {
+            if (autoScannedPath == note.path) return
+            autoScannedPath = note.path
+        }
+        studyScanning.value = true
+        viewModelScope.launch {
+            val snapshot = withContext(Dispatchers.IO) {
+                readPdfTextSnapshot(note.path, ch.fasrv.fanotes.study.MAX_TASK_SCAN_PAGES)?.also {
+                    pdfTextCache = Triple(note.path, ch.fasrv.fanotes.study.MAX_TASK_SCAN_PAGES, it)
                 }
             }
-            pdfTextCache = path to pages
-            pages
-        } catch (_: Exception) {
-            emptyList()
-        } finally {
-            file.delete()
+            studyScanning.value = false
+            if (open.value?.path != note.path) return@launch
+            val problem = snapshot?.let { ch.fasrv.fanotes.study.pdfTextProblem(it) } ?: ch.fasrv.fanotes.study.PdfTextProblem.UNREADABLE
+            studyDetectionAvailable.value = problem != ch.fasrv.fanotes.study.PdfTextProblem.NO_TEXT_SOURCE
+            if (problem != ch.fasrv.fanotes.study.PdfTextProblem.NONE || snapshot == null) {
+                // Without any text source the panel explains it in place; the toast would repeat on every visit.
+                if (!(automatic && problem == ch.fasrv.fanotes.study.PdfTextProblem.NO_TEXT_SOURCE)) {
+                    message.value = ch.fasrv.fanotes.desk.ChromeText.ui(
+                        when (problem) {
+                            ch.fasrv.fanotes.study.PdfTextProblem.NO_TEXT_SOURCE -> "Auf diesem Gerät fehlt die PDF-Textfunktion. Erkenne die Aufträge am Computer (Sync) oder füge sie von Hand hinzu."
+                            ch.fasrv.fanotes.study.PdfTextProblem.SCAN_WITHOUT_TEXT -> "Scan ohne Text. Erkenne die Aufträge am Computer (Sync) oder füge sie von Hand hinzu."
+                            else -> "Das PDF konnte nicht gelesen werden. Es ist vielleicht beschädigt oder passwortgeschützt. Du kannst Aufträge von Hand hinzufügen."
+                        },
+                    )
+                }
+                return@launch
+            }
+            val detected = ch.fasrv.fanotes.study.detectTasks(ch.fasrv.fanotes.study.taskScanPages(snapshot))
+            val before = ch.fasrv.fanotes.study.readTaskList(markdown.value)
+            val merged = ch.fasrv.fanotes.study.mergeDetected(before, detected)
+            if (merged.tasks.isNotEmpty() || before != null) commitTasks(merged)
+            message.value = if (detected.isEmpty()) "Keine Aufträge im Text gefunden. Du kannst sie von Hand hinzufügen." else if (ch.fasrv.fanotes.desk.ChromeText.language == "en") "${detected.size} assignments found." else "${detected.size} Aufträge erkannt."
         }
+    }
+
+    private fun elapsedNow() = android.os.SystemClock.elapsedRealtime()
+
+    fun toggleStudyTimer(id: String) {
+        val running = studyTimer.value
+        val path = open.value?.path ?: return
+        stopStudyTimer()
+        if (running?.taskId == id) return
+        startStudyTimer(ch.fasrv.fanotes.study.StudyTimerRun(path, id, System.currentTimeMillis(), elapsedNow()))
+    }
+
+    private fun startStudyTimer(run: ch.fasrv.fanotes.study.StudyTimerRun) {
+        studyTimerJob?.cancel()
+        studyTimer.value = run
+        graph.writeStudyTimer(graph.vaultId, run.stored().toJson())
+        studyTimerJob = viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(STUDY_TIMER_SAVE_MS)
+                saveStudyTimer(keepRunning = true)
+            }
+        }
+    }
+
+    /** The timer is over: no job, no state, nothing stored. */
+    private fun endStudyTimer() {
+        studyTimerJob?.cancel()
+        studyTimer.value = null
+        graph.writeStudyTimer(graph.vaultId, null)
+    }
+
+    private fun addStudySeconds(taskId: String, seconds: Int) {
+        if (seconds > 0) updateStudyTask(taskId, typed = false) { it.copy(spentSec = (it.spentSec + seconds).coerceAtMost(86_400 * 7)) }
+    }
+
+    /**
+     * Adds the time since the last checkpoint to the task and moves the checkpoint. While the timer runs the note is
+     * written at most once a minute; pause, stop, a note switch and leaving or returning to the app write it too.
+     * A stretch longer than the limit (a timer forgotten for hours) does not count and ends the timer.
+     */
+    private fun saveStudyTimer(keepRunning: Boolean) {
+        val run = studyTimer.value ?: return
+        if (open.value?.path != run.path || storedTasks().tasks.none { it.id == run.taskId }) {
+            endStudyTimer()
+            return
+        }
+        val nowMono = elapsedNow()
+        val nowWall = System.currentTimeMillis()
+        val credit = run.creditAt(nowMono)
+        addStudySeconds(run.taskId, credit.seconds)
+        when {
+            credit.expired -> {
+                endStudyTimer()
+                message.value = ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.study.STUDY_TIMER_EXPIRED)
+            }
+            keepRunning -> {
+                val next = run.afterCheckpoint(credit, nowWall, nowMono)
+                studyTimer.value = next
+                graph.writeStudyTimer(graph.vaultId, next.stored().toJson())
+            }
+            else -> endStudyTimer()
+        }
+    }
+
+    /**
+     * The app leaves or returns to the foreground: write the elapsed time, the timer keeps running (unless the app
+     * was gone for longer than the limit).
+     */
+    fun flushStudyTimer() {
+        if (studyTimer.value != null) saveStudyTimer(keepRunning = true)
+    }
+
+    fun stopStudyTimer() {
+        if (studyTimer.value == null) return
+        saveStudyTimer(keepRunning = false)
+    }
+
+    /**
+     * A note opened. A timer that was running when the process died continues here with the time that passed,
+     * counted up to the limit; an older one is dropped. A timer of another note stays stored until that note opens.
+     */
+    private fun resumeStudyTimer(path: String) {
+        if (studyTimer.value != null) return
+        val vault = graph.vaultId
+        val raw = graph.readStudyTimer(vault) ?: return
+        val record = ch.fasrv.fanotes.study.studyTimerRecordFromJson(raw)
+        if (record == null) {
+            graph.writeStudyTimer(vault, null)
+            return
+        }
+        val nowWall = System.currentTimeMillis()
+        val credit = record.creditAt(nowWall)
+        if (record.path != path) {
+            if (credit.expired) graph.writeStudyTimer(vault, null)
+            return
+        }
+        if (storedTasks().tasks.none { it.id == record.taskId }) {
+            graph.writeStudyTimer(vault, null)
+            return
+        }
+        addStudySeconds(record.taskId, credit.seconds)
+        if (credit.expired) {
+            graph.writeStudyTimer(vault, null)
+            message.value = ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.study.STUDY_TIMER_EXPIRED)
+            return
+        }
+        startStudyTimer(record.resumed(credit, nowWall, elapsedNow()))
+    }
+
+    /** A study block named by kind, offset in the whole note and a hash of its JSON. */
+    data class StudyEditTarget(val kind: ch.fasrv.fanotes.study.StudyKind, val from: Int, val hash: Int)
+
+    fun studyBlockFor(target: StudyEditTarget) =
+        ch.fasrv.fanotes.study.locateStudyBlock(markdown.value, target.kind, target.from, target.hash)
+
+    fun openStudyBlock(kind: String, from: Int, hash: Int) {
+        val studyKind = ch.fasrv.fanotes.study.StudyKind.of(kind) ?: return
+        studyEdit.value = StudyEditTarget(studyKind, from, hash)
+    }
+
+    fun closeStudyBlock() {
+        studyEdit.value = null
+    }
+
+    /** Writes an edited block straight back into the note, unless the block moved or changed since it was opened. */
+    fun writeStudyBlock(data: ch.fasrv.fanotes.json.JsonValue) {
+        val target = studyEdit.value ?: return
+        val ref = studyBlockFor(target)
+        if (ref == null) {
+            studyEdit.value = null
+            message.value = "Deine Änderung wurde nicht gespeichert, weil sich die Notiz geändert hat. Öffne den Block neu."
+            return
+        }
+        val next = ch.fasrv.fanotes.study.writeStudyBlockMerged(markdown.value, ref, data)
+        updateMarkdown(next)
+        val written = ch.fasrv.fanotes.study.findStudyBlocks(next).firstOrNull { it.from == ref.from && it.kind == target.kind }
+        studyEdit.value = written?.let { target.copy(from = it.from, hash = ch.fasrv.fanotes.study.studyBodyHash(it.body)) }
+    }
+
+    /** Puts the caret on the block's first JSON line so the source shows. */
+    fun showStudySource() {
+        val ref = studyEdit.value?.let { studyBlockFor(it) } ?: return
+        studyEdit.value = null
+        requestGotoLine((ref.startLine + 1).toString())
+    }
+
+    fun insertStudyTemplate(kind: ch.fasrv.fanotes.study.StudyKind) {
+        if (open.value == null) {
+            message.value = "Öffne zuerst eine Notiz."
+            return
+        }
+        if (open.value?.kind == NoteKind.PDF) {
+            message.value = "In ein PDF lassen sich keine Lernwerkzeuge einfügen. Öffne eine Textnotiz."
+            return
+        }
+        val data = when (kind) {
+            ch.fasrv.fanotes.study.StudyKind.SORT -> ch.fasrv.fanotes.study.sortDataJson(ch.fasrv.fanotes.study.defaultSortData())
+            ch.fasrv.fanotes.study.StudyKind.TERM -> ch.fasrv.fanotes.study.termDataJson(ch.fasrv.fanotes.study.defaultTermData())
+            else -> return
+        }
+        updateMarkdown(ch.fasrv.fanotes.study.insertStudyBlock(markdown.value, kind, data))
+        showText.value = true
+    }
+
+    /** Opens the Aufträge or Markierungen panel of the open PDF. */
+    fun openStudyPanel(tab: String) {
+        if (open.value?.kind != NoteKind.PDF) {
+            message.value = "Öffne zuerst ein PDF."
+            return
+        }
+        openEditorMenu(tab)
     }
 
     val pdfThumbs = MutableStateFlow<List<Bitmap>>(emptyList())
@@ -929,10 +1359,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         gotoLineInput.value = null
     }
 
-    fun updateMarkdown(value: String) {
+    /** [typed] false for writes the app makes itself (the task timer): they are no keystroke in the page statistics. */
+    fun updateMarkdown(value: String, typed: Boolean = true) {
         val now = System.currentTimeMillis()
-        rememberActivity { ch.fasrv.fanotes.desk.recordKeystroke(it, now, lastTypedAtMs) }
-        lastTypedAtMs = now
+        if (typed) {
+            rememberActivity { ch.fasrv.fanotes.desk.recordKeystroke(it, now, lastTypedAtMs) }
+            lastTypedAtMs = now
+        }
         markdown.value = value
         open.value?.path?.let { rememberTags(it, value) }
         noteChanged()
@@ -1615,6 +2048,22 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Like [readUri] but gives up with [StudyImageTooLarge] once more than [max] bytes arrive. */
+    fun readUriCapped(uri: Uri, max: Int): ByteArray? {
+        val input = getApplication<Application>().contentResolver.openInputStream(uri) ?: return null
+        input.use { stream ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val n = stream.read(buffer)
+                if (n < 0) break
+                if (out.size() + n > max) throw StudyImageTooLarge()
+                out.write(buffer, 0, n)
+            }
+            return out.toByteArray()
+        }
+    }
+
     fun readUri(uri: Uri): ByteArray? = getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
 
     fun useTree(uri: Uri) {
@@ -1804,6 +2253,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val noteLinks = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteLinkMark>>(emptyList())
     val noteTextFields = MutableStateFlow<List<ch.fasrv.fanotes.desk.NoteTextField>>(emptyList())
     val noteTextFieldFocus = MutableStateFlow<String?>(null)
+
+    /** Study annotations ("Lernen" tools) of the open note, in the payload's `annotations` array. */
+    val studyAnnotations = MutableStateFlow<List<ch.fasrv.fanotes.study.StudyAnnotation>>(emptyList())
+    val studyHistory = MutableStateFlow(ch.fasrv.fanotes.study.AnnotationHistory())
+    private var studyHistoryPath: String? = null
     val worksheetBoxes = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredBox>>(emptyList())
     val worksheetHighlights = MutableStateFlow<List<ch.fasrv.fanotes.desk.AnchoredHighlight>>(emptyList())
     val bookPane = MutableStateFlow<BookPaneState?>(null)
@@ -1825,6 +2279,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             }
             noteLinks.value = links
             noteTextFields.value = ch.fasrv.fanotes.desk.parseNoteTextFields(note?.payload?.array("textFields"))
+            loadStudyAnnotations(note)
             worksheetBoxes.value = overlay.first
             worksheetHighlights.value = overlay.second
         }
@@ -2130,12 +2585,26 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun recordBugTool(name: String) {
         recordBug("tool", open.value?.path, name)
+        // Same as the desktop listener: only a slugged tool name is counted, and only while sharing is on.
+        graph.diagnostics.recordFeature("tool." + name.lowercase().replace(Regex("[^a-z0-9]+"), "-").take(30))
     }
 
     fun openBugReport() {
         bugReportOpen.value = true
         bugReportMessage.value = null
     }
+
+    /** Same entry point as the desktop shortcut: the panel for the owner account, else the anonymous bug report. */
+    fun openWorkRequests() {
+        if (workRequestsAllowed.value) workRequestsOpen.value = true else openBugReport()
+    }
+
+    fun closeWorkRequests() {
+        workRequestsOpen.value = false
+    }
+
+    /** Logs and version for a new request; the same five-minute buffer as the bug report. */
+    fun workRequestLogs(): List<ch.fasrv.fanotes.desk.BugReportEvent> = bugLog.snapshot(System.currentTimeMillis())
 
     fun closeBugReport() {
         bugReportOpen.value = false
@@ -2402,7 +2871,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val found = mutableListOf<VaultNode>()
         fun visit(nodes: List<VaultNode>) {
             for (node in nodes) {
-                if (node.kind == NoteKind.FOLDER) visit(node.children) else found += node
+                // Stories open in the writing mode; they are not notes the note screens can read.
+                if (node.kind == NoteKind.FOLDER) visit(node.children) else if (node.kind != NoteKind.STORY) found += node
             }
         }
         visit(tree.value)
@@ -2590,6 +3060,128 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val historyBusy = MutableStateFlow(false)
     val historyComparison = MutableStateFlow<Pair<String, String>?>(null)
     val study = MutableStateFlow<StudyPicture?>(null)
+
+    /**
+     * Settings → Statistik. Computed off the main thread, kept per file in app storage (path, size and
+     * modification time, no expiry) so opening the page again reads only what changed, cancelled on leave.
+     */
+    val vaultStats = MutableStateFlow<ch.fasrv.fanotes.desk.VaultStats?>(null)
+    val vaultStatsProgress = MutableStateFlow<ch.fasrv.fanotes.desk.StatsProgress?>(null)
+    val vaultStatsFailed = MutableStateFlow(false)
+    private var statsJob: kotlinx.coroutines.Job? = null
+    private var statsLoader: ch.fasrv.fanotes.desk.VaultStatsLoader? = null
+    private var statsLoaderVault: ch.fasrv.fanotes.vault.VaultIo? = null
+
+    /** Bumped on every start and cancel, so a run that was cancelled cannot overwrite what a newer one shows. */
+    private var statsGeneration = 0
+
+    /** [android.os.SystemClock.elapsedRealtime] when a run last finished completely, or -1. */
+    private var statsFreshAt = -1L
+
+    /** Anything the run itself does not catch (it catches exceptions and running out of memory) ends the page in its failed state, not the app. */
+    private val statsErrors = kotlinx.coroutines.CoroutineExceptionHandler { _, error ->
+        diagnostics.recordError(error)
+        vaultStatsFailed.value = true
+        vaultStatsProgress.value = null
+    }
+
+    fun loadVaultStats(force: Boolean = false) {
+        val io = graph.vault
+        val sameVault = statsLoader != null && statsLoaderVault === io
+        // The page is opened again right after a complete run (a rotation, a quick return): nothing to do.
+        if (!force && sameVault && statsJob?.isActive != true && !vaultStatsFailed.value &&
+            statsFreshAt >= 0 && android.os.SystemClock.elapsedRealtime() - statsFreshAt < STATS_FRESH_MS
+        ) return
+        statsJob?.cancel()
+        val loader = statsLoader?.takeIf { sameVault }
+            ?: ch.fasrv.fanotes.desk.VaultStatsLoader(io, cache = graph.statsCache()).also { statsLoader = it; statsLoaderVault = io }
+        // Another vault: the numbers on screen are not its numbers.
+        if (!sameVault) { vaultStats.value = null; statsFreshAt = -1L }
+        val generation = ++statsGeneration
+        vaultStatsFailed.value = false
+        vaultStatsProgress.value = ch.fasrv.fanotes.desk.StatsProgress("tree", 0, 0)
+        statsJob = viewModelScope.launch(statsErrors) {
+            try {
+                val done = loader.load(force, onProgress = { if (generation == statsGeneration) vaultStatsProgress.value = it }) { stats, progress ->
+                    if (generation == statsGeneration) {
+                        vaultStats.value = stats
+                        vaultStatsProgress.value = progress
+                    }
+                }
+                if (generation == statsGeneration) {
+                    diagnostics.setVault(done.totals.notes.toLong(), done.totals.bytes)
+                    statsFreshAt = android.os.SystemClock.elapsedRealtime()
+                    vaultStatsProgress.value = null
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                failVaultStats(generation, error)
+            } catch (error: OutOfMemoryError) {
+                failVaultStats(generation, error)
+            }
+        }
+    }
+
+    private fun failVaultStats(generation: Int, error: Throwable) {
+        if (generation != statsGeneration) return
+        diagnostics.recordError(error)
+        vaultStatsFailed.value = true
+        vaultStatsProgress.value = null
+    }
+
+    /** The Statistik page was left: stop reading the vault. Keeps what was computed. */
+    fun cancelVaultStats() {
+        statsGeneration += 1
+        statsJob?.cancel()
+        statsJob = null
+        vaultStatsProgress.value = null
+    }
+
+    val diagnostics: ch.fasrv.fanotes.desk.DiagnosticsClient get() = graph.diagnostics
+
+    private var diagnosticsJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * At most one report a day, and only while a toggle is on. With both off this does nothing at all:
+     * no vault access, no job. When a report is due it takes the vault size from what is already known
+     * (this session's statistics, the saved ones, the explorer tree) and never walks the vault.
+     */
+    private fun diagnosticsTick() {
+        diagnosticsJob?.cancel()
+        diagnosticsJob = null
+        if (!diagnostics.enabled()) return
+        diagnosticsJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                diagnostics.runDailyCheck {
+                    val current = vaultStats.value?.takeIf { statsLoaderVault === graph.vault }?.let {
+                        ch.fasrv.fanotes.desk.StatsSummary(it.totals.notes.toLong(), it.totals.bytes, it.generatedAt)
+                    }
+                    ch.fasrv.fanotes.desk.diagnosticsFigures(
+                        current,
+                        ch.fasrv.fanotes.desk.readStatsSummary(graph.statsCache()),
+                        ch.fasrv.fanotes.vault.censusNotes(tree.value).notes,
+                    )
+                }
+            }
+        }
+    }
+
+    init {
+        diagnostics.markStartupReady(android.os.SystemClock.elapsedRealtime() - android.os.Process.getStartElapsedRealtime())
+        viewModelScope.launch {
+            // The explorer tree is the vault size when no statistics were saved, so give it a moment to load first.
+            var waitedMs = 0L
+            while (!treeLoaded && waitedMs < 30_000) {
+                kotlinx.coroutines.delay(500)
+                waitedMs += 500
+            }
+            while (true) {
+                diagnosticsTick()
+                kotlinx.coroutines.delay(6L * 60 * 60 * 1000)
+            }
+        }
+    }
     val deskSettings = MutableStateFlow(graph.readDesk())
     val spellingLanguage = MutableStateFlow("unknown")
     val spellingEpoch = MutableStateFlow(0)
@@ -2757,6 +3349,160 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         noteTextFields.value = next
         if (noteTextFieldFocus.value == id) noteTextFieldFocus.value = null
         noteChanged()
+    }
+
+    private fun loadStudyAnnotations(note: ch.fasrv.fanotes.vault.OpenNote?) {
+        val list = ch.fasrv.fanotes.study.readStudyAnnotations(note?.payload)
+        if (studyHistoryPath != note?.path) {
+            studyHistoryPath = note?.path
+            studyHistory.value = ch.fasrv.fanotes.study.AnnotationHistory()
+        }
+        if (list != studyAnnotations.value) studyAnnotations.value = list
+    }
+
+    private fun storeStudy(next: List<ch.fasrv.fanotes.study.StudyAnnotation>) {
+        val source = open.value ?: return
+        open.value = source.copy(payload = ch.fasrv.fanotes.study.writeStudyAnnotations(source.payload, next))
+        studyAnnotations.value = next
+        noteChanged()
+    }
+
+    /** One annotation edit = one undo step on the annotation stack (ink keeps its own). */
+    fun commitStudy(before: List<ch.fasrv.fanotes.study.StudyAnnotation>, next: List<ch.fasrv.fanotes.study.StudyAnnotation>) {
+        if (open.value == null || next == before) return
+        studyHistory.value = studyHistory.value.push(before)
+        storeStudy(next)
+    }
+
+    fun undoStudy() {
+        val result = studyHistory.value.undo(studyAnnotations.value) ?: return
+        studyHistory.value = result.first
+        storeStudy(result.second)
+    }
+
+    fun redoStudy() {
+        val result = studyHistory.value.redo(studyAnnotations.value) ?: return
+        studyHistory.value = result.first
+        storeStudy(result.second)
+    }
+
+    /** Adds a reference image (already downscaled to a data URL) on [page]; false when a cap stops it. */
+    fun addStudyImage(
+        page: Int,
+        dataUrl: String,
+        aspect: Double,
+        title: String,
+        at: ch.fasrv.fanotes.study.CropPlacement? = null,
+    ): Boolean {
+        val before = studyAnnotations.value
+        if (before.count { it is ch.fasrv.fanotes.study.StudyImage } >= ch.fasrv.fanotes.study.ANNOTATION_IMAGE_LIMIT) {
+            message.value = "Maximal 12 Bilder pro Notiz."
+            return false
+        }
+        val used = ch.fasrv.fanotes.study.annotationImageChars(before)
+        if (!ch.fasrv.fanotes.study.imageFitsBudget(used, dataUrl.length)) {
+            message.value = ch.fasrv.fanotes.study.imageBudgetMessage(used, ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.study.IMAGE_BUDGET_TEMPLATE))
+            return false
+        }
+        val image = ch.fasrv.fanotes.study.StudyImage(
+            ch.fasrv.fanotes.study.newAnnotationId(), page, at?.x ?: 0.06, at?.y ?: 0.06, at?.w ?: 0.4, aspect, 1.0, false, dataUrl, title.take(80),
+        )
+        val next = ch.fasrv.fanotes.study.addItem(before, image)
+        if (next == before) {
+            message.value = "Das Bild konnte nicht gespeichert werden."
+            return false
+        }
+        commitStudy(before, next)
+        message.value = "Bild eingefügt. Zum Nachzeichnen die Deckkraft senken und sperren."
+        return true
+    }
+
+    /** Reads a picked image off the main thread, shrinks it to the note's budget and adds it to [page]. */
+    private val STUDY_IMAGE_INPUT_MAX_BYTES = 40 * 1024 * 1024
+
+    fun importStudyImage(uri: Uri, page: Int, title: String? = null, afterRead: () -> Unit = {}) {
+        val resolver = getApplication<Application>().contentResolver
+        viewModelScope.launch {
+            var tooLarge = false
+            val payload = withContext(Dispatchers.IO) {
+                try {
+                    val bytes = readUriCapped(uri, STUDY_IMAGE_INPUT_MAX_BYTES) ?: return@withContext null
+                    StudyImageImport.encode(bytes, resolver.getType(uri).orEmpty())
+                } catch (_: StudyImageTooLarge) {
+                    tooLarge = true
+                    null
+                } catch (_: OutOfMemoryError) {
+                    tooLarge = true
+                    null
+                } catch (_: Exception) {
+                    null
+                } finally {
+                    afterRead()
+                }
+            }
+            if (payload == null) {
+                message.value = if (tooLarge) "Das Bild ist zu groß." else "Das Bild konnte nicht gelesen werden. Wähle eine andere Bilddatei."
+                return@launch
+            }
+            val name = title ?: uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.').orEmpty()
+            addStudyImage(page, payload.dataUrl, payload.aspect, name)
+        }
+    }
+
+    /**
+     * "PDF-Ausschnitt": renders [crop] of PDF page [page] (1-based) straight from the PDF at a
+     * higher resolution than the on-screen backdrop and stores it as a reference image beside the cut-out.
+     */
+    fun cropStudyPdfRegion(page: Int, crop: ch.fasrv.fanotes.study.SRect) {
+        val note = open.value ?: return
+        if (note.kind != NoteKind.PDF) return
+        viewModelScope.launch {
+            var tooLarge = false
+            val payload = withContext(Dispatchers.IO) {
+                try { renderPdfCrop(note, page, crop) } catch (_: StudyImageTooLarge) { tooLarge = true; null } catch (_: OutOfMemoryError) { tooLarge = true; null } catch (_: Exception) { null }
+            }
+            if (payload == null) {
+                message.value = if (tooLarge) "Der Ausschnitt ist zu groß. Wähle einen kleineren Bereich." else "Der Ausschnitt konnte nicht erstellt werden. Wähle einen kleineren Bereich."
+                return@launch
+            }
+            addStudyImage(page, payload.dataUrl, payload.aspect, "Abb. S. $page", ch.fasrv.fanotes.study.cropPlacement(crop))
+        }
+    }
+
+    private fun renderPdfCrop(note: OpenNote, pageNumber: Int, crop: ch.fasrv.fanotes.study.SRect): StudyImagePayload? {
+        val bytes = graph.vault.read(note.path) ?: return null
+        val file = File.createTempFile("fanotes-pdf-crop", ".pdf")
+        try {
+            file.writeBytes(bytes)
+            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                openNotePdf(descriptor).use { renderer ->
+                    if (renderer.pageCount == 0) return null
+                    renderer.openPage((pageNumber - 1).coerceIn(0, renderer.pageCount - 1)).use { page ->
+                        val aspect = page.height.toDouble() / page.width.coerceAtLeast(1)
+                        val (w, h) = ch.fasrv.fanotes.study.cropRenderSize(crop, aspect)
+                        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                        try {
+                        bitmap.eraseColor(android.graphics.Color.WHITE)
+                        val sx = w / ((crop.r - crop.l) * page.width).toFloat()
+                        val sy = h / ((crop.b - crop.t) * page.height).toFloat()
+                        val matrix = android.graphics.Matrix().apply {
+                            setScale(sx, sy)
+                            postTranslate(-(crop.l * page.width).toFloat() * sx, -(crop.t * page.height).toFloat() * sy)
+                        }
+                        page.render(bitmap, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        val out = java.io.ByteArrayOutputStream()
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                        // Same budget and PNG rules as a picked image (long edge 1400, shrinks to fit).
+                        return StudyImageImport.encode(out.toByteArray(), "image/png")
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    }
+                }
+            }
+        } finally {
+            file.delete()
+        }
     }
 
     fun cancelTextFieldPlacement() {
@@ -3845,6 +4591,16 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cardsToday() = cardsFromMarkdown(markdown.value, java.time.LocalDate.now().toString())
 
+    /** A picture of a flashcard: a vault file (`.fanotes/worksheets/...`) or an old data URL. */
+    suspend fun readStudyBitmap(ref: String): Bitmap? = withContext(Dispatchers.IO) {
+        val bytes = if (ref.startsWith("data:image/")) {
+            runCatching { android.util.Base64.decode(ref.substringAfter("base64,"), android.util.Base64.DEFAULT) }.getOrNull()
+        } else {
+            runCatching { graph.vault.read(ref) }.getOrNull()
+        }
+        bytes?.let { decodePaperImage(it) }
+    }
+
     fun loadVaultMeta() {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
@@ -4122,6 +4878,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val next = deskSettings.value + (key to value)
         deskSettings.value = next
         graph.writeDesk(next)
+        if (key == "diagnostics-usage" || key == "diagnostics-logs") {
+            graph.configureDiagnostics(next)
+            diagnosticsTick()
+        }
     }
 
     fun runAi(
@@ -4404,7 +5164,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val installedAddons = MutableStateFlow<List<ch.fasrv.fanotes.desk.InstalledAddon>>(emptyList())
     val pendingExport = MutableStateFlow<ch.fasrv.fanotes.desk.DeskExport?>(null)
 
+    /** Opens or closes an editor panel. The task timer is not tied to a panel: it runs until it is stopped. */
     fun openEditorMenu(id: String?) {
+        if (id == "study-tasks") refreshStudyDetection()
         editorMenu.value = id
     }
 
@@ -4472,6 +5234,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         when (id) {
             "new-note" -> createNoteIn(defaultCreateFolder())
             "new-folder" -> createFolderIn("")
+            "new-story" -> createStory(currentFolder())
+            "import-story" -> importStory(currentFolder())
             "new-subfolder" -> createFolderIn(currentFolder())
             "note-here" -> createNoteIn(currentFolder())
             "save" -> saveFromShortcut()
@@ -4490,6 +5254,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             "overview" -> showDestination("overview")
             "study" -> showDestination("study")
             "flashcards" -> showDestination("cards")
+            "study-tasks" -> openStudyPanel("study-tasks")
+            "study-marks" -> openStudyPanel("study-marks")
+            "study-sort" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.SORT)
+            "study-term" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.TERM)
             "homework" -> showDestination("tasks")
             "calendar" -> showDestination("calendar")
             "daily" -> openDaily()
@@ -4519,6 +5287,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 after.installedAddons.lastOrNull()?.let { rememberAddon(it) }
             }
             "bug-report" -> openBugReport()
+            "work-requests" -> openWorkRequests()
             "trash" -> openTrash()
             "pin-tab" -> togglePinTab()
             "close-others" -> closeTabs("others")

@@ -48,6 +48,7 @@ import ch.fasrv.fanotes.schulnetz.examSchedulerUrl
 import ch.fasrv.fanotes.schulnetz.findSchedulerUrl
 import ch.fasrv.fanotes.schulnetz.icalBodyUsable
 import ch.fasrv.fanotes.schulnetz.mergeById
+import ch.fasrv.fanotes.schulnetz.mergeExamsById
 import ch.fasrv.fanotes.schulnetz.mondaysBetween
 import ch.fasrv.fanotes.schulnetz.overlayDated
 import ch.fasrv.fanotes.schulnetz.overlayLessons
@@ -654,8 +655,8 @@ class SchulnetzClient(
         }
         if (termine.value.isNotEmpty()) events = mergeById(events, termine.value)
         // An exam listed both in the timetable and in the overview is one exam.
-        val examEvents = dedupeExams(mergeById(
-            mergeById(
+        val examEvents = dedupeExams(mergeExamsById(
+            mergeExamsById(
                 overlayDated(previous?.exams.orEmpty(), examWeeks.values.flatten(), examWeeks.keys.map { it.toString() }.toSet()),
                 lessonWeeks.values.flatten().filter { it.isExamLike() },
             ),

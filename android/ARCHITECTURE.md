@@ -64,13 +64,13 @@ Growing the page uses the desktop margins: 108×144, the same step, caps at 20×
 
 The corridor filter (`inkSampleMap.ts`) drops a sample that jumps more than 0.08 in y or 0.12 in normalized distance, and treats a slam back into the top band as a leap. Stylus samples are dense, so a real stroke is a chain of short segments. A one-point ghost near y≈0 can be replaced by the next in-band sample.
 
-Undo stores the stroke list before a gesture. An eraser gesture is one undo step: the first sample that hits pushes the checkpoint, later samples in that gesture do not. The eraser splits a stroke at points inside the nib radius and keeps the remaining pieces.
+Undo stores the stroke list before a gesture. An eraser gesture is one undo step: the first sample that hits pushes the checkpoint, later samples in that gesture do not. The eraser splits a stroke at points inside the nib radius and keeps the remaining pieces. Each frame of the gesture is swept from where the previous frame ended, so a fast stroke leaves no gap between frames, and a stroke whose bounding box cannot reach the swept box is skipped without being walked (`EraserSweep.kt`). The carried position is dropped when the gesture ends, on undo or redo, and when the page changes size.
 
 ## Pointers
 
 `MotionEvent.TOOL_TYPE_STYLUS` writes. `TOOL_TYPE_ERASER`, or a stylus with `BUTTON_STYLUS_PRIMARY` / `BUTTON_STYLUS_SECONDARY`, erases. A mouse may ink so an emulator or a Bluetooth mouse still works. A finger never inks unless **Finger zeichnet** is on.
 
-Palm rejection matches `inkPointerPolicy.ts`: while a stylus is down, and for 850 ms after it lifts, finger contacts are ignored for both ink and navigation. Outside that window, fingers scroll, pinch-zoom (0.5–4 around the centroid), long-press to select a stroke, and fling horizontally between notes when zoom is at most 1.15.
+Palm rejection matches `inkPointerPolicy.ts`: while a stylus is down, and for 850 ms after it lifts, finger contacts are ignored for both ink and navigation. Every pen contact is released when it lifts or is cancelled, also when it only pressed a mapped tablet button or tapped a tool and never started ink (`palmAfterContactEnd`); otherwise finger pan and zoom would stay locked. A pointer that comes up with `FLAG_CANCELED` (API 33+) is a cancel, like `ACTION_CANCEL`. Outside that window, fingers scroll, pinch-zoom (0.5–4 around the centroid), long-press to select a stroke, and fling horizontally between notes when zoom is at most 1.15.
 
 Android reports tilt as radians off the screen normal (`AXIS_TILT`) plus a direction (`AXIS_ORIENTATION`). Pointer Events, and therefore the stored stroke, use degrees:
 
@@ -83,7 +83,7 @@ Hover paints a ring and is not committed. On API 34+, `MotionPredictor.predict(u
 
 The page scale is `(view width − padding) / 900 * zoom`. Growing `sourceWidth` lengthens the page; it does not shrink existing ink.
 
-Committed ink is cached in fixed page-pixel tiles (192×192, rasterized at most at 1.75×). A pinch only changes the destination rectangle. Tiles are rebuilt when the zoom settles, and an eraser drops only the tiles under the nib. Ruling is drawn for the visible window. Typed Markdown is a `StaticLayout` under the ink, in the desktop column (72×78 padding inside the 900-wide sheet), rebuilt when the zoom changes so the glyphs are not a stretched bitmap. The tool bar is a sibling drawn above the page and hides while the pen is down.
+Committed ink is cached in fixed page-pixel tiles (192×192, rasterized at most at 1.75×). A pinch only changes the destination rectangle. Tiles are rebuilt when the zoom settles, and an eraser drops only the tiles under the box it swept. Ruling is drawn for the visible window. Typed Markdown is a `StaticLayout` under the ink, in the desktop column (72×78 padding inside the 900-wide sheet), rebuilt when the zoom changes so the glyphs are not a stretched bitmap. The tool bar is a sibling drawn above the page and hides while the pen is down.
 
 ## Sync
 
@@ -112,6 +112,16 @@ The desktop engine transfers up to 3 files at once. This client transfers sequen
 Secrets (`v`, `accountId`, `deviceId`, `token`, `expiresAt`, `email`, `vaultSecret`) are sealed with an Android Keystore AES-GCM key (`fanotes-sync`) and are not written into the vault. Per-vault state (`version`, `accountId`, `cursor`, `lastSyncAt`, `files`, `conflicts`) lives under the app's files directory, keyed by a hash of the vault path or tree URI.
 
 Skip rules match the desktop: dot paths other than `.fanotes/` children, `.fanotes/history` unless history is included, `.fanotes/trash` (the tablet trash stays on the device), `onboarding.json`, `tree-cache`, `.DS_Store`, `Thumbs.db`, `desktop.ini`, `*.tmp`, `.~lock.*`, `~$*`, the recognition model unless opted in, excluded prefixes, and files over 100 MB.
+
+## Statistik on a big vault
+
+Settings → Statistik reads every note, so its cost is what keeps a 20,000 note SAF vault usable.
+
+- `SafVault` reads by document id. One `buildChildDocumentsUriUsingTree` cursor query lists a directory (name, type, size and time of every child), a listed `VaultEntry` carries its document id in `handle`, and a file opens by that id. A path lookup costs one listing per segment. `DocumentFile.findFile` asks the provider for the name of every sibling it looks at, so it stays only on the write, move and delete paths. The logic lives in `core` (`DocumentTree`) and is tested against a fake provider that counts calls.
+- `VaultStatsLoader` keeps what it read from each note in `filesDir/stats-cache/<vault hash>.jsonl`, keyed by path, size and modification time, with no expiry. The number of cards due is derived from the stored due dates on every run. The file is JSON Lines (format in `StatsCache.kt`): a damaged line costs one note, and another `STATS_CACHE_VERSION` drops the file. Bump the version when `storedFactsFromNote` or `countWords` change.
+- One note cannot take the app down. At most `STATS_MAX_NOTE_BYTES` (4 MiB) of a note is read; a bigger one is counted from its first bytes and shown as partly counted. Notes above 512 KiB are read one at a time, and a note that still does not fit in memory is skipped for that run. `countWords` is a set of linear scans, checked against the old regular expressions on random text.
+- Two runs on one loader never overlap, a cancelled run reports nothing more, and the time zone is read once per run. A day after today never counts as activity.
+- The daily diagnostics check never walks the vault. With both toggles off it does nothing at all. When a report is due it takes notes and bytes from this session's Statistik run, else the summary saved in the first line of the cache file, else the explorer tree's note count.
 
 ## Recognition, math, sections
 

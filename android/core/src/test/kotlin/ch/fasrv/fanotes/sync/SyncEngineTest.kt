@@ -29,7 +29,7 @@ class SyncEngineTest {
         val host = MemoryHost("vault")
         val engine = engine(SyncApi(server), host, "Tablet")
         try {
-            engine.register("ada@example.com", "correct horse")
+            engine.registerAndSettle("ada@example.com", "correct horse")
             host.put("Notes/Hello.md", "Hello\n".encodeToByteArray(), 1_000)
             engine.syncNow()
             var rejected = false
@@ -47,12 +47,12 @@ class SyncEngineTest {
             try {
                 var oldRejected = false
                 try {
-                    other.login("ada@example.com", "correct horse")
+                    other.loginAndSettle("ada@example.com", "correct horse")
                 } catch (_: Exception) {
                     oldRejected = true
                 }
                 assertTrue(oldRejected)
-                other.login("ada@example.com", "brand new secret")
+                other.loginAndSettle("ada@example.com", "brand new secret")
                 other.syncNow()
                 assertEquals("Hello\n", otherHost.read("Notes/Hello.md").decodeToString())
             } finally {
@@ -84,10 +84,10 @@ class SyncEngineTest {
         val engineA = engine(apiA, hostA, "Tablet A")
         val engineB = engine(apiB, hostB, "Tablet B")
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             hostA.put("Notes/Hello.md", "Hello from A\n".encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             assertEquals("Hello from A\n", hostB.read("Notes/Hello.md").decodeToString())
 
@@ -118,10 +118,10 @@ class SyncEngineTest {
         fun doc(vararg tasks: HomeworkTask) = serializeHomeworkMarkdown(HomeworkDocument(tasks.toList())).encodeToByteArray()
         fun hw(id: String, done: Boolean, at: String) = HomeworkTask(id, id, done = done, createdAt = "2026-10-01T00:00:00Z", updatedAt = at)
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             hostA.put(HOMEWORK_NOTE_PATH, doc(hw("x", false, "2026-10-01T10:00:00Z"), hw("y", false, "2026-10-01T10:00:00Z")), 1_000)
             engineA.syncNow()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             // A (Kanti+) ticks x later; B (FaNotes) ticks y later than A's y and adds z.
             hostA.put(HOMEWORK_NOTE_PATH, doc(hw("x", true, "2026-10-02T10:00:00Z"), hw("y", false, "2026-10-01T10:00:00Z")), 2_000)
@@ -155,12 +155,12 @@ class SyncEngineTest {
         val engineA = engine(apiA, hostA, "Tablet A")
         val engineB = engine(apiB, hostB, "Tablet B")
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             val first = noteFamd("2026-01-01T00:00:00.000Z")
             val shifted = noteFamd("2026-02-02T00:00:00.000Z")
             hostA.put("Notizen/Seite.famd", first.encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             val kept = hostB.read("Notizen/Seite.famd")
             hostA.put("Notizen/Seite.famd", shifted.encodeToByteArray(), 2_000)
@@ -184,13 +184,13 @@ class SyncEngineTest {
         val engineA = engine(apiA, hostA, "Tablet A")
         val engineB = engine(apiB, hostB, "Tablet B")
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             val note = noteFamd("2026-01-01T00:00:00.000Z")
             val blank = serializeFamd("", emptyFamdPayload("2026-03-03T00:00:00.000Z"))
             assertTrue(note.length > blank.length + 64)
             hostA.put("Notizen/Seite.famd", note.encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             hostB.put("Notizen/Seite.famd", blank.encodeToByteArray(), 2_000)
             engineB.syncNow()
@@ -211,7 +211,7 @@ class SyncEngineTest {
         val api = SyncApi(server)
         val engine = engine(api, host, "Tablet")
         try {
-            engine.register("ada@example.com", "correct horse")
+            engine.registerAndSettle("ada@example.com", "correct horse")
             val secrets = parseJson(host.readSecrets()!!) as JsonValue.Obj
             val session = SyncSession(
                 secrets.string("accountId")!!,
@@ -247,11 +247,11 @@ class SyncEngineTest {
         val engineA = engine(SyncApi(server), hostA, "Tablet A")
         val engineB = engine(SyncApi(server), hostB, "Tablet B")
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             val note = noteFamd("2026-01-01T00:00:00.000Z").encodeToByteArray()
             hostA.put("Notizen/Seite.famd", note, 1_000)
             engineA.syncNow()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             synchronized(hostA.files) { hostA.files.remove("Notizen/Seite.famd") }
             engineA.syncNow()
@@ -277,11 +277,11 @@ class SyncEngineTest {
         val engineA = engine(SyncApi(server), hostA, "Tablet A")
         val engineB = engine(SyncApi(server), hostB, "Tablet B")
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             val note = ByteArray(8000) { 9 }
             hostA.put("Bilder/Scan.png", note, 1_000)
             engineA.syncNow()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             hostA.put("Bilder/Scan.png", ByteArray(40) { 1 }, 2_000)
             engineA.syncNow()
@@ -306,10 +306,10 @@ class SyncEngineTest {
         }))
         engineB.attach(hostB)
         try {
-            engineA.register("memory@example.com", "synthetic passphrase")
+            engineA.registerAndSettle("memory@example.com", "synthetic passphrase")
             hostA.put("Notes/synthetic.famd", noteFamd("2026-01-01T00:00:00Z").encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("memory@example.com", "synthetic passphrase")
+            engineB.loginAndSettle("memory@example.com", "synthetic passphrase")
             engineB.syncNow()
             val original = hostB.read("Notes/synthetic.famd")
             val stateBefore = hostB.readState("memory-b")
@@ -347,10 +347,10 @@ class SyncEngineTest {
         val engineA = engine(SyncApi(server), hostA, "A")
         val engineB = engine(SyncApi(server), hostB, "B")
         try {
-            engineA.register("memory@example.com", "synthetic passphrase")
+            engineA.registerAndSettle("memory@example.com", "synthetic passphrase")
             hostA.put("Notes/synthetic.famd", noteFamd("2026-01-01T00:00:00Z").encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("memory@example.com", "synthetic passphrase")
+            engineB.loginAndSettle("memory@example.com", "synthetic passphrase")
             engineB.syncNow()
             val original = hostB.read("Notes/synthetic.famd")
             val stateBefore = hostB.readState("spike-b")
@@ -381,10 +381,10 @@ class SyncEngineTest {
         val engineB = SyncEngine(SyncApi(server), SyncEngineOptions(automatic = { false }))
         engineB.attach(hostB)
         try {
-            engineA.register("memory@example.com", "synthetic passphrase")
+            engineA.registerAndSettle("memory@example.com", "synthetic passphrase")
             hostA.put("Notes/synthetic.famd", noteFamd("2026-01-01T00:00:00Z").encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("memory@example.com", "synthetic passphrase")
+            engineB.loginAndSettle("memory@example.com", "synthetic passphrase")
             engineB.syncNow()
             val changed = noteFamd("2026-02-01T00:00:00Z").replace("# Seite", "# Changed")
             hostA.put("Notes/synthetic.famd", changed.encodeToByteArray(), 2_000)
@@ -415,7 +415,7 @@ class SyncEngineTest {
         val kept = noteFamd("2026-03-01T00:00:00Z").encodeToByteArray()
         val huge = noteFamd("2026-03-02T00:00:00Z").encodeToByteArray()
         try {
-            engineA.register("memory@example.com", "synthetic passphrase")
+            engineA.registerAndSettle("memory@example.com", "synthetic passphrase")
             hostA.put("Notes/ok.famd", kept, 1_000)
             hostA.put("Notes/huge.famd", huge, 1_000)
             hostA.reportedSizes["Notes/huge.famd"] = MAX_SYNC_DOCUMENT_BYTES.toLong() + 1
@@ -423,7 +423,7 @@ class SyncEngineTest {
             assertEquals(SyncStatus.IDLE, engineA.state.value.status)
             assertTrue(engineA.state.value.error?.contains("memory is low") != true)
             kotlin.test.assertContentEquals(huge, hostA.read("Notes/huge.famd"))
-            engineB.login("memory@example.com", "synthetic passphrase")
+            engineB.loginAndSettle("memory@example.com", "synthetic passphrase")
             engineB.syncNow()
             assertEquals(SyncStatus.IDLE, engineB.state.value.status)
             kotlin.test.assertContentEquals(kept, hostB.read("Notes/ok.famd"))
@@ -448,11 +448,11 @@ class SyncEngineTest {
             "v2",
         )
         try {
-            engineA.register("guest-sync@example.com", "synthetic passphrase")
+            engineA.registerAndSettle("guest-sync@example.com", "synthetic passphrase")
             hostA.put("Notes/guest-blank.famd", blank.encodeToByteArray(), 1_000)
             hostA.put("Notes/guest-reused.famd", reused.encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("guest-sync@example.com", "synthetic passphrase")
+            engineB.loginAndSettle("guest-sync@example.com", "synthetic passphrase")
             engineB.syncNow()
             assertEquals(SyncStatus.IDLE, engineA.state.value.status)
             assertEquals(SyncStatus.IDLE, engineB.state.value.status)
@@ -473,7 +473,7 @@ class SyncEngineTest {
         val engineA = engine(SyncApi(server), hostA, "Tablet A")
         val engineB = engine(SyncApi(server), hostB, "Tablet B")
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             hostA.put("Notes/Old.md", "Old note from A\n".encodeToByteArray(), 1_000)
             engineA.syncNow()
             synchronized(hostA.files) { hostA.files.remove("Notes/Old.md") }
@@ -486,7 +486,7 @@ class SyncEngineTest {
             val kept = "Kept on B and never deleted here\n".encodeToByteArray()
             hostB.put("Notes/Old.md", kept, 3_000)
             val before = server.callCount()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             val puts = server.callsSince(before).filter { it.method == "PUT" }
             val rejected = puts.single { it.status == 409 }
@@ -519,7 +519,7 @@ class SyncEngineTest {
             val host = MemoryHost("guard-$legacy")
             val engine = engine(SyncApi(server), host, "Tablet")
             try {
-                engine.register("ada@example.com", "correct horse")
+                engine.registerAndSettle("ada@example.com", "correct horse")
                 val full = "Eine Zeile mit Inhalt.\n".repeat(60).encodeToByteArray()
                 host.put("Notes/Lang.md", full, 1_000)
                 engine.syncNow()
@@ -559,10 +559,10 @@ class SyncEngineTest {
         val engineA = engine(SyncApi(server), hostA, "Tablet A")
         val engineB = engine(SyncApi(server), hostB, "Tablet B")
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             hostA.put("Notes/Shared.md", "First version\n".encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             assertEquals("First version\n", hostB.read("Notes/Shared.md").decodeToString())
             val edit = server.callCount()
@@ -614,10 +614,10 @@ class SyncEngineTest {
             return state.array("skipped")?.items.orEmpty().mapNotNull { (it as? JsonValue.Obj)?.string("id") }
         }
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             hostA.put("Notes/Base.md", "Base note\n".encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             val badUpload = server.callCount()
             hostA.put("Notes/Bad.md", "This blob arrives damaged\n".encodeToByteArray(), 2_000)
@@ -683,7 +683,7 @@ class SyncEngineTest {
         val host = MemoryHost("vault")
         val engine = engine(SyncApi(server), host, "Phone")
         try {
-            engine.register("ada@example.com", "correct horse")
+            engine.registerAndSettle("ada@example.com", "correct horse")
             host.put("Notes/Hello.md", "Hello\n".encodeToByteArray(), 1_000)
             engine.syncNow()
             val seen = java.util.Collections.synchronizedList(mutableListOf<SyncStatus>())
@@ -707,7 +707,7 @@ class SyncEngineTest {
         val server = MemorySyncServer()
         val engine = engine(SyncApi(server), MemoryHost("vault"), "Phone")
         try {
-            engine.register("ada@example.com", "correct horse")
+            engine.registerAndSettle("ada@example.com", "correct horse")
             val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
             server.beforeRequest = { entered.complete(Unit); delay(60_000) }
             val job = launch { runCatching { engine.syncNow() } }
@@ -726,7 +726,7 @@ class SyncEngineTest {
         val server = MemorySyncServer()
         val engine = engine(SyncApi(server), MemoryHost("vault"), "Phone")
         try {
-            engine.register("ada@example.com", "correct horse")
+            engine.registerAndSettle("ada@example.com", "correct horse")
             server.failTransport = true
             engine.syncNow()
             assertEquals(SyncStatus.OFFLINE, engine.state.value.status)
@@ -743,11 +743,11 @@ class SyncEngineTest {
         val engineA = engine(SyncApi(server), hostA, "Laptop")
         val engineB = engine(SyncApi(server), hostB, "Tablet")
         try {
-            engineA.register("ada@example.com", "correct horse")
+            engineA.registerAndSettle("ada@example.com", "correct horse")
             hostA.put("Old/Note.md", "old\n".encodeToByteArray(), 1_000)
             hostA.put("Old/Other.md", "other\n".encodeToByteArray(), 1_000)
             engineA.syncNow()
-            engineB.login("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
             engineB.syncNow()
             assertEquals("old\n", hostB.read("Old/Note.md").decodeToString())
 
@@ -774,6 +774,105 @@ class SyncEngineTest {
             engineA.close()
             engineB.close()
         }
+    }
+
+    private fun storyScene(vararg paragraphs: Triple<String, String, String>, vectors: Map<String, Map<String, Int>> = emptyMap()) =
+        ("{\"format\":\"fanotes-story-scene-v1\",\"id\":\"scene000001\",\"paragraphs\":[" + paragraphs.joinToString(",") { (id, key, text) ->
+            val v = (vectors[id] ?: mapOf("laptop" to 1)).entries.joinToString(",") { "\"${it.key}\":${it.value}" }
+            "{\"id\":\"$id\",\"key\":\"$key\",\"v\":{$v},\"style\":\"body\",\"runs\":[{\"text\":\"$text\"}]}"
+        } + "]}\n").encodeToByteArray()
+
+    private suspend fun storyTexts(host: MemoryHost, path: String) = ((parseJson(host.read(path).decodeToString()) as JsonValue.Obj).array("paragraphs")!!.items)
+        .map { it as JsonValue.Obj }.filter { it["deleted"] == null }.map { p -> p.array("runs")!!.items.joinToString("") { (it as JsonValue.Obj).string("text")!! } }
+
+    @Test
+    fun storyScenesMergeParagraphByParagraphWithoutAConflictCopy() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Laptop")
+        val engineB = engine(SyncApi(server), hostB, "Tablet")
+        val path = "Bücher/Roman.story/scenes/scene000001.json"
+        val long = "über Straßen und Brücken ".repeat(40)
+        try {
+            engineA.registerAndSettle("ada@example.com", "correct horse")
+            hostA.put(path, storyScene(Triple("para000001", "a0", "Eins $long"), Triple("para000002", "a1", "Zwei $long"), Triple("para000003", "a2", "Drei $long")), 1_000)
+            engineA.syncNow()
+            engineB.loginAndSettle("ada@example.com", "correct horse")
+            engineB.syncNow()
+            // A edits the first paragraph, B the third and adds a fourth; both edit the second.
+            hostA.put(path, storyScene(Triple("para000001", "a0", "Eins neu"), Triple("para000002", "a1", "Zwei vom Laptop"), Triple("para000003", "a2", "Drei $long"),
+                vectors = mapOf("para000001" to mapOf("laptop" to 2), "para000002" to mapOf("laptop" to 2))), 2_000)
+            hostB.put(path, storyScene(Triple("para000001", "a0", "Eins $long"), Triple("para000002", "a1", "Zwei vom Tablet"), Triple("para000003", "a2", "Drei neu"), Triple("para000004", "a3", "Vier"),
+                vectors = mapOf("para000002" to mapOf("laptop" to 1, "tablet" to 1), "para000003" to mapOf("laptop" to 1, "tablet" to 1), "para000004" to mapOf("tablet" to 1))), 3_000)
+            engineA.syncNow()
+            engineB.syncNow()
+            engineA.syncNow()
+            engineB.syncNow()
+            assertEquals(hostA.read(path).decodeToString(), hostB.read(path).decodeToString())
+            val texts = storyTexts(hostA, path)
+            for (expected in listOf("Eins neu", "Zwei vom Laptop", "Zwei vom Tablet", "Drei neu", "Vier")) assertTrue(expected in texts, expected)
+            assertTrue(hostA.files.keys.none { it.contains("Konflikt") })
+            assertTrue(hostB.files.keys.none { it.contains("Konflikt") })
+            // A truncated file (paragraphs gone without tombstones) does not replace the scene.
+            hostB.put(path, storyScene(Triple("para000001", "a0", "Eins neu"), vectors = mapOf("para000001" to mapOf("laptop" to 2))), 4_000)
+            engineB.syncNow()
+            engineA.syncNow()
+            assertTrue("Vier" in storyTexts(hostA, path))
+            assertTrue("Vier" in storyTexts(hostB, path))
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
+    fun aStoryFileTheEditorStartedOnDuringTheDownloadIsNotWritten() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("vault-a")
+        val hostB = MemoryHost("vault-b")
+        val engineA = engine(SyncApi(server), hostA, "Laptop")
+        val path = "Bücher/Roman.story/scenes/scene000001.json"
+        var armed = false
+        var mark = 0
+        // Free when sync looks first; the editor is dirty by the time the download is done.
+        val engineB = SyncEngine(SyncApi(server), SyncEngineOptions(platform = "android", deviceName = { "Tablet" }, automatic = { false },
+            isPathBusy = { it == path && armed && server.callsSince(mark).any { call -> call.method == "GET" && call.fileId != null } }))
+        engineB.attach(hostB)
+        try {
+            engineA.registerAndSettle("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
+            hostA.put(path, storyScene(Triple("para000001", "a0", "Eins vom Laptop")), 1_000)
+            engineA.syncNow()
+            mark = server.callCount()
+            armed = true
+            engineB.syncNow()
+            assertTrue(path !in hostB.files, "nothing was written while the editor held the file")
+            armed = false
+            engineB.syncNow()
+            assertEquals(listOf("Eins vom Laptop"), storyTexts(hostB, path))
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    /**
+     * register/login schedule an immediate background cycle (schedule(0)) even when `automatic` is false.
+     * Wait for that cycle to finish so it cannot interleave with the test's own syncNow() and the state it asserts.
+     */
+    private suspend fun SyncEngine.settleInitialCycle() {
+        withTimeout(10_000) { while (state.value.lastSyncAt == null || state.value.status != SyncStatus.IDLE) delay(5) }
+    }
+
+    private suspend fun SyncEngine.registerAndSettle(email: String, password: String) {
+        register(email, password)
+        settleInitialCycle()
+    }
+
+    private suspend fun SyncEngine.loginAndSettle(email: String, password: String) {
+        login(email, password)
+        settleInitialCycle()
     }
 
     private fun engine(api: SyncApi, host: MemoryHost, name: String): SyncEngine {

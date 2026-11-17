@@ -3,7 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val fanotesVersion = providers.gradleProperty("fanotes.version").orElse("2026.11.2")
+val fanotesVersion = providers.gradleProperty("fanotes.version").orElse("2026.11.3-beta.3")
 
 android {
     namespace = "ch.fasrv.fanotes"
@@ -13,7 +13,7 @@ android {
         applicationId = "ch.fasrv.fanotes"
         minSdk = 29
         targetSdk = 36
-        versionCode = 51000200
+        versionCode = 51000253
         versionName = fanotesVersion.get()
     }
 
@@ -77,3 +77,21 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }
+
+// The writing mode ("Schreiben") runs the shared web editor in a WebView. Its
+// bundle is built from fanotes/ into assets/writing/ (git-ignored). Without
+// Node and fanotes/node_modules the build continues and the writing screen
+// reports that it is missing from this build.
+val writingBundle = tasks.register<Exec>("writingBundle") {
+    description = "Builds the writing mode bundle for the WebView."
+    val app = rootProject.file("../fanotes")
+    workingDir = app
+    commandLine("node", "scripts/build-android-writing.mjs")
+    onlyIf {
+        val missing = !file("src/main/assets/writing/writing.html").exists() || project.hasProperty("fanotesWritingBundle")
+        val canBuild = File(app, "node_modules/vite").exists()
+        if (missing && !canBuild) logger.warn("FaNotes: writing mode bundle missing and fanotes/node_modules not installed; the writing screen will be empty.")
+        missing && canBuild
+    }
+}
+tasks.named("preBuild") { dependsOn(writingBundle) }

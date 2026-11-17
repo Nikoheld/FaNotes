@@ -5,7 +5,7 @@ package ch.fasrv.fanotes.text
  * and code, with the ink marker and other HTML comments left off the page.
  * Inline markers such as `**bold**` stay in the text for the renderer.
  */
-enum class PaperKind { H1, H2, H3, H4, H5, H6, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, TABLE, IMAGE, SPACER }
+enum class PaperKind { H1, H2, H3, H4, H5, H6, PARAGRAPH, BULLET, NUMBER, TASK, QUOTE, CODE, MATH, RULE, TABLE, IMAGE, SPACER, STUDY }
 
 /** Column alignment from a GFM separator, the same `:---`, `:---:`, and `---:` the preview uses. */
 enum class TableAlign { LEFT, CENTER, RIGHT }
@@ -20,7 +20,8 @@ private val TASK = Regex("""^\s*[-*+]\s+\[([ xX])](?:\s+(.*))?$""")
 private val TABLE_RULE = Regex("""^:?-{3,}:?$""")
 private val IMAGE_LINE = Regex("""^!\[([^\]]*)]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*$""")
 
-fun paperLines(markdown: String): List<PaperLine> {
+/** [studyBlocks] turns readable study blocks into one STUDY line (the paper view draws them); other callers keep the code lines. */
+fun paperLines(markdown: String, studyBlocks: Boolean = false): List<PaperLine> {
     val source = markdown.replace("\r\n", "\n").replace(COMMENT, "")
     val lines = source.split('\n')
     val out = ArrayList<PaperLine>(lines.size)
@@ -30,9 +31,19 @@ fun paperLines(markdown: String): List<PaperLine> {
     var mathStart = -1
     val code = StringBuilder()
     val math = StringBuilder()
+    // Study blocks (fanotes-key, -sort, ...) become one STUDY line: "kind US blockIndex US json".
+    val studyAt = if (!studyBlocks || !source.contains("fanotes-")) emptyMap() else ch.fasrv.fanotes.study.findStudyBlocks(source).withIndex()
+        .filter { ch.fasrv.fanotes.study.studyBlockReadable(it.value) }
+        .associateBy { it.value.startLine - 1 }
     var index = 0
     while (index < lines.size) {
         val raw = lines[index]
+        val study = if (!inCode && !inMath) studyAt[index] else null
+        if (study != null) {
+            out += PaperLine(PaperKind.STUDY, "${study.value.kind.id}\u001f${study.index}\u001f${study.value.body}", index)
+            index = study.value.endLine
+            continue
+        }
         val fence = raw.trimStart().startsWith("```")
         if (fence) {
             if (inCode) {

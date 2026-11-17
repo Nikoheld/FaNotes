@@ -31,6 +31,8 @@ const {
   noteBudgetSliceCleared,
 } = await server.ssrLoadModule('/src/lib/inkStrokePaint.ts')
 const { applyToolErase } = await server.ssrLoadModule('/src/lib/toolErase.ts')
+const { mayWipeLiveInk, mayWipeLiveInkAfterRedraw } = await server.ssrLoadModule('/src/lib/liveInkHandoff.ts')
+const { stepInkRepaint, swapInkBuffer } = await server.ssrLoadModule('/src/lib/inkRepaintJob.ts')
 const { bindPaperNoteText } = await server.ssrLoadModule('/src/lib/noteTextStay.ts')
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -168,7 +170,9 @@ try {
   assert.doesNotMatch(cameraSource, /willChange = 'transform'/)
   assert.match(boardSource, /eraseInkKeepingNoteText\(/)
   assert.match(boardSource, /decideCommittedEraseHole\(/)
-  assert.match(boardSource, /job\.cleared = noteBudgetSliceCleared\(job\.cleared, from\)/)
+  // Since the double-buffered repaint (#1195) a job counts as cleared from its start: the visible
+  // bitmap is unsealed until the buffer is swapped in, so an erase never punches into it.
+  assert.match(boardSource, /cleared: true/)
   assert.match(boardSource, /budgetCleared: Boolean\(painting\?\.cleared\)/)
   assert.equal(
     boardSource.match(/if \(eraseHole\.seal\) committedBitmapRef\.current = \{ key: contentKey, topPx \}/g)?.length,
@@ -349,6 +353,113 @@ try {
   })
   assert.equal(intact.punch, true, 'an intact bitmap still punches only the erased ink')
   assert.equal(intact.seal, true)
+
+  // Heavy-page repaint, frame by frame: the visible committed bitmap shows the old page until the
+  // finished page replaces it in one copy, also when the pixel size changes (zoom, DPR, window
+  // resize, page grow). A resize up front blanks it for the whole job; a failed or cancelled job
+  // never puts a partial page on screen.
+  {
+    const makeVisible = (width, height, content) => {
+      const state = { width, height, content, mode: 'source-over' }
+      const canvas = {
+        get width() { return state.width },
+        set width(value) { state.width = value; state.content = 'blank' },
+        get height() { return state.height },
+        set height(value) { state.height = value; state.content = 'blank' },
+        get content() { return state.content },
+        getContext: () => ({
+          save() {},
+          restore() { state.mode = 'source-over' },
+          setTransform() {},
+          drawImage(image) { state.content = image.content },
+          set globalAlpha(_value) {},
+          get globalAlpha() { return 1 },
+          set globalCompositeOperation(value) { state.mode = value },
+          get globalCompositeOperation() { return state.mode },
+        }),
+      }
+      return canvas
+    }
+    // One scenario: a visible canvas with the old page, a job painting `total` strokes into a page
+    // of `target` size. Returns what the visible canvas shows after every task (frame).
+    const heavyRepaint = ({ total = 9, perSlice = 3, target, resizeUpFront = false, failAt = -1, cancelAfter = -1 }) => {
+      const visible = makeVisible(100, 50, 'old page')
+      if (resizeUpFront) { visible.width = target.width; visible.height = target.height }
+      const buffer = { width: target.width, height: target.height, content: 'blank', painted: 0 }
+      const strokes = Array.from({ length: total }, () => ({}))
+      const job = { key: 'k', strokes, frame: 0, buffer, width: target.width, height: target.height, coverage: null }
+      let current = job
+      let dirty = false
+      const queue = []
+      const seen = []
+      const record = () => seen.push(`${visible.width}x${visible.height} ${visible.content}`)
+      const host = {
+        isCurrent: (running) => current === running,
+        strokes: () => strokes,
+        size: () => target,
+        dirty: () => dirty,
+        paint: (running, from) => {
+          if (from === failAt) return { next: from, coverage: null, failed: true }
+          const next = Math.min(from + perSlice, running.strokes.length)
+          buffer.painted = next
+          buffer.content = next >= running.strokes.length ? 'new page' : `partial ${next}/${running.strokes.length}`
+          return { next, coverage: null }
+        },
+        swap: (running) => swapInkBuffer(visible, running.buffer),
+        schedule: (run) => { queue.push(run); return queue.length },
+        finished: () => { current = null },
+        dropped: () => { current = null },
+        failed: () => { current = null },
+      }
+      record() // frame before the job
+      stepInkRepaint(job, 0, host)
+      record()
+      for (let frame = 0; queue.length && frame < 50; frame += 1) {
+        if (frame === cancelAfter) current = null // another repaint took over
+        queue.shift()()
+        record()
+      }
+      return { seen, visible }
+    }
+    const zoom = { width: 200, height: 100 }
+    const zoomed = heavyRepaint({ target: zoom })
+    assert.ok(zoomed.seen.slice(0, -1).every((frame) => frame === '100x50 old page'), 'the old page stays on screen, not blank, for the whole job')
+    assert.equal(zoomed.seen.at(-1), '200x100 new page', 'the swap resizes and fills the visible canvas in the same task')
+    assert.ok(!zoomed.seen.some((frame) => /blank|partial/.test(frame)), 'no blank or half painted frame')
+    const blanked = heavyRepaint({ target: zoom, resizeUpFront: true })
+    assert.ok(blanked.seen.slice(1, -1).every((frame) => frame === '200x100 blank'), 'sanity: the old order (resize before the job) is a blank page until the swap')
+
+    const sameSize = heavyRepaint({ target: { width: 100, height: 50 } })
+    assert.ok(sameSize.seen.slice(0, -1).every((frame) => frame === '100x50 old page'))
+    assert.equal(sameSize.seen.at(-1), '100x50 new page')
+
+    const failing = heavyRepaint({ target: zoom, failAt: 3 })
+    assert.ok(failing.seen.every((frame) => frame === '100x50 old page'), 'a failed job leaves the old page; no partial page is swapped in')
+    const cancelled = heavyRepaint({ target: zoom, cancelAfter: 1 })
+    assert.ok(cancelled.seen.every((frame) => frame === '100x50 old page'), 'a cancelled job never shows its half page')
+
+    // The live stroke on a page that is being repainted: pen-up keeps it (the direct commit is
+    // refused while a job runs), every redraw before the swap keeps it, the swap wipes it. Never a
+    // frame without the stroke, and never both layers drawing it once the page is swapped in.
+    const penUpFrames = ({ guardRedraw }) => {
+      const swapFrame = 3
+      let live = true
+      const seen = []
+      for (let frame = 0; frame < 6; frame += 1) {
+        const jobRunning = frame < swapFrame
+        if (frame === 0 && mayWipeLiveInk({ committedHasStroke: false, committedPaintRunning: jobRunning })) live = false
+        // The microtask redraw after pen-up, and every redraw until the swap.
+        const redrawMayWipe = guardRedraw ? mayWipeLiveInkAfterRedraw({ committedPaintRunning: jobRunning }) : true
+        if (frame < swapFrame && redrawMayWipe) live = false
+        const swapped = frame >= swapFrame
+        if (swapped) live = false // the swap wipes the live copy in the same task
+        seen.push(live || swapped)
+      }
+      return seen
+    }
+    assert.deepEqual(penUpFrames({ guardRedraw: true }), [true, true, true, true, true, true], 'the stroke is on screen in every frame of a heavy repaint')
+    assert.deepEqual(penUpFrames({ guardRedraw: false }).slice(0, 3), [false, false, false], 'sanity: an unguarded redraw wipes the only copy of the stroke until the swap')
+  }
 
   const beforeRefresh = plane.style.transform
   const generation = forcePaperCompositorRefresh(scroller)

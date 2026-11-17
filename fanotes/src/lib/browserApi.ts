@@ -17,6 +17,7 @@ import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './sear
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
 import { parseNoteTextFields } from './noteTextField'
+import { parseAnnotations } from '../../electron/noteAnnotation.mjs'
 import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
 import { isPaperStyle } from './paperStyles'
 import { browserInitialFiles, browserStarterFolders, browserStarterSubjects } from './browserPreview'
@@ -268,6 +269,11 @@ export function createBrowserApi(): FaNotesApi {
   /** `fanotes-page-text-v1` records of browser-vault PDFs (document search). */
   const pageText = new Map<string, PageTextRecord>()
   const notePaper = new Map<string, PaperStyle>()
+  const STORY_FILE = /^(.+\.story)\/((?:[A-Za-z0-9_-]{1,64}\/){0,3}[A-Za-z0-9_.-]{1,96}\.(?:json|md))$/iu
+  /** Note and PDF colours in the tree, by path (synced as `.fanotes/file-colors.json`). */
+  const fileColors = new Map<string, string>()
+  /** When the writing mode last saved each story file. Assets carry no time of their own, and sync must see an edit of the same length. */
+  const storyTimes = new Map<string, number>()
   let subjectBooks: SubjectBookRecord[] = []
   let folderLocations: FolderLocationMap = {}
   const noteHistory = new Map<string, Array<{ id: string; createdAt: string; content: string; bytes: number; tier?: 'week' | 'short'; ext?: string; companion?: string }>>()
@@ -425,7 +431,19 @@ export function createBrowserApi(): FaNotesApi {
         if (isPaperStyle(style)) notePaper.set(path, style)
       })
     }
+    const storedFileColors = meta.get('fileColors')
+    if (isRecord(storedFileColors)) {
+      Object.entries(storedFileColors).forEach(([path, color]) => {
+        if (typeof color === 'string' && /^#[a-f0-9]{6}$/iu.test(color)) fileColors.set(path, color.toLowerCase())
+      })
+    }
     subjectBooks = parseSubjectBooks(meta.get('subjectBooks'))
+    const storedStoryTimes = meta.get('storyAssetTimes')
+    if (isRecord(storedStoryTimes)) {
+      Object.entries(storedStoryTimes).forEach(([path, time]) => {
+        if (typeof time === 'number' && Number.isFinite(time) && time > 0) storyTimes.set(path, time)
+      })
+    }
     folderLocations = sanitizeFolderLocationMap(meta.get('folderLocations'))
     fileRows.forEach((row) => files.set(row.path, row))
     folderRows.forEach((row) => folders.set(row.path, row))
@@ -463,12 +481,19 @@ export function createBrowserApi(): FaNotesApi {
   const persistFolderLocations = () => setMeta('folderLocations', folderLocations)
   const logicalResult = (logical: string, storedResult: string) => [parentPath(logical), fileName(storedResult)].filter(Boolean).join('/')
 
+  const colorOf = (path: string) => {
+    const color = fileColors.get(path)
+    return color ? { color } : {}
+  }
+
   const buildTree = () => {
     if (cachedTree) return clone(cachedTree)
     const root: VaultEntry[] = []
     const directories = new Map<string, VaultEntry[]>([['', root]])
+    const insideStory = (path: string) => /\.story(?:\/|$)/iu.test(path)
     ;[...folders.values()].sort((a, b) => a.path.localeCompare(b.path, getUiLanguage())).forEach((folder) => {
       if (isPlaceholderDescendant(folder.path, folderLocations)) return
+      if (insideStory(folder.path)) return
       const children: VaultEntry[] = []
       directories.set(folder.path, children)
       const entry: VaultEntry = { name: fileName(folder.path), relativePath: folder.path, kind: 'folder', color: folder.color, children }
@@ -492,13 +517,22 @@ export function createBrowserApi(): FaNotesApi {
       if (hiddenFamd.has(record.path)) return
       if (isPlaceholderDescendant(record.path, folderLocations)) return
       const extension = fileName(record.path).split('.').pop()?.toLocaleLowerCase('en-US') || 'md'
-      const entry: VaultEntry = { name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content) }
+      const entry: VaultEntry = { name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content), ...colorOf(record.path) }
       ;(directories.get(parentPath(record.path)) ?? root).push(entry)
+    })
+    // Writing-mode projects: a `.story` folder (record or synced files) is one document.
+    const stories = new Set<string>()
+    folders.forEach((folder) => { if (/\.story$/iu.test(folder.path)) stories.add(folder.path) })
+    assets.forEach((_blob, path) => { const match = /^(.+?\.story)\/story\.json$/iu.exec(path); if (match) stories.add(match[1]) })
+    stories.forEach((path) => {
+      if (isPlaceholderDescendant(path, folderLocations)) return
+      ;(directories.get(parentPath(path)) ?? root).push({ name: fileName(path), relativePath: path, kind: 'file', extension: 'story', ...colorOf(path) })
     })
     assets.forEach((blob, path) => {
       if (path.startsWith('.') || !/\.pdf$/iu.test(path)) return
       if (isPlaceholderDescendant(path, folderLocations)) return
-      const entry: VaultEntry = { name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size }
+      if (/\.story\//iu.test(path)) return
+      const entry: VaultEntry = { name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size, ...colorOf(path) }
       ;(directories.get(parentPath(path)) ?? root).push(entry)
     })
     const listStored = (parent: string): VaultEntry[] => {
@@ -510,11 +544,11 @@ export function createBrowserApi(): FaNotesApi {
       files.forEach((record) => {
         if (record.path === '.fanotes/recognition-model.json' || hiddenFamd.has(record.path) || parentPath(record.path) !== parent) return
         const extension = fileName(record.path).split('.').pop()?.toLocaleLowerCase('en-US') || 'md'
-        items.push({ name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content) })
+        items.push({ name: fileName(record.path), relativePath: record.path, kind: 'file', extension, modifiedAt: record.modifiedAt, size: textBytes(record.content), ...colorOf(record.path) })
       })
       assets.forEach((blob, path) => {
         if (path.startsWith('.') || !/\.pdf$/iu.test(path) || parentPath(path) !== parent) return
-        items.push({ name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size })
+        items.push({ name: fileName(path), relativePath: path, kind: 'file', extension: 'pdf', size: blob.size, ...colorOf(path) })
       })
       return items
     }
@@ -527,7 +561,20 @@ export function createBrowserApi(): FaNotesApi {
 
   const persistNotePaper = () => setMeta('notePaper', Object.fromEntries(notePaper))
 
+  const remapFileColors = async (from: string, to: string | null) => {
+    let changed = false
+    for (const [path, color] of [...fileColors.entries()]) {
+      if (path !== from && !path.startsWith(`${from}/`)) continue
+      fileColors.delete(path)
+      if (to !== null) fileColors.set(path === from ? to : `${to}${path.slice(from.length)}`, color)
+      changed = true
+    }
+    if (changed) await setMeta('fileColors', Object.fromEntries(fileColors))
+  }
+
+  // Per-note settings follow the note: paper style and tree colour.
   const remapNotePaper = async (from: string, to: string | null) => {
+    await remapFileColors(from, to)
     const next = new Map<string, PaperStyle>()
     let changed = false
     notePaper.forEach((style, path) => {
@@ -842,6 +889,12 @@ export function createBrowserApi(): FaNotesApi {
       if (!record) throw new Error('Die Notiz wurde im Browser-Vault nicht gefunden.')
       return parseFamd(record.content).markdown
     },
+    readNotePageStats: async (rawPath) => {
+      await ready
+      const logical = resolveStored(normalizePath(rawPath), false)
+      const source = files.get(companionNotePath(logical, '.famd'))?.content ?? files.get(logical)?.content ?? ''
+      try { return parseFamd(source).payload?.pageStats ?? null } catch { return null }
+    },
     readAssetDataUrl: async (rawPath) => {
       await ready
       const path = resolveStored(normalizePath(rawPath), false)
@@ -1042,6 +1095,61 @@ export function createBrowserApi(): FaNotesApi {
       folders.set(path, record)
       cachedTree = null
       return { color }
+    },
+    storyRead: async (rawPath) => {
+      await ready
+      const path = normalizePath(rawPath)
+      if (!STORY_FILE.test(path)) throw new Error('Nur Dateien in einem .story-Ordner.')
+      const blob = assets.get(path)
+      return blob ? blob.text() : null
+    },
+    storyWrite: async (rawPath, content) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const match = STORY_FILE.exec(path)
+      if (!match) throw new Error('Nur Dateien in einem .story-Ordner.')
+      if (typeof content !== 'string' || content.length > 16 * 1024 * 1024) throw new Error('Der Inhalt ist ungültig oder zu gross.')
+      if (path.toLowerCase().endsWith('.json')) JSON.parse(content)
+      const blob = new Blob([content], { type: path.endsWith('.md') ? 'text/markdown' : 'application/json' })
+      await write('assets', (store) => { store.put({ path, value: blob } satisfies AssetRecord) })
+      const previous = assetUrls.get(path)
+      if (previous) { URL.revokeObjectURL(previous); assetUrls.delete(path) }
+      assets.set(path, blob)
+      storyTimes.set(path, Math.max(Date.now(), (storyTimes.get(path) ?? 0) + 1))
+      await setMeta('storyAssetTimes', Object.fromEntries(storyTimes), false)
+      cachedTree = null
+    },
+    storyList: async (rawPath) => {
+      await ready
+      const story = normalizePath(rawPath)
+      if (!/\.story$/iu.test(story)) throw new Error('Kein .story-Ordner.')
+      return [...assets.keys()].filter((path) => path.startsWith(`${story}/`)).map((path) => path.slice(story.length + 1))
+    },
+    storyCreate: async (rawParent, name) => {
+      await ready
+      const parent = rawParent ? normalizePath(rawParent) : ''
+      const clean = name.replace(/[\\/:*?"<>|\u0000-\u001f]/gu, ' ').trim() || 'Geschichte.story'
+      if (!/\.story$/iu.test(clean)) throw new Error('Ein Geschichten-Ordner endet auf .story.')
+      const taken = (candidate: string) => folders.has(candidate) || files.has(candidate) || [...assets.keys()].some((path) => path === candidate || path.startsWith(`${candidate}/`))
+      const base = clean.replace(/\.story$/iu, '')
+      let chosen = [parent, clean].filter(Boolean).join('/')
+      for (let index = 2; taken(chosen); index += 1) chosen = [parent, `${base} ${index}.story`].filter(Boolean).join('/')
+      const record = { path: chosen }
+      await write('folders', (store) => { store.put(record) })
+      folders.set(chosen, record)
+      cachedTree = null
+      return chosen
+    },
+    setFileColor: async (rawPath, color) => {
+      await ready
+      const path = normalizePath(rawPath)
+      if (!files.has(path) && !(assets.has(path) && /\.pdf$/iu.test(path) && !path.startsWith('.'))) throw new Error('Das Dokument wurde nicht gefunden.')
+      if (color !== null && !/^#[a-f0-9]{6}$/iu.test(color)) throw new Error('Die Dokumentfarbe ist ungültig.')
+      if (color) fileColors.set(path, color.toLowerCase())
+      else fileColors.delete(path)
+      await setMeta('fileColors', Object.fromEntries(fileColors))
+      cachedTree = null
+      return { color: color?.toLowerCase() ?? null }
     },
     getFolderLocations: async (rawPath) => {
       await ready
@@ -1486,6 +1594,7 @@ export function createBrowserApi(): FaNotesApi {
         noteLinks: payload?.noteLinks ?? [],
         noteBackups: payload?.noteBackups ?? [],
         textFields: payload?.textFields ?? [],
+        annotations: payload?.annotations ?? [],
       }
     },
     readNotePaperStyle: async (rawPath) => {
@@ -1559,6 +1668,28 @@ export function createBrowserApi(): FaNotesApi {
       files.set(famdPath, record)
       cachedTree = null
       return backups
+    },
+    writeNoteAnnotations: async (rawPath, rawList) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const list = parseAnnotations(rawList)
+      const famdPath = companionNotePath(path, '.famd')
+      const existing = files.get(famdPath)
+      const parsed = parseFamd(existing?.content ?? '')
+      const payload = {
+        ...(parsed.payload || emptyFamdPayload()),
+        updatedAt: new Date().toISOString(),
+        annotations: list,
+      }
+      const record = {
+        path: famdPath,
+        content: serializeFamd(parsed.markdown, payload, famdEncodingForSave(existing?.content ?? '')),
+        modifiedAt: new Date().toISOString(),
+      }
+      await write('files', (store) => { store.put(record) })
+      files.set(famdPath, record)
+      cachedTree = null
+      return list
     },
     writeNoteTextFields: async (rawPath, rawFields) => {
       await ready
@@ -1714,6 +1845,9 @@ export function createBrowserApi(): FaNotesApi {
     importOneNote: async () => {
       throw new Error('Binäre OneNote-Notizbücher werden sicher in der Linux- oder Windows-App importiert.')
     },
+    readWorksheetHtml: async () => {
+      throw new Error('Importierte OneNote-Seiten gibt es nur in der Desktop-App.')
+    },
     readWorksheet: async (id) => {
       await ready
       const document = worksheets.get(id)
@@ -1857,6 +1991,7 @@ export function createBrowserApi(): FaNotesApi {
     addons: createBrowserAddonsApi(),
     sync: createBrowserSyncHost({
       files, folders, assets, drawings, worksheets,
+      storyTimes,
       getSubjectBooks: () => subjectBooks,
       setSubjectBooks: async (books) => { subjectBooks = books; await setMeta('subjectBooks', books) },
       putFile: async (record) => { await write('files', (store) => { store.put(record) }); files.set(record.path, record) },
@@ -1877,6 +2012,13 @@ export function createBrowserApi(): FaNotesApi {
       deleteDrawing: async (id) => { await write('drawings', (store) => { store.delete(id) }); drawings.delete(id) },
       putWorksheet: async (document) => { await write('worksheets', (store) => { store.put(document) }); worksheets.set(document.id, document) },
       deleteWorksheet: async (id) => { await write('worksheets', (store) => { store.delete(id) }); worksheets.delete(id) },
+      fileColors,
+      putFileColors: async (next) => {
+        fileColors.clear()
+        next.forEach((color, path) => fileColors.set(path, color))
+        await setMeta('fileColors', Object.fromEntries(fileColors), false)
+        cachedTree = null
+      },
       putFolders: async (list) => {
         await write('folders', (store) => { store.clear(); list.forEach((folder) => store.put(folder satisfies FolderRecord)) })
         folders.clear()

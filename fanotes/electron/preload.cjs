@@ -11,6 +11,7 @@ const CHANNELS = Object.freeze({
   getFastTree: 'fanotes:get-fast-tree',
   selectVault: 'fanotes:select-vault',
   getTree: 'fanotes:get-tree',
+  vaultChanged: 'fanotes:vault-changed',
   readFile: 'fanotes:read-file',
   writeFile: 'fanotes:write-file',
   readRecognitionModel: 'fanotes:read-recognition-model',
@@ -23,6 +24,11 @@ const CHANNELS = Object.freeze({
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
   setFolderColor: 'fanotes:set-folder-color',
+  storyRead: 'fanotes:story-read',
+  storyWrite: 'fanotes:story-write',
+  storyList: 'fanotes:story-list',
+  storyCreate: 'fanotes:story-create',
+  setFileColor: 'fanotes:set-file-color',
   getFolderLocations: 'fanotes:get-folder-locations',
   pickFolderLocation: 'fanotes:pick-folder-location',
   setFolderLocations: 'fanotes:set-folder-locations',
@@ -42,6 +48,7 @@ const CHANNELS = Object.freeze({
   readNoteBackups: 'fanotes:read-note-backups',
   writeNoteBackups: 'fanotes:write-note-backups',
   writeNoteTextFields: 'fanotes:write-note-text-fields',
+  writeNoteAnnotations: 'fanotes:write-note-annotations',
   readNoteCompanion: 'fanotes:read-note-companion',
   readSubjectBooks: 'fanotes:read-subject-books',
   writeSubjectBooks: 'fanotes:write-subject-books',
@@ -54,6 +61,7 @@ const CHANNELS = Object.freeze({
   importPdfNote: 'fanotes:import-pdf-note',
   importOneNote: 'fanotes:import-onenote',
   readWorksheet: 'fanotes:read-worksheet',
+  readWorksheetHtml: 'fanotes:read-worksheet-html',
   saveWorksheet: 'fanotes:save-worksheet',
   deleteWorksheet: 'fanotes:delete-worksheet',
   listNoteHistory: 'fanotes:list-note-history',
@@ -78,6 +86,7 @@ const CHANNELS = Object.freeze({
   aiListModels: 'fanotes:ai-list-models',
   aiTransform: 'fanotes:ai-transform',
   grokBuild: 'fanotes:grok-build',
+  mcpLocal: 'fanotes:mcp-local',
   loadSecureSettings: 'fanotes:load-secure-settings',
   saveSettings: 'fanotes:save-settings',
   resetAppData: 'fanotes:reset-app-data',
@@ -125,7 +134,7 @@ const api = Object.freeze({
   selectVault: () => invoke(CHANNELS.selectVault),
   getCachedTree: () => invoke(CHANNELS.getCachedTree),
   getFastTree: () => invoke(CHANNELS.getFastTree),
-  getTree: () => invoke(CHANNELS.getTree),
+  getTree: (options) => invoke(CHANNELS.getTree, options?.fromWatcher === true ? { fromWatcher: true } : undefined),
   readFile: (relativePath) => invoke(CHANNELS.readFile, relativePath),
   writeFile: (relativePath, content) => invoke(CHANNELS.writeFile, relativePath, content),
   handwritingLearning: (op, value) => invoke(CHANNELS.handwritingLearning, op, value),
@@ -139,6 +148,11 @@ const api = Object.freeze({
   convertFamdNotes: () => invoke(CHANNELS.convertFamdNotes),
   createFolder: (parentPath, preferredName) => invoke(CHANNELS.createFolder, parentPath, preferredName),
   setFolderColor: (relativePath, color) => invoke(CHANNELS.setFolderColor, relativePath, color),
+  storyRead: (relativePath) => invoke(CHANNELS.storyRead, relativePath),
+  storyWrite: (relativePath, content) => invoke(CHANNELS.storyWrite, relativePath, content),
+  storyList: (storyPath) => invoke(CHANNELS.storyList, storyPath),
+  storyCreate: (parent, name) => invoke(CHANNELS.storyCreate, parent, name),
+  setFileColor: (relativePath, color) => invoke(CHANNELS.setFileColor, relativePath, color),
   getFolderLocations: (relativePath) => invoke(CHANNELS.getFolderLocations, relativePath),
   pickFolderLocation: () => invoke(CHANNELS.pickFolderLocation),
   setFolderLocations: (relativePath, paths, moveContents) => invoke(CHANNELS.setFolderLocations, relativePath, paths, moveContents),
@@ -158,6 +172,7 @@ const api = Object.freeze({
   readNoteBackups: (relativePath) => invoke(CHANNELS.readNoteBackups, relativePath),
   writeNoteBackups: (relativePath, backups) => invoke(CHANNELS.writeNoteBackups, relativePath, backups),
   writeNoteTextFields: (relativePath, fields) => invoke(CHANNELS.writeNoteTextFields, relativePath, fields),
+  writeNoteAnnotations: (relativePath, list) => invoke(CHANNELS.writeNoteAnnotations, relativePath, list),
   readNoteCompanion: (relativePath) => invoke(CHANNELS.readNoteCompanion, relativePath),
   readSubjectBooks: () => invoke(CHANNELS.readSubjectBooks),
   writeSubjectBooks: (books) => invoke(CHANNELS.writeSubjectBooks, books),
@@ -175,6 +190,7 @@ const api = Object.freeze({
   importPdfNote: (parentPath) => invoke(CHANNELS.importPdfNote, parentPath),
   importOneNote: () => invoke(CHANNELS.importOneNote),
   readWorksheet: (id) => invoke(CHANNELS.readWorksheet, id),
+  readWorksheetHtml: (id) => invoke(CHANNELS.readWorksheetHtml, id),
   saveWorksheet: (document) => invoke(CHANNELS.saveWorksheet, document),
   deleteWorksheet: (id) => invoke(CHANNELS.deleteWorksheet, id),
   listNoteHistory: (relativePath) => invoke(CHANNELS.listNoteHistory, relativePath),
@@ -199,6 +215,7 @@ const api = Object.freeze({
   aiListModels: (connection) => invoke(CHANNELS.aiListModels, connection),
   aiTransform: (payload) => invoke(CHANNELS.aiTransform, payload),
   grokBuild: (request) => invoke(CHANNELS.grokBuild, request),
+  mcpLocal: (request) => invoke(CHANNELS.mcpLocal, request),
   loadSecureSettings: () => invoke(CHANNELS.loadSecureSettings),
   saveSettings: (settings, options) => invoke(CHANNELS.saveSettings, settings, options),
   resetAppData: () => invoke(CHANNELS.resetAppData),
@@ -219,6 +236,12 @@ const api = Object.freeze({
     const listener = (_event, id) => callback(id)
     ipcRenderer.on(CHANNELS.shareOpen, listener)
     return () => ipcRenderer.removeListener(CHANNELS.shareOpen, listener)
+  },
+  onVaultChanged: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, change) => callback(change)
+    ipcRenderer.on(CHANNELS.vaultChanged, listener)
+    return () => ipcRenderer.removeListener(CHANNELS.vaultChanged, listener)
   },
   onBeforeClose: (callback) => {
     if (typeof callback !== 'function') return () => {}

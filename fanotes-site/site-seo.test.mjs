@@ -111,6 +111,17 @@ test('origin gzip covers sitemap and svg and varies on the encoding', () => {
   for (const conf of [fanotes, schulnetz]) assert.match(conf, /^    gzip_vary on;$/mu)
   assert.match(fanotes, /gzip_types[^\n]*application\/xml[^\n]*image\/svg\+xml/)
   assert.doesNotMatch(fanotes, /gzip_types[^\n]*wasm/)
+  assert.match(schulnetz, /gzip_types[^\n]+\n\n    # HTML, CSS and script responses name UTF-8\. The pages already use that encoding\.\n    charset utf-8;\n    charset_types text\/css text\/plain text\/xml application\/javascript application\/rss\+xml image\/svg\+xml;/u)
+  assert.match(schulnetz, /location ~ \^\/\(\?:kanti-icon\\\.svg\|kanti-icon-512\\\.png\|apple-touch-icon\\\.png\|og-kanti\\\.png\|intro\\\.css\)\$ \{\n        expires 1d;/u)
+  assert.match(schulnetz, /location = \/sitemap\.xml \{\n        expires 1h;\n        types \{ application\/xml xml; \}\n        default_type application\/xml;\n        charset utf-8;\n        charset_types text\/xml application\/xml;/u)
+  assert.match(schulnetz, /location = \/robots\.txt \{\n        expires 1h;\n        charset utf-8;\n        charset_types text\/plain;/u)
+  const blocks = fanotes.split(/\n    location /u).slice(1)
+  for (const block of blocks) {
+    if (!block.includes('add_header X-Content-Type-Options')) continue
+    assert.match(block, /add_header X-Frame-Options "DENY" always;/)
+    assert.match(block, /add_header Permissions-Policy "camera=\(\), microphone=\(\), geolocation=\(\), payment=\(\), usb=\(\), serial=\(\), bluetooth=\(\)" always;/)
+    assert.match(block, /add_header Cross-Origin-Opener-Policy "same-origin" always;/)
+  }
 })
 
 test('server maps .xml and serves the HTML 404 to crawlers', () => {

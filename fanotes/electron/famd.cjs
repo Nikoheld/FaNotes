@@ -5,6 +5,7 @@ const path = require('node:path')
 const crypto = require('node:crypto')
 const v2codec = require('./famdV2.mjs')
 const famdPack = require('./famdPack.mjs')
+const noteAnnotation = require('./noteAnnotation.mjs')
 
 const FAMD_SCHEMA = 'fanotes-famd-v1'
 const FAMD_HEADER = /(?:^|\n)<!--\s*fanotes-famd:v1\s+chars=(\d+)\s*-->\n/u
@@ -132,6 +133,7 @@ function sanitizeNoteTextField(value) {
   const y = Number(value.y)
   const width = Number(value.width)
   const fontSize = Number(value.fontSize)
+  const color = typeof value.color === 'string' && /^#[0-9a-f]{6}$/iu.test(value.color) ? value.color.toLowerCase() : null
   return {
     id: typeof value.id === 'string' && TEXT_FIELD_ID.test(value.id) ? value.id : `tf-${Date.now().toString(36)}`,
     page: Number.isSafeInteger(page) && page >= 1 && page <= 10000 ? page : 1,
@@ -140,6 +142,8 @@ function sanitizeNoteTextField(value) {
     width: Number.isFinite(width) ? Math.min(0.92, Math.max(0.12, width)) : 0.32,
     fontSize: Number.isSafeInteger(fontSize) && fontSize >= 10 && fontSize <= 48 ? fontSize : 16,
     text: typeof value.text === 'string' ? value.text.slice(0, TEXT_FIELD_MAX_CHARS) : '',
+    ...(color ? { color } : {}),
+    ...(value.bold === true ? { bold: true } : {}),
   }
 }
 
@@ -234,6 +238,7 @@ function payloadFromParsed(parsed) {
   const noteBackups = parseNoteBackups(parsed.noteBackups)
   const pageStats = parsePageStats(parsed.pageStats)
   const textFields = parseNoteTextFields(parsed.textFields)
+  const annotations = noteAnnotation.parseAnnotations(parsed.annotations)
   return {
     schema: FAMD_SCHEMA,
     updatedAt,
@@ -244,6 +249,7 @@ function payloadFromParsed(parsed) {
     ...(noteBackups.length ? { noteBackups } : {}),
     ...(pageStats ? { pageStats } : {}),
     ...(textFields.length ? { textFields } : {}),
+    ...(annotations.length ? { annotations } : {}),
   }
 }
 
@@ -302,6 +308,7 @@ function companionFromParsed(parsed) {
     noteLinks: payload?.noteLinks ?? [],
     noteBackups: payload?.noteBackups ?? [],
     textFields: payload?.textFields ?? [],
+    annotations: payload?.annotations ?? [],
   }
 }
 
@@ -395,6 +402,8 @@ function serializeFamd(markdown, payload, encoding) {
   if (pageStats) next.pageStats = pageStats
   const textFields = parseNoteTextFields(payload?.textFields)
   if (textFields.length) next.textFields = textFields
+  const annotations = noteAnnotation.parseAnnotations(payload?.annotations)
+  if (annotations.length) next.annotations = annotations
   if (encoding === 'v2') return v2codec.encodeV2Document(body, next)
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`
@@ -482,6 +491,7 @@ function sameFamdPayload(left, right) {
   if (JSON.stringify(left.noteBackups || []) !== JSON.stringify(right.noteBackups || [])) return false
   if (JSON.stringify(left.pageStats || null) !== JSON.stringify(right.pageStats || null)) return false
   if (JSON.stringify(left.textFields || []) !== JSON.stringify(right.textFields || [])) return false
+  if (JSON.stringify(left.annotations || []) !== JSON.stringify(right.annotations || [])) return false
   return sameInk(left.ink, right.ink)
 }
 
@@ -604,6 +614,7 @@ module.exports = {
   parseNoteBackups,
   parseNoteLinks,
   parseNoteTextFields,
+  parseAnnotations: noteAnnotation.parseAnnotations,
   sameFamdPayload,
   serializeFamd,
   stripFamdPayload,

@@ -2,7 +2,7 @@
 // Synthetic accounts and grades only.
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
@@ -23,6 +23,7 @@ const {
   normalizePairingCode,
   parseCookies,
   PAIR_TTL_MS,
+  SESSION_COOKIE,
   SESSION_IDLE_MS,
 } = await import('./kanti-web-api.mjs')
 const { mergeRevealLedger, newGradeTargetIds, tamSchoolRoot, unrevealedGradeIds, webGradeView, gradeTargetId } = await import('./schulnetz-logic.mjs')
@@ -403,7 +404,8 @@ test('FaNotes sign-in shows the account connection and ends with a password chan
 })
 
 test('hidden grades: a new mark never reaches the browser until it is revealed', async () => {
-  const env = await start()
+  // Changes are stamped with this clock. A live clock's milliseconds can contain the digits 3.5.
+  const env = await start({ clock: () => new Date('2026-11-10T12:00:00.000Z') })
   try {
     const app = await appIdentity(env.base)
     await linkSchulnetz(app)
@@ -730,6 +732,421 @@ test('a request is logged as JSON with a request id and without cookies or the q
     assert.equal(lines[0].includes('secret'), false)
     assert.equal(lines[0].includes('abcdef'), false)
     assert.equal(changes.headers.get('x-request-id'), denied.requestId)
+  } finally {
+    await env.close()
+  }
+})
+
+test('an unreadable session file is kept and the browser cookie stays', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'kanti-web-read-'))
+  const store = createKantiWebStore({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const sessions = join(store.root, 'sessions')
+  const pairings = join(store.root, 'pairings')
+  let sessionFile
+  let pairingFile
+  try {
+    const created = await store.createSession('Browser', [])
+    sessionFile = join(sessions, `${created.hash}.json`)
+    const before = await readFile(sessionFile)
+    const pairing = await store.createPairing('Browser')
+    assert.equal(typeof pairing.code, 'string')
+    const pairingNames = await readdir(pairings)
+    assert.equal(pairingNames.length, 1)
+    pairingFile = join(pairings, pairingNames[0])
+    const pairingBefore = await readFile(pairingFile)
+    const stale = await store.createSession('Old', [])
+    const staleFile = join(sessions, `${stale.hash}.json`)
+    const staleJson = JSON.parse(await readFile(staleFile, 'utf8'))
+    staleJson.expiresAt = '2020-01-01T00:00:00.000Z'
+    await writeFile(staleFile, JSON.stringify(staleJson))
+
+    await chmod(sessionFile, 0o000)
+    await chmod(pairingFile, 0o000)
+    await assert.rejects(() => store.sessionFromToken(created.token), { code: 'EACCES' })
+    await assert.rejects(() => store.updateSession(created.hash, (session) => ({ ...session, browser: 'Other' })), { code: 'EACCES' })
+    const reread = createKantiWebStore({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+    assert.deepEqual(await reread.sessionsFor('none'), [])
+    await store.sweep(true)
+    assert.equal((await readdir(sessions)).includes(`${stale.hash}.json`), false)
+    await chmod(sessionFile, 0o600)
+    await chmod(pairingFile, 0o600)
+    assert.deepEqual(await readFile(sessionFile), before)
+    assert.deepEqual(await readFile(pairingFile), pairingBefore)
+    assert.equal((await store.sessionFromToken(created.token)).session.browser, 'Browser')
+
+    await writeFile(staleFile, '{')
+    await store.sweep(true)
+    assert.equal((await readdir(sessions)).includes(`${stale.hash}.json`), false)
+  } finally {
+    if (sessionFile) await chmod(sessionFile, 0o600).catch(() => undefined)
+    if (pairingFile) await chmod(pairingFile, 0o600).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  let liveFile
+  try {
+    const app = await appIdentity(env.base)
+    const created = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: app.accountId,
+      provider: 'schulnetz',
+      label: 'Schule',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    liveFile = join(env.store.root, 'sessions', `${created.hash}.json`)
+    const before = await readFile(liveFile)
+    const client = browser(env.base)
+    client.jar[SESSION_COOKIE] = created.token
+    await chmod(liveFile, 0o000)
+    const during = await client.call('GET', '/session')
+    assert.equal(during.status, 500)
+    assert.equal(during.body.error, 'Kanti+ ist vorübergehend nicht erreichbar.')
+    assert.equal(client.jar[SESSION_COOKIE], created.token)
+    await env.store.sweep(true)
+    await chmod(liveFile, 0o600)
+    assert.deepEqual(await readFile(liveFile), before)
+    const after = await client.session()
+    assert.equal(after.status, 200)
+    assert.equal(after.body.signedIn, true)
+    assert.equal(after.body.browser, 'Browser')
+  } finally {
+    if (liveFile) await chmod(liveFile, 0o600).catch(() => undefined)
+    await env.close()
+  }
+})
+
+test('a failed session replace removes its temporary file and keeps the session', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'kanti-web-write-'))
+  const store = createKantiWebStore({ root, now: () => new Date('2026-11-15T12:00:00.000Z') })
+  const sessions = join(store.root, 'sessions')
+  try {
+    const created = await store.createSession('Browser', [])
+    const file = join(sessions, `${created.hash}.json`)
+    const before = await readFile(file, 'utf8')
+    await chmod(sessions, 0o500)
+    await assert.rejects(() => store.updateSession(created.hash, (session) => ({ ...session, browser: 'Other' })), { code: 'EACCES' })
+    await chmod(sessions, 0o700)
+    assert.equal(await readFile(file, 'utf8'), before)
+    assert.equal((await readdir(sessions)).some((name) => name.endsWith('.tmp')), false)
+    assert.equal(before.includes('Other'), false)
+  } finally {
+    await chmod(sessions, 0o700).catch(() => undefined)
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('an unreadable account keeps the browser session', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  let guestFile
+  try {
+    const app = await appIdentity(env.base)
+    const paired = await pairBrowser(env.base, [app])
+    guestFile = join(env.root, 'accounts', app.accountId, 'guest.json')
+    const guestBefore = await readFile(guestFile)
+    const sessions = join(env.store.root, 'sessions')
+    const [sessionName] = await readdir(sessions)
+    const sessionBefore = await readFile(join(sessions, sessionName))
+    await chmod(guestFile, 0o000)
+    const during = await paired.client.session()
+    assert.equal(during.status, 200)
+    assert.equal(during.body.signedIn, true)
+    assert.equal(during.body.connections.length, 1)
+    assert.equal(typeof paired.client.jar[SESSION_COOKIE], 'string')
+    await chmod(guestFile, 0o600)
+    assert.deepEqual(await readFile(guestFile), guestBefore)
+    assert.deepEqual(await readFile(join(sessions, sessionName)), sessionBefore)
+    const gone = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: 'a'.repeat(32),
+      provider: 'schulnetz',
+      label: 'Weg',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const other = browser(env.base)
+    other.jar[SESSION_COOKIE] = gone.token
+    const dropped = await other.session()
+    assert.equal(dropped.status, 401)
+    assert.equal(other.jar[SESSION_COOKIE], undefined)
+    const left = await readdir(sessions)
+    assert.equal(left.includes(`${gone.hash}.json`), false)
+    assert.equal(left.includes(sessionName), true)
+  } finally {
+    if (guestFile) await chmod(guestFile, 0o600).catch(() => undefined)
+    await env.close()
+  }
+})
+
+test('a browser session that is not the known shape is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const created = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: 'b'.repeat(32),
+      provider: 'schulnetz',
+      label: 'Bleibt',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const file = join(env.store.root, 'sessions', `${created.hash}.json`)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    parsed.v = 2
+    const stored = `${JSON.stringify(parsed)}\n`
+    await writeFile(file, stored)
+    const client = browser(env.base)
+    client.jar[SESSION_COOKIE] = created.token
+    const result = await client.call('GET', '/session')
+    assert.equal(result.status, 500)
+    assert.equal(client.jar[SESSION_COOKIE], created.token)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    await env.store.sweep(true)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    const expired = await env.store.createSession('Browser', [])
+    const expiredFile = join(env.store.root, 'sessions', `${expired.hash}.json`)
+    const old = JSON.parse(await readFile(expiredFile, 'utf8'))
+    old.expiresAt = '2020-01-01T00:00:00.000Z'
+    old.maxUntil = '2020-01-01T00:00:00.000Z'
+    await writeFile(expiredFile, JSON.stringify(old))
+    await env.store.sweep(true)
+    await assert.rejects(readFile(expiredFile), (error) => error?.code === 'ENOENT')
+    assert.equal(await readFile(file, 'utf8'), stored)
+  } finally {
+    await env.close()
+  }
+})
+
+test('a browser session whose version is not a number is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const created = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: 'c'.repeat(32),
+      provider: 'schulnetz',
+      label: 'Bleibt',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const file = join(env.store.root, 'sessions', `${created.hash}.json`)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    parsed.v = '2'
+    const stored = `${JSON.stringify(parsed)}\n`
+    await writeFile(file, stored)
+    const client = browser(env.base)
+    client.jar[SESSION_COOKIE] = created.token
+    const result = await client.call('GET', '/session')
+    assert.equal(result.status, 500)
+    assert.equal(client.jar[SESSION_COOKIE], created.token)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    await env.store.sweep(true)
+    assert.equal(await readFile(file, 'utf8'), stored)
+  } finally {
+    await env.close()
+  }
+})
+
+test('a browser session whose connections are not connections is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-16T12:00:00.000Z') })
+  try {
+    const app = await appIdentity(env.base)
+    const created = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: app.accountId,
+      provider: 'schulnetz',
+      label: 'Bleibt',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const file = join(env.store.root, 'sessions', `${created.hash}.json`)
+    const valid = await readFile(file, 'utf8')
+    const parsed = JSON.parse(valid)
+    const client = browser(env.base)
+    client.jar[SESSION_COOKIE] = created.token
+    const opened = await client.session()
+    assert.equal(opened.status, 200)
+    assert.equal(opened.body.connections.length, 1)
+    assert.equal(await readFile(file, 'utf8'), valid)
+    const keep = async (value) => {
+      const stored = JSON.stringify(value)
+      await writeFile(file, stored)
+      const result = await client.call('GET', '/session')
+      assert.equal(result.status, 500)
+      assert.equal(client.jar[SESSION_COOKIE], created.token)
+      assert.equal(await readFile(file, 'utf8'), stored)
+      await assert.rejects(
+        () => env.store.revoke(app.accountId, created.session.publicId),
+        (error) => error?.code === 'EBADMSG',
+      )
+      assert.equal(await readFile(file, 'utf8'), stored)
+      await env.store.sweep(true)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ ...parsed, connections: 'kept' })
+    await keep({ ...parsed, connections: null })
+    await keep({ ...parsed, connections: [{ kept: true }] })
+    await keep({ ...parsed, connections: [...parsed.connections, { kept: true }] })
+    await keep({ ...parsed, fanotes: 'kept' })
+    await keep({ ...parsed, fanotes: { kept: true } })
+    await writeFile(file, valid)
+    const restored = await client.session()
+    assert.equal(restored.status, 200)
+    assert.equal(restored.body.connections.length, 1)
+    assert.equal(await readFile(file, 'utf8'), valid)
+    await writeFile(file, JSON.stringify({ ...parsed, connections: [] }))
+    const dropped = await client.session()
+    assert.equal(dropped.status, 401)
+    assert.equal(client.jar[SESSION_COOKIE], undefined)
+    await assert.rejects(readFile(file), (error) => error?.code === 'ENOENT')
+  } finally {
+    await env.close()
+  }
+})
+
+test('a browser session whose expiry is not a time is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-16T12:00:00.000Z') })
+  try {
+    const app = await appIdentity(env.base)
+    const created = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: app.accountId,
+      provider: 'schulnetz',
+      label: 'Bleibt',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const file = join(env.store.root, 'sessions', `${created.hash}.json`)
+    const valid = await readFile(file, 'utf8')
+    const parsed = JSON.parse(valid)
+    const client = browser(env.base)
+    client.jar[SESSION_COOKIE] = created.token
+    const opened = await client.session()
+    assert.equal(opened.status, 200)
+    assert.equal(opened.body.connections.length, 1)
+    assert.equal(await readFile(file, 'utf8'), valid)
+    const keep = async (value) => {
+      const stored = JSON.stringify(value)
+      await writeFile(file, stored)
+      const result = await client.call('GET', '/session')
+      assert.equal(result.status, 500)
+      assert.equal(client.jar[SESSION_COOKIE], created.token)
+      assert.equal(await readFile(file, 'utf8'), stored)
+      await env.store.sweep(true)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ ...parsed, expiresAt: 'tomorrow' })
+    await keep({ ...parsed, expiresAt: 1_700_000_000_000 })
+    await keep({ ...parsed, maxUntil: 'later' })
+    await keep({ ...parsed, maxUntil: 1 })
+    await writeFile(file, valid)
+    const restored = await client.session()
+    assert.equal(restored.status, 200)
+    assert.equal(restored.body.connections.length, 1)
+    assert.equal(await readFile(file, 'utf8'), valid)
+    const blank = { ...parsed, expiresAt: '' }
+    await writeFile(file, JSON.stringify(blank))
+    const ended = await client.session()
+    assert.equal(ended.status, 401)
+    assert.equal(client.jar[SESSION_COOKIE], undefined)
+    await assert.rejects(readFile(file), (error) => error?.code === 'ENOENT')
+    const expired = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: app.accountId,
+      provider: 'schulnetz',
+      label: 'Weg',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const expiredFile = join(env.store.root, 'sessions', `${expired.hash}.json`)
+    const old = JSON.parse(await readFile(expiredFile, 'utf8'))
+    old.expiresAt = '2020-01-01T00:00:00.000Z'
+    old.maxUntil = '2020-01-01T00:00:00.000Z'
+    await writeFile(expiredFile, JSON.stringify(old))
+    await env.store.sweep(true)
+    await assert.rejects(readFile(expiredFile), (error) => error?.code === 'ENOENT')
+  } finally {
+    await env.close()
+  }
+})
+
+test('a claimed pairing does not keep a connection id from the code', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const offer = await env.store.createOffer()
+    const pairings = join(env.store.root, 'pairings')
+    const [name] = await readdir(pairings)
+    const file = join(pairings, name)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    const accountId = 'a'.repeat(32)
+    parsed.finished = true
+    parsed.connections = [{ accountId, id: 'not-a-connection', provider: 'tam', label: '  TAM  ', baseUrl: 'https://school.example' }]
+    await writeFile(file, JSON.stringify(parsed))
+    const claimed = await env.store.claimOffer(offer.code, 'Browser', null)
+    assert.equal(claimed.added, 1)
+    const [connection] = claimed.session.connections
+    assert.match(connection.id, /^[a-f0-9]{12}$/u)
+    assert.equal(connection.provider, 'tam')
+    assert.equal(connection.label, 'TAM')
+    assert.equal(connection.baseUrl, 'https://school.example')
+    assert.equal(connection.source, 'pair')
+    await assert.rejects(readFile(file), (error) => error?.code === 'ENOENT')
+  } finally {
+    await env.close()
+  }
+})
+
+test('a pairing code whose connections are not a list is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const offer = await env.store.createOffer()
+    const pairings = join(env.store.root, 'pairings')
+    const [name] = await readdir(pairings)
+    const file = join(pairings, name)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    const keep = async (value) => {
+      const stored = `${JSON.stringify(value)}\n`
+      await writeFile(file, stored)
+      await assert.rejects(() => env.store.lookupPairing(offer.code), (error) => error?.code === 'EBADMSG')
+      await env.store.sweep(true)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ ...parsed, connections: { accountId: 'd'.repeat(32) } })
+    await keep({ ...parsed, finished: 'yes' })
+    await keep({ ...parsed, connections: [{ accountId: 'not-an-id' }] })
+  } finally {
+    await env.close()
+  }
+})
+
+test('a pairing code of another version is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const offer = await env.store.createOffer()
+    const pairings = join(env.store.root, 'pairings')
+    const [name] = await readdir(pairings)
+    const file = join(pairings, name)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    parsed.v = '2'
+    parsed.expiresAt = '2020-01-01T00:00:00.000Z'
+    parsed.connections = [{ accountId: 'd'.repeat(32), kept: true }]
+    const stored = `${JSON.stringify(parsed)}\n`
+    await writeFile(file, stored)
+    await assert.rejects(() => env.store.lookupPairing(offer.code), (error) => error?.code === 'EBADMSG')
+    await env.store.sweep(true)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    const odd = await env.store.createOffer()
+    const oddName = (await readdir(pairings)).find((item) => item !== name)
+    const oddFile = join(pairings, oddName)
+    const oddParsed = JSON.parse(await readFile(oddFile, 'utf8'))
+    const oddStored = `${JSON.stringify({ ...oddParsed, expiresAt: 'tomorrow' })}\n`
+    await writeFile(oddFile, oddStored)
+    await assert.rejects(() => env.store.lookupPairing(odd.code), (error) => error?.code === 'EBADMSG')
+    await env.store.sweep(true)
+    assert.equal(await readFile(oddFile, 'utf8'), oddStored)
+    assert.equal(await readFile(file, 'utf8'), stored)
+    const expired = await env.store.createOffer()
+    const names = await readdir(pairings)
+    const expiredName = names.find((item) => item !== name && item !== oddName)
+    const expiredFile = join(pairings, expiredName)
+    const old = JSON.parse(await readFile(expiredFile, 'utf8'))
+    old.expiresAt = '2020-01-01T00:00:00.000Z'
+    await writeFile(expiredFile, JSON.stringify(old))
+    await env.store.sweep(true)
+    await assert.rejects(readFile(expiredFile), (error) => error?.code === 'ENOENT')
+    assert.equal(await readFile(file, 'utf8'), stored)
   } finally {
     await env.close()
   }

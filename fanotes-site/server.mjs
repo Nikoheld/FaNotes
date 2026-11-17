@@ -11,6 +11,8 @@ import { handleProfileRequest } from './profile-api.mjs'
 import { handleRemoteSupportRequest } from './remote-support-api.mjs'
 import { handleBugReportRequest } from './bug-report-api.mjs'
 import { handleSendDataRequest } from './send-data-api.mjs'
+import { handleDiagnosticsRequest } from './diagnostics-api.mjs'
+import { handleWorkRequestsRequest } from './work-requests-api.mjs'
 import { handleSyncRequest, setAccountDeletedHook } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
 import { handleMcpRequest } from './mcp-api.mjs'
@@ -23,7 +25,9 @@ import { languageForRequest, localizeExactText, localizeResponse } from './i18n.
 import { createAnalyticsService } from './analytics.mjs'
 import { loadGithubReleases, pickGithubPackage } from './github-release.mjs'
 import { startSystemdWatchdog } from './systemd-notify.mjs'
+import { readBackupStatus } from './backup-status.mjs'
 import { createReleaseCache } from './release-cache.mjs'
+import { readReleaseShare } from './release-list.mjs'
 import { FAVICON_TARGET, clientAddress, createPublicLimiter, publicCacheControl } from './public-http.mjs'
 import {
   DELTA_ROUTE_PATTERN,
@@ -137,13 +141,12 @@ const updateSigningMaterial = () => {
   return updateSigningMaterialPromise
 }
 
-const checksumMap = async () => {
-  const text = await fs.readFile(join(RELEASE_DIR, 'SHA256SUMS'), 'utf8')
-  return new Map(text.split(/\r?\n/u).flatMap((line) => {
-    const match = /^([a-f0-9]{64})\s+\*?(.+)$/iu.exec(line.trim())
-    return match ? [[match[2], match[1].toLowerCase()]] : []
-  }))
-}
+const checksumMapFromText = (text) => new Map(String(text).split(/\r?\n/u).flatMap((line) => {
+  const match = /^([a-f0-9]{64})\s+\*?(.+)$/iu.exec(line.trim())
+  return match ? [[match[2], match[1].toLowerCase()]] : []
+}))
+
+const checksumMap = async () => checksumMapFromText(await fs.readFile(join(RELEASE_DIR, 'SHA256SUMS'), 'utf8'))
 
 let trustedChecksumCache = null
 const releaseDigestCache = new Map()
@@ -298,10 +301,11 @@ const discoverPlatformRelease = async (platform, entries, checksums, channel = '
 
 const discoverReleases = async (channel = 'stable') => {
   if (!UPDATE_CHANNELS.includes(channel)) throw new Error('Unbekannter Release-Kanal.')
-  const [entries, checksums] = await Promise.all([
-    fs.readdir(RELEASE_DIR, { withFileTypes: true }),
-    checksumMap(),
-  ])
+  // A child, not fs.readdir: a hung share must not keep a libuv thread, and a
+  // second listing waits until that child has actually exited.
+  const share = await readReleaseShare(RELEASE_DIR)
+  const entries = share.files.map((name) => ({ name, isFile: () => true }))
+  const checksums = checksumMapFromText(share.checksums)
   const [linux, windows] = await Promise.all([
     discoverPlatformRelease('linux', entries, checksums, channel),
     discoverPlatformRelease('windows', entries, checksums, channel),
@@ -648,6 +652,8 @@ const server = createServer(async (request, response) => {
     if (await handleRemoteSupportRequest(request, response, url)) return
     if (await handleBugReportRequest(request, response, url)) return
     if (await handleSendDataRequest(request, response, url)) return
+    if (await handleDiagnosticsRequest(request, response, url)) return
+    if (await handleWorkRequestsRequest(request, response, url)) return
     if (await handleAiProxyRequest(request, response, url)) return
     if (url.pathname === '/api/v1/analytics/event') {
       if (request.method !== 'POST') {
@@ -683,13 +689,21 @@ const server = createServer(async (request, response) => {
       return
     }
     if (url.pathname === '/api/health') {
-      const releases = await releaseCache.get()
-      // Kanti+ grade promise: max age of the last successful grade check across linked accounts (< 600 s).
-      const kanti = await schulnetz.health().catch(() => null)
+      // The release share can stop answering. Health must still return the grade promise.
+      const releases = await releaseCache.get('stable', 2_000)
+      const kanti = await Promise.race([
+        schulnetz.health().catch(() => null),
+        new Promise((resolve) => setTimeout(() => resolve(null), 2_000)),
+      ])
+      const backup = await Promise.race([
+        readBackupStatus(process.env.FANOTES_SYNC_BACKUP_DIR || '/var/lib/fanotes-sync-backups').catch(() => null),
+        new Promise((resolve) => setTimeout(() => resolve(null), 2_000)),
+      ])
       json(response, 200, {
         status: 'ok',
-        version: releases.linux.version,
-        windowsVersion: releases.windows?.version ?? null,
+        version: releases?.linux?.version ?? null,
+        windowsVersion: releases?.windows?.version ?? null,
+        backup,
         ...(kanti ? { schulnetz: { status: kanti.status, gradeCheckMaxAgeSeconds: kanti.gradeChecks.maxAgeSeconds, overdue: kanti.gradeChecks.overdue, slaSeconds: kanti.slaSeconds, pollErrors: kanti.pollErrors, push: { p50LatencyMs: kanti.pushes24h.p50LatencyMs, p95LatencyMs: kanti.pushes24h.p95LatencyMs, maxLatencyMs: kanti.pushes24h.maxLatencyMs, overdue: kanti.pushes24h.overdue } } } : {}),
       })
       return
@@ -745,7 +759,9 @@ const server = createServer(async (request, response) => {
 
 server.keepAliveTimeout = 65_000
 server.headersTimeout = 70_000
-server.requestTimeout = 30_000
+// Sync accepts a 110 MB encrypted note and nginx allows 300 s for that body.
+// 30 s aborted a slow upload before it could be stored.
+server.requestTimeout = 300_000
 
 startSystemdWatchdog()
 

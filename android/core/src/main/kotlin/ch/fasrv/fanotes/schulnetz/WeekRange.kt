@@ -287,17 +287,34 @@ fun stampWeeks(previous: Map<String, String>, minDay: String, maxDay: String, no
  * 43 ids for 669 lessons), so a lesson's identity is its id and its start; an id alone would keep
  * only the first week's lesson and drop every later one.
  */
-fun mergeById(base: List<AgendaEvent>, incoming: List<AgendaEvent>): List<AgendaEvent> {
+fun mergeById(base: List<AgendaEvent>, incoming: List<AgendaEvent>): List<AgendaEvent> = mergeBy(base, incoming, ::mergeKey)
+
+/**
+ * Merges exam lists like [mergeById], but a scheduler id ([positionalScheduleId]) only names an exam
+ * together with its start: by id alone, exam 1 of one week replaced exam 1 of every other week.
+ * Server mirror: carryTimetableExams (schulnetz-logic.mjs).
+ */
+fun mergeExamsById(base: List<AgendaEvent>, incoming: List<AgendaEvent>): List<AgendaEvent> =
+    mergeBy(base, incoming) { event -> if (positionalScheduleId(event)) "${cleanSchulnetzText(event.id)}|${event.start}" else event.id }
+
+/**
+ * A bare number is a scheduler id: the entry's position in one week's answer (0, 1, 2… again every
+ * week, and the class overview counts separately from the timetable). Any other id (an iCal UID, a
+ * REST id) is the exam's own. Server mirror: positionalScheduleId (schulnetz-logic.mjs).
+ */
+fun positionalScheduleId(event: AgendaEvent): Boolean = cleanSchulnetzText(event.id).let { it.isNotEmpty() && it.all(Char::isDigit) }
+
+private fun mergeBy(base: List<AgendaEvent>, incoming: List<AgendaEvent>, keyOf: (AgendaEvent) -> String): List<AgendaEvent> {
     if (incoming.isEmpty()) return base
-    val incomingByKey = incoming.associateBy(::mergeKey)
+    val incomingByKey = incoming.associateBy(keyOf)
     val seen = mutableSetOf<String>()
     val out = mutableListOf<AgendaEvent>()
     for (event in base) {
-        val key = mergeKey(event)
+        val key = keyOf(event)
         if (!seen.add(key)) continue
         out += incomingByKey[key] ?: event
     }
-    for (event in incoming) if (seen.add(mergeKey(event))) out += event
+    for (event in incoming) if (seen.add(keyOf(event))) out += event
     return out
 }
 

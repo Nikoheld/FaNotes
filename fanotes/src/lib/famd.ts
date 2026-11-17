@@ -1,6 +1,7 @@
 import { parseNoteBackups, serializeNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, serializeNoteLinks, type NoteLinkRecord } from './noteLink'
 import { parseNoteTextFields, type NoteTextField } from './noteTextField'
+import { annotationsHaveContent, parseAnnotations, type NoteAnnotation } from '../../electron/noteAnnotation.mjs'
 import { parsePageStats, type PageStats } from './pageStats'
 import { isPaperStyle } from './paperStyles'
 import type { PaperStyle } from '../types'
@@ -33,6 +34,8 @@ export type FamdPayload = {
   noteBackups?: NoteBackupSnapshot[]
   pageStats?: PageStats
   textFields?: NoteTextField[]
+  /** Study annotations (callouts, stamps, reference images ...). Versions before them drop this key on save. */
+  annotations?: NoteAnnotation[]
 }
 
 export const isNoteFileName = (name: string) => (
@@ -104,6 +107,7 @@ const payloadFromParsed = (parsed: Partial<FamdPayload> & { schema?: string } | 
   const noteBackups = parseNoteBackups(parsed.noteBackups)
   const pageStats = parsed.pageStats ? parsePageStats(parsed.pageStats, Date.parse(updatedAt) || Date.now()) : undefined
   const textFields = parseNoteTextFields(parsed.textFields)
+  const annotations = parseAnnotations(parsed.annotations)
   return {
     schema: FAMD_SCHEMA,
     updatedAt,
@@ -114,6 +118,7 @@ const payloadFromParsed = (parsed: Partial<FamdPayload> & { schema?: string } | 
     ...(noteBackups.length ? { noteBackups } : {}),
     ...(pageStats ? { pageStats } : {}),
     ...(textFields.length ? { textFields } : {}),
+    ...(annotations.length ? { annotations } : {}),
   }
 }
 
@@ -205,7 +210,8 @@ export const inkHasMarks = (value: unknown, depth = 0): boolean => {
 }
 
 const textFieldsHaveText = (payload: FamdPayload | null) => (
-  payload?.textFields?.some((field) => typeof field.text === 'string' && field.text.trim().length > 0) ?? false
+  (payload?.textFields?.some((field) => typeof field.text === 'string' && field.text.trim().length > 0) ?? false)
+  || annotationsHaveContent(payload?.annotations)
 )
 
 /** Blank means no prose and no ink. A truncated famd is unreadable and must not be uploaded. */
@@ -286,6 +292,8 @@ export const serializeFamd = (markdown: string, payload: FamdPayload, encoding?:
   if (payload.pageStats) next.pageStats = payload.pageStats
   const textFields = parseNoteTextFields(payload.textFields)
   if (textFields.length) next.textFields = textFields
+  const annotations = parseAnnotations(payload.annotations)
+  if (annotations.length) next.annotations = annotations
   if (encoding === 'v2') return encodeV2Document(body, next)
   const json = JSON.stringify(next)
   return `${body ? `${body}\n\n` : ''}<!-- fanotes-famd:v1 chars=${json.length} -->\n${json}\n`

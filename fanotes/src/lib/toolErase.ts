@@ -1,12 +1,7 @@
 import { strokePointBounds } from './strokeBounds'
 import {
   cutPageStroke,
-  distanceToPath,
   distanceToSegment,
-  pixelsOf,
-  planInkPieces,
-  rangeHitsPath,
-  sliceStroke,
   type InkPieceStroke,
 } from './inkPieces'
 
@@ -93,10 +88,9 @@ const boundsOverlap = (
 ) => right >= otherLeft && left <= otherRight && bottom >= otherTop && top <= otherBottom
 
 /**
- * Removes the letter the eraser actually touches.
- * A dot or crossbar goes with its letter. Neighbouring letters stay, even
- * when they share a pen stroke. A long straight mark loses only the span
- * under the eraser.
+ * Strictly local eraser: cuts away only the ink within the eraser's reach
+ * (radius plus half the stroke width) along its path, at the page's scale.
+ * Nothing else is removed or widened.
  */
 export const applyToolErase = <T extends ToolEraseStroke>(
   strokes: T[],
@@ -120,8 +114,9 @@ export const applyToolErase = <T extends ToolEraseStroke>(
     pathBottom = Math.max(pathBottom, point.y)
   }
 
-  // Cached bounds per stroke: building a pixel array for every stroke on each
-  // eraser move cost about 0.3 s per drag on a 320k-sample note.
+  // Cached bounds per stroke: reading every sample of every stroke on each
+  // eraser move cost about 0.3 s per drag on a 320k-sample note. A stroke
+  // whose bounds, grown by the eraser's reach, miss the path is not read at all.
   const near: T[] = []
   for (const stroke of strokes) {
     if (!stroke.points.length) continue
@@ -130,60 +125,31 @@ export const applyToolErase = <T extends ToolEraseStroke>(
     const top = bounds.minY * sourceHeight
     const right = bounds.maxX * sourceWidth
     const bottom = bounds.maxY * sourceHeight
-    const pad = radius + visibleHalfWidth(stroke) + 96
+    const pad = radius + visibleHalfWidth(stroke) + 1
     if (boundsOverlap(left, top, right, bottom, pathLeft - pad, pathTop - pad, pathRight + pad, pathBottom + pad)) {
       near.push(stroke)
     }
   }
   if (!near.length) return strokes
 
-  const pieces = planInkPieces(near, sourceWidth, sourceHeight)
-  const removeGroup = new Set<number>()
-  const cutPiece = new Set<(typeof pieces)[number]>()
-  for (const piece of pieces) {
-    const pixels = pixelsOf(piece.stroke.points, sourceWidth, sourceHeight)
-    const reach = radius + visibleHalfWidth(piece.stroke)
-    const hit = rangeHitsPath(pixels, piece.start, piece.end, reach, path)
-      || (piece.start === piece.end && distanceToPath(pixels[piece.start], path) <= reach)
-    if (!hit) continue
-    if (piece.kind === 'long') cutPiece.add(piece)
-    else removeGroup.add(piece.group)
-  }
-  if (!removeGroup.size && !cutPiece.size) return strokes
-
-  const byStroke = new Map<T, typeof pieces>()
-  for (const piece of pieces) {
-    const list = byStroke.get(piece.stroke)
-    if (list) list.push(piece)
-    else byStroke.set(piece.stroke, [piece])
-  }
-
+  // Strictly local: only the ink inside the eraser's reach is cut away. No
+  // letter, dot or neighbouring-word grouping widens the erased area.
+  const nearSet = new Set<T>(near)
   let changed = false
   const next: T[] = []
   for (const stroke of strokes) {
-    const mine = byStroke.get(stroke)
-    if (!mine) {
+    if (!nearSet.has(stroke)) {
       next.push(stroke)
       continue
     }
-    const dropped = mine.some((piece) => piece.kind !== 'long' && removeGroup.has(piece.group))
-    const cut = mine.some((piece) => cutPiece.has(piece))
-    if (!dropped && !cut) {
+    const reach = radius + visibleHalfWidth(stroke)
+    const pieces = cutPageStroke(stroke, sourceWidth, sourceHeight, path, reach)
+    if (!pieces) {
       next.push(stroke)
       continue
     }
     changed = true
-    const pixels = pixelsOf(stroke.points, sourceWidth, sourceHeight)
-    const reach = radius + visibleHalfWidth(stroke)
-    for (const piece of mine) {
-      if (piece.kind !== 'long' && removeGroup.has(piece.group)) continue
-      if (piece.kind === 'long' && cutPiece.has(piece)) {
-        const letterWidth = piece.bounds.height >= 14 ? Math.max(32, piece.bounds.height * 1.15) : 0
-        next.push(...cutPageStroke(stroke, pixels, path, reach, letterWidth, piece.start, piece.end))
-        continue
-      }
-      next.push(sliceStroke(stroke, piece.start, piece.end))
-    }
+    next.push(...pieces)
   }
   return changed ? next : strokes
 }

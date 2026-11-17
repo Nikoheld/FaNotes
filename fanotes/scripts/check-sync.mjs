@@ -50,6 +50,7 @@ const vite = await createServer({ root: appRoot, appType: 'custom', logLevel: 'e
 const crypto = await vite.ssrLoadModule('/src/lib/sync/crypto.ts')
 const { SyncApi, SyncApiError } = await vite.ssrLoadModule('/src/lib/sync/api.ts')
 const { SyncEngine, isSyncablePath, conflictCopyPath, loadPersistedSyncState } = await vite.ssrLoadModule('/src/lib/sync/engine.ts')
+const { syncStatusLabel } = await vite.ssrLoadModule('/src/lib/sync/status.ts')
 const homework = await vite.ssrLoadModule('/src/lib/homeworkStore.ts')
 const conflictsModule = await vite.ssrLoadModule('/src/lib/sync/conflicts.ts')
 
@@ -380,7 +381,14 @@ try {
 
   // A note that is being edited is not overwritten; it arrives once the editor is quiet.
   let busy = true
-  const C = createEngine(hostB, 'Tablet', { busy: (path) => busy && path === 'Mathe/Algebra.md' })
+  // `busyAfter`: the file turns busy only after this many checks (an editor starts on it during the download).
+  let busyAfter = -1
+  let checks = 0
+  const C = createEngine(hostB, 'Tablet', { busy: (path) => {
+    if (path !== 'Mathe/Algebra.md') return false
+    if (busyAfter >= 0) return checks++ >= busyAfter
+    return busy
+  } })
   await C.engine.start()
   assert.equal(C.engine.getState().status, 'idle', 'session restored from the host secrets')
   assert.equal(C.engine.getState().account.email, 'fabio@example.com')
@@ -391,6 +399,76 @@ try {
   busy = false
   await C.engine.syncNow()
   assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.', 'applied once the note is idle')
+
+  // The file was free when the pull looked at it, but an editor started on it while it downloaded:
+  // the write is put off, not done over the editor's file.
+  hostA.put('Mathe/Algebra.md', '# Algebra\n\nWährend des Downloads.')
+  await A.engine.syncNow()
+  busyAfter = 1
+  checks = 0
+  await C.engine.syncNow()
+  assert.ok(checks >= 2, 'busy was asked again before writing')
+  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.', 'not written while the editor holds it')
+  busyAfter = -1
+  busy = false
+  await C.engine.syncNow()
+  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nWährend des Downloads.', 'written on the next cycle')
+  hostA.put('Mathe/Algebra.md', '# Algebra\n\nDritte Fassung.')
+  await A.engine.syncNow()
+  await C.engine.syncNow()
+
+  // A file that is here but cannot be read (permissions, locked) is not "missing":
+  // the server's version is not written over it; it arrives once it can be read.
+  const readable = hostB.read
+  hostB.read = async (path) => { if (path === 'Mathe/Algebra.md') throw new Error('EACCES'); return readable(path) }
+  hostA.put('Mathe/Algebra.md', '# Algebra\n\nVierte Fassung.')
+  await A.engine.syncNow()
+  await C.engine.syncNow()
+  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.', 'unreadable local note left alone')
+  hostB.read = readable
+  await C.engine.syncNow()
+  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nVierte Fassung.', 'applied once it can be read')
+  hostA.put('Mathe/Algebra.md', '# Algebra\n\nDritte Fassung.')
+  await A.engine.syncNow()
+  await C.engine.syncNow()
+  assert.equal(hostB.text('Mathe/Algebra.md'), '# Algebra\n\nDritte Fassung.')
+
+  // A large first sync runs into the server's request budget (HTTP 429). That is a pause, not
+  // an error: no error state, and the cycle goes on by itself after the server's retryAfter,
+  // even with automatic sync off.
+  {
+    const realFetch = globalThis.fetch
+    let throttle = true
+    globalThis.fetch = (input, init) => {
+      if (throttle && String(input).includes('/api/v1/sync/') && !String(input).endsWith('/prelogin')) {
+        throttle = false
+        return Promise.resolve(new Response(JSON.stringify({ error: 'Zu viele Anfragen. Bitte später erneut versuchen.', retryAfter: 1 }), { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '1' } }))
+      }
+      return realFetch(input, init)
+    }
+    try {
+      hostA.put('Mathe/Gedrosselt.md', '# Gedrosselt')
+      await A.engine.syncNow()
+      const paused = A.engine.getState()
+      assert.equal(paused.status, 'paused', 'a throttled cycle shows as a pause, not as in sync')
+      assert.equal(paused.error, null, 'throttling is not an error')
+      assert.ok(paused.pausedUntil > Date.now() - 50 && paused.pausedUntil <= Date.now() + 65_000, 'the end of the pause is published')
+      assert.ok(paused.log.some((entry) => /bremst kurz/u.test(entry.text)), 'the pause is logged')
+      let calls = 0
+      const counting = globalThis.fetch
+      globalThis.fetch = (input, init) => { calls += 1; return counting(input, init) }
+      await A.engine.syncNow('focus')
+      assert.equal(calls, 0, 'automatic triggers wait while the server throttles')
+      for (let waited = 0; waited < 4_000 && A.engine.getState().lastSyncAt === paused.lastSyncAt; waited += 100) await new Promise((resolve) => setTimeout(resolve, 100))
+      assert.notEqual(A.engine.getState().lastSyncAt, paused.lastSyncAt, 'the cycle resumed by itself after retryAfter')
+      assert.ok(calls > 0)
+      await C.engine.syncNow()
+      assert.equal(hostB.text('Mathe/Gedrosselt.md'), '# Gedrosselt', 'the resumed cycle uploaded the note')
+      assert.equal(A.engine.getState().status, 'idle', A.engine.getState().error)
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
 
   // Password change re-wraps the same vault secret; other sessions are signed out.
   await A.engine.changePassword('korrektes pferd batterie', 'neues sicheres passwort 42')
@@ -888,6 +966,403 @@ try {
     Q.engine.dispose()
   }
 
+  // ── Review R13: the throttle pause, notes that wait, and what a failed cycle leaves behind ──
+  {
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    const waitFor = async (check, message, limit = 8_000) => {
+      for (let waited = 0; waited < limit; waited += 25) {
+        if (check()) return
+        await sleep(25)
+      }
+      assert.fail(message)
+    }
+    const password = 'drosselung und halten 2026'
+    const clockOf = (ms) => `${String(new Date(ms).getHours()).padStart(2, '0')}:${String(new Date(ms).getMinutes()).padStart(2, '0')}`
+    /** An engine whose requests the test can count, slow down, or answer with HTTP 429 (the server's request budget). */
+    const createSteered = (host, name, hooks = {}) => {
+      const steer = {
+        counts: { changes: 0, download: 0, upload: 0, delete: 0 },
+        log: [],
+        rule: null,
+        /** `rule(kind, count)` returns `{ throttle: seconds }`, `{ delay: ms }` or nothing; counts and log start again. */
+        arm(rule) { steer.counts = { changes: 0, download: 0, upload: 0, delete: 0 }; steer.log = []; steer.rule = rule },
+      }
+      const steerFetch = async (input, init = {}) => {
+        const url = new URL(String(input))
+        const route = url.pathname.slice('/api/v1/sync'.length)
+        const method = init.method ?? 'GET'
+        const kind = route.startsWith('/changes') ? 'changes' : route.startsWith('/files/') ? (method === 'PUT' ? 'upload' : method === 'DELETE' ? 'delete' : 'download') : null
+        if (kind) {
+          steer.counts[kind] += 1
+          steer.log.push({ kind, search: url.search })
+          const verdict = steer.rule?.(kind, steer.counts[kind])
+          if (verdict?.delay) await sleep(verdict.delay)
+          if (verdict?.throttle) {
+            return new Response(JSON.stringify({ error: 'Zu viele Anfragen. Bitte später erneut versuchen.', retryAfter: verdict.throttle }), { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': String(verdict.throttle) } })
+          }
+        }
+        return fetch(input, init)
+      }
+      const engine = new SyncEngine(new SyncApi(ORIGIN, steerFetch))
+      const events = { applied: [], conflicts: [] }
+      engine.attach(host, {
+        platform: 'linux',
+        deviceName: () => name,
+        automatic: () => hooks.automatic ?? false,
+        isPathBusy: (path) => hooks.busy?.(path) ?? false,
+        excludedPrefixes: () => [],
+        onApplied: (change) => events.applied.push(change),
+        onConflict: (conflict) => events.conflicts.push(conflict),
+        onSignedOut: () => undefined,
+      })
+      return { engine, events, steer }
+    }
+    /**
+     * Records the timers the engine arms (window.setTimeout) and lets the test fire one by hand, so no check has to
+     * wait for a pause to run out, or to bet on a pause still lasting after a slow step.
+     */
+    const captureTimers = () => {
+      const realSetTimeout = window.setTimeout
+      const timers = []
+      window.setTimeout = (callback, delay, ...rest) => {
+        const id = realSetTimeout(callback, delay, ...rest)
+        timers.push({ callback, delay, id })
+        return id
+      }
+      return { timers, restore() { window.setTimeout = realSetTimeout }, fire(timer) { clearTimeout(timer.id); timer.callback() } }
+    }
+    /** Answers the first sync request with HTTP 429 and everything after it normally. */
+    const first = (throttle) => { let used = false; return () => { if (used) return null; used = true; return { throttle } } }
+    const savedState = (host, vault) => JSON.parse(host.store.state.get(vault))
+
+    // The status label.
+    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 0 }), 'Synchron')
+    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 1 }), 'Synchron · 1 Änderung von einem anderen Gerät wartet')
+    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 3 }), 'Synchron · 3 Änderungen von anderen Geräten warten')
+    assert.equal(syncStatusLabel({ status: 'paused', pausedUntil: new Date(2026, 10, 16, 9, 5, 30).getTime(), heldRemote: 0 }), 'Sync pausiert – geht um 09:05 weiter')
+    assert.equal(syncStatusLabel({ status: 'paused', pausedUntil: new Date(2026, 10, 16, 14, 32, 0).getTime(), heldRemote: 2 }), 'Sync pausiert – geht um 14:32 weiter · 2 Änderungen von anderen Geräten warten')
+    assert.equal(syncStatusLabel({ status: 'paused', pausedUntil: null, heldRemote: 0 }), 'Sync pausiert')
+    assert.equal(syncStatusLabel({ status: 'offline', heldRemote: 2 }), 'Offline – wartet auf Verbindung')
+    // The settings card shows the pause (icon, colour class, label with the end time) and the waiting changes.
+    {
+      const { createElement } = await import('react')
+      const { renderToStaticMarkup } = await import('react-dom/server')
+      const { SyncSettingsSection } = await vite.ssrLoadModule('/src/components/SyncSettingsSection.tsx')
+      const { defaultSettingsForPlatform } = await vite.ssrLoadModule('/src/defaults.ts')
+      const render = (patch) => renderToStaticMarkup(createElement(SyncSettingsSection, {
+        engine: {},
+        syncState: { status: 'idle', account: { email: 'ada@example.com', accountId: 'a'.repeat(32), deviceId: 'd' }, vaultId: 'v', lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false, ...patch },
+        settings: defaultSettingsForPlatform('linux'),
+        update: () => undefined,
+        platform: 'linux',
+        grants: [],
+        onGrants: () => undefined,
+      }))
+      const pausedHtml = render({ status: 'paused', pausedUntil: new Date(2026, 10, 16, 14, 32, 0).getTime(), heldRemote: 1 })
+      assert.match(pausedHtml, /sync-status-card is-paused/u)
+      assert.match(pausedHtml, /sync-status-icon"><svg[^>]*lucide-clock/u, 'the pause has its own icon')
+      assert.match(pausedHtml, /Sync pausiert – geht um 14:32 weiter · 1 Änderung von einem anderen Gerät wartet/u)
+      assert.doesNotMatch(render({ status: 'idle' }), /is-paused|lucide-clock/u)
+      assert.match(render({ status: 'idle', heldRemote: 2 }), /Synchron · 2 Änderungen von anderen Geräten warten/u)
+    }
+
+    // 1 + 2. The server's request budget runs out: the pause is shown with its end, a manual sync waits for
+    // it instead of firing a request, a replaced timer does not end the periodic sync, and a good cycle,
+    // a sign-out or a clock that jumped back do not leave the gate shut.
+    {
+      const host = createFakeHost('r13-pause')
+      host.put('Pause/Eins.md', '# Eins')
+      const T = createSteered(host, 'Laptop', { automatic: true })
+      await T.engine.register('pause@example.com', password)
+      await T.engine.syncNow()
+      await T.engine.syncNow()
+      assert.equal(T.engine.getState().status, 'idle', T.engine.getState().error)
+
+      host.put('Pause/Zwei.md', '# Zwei')
+      T.steer.arm(first(5))
+      await T.engine.syncNow()
+      const paused = T.engine.getState()
+      assert.equal(paused.status, 'paused', 'a throttled cycle shows as a pause, not as in sync')
+      assert.equal(paused.error, null, 'a pause is not an error')
+      assert.ok(paused.pausedUntil > Date.now() && paused.pausedUntil <= Date.now() + 65_000, 'the end of the pause is published')
+      assert.equal(syncStatusLabel(paused), `Sync pausiert – geht um ${clockOf(paused.pausedUntil)} weiter`)
+
+      const capture = captureTimers()
+      try {
+        // A manual sync waits for the end of the pause instead of firing a request.
+        const before = T.steer.log.length
+        await T.engine.syncNow('manual')
+        assert.equal(T.steer.log.length, before, 'a manual sync does not fire a request while the server throttles')
+        assert.equal(T.engine.getState().status, 'paused')
+        const manual = capture.timers.filter((timer) => timer.delay > 0)
+        assert.equal(manual.length, 1, 'a manual sync arms the resume')
+        assert.ok(manual[0].delay <= 5_000, 'for the end of the pause')
+
+        // A vault switch replaces the timer that waits for the end of the pause by an immediate one, which meets the closed gate.
+        capture.timers.length = 0
+        await T.engine.switchVault()
+        await sleep(100)
+        assert.equal(T.steer.log.length, before, 'the gate holds')
+        assert.equal(T.engine.getState().status, 'paused')
+        const rearmed = capture.timers.filter((timer) => timer.delay > 0)
+        assert.equal(rearmed.length, 1, 'the timer that the pause swallowed is armed again, or the periodic sync would be dead')
+        assert.ok(rearmed[0].delay <= 5_000)
+        // The pause runs out.
+        capture.fire(rearmed[0])
+      } finally {
+        capture.restore()
+      }
+      await waitFor(() => T.engine.getState().status === 'idle', 'the sync goes on after the pause')
+      assert.equal(T.engine.getState().pausedUntil, null)
+      assert.ok(T.steer.log.some((request) => request.kind === 'upload'), 'the waiting note is uploaded once the pause is over')
+
+      // Work outside a cycle (resolving a conflict) must not turn the pause into "in sync".
+      host.put('Pause/Drei.md', '# Drei')
+      T.steer.arm(first(30))
+      await T.engine.syncNow()
+      assert.equal(T.engine.getState().status, 'paused')
+      assert.ok(T.engine.getState().pausedUntil - Date.now() > 25_000, 'the retryAfter of the server is honoured')
+      const resolved = await T.engine.resolveConflict({ title: 'Leer', device: null, pairs: [] }, 'original', {})
+      assert.equal(resolved.status, 'resolved')
+      assert.equal(T.engine.getState().status, 'paused', 'work outside a cycle keeps the pause visible')
+      assert.ok(T.engine.getState().pausedUntil > Date.now())
+      // The first good cycle ends the pause: the server accepts requests again, so triggers are no longer held back.
+      await T.engine.syncNow('resume')
+      assert.equal(T.engine.getState().status, 'idle', T.engine.getState().error)
+      assert.equal(T.engine.getState().pausedUntil, null)
+      const afterResume = T.steer.log.length
+      await T.engine.syncNow('focus')
+      assert.ok(T.steer.log.length > afterResume, 'after a good cycle the old pause no longer holds automatic triggers back')
+
+      // Signing out ends the pause. Signing in again syncs at once.
+      host.put('Pause/Vier.md', '# Vier')
+      T.steer.arm(first(30))
+      await T.engine.syncNow()
+      assert.equal(T.engine.getState().status, 'paused')
+      await T.engine.logout()
+      assert.equal(T.engine.getState().status, 'signed-out')
+      assert.equal(T.engine.getState().pausedUntil, null)
+      await T.engine.login('pause@example.com', password)
+      await waitFor(() => T.engine.getState().lastSyncAt !== null, 'signing in again does not inherit the old pause')
+      assert.equal(T.engine.getState().status, 'idle', T.engine.getState().error)
+
+      // The clock jumps back an hour while the server throttles: the gate shuts for no longer than a pause can last,
+      // and the timer that a vault switch swallowed is armed again for that time, not for the size of the jump.
+      host.put('Pause/Fuenf.md', '# Fuenf')
+      T.steer.arm(first(5))
+      await T.engine.syncNow()
+      assert.equal(T.engine.getState().status, 'paused')
+      const realNow = Date.now
+      const clock = captureTimers()
+      Date.now = () => realNow() - 3_600_000
+      try {
+        await T.engine.switchVault()
+        await sleep(100)
+        assert.equal(T.engine.getState().status, 'paused')
+        assert.ok(T.engine.getState().pausedUntil <= Date.now() + 65_000, 'the pause is cut to what a pause can last')
+        const armed = clock.timers.filter((timer) => timer.delay > 0)
+        assert.ok(armed.length > 0, 'the swallowed timer is armed again')
+        assert.ok(Math.max(...armed.map((timer) => timer.delay)) <= 65_000, 'and not for the size of the clock jump')
+      } finally {
+        Date.now = realNow
+        clock.restore()
+      }
+      await T.engine.syncNow('resume')
+      assert.equal(T.engine.getState().status, 'idle', T.engine.getState().error)
+      T.engine.dispose()
+    }
+
+    // 3. A pull that fails halfway: the notes written so far are saved and reported (the tree and open tabs
+    // refresh), no worker goes on writing after the failure, and the next pull starts behind the finished notes.
+    {
+      const hostS = createFakeHost('r13-pull-s')
+      for (let index = 1; index <= 6; index += 1) hostS.put(`Teil/Datei${index}.md`, `# Datei ${index}`)
+      const S = createSteered(hostS, 'Laptop')
+      await S.engine.register('pull@example.com', password)
+      await S.engine.syncNow()
+      assert.equal(S.engine.getState().trackedFiles, 6)
+      const hostR = createFakeHost('r13-pull-r')
+      const R = createSteered(hostR, 'Tablet')
+      await R.engine.login('pull@example.com', password)
+      R.steer.arm((kind, count) => (kind === 'download' && count === 4 ? { throttle: 5 } : null))
+      await R.engine.syncNow()
+      assert.equal(R.engine.getState().status, 'paused', R.engine.getState().error)
+      const present = [...hostR.files.keys()].sort()
+      assert.ok(present.length >= 1 && present.length < 6, `some notes arrived before the budget ran out (${present.length})`)
+      assert.deepEqual(R.events.applied.flatMap((change) => change.written).sort(), present, 'the app is told about every note that was written, although the pull failed afterwards')
+      const saved = savedState(hostR, 'vault-r13-pull-r')
+      assert.deepEqual(Object.keys(saved.files).sort(), present, 'and they are recorded as synced')
+      assert.ok(saved.cursor > 0, 'the cursor moved behind the notes that are done')
+      await sleep(300)
+      assert.deepEqual([...hostR.files.keys()].sort(), present, 'no worker goes on writing after the pull failed')
+
+      const mark = R.steer.log.length
+      await R.engine.syncNow('resume')
+      assert.equal(R.engine.getState().status, 'idle', R.engine.getState().error)
+      assert.equal(hostR.files.size, 6)
+      assert.deepEqual(R.events.applied.flatMap((change) => change.written).sort(), [...hostR.files.keys()].sort())
+      assert.equal([...hostR.files.keys()].filter((path) => path.includes('Konflikt')).length, 0, 'no conflict copies')
+      const resumed = R.steer.log.slice(mark).find((request) => request.kind === 'changes')
+      assert.ok(Number(new URLSearchParams(resumed.search).get('since')) > 0, 'the resumed pull does not list the finished notes again')
+      S.engine.dispose()
+      R.engine.dispose()
+    }
+
+    // 4 + 5 + 6. Two devices on one account. The tablet holds notes that cannot be applied yet, and meets a
+    // conflict and a failed push.
+    {
+      const hostS = createFakeHost('r13-held-s')
+      for (const name of ['A', 'B', 'C']) hostS.put(`Held/${name}.md`, `# ${name} eins`)
+      hostS.put('Konf/Notiz.md', '# Urfassung')
+      hostS.put('Scan/G.md', '# G eins')
+      const S = createSteered(hostS, 'Laptop')
+      await S.engine.register('held@example.com', password)
+      await S.engine.syncNow()
+      const hostR = createFakeHost('r13-held-r')
+      let openNote = null
+      let conflictMode = 'never'
+      let asked = 0
+      const R = createSteered(hostR, 'Tablet', { busy: (path) => {
+        if (path === 'Konf/Notiz.md') return conflictMode === 'after-first-check' ? asked++ >= 1 : false
+        return path === openNote
+      } })
+      await R.engine.login('held@example.com', password)
+      await R.engine.syncNow()
+      assert.equal(hostR.files.size, 5)
+
+      // 4. B is open in an editor on the tablet while the laptop changes B and then C: the open note does not
+      // hold the cursor back, is counted, and arrives once the editor is closed.
+      openNote = 'Held/B.md'
+      hostS.put('Held/B.md', '# B zwei')
+      await S.engine.syncNow()
+      hostS.put('Held/C.md', '# C zwei')
+      await S.engine.syncNow()
+      const revisionC = savedState(hostS, 'vault-r13-held-s').files['Held/C.md'].revision
+      await R.engine.syncNow()
+      assert.equal(hostR.text('Held/C.md'), '# C zwei', 'the other notes still arrive')
+      assert.equal(hostR.text('Held/B.md'), '# B eins', 'an open note is not replaced')
+      assert.equal(R.engine.getState().status, 'idle')
+      assert.equal(R.engine.getState().heldRemote, 1, 'the waiting change is counted')
+      assert.equal(syncStatusLabel(R.engine.getState()), 'Synchron · 1 Änderung von einem anderen Gerät wartet')
+      const held = savedState(hostR, 'vault-r13-held-r')
+      assert.ok(held.cursor >= revisionC, 'the cursor is not held in front of the open note')
+      assert.equal(held.skipped.length, 1, 'the open note waits on the retry list')
+      const restarted = createSteered(hostR, 'Tablet')
+      await restarted.engine.start()
+      assert.equal(restarted.engine.getState().heldRemote, 1, 'the count survives a restart')
+      restarted.engine.dispose()
+
+      const mark = R.steer.log.length
+      await R.engine.syncNow()
+      await R.engine.syncNow()
+      const since = R.steer.log.slice(mark).filter((request) => request.kind === 'changes').map((request) => Number(new URLSearchParams(request.search).get('since')))
+      assert.equal(since.length, 2)
+      assert.ok(since.every((value) => value >= revisionC), 'an open note does not make every cycle list the changes after it again')
+      assert.equal(R.engine.getState().heldRemote, 1)
+      assert.equal(hostR.text('Held/B.md'), '# B eins')
+      openNote = null
+      await R.engine.syncNow()
+      assert.equal(hostR.text('Held/B.md'), '# B zwei', 'the change arrives once the note is closed')
+      assert.equal(R.engine.getState().heldRemote, 0)
+      assert.equal(syncStatusLabel(R.engine.getState()), 'Synchron')
+      assert.deepEqual(savedState(hostR, 'vault-r13-held-r').skipped, [])
+      assert.ok(R.events.applied.some((change) => change.written.includes('Held/B.md')), 'the app is told to reload it')
+
+      // 4. A file that cannot be read is reported once, not on every cycle, and again when its state changed in between.
+      const readable = hostR.read
+      const locked = new Set()
+      hostR.read = async (path) => { if (locked.has(path)) throw new Error('EACCES'); return readable(path) }
+      const reports = () => R.engine.getState().log.filter((entry) => /Held\/A\.md.*nicht lesen/u.test(entry.text)).length
+      locked.add('Held/A.md')
+      hostS.put('Held/A.md', '# A zwei')
+      await S.engine.syncNow()
+      for (let round = 0; round < 3; round += 1) await R.engine.syncNow()
+      assert.equal(reports(), 1, 'an unreadable file is reported once, not on every cycle')
+      assert.equal(R.engine.getState().heldRemote, 1)
+      assert.equal(hostR.text('Held/A.md'), '# A eins', 'the unreadable file is left alone')
+      locked.delete('Held/A.md')
+      await R.engine.syncNow()
+      assert.equal(hostR.text('Held/A.md'), '# A zwei', 'it arrives once it can be read')
+      assert.equal(R.engine.getState().heldRemote, 0)
+      locked.add('Held/A.md')
+      hostS.put('Held/A.md', '# A drei')
+      await S.engine.syncNow()
+      await R.engine.syncNow()
+      await R.engine.syncNow()
+      assert.equal(reports(), 2, 'reported again when it became unreadable anew')
+      locked.delete('Held/A.md')
+      await R.engine.syncNow()
+      assert.equal(hostR.text('Held/A.md'), '# A drei')
+      hostR.read = readable
+
+      // 5. The note turns busy during the download, after a conflict was found: no conflict copy is written for a
+      // deferral, so trying again does not leave two copies and two conflict entries.
+      hostS.put('Konf/Notiz.md', '# Fassung vom Laptop')
+      await S.engine.syncNow()
+      hostR.put('Konf/Notiz.md', '# Fassung vom Tablet')
+      // The note is free when the pull looks at it and busy when the conflict copy would be written.
+      conflictMode = 'after-first-check'
+      await R.engine.syncNow()
+      const copies = () => [...hostR.files.keys()].filter((path) => path.startsWith('Konf/Notiz (Konflikt'))
+      assert.equal(copies().length, 0, 'a deferred note gets no conflict copy')
+      assert.equal(R.events.conflicts.length, 0)
+      assert.equal(R.engine.getState().conflicts.length, 0)
+      assert.equal(hostR.text('Konf/Notiz.md'), '# Fassung vom Tablet', 'the open note is untouched')
+      conflictMode = 'never'
+      await R.engine.syncNow()
+      assert.equal(copies().length, 1, 'exactly one conflict copy once the note is free')
+      assert.equal(hostR.text(copies()[0]), '# Fassung vom Tablet')
+      assert.equal(hostR.text('Konf/Notiz.md'), '# Fassung vom Laptop')
+      assert.equal(R.events.conflicts.length, 1)
+      assert.equal(R.engine.getState().conflicts.length, 1)
+      assert.equal(R.engine.getState().heldRemote, 0)
+
+      // 6. A push that failed halfway must not leave its listing of the vault to the next cycle: a note that is
+      // gone from the vault was reported as "present but unreadable" and put off.
+      hostR.put('Scan/H.md', '# H')
+      R.steer.arm((kind) => (kind === 'upload' ? { throttle: 5 } : null))
+      await R.engine.syncNow()
+      assert.equal(R.engine.getState().status, 'paused')
+      R.steer.arm(null)
+      // G disappears from the tablet (moved away, quarantined) and the laptop changes it.
+      hostR.files.delete('Scan/G.md')
+      hostS.put('Scan/G.md', '# G zwei')
+      await S.engine.syncNow()
+      await R.engine.syncNow('resume')
+      assert.equal(R.engine.getState().status, 'idle', R.engine.getState().error)
+      assert.equal(hostR.text('Scan/G.md'), '# G zwei')
+      assert.ok(!R.engine.getState().log.some((entry) => /Scan\/G\.md.*nicht lesen/u.test(entry.text)), 'a note that is gone is not reported as unreadable on account of an old listing')
+      assert.equal(R.engine.getState().heldRemote, 0)
+      assert.ok(R.events.applied.some((change) => change.written.includes('Scan/G.md')), 'the pull applied the note and told the app')
+      S.engine.dispose()
+      R.engine.dispose()
+    }
+
+    // 7. After the first failure no worker takes another file, and the cycle ends only when the running ones
+    // are done, so the saved state matches the server.
+    {
+      const host = createFakeHost('r13-limited')
+      for (let index = 1; index <= 12; index += 1) host.put(`Viele/Datei${index}.md`, `# Datei ${index}`)
+      const U = createSteered(host, 'Laptop')
+      await U.engine.register('limited@example.com', password)
+      U.steer.arm((kind, count) => (kind === 'upload' ? (count === 2 ? { throttle: 5 } : { delay: 80 }) : null))
+      await U.engine.syncNow()
+      assert.equal(U.engine.getState().status, 'paused', U.engine.getState().error)
+      const started = U.steer.counts.upload
+      assert.ok(started >= 2 && started < 12, `the failure stopped the upload (${started} started)`)
+      await sleep(400)
+      assert.equal(U.steer.counts.upload, started, 'no worker takes another file after the cycle failed')
+      const session = U.engine.getSession()
+      const onServer = (await new SyncApi(ORIGIN).changes(session, 0)).entries.length
+      assert.equal(Object.keys(savedState(host, 'vault-r13-limited').files).length, onServer, 'every upload that went through is in the saved state')
+      await U.engine.syncNow('resume')
+      assert.equal(U.engine.getState().status, 'idle', U.engine.getState().error)
+      assert.equal((await new SyncApi(ORIGIN).changes(session, 0)).entries.length, 12)
+      assert.equal([...host.files.keys()].filter((path) => path.includes('Konflikt')).length, 0)
+      U.engine.dispose()
+    }
+  }
+
   // ── Wiring ──────────────────────────────────────────────────────────────
   const serverSource = read('../fanotes-site/server.mjs')
   assert.match(serverSource, /import \{[^}]*\bhandleSyncRequest\b[^}]*\} from '\.\/sync-api\.mjs'/u)
@@ -1001,6 +1476,7 @@ try {
   assert.match(appSource, /id: 'sync-now'/u)
   assert.match(appSource, /id: 'sync-settings'/u)
   assert.match(appSource, /className=\{`sync-status-item/u)
+  assert.match(appSource, /syncState\.status === 'paused' \? <Clock size=\{12\} \/> : <Cloud size=\{12\} \/>[^]*?syncState\.status === 'paused' \? 'Sync pausiert' : 'Synchron'/u, 'the status bar shows the pause')
   const settingsSource = read('src/components/SettingsModal.tsx')
   assert.match(settingsSource, /\{ id: 'sync', label: 'Sync'/u)
   assert.match(settingsSource, /<SyncSettingsSection/u)

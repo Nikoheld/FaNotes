@@ -33,8 +33,12 @@ const idle = () => new Promise<void>((resolve) => {
   else window.setTimeout(resolve, 50)
 })
 
+/** Changes on every app start, so each story is read once per session even if it changed while the app was closed. */
+const SESSION = Math.random().toString(36).slice(2, 10)
+
 class DocSearchService {
   private indexer: DocIndexer | null = null
+  private storyVersions = new Map<string, number>()
   private closeStore: (() => void) | null = null
   private vaultKey = ''
   private listeners = new Set<Listener>()
@@ -60,7 +64,7 @@ class DocSearchService {
     const api = input.api
     this.indexer = new DocIndexer({
       store,
-      list: async () => listSearchDocuments(await api.getTree()),
+      list: async () => listSearchDocuments(await api.getTree(), (path) => `${SESSION}:${this.storyVersions.get(path) ?? 0}`),
       extractor: createBrowserExtractor({
         api,
         recognize: (pixels, width, height) => recognizeTrocrLine(pixels, width, height),
@@ -100,6 +104,12 @@ class DocSearchService {
 
   /** Call after saves, imports, renames, moves, deletes and sync. Coalesced. */
   notifyChanged() { this.scheduleSoon(CHANGE_DEBOUNCE_MS) }
+
+  /** A story's files changed (writing-mode save, sync): it is read again on the next pass. */
+  notifyStoryChanged(storyPath: string) {
+    this.storyVersions.set(storyPath, (this.storyVersions.get(storyPath) ?? 0) + 1)
+    this.notifyChanged()
+  }
 
   private scheduleSoon(delay: number) {
     if (this.changeTimer !== null) window.clearTimeout(this.changeTimer)
