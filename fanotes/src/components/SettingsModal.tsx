@@ -291,7 +291,7 @@ const THEMES: Array<{
   { id: 'forest', label: 'Wald', detail: 'Stein', background: '#171a18', surface: '#1e221f', accent: '#2a6f97', secondary: '#6b7280' },
   { id: 'aurora', label: 'Aurora', detail: 'Nebel', background: '#18181c', surface: '#1f1f24', accent: '#2a6f97', secondary: '#6b7280' },
   { id: 'sepia', label: 'Studierzimmer', detail: 'Warm', background: '#fbfaf7', surface: '#f4f1ea', accent: '#2a6f97', secondary: '#6b7280' },
-  { id: 'snow', label: 'Schnee', detail: 'Bewegliche Flocken', background: '#f4f7fb', surface: '#e7eef6', accent: '#2a6f97', secondary: '#6b7280' },
+  { id: 'snow', label: 'Schnee', detail: 'Schnee mit Physik zum Spielen', background: '#eef5fc', surface: '#dfecf8', accent: '#2a6f97', secondary: '#6b7280' },
 ]
 
 const BACKGROUNDS: Array<{ id: AppSettings['workspaceBackground']; label: string }> = [

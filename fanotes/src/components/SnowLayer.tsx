@@ -1,24 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import {
-  createSnowField,
-  dragSnowField,
+  burstSnow,
+  createSnowWorld,
+  interactSnow,
   obstaclesFromRects,
-  snowDragHitsSettled,
-  sprinkleSnow,
-  stepSnowField,
-  wakeSnowForObstacles,
-  SNOW_FLAKE_COUNT,
+  resizeSnowWorld,
+  stepSnowWorld,
+  syncSnowObstacles,
+  SNOW_COLUMN,
   SNOW_OBSTACLE_SELECTOR,
-  type SnowField,
   type SnowObstacle,
+  type SnowWorld,
 } from '../lib/snowTheme'
 
-const CONTROL_SELECTOR = 'button, a, input, textarea, select, summary, label, [role="button"], [contenteditable="true"], .cm-editor, .cm-content, canvas'
-
-const viewportField = (): SnowField => createSnowField(
-  typeof window === 'undefined' ? 1280 : Math.max(1, window.innerWidth),
-  typeof window === 'undefined' ? 800 : Math.max(1, window.innerHeight),
-)
+const CONTROL_SELECTOR = 'button, a, input, textarea, select, summary, label, [role="button"], [contenteditable="true"], .cm-editor, .cm-content, canvas:not(.snow-canvas)'
 
 const controlTarget = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest(CONTROL_SELECTOR))
 
@@ -27,141 +22,182 @@ const obstacleKey = (obstacles: readonly SnowObstacle[]) => obstacles
   .sort()
   .join('|')
 
-/** Full-shell snow. Hits pass through; a drag that starts on settled snow pushes that pile. */
+const FLAKE_SPRITE = 32
+
+/** A soft white flake with a pale blue rim, so it reads on the light theme. */
+const makeSprite = () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = FLAKE_SPRITE
+  canvas.height = FLAKE_SPRITE
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return canvas
+  const half = FLAKE_SPRITE / 2
+  const gradient = ctx.createRadialGradient(half, half, 0, half, half, half)
+  gradient.addColorStop(0, 'rgba(255,255,255,1)')
+  gradient.addColorStop(0.55, 'rgba(255,255,255,.95)')
+  gradient.addColorStop(0.8, 'rgba(214,232,247,.9)')
+  gradient.addColorStop(1, 'rgba(160,196,225,0)')
+  ctx.fillStyle = gradient
+  ctx.beginPath()
+  ctx.arc(half, half, half, 0, Math.PI * 2)
+  ctx.fill()
+  return canvas
+}
+
+const drawPiles = (ctx: CanvasRenderingContext2D, world: SnowWorld) => {
+  for (const pile of world.piles.values()) {
+    const heights = pile.heights
+    let any = false
+    for (let index = 0; index < heights.length; index += 1) if (heights[index] > 0.25) { any = true; break }
+    if (!any) continue
+    const path = new Path2D()
+    path.moveTo(pile.left, pile.top + 1)
+    for (let index = 0; index < heights.length; index += 1) {
+      path.lineTo(pile.left + (index + 0.5) * SNOW_COLUMN, pile.top - heights[index])
+    }
+    path.lineTo(pile.right, pile.top + 1)
+    path.closePath()
+    const deepest = Math.max(...heights, 1)
+    const gradient = ctx.createLinearGradient(0, pile.top - deepest, 0, pile.top)
+    gradient.addColorStop(0, '#ffffff')
+    gradient.addColorStop(1, '#d6e6f4')
+    ctx.fillStyle = gradient
+    ctx.fill(path)
+    ctx.lineWidth = 1
+    ctx.strokeStyle = 'rgba(120,160,195,.55)'
+    ctx.stroke(path)
+  }
+}
+
+/**
+ * Full-shell snow on one canvas. Flakes drift in changing wind and pile up on
+ * ledges. Moving the pointer stirs the flakes, pressing and dragging plows the
+ * piles and throws snow, a click on empty space makes a burst. The canvas never
+ * takes pointer events, so the app stays fully usable.
+ */
 export function SnowLayer({ reduceMotion }: { reduceMotion: boolean }) {
-  const layerRef = useRef<HTMLDivElement>(null)
-  const [field, setField] = useState(viewportField)
-  const fieldRef = useRef(field)
-  fieldRef.current = field
-  const reduceMotionRef = useRef(reduceMotion)
-  reduceMotionRef.current = reduceMotion
-  const obstaclesRef = useRef<SnowObstacle[]>([])
-  const obstaclesKeyRef = useRef('')
+  const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
-    let frame = 0
+    const canvas = canvasRef.current
+    const ctx = canvas?.getContext('2d')
+    if (!canvas || !ctx) return undefined
+    const sprite = makeSprite()
+    const world = createSnowWorld(Math.max(1, window.innerWidth), Math.max(1, window.innerHeight))
+    let obstacles: SnowObstacle[] = []
+    let obstaclesKey = ''
+    let dpr = 1
+
+    const fit = () => {
+      dpr = Math.min(2, window.devicePixelRatio || 1)
+      canvas.width = Math.max(1, Math.round(window.innerWidth * dpr))
+      canvas.height = Math.max(1, Math.round(window.innerHeight * dpr))
+      resizeSnowWorld(world, window.innerWidth, window.innerHeight)
+    }
+    fit()
+
     const measure = () => {
       const rects = [...document.body.querySelectorAll(SNOW_OBSTACLE_SELECTOR)]
-        .filter((node) => !node.closest('.snow-layer'))
         .map((node) => {
           const rect = node.getBoundingClientRect()
           return { left: rect.left, top: rect.top, right: rect.right, width: rect.width, height: rect.height }
         })
       const next = obstaclesFromRects(rects, window.innerWidth, window.innerHeight)
       const key = obstacleKey(next)
-      if (key === obstaclesKeyRef.current) return
-      obstaclesKeyRef.current = key
-      obstaclesRef.current = next
-      setField((current) => {
-        const woken = wakeSnowForObstacles(current, next)
-        fieldRef.current = woken
-        return woken
-      })
+      if (key === obstaclesKey) return
+      obstaclesKey = key
+      obstacles = next
+      syncSnowObstacles(world, next)
     }
-    const schedule = () => {
-      if (frame) return
-      frame = window.requestAnimationFrame(() => {
-        frame = 0
+    let measureFrame = 0
+    const scheduleMeasure = () => {
+      if (measureFrame) return
+      measureFrame = window.requestAnimationFrame(() => {
+        measureFrame = 0
         measure()
       })
     }
     measure()
-    const timer = window.setInterval(schedule, 200)
-    window.addEventListener('resize', schedule)
-    const observer = new MutationObserver(schedule)
+    const timer = window.setInterval(scheduleMeasure, 250)
+    const observer = new MutationObserver(scheduleMeasure)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] })
-    return () => {
-      window.clearInterval(timer)
-      window.removeEventListener('resize', schedule)
-      observer.disconnect()
-      if (frame) window.cancelAnimationFrame(frame)
-    }
-  }, [])
-
-  useEffect(() => {
-    let frame = 0
-    let last = performance.now()
-    const tick = (now: number) => {
-      const dt = now - last
-      last = now
-      setField((current) => {
-        let next = stepSnowField(current, dt, reduceMotionRef.current, obstaclesRef.current)
-        if (!reduceMotionRef.current) {
-          const missing = SNOW_FLAKE_COUNT - next.flakes.length
-          if (missing > 0) next = sprinkleSnow(next, Math.min(2, missing))
-        }
-        fieldRef.current = next
-        return next
-      })
-      frame = requestAnimationFrame(tick)
-    }
-    frame = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(frame)
-  }, [])
-
-  useEffect(() => {
     const onResize = () => {
-      setField((current) => {
-        const next = { ...current, width: window.innerWidth, height: window.innerHeight }
-        fieldRef.current = next
-        return next
-      })
+      fit()
+      scheduleMeasure()
     }
     window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [])
 
-  useEffect(() => {
-    let origin: { x: number; y: number } | null = null
-    const onDown = (event: PointerEvent) => {
-      origin = null
-      if (event.button !== 0 || controlTarget(event.target)) return
-      if (!snowDragHitsSettled(fieldRef.current, event.clientX, event.clientY)) return
-      origin = { x: event.clientX, y: event.clientY }
+    const draw = () => {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight)
+      drawPiles(ctx, world)
+      for (const flake of world.flakes) {
+        const size = flake.radius * 2.6
+        ctx.globalAlpha = Math.min(1, 0.55 + flake.radius * 0.18)
+        ctx.drawImage(sprite, flake.x - size / 2, flake.y - size / 2, size, size)
+      }
+      ctx.globalAlpha = 1
     }
+
+    // Pointer: stir on move, plow while pressed. Nothing here blocks the event.
+    let last: { x: number; y: number; t: number } | null = null
+    let pressed = false
+    let pressedOnControl = false
     const onMove = (event: PointerEvent) => {
-      if (!origin) return
-      const dx = event.clientX - origin.x
-      const dy = event.clientY - origin.y
-      origin = { x: event.clientX, y: event.clientY }
-      if (dx === 0 && dy === 0) return
-      setField((current) => {
-        const next = dragSnowField(current, event.clientX, event.clientY, dx, dy)
-        fieldRef.current = next
-        return next
-      })
+      const now = performance.now()
+      if (last && !reduceMotion) {
+        const dt = Math.max(8, now - last.t) / 1000
+        const vx = Math.max(-1800, Math.min(1800, (event.clientX - last.x) / dt))
+        const vy = Math.max(-1800, Math.min(1800, (event.clientY - last.y) / dt))
+        interactSnow(world, event.clientX, event.clientY, vx, vy, pressed && !pressedOnControl)
+      }
+      last = { x: event.clientX, y: event.clientY, t: now }
+    }
+    const onDown = (event: PointerEvent) => {
+      if (event.button !== 0) return
+      pressed = true
+      pressedOnControl = controlTarget(event.target)
+      last = { x: event.clientX, y: event.clientY, t: performance.now() }
+      if (!pressedOnControl && !reduceMotion) burstSnow(world, event.clientX, event.clientY, 14)
     }
     const onUp = () => {
-      origin = null
+      pressed = false
     }
-    window.addEventListener('pointerdown', onDown, true)
     window.addEventListener('pointermove', onMove, true)
+    window.addEventListener('pointerdown', onDown, true)
     window.addEventListener('pointerup', onUp, true)
     window.addEventListener('pointercancel', onUp, true)
+
+    let frame = 0
+    let lastTime = performance.now()
+    const tick = (now: number) => {
+      const dt = now - lastTime
+      lastTime = now
+      if (!reduceMotion && !document.hidden) {
+        stepSnowWorld(world, dt)
+        draw()
+      }
+      frame = requestAnimationFrame(tick)
+    }
+    if (reduceMotion) draw()
+    frame = requestAnimationFrame(tick)
+
     return () => {
-      window.removeEventListener('pointerdown', onDown, true)
+      cancelAnimationFrame(frame)
+      if (measureFrame) cancelAnimationFrame(measureFrame)
+      window.clearInterval(timer)
+      observer.disconnect()
+      window.removeEventListener('resize', onResize)
       window.removeEventListener('pointermove', onMove, true)
+      window.removeEventListener('pointerdown', onDown, true)
       window.removeEventListener('pointerup', onUp, true)
       window.removeEventListener('pointercancel', onUp, true)
     }
-  }, [])
+  }, [reduceMotion])
 
   return (
-    <div ref={layerRef} className="snow-layer" aria-hidden="true">
-      {field.flakes.map((flake) => (
-        <span
-          key={flake.id}
-          className="snow-flake"
-          data-x={flake.x}
-          data-y={flake.y}
-          data-settled={flake.settled ? 'true' : 'false'}
-          style={{
-            width: flake.radius * 2,
-            height: flake.radius * 2,
-            transform: `translate3d(${flake.x}px, ${flake.y}px, 0)`,
-          }}
-        />
-      ))}
+    <div className="snow-layer" aria-hidden="true">
+      <canvas ref={canvasRef} className="snow-canvas" />
     </div>
   )
 }

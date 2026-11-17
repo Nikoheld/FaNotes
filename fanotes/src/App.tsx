@@ -754,7 +754,7 @@ const THEME_CONTRAST_SURFACES: Record<string, string[]> = {
   forest: ['#171a18', '#1e221f', '#1e221f', '#2a2f2c'],
   aurora: ['#18181c', '#1f1f24', '#1f1f24', '#2c2c33'],
   sepia: ['#fbfaf7', '#f4f1ea', '#f4f1ea', '#fffdf8'],
-  snow: ['#f4f7fb', '#e7eef6', '#e7eef6', '#fbfcfe'],
+  snow: ['#eef5fc', '#dfecf8', '#e1edf8', '#fafdff'],
 }
 
 const saveExportFile = (filename: string, blob: Blob) => {
