@@ -2,6 +2,7 @@
 //   POST /api/v1/worker/claim                      -> {request|null, busy}
 //   POST /api/v1/worker/requests/:id/events        {text, percent}
 //   POST /api/v1/worker/requests/:id/status        {status, prNumber?, prUrl?, ci?: pending|success|failure, reason?}
+//   POST /api/v1/worker/requests/:id/merged        {prNumber, prUrl?}  (operator: PR merged by hand)
 //   GET  /api/v1/worker/requests/:id/messages?after=<seq> -> {messages:[{seq,at,text}], status, approved, cancelled, lastSeq}
 //   GET  /api/v1/worker/requests/:id/attachments/(screenshot|logs) -> bytes
 export function createApi({ origin, token, fetchImpl = fetch, timeoutMs = 20_000 }) {
@@ -29,6 +30,7 @@ export function createApi({ origin, token, fetchImpl = fetch, timeoutMs = 20_000
     },
     event: (id, ev) => json('POST', `/requests/${enc(id)}/events`, ev),
     status: (id, payload) => json('POST', `/requests/${enc(id)}/status`, payload),
+    markMerged: (id, payload) => json('POST', `/requests/${enc(id)}/merged`, payload),
     async control(id, after = 0) { return parseControl(await json('GET', `/requests/${enc(id)}/messages?after=${after}`)) },
     async attachment(id, name) {
       const res = await raw('GET', `/requests/${enc(id)}/attachments/${name}`)

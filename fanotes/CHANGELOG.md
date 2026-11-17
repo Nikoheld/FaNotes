@@ -1,5 +1,72 @@
 # Änderungsverlauf
 
+## 2026.11.3-beta.3
+
+- Keep a snapshot lesson that has no week.
+- Leave start-page lines as text in a snapshot.
+- Keep a snapshot row that is not a record.
+- Read an ICS time with a numeric offset as that zone's clock.
+- Keep a catalog entry that is not a class or room.
+- Android: Fehler & Wünsche panel (work requests)
+- Do not let an upload take a file slot it cannot fill.
+- Reconcile open tabs on failed save and first keystroke; add Electron check
+- Android copy fixes from review R18
+- Wire Android stats cache and diagnostics tick into the app
+- Keep a class week that is not a week.
+- Harden local MCP token exposure and OneNote page serving (R19 leftovers)
+- Fix vault-watch dots/toasts and statistics medium findings
+- Test: find the quoted diagnostics location in the X-Real-IP check too.
+- Fix MCP client compatibility (R5)
+- Keep a commute timetable entry that is not a stored trip.
+- Keep the exam material that Schulnetz stores in the mark field.
+- Keep a reveal ledger id that is not a token.
+- Test: find the quoted diagnostics location.
+- nginx: quote the diagnostics location regex.
+- Keep an agenda week that is not a week.
+- Align the work-requests client with the merged server API.
+- Align the request worker with the merged work-requests server API.
+- Keep a grade ledger key that is not text.
+- Add the Fehler & Wünsche work-requests panel (Ctrl+Shift+B).
+- Add work-request worker that runs Claude Code headless per request.
+- Add security headers to the work requests nginx locations
+- Add work requests server API (owner SSE, worker claim, status machine)
+- Harden diagnostics client address, study render and CSP delivery (R19, part 1)
+- Writing mode: reachable soft-wrap line ends, kept Shift+Enter indentation
+- Fix English catalog: duplicate keys, wrong values, missing Android strings
+- Harden the heavy-page ink double buffer (review R4)
+- Android: detect assignments on Android 12-14 and from synced text, keep the timer running, Aufträge as a bottom sheet
+- perf(android): Statistik loader limits, saved facts cache, cheap diagnostics check (core)
+- Fix eraser crossings and mid-segment cuts (desktop and Android)
+- Fix dark-mode contrast: study legend inputs, error red, heatmap and chart colours; aria fixes
+- Reserve only the bytes an open resumable replace still adds.
+- Reconcile open tabs with outside renames, deletes and edits
+- Fix study block UX: editor lock-out, overlapping key labels, caps (R9)
+- Keep sync going through a throttle pause, show the pause, and stop waiting notes from holding the sync back.
+- Give each Kurs course its own grade id.
+- Keep commute settings that are not the known shape.
+- Keep a push token that is not a token.
+- Keep a commute alert that is not an alert record.
+- Keep a browser session whose connections are not connections.
+- Reserve only the bytes a resumable replace still adds.
+- Keep a commute route the sanitizer would skip.
+- Keep an explicit zero grade weight when an app upload says one.
+- Keep a push ledger whose keys are not short strings.
+- Keep a mensa cache whose days are not days.
+- Keep a school link that is not the known shape.
+- Keep a pairing code of another version.
+- Keep every exam when Schulnetz reuses a scheduler id in another week
+- Read the release share in a child so a hung listing can be killed.
+- Keep a browser session whose version is not a number.
+- Reserve only the archive bytes a replace still keeps.
+- Keep a snapshot whose week maps are not objects.
+- Count an archived note once when a replace is retried.
+- Keep a timetable index that is not the class catalog.
+- Keep a snapshot whose saved lists are not arrays.
+- Docs: palm release, place on release, eraser sweep
+- Android eraser: sweep between frames and skip strokes that cannot be reached
+- Android study tools: place on release, survive recreation, cheaper painter
+- Android: release the pen palm lock on every pen up or cancel
+
 ## 2026.11.3-beta.2
 
 - Keep a snapshot whose grades or events are not lists.

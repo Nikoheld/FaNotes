@@ -14,11 +14,27 @@ process.env.FANOTES_SYNC_DIR = dataDirectory
 process.env.FANOTES_PUBLIC_ORIGIN = 'http://127.0.0.1'
 const { handleSyncRequest, evaluateSyncWrite } = await import('./sync-api.mjs')
 
+let cleanupRequestId = ''
+let cleanupAccountId = ''
+const cleanupFinished = new Set()
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, 'http://127.0.0.1')
-  if (await handleSyncRequest(request, response, url)) return
-  response.writeHead(404)
-  response.end()
+  const requestId = request.headers['x-request-id']
+  if (typeof requestId === 'string' && requestId === cleanupRequestId && cleanupAccountId) {
+    const account = cleanupAccountId
+    const originalEnd = response.end
+    response.end = function (...args) {
+      rmSync(join(dataDirectory, 'accounts', account, 'incoming'), { recursive: true, force: true })
+      return originalEnd.apply(this, args)
+    }
+  }
+  try {
+    if (await handleSyncRequest(request, response, url)) return
+    response.writeHead(404)
+    response.end()
+  } finally {
+    if (typeof requestId === 'string' && requestId === cleanupRequestId) cleanupFinished.add(requestId)
+  }
 })
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
 const origin = `http://127.0.0.1:${server.address().port}`
@@ -306,6 +322,75 @@ test('three devices keep the newer note across clock skew, offline replay, empty
   })
   assert.equal(status, 400)
   assert.deepEqual((await readLive(id)).body, restored)
+})
+
+test('a cleanup error after a stale response does not start a second one', async () => {
+  const registered = await jsonCall('POST', '/api/v1/sync/register', {
+    email: 'fuzz-cleanup@example.com',
+    authKey,
+    kdf: { algorithm: 'pbkdf2-sha256', iterations: 300000, salt: b64(16) },
+    vaultKeyWrap: { iv: b64(12), data: b64(32) },
+    device: { name: 'Laptop', platform: 'linux' },
+  })
+  assert.equal(registered.status, 201)
+  const account = registered.json.accountId
+  const token = registered.json.token
+  const id = randomBytes(32).toString('hex')
+  const kept = Buffer.alloc(80, 9)
+  const created = await call('PUT', `/api/v1/sync/files/${id}`, {
+    token,
+    accountId: account,
+    body: kept,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': kept.length,
+      'If-Match': '0',
+      'X-FaNotes-Meta': b64(32),
+      'X-FaNotes-Sha256': sha256(kept),
+      'X-FaNotes-Blank': '0',
+    },
+  })
+  assert.equal(created.status, 200, created.body.toString('utf8'))
+  const requestId = 'fuzz-cleanup-1'
+  const rejections = []
+  const onRejection = (error) => { rejections.push(error) }
+  process.on('unhandledRejection', onRejection)
+  cleanupAccountId = account
+  cleanupRequestId = requestId
+  try {
+    const other = Buffer.alloc(90, 4)
+    const stale = await call('PUT', `/api/v1/sync/files/${id}`, {
+      token,
+      accountId: account,
+      body: other,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': other.length,
+        'If-Match': '0',
+        'X-FaNotes-Meta': b64(32),
+        'X-FaNotes-Sha256': sha256(other),
+        'X-FaNotes-Blank': '0',
+        'X-Request-Id': requestId,
+      },
+    })
+    const deadline = Date.now() + 2000
+    while (!cleanupFinished.has(requestId) && Date.now() < deadline) {
+      await new Promise((resolve) => setImmediate(resolve))
+    }
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.ok(cleanupFinished.has(requestId))
+    assert.equal(rejections.length, 0)
+    assert.equal(stale.status, 409)
+    const payload = JSON.parse(stale.body.toString('utf8'))
+    assert.equal(payload.reason, 'stale')
+    const live = await call('GET', `/api/v1/sync/files/${id}`, { token, accountId: account })
+    assert.equal(live.status, 200)
+    assert.deepEqual(live.body, kept)
+  } finally {
+    process.removeListener('unhandledRejection', onRejection)
+    cleanupRequestId = ''
+    cleanupAccountId = ''
+  }
 })
 
 test('concurrent devices leave exactly one body, and a random walk never drops the largest note', async () => {

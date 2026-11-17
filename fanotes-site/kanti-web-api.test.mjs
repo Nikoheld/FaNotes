@@ -998,6 +998,119 @@ test('a browser session whose connections are not connections is left in place',
   }
 })
 
+test('a browser session whose expiry is not a time is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-16T12:00:00.000Z') })
+  try {
+    const app = await appIdentity(env.base)
+    const created = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: app.accountId,
+      provider: 'schulnetz',
+      label: 'Bleibt',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const file = join(env.store.root, 'sessions', `${created.hash}.json`)
+    const valid = await readFile(file, 'utf8')
+    const parsed = JSON.parse(valid)
+    const client = browser(env.base)
+    client.jar[SESSION_COOKIE] = created.token
+    const opened = await client.session()
+    assert.equal(opened.status, 200)
+    assert.equal(opened.body.connections.length, 1)
+    assert.equal(await readFile(file, 'utf8'), valid)
+    const keep = async (value) => {
+      const stored = JSON.stringify(value)
+      await writeFile(file, stored)
+      const result = await client.call('GET', '/session')
+      assert.equal(result.status, 500)
+      assert.equal(client.jar[SESSION_COOKIE], created.token)
+      assert.equal(await readFile(file, 'utf8'), stored)
+      await env.store.sweep(true)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ ...parsed, expiresAt: 'tomorrow' })
+    await keep({ ...parsed, expiresAt: 1_700_000_000_000 })
+    await keep({ ...parsed, maxUntil: 'later' })
+    await keep({ ...parsed, maxUntil: 1 })
+    await writeFile(file, valid)
+    const restored = await client.session()
+    assert.equal(restored.status, 200)
+    assert.equal(restored.body.connections.length, 1)
+    assert.equal(await readFile(file, 'utf8'), valid)
+    const blank = { ...parsed, expiresAt: '' }
+    await writeFile(file, JSON.stringify(blank))
+    const ended = await client.session()
+    assert.equal(ended.status, 401)
+    assert.equal(client.jar[SESSION_COOKIE], undefined)
+    await assert.rejects(readFile(file), (error) => error?.code === 'ENOENT')
+    const expired = await env.store.createSession('Browser', [env.store.newConnection({
+      accountId: app.accountId,
+      provider: 'schulnetz',
+      label: 'Weg',
+      baseUrl: '',
+      source: 'pair',
+    })])
+    const expiredFile = join(env.store.root, 'sessions', `${expired.hash}.json`)
+    const old = JSON.parse(await readFile(expiredFile, 'utf8'))
+    old.expiresAt = '2020-01-01T00:00:00.000Z'
+    old.maxUntil = '2020-01-01T00:00:00.000Z'
+    await writeFile(expiredFile, JSON.stringify(old))
+    await env.store.sweep(true)
+    await assert.rejects(readFile(expiredFile), (error) => error?.code === 'ENOENT')
+  } finally {
+    await env.close()
+  }
+})
+
+test('a claimed pairing does not keep a connection id from the code', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const offer = await env.store.createOffer()
+    const pairings = join(env.store.root, 'pairings')
+    const [name] = await readdir(pairings)
+    const file = join(pairings, name)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    const accountId = 'a'.repeat(32)
+    parsed.finished = true
+    parsed.connections = [{ accountId, id: 'not-a-connection', provider: 'tam', label: '  TAM  ', baseUrl: 'https://school.example' }]
+    await writeFile(file, JSON.stringify(parsed))
+    const claimed = await env.store.claimOffer(offer.code, 'Browser', null)
+    assert.equal(claimed.added, 1)
+    const [connection] = claimed.session.connections
+    assert.match(connection.id, /^[a-f0-9]{12}$/u)
+    assert.equal(connection.provider, 'tam')
+    assert.equal(connection.label, 'TAM')
+    assert.equal(connection.baseUrl, 'https://school.example')
+    assert.equal(connection.source, 'pair')
+    await assert.rejects(readFile(file), (error) => error?.code === 'ENOENT')
+  } finally {
+    await env.close()
+  }
+})
+
+test('a pairing code whose connections are not a list is left in place', async () => {
+  const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
+  try {
+    const offer = await env.store.createOffer()
+    const pairings = join(env.store.root, 'pairings')
+    const [name] = await readdir(pairings)
+    const file = join(pairings, name)
+    const parsed = JSON.parse(await readFile(file, 'utf8'))
+    const keep = async (value) => {
+      const stored = `${JSON.stringify(value)}\n`
+      await writeFile(file, stored)
+      await assert.rejects(() => env.store.lookupPairing(offer.code), (error) => error?.code === 'EBADMSG')
+      await env.store.sweep(true)
+      assert.equal(await readFile(file, 'utf8'), stored)
+    }
+    await keep({ ...parsed, connections: { accountId: 'd'.repeat(32) } })
+    await keep({ ...parsed, finished: 'yes' })
+    await keep({ ...parsed, connections: [{ accountId: 'not-an-id' }] })
+  } finally {
+    await env.close()
+  }
+})
+
 test('a pairing code of another version is left in place', async () => {
   const env = await start({ clock: () => new Date('2026-11-15T12:00:00.000Z') })
   try {
@@ -1014,9 +1127,19 @@ test('a pairing code of another version is left in place', async () => {
     await assert.rejects(() => env.store.lookupPairing(offer.code), (error) => error?.code === 'EBADMSG')
     await env.store.sweep(true)
     assert.equal(await readFile(file, 'utf8'), stored)
+    const odd = await env.store.createOffer()
+    const oddName = (await readdir(pairings)).find((item) => item !== name)
+    const oddFile = join(pairings, oddName)
+    const oddParsed = JSON.parse(await readFile(oddFile, 'utf8'))
+    const oddStored = `${JSON.stringify({ ...oddParsed, expiresAt: 'tomorrow' })}\n`
+    await writeFile(oddFile, oddStored)
+    await assert.rejects(() => env.store.lookupPairing(odd.code), (error) => error?.code === 'EBADMSG')
+    await env.store.sweep(true)
+    assert.equal(await readFile(oddFile, 'utf8'), oddStored)
+    assert.equal(await readFile(file, 'utf8'), stored)
     const expired = await env.store.createOffer()
     const names = await readdir(pairings)
-    const expiredName = names.find((item) => item !== name)
+    const expiredName = names.find((item) => item !== name && item !== oddName)
     const expiredFile = join(pairings, expiredName)
     const old = JSON.parse(await readFile(expiredFile, 'utf8'))
     old.expiresAt = '2020-01-01T00:00:00.000Z'

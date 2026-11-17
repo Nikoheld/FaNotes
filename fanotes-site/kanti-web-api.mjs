@@ -151,6 +151,15 @@ const cleanLabel = (raw, fallback) => {
   return text || fallback
 }
 
+// Only the fields a session connection is allowed to keep. A saved id or addedAt must not replace the new ones.
+const pairedConnection = (connection) => ({
+  accountId: connection.accountId,
+  provider: connection.provider === 'tam' ? 'tam' : 'schulnetz',
+  label: cleanLabel(connection.label, connection.provider === 'tam' ? 'TAM' : 'Schulnetz'),
+  baseUrl: typeof connection.baseUrl === 'string' ? connection.baseUrl.slice(0, 200) : '',
+  source: 'pair',
+})
+
 export const parseCookies = (header) => {
   const out = {}
   for (const part of String(header || '').split(';')) {
@@ -212,6 +221,9 @@ export const createKantiWebStore = (options = {}) => {
   }
   const nowMs = () => now().getTime()
   const alive = (session) => Boolean(session && session.v === 1 && Date.parse(session.expiresAt) > nowMs() && Date.parse(session.maxUntil) > nowMs())
+  // A missing expiry can still end the session. A value that is not a time must not look finished.
+  const instantKnown = (value) => value == null || value === '' || (typeof value === 'string' && Number.isFinite(Date.parse(value)))
+  const expiryKnown = (session) => instantKnown(session?.expiresAt) && instantKnown(session?.maxUntil)
   // A missing version can go. Any other version, including one that is not a number, must not look dead.
   const otherVersion = (session) => Boolean(session) && Object.hasOwn(session, 'v') && session.v != null && session.v !== 1
   const plainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -263,6 +275,8 @@ export const createKantiWebStore = (options = {}) => {
     if (otherVersion(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
     // A connection list or sign-in that is not the known shape must not look empty, or the next request deletes the session or drops that field.
     if (session && session.v === 1 && !sessionShapeKnown(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
+    // A saved expiry that is not a time must not look finished, or the next request deletes the session.
+    if (session && session.v === 1 && !expiryKnown(session)) throw Object.assign(new Error('session'), { code: 'EBADMSG' })
     return alive(session) ? session : null
   }
   const saveSession = async (hash, session) => {
@@ -338,6 +352,13 @@ export const createKantiWebStore = (options = {}) => {
 
   // A missing version can go. Any other version must not look unused, or the sweep deletes it once its old expiry has passed.
   const otherPairingVersion = (record) => Boolean(record) && typeof record === 'object' && Object.hasOwn(record, 'v') && record.v != null && record.v !== 1
+  // A missing or unreadable expiry must not look still open, or the code never expires.
+  const pairingExpiryKnown = (value) => typeof value === 'string' && value !== '' && Number.isFinite(Date.parse(value))
+  // A connection list that is not a list must not be claimed, or the claim deletes the code and then fails.
+  const pairingShapeKnown = (record) => Array.isArray(record?.connections)
+    && record.connections.every((item) => item && typeof item === 'object' && !Array.isArray(item) && typeof item.accountId === 'string' && ACCOUNT_ID.test(item.accountId))
+    && (record.finished == null || typeof record.finished === 'boolean')
+    && (record.offer == null || typeof record.offer === 'boolean')
   const readPairing = async (rawCode) => {
     const code = normalizePairingCode(rawCode)
     if (!code) return null
@@ -346,6 +367,8 @@ export const createKantiWebStore = (options = {}) => {
     if (!record) return null
     if (otherPairingVersion(record)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
     if (record.v !== 1) return null
+    if (!pairingExpiryKnown(record.expiresAt)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
+    if (!pairingShapeKnown(record)) throw Object.assign(new Error('pairing'), { code: 'EBADMSG' })
     if (Date.parse(record.expiresAt) <= nowMs()) {
       await fs.rm(file, { force: true })
       return null
@@ -435,7 +458,7 @@ export const createKantiWebStore = (options = {}) => {
       if (!fresh || fresh.record.offer !== true) return null
       if (!fresh.record.finished) return { waiting: true }
       await deletePairing(fresh)
-      const incoming = fresh.record.connections.map((connection) => ({ ...connection, source: 'pair' }))
+      const incoming = fresh.record.connections.map(pairedConnection)
       if (!incoming.length) return null
       if (current) {
         const updated = await updateSession(current.hash, (session) => ({ ...session, connections: mergeConnections(session, incoming) }))
@@ -451,7 +474,7 @@ export const createKantiWebStore = (options = {}) => {
     const fresh = await readPairing(found.code)
     if (!fresh || !fresh.record.finished || !sameText(fresh.record.secretHash, found.record.secretHash)) return null
     await deletePairing(fresh)
-    const incoming = fresh.record.connections.map((connection) => ({ ...connection, source: 'pair' }))
+    const incoming = fresh.record.connections.map(pairedConnection)
     if (!incoming.length) return null
     if (current) {
       const updated = await updateSession(current.hash, (session) => ({ ...session, connections: mergeConnections(session, incoming) }))
@@ -527,6 +550,8 @@ export const createKantiWebStore = (options = {}) => {
         continue
       }
       if (otherPairingVersion(record)) continue
+      // A version 1 expiry that is not a time, or a connection list that is not a list, stays. Sweep only removes a missing, broken, or expired code.
+      if (record?.v === 1 && (!pairingExpiryKnown(record.expiresAt) || !pairingShapeKnown(record))) continue
       if (!record || Date.parse(record.expiresAt) <= nowMs()) await fs.rm(resolve(pairingsDir, name), { force: true })
     }
     for (const name of await fs.readdir(sessionsDir).catch(() => [])) {
@@ -538,8 +563,9 @@ export const createKantiWebStore = (options = {}) => {
       } catch {
         continue
       }
-      // A session of another version stays. Sweep only removes a missing, broken, or expired version 1 file.
+      // A session of another version stays. A version 1 expiry that is not a time stays. Sweep only removes a missing, broken, or expired version 1 file.
       if (otherVersion(session)) continue
+      if (session && session.v === 1 && !expiryKnown(session)) continue
       if (!alive(session)) await locked(`session:${hash}`, () => deleteSession(hash))
     }
   }

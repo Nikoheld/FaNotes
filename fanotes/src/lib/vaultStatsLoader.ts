@@ -28,9 +28,12 @@ export type StatsProgress = { phase: 'tree' | 'notes' | 'history' | 'stories' | 
 
 /** Per-file facts, valid while mtime and size stay the same. Lives for the app session. */
 const factCache = new Map<string, { sig: string; facts: NoteFacts }>()
-/** Page statistics change without the note's mtime moving, so they expire instead. */
+/** Page statistics change without the note's mtime moving, so they expire instead (the main process caches the parse by companion mtime). */
 const statsCache = new Map<string, { at: number; stats: PageStats | null }>()
-const STATS_TTL_MS = 5 * 60_000
+const STATS_TTL_MS = 60 * 60_000
+/** Aggregating is O(files); never spend more than ~1/10 of the time on it while a scan runs. */
+const EMIT_MIN_MS = 250
+const EMIT_DUTY = 10
 const historyCache = new Map<string, { sig: string; stamps: string[] }>()
 const storyCache = new Map<string, { sig: string; days: Record<string, number> }>()
 
@@ -114,11 +117,16 @@ export const loadVaultStats = async (host: StatsHost, signal: AbortSignal, onUpd
   const stories: Record<string, Record<string, number>> = {}
   let homework: HomeworkTask[] | null = null
   let lastEmit = 0
+  let emitGapMs = EMIT_MIN_MS
   const emit = (progress: StatsProgress, force = false) => {
+    if (signal.aborted) return
     const at = performance.now()
-    if (!force && at - lastEmit < 250) return
-    lastEmit = at
-    onUpdate(aggregateVault({ tree, facts, history, stories, homework, now }) as VaultStats, progress)
+    if (!force && at - lastEmit < emitGapMs) return
+    const result = aggregateVault({ tree, facts, history, stories, homework, now }) as VaultStats
+    const finished = performance.now()
+    emitGapMs = Math.max(EMIT_MIN_MS, (finished - at) * EMIT_DUTY)
+    lastEmit = finished
+    onUpdate(result, progress)
   }
   emit({ phase: 'tree', done: 0, total: files.length }, true)
 

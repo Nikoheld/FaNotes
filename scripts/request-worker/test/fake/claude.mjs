@@ -8,6 +8,8 @@ for await (const c of process.stdin) prompt += c
 if (process.env.FAKE_CLAUDE_LOG) fs.appendFileSync(process.env.FAKE_CLAUDE_LOG, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), hasToken: 'FANOTES_AGENT_TOKEN' in process.env, prompt }) + '\n')
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\n')
 const tool = (name, input) => out({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } })
+// Resolving a conflict: the resume prompt asks to merge main; the fake "resolves" it.
+if (prompt.includes('merge conflicts') && process.env.FAKE_GH_CONFLICT_FILE) fs.rmSync(process.env.FAKE_GH_CONFLICT_FILE, { force: true })
 out({ type: 'system', subtype: 'init', session_id: 'sess-1' })
 tool('Read', { file_path: '/x/App.tsx' })
 if (scenario === 'hang') { setInterval(() => {}, 1000); process.on('SIGTERM', () => process.exit(143)) }

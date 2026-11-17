@@ -135,7 +135,7 @@ const api = Object.freeze({
   selectVault: () => invoke(CHANNELS.selectVault),
   getCachedTree: () => invoke(CHANNELS.getCachedTree),
   getFastTree: () => invoke(CHANNELS.getFastTree),
-  getTree: () => invoke(CHANNELS.getTree),
+  getTree: (options) => invoke(CHANNELS.getTree, options?.fromWatcher === true ? { fromWatcher: true } : undefined),
   readFile: (relativePath) => invoke(CHANNELS.readFile, relativePath),
   writeFile: (relativePath, content) => invoke(CHANNELS.writeFile, relativePath, content),
   handwritingLearning: (op, value) => invoke(CHANNELS.handwritingLearning, op, value),

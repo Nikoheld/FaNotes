@@ -8,14 +8,17 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -34,8 +37,11 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
@@ -57,8 +63,10 @@ import ch.fasrv.fanotes.study.TermData
 import ch.fasrv.fanotes.study.TermEntry
 import ch.fasrv.fanotes.study.defaultSortData
 import ch.fasrv.fanotes.study.defaultTermData
+import ch.fasrv.fanotes.study.STUDY_SHEET_WIDTH_DP
 import ch.fasrv.fanotes.study.formatClock
 import ch.fasrv.fanotes.study.groupMarksByPage
+import ch.fasrv.fanotes.study.liveSeconds
 import ch.fasrv.fanotes.study.marksToMarkdown
 import ch.fasrv.fanotes.study.newStudyId
 import ch.fasrv.fanotes.study.sortEditable
@@ -66,6 +74,8 @@ import ch.fasrv.fanotes.study.termEditable
 import ch.fasrv.fanotes.study.readTaskList
 import ch.fasrv.fanotes.study.removeSortCard
 import ch.fasrv.fanotes.study.sortDataJson
+import ch.fasrv.fanotes.study.studySheetCompact
+import ch.fasrv.fanotes.study.studySheetMaxHeightDp
 import ch.fasrv.fanotes.study.taskProgress
 import ch.fasrv.fanotes.study.termDataJson
 import ch.fasrv.fanotes.study.unsortedCards
@@ -78,42 +88,107 @@ private fun ui(text: String) = ChromeText.ui(text)
 /** Sentences with numbers cannot come from the catalog; they follow the UI language here. */
 private fun counted(german: String, english: String) = if (ChromeText.language == "en") english else german
 
-/** The Aufträge and Markierungen panel of an open PDF (menu `study-tasks` / `study-marks`). */
+/** The header row of the folded sheet; everything below it is the scrolling body. */
+private val SheetHeader = 48.dp
+
+/**
+ * The Aufträge and Markierungen panel of an open PDF (menu `study-tasks` / `study-marks`) as a bottom sheet. It takes at
+ * most 40 % of the window, so the page above stays readable and usable. In small windows (phone, landscape, split screen)
+ * it folds up to its header after a jump, so the page it jumped to shows in full. The task timer is not part of the
+ * sheet: closing it does not stop the timer.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun StudyPanel(model: FaNotesViewModel, initialTab: String) {
-    var tab by remember(initialTab) { mutableStateOf(initialTab) }
-    Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-        Row {
-            TextButton(onClick = { tab = "study-tasks"; model.openEditorMenu("study-tasks") }) {
-                Text(ui("Aufträge"), fontWeight = if (tab == "study-tasks") FontWeight.Bold else FontWeight.Normal)
-            }
-            TextButton(onClick = { tab = "study-marks"; model.openEditorMenu("study-marks") }) {
-                Text(ui("Markierungen"), fontWeight = if (tab == "study-marks") FontWeight.Bold else FontWeight.Normal)
+fun StudySheet(model: FaNotesViewModel, initialTab: String, modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier) {
+        val windowWidth = maxWidth.value.toInt()
+        val windowHeight = maxHeight.value.toInt()
+        val compact = studySheetCompact(windowWidth, windowHeight)
+        var folded by rememberSaveable { mutableStateOf(false) }
+        var tab by remember(initialTab) { mutableStateOf(initialTab) }
+        val jump: (Int) -> Unit = { page -> if (model.jumpToStudyPage(page) && compact) folded = true }
+        Surface(
+            modifier = Modifier
+                .widthIn(max = STUDY_SHEET_WIDTH_DP.dp)
+                .fillMaxWidth()
+                .heightIn(max = if (folded) SheetHeader + 12.dp else studySheetMaxHeightDp(windowHeight).dp),
+            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 10.dp,
+        ) {
+            Column {
+                Box(
+                    Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(top = 6.dp)
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)),
+                )
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = SheetHeader).clickable { folded = !folded }.padding(start = 16.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(ui(if (tab == "study-marks") "Markierungen" else "Aufträge"), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    SheetTimerText(model)
+                    TextButton(onClick = { folded = !folded }) { Text(ui(if (folded) "Aufklappen" else "Einklappen")) }
+                    TextButton(onClick = { model.openEditorMenu(null) }) { Text(ui("Schließen")) }
+                }
+                if (!folded) {
+                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
+                        Row {
+                            TextButton(onClick = { tab = "study-tasks"; model.openEditorMenu("study-tasks") }) {
+                                Text(ui("Aufträge"), fontWeight = if (tab == "study-tasks") FontWeight.Bold else FontWeight.Normal)
+                            }
+                            TextButton(onClick = { tab = "study-marks"; model.openEditorMenu("study-marks") }) {
+                                Text(ui("Markierungen"), fontWeight = if (tab == "study-marks") FontWeight.Bold else FontWeight.Normal)
+                            }
+                        }
+                        if (tab == "study-marks") StudyMarksTab(model, jump) else StudyTasksTab(model, jump)
+                    }
+                }
             }
         }
-        if (tab == "study-marks") StudyMarksTab(model) else StudyTasksTab(model)
     }
+}
+
+/** The running timer in the sheet's header, so it shows while the sheet is folded. */
+@Composable
+private fun SheetTimerText(model: FaNotesViewModel) {
+    val timer by model.studyTimer.collectAsStateWithLifecycle()
+    val markdown by model.markdown.collectAsStateWithLifecycle()
+    val running = timer ?: return
+    var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
+    LaunchedEffect(running) {
+        while (true) {
+            now = android.os.SystemClock.elapsedRealtime()
+            delay(1000)
+        }
+    }
+    val spent = remember(markdown, running.taskId) { readTaskList(markdown)?.tasks?.firstOrNull { it.id == running.taskId }?.spentSec ?: 0 }
+    Text("■ " + formatClock(spent + running.liveSeconds(now)), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StudyTasksTab(model: FaNotesViewModel) {
+private fun StudyTasksTab(model: FaNotesViewModel, onJump: (Int) -> Unit) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
     val timer by model.studyTimer.collectAsStateWithLifecycle()
     val scanning by model.studyScanning.collectAsStateWithLifecycle()
+    val detectionAvailable by model.studyDetectionAvailable.collectAsStateWithLifecycle()
     val editing by model.studyEditingTask.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
     val stored = remember(markdown) { readTaskList(markdown) }
     val tasks = stored?.tasks.orEmpty()
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
     // First visit: detect the assignments once, like the desktop panel does.
     LaunchedEffect(open?.path) {
-        if (stored == null) model.scanStudyTasks()
+        if (stored == null) model.scanStudyTasks(automatic = true)
     }
     LaunchedEffect(timer) {
         while (timer != null) {
-            now = System.currentTimeMillis()
+            now = android.os.SystemClock.elapsedRealtime()
             delay(1000)
         }
     }
@@ -123,22 +198,25 @@ private fun StudyTasksTab(model: FaNotesViewModel) {
         if (progress.plannedMinutes > 0) counted(" · noch ca. ${progress.remainingMinutes} von ${progress.plannedMinutes} Min.", " · about ${progress.remainingMinutes} of ${progress.plannedMinutes} min left") else ""
     Text(summary, fontSize = 13.sp)
     Row {
-        TextButton(onClick = { model.scanStudyTasks() }, enabled = !scanning) { Text(ui(if (scanning) "Suche …" else "Neu erkennen")) }
+        TextButton(onClick = { model.scanStudyTasks() }, enabled = !scanning && detectionAvailable) { Text(ui(if (scanning) "Suche …" else "Neu erkennen")) }
         TextButton(onClick = { model.addStudyTask() }) { Text(ui("Auftrag hinzufügen")) }
     }
-    if (tasks.isEmpty() && !scanning) {
+    if (!detectionAvailable) {
+        // The list the computer detected still shows below (it syncs with the note); only the scan is missing here.
+        Text(ui("Auf diesem Gerät fehlt die PDF-Textfunktion. Erkenne die Aufträge am Computer (Sync) oder füge sie von Hand hinzu."), fontSize = 13.sp)
+    } else if (tasks.isEmpty() && !scanning) {
         Text(ui("Keine Aufträge. Zeilen wie „Auftrag 3: …“ werden automatisch erkannt, sonst füge sie von Hand hinzu."), fontSize = 13.sp)
     }
     tasks.forEach { task ->
-        val running = timer?.second == task.id
-        val seconds = task.spentSec + if (running) Math.round((now - (timer?.third ?: now)) / 1000.0).toInt().coerceAtLeast(0) else 0
-        TaskRow(model, task, seconds, running, editing == task.id)
+        val run = timer?.takeIf { it.taskId == task.id }
+        val seconds = task.spentSec + (run?.liveSeconds(now) ?: 0)
+        TaskRow(model, task, seconds, run != null, editing == task.id, onJump)
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TaskRow(model: FaNotesViewModel, task: StudyTask, seconds: Int, running: Boolean, editing: Boolean) {
+private fun TaskRow(model: FaNotesViewModel, task: StudyTask, seconds: Int, running: Boolean, editing: Boolean, onJump: (Int) -> Unit) {
     val over = task.minutes > 0 && seconds > task.minutes * 60
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Checkbox(
@@ -165,14 +243,14 @@ private fun TaskRow(model: FaNotesViewModel, task: StudyTask, seconds: Int, runn
             } else {
                 Text(
                     (if (task.number.isNotEmpty()) "${ui("Auftrag")} ${task.number}  " else "${ui("Auftrag")}  ") + task.title.ifEmpty { ui("ohne Text") },
-                    modifier = Modifier.clickable { model.jumpToStudyPage(task.page) },
+                    modifier = Modifier.clickable { onJump(task.page) },
                     fontSize = 14.sp,
                     fontWeight = if (task.done) FontWeight.Normal else FontWeight.SemiBold,
                     color = if (task.done) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f) else MaterialTheme.colorScheme.onSurface,
                 )
             }
             FlowRow(verticalArrangement = Arrangement.Center) {
-                TextButton(onClick = { model.jumpToStudyPage(task.page) }) { Text("${ui("S.")} ${task.page}") }
+                TextButton(onClick = { onJump(task.page) }) { Text("${ui("S.")} ${task.page}") }
                 Text(
                     formatClock(seconds) + if (task.minutes > 0) " / ${task.minutes} min" else "",
                     color = if (over) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
@@ -205,7 +283,7 @@ private fun EditField(key: String, initial: String, label: String, modifier: Mod
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StudyMarksTab(model: FaNotesViewModel) {
+private fun StudyMarksTab(model: FaNotesViewModel, onJump: (Int) -> Unit) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
     val open by model.open.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -223,12 +301,12 @@ private fun StudyMarksTab(model: FaNotesViewModel) {
     ) { Text(ui("Als Notiz kopieren")) }
     if (marks.isEmpty()) Text(ui("Markiere Text im PDF mit dem Textmarker. Alle Stellen erscheinen hier nach Seite sortiert."), fontSize = 13.sp)
     grouped.forEach { group ->
-        TextButton(onClick = { model.jumpToStudyPage(group.page) }) { Text("${ui("Seite")} ${group.page}", fontWeight = FontWeight.SemiBold) }
+        TextButton(onClick = { onJump(group.page) }) { Text("${ui("Seite")} ${group.page}", fontWeight = FontWeight.SemiBold) }
         group.marks.forEach { mark ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text(
                     mark.quote,
-                    modifier = Modifier.weight(1f).clickable { model.jumpToStudyPage(mark.page) }.padding(start = 12.dp),
+                    modifier = Modifier.weight(1f).clickable { onJump(mark.page) }.padding(start = 12.dp),
                     fontSize = 13.sp,
                     textDecoration = if (mark.kind == "underline") androidx.compose.ui.text.style.TextDecoration.Underline else null,
                     maxLines = 3,

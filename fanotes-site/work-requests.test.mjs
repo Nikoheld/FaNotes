@@ -231,3 +231,43 @@ test('SSE connections are capped per account', async () => {
     for (const controller of controllers) controller.abort()
   } finally { await s.close() }
 })
+
+test('auto-approve marks a request approved when it reaches waiting_for_you', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'fanotes-req-'))
+  try {
+    for (const autoApprove of [false, true]) {
+      const store = createWorkRequestsStore(join(dir, String(autoApprove)), { autoApprove })
+      const created = await store.create(OWNER, { type: 'bug', title: 'T', description: 'D', priority: 'normal' })
+      await store.claim()
+      await store.workerStatus(created.id, { status: 'working' })
+      await store.workerStatus(created.id, { status: 'pr_open', pr: { number: 1 } })
+      const { request } = await store.workerStatus(created.id, { status: 'waiting_for_you' })
+      assert.equal(request.approved, autoApprove)
+      const events = await store.readEvents(created.id)
+      assert.equal(events.some((event) => event.type === 'approved' && event.by === 'auto'), autoApprove)
+      if (autoApprove) assert.equal((await store.workerStatus(created.id, { status: 'merged' })).request.status, 'merged')
+    }
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('operator can mark a failed request with a hand-merged PR as merged', async () => {
+  const s = await start()
+  try {
+    const created = await create(s)
+    await s.worker('POST', '/claim', {})
+    await s.worker('POST', `/requests/${created.id}/status`, { status: 'working' })
+    assert.equal((await s.worker('POST', `/requests/${created.id}/merged`, { prNumber: 5 })).status, 409)
+    await s.worker('POST', `/requests/${created.id}/status`, { status: 'pr_open', prNumber: 5 })
+    await s.worker('POST', `/requests/${created.id}/status`, { status: 'failed', reason: 'CI-Zeitlimit überschritten' })
+    assert.equal((await s.call('POST', `/requests/${created.id}/merged`, { body: {} })).status, 404)
+    const marked = await s.worker('POST', `/requests/${created.id}/merged`, { prNumber: 5, prUrl: 'https://github.com/Nikoheld/FaNotes/pull/5' })
+    assert.equal(marked.status, 200)
+    assert.equal(marked.body.request.status, 'merged')
+    assert.equal(marked.body.request.reason, '')
+    assert.equal(marked.body.request.percent, 100)
+    const again = await s.worker('POST', `/requests/${created.id}/merged`, {})
+    assert.equal(again.body.request.status, 'merged')
+    const owner = await s.call('GET', `/requests/${created.id}`)
+    assert.equal(owner.body.request.status, 'merged')
+  } finally { await s.close() }
+})

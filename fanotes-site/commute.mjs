@@ -5,8 +5,8 @@ import { promises as fs } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import {
-  CHAIN_TRANSFER_MIN, CHECK_IMMINENT_MS, MAX_VIAS, chainSegments, hasViaLoop, passesVias, sameViaStop, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
-  parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizeRoutes,
+  CHAIN_TRANSFER_MIN, CHECK_IMMINENT_MS, MAX_PINS, MAX_TIMES, MAX_VIAS, chainSegments, hasViaLoop, passesVias, sameViaStop, matchTransportLeg, mergeLegDetail, slimTrip, tripPosition, WINDOW_BEFORE_MS, inWindow, isoZurich, lessonChangeAlert, markQuietest, matchPin, nextCheckAt,
+  parseCompletion, parseLocal, parseSearchChRoute, parseTransportRoute, pinMissingAlert, rankTrips, routeTarget, sanitizePins, sanitizeRoutes, sanitizeSchedule, sanitizeVias,
   sanitizeSettings, sanitizeStop, tripAlerts, usable, zurichWall,
 } from './commute-logic.mjs'
 import { createServiceLog, routeOf } from './service-log.mjs'
@@ -502,6 +502,64 @@ export const createCommute = (options = {}) => {
       if (!known) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // An entry the sanitizer would skip must not look absent, or the next check deletes its alert state and the next save drops the route.
       if (sanitizeRoutes(stored.routes).length !== stored.routes.length) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
+      const weekdayKept = (day) => {
+        const number = Number(day)
+        return Number.isInteger(number) && number >= 1 && number <= 7
+      }
+      const STOP_TYPES = ['train', 'bus', 'tram', 'ship', 'cableway', 'other']
+      const stopTypeKnown = (stop) => stop == null || typeof stop !== 'object' || Array.isArray(stop) || stop.type == null || STOP_TYPES.includes(stop.type)
+      const thresholdKept = (value) => value == null || (typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 30)
+      const minutesKept = (value, min, max) => typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max
+      const transfersKept = (value) => {
+        if (value == null) return true
+        const number = Number(value)
+        return Number.isInteger(number) && number >= 0 && number <= 9
+      }
+      const stopIdKept = (value) => {
+        if (value == null || value === '') return true
+        const stopId = String(value).replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 32)
+        return /^[A-Za-z0-9:_.-]{1,32}$/u.test(stopId)
+      }
+      const arrivalKept = (value) => {
+        if (value == null || value === '') return true
+        const match = /^(\d{1,2}):(\d{2})$/u.exec(String(value || '').trim())
+        return Boolean(match) && Number(match[1]) <= 23 && Number(match[2]) <= 59
+      }
+      const detailKnown = (route) => {
+        const pins = route?.pins
+        const vias = route?.vias
+        const schedule = route?.schedule
+        const times = schedule?.times
+        const days = schedule?.days
+        const mode = schedule?.mode
+        const buffer = schedule?.bufferMinutes
+        if (pins != null && !Array.isArray(pins)) return false
+        if (Array.isArray(pins) && sanitizePins(pins.slice(0, MAX_PINS)).length !== Math.min(pins.length, MAX_PINS)) return false
+        if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin) => Array.isArray(pin?.days) && pin.days.some((day) => !weekdayKept(day)))) return false
+        if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin, index, list) => {
+          if (!Array.isArray(pin?.days)) return false
+          const earlier = new Set(list.slice(0, index).flatMap((item) => Array.isArray(item?.days) ? item.days.map(Number) : []))
+          return pin.days.some((day) => earlier.has(Number(day)))
+        })) return false
+        if (Array.isArray(pins) && pins.slice(0, MAX_PINS).some((pin) => pin && typeof pin === 'object' && (!transfersKept(pin.transfers) || !stopIdKept(pin.stopId) || !arrivalKept(pin.arrival)))) return false
+        if (vias != null && !Array.isArray(vias)) return false
+        if (Array.isArray(vias) && sanitizeVias({ vias: vias.slice(0, MAX_VIAS) }).length !== Math.min(vias.length, MAX_VIAS)) return false
+        if (Array.isArray(vias) && vias.slice(0, MAX_VIAS).some((via) => !stopTypeKnown(via))) return false
+        if (!stopTypeKnown(route?.from) || !stopTypeKnown(route?.to)) return false
+        if (route?.notify != null && typeof route.notify !== 'boolean') return false
+        if (!thresholdKept(route?.delayThreshold)) return false
+        if (schedule != null && (typeof schedule !== 'object' || Array.isArray(schedule))) return false
+        if (days != null && !Array.isArray(days)) return false
+        if (Array.isArray(days) && days.some((day) => !weekdayKept(day))) return false
+        if (mode != null && !['none', 'times', 'firstLesson', 'lastLesson'].includes(mode)) return false
+        if (mode === 'times' && sanitizeSchedule({ mode: 'times', times: Array.isArray(times) ? times : [] }).times.length === 0) return false
+        if (buffer != null && buffer !== '' && !minutesKept(buffer, 0, 60)) return false
+        if (times != null && !Array.isArray(times)) return false
+        if (route?.schedule?.mode === 'times' && Array.isArray(times) && sanitizeSchedule({ mode: 'times', times: times.slice(0, MAX_TIMES) }).times.length !== Math.min(times.length, MAX_TIMES)) return false
+        return true
+      }
+      // A pin, via, time, weekday, shared pin day, walking time, schedule, stop type, threshold, notify flag, or arrival the sanitizer would replace must not look absent, or the next save drops it. The caps stay.
+      if (!stored.routes.every(detailKnown)) throw Object.assign(new Error('commute routes'), { code: 'EBADMSG' })
       // Hidden labels or a threshold that are not the known shape must not look like the defaults, or the next save clears them.
       const settings = stored.settings
       if (settings != null) {
@@ -509,7 +567,7 @@ export const createCommute = (options = {}) => {
         const threshold = settings.delayThreshold
         const settingsKnown = typeof settings === 'object' && !Array.isArray(settings)
           && (labels == null || (Array.isArray(labels) && labels.every((label) => typeof label === 'string')))
-          && (threshold == null || (typeof threshold === 'number' && Number.isFinite(threshold)))
+          && (threshold == null || minutesKept(threshold, 1, 30))
         if (!settingsKnown) throw Object.assign(new Error('commute settings'), { code: 'EBADMSG' })
       }
     }

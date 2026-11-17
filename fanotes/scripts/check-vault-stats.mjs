@@ -128,6 +128,39 @@ try {
   assert.equal(countWords('# Titel\n\n**fett** und [Link](http://x.y) <!-- hidden words -->'), 4)
   assert.deepEqual(streaks(['2026-11-10', '2026-11-11', '2026-11-12', '2026-11-14', '2026-11-15'], now), { current: 2, longest: 3, activeDays: 5 })
   assert.equal(factsFromNote('plain text here', now).words, 3)
+  // "Heute fällig" follows the calendar day without re-reading the note (M1).
+  const dueNote = factsFromNote(embedCards('x', [
+    { id: 'a', front: 'Q1', back: 'A1', ease: 2.5, intervalDays: 1, due: '2026-11-15', reps: 1, lapses: 0 },
+    { id: 'b', front: 'Q2', back: 'A2', ease: 2.5, intervalDays: 1, due: '2026-11-16', reps: 1, lapses: 0 },
+  ]), now)
+  const dueTree = [{ name: 'd.md', relativePath: 'd.md', kind: 'file', extension: 'md', size: 1, modifiedAt: now.toISOString() }]
+  const dueOn = (date) => aggregateVault({ tree: dueTree, facts: { 'd.md': dueNote }, now: date }).cards.due
+  assert.equal(dueOn(now), 1)
+  assert.equal(dueOn(new Date(2026, 10, 16, 0, 5)), 2, 'a card due tomorrow is due after midnight')
+  // Page-stats time is capped per tick and per session (M7).
+  const { tickPageStats, openPageStats, MAX_TICK_GAP_MS, MAX_SESSION_DWELL_MS } = await server.ssrLoadModule('/src/lib/pageStats.ts')
+  const t0 = Date.UTC(2026, 10, 15, 8)
+  const idle = tickPageStats(openPageStats(emptyPageStats(t0), t0), t0 + 3 * 3600_000, true)
+  assert.equal(idle.dwellMs, MAX_TICK_GAP_MS, 'a three hour gap adds only the cap')
+  let session = openPageStats(emptyPageStats(t0), t0)
+  for (let i = 1; i <= 400; i += 1) session = tickPageStats(session, t0 + i * MAX_TICK_GAP_MS, true)
+  assert.equal(session.dwellMs, MAX_SESSION_DWELL_MS, 'one session stops at the session cap')
+  // Loader: aggregate runs are throttled while scanning, and nothing is emitted after abort (M4, L5).
+  {
+    const manyDir = path.join(temporary, 'many')
+    fs.mkdirSync(manyDir)
+    const names = Array.from({ length: 300 }, (_, i) => `n${i}.md`)
+    for (const name of names) fs.writeFileSync(path.join(manyDir, name), `word ${name}`)
+    const entries = names.map((name) => ({ name, relativePath: name, kind: 'file', extension: 'md', size: 10, modifiedAt: now.toISOString() }))
+    let updates = 0
+    await loadVaultStats({ getTree: async () => entries, readFile: async (p) => fs.readFileSync(path.join(manyDir, p), 'utf8') }, new AbortController().signal, () => { updates += 1 }, { force: true, now })
+    assert.ok(updates >= 2 && updates < 40, `throttled emits (${updates})`)
+    const aborted = new AbortController()
+    aborted.abort()
+    let afterAbort = 0
+    await loadVaultStats({ getTree: async () => entries, readFile: async () => '' }, aborted.signal, () => { afterAbort += 1 }, { force: true, now })
+    assert.equal(afterAbort, 0)
+  }
   console.log('Statistik-Prüfung bestanden: Aggregation, Cache, Abbruch und Skalierung auf einem synthetischen Vault.')
 } finally {
   await server.close()

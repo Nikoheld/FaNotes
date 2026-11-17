@@ -4,7 +4,7 @@
 //   claim(picked) -> working -> pr_open -> waiting_for_you -> (approved) merged | failed
 import fs from 'node:fs'
 import path from 'node:path'
-import { childEnv } from './config.mjs'
+import { childEnv, modelFor } from './config.mjs'
 import { run } from './exec.mjs'
 import { buildPrompt } from './prompt.mjs'
 import { createThrottle, estimatePercent } from './progress.mjs'
@@ -15,6 +15,7 @@ import { ciState, findOpenPr } from './ci.mjs'
 
 const sleepDefault = (ms) => new Promise((r) => setTimeout(r, ms))
 const MAX_CI_FIXES = 2
+const MAX_CONFLICT_FIXES = 3
 // Phases in which Claude may run: only one such job at a time.
 const ACTIVE = new Set(['claimed', 'preparing', 'running'])
 const SERVER_CI = { green: 'success', red: 'failure', pending: 'pending' }
@@ -53,9 +54,11 @@ class Job {
 
   async execute() {
     if (this.state.phase !== 'claimed') this.log.info(`resuming request ${this.id} in phase ${this.state.phase}`)
-    try { await this.drive() } catch (e) { await this.fail(`Interner Fehler: ${this.log.redact(e.message)}`) }
-    // Stopped by SIGTERM mid-request: keep state and worktree so the next start resumes.
-    if (this.stopping && !['done', 'failed'].includes(this.state.phase)) return false
+    if (this.state.phase === 'failed' && this.state.reported === false) await this.reportFailure()
+    else try { await this.drive() } catch (e) { await this.fail(`Interner Fehler: ${this.log.redact(e.message)}`) }
+    // Stopped by SIGTERM mid-request (or before the failure reached the server): keep state and
+    // worktree so the next start resumes.
+    if (this.stopping && (!['done', 'failed'].includes(this.state.phase) || this.state.reported === false)) return false
     try { await removeWorktree(this.config, this.id, { deleteBranch: this.state.phase === 'done' }) } catch (e) { this.log.warn('cleanup: ' + e.message) }
     return true
   }
@@ -63,8 +66,38 @@ class Job {
   async fail(reason) {
     if (this.state.phase === 'done' || this.state.phase === 'failed') return
     this.log.warn(`request ${this.id} failed: ${reason}`)
-    this.go('failed', { reason })
-    await this.postStatus({ status: 'failed', reason })
+    this.go('failed', { reason, reported: false })
+    await this.reportFailure()
+  }
+  // The server keeps a request "working" until it hears otherwise, and only one request may be
+  // working at a time, so a lost failure report would block the whole queue. Keep trying (also
+  // across restarts) until the server has the failure or refuses it.
+  async reportFailure() {
+    for (let i = 0; !this.stopping; i++) {
+      try { await this.api.status(this.id, { status: 'failed', reason: this.state.reason }) } catch (e) {
+        if (!(e.status >= 400 && e.status < 500 && e.status !== 429)) {
+          this.log.warn(`failure report for ${this.id} failed (${i + 1}): ${e.message}`)
+          await this.sleep(Math.min(60_000, 1000 * 2 ** i))
+          continue
+        }
+        this.log.warn(`failure report for ${this.id} refused: ${e.message}`)
+      }
+      this.state = { ...this.state, reported: true }
+      this.save()
+      return
+    }
+  }
+  // The PR conflicts with main: send Claude back to merge main into the branch and push.
+  async fixConflict() {
+    const st = this.state
+    st.conflictFixes = st.conflictFixes || 0
+    if (st.conflictFixes >= MAX_CONFLICT_FIXES) { await this.fail('Merge-Konflikt mit main liess sich nicht lösen'); return false }
+    st.conflictFixes++
+    st.pending.push({ id: `conflict-${st.conflictFixes}`, text: 'The pull request now has merge conflicts with main (other requests were merged meanwhile). Run `git fetch origin main` and `git merge origin/main` on your branch, resolve every conflict so both sides keep working (in fanotes/resources/i18n/en.json and package.json keep both added blocks, valid JSON, no duplicate keys), run the relevant checks and tsc again, commit the merge and push. Do not open a new pull request.' })
+    await this.postEvent('Konflikt mit main, Claude führt main zusammen', { percent: 88 })
+    await this.postStatus({ status: 'working' })
+    this.go('running')
+    return true
   }
   // The owner cancelled: the server already moved the request to `rejected`; nothing to post.
   cancelled() {
@@ -166,7 +199,9 @@ class Job {
     let steps = st.steps || 0
     const throttle = createThrottle({ minIntervalMs: config.throttleMs, post: (p) => this.postEvent(p.text, { percent: p.percent }) })
     const outcome = { cancelled: false, timedOut: false }
-    const handle = startClaude(config, {
+    const model = modelFor(config, this.id)
+    if (model !== config.model) this.log.info(`request ${this.id} uses model ${model}`)
+    const handle = startClaude({ ...config, model }, {
       cwd: this.dir, env: await this.claudeEnv(), prompt, sessionId: resumeId,
       onItem: (item) => {
         if (item.kind === 'session') { if (st.sessionId !== item.id) { st.sessionId = item.id; this.save() } }
@@ -221,6 +256,7 @@ class Job {
       if (this.budgetLeft() <= 0) { await this.fail('Zeitbudget überschritten'); return false }
       if (st.pending.length) { await this.postStatus({ status: 'working' }); this.go('running'); return true }
       const ci = await ciState(config, this.dir, st.pr.number)
+      if (ci.state === 'conflict') return this.fixConflict()
       if (ci.state === 'green') {
         await this.postEvent('CI ist grün', { percent: 95 })
         await this.postStatus({ status: 'waiting_for_you', prNumber: st.pr.number, prUrl: st.pr.url, ci: SERVER_CI.green })
@@ -261,10 +297,16 @@ class Job {
   async mergePhase() {
     const { config, state: st } = this
     const ci = await ciState(config, this.dir, st.pr.number)
+    if (ci.state === 'conflict') return this.fixConflict()
     if (ci.state !== 'green') { await this.fail(`Nicht gemergt: CI ist nicht grün (${ci.state})`); return false }
     await this.postEvent('Merged den Pull Request', { percent: 96 })
     const r = await run(config.ghBin, ['pr', 'merge', String(st.pr.number), '--merge'], { cwd: this.dir, timeoutMs: 120_000 })
-    if (r.code !== 0) { await this.fail('Merge fehlgeschlagen: ' + this.log.redact(r.stderr.trim().slice(-200))); return false }
+    if (r.code !== 0) {
+      // main may have moved between the check and the merge.
+      if ((await ciState(config, this.dir, st.pr.number)).state === 'conflict') return this.fixConflict()
+      await this.fail('Merge fehlgeschlagen: ' + this.log.redact(r.stderr.trim().slice(-200)))
+      return false
+    }
     this.go('verifying')
     return true
   }
@@ -275,7 +317,7 @@ class Job {
     return [
       { label: 'tsc', cmd: 'npx', args: ['tsc', '-p', 'tsconfig.app.json', '--noEmit'], cwd: 'fanotes', env: {} },
       { label: 'Android-Tests', cmd: './gradlew', cwd: 'android', env: gradleEnv,
-        args: ['--no-daemon', '-Dorg.gradle.jvmargs=-Xmx1536m', '-Pkotlin.compiler.execution.strategy=in-process', ':core:test', ':app:compileDebugKotlin'] },
+        args: ['--offline', '--no-daemon', '-Dorg.gradle.jvmargs=-Xmx1536m', '-Pkotlin.compiler.execution.strategy=in-process', ':core:test', ':app:compileDebugKotlin'] },
     ]
   }
 

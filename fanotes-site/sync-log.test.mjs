@@ -11,7 +11,7 @@ import test from 'node:test'
 const dataDirectory = mkdtempSync(join(tmpdir(), 'fanotes-sync-log-'))
 process.env.FANOTES_SYNC_DIR = dataDirectory
 process.env.FANOTES_PUBLIC_ORIGIN = 'http://127.0.0.1'
-const { handleSyncRequest, syncFailureCode, syncRequestId, syncRouteTemplate } = await import('./sync-api.mjs')
+const { changesSince, handleSyncRequest, syncFailureCode, syncRequestId, syncRouteTemplate } = await import('./sync-api.mjs')
 
 const captured = []
 const originalLog = console.log
@@ -149,6 +149,25 @@ test('a sync log names the route and never the note, token, cookie, or email', a
     assert.equal(putText.includes(secret), false, secret)
   }
 
+  const revision = JSON.parse(created.body.toString('utf8')).revision
+  const caughtUp = await call('GET', `/api/v1/sync/changes?since=${revision}`, { token, accountId })
+  assert.equal(caughtUp.status, 200, caughtUp.body.toString('utf8'))
+  const caughtUpJson = JSON.parse(caughtUp.body.toString('utf8'))
+  assert.deepEqual(caughtUpJson.entries, [])
+  assert.equal(caughtUpJson.more, false)
+  assert.equal(caughtUpJson.nextSince, revision)
+  assert.equal(caughtUpJson.revision, revision)
+  const ahead = await call('GET', `/api/v1/sync/changes?since=${revision + 1}`, { token, accountId })
+  const aheadJson = JSON.parse(ahead.body.toString('utf8'))
+  assert.equal(ahead.status, 200)
+  assert.deepEqual(aheadJson.entries, [])
+  assert.equal(aheadJson.nextSince, revision)
+  assert.equal(aheadJson.revision, revision)
+  const changesText = JSON.stringify(takeLogs())
+  for (const secret of [email, authKey, token, meta, noteMarker, fileId]) {
+    assert.equal(changesText.includes(secret), false, secret)
+  }
+
   const rejected = await call('GET', `/api/v1/sync/files/${fileId}`, {
     headers: { Authorization: `Bearer ${token}`, 'X-Request-Id': token, Cookie: `session=${token}` },
   })
@@ -156,6 +175,57 @@ test('a sync log names the route and never the note, token, cookie, or email', a
   const rejectedText = JSON.stringify(takeLogs())
   assert.equal(rejectedText.includes(token), false)
   assert.equal(rejectedText.includes(fileId), false)
+})
+
+test('a caught-up changes cursor does not drop a revision past the table number', () => {
+  const entries = [
+    { id: 'a', revision: 2 },
+    { id: 'b', revision: 4 },
+  ]
+  const caughtUp = changesSince(entries, 4, 4)
+  assert.deepEqual(caughtUp.entries, [])
+  assert.equal(caughtUp.more, false)
+  assert.equal(caughtUp.nextSince, 4)
+  const ahead = changesSince(entries, 9, 4)
+  assert.deepEqual(ahead.entries, [])
+  assert.equal(ahead.nextSince, 4)
+  const hidden = changesSince(entries, 3, 3)
+  assert.deepEqual(hidden.entries.map((entry) => entry.id), ['b'])
+  assert.equal(hidden.more, false)
+  assert.equal(hidden.nextSince, 4)
+})
+
+test('a changes page keeps five hundred notes when every revision is unique', () => {
+  const entries = []
+  for (let index = 0; index < 501; index += 1) entries.push({ id: `n${index}`, revision: index + 1 })
+  const page = changesSince(entries, 0, 501)
+  assert.equal(page.entries.length, 500)
+  assert.equal(page.more, true)
+  assert.equal(page.nextSince, 500)
+  const next = changesSince(entries, page.nextSince, 501)
+  assert.equal(next.entries.length, 1)
+  assert.equal(next.entries[0].revision, 501)
+  assert.equal(next.more, false)
+  assert.equal(next.nextSince, 501)
+})
+
+test('a changes page does not split notes that share a revision', () => {
+  const entries = []
+  for (let index = 0; index < 499; index += 1) entries.push({ id: `n${index}`, revision: index + 1 })
+  entries.push({ id: 'shared-b', revision: 500 })
+  entries.push({ id: 'shared-a', revision: 500 })
+  entries.push({ id: 'later', revision: 501 })
+  const page = changesSince(entries, 0, 501)
+  assert.equal(page.entries.length, 501)
+  assert.equal(page.more, true)
+  assert.equal(page.nextSince, 500)
+  assert.deepEqual(page.entries.slice(-2).map((entry) => entry.id), ['shared-a', 'shared-b'])
+  const next = changesSince(entries, page.nextSince, 501)
+  assert.deepEqual(next.entries.map((entry) => entry.id), ['later'])
+  assert.equal(next.more, false)
+  assert.equal(next.nextSince, 501)
+  const seen = new Set([...page.entries, ...next.entries].map((entry) => entry.id))
+  assert.equal(seen.size, entries.length)
 })
 
 test.after(() => new Promise((resolve) => {

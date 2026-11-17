@@ -667,7 +667,8 @@ const publicEntry = (entry) => ({
   deleted: Boolean(entry.deleted),
   size: entry.deleted ? 0 : entry.size,
   sha256: entry.deleted ? null : entry.sha256,
-  meta: entry.deleted ? null : entry.meta,
+  // Copied metadata still names the previous note. A device that has that note would adopt this revision and could overwrite the body.
+  meta: entry.deleted || entry.metaHeld === true ? null : entry.meta,
   updatedAt: entry.updatedAt,
   deviceId: entry.deviceId,
 })
@@ -979,17 +980,36 @@ const handleDeleteAccount = async (request, response, auth) => {
   sendEmpty(request, response, 204)
 }
 
+// A caught-up cursor still has to notice a revision the table number has not reached.
+// A consistent table has none, so that poll does not copy or sort every note.
+// A shared revision must stay on one changes page, or the cursor would skip the note left on the next page.
+export const changesSince = (entries, since, tableRevision) => {
+  const tableRevisionNumber = Number(tableRevision) || 0
+  const list = []
+  for (const entry of entries) {
+    if (Number(entry?.revision) > since) list.push(entry)
+  }
+  if (!list.length) return { entries: [], more: false, nextSince: tableRevisionNumber }
+  list.sort((left, right) => left.revision - right.revision || String(left.id).localeCompare(String(right.id)))
+  let end = Math.min(CHANGES_PAGE, list.length)
+  if (end < list.length && list[end].revision === list[end - 1].revision) {
+    const shared = list[end - 1].revision
+    while (end < list.length && list[end].revision === shared) end += 1
+  }
+  const page = list.slice(0, end)
+  return { entries: page, more: end < list.length, nextSince: page[page.length - 1].revision }
+}
+
 const handleChanges = async (request, response, auth, url) => {
   const table = await loadTable(auth.account.id)
   const since = Number(url.searchParams.get('since') || 0)
   if (!Number.isInteger(since) || since < 0) fail(400, 'Der Parameter „since“ muss eine Revisionsnummer sein.')
-  const entries = [...table.entries.values()].filter((entry) => entry.revision > since).sort((a, b) => a.revision - b.revision)
-  const page = entries.slice(0, CHANGES_PAGE)
+  const page = changesSince(table.entries.values(), since, table.revision)
   sendJson(request, response, 200, {
     revision: table.revision,
-    entries: page.map(publicEntry),
-    more: entries.length > page.length,
-    nextSince: page.length ? page[page.length - 1].revision : table.revision,
+    entries: page.entries.map(publicEntry),
+    more: page.more,
+    nextSince: page.nextSince,
   })
 }
 
@@ -1066,6 +1086,19 @@ const handleGetFile = async (request, response, auth, fileId) => {
               await reopened.close()
               throw error
             }
+          }
+        } else if (await restoreLiveBlob(auth.account.id, fileId, entry)) {
+          const reopened = await fs.open(blobPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+          try {
+            const again = await reopened.stat()
+            if (!again.isFile() || again.size !== (Number(entry.size) || 0)) {
+              await reopened.close()
+              return { entry, handle: null, size: again.size, mismatch: true }
+            }
+            return { entry, handle: reopened, size: again.size }
+          } catch (error) {
+            await reopened.close()
+            throw error
           }
         }
         return { entry, handle: null, size: info.size, mismatch: true }
@@ -1192,6 +1225,20 @@ export const evaluateSyncWrite = ({ current, base, nextSize, blank, clear, archi
   return 'accept'
 }
 
+// The row was recorded from bytes that were already on disk. Its metadata was
+// copied, so only this same body may replace that metadata. A blank claim is
+// still refused, and a different body stays stale.
+const heldMetaCanReplace = (current, nextSize, sha) => Boolean(
+  current && !current.deleted && current.metaHeld === true
+  && current.sha256 === sha
+  && (Number(current.size) || 0) === nextSize
+)
+
+const decisionForHeldMeta = (decision, current, nextSize, sha, blank, clear) => {
+  if (decision !== 'stale' || !heldMetaCanReplace(current, nextSize, sha)) return decision
+  return rejectsBlankOverwrite(current, nextSize, blank, clear) ? 'guard' : 'accept'
+}
+
 const listRevisionFiles = async (directory) => {
   let names
   try {
@@ -1242,7 +1289,9 @@ const restoreLiveBlob = async (accountId, fileId, entry) => {
   const blobDirectory = safeJoin(accountDirectory(accountId), 'blobs')
   const blobPath = safeJoin(blobDirectory, fileId)
   const live = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
-  if (live) return false
+  // A short remnant must not hide the archived note. It is not a ciphertext.
+  // A full live file stays where it is, and a symlink is not followed.
+  if (live && !(live.isFile() && live.size < EMPTY_CIPHERTEXT_BYTES)) return false
   const directory = revisionsDirectory(accountId, fileId)
   const candidates = (await listRevisionFiles(directory)).filter((file) => file.size === expectedSize)
   const revision = Number(entry.revision)
@@ -1279,6 +1328,8 @@ const unarchivedBytes = async (accountId, fileId, current, nextSize) => {
   const blobPath = safeJoin(accountDirectory(accountId), 'blobs', fileId)
   const live = await fs.lstat(blobPath).catch((error) => (error?.code === 'ENOENT' ? null : Promise.reject(error)))
   if (!live?.isFile()) return 0
+  // A torn live file is not archived, so its table size is not reserved again.
+  if (live.size < EMPTY_CIPHERTEXT_BYTES && live.size !== currentSize) return 0
   const files = await listRevisionFiles(revisionsDirectory(accountId, fileId))
   const name = revisionArchiveName(current, nextSize)
   const simulated = files.map((file) => ({ name: file.name, size: file.size, revision: file.revision }))
@@ -1322,7 +1373,8 @@ const retainPreviousBlob = async (accountId, fileId, current, nextSize, move) =>
     // Copy into a temporary name and rename it. A crash must not leave a torn
     // file under the revision name, or a later restore would publish that copy.
     if (!existing) {
-      await copyDurable(blobPath, dest)
+      // A torn live file must not take the archive slot of this note.
+      if (!(stat.size < EMPTY_CIPHERTEXT_BYTES && stat.size !== currentSize)) await copyDurable(blobPath, dest)
     } else if (existing.isFile()) {
       if (!await holdsCurrent(dest, existing.size) && await holdsCurrent(blobPath, stat.size)) await copyDurable(blobPath, dest)
     } else if (await holdsCurrent(blobPath, stat.size)) {
@@ -1428,6 +1480,10 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
     return { matchesRequest: true, entry }
   }
   const currentSize = Number(current.size) || 0
+  // A short remnant is not a newer note. Publishing it would replace the
+  // table row, and the device that still has the note would be told its copy
+  // is stale.
+  if (stat.size < EMPTY_CIPHERTEXT_BYTES && stat.size !== currentSize) return null
   const liveSha = await hashFile(blobPath)
   if (stat.size === currentSize && liveSha === current.sha256) return null
   const matchesRequest = Boolean(incoming) && incoming.size === stat.size && incoming.sha256 === liveSha
@@ -1441,6 +1497,8 @@ const settleDivergentLiveBlob = async (accountId, table, fileId, current, incomi
     updatedAt: nowIso(),
     deviceId: matchesRequest ? incoming.deviceId : current.deviceId,
   }
+  // Metadata copied from the previous note does not describe this body.
+  if (!matchesRequest) entry.metaHeld = true
   await recordLiveBlob(accountId, table, entry)
   return { matchesRequest, entry }
 }
@@ -1489,7 +1547,7 @@ const handlePutFile = async (request, response, auth, fileId) => {
     const archivedSize = current?.deleted
       ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
       : 0
-    const decision = evaluateSyncWrite({ current: current ?? null, base, nextSize: incoming.size, blank, clear, archivedSize })
+    const decision = decisionForHeldMeta(evaluateSyncWrite({ current: current ?? null, base, nextSize: incoming.size, blank, clear, archivedSize }), current, incoming.size, declaredSha, blank, clear)
     if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
     if (decision === 'guard') {
       committed = await moveToQuarantine(auth.account.id, fileId, base, incoming.path)
@@ -1987,7 +2045,7 @@ const finishRenamedUpload = async (request, response, auth, fileId, uploadId, ba
   const archivedSize = current?.deleted
     ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
     : 0
-  const decision = evaluateSyncWrite({ current, base, nextSize: stat.size, blank, clear, archivedSize })
+  const decision = decisionForHeldMeta(evaluateSyncWrite({ current, base, nextSize: stat.size, blank, clear, archivedSize }), current, stat.size, declaredSha, blank, clear)
   if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
   if (decision === 'guard') return guardRejected(request, response, current)
   if (current && !current.deleted && current.sha256 === declaredSha && Number(current.size) === stat.size) {
@@ -2067,7 +2125,7 @@ const handleUploadComplete = async (request, response, auth, fileId, uploadId) =
     const archivedSize = current?.deleted
       ? newestArchivedBytes(await listRevisionFiles(revisionsDirectory(auth.account.id, fileId)))
       : 0
-    const decision = evaluateSyncWrite({ current: current ?? null, base, nextSize: meta.size, blank, clear, archivedSize })
+    const decision = decisionForHeldMeta(evaluateSyncWrite({ current: current ?? null, base, nextSize: meta.size, blank, clear, archivedSize }), current, Number(meta.size) || 0, declaredSha, blank, clear)
     if (decision === 'stale') return conflict(request, response, current ?? { id: fileId, revision: 0, deleted: true, updatedAt: null, deviceId: null })
     if (decision === 'guard') {
       // The live blob stays. Drop the partial only after the rejected body is
@@ -2285,6 +2343,10 @@ export const handleSyncRequest = async (request, response, url) => {
     }
     fail(404, 'Diesen Sync-Endpunkt gibt es nicht.')
   } catch (error) {
+    if (response.headersSent || response.writableEnded) {
+      // The client already has this response. A cleanup error must not start a second one.
+      return true
+    }
     if (error instanceof SyncApiError) {
       sendJson(request, response, error.status, { error: error.publicMessage, ...error.extra }, error.status === 429 && error.extra?.retryAfter ? { 'Retry-After': String(error.extra.retryAfter) } : {})
     } else {

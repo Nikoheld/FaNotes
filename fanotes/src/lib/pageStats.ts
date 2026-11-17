@@ -434,6 +434,11 @@ export const openPageStats = (state: PageStats | PageStatsSession, now: number):
  * is attributed to the local hour and weekday in which the tick happens, so a
  * one-second tick stays exact enough for the histograms.
  */
+/** One tick never adds more than this: a sleeping laptop or an idle open note is not study time. */
+export const MAX_TICK_GAP_MS = 2 * 60_000
+/** A single uninterrupted session stops counting after this long. */
+export const MAX_SESSION_DWELL_MS = 4 * 60 * 60_000
+
 export const tickPageStats = (
   session: PageStatsSession,
   now: number,
@@ -447,7 +452,7 @@ export const tickPageStats = (
         ? { ...session, active: false, sessionStartedAt: null }
         : session
   }
-  const extra = Math.max(0, now - session.sessionStartedAt)
+  const extra = Math.max(0, Math.min(now - session.sessionStartedAt, MAX_TICK_GAP_MS, MAX_SESSION_DWELL_MS - session.sessionDwellMs))
   const date = new Date(now)
   const dwellByHour = [...session.dwellByHour]
   dwellByHour[date.getHours()] += extra

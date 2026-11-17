@@ -11,6 +11,8 @@ import {
   type NoteTextFieldPageRect,
 } from '../lib/noteTextField'
 import { readUsedSheetZoom } from '../lib/paperView'
+import { toggleNoteTextTask } from '../lib/noteTextMarkdown'
+import { NoteTextFieldMarkdown } from './NoteTextFieldMarkdown'
 
 type FieldLayout = {
   id: string
@@ -39,6 +41,7 @@ type NoteTextFieldLayerProps = {
   onFinish?: () => void
   onRemove: (id: string) => void
   onFocusHandled?: () => void
+  onSelectedChange?: (id: string | null) => void
 }
 
 type Gesture =
@@ -50,6 +53,44 @@ const MIN_BOX_HEIGHT = 1.9 // em
 const fitTextArea = (node: HTMLTextAreaElement) => {
   node.style.height = '0px'
   node.style.height = `${Math.max(node.scrollHeight, 0)}px`
+}
+
+/** Size, bold and colour controls of the selected text box; shown in the top toolbar. */
+export function NoteTextFieldToolbar({ field, onStyle, onRemove }: {
+  field: NoteTextField
+  onStyle: (id: string, patch: StylePatch) => void
+  onRemove: (id: string) => void
+}) {
+  return (
+    <div
+      className="note-text-field-toolbar"
+      role="toolbar"
+      aria-label="Textfeld-Werkzeuge"
+      onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }}
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      <button type="button" aria-label="Schrift kleiner" title="Schrift kleiner" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, -1) })}><Minus size={13} aria-hidden="true" /></button>
+        <span className="note-text-field-size" title="Schriftgröße">{field.fontSize}</span>
+        <button type="button" aria-label="Schrift größer" title="Schrift größer" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, 1) })}><Plus size={13} aria-hidden="true" /></button>
+        <i className="note-text-field-sep" aria-hidden="true" />
+        <button type="button" className={field.bold ? 'is-on' : ''} aria-pressed={Boolean(field.bold)} aria-label="Fett" title="Fett (Strg+B)" onClick={() => onStyle(field.id, { bold: field.bold ? undefined : true })}><Bold size={13} aria-hidden="true" /></button>
+        <i className="note-text-field-sep" aria-hidden="true" />
+        {NOTE_TEXT_FIELD_COLORS.map((color) => (
+          <button
+            key={color.label}
+            type="button"
+            className={`note-text-field-swatch ${(field.color ?? undefined) === color.value ? 'is-on' : ''}`}
+            style={{ '--swatch': color.css } as CSSProperties}
+            aria-label={color.label}
+            title={color.label}
+            aria-pressed={(field.color ?? undefined) === color.value}
+            onClick={() => onStyle(field.id, { color: color.value })}
+          />
+        ))}
+        <i className="note-text-field-sep" aria-hidden="true" />
+        <button type="button" className="is-danger" aria-label="Textfeld entfernen" title="Textfeld entfernen" onClick={() => onRemove(field.id)}><Trash2 size={13} aria-hidden="true" /></button>
+    </div>
+  )
 }
 
 export function NoteTextFieldLayer({
@@ -64,6 +105,7 @@ export function NoteTextFieldLayer({
   onFinish,
   onRemove,
   onFocusHandled,
+  onSelectedChange,
 }: NoteTextFieldLayerProps) {
   const layerRef = useRef<HTMLDivElement>(null)
   const gestureRef = useRef<Gesture | null>(null)
@@ -71,8 +113,38 @@ export function NoteTextFieldLayer({
   fieldsRef.current = fields
   const [layout, setLayout] = useState<FieldLayout[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  useEffect(() => { onSelectedChange?.(selectedId) }, [selectedId, onSelectedChange])
+  useEffect(() => () => onSelectedChange?.(null), [onSelectedChange])
   const previousSelectedRef = useRef<string | null>(null)
   const composingRef = useRef(false)
+  const onTextRef = useRef(onText)
+  onTextRef.current = onText
+  const onFinishRef = useRef(onFinish)
+  onFinishRef.current = onFinish
+
+  // The rendered Markdown is memoised on its text, so these read the current props.
+  const toggleTask = useCallback((id: string, line: number) => {
+    const field = fieldsRef.current.find((item) => item.id === id)
+    if (!field) return
+    const next = toggleNoteTextTask(field.text, line)
+    if (next === field.text) return
+    onTextRef.current(id, next)
+    onFinishRef.current?.()
+  }, [])
+
+  const openLink = useCallback((href: string) => {
+    void window.fanotes.openExternal(href).catch(() => {})
+  }, [])
+
+  // A click on the rendered text opens the box for typing, caret at the end.
+  const startEditing = useCallback((id: string) => {
+    const node = layerRef.current?.querySelector<HTMLTextAreaElement>(`[data-note-text-field="${CSS.escape(id)}"]`)
+    setSelectedId(id)
+    if (!node) return
+    node.focus({ preventScroll: true })
+    const end = node.value.length
+    node.setSelectionRange(end, end)
+  }, [])
 
   const measure = useCallback(() => {
     const layer = layerRef.current
@@ -174,7 +246,7 @@ export function NoteTextFieldLayer({
     if (!selectedId) return
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target
-      if (target instanceof Element && target.closest('.note-text-field')) return
+      if (target instanceof Element && target.closest('.note-text-field, .note-text-field-toolbar')) return
       // A press that a tool swallows (pen, touch) never moves focus, so the box would keep typing unseen.
       const active = document.activeElement
       if (active instanceof HTMLElement && active.closest('.note-text-field')) active.blur()
@@ -335,7 +407,7 @@ export function NoteTextFieldLayer({
         const scale = position?.scale ?? 1
         const inverse = position?.inverse ?? 1
         const empty = field.text.trim() === ''
-        const flipBelow = (position?.top ?? 0) * (1 / Math.max(inverse, 0.01)) < 64
+        const rendered = !selected && !empty
         const style = {
           left: position?.left ?? 0,
           top: position?.top ?? 0,
@@ -344,51 +416,21 @@ export function NoteTextFieldLayer({
           '--tf-inv': inverse,
           '--tf-ink': field.color ?? '#20222b',
         } as CSSProperties
-        const stopFocusSteal = (event: ReactPointerEvent<HTMLElement>) => {
-          event.preventDefault()
-          event.stopPropagation()
-        }
         return (
           <div
             key={field.id}
-            className={`note-text-field ${selected ? 'is-selected' : ''} ${empty ? 'is-empty' : ''}`}
+            className={`note-text-field ${selected ? 'is-selected' : ''} ${empty ? 'is-empty' : ''} ${rendered ? 'is-rendered' : ''}`}
             style={style}
-            onFocus={() => setSelectedId(field.id)}
+            onFocus={(event) => {
+              // Tabbing to a link or checkbox of the rendered text does not start an edit.
+              if (event.target instanceof Element && event.target.closest('.note-text-field-render')) return
+              setSelectedId(field.id)
+            }}
             onBlur={(event) => {
               const next = event.relatedTarget
               if (next instanceof Node && !event.currentTarget.contains(next) && !composingRef.current) setSelectedId((current) => current === field.id ? null : current)
             }}
           >
-            {selected && (
-              <div
-                className={`note-text-field-toolbar ${flipBelow ? 'is-below' : ''} ${field.x > 0.5 ? 'is-right' : ''}`}
-                role="toolbar"
-                aria-label="Textfeld-Werkzeuge"
-                onPointerDown={stopFocusSteal}
-                onMouseDown={(event) => event.preventDefault()}
-              >
-                <button type="button" aria-label="Schrift kleiner" title="Schrift kleiner" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, -1) })}><Minus size={13} aria-hidden="true" /></button>
-                <span className="note-text-field-size" title="Schriftgröße">{field.fontSize}</span>
-                <button type="button" aria-label="Schrift größer" title="Schrift größer" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, 1) })}><Plus size={13} aria-hidden="true" /></button>
-                <i className="note-text-field-sep" aria-hidden="true" />
-                <button type="button" className={field.bold ? 'is-on' : ''} aria-pressed={Boolean(field.bold)} aria-label="Fett" title="Fett (Strg+B)" onClick={() => onStyle(field.id, { bold: field.bold ? undefined : true })}><Bold size={13} aria-hidden="true" /></button>
-                <i className="note-text-field-sep" aria-hidden="true" />
-                {NOTE_TEXT_FIELD_COLORS.map((color) => (
-                  <button
-                    key={color.label}
-                    type="button"
-                    className={`note-text-field-swatch ${(field.color ?? undefined) === color.value ? 'is-on' : ''}`}
-                    style={{ '--swatch': color.css } as CSSProperties}
-                    aria-label={color.label}
-                    title={color.label}
-                    aria-pressed={(field.color ?? undefined) === color.value}
-                    onClick={() => onStyle(field.id, { color: color.value })}
-                  />
-                ))}
-                <i className="note-text-field-sep" aria-hidden="true" />
-                <button type="button" className="is-danger" aria-label="Textfeld entfernen" title="Textfeld entfernen" onClick={() => onRemove(field.id)}><Trash2 size={13} aria-hidden="true" /></button>
-              </div>
-            )}
             <button
               type="button"
               tabIndex={-1}
@@ -405,6 +447,7 @@ export function NoteTextFieldLayer({
             </button>
             <textarea
               data-note-text-field={field.id}
+              data-snapshot={empty ? undefined : 'hide'}
               value={field.text}
               rows={1}
               maxLength={NOTE_TEXT_FIELD_MAX_CHARS}
@@ -429,6 +472,26 @@ export function NoteTextFieldLayer({
               onKeyDown={(event) => onKeyDown(field, event)}
               onPointerDown={(event) => event.stopPropagation()}
             />
+            {!empty && (
+              <div
+                className="note-text-field-render"
+                data-snapshot="show"
+                data-i18n-ignore
+                style={{
+                  fontSize: `${field.fontSize * scale}px`,
+                  minHeight: `${MIN_BOX_HEIGHT}em`,
+                  fontWeight: field.bold ? 700 : 400,
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => startEditing(field.id)}
+              >
+                <NoteTextFieldMarkdown
+                  text={field.text}
+                  onToggleTask={(line) => toggleTask(field.id, line)}
+                  onOpenLink={openLink}
+                />
+              </div>
+            )}
             <button
               type="button"
               tabIndex={-1}

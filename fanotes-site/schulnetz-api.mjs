@@ -285,9 +285,28 @@ export const createSchulnetzRuntime = (options = {}) => {
     // A missing or broken file can start again. A file that is there but whose saved lists or week maps are not the known shape must not look empty, or the next save replaces them.
     if (stored == null) return null
     const lists = ['grades', 'events', 'exams', 'absences', 'homework', 'messages', 'vacations', 'konto', 'startMessages']
+    // Start-page lines are text. The other lists are records; a string there is dropped on the next upload.
+    const records = ['grades', 'events', 'exams', 'absences', 'homework', 'messages', 'vacations', 'konto']
     const maps = ['weekFetched', 'weekRead', 'examWeekFetched']
     const plain = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
-    const known = plain(stored) && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && maps.every((name) => stored[name] == null || plain(stored[name]))
+    const rowsKnown = (list) => list.every(plain)
+    const lessonWeekKnown = (event) => !isLesson(event) || Boolean(weekMondayKey(event.start))
+    const stampKnown = (map) => Object.entries(map).every(([key, stamp]) => typeof key === 'string' && key && typeof stamp === 'string' && Number.isFinite(Date.parse(stamp)))
+    const timeKnown = (value) => value == null || value === '' || (typeof value === 'string' && Number.isFinite(Date.parse(value)))
+    const dayKnown = (value) => value == null || value === '' || (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value))
+    const readTimeKnown = stored.fetchedAt == null || (typeof stored.fetchedAt === 'string' && stored.fetchedAt !== '' && Number.isFinite(Date.parse(stored.fetchedAt)))
+    const timesKnown = ['lessonsFetchedAt', 'gradesFetchedAt', 'icalFetchedAt'].every((name) => timeKnown(stored[name]))
+    const spansKnown = ['weekSpanStart', 'weekSpanEnd'].every((name) => dayKnown(stored[name]))
+    const saldoKnown = stored.kontoSaldo == null || typeof stored.kontoSaldo === 'string'
+    const versionKnown = (value) => value == null || value === '' || (typeof value === 'number' && Number.isFinite(value)) || (typeof value === 'string' && Number.isFinite(Number(value)))
+    const parsersKnown = ['absenceParser', 'gradeParser'].every((name) => versionKnown(stored[name]))
+    // A saved row that is not a record must not be dropped, or the next upload replaces the snapshot.
+    // A saved lesson with no week must not be dropped, or the next upload keeps the dated lessons and replaces the snapshot.
+    // A saved week stamp that is not a time must not look unread, or the next read fetches that week again.
+    // A saved read time or week span that is not a time must not look unread, or the next read uses the near window again.
+    // A saved balance that is not text must not look blank, or the next read stores an empty balance.
+    // A saved parser version that is not a version must not look old, or the next upload replaces the statement or hides grade news.
+    const known = plain(stored) && readTimeKnown && timesKnown && spansKnown && saldoKnown && parsersKnown && lists.every((name) => stored[name] == null || Array.isArray(stored[name])) && records.every((name) => stored[name] == null || rowsKnown(stored[name])) && (stored.events == null || stored.events.every(lessonWeekKnown)) && maps.every((name) => stored[name] == null || (plain(stored[name]) && stampKnown(stored[name])))
     if (!known) throw Object.assign(new Error('snapshot'), { code: 'EBADMSG' })
     return stored
   }
@@ -305,10 +324,30 @@ export const createSchulnetzRuntime = (options = {}) => {
     const link = await readJson(file)
     // A missing or broken file can start again. A file that is there but not this link, including a push token that is not a token, must not look connected, or the next link drops that token and the next upload replaces the snapshot.
     if (link == null) return null
+    const timeKnown = (value) => value == null || value === '' || (typeof value === 'string' && Number.isFinite(Date.parse(value)))
+    const sealKnown = (value) => value == null || value === '' || (plainObject(value) && value.v === 1 && typeof value.iv === 'string' && typeof value.tag === 'string' && typeof value.data === 'string')
+    const modeKnown = (value) => value == null || value === '' || value === 'web' || value === 'rest' || value === 'device'
+    const deviceKnown = (value) => value == null || value === '' || (typeof value === 'string' && /^[a-f0-9]{24}$/u.test(value))
+    const baseKnown = (link) => link.baseUrl == null || link.baseUrl === '' || (link.mode === 'device' ? typeof link.baseUrl === 'string' : typeof normalizeSchoolBase(link.baseUrl) === 'string')
+    const flagKnown = (value) => value == null || value === '' || typeof value === 'boolean'
     const known = plainObject(link)
       && (link.fcmTokens == null || (Array.isArray(link.fcmTokens) && link.fcmTokens.every(isValidFcmToken)))
       && (link.pushKeys == null || plainObject(link.pushKeys))
       && (link.settings == null || plainObject(link.settings))
+      // A saved revision that is not a count must not look new, or the next upload replaces the count.
+      && (link.revision == null || (typeof link.revision === 'number' && Number.isFinite(link.revision)))
+      // A saved sign-in time that is not a time must not look expired, or the next poll deletes the session.
+      && timeKnown(link.cookiesSavedAt) && timeKnown(link.accessExpiresAt)
+      // A saved sign-in that is not a sealed token must not look signed out, or the next poll drops the session.
+      && sealKnown(link.refresh) && sealKnown(link.access) && sealKnown(link.sso) && sealKnown(link.serverSession)
+      // A saved mode that is not a mode must not look like a token sign-in, or the next poll marks the account signed out.
+      && modeKnown(link.mode)
+      // A saved device id that is not an id must not be sent, or the next poll marks the account signed out.
+      && deviceKnown(link.deviceId)
+      // A saved school address that is not an allowed address must not be opened, or the next poll drops the session.
+      && baseKnown(link)
+      // A saved sign-in flag that is not a flag must not look set, or the next poll stays silent or sends another sign-in push.
+      && flagKnown(link.needsReauth) && flagKnown(link.loginPushSent)
     if (!known) throw Object.assign(new Error('link'), { code: 'EBADMSG' })
     if (link.topic != null || link.pushEndpoints != null) {
       stripLegacyPush(link)

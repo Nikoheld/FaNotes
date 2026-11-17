@@ -142,6 +142,25 @@ export const parseNoteTextFieldTombstones = (value: unknown): NoteTextFieldTombs
     .map(([id, deletedAt]) => ({ id, deletedAt }))
 }
 
+const LAST_FONT_SIZE_KEY = 'fanotes-note-text-field-font-size'
+
+const fontSizeStorage = (): Storage | null => {
+  try { return globalThis.localStorage ?? null } catch { return null }
+}
+
+/** Font size the owner last chose for a text field; new fields start with it. */
+export const readLastNoteTextFieldFontSize = (): number => {
+  try {
+    const raw = fontSizeStorage()?.getItem(LAST_FONT_SIZE_KEY)
+    return raw === null || raw === undefined ? DEFAULT_FONT_SIZE : clampFontSize(Number(raw))
+  } catch { return DEFAULT_FONT_SIZE }
+}
+
+export const rememberNoteTextFieldFontSize = (size: number): void => {
+  if (clampFontSize(size) !== size) return
+  try { fontSizeStorage()?.setItem(LAST_FONT_SIZE_KEY, String(size)) } catch { /* storage unavailable */ }
+}
+
 /** Click point becomes the top-left of a new empty field, kept on the page. */
 export const placeNoteTextField = (point: { page: number; x: number; y: number }): NoteTextField => {
   const width = DEFAULT_WIDTH
@@ -151,7 +170,7 @@ export const placeNoteTextField = (point: { page: number; x: number; y: number }
     x: Math.min(clampUnit(point.x, 0.5), 1 - width),
     y: Math.min(clampUnit(point.y, 0.5), 0.92),
     width,
-    fontSize: DEFAULT_FONT_SIZE,
+    fontSize: readLastNoteTextFieldFontSize(),
     text: '',
     updatedAt: Date.now(),
   })
@@ -166,6 +185,7 @@ export const patchNoteTextField = (
   patch: Partial<Pick<NoteTextField, 'page' | 'x' | 'y' | 'width' | 'text' | 'fontSize'>> & { color?: string | undefined; bold?: boolean | undefined },
   now: number = Date.now(),
 ): NoteTextField[] => {
+  if (patch.fontSize !== undefined) rememberNoteTextFieldFontSize(patch.fontSize)
   // The list is cleaned once; only the patched box is cleaned again. This runs on every keystroke.
   return parseNoteTextFields(fields).map((field) => {
     if (field.id !== id) return field

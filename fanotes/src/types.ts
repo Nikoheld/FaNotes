@@ -142,6 +142,8 @@ export type AppSettings = {
   /** Show the invisible handwriting transcript in the margin. */
   marginTranscript: boolean
   showWordCount: boolean
+  /** Editor toolbar placement: horizontal bar on top or vertical bar at the left edge. */
+  toolbarPosition: 'top' | 'side'
   showOutline: boolean
   defaultFolder: string
   dailyNotesFolder: string
@@ -548,7 +550,8 @@ export type FaNotesApi = {
   selectVault: () => Promise<BootstrapData | null>
   getCachedTree: () => Promise<VaultEntry[] | null>
   getFastTree: () => Promise<VaultEntry[]>
-  getTree: () => Promise<VaultEntry[]>
+  /** `fromWatcher`: reuse the vault walk the file watcher just did (desktop). */
+  getTree: (options?: { fromWatcher?: boolean }) => Promise<VaultEntry[]>
   readFile: (relativePath: string) => Promise<string>
   readAssetDataUrl: (relativePath: string) => Promise<string>
   readAssetBytes: (relativePath: string) => Promise<Uint8Array>

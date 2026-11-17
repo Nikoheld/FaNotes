@@ -1,47 +1,14 @@
 package ch.fasrv.fanotes.companion
 
-import ch.fasrv.fanotes.json.JsonValue
-import ch.fasrv.fanotes.json.parseJson
 import java.io.File
 import java.io.RandomAccessFile
-import java.security.MessageDigest
 
 /*
  * Read-only adapters for formats that other FaNotes clients own. Kanti+ never writes them.
+ * The desktop's PDF text files (`fanotes-pdf-ocr-v1`, `fanotes-page-text-v1`) are read in `:core`, in `ch.fasrv.fanotes.desk.PdfSidecars`.
  */
 
-/** The desktop's scanned-PDF transcript (`fanotes-pdf-ocr-v1`), owned by FaNotes desktop. */
-const val DESKTOP_PDF_OCR_FORMAT = "fanotes-pdf-ocr-v1"
-
-fun desktopPdfOcrSidecar(relativePath: String): String {
-    val digest = MessageDigest.getInstance("SHA-256").digest(relativePath.toByteArray(Charsets.UTF_8))
-    return ".fanotes/pdf-ocr/" + digest.joinToString("") { "%02x".format(it) }.take(32) + ".json"
-}
-
-/**
- * Page texts from a desktop sidecar, only when it belongs to this path and this exact PDF:
- * the size and the content stamp must match. Modification times are not compared, because a
- * synced copy on the phone has its own. Anything malformed or over the desktop limits is ignored.
- */
-fun desktopPdfOcrPages(raw: String?, path: String, size: Long, stamp: String): Map<Int, String> {
-    if (raw.isNullOrBlank() || raw.length > 512 * 1024) return emptyMap()
-    val obj = runCatching { parseJson(raw) as? JsonValue.Obj }.getOrNull() ?: return emptyMap()
-    if (obj.string("format") != DESKTOP_PDF_OCR_FORMAT || obj.string("path") != path) return emptyMap()
-    if (obj.double("size")?.toLong() != size || obj.string("stamp") != stamp) return emptyMap()
-    val pages = obj.array("pages")?.items ?: return emptyMap()
-    if (pages.size > 60) return emptyMap()
-    val out = LinkedHashMap<Int, String>()
-    for (item in pages) {
-        val entry = item as? JsonValue.Obj ?: return emptyMap()
-        val page = entry.double("page")?.toInt() ?: return emptyMap()
-        val text = entry.string("text") ?: return emptyMap()
-        if (page < 1 || page > 2000 || text.length > 6_000 || page in out) return emptyMap()
-        out[page] = text
-    }
-    return out
-}
-
-/** [pdfByteStamp] without loading the file: the same sampled bytes, read with seeks. */
+/** [ch.fasrv.fanotes.desk.pdfByteStamp] without loading the file: the same sampled bytes, read with seeks. */
 fun pdfFileStamp(file: File): String {
     RandomAccessFile(file, "r").use { raf ->
         val length = raf.length()

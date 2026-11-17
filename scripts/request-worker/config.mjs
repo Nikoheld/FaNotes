@@ -1,5 +1,6 @@
 // Configuration for the request worker. Everything comes from the environment.
 // The agent token is read here and nowhere else; it is never logged.
+import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -32,6 +33,8 @@ export function loadConfig(env = process.env) {
     budgetMs: intEnv(env, 'FANOTES_REQUEST_BUDGET_MIN', 60) * 60_000,
     maxTurns: env.FANOTES_MAX_TURNS ? intEnv(env, 'FANOTES_MAX_TURNS', 0) : null,
     model: env.FANOTES_CLAUDE_MODEL || '',
+    // Optional JSON file {"<request id>": "<model>"}; read each time a run starts.
+    modelOverridesPath: env.FANOTES_MODEL_OVERRIDES || path.join(os.homedir(), '.config/fanotes-request-worker/models.json'),
     claudeBin: env.FANOTES_CLAUDE_BIN || 'claude',
     ghBin: env.FANOTES_GH_BIN || 'gh',
     permissionMode: env.FANOTES_CLAUDE_PERMISSION_MODE || 'acceptEdits',
@@ -52,6 +55,19 @@ export function loadConfig(env = process.env) {
     once: env.FANOTES_WORKER_ONCE === '1',
     home: os.homedir(),
   }
+}
+
+const MODEL_NAME = /^[A-Za-z0-9._\[\]-]{1,64}$/u
+
+// The model for one request: the override file wins over FANOTES_CLAUDE_MODEL.
+// A missing, unreadable or malformed file falls back to the default.
+export function modelFor(config, id) {
+  try {
+    const map = JSON.parse(fs.readFileSync(config.modelOverridesPath, 'utf8'))
+    const value = map && typeof map === 'object' ? map[id] : undefined
+    if (typeof value === 'string' && MODEL_NAME.test(value)) return value
+  } catch { /* no overrides */ }
+  return config.model
 }
 
 // Env for the child `claude` process: never contains the agent token.

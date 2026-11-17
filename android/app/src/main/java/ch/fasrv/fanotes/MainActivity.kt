@@ -352,6 +352,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // The task timer counts the time the app was away (up to its limit) and stops when it was gone for longer.
+        model.flushStudyTimer()
+    }
+
     override fun onPause() {
         model.flushStudyTimer()
         try {
@@ -3012,7 +3018,9 @@ private fun NotePage(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (path != null && editorMenu != null) {
+        if (path != null && (editorMenu == "study-tasks" || editorMenu == "study-marks")) {
+            StudySheet(model, editorMenu.orEmpty(), Modifier.align(Alignment.BottomCenter))
+        } else if (path != null && editorMenu != null) {
             Column(
                 Modifier
                     .align(Alignment.TopCenter)
@@ -3027,8 +3035,6 @@ private fun NotePage(
                                 "tags" -> "Tag hinzufügen"
                                 "search" -> "Im Text suchen …"
                                 "more" -> "Mehr"
-                                "study-tasks" -> "Aufträge"
-                                "study-marks" -> "Markierungen"
                                 else -> "Werkzeuge"
                             },
                         ),
@@ -3043,7 +3049,6 @@ private fun NotePage(
                     "pdf-search" -> PdfSearchBar(model)
                     "pdf-thumbs" -> PdfThumbStrip(model)
                     "pdf-password" -> PdfPasswordPrompt(model)
-                    "study-tasks", "study-marks" -> StudyPanel(model, editorMenu.orEmpty())
                     "more" -> EditorMoreMenu(model, noteKind, backdrop, showRelations, onExportPdf, onDownload, onImportSheet)
                     else -> Unit
                 }
@@ -3177,6 +3182,15 @@ private fun PageSurface(
         model.importStudyImage(uri, pageNumber, "Foto") { file.delete() }
     }
     val pdfCamera by model.pdfCameraCommand.collectAsStateWithLifecycle()
+    val studyTimer by model.studyTimer.collectAsStateWithLifecycle()
+    val timerChip = remember(studyTimer, markdown) {
+        studyTimer?.let { run ->
+            ch.fasrv.fanotes.study.readTaskList(markdown)?.tasks?.firstOrNull { it.id == run.taskId }?.let { task ->
+                val name = ch.fasrv.fanotes.desk.ChromeText.ui("Auftrag")
+                StudyTimerChip(if (task.number.isNotEmpty()) "$name ${task.number}" else name, task.spentSec, run)
+            }
+        }
+    }
     val sheetReset by model.sheetReset.collectAsStateWithLifecycle()
     var appliedClear by remember { mutableStateOf(0) }
     var appliedPlaceLink by remember { mutableStateOf(0) }
@@ -3238,6 +3252,7 @@ private fun PageSurface(
                         "backup" -> model.performDesktopCommand("history")
                         "pdf-prev" -> model.goToPdfPage(model.pdfThumbPage.value - 1)
                         "pdf-next" -> model.goToPdfPage(model.pdfThumbPage.value + 1)
+                        "study-timer-stop" -> model.stopStudyTimer()
                         "tags", "search", "more", "pdf-search", "pdf-thumbs", "pdf-password" -> model.openEditorMenu(action)
                         else -> model.openEditorMenu(action)
                     }
@@ -3367,6 +3382,7 @@ private fun PageSurface(
             page.onMath = onMath
             page.onTextHand = { model.openTextHand() }
             page.pdfNote = model.open.value?.kind == NoteKind.PDF
+            page.studyTimerChip = timerChip
             page.onPdfKey = { action ->
                 when (action) {
                     "next" -> model.goToPdfPage(model.pdfThumbPage.value + 1)

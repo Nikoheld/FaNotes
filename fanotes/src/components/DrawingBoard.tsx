@@ -12,6 +12,7 @@ import {
   CircleAlert,
   Eraser,
   FileInput,
+  Highlighter,
   GripVertical,
   LoaderCircle,
   ListChecks,
@@ -62,6 +63,13 @@ import { pdfFromRgbaPages, type CanvasPdfPage } from '../lib/canvasPdf'
 import { rasterizePaperLayers, scrollPaperTo, waitForPaperPaint } from '../lib/canvasSnapshot'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
+import { PenQuickMenu } from './PenQuickMenu'
+import {
+  PEN_TIP_MASK,
+  quickMenuChordOnDown,
+  quickMenuChordOnMove,
+  type QuickMenuPanState,
+} from '../lib/penQuickMenu'
 import type {
   RecognitionResources,
 } from '../lib/handwritingDb'
@@ -242,6 +250,7 @@ import {
   tabletButtonActionFromPointer,
   tabletButtonIdentityFromPointer,
 } from '../lib/tabletButtons'
+import { nextPenEraserHold, penEraserHeldFor, type PenEraserHold } from '../lib/penEraserHold'
 import {
   type InkSection,
   type SerializedSection,
@@ -817,6 +826,16 @@ export type DrawingBoardHandle = {
   finishCanvasExport: () => void
 }
 
+/** See `DrawingBoardProps.foreignErase`. Points and radius are client pixels. */
+export type ForeignEraseHost = {
+  /** Erases what lies under the eraser path; true when anything went. */
+  erase: (path: ReadonlyArray<{ x: number; y: number }>, radius: number) => boolean
+  /** Seals what this gesture erased into one undo step; null when nothing was erased. */
+  commit: () => number | null
+  undo: (step: number) => void
+  redo: (step: number) => void
+}
+
 export type DrawingBoardProps = {
   settings: Pick<
     AppSettings,
@@ -863,6 +882,11 @@ export type DrawingBoardProps = {
   /** Reports finished strokes and erased strokes for the note's quiet statistics. */
   onInkActivity?: (activity: InkActivity) => void
   onTrainingChanged?: (sampleCount: number) => void
+  /**
+   * Marks under the ink that are not strokes (PDF text highlights). The
+   * eraser takes them off too, and one undo step brings back both.
+   */
+  foreignErase?: ForeignEraseHost
   onOpenGlyphenWerk?: () => void
   onClose?: () => void
   pagePaperStyle?: PaperStyle
@@ -972,6 +996,8 @@ const paperLabel: Record<PaperStyle, string> = Object.fromEntries(
 ) as Record<PaperStyle, string>
 
 const colorChoices = ['#191c24', '#3d52d5', '#7654d6', '#d74769', '#df7627', '#138d75']
+/** Drawing colours for the Wacom quick menu ring (Textmarker yellow first). */
+const QUICK_ART_COLORS = ['#f2b735', '#77ad3a', '#21a8c7', '#e5489a', '#f06c32', '#6548dc', '#d83b52', '#17191f']
 const artColorChoices = [
   '#17191f', '#ffffff', '#6c727f', '#d83b52', '#f06c32', '#f2b735', '#77ad3a',
   '#1ca982', '#21a8c7', '#3478df', '#6548dc', '#a444cf', '#e5489a', '#8b5a3c',
@@ -1517,6 +1543,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onDirtyChange,
   onInkActivity,
   onTrainingChanged,
+  foreignErase,
   onOpenGlyphenWerk,
   onClose,
   pagePaperStyle,
@@ -1674,6 +1701,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const activeStrokeRef = useRef<InkStroke | null>(null)
   const activePointerRef = useRef<number | null>(null)
   const inkSessionRef = useRef<InkPointerSessionSnapshot | null>(null)
+  // Eraser-mapped pen button held over the sheet, and whether the live gesture
+  // is such a button erase. That gesture survives tip lifts and hover moves.
+  const penEraserHoldRef = useRef<PenEraserHold | null>(null)
+  const buttonEraserGestureRef = useRef(false)
   const pendingSolverTapRef = useRef<PendingSolverTap | null>(null)
   const solverDoubleTapPointRef = useRef<Pick<StrokePoint, 'x' | 'y'> | null>(null)
   const mathSolverRunRef = useRef(0)
@@ -1686,6 +1717,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const gestureChangedRef = useRef(false)
   const undoRef = useRef<InkStroke[][]>([])
   const redoRef = useRef<InkStroke[][]>([])
+  const foreignEraseRef = useRef(foreignErase)
+  foreignEraseRef.current = foreignErase
+  /** Foreign erase step of an undo or redo entry (see ForeignEraseHost). */
+  const foreignStepsRef = useRef(new WeakMap<InkStroke[], number>())
   const drawFrameRef = useRef<number | null>(null)
   const activeRenderedPointCountRef = useRef(0)
   const liveCanvasHasInkRef = useRef(false)
@@ -1707,7 +1742,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     y: number
     pointerType: string
     samples: FingerPanSample[]
-  } | null>(null)
+  } & QuickMenuPanState | null>(null)
+  const openPenQuickMenuRef = useRef<(x: number, y: number, pointerId: number) => void>(() => {})
   const fingerPanFlingRef = useRef(0)
   const lastFingerPanAtRef = useRef(0)
   const undoNowRef = useRef<() => void>(() => {})
@@ -1753,6 +1789,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [tool, setTool] = useState<DrawingTool>(initialToolMemory.tool)
   const [inkMode, setInkMode] = useState<InkMode>(initialToolMemory.inkMode)
   const [artPanelOpen, setArtPanelOpen] = useState(false)
+  const [penQuickMenu, setPenQuickMenu] = useState<{ x: number; y: number; pointerId: number } | null>(null)
   const [artStudioTab, setArtStudioTab] = useState<ArtStudioTab>('brushes')
   const [artBrush, setArtBrush] = useState<ArtBrush>(initialArtPreferences.brush)
   const [artColor, setArtColor] = useState(initialArtPreferences.color)
@@ -4368,6 +4405,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     )
     const last = points.at(-1)
     if (last) eraserAnchorRef.current = last
+    const foreign = foreignEraseRef.current
+    if (foreign) {
+      const surface = canvasRef.current?.closest('.unified-paper') as HTMLElement | null
+      const box = surface?.getBoundingClientRect()
+      if (box && box.width > 0 && sourceWidthRef.current > 0) {
+        const path = samples.map((sample) => ({ x: box.left + sample.x * box.width, y: box.top + sample.y * box.height }))
+        if (foreign.erase(path, eraserSize * box.width / sourceWidthRef.current)) gestureChangedRef.current = true
+      }
+    }
     if (next === before) return
     noteErasedInkRef.current(before, next)
     noteStrokesErased(Math.max(1, before.length - next.length))
@@ -5189,7 +5235,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     return true
   }, [startFingerPanFling])
-  const beginTabletPan = (pointerId: number, clientX: number, clientY: number, pointerType: string, now: number) => {
+  const beginTabletPan = (
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+    pointerType: string,
+    now: number,
+    stylusButton = false,
+    buttons = 0,
+  ) => {
     cancelFingerPanFling()
     tabletPanRef.current = {
       pointerId,
@@ -5197,14 +5251,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       y: clientY,
       pointerType,
       samples: [{ t: now, x: clientX, y: clientY }],
+      stylusButton,
+      tipDown: (buttons & PEN_TIP_MASK) !== 0,
+      menu: false,
+      lastAt: now,
     }
   }
-  const dragSheetWithPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
+  const dragSheetWithPointer = useCallback((pointerId: number, clientX: number, clientY: number, buttons?: number) => {
     const pan = tabletPanRef.current
     if (!pan || pan.pointerId !== pointerId) return false
+    const now = performance.now()
+    // Pan button held, then the tip: open the quick menu and freeze the sheet.
+    if (quickMenuChordOnMove(pan, pointerId, buttons, now)) {
+      pan.menu = true
+      openPenQuickMenuRef.current(clientX, clientY, pointerId)
+    }
+    if (pan.menu) return true
     const dx = clientX - pan.x
     const dy = clientY - pan.y
-    const now = performance.now()
     pan.x = clientX
     pan.y = clientY
     pan.samples = pushFingerPanSample(pan.samples, { t: now, x: clientX, y: clientY }, now)
@@ -5342,13 +5406,24 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // A new contact stops a coasting finger pan. The mouse event a touch lift
     // synthesizes must not, or the coast would die in the same gesture.
     if (!(event.pointerType === 'mouse' && performance.now() - lastFingerPanAtRef.current < 500)) cancelFingerPanFling()
-    if (event.pointerType === 'pen') tabletPanRef.current = null
     const now = performance.now()
+    if (quickMenuChordOnDown(tabletPanRef.current, event.nativeEvent, now)) {
+      // The tip arrived as its own pointer while a mouse-labelled pan button is held.
+      event.preventDefault()
+      const pan = tabletPanRef.current
+      if (pan) pan.menu = true
+      openPenQuickMenuRef.current(event.clientX, event.clientY, event.pointerId)
+      return
+    }
+    if (event.pointerType === 'pen') tabletPanRef.current = null
     const asStylus = event.pointerType === 'pen' || (
       lastPenContactRef.current > 0 && now - lastPenContactRef.current < POST_PEN_IGNORE_MS
     )
     const buttonIdentity = tabletButtonIdentityFromPointer(event.nativeEvent, asStylus)
-    const buttonAction = tabletButtonActionFromPointer(settings.tabletButtons, event.nativeEvent, asStylus)
+    // A still-held eraser button wins even when the sample dropped its bit.
+    const buttonAction = event.pointerType === 'pen' && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
+      ? 'eraser'
+      : tabletButtonActionFromPointer(settings.tabletButtons, event.nativeEvent, asStylus)
     if (!buttonIdentity && event.button !== 0 && event.pointerType !== 'pen') return
     if (buttonIdentity && buttonAction === 'os') return
     if (buttonIdentity && (buttonAction === 'none' || buttonAction === 'undo' || buttonAction === 'redo' || buttonAction === 'pan')) {
@@ -5356,7 +5431,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (buttonAction === 'undo') undoNowRef.current()
       if (buttonAction === 'redo') redoNowRef.current()
       if (buttonAction === 'pan') {
-        beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now)
+        beginTabletPan(event.pointerId, event.clientX, event.clientY, event.pointerType, now, true, event.buttons)
         activePointerRef.current = event.pointerId
         if (event.pointerType === 'pen') {
           lastPenContactRef.current = now
@@ -5670,6 +5745,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     gestureChangedRef.current = false
     eraserAnchorRef.current = null
     gestureToolRef.current = pointerEraser ? 'eraser' : tool
+    buttonEraserGestureRef.current = pointerEraser
     if (gestureToolRef.current === 'pen') {
       activeRenderedPointCountRef.current = 0
       activeStrokeRef.current = inkMode === 'drawing' ? {
@@ -5704,7 +5780,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, cancelFingerPanFling, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, selectionPurpose, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
-    if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY)) {
+    if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY, event.buttons)) {
       if (event.cancelable) event.preventDefault()
       return
     }
@@ -5713,15 +5789,31 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       settings.penOnly,
       activePointerRef.current === event.pointerId,
     )) return
+    if (
+      activePointerRef.current === null
+      && event.pointerType === 'pen'
+      && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
+    ) {
+      // Chromium sends no new pointerdown while a pen button stays pressed:
+      // touching down again or hovering in with the eraser button held only
+      // moves. Re-open the button erase here instead of ignoring the pen.
+      handlePointerDown(event)
+      return
+    }
     if (activePointerRef.current !== event.pointerId) return
     const now = performance.now()
+    const heldEraser = buttonEraserGestureRef.current && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
     // End only when the helper says so — not because a few seconds elapsed
     // or Linux Wacom sent pressure 0 while the tip button is still down.
-    if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event.nativeEvent)) {
+    // A held eraser button keeps erasing through lifts and hover.
+    if (!heldEraser && shouldHardEndInkPointerSession(inkSessionRef.current, now, event.nativeEvent)) {
       forceEndActivePointerRef.current('watchdog', event.nativeEvent)
       return
     }
-    if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event.nativeEvent, now)
+    if (inkSessionRef.current) {
+      inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event.nativeEvent, now)
+      if (heldEraser) inkSessionRef.current = { ...inkSessionRef.current, lastContactAt: now }
+    }
     event.preventDefault()
     if (selectionLoopRef.current) {
       const samples = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
@@ -5756,7 +5848,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const latest = activeStrokeRef.current?.points.at(-1)
       if (latest) ensureWriteRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
+  }, [appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, handlePointerDown, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
@@ -5786,6 +5878,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
       pointerBoundsRef.current = null
       eraserAnchorRef.current = null
+      buttonEraserGestureRef.current = false
       activePointerRef.current = cleanup.session.activePointerId
       inkSessionRef.current = null
       activePointerTargetRef.current = null
@@ -5979,6 +6072,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     })
     if (gestureChangedRef.current) {
       undoRef.current.push(beforeGestureRef.current)
+      const foreignStep = gestureToolRef.current === 'eraser' ? foreignEraseRef.current?.commit() ?? null : null
+      if (foreignStep !== null) foreignStepsRef.current.set(beforeGestureRef.current, foreignStep)
       if (undoRef.current.length > 80) undoRef.current.shift()
       redoRef.current = []
       setTokens([])
@@ -6357,6 +6452,36 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [cancelFingerPanFling, finishPointer, markPenContact, scheduleRedraw])
   forceEndActivePointerRef.current = forceEndActivePointer
 
+  // Track the eraser-mapped pen button on every pen sample, before the board
+  // handlers read it (window capture runs first). Releasing the button, a
+  // cancel, or the pen leaving the sheet ends a held-button erase.
+  const tabletButtonsRef = useRef(settings.tabletButtons)
+  tabletButtonsRef.current = settings.tabletButtons
+  useEffect(() => {
+    const overOwnSheet = (target: EventTarget | null) => (
+      target instanceof Element
+      && Boolean(boardRef.current?.contains(target))
+      && isInkSurfaceTarget(target)
+    )
+    const onPenSample = (event: PointerEvent) => {
+      if (event.pointerType !== 'pen') return
+      const overSheet = event.type !== 'pointercancel'
+        && overOwnSheet(event.type === 'pointerout' ? event.relatedTarget : event.target)
+      const hold = nextPenEraserHold(penEraserHoldRef.current, event, tabletButtonsRef.current, overSheet)
+      penEraserHoldRef.current = hold
+      if (!buttonEraserGestureRef.current || activePointerRef.current !== event.pointerId) return
+      if (penEraserHeldFor(hold, event.pointerId)) return
+      // No sample point: a release or leave must not erase where the pen went.
+      forceEndActivePointerRef.current('watchdog')
+    }
+    const types = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerout'] as const
+    for (const type of types) window.addEventListener(type, onPenSample, true)
+    return () => {
+      for (const type of types) window.removeEventListener(type, onPenSample, true)
+      penEraserHoldRef.current = null
+    }
+  }, [])
+
   const discardHandGestureRef = useRef(() => {})
   discardHandGestureRef.current = () => {
     // Two fingers take the sheet. The one-finger pan must stop or both would scroll.
@@ -6447,15 +6572,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       }
     }
     const onWindowPointerMove = (event: PointerEvent) => {
-      if (dragSheetWithPointerRef.current(event.pointerId, event.clientX, event.clientY)) return
+      if (dragSheetWithPointerRef.current(event.pointerId, event.clientX, event.clientY, event.buttons)) return
       if (!inputActive || activePointerRef.current !== event.pointerId) return
       const now = performance.now()
+      const heldEraser = buttonEraserGestureRef.current && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
       // Same helper as canvas move: pressure flicker must not cut a live stroke.
-      if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event)) {
+      if (!heldEraser && shouldHardEndInkPointerSession(inkSessionRef.current, now, event)) {
         forceEndActivePointer('watchdog', event)
         return
       }
-      if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event, now)
+      if (inkSessionRef.current) {
+        inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event, now)
+        if (heldEraser) inkSessionRef.current = { ...inkSessionRef.current, lastContactAt: now }
+      }
       const canvas = canvasRef.current
       const hitTarget = inline ? surfaceRef.current : canvas
       if (hitTarget && (event.target === hitTarget || (event.target instanceof Node && hitTarget.contains(event.target)))) {
@@ -6561,7 +6690,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const onWatchdog = () => {
       const now = performance.now()
-      if (shouldHardEndInkPointerSession(inkSessionRef.current, now)) {
+      // A pen hovering still with the eraser button held sends no samples.
+      const heldEraser = buttonEraserGestureRef.current
+        && activePointerRef.current !== null
+        && penEraserHeldFor(penEraserHoldRef.current, activePointerRef.current)
+      if (!heldEraser && shouldHardEndInkPointerSession(inkSessionRef.current, now)) {
         forceEndActivePointer('watchdog')
         return
       }
@@ -6640,7 +6773,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
-    redoRef.current.push(snapshotStrokes(strokesRef.current))
+    const redoEntry = snapshotStrokes(strokesRef.current)
+    redoRef.current.push(redoEntry)
+    const foreignStep = foreignStepsRef.current.get(previous)
+    if (foreignStep !== undefined) {
+      foreignStepsRef.current.set(redoEntry, foreignStep)
+      foreignEraseRef.current?.undo(foreignStep)
+    }
     strokesRef.current = snapshotStrokes(previous)
     setTokens([])
     setCorrection('')
@@ -6658,7 +6797,13 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     clearRecognitionScope()
     closeMathSolverSelection()
     closeMathCorrectionSession()
-    undoRef.current.push(snapshotStrokes(strokesRef.current))
+    const undoEntry = snapshotStrokes(strokesRef.current)
+    undoRef.current.push(undoEntry)
+    const foreignStep = foreignStepsRef.current.get(next)
+    if (foreignStep !== undefined) {
+      foreignStepsRef.current.set(undoEntry, foreignStep)
+      foreignEraseRef.current?.redo(foreignStep)
+    }
     strokesRef.current = snapshotStrokes(next)
     setTokens([])
     setCorrection('')
@@ -8577,6 +8722,47 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     else setArtColor(color)
   }
 
+  // Wacom quick menu (pan button + tip): the same actions as the toolbar.
+  openPenQuickMenuRef.current = (x, y, pointerId) => {
+    setArtPanelOpen(false)
+    setPenQuickMenu({ x, y, pointerId })
+  }
+  const quickMenuUsesStrip = tool === 'pen' && inkMode === 'drawing'
+  const quickMenuColors = quickMenuUsesStrip && !stripUsesPenColor ? QUICK_ART_COLORS : colorChoices
+  const quickMenuColor = quickMenuUsesStrip ? stripColor : penColor
+  const quickMenuTools = [
+    { id: 'write', label: 'Schreiben', icon: <PenLine size={18} />, active: tool === 'pen' && inkMode === 'writing' },
+    { id: 'highlighter', label: 'Textmarker', icon: <Highlighter size={18} />, active: tool === 'pen' && inkMode === 'drawing' && artBrush === 'highlighter' },
+    { id: 'eraser', label: 'Radierer', icon: <Eraser size={18} />, active: tool === 'eraser' },
+    { id: 'select', label: 'Verschieben', icon: <Move size={18} />, active: tool === 'select' },
+    { id: 'laser', label: 'Laserpointer', icon: <Crosshair size={18} />, active: tool === 'laser' },
+  ]
+  const closePenQuickMenu = () => {
+    setPenQuickMenu(null)
+    requestAnimationFrame(() => boardRef.current?.focus({ preventScroll: true }))
+  }
+  const chooseQuickMenuTool = (id: string) => {
+    if (id === 'write') activateWriting()
+    else if (id === 'highlighter') {
+      const brush = ART_BRUSHES.find((item) => item.id === 'highlighter')
+      if (brush) chooseArtBrush(brush)
+      activateDrawing()
+      setArtPanelOpen(false)
+    } else if (id === 'eraser') activateEraser()
+    else if (id === 'select') beginInkEdit()
+    else if (id === 'laser') activateLaser()
+    closePenQuickMenu()
+  }
+  const chooseQuickMenuColor = (color: string) => {
+    if (quickMenuUsesStrip) chooseStripColor(color)
+    else {
+      choosePenColor(color)
+      // A colour is for writing: leave the eraser, laser or selection.
+      if (tool !== 'pen') activateWriting()
+    }
+    closePenQuickMenu()
+  }
+
   const mergeActions = (labeled: boolean) => (
     sectionsEnabled && inkMode === 'writing' && sections.length > 1 ? <>
       <button
@@ -9060,6 +9246,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         if (inline) return portalInkToolbar(createPortal, toolbar, inkToolbarHost, inputActive)
         return toolbar
       })()}
+
+      {penQuickMenu && createPortal(
+        <PenQuickMenu
+          x={penQuickMenu.x}
+          y={penQuickMenu.y}
+          pointerId={penQuickMenu.pointerId}
+          tools={quickMenuTools}
+          colors={quickMenuColors}
+          activeColor={quickMenuColor}
+          onTool={chooseQuickMenuTool}
+          onColor={chooseQuickMenuColor}
+          onClose={closePenQuickMenu}
+        />,
+        document.body,
+      )}
 
       {(rulerPose || setSquarePose || compassPose)
         && draftingSettings.panelOpen
