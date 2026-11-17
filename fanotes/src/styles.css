@@ -1723,6 +1723,7 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
   background: #edeff3;
 }
 .paper-view { position: relative; }
+.paper-view[data-camera-restoring] { visibility: hidden; }
 /* Under CSS zoom a percentage resolves against the scroller *in zoomed units*
    (100% at 200% = half the viewport). With a bare 100% the sheet re-flowed
    narrower on every zoom step: the text column re-wrapped, PDF pages shrank
