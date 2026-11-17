@@ -1,5 +1,57 @@
 # Änderungsverlauf
 
+## 2026.11.3-beta.4
+
+- Keep text boxes typed right before a browser tab closes
+- Request worker: resolve merge conflicts, offline Android check, mark hand merges
+- Add setting for a vertical or horizontal editor toolbar
+- Remember pen or keyboard mode per document
+- Add Wacom quick colour and tool menu (pan button + pen tip)
+- Keep erasing while the Wacom eraser button is held
+- Request worker: read CI via statusCheckRollup, never drop a failure report
+- Keep a link sign-in flag that is not a flag.
+- Keep a link school address that is not an allowed address.
+- Keep a claimed pairing from replacing the new connection id.
+- Keep a link device id that is not an id.
+- Hide copied metadata from the changes feed.
+- Keep a link mode that is not a mode.
+- Leave a pairing code whose connections are not a list.
+- Ignore a cleanup error after the sync response was sent.
+- Keep a link sign-in that is not a sealed token.
+- Leave a pairing code whose expiry is not a time.
+- Keep a link sign-in time that is not a time.
+- Work requests: optional auto-approve once CI is green
+- Let the writer name a body recorded with copied metadata.
+- Show text box colour and size controls in the top toolbar instead of floating next to the box.
+- Let the eraser and undo take highlighter marks off a PDF.
+- Keep a link revision that is not a count.
+- Keep a commute pin day or empty departure list the sanitizer would change.
+- Keep a snapshot parser version that is not a version.
+- Render Markdown in note and PDF text boxes.
+- Apply the theme to portaled popovers and dialogs and replace hard-coded colours with theme tokens.
+- Remember the last text box font size for new text inserts.
+- Keep a browser session whose expiry is not a time.
+- Open notes and PDFs without a flicker.
+- Keep a snapshot read time or balance that is not the known shape.
+- Return a caught-up changes page without sorting every note.
+- Let the request worker pick the model per request
+- Reopen a book PDF at the exact spot inside the page where it was left.
+- Restore a note when a short remnant hides the archive.
+- Keep a snapshot week stamp that is not a time.
+- Keep a commute walking time or delay limit the sanitizer would rewrite.
+- Keep a commute pin arrival the sanitizer would clear.
+- Keep a commute threshold, stop type, or notify flag the sanitizer would replace.
+- Keep a commute weekday or schedule the sanitizer would replace.
+- Read the mark when the cell also contains the point count.
+- Do not publish a short remnant as a newer note.
+- Keep a commute pin, via, or time the sanitizer would skip.
+- Merge text boxes per box across web windows; save on hide; two-window and close checks
+- Merge PDF text boxes box by box instead of replacing the whole list
+- Do not drop or overwrite a note companion.
+- Stop imported calendar series at UNTIL and COUNT.
+- Keep sync bases for optional history and the handwriting model.
+- Count handwriting in a collapsed subsection as ink.
+
 ## 2026.11.3-beta.3
 
 - Keep a snapshot lesson that has no week.
