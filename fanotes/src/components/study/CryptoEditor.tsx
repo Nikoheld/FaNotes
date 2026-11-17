@@ -1,5 +1,5 @@
 import { Check, Lightbulb } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   PLAIN_ROW, checkAlphabet, checkAnswer, checkBuilt, hintAnswer, keywordAlphabet, keywordParts, shiftAlphabet, summariseAnswer, unusedLetters,
 } from '../../lib/study/crypto/caesar'
@@ -234,6 +234,23 @@ function VigenereTool({ data, onChange }: { data: VigenereData; onChange: (data:
   const keyLetter = focus !== null ? rows.key[focus] : ''
   const plainLetter = focus !== null ? rows.plain[focus] : ''
   const entered = focus !== null && Boolean(cellText(data.answer[focus]))
+  // The square scrolls in its own box: bring the key row and plain column of the current letter into view.
+  const squareRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!keyLetter || !plainLetter) return
+    const box = squareRef.current
+    const cell = box?.querySelector<HTMLElement>('td.is-row.is-col')
+    if (!box || !cell) return
+    // Only the square's own box scrolls, never the note around it.
+    const view = box.getBoundingClientRect()
+    const rect = cell.getBoundingClientRect()
+    const header = box.querySelector('thead')?.getBoundingClientRect().height ?? 0
+    const rowHead = box.querySelector('tbody th')?.getBoundingClientRect().width ?? 0
+    if (rect.top < view.top + header) box.scrollTop -= view.top + header - rect.top
+    else if (rect.bottom > view.bottom) box.scrollTop += rect.bottom - view.bottom
+    if (rect.left < view.left + rowHead) box.scrollLeft -= view.left + rowHead - rect.left
+    else if (rect.right > view.right) box.scrollLeft += rect.right - view.right
+  }, [keyLetter, plainLetter])
   const setLetter = (index: number, ch: string) => {
     edit({ answer: setCharAt(data.answer, index, ch.toUpperCase(), rows.plain.length) })
     if (ch) window.setTimeout(() => document.querySelector<HTMLInputElement>(`[data-vig="${index + 1}"]`)?.focus(), 0)
@@ -251,7 +268,7 @@ function VigenereTool({ data, onChange }: { data: VigenereData; onChange: (data:
         <label className="lw-cx-field"><span>Klartext (ohne Leerzeichen)</span><input value={data.plain} maxLength={CRYPTO_LIMITS.text} onChange={(event) => edit({ plain: event.target.value })} /></label>
       </div>
       <Rule>Suche die Zeile des Schlüsselbuchstabens und die Spalte des Klartextbuchstabens. Der Geheimbuchstabe steht dort, wo sie sich treffen.</Rule>
-      <div className="lw-cx-scroll lw-cx-square-wrap">
+      <div ref={squareRef} className="lw-cx-scroll lw-cx-square-wrap">
         <table className="lw-cx-square" aria-label="Vigenère-Quadrat">
           <thead><tr><th aria-hidden="true" />{[...ALPHABET].map((ch) => <th key={ch} scope="col" className={plainLetter === ch ? 'is-pick' : ''}>{ch}</th>)}</tr></thead>
           <tbody>
