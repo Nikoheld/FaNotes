@@ -44,7 +44,7 @@ The file is the Markdown body, then a marker, then exactly N UTF-16 code units o
 
 `chars` is a JavaScript string length. On the JVM that is `String.length` (UTF-16 code units), not UTF-8 bytes. The parser uses the last marker, rejects a length that runs past the file, and requires `"schema": "fanotes-famd-v1"`.
 
-Serialization writes keys in this order: `schema`, `updatedAt`, `ink`, `worksheets`, then `paperStyle` when it is one of `blank`, `dots`, `squares`, `grid`, `lines`, `millimeter`. `noteLinks`, `noteBackups`, and `pageStats` are copied through when present so an Android save does not drop desktop page statistics or links. Unknown top-level payload keys are not rewritten; the desktop codec itself only emits the keys above.
+Serialization writes keys in this order: `schema`, `updatedAt`, `ink`, `worksheets`, then `paperStyle` when it is one of `blank`, `dots`, `squares`, `grid`, `lines`, `millimeter`. `noteLinks`, `noteBackups`, and `pageStats` are copied through when present so an Android save does not drop desktop page statistics or links. So are `textFields`, `textFieldTombstones` (`{ id, deletedAt }` of boxes deleted on desktop, never part of `textFields`) and `annotations`. A text box may carry `updatedAt`, the epoch millisecond of its last edit; desktop merges concurrent edits box by box with it, so Android reads it, writes it back unchanged and stamps a box it edits. Unknown top-level payload keys are not rewritten; the desktop codec itself only emits the keys above.
 
 `updatedAt` is an ISO-8601 instant (`DateTimeFormatter.ISO_INSTANT`).
 

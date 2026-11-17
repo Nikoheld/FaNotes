@@ -21,5 +21,6 @@ export function encodeV2Document(body: string, payload: {
   noteBackups?: unknown[]
   pageStats?: unknown
   textFields?: unknown[]
+  textFieldTombstones?: unknown[]
   annotations?: unknown[]
 }): string

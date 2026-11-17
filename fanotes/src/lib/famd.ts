@@ -1,6 +1,6 @@
 import { parseNoteBackups, serializeNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, serializeNoteLinks, type NoteLinkRecord } from './noteLink'
-import { parseNoteTextFields, type NoteTextField } from './noteTextField'
+import { parseNoteTextFields, parseNoteTextFieldTombstones, type NoteTextField, type NoteTextFieldTombstone } from './noteTextField'
 import { annotationsHaveContent, parseAnnotations, type NoteAnnotation } from '../../electron/noteAnnotation.mjs'
 import { parsePageStats, type PageStats } from './pageStats'
 import { isPaperStyle } from './paperStyles'
@@ -34,6 +34,8 @@ export type FamdPayload = {
   noteBackups?: NoteBackupSnapshot[]
   pageStats?: PageStats
   textFields?: NoteTextField[]
+  /** Boxes deleted in one window, so a stale edit of them elsewhere can be told from a box that never existed. */
+  textFieldTombstones?: NoteTextFieldTombstone[]
   /** Study annotations (callouts, stamps, reference images ...). Versions before them drop this key on save. */
   annotations?: NoteAnnotation[]
 }
@@ -107,6 +109,7 @@ const payloadFromParsed = (parsed: Partial<FamdPayload> & { schema?: string } | 
   const noteBackups = parseNoteBackups(parsed.noteBackups)
   const pageStats = parsed.pageStats ? parsePageStats(parsed.pageStats, Date.parse(updatedAt) || Date.now()) : undefined
   const textFields = parseNoteTextFields(parsed.textFields)
+  const textFieldTombstones = parseNoteTextFieldTombstones(parsed.textFieldTombstones)
   const annotations = parseAnnotations(parsed.annotations)
   return {
     schema: FAMD_SCHEMA,
@@ -118,6 +121,7 @@ const payloadFromParsed = (parsed: Partial<FamdPayload> & { schema?: string } | 
     ...(noteBackups.length ? { noteBackups } : {}),
     ...(pageStats ? { pageStats } : {}),
     ...(textFields.length ? { textFields } : {}),
+    ...(textFieldTombstones.length ? { textFieldTombstones } : {}),
     ...(annotations.length ? { annotations } : {}),
   }
 }
@@ -292,6 +296,8 @@ export const serializeFamd = (markdown: string, payload: FamdPayload, encoding?:
   if (payload.pageStats) next.pageStats = payload.pageStats
   const textFields = parseNoteTextFields(payload.textFields)
   if (textFields.length) next.textFields = textFields
+  const textFieldTombstones = parseNoteTextFieldTombstones(payload.textFieldTombstones)
+  if (textFieldTombstones.length) next.textFieldTombstones = textFieldTombstones
   const annotations = parseAnnotations(payload.annotations)
   if (annotations.length) next.annotations = annotations
   if (encoding === 'v2') return encodeV2Document(body, next)

@@ -125,6 +125,15 @@ function parseNoteBackups(value) {
 const TEXT_FIELD_ID = /^[a-zA-Z0-9._-]{1,96}$/u
 const TEXT_FIELD_LIMIT = 200
 const TEXT_FIELD_MAX_CHARS = 8000
+/** Largest epoch millisecond a JS Date can hold; a stamp beyond it is junk. */
+const TEXT_FIELD_STAMP_MAX = 8.64e15
+
+/** Epoch milliseconds of an edit or delete. Anything that is not a positive finite number is "unknown". */
+function sanitizeTextFieldStamp(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= TEXT_FIELD_STAMP_MAX
+    ? Math.floor(value)
+    : null
+}
 
 function sanitizeNoteTextField(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -134,6 +143,7 @@ function sanitizeNoteTextField(value) {
   const width = Number(value.width)
   const fontSize = Number(value.fontSize)
   const color = typeof value.color === 'string' && /^#[0-9a-f]{6}$/iu.test(value.color) ? value.color.toLowerCase() : null
+  const updatedAt = sanitizeTextFieldStamp(value.updatedAt)
   return {
     id: typeof value.id === 'string' && TEXT_FIELD_ID.test(value.id) ? value.id : `tf-${Date.now().toString(36)}`,
     page: Number.isSafeInteger(page) && page >= 1 && page <= 10000 ? page : 1,
@@ -144,6 +154,7 @@ function sanitizeNoteTextField(value) {
     text: typeof value.text === 'string' ? value.text.slice(0, TEXT_FIELD_MAX_CHARS) : '',
     ...(color ? { color } : {}),
     ...(value.bold === true ? { bold: true } : {}),
+    ...(updatedAt ? { updatedAt } : {}),
   }
 }
 
@@ -159,6 +170,46 @@ function parseNoteTextFields(value) {
     if (fields.length === TEXT_FIELD_LIMIT) break
   }
   return fields
+}
+
+/**
+ * Deleted boxes, `{ id, deletedAt }`, kept in their own payload key so older
+ * builds (which read `textFields` as the list of live boxes) never see them.
+ * Newest first, one entry per id.
+ */
+function parseNoteTextFieldTombstones(value) {
+  if (!Array.isArray(value)) return []
+  const latest = new Map()
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    if (typeof entry.id !== 'string' || !TEXT_FIELD_ID.test(entry.id)) continue
+    const deletedAt = sanitizeTextFieldStamp(entry.deletedAt)
+    if (!deletedAt) continue
+    latest.set(entry.id, Math.max(latest.get(entry.id) ?? 0, deletedAt))
+  }
+  return [...latest]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, TEXT_FIELD_LIMIT)
+    .map(([id, deletedAt]) => ({ id, deletedAt }))
+}
+
+/**
+ * The changes one window sends: boxes to add or replace and ids to delete.
+ * An op without a valid id is dropped; inventing one would add a second copy.
+ */
+function parseNoteTextFieldOps(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  const upserts = []
+  const seen = new Set()
+  for (const entry of Array.isArray(source.upserts) ? source.upserts.slice(0, TEXT_FIELD_LIMIT * 2) : []) {
+    if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string' || !TEXT_FIELD_ID.test(entry.id) || seen.has(entry.id)) continue
+    const field = sanitizeNoteTextField(entry)
+    if (!field) continue
+    seen.add(field.id)
+    upserts.push(field)
+    if (upserts.length === TEXT_FIELD_LIMIT) break
+  }
+  return { upserts, deletes: parseNoteTextFieldTombstones(Array.isArray(source.deletes) ? source.deletes.slice(0, TEXT_FIELD_LIMIT * 2) : []) }
 }
 
 function emptyFamdPayload(updatedAt = new Date().toISOString()) {
@@ -238,6 +289,7 @@ function payloadFromParsed(parsed) {
   const noteBackups = parseNoteBackups(parsed.noteBackups)
   const pageStats = parsePageStats(parsed.pageStats)
   const textFields = parseNoteTextFields(parsed.textFields)
+  const textFieldTombstones = parseNoteTextFieldTombstones(parsed.textFieldTombstones)
   const annotations = noteAnnotation.parseAnnotations(parsed.annotations)
   return {
     schema: FAMD_SCHEMA,
@@ -249,6 +301,7 @@ function payloadFromParsed(parsed) {
     ...(noteBackups.length ? { noteBackups } : {}),
     ...(pageStats ? { pageStats } : {}),
     ...(textFields.length ? { textFields } : {}),
+    ...(textFieldTombstones.length ? { textFieldTombstones } : {}),
     ...(annotations.length ? { annotations } : {}),
   }
 }
@@ -402,6 +455,8 @@ function serializeFamd(markdown, payload, encoding) {
   if (pageStats) next.pageStats = pageStats
   const textFields = parseNoteTextFields(payload?.textFields)
   if (textFields.length) next.textFields = textFields
+  const textFieldTombstones = parseNoteTextFieldTombstones(payload?.textFieldTombstones)
+  if (textFieldTombstones.length) next.textFieldTombstones = textFieldTombstones
   const annotations = noteAnnotation.parseAnnotations(payload?.annotations)
   if (annotations.length) next.annotations = annotations
   if (encoding === 'v2') return v2codec.encodeV2Document(body, next)
@@ -614,6 +669,8 @@ module.exports = {
   parseNoteBackups,
   parseNoteLinks,
   parseNoteTextFields,
+  parseNoteTextFieldOps,
+  parseNoteTextFieldTombstones,
   parseAnnotations: noteAnnotation.parseAnnotations,
   sameFamdPayload,
   serializeFamd,

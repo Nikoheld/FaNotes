@@ -2,6 +2,7 @@ import type { NoteBackupSnapshot } from './lib/noteBackup'
 import type { SendDataLinuxRuntime } from './lib/sendData'
 import type { NoteLinkRecord } from './lib/noteLink'
 import type { NoteTextField } from './lib/noteTextField'
+import type { NoteTextFieldOps } from '../electron/noteTextFieldMerge.mjs'
 import type { NoteAnnotation } from '../electron/noteAnnotation.mjs'
 import type { SubjectBookRecord } from './lib/subjectBook'
 
@@ -665,6 +666,12 @@ export type FaNotesApi = {
   readNoteBackups?: (relativePath: string) => Promise<NoteBackupSnapshot[]>
   writeNoteBackups?: (relativePath: string, backups: NoteBackupSnapshot[]) => Promise<NoteBackupSnapshot[]>
   writeNoteTextFields?: (relativePath: string, fields: NoteTextField[]) => Promise<NoteTextField[]>
+  /**
+   * Merges one window's text box changes into the boxes on disk right now (see `electron/noteTextFieldMerge.mjs`)
+   * and returns the stored boxes. Without changes it only reads them; `null` means the note has no companion yet.
+   * Hosts without it omit the option and the app replaces the whole list with `writeNoteTextFields`.
+   */
+  mergeNoteTextFields?: (relativePath: string, ops: NoteTextFieldOps<NoteTextField>) => Promise<NoteTextField[] | null>
   writeNoteAnnotations?: (relativePath: string, list: NoteAnnotation[]) => Promise<NoteAnnotation[]>
   /** Ink, page stats, links, paper style, backups, and text fields from one companion parse. */
   readNoteCompanion?: (relativePath: string) => Promise<{

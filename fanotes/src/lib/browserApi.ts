@@ -16,7 +16,8 @@ import { sanitizePageTextRecord, type PageTextRecord } from './docSearch/pageTex
 import { inkAnchorForQuery, noteSearchExcerpt, readableTranscript } from './searchInkAnchor'
 import { parseNoteBackups, type NoteBackupSnapshot } from './noteBackup'
 import { parseNoteLinks, type NoteLinkRecord } from './noteLink'
-import { parseNoteTextFields } from './noteTextField'
+import { parseNoteTextFields, parseNoteTextFieldTombstones } from './noteTextField'
+import { applyNoteTextFieldOps } from '../../electron/noteTextFieldMerge.mjs'
 import { parseAnnotations } from '../../electron/noteAnnotation.mjs'
 import { parseSubjectBooks, type SubjectBookRecord } from './subjectBook'
 import { isPaperStyle } from './paperStyles'
@@ -111,6 +112,15 @@ const requestResult = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, re
   request.onsuccess = () => resolve(request.result)
   request.onerror = () => reject(request.error ?? new Error('Der lokale Web-Vault antwortet nicht.'))
 })
+
+// Set while the page is hidden or closing: its last text box save has to issue the IndexedDB write synchronously.
+let pageClosing = false
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => { pageClosing = true })
+  window.addEventListener('pageshow', () => { pageClosing = false })
+  // A hidden tab may be frozen or discarded without another event, so its saves take the same path.
+  document.addEventListener('visibilitychange', () => { pageClosing = document.visibilityState === 'hidden' })
+}
 
 const transactionDone = (transaction: IDBTransaction) => new Promise<void>((resolve, reject) => {
   transaction.oncomplete = () => resolve()
@@ -260,6 +270,16 @@ export function createBrowserApi(): FaNotesApi {
   let settings: AppSettings = { ...localizedDefaults }
   let onboardingComplete = false
   const files = new Map<string, FileRecord>()
+  // Other tabs of this vault announce their text box saves, which keeps this page's copy of the record
+  // current for the saves that cannot wait for a read (closing or hidden page).
+  const textFieldChannel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('fanotes-web-vault-text-fields') : null
+  textFieldChannel?.addEventListener('message', (event: MessageEvent) => {
+    const record = event.data as FileRecord | null
+    if (record && typeof record.path === 'string' && typeof record.content === 'string') {
+      files.set(record.path, record)
+      cachedTree = null
+    }
+  })
   const folders = new Map<string, FolderRecord>()
   const assets = new Map<string, Blob>()
   const assetUrls = new Map<string, string>()
@@ -1712,6 +1732,50 @@ export function createBrowserApi(): FaNotesApi {
       files.set(famdPath, record)
       cachedTree = null
       return fields
+    },
+    mergeNoteTextFields: async (rawPath, rawOps) => {
+      await ready
+      const path = normalizePath(rawPath)
+      const famdPath = companionNotePath(path, '.famd')
+      const source = rawOps && typeof rawOps === 'object' ? rawOps as { upserts?: unknown; deletes?: unknown } : {}
+      const ops = { upserts: parseNoteTextFields(source.upserts), deletes: parseNoteTextFieldTombstones(source.deletes) }
+      // Another tab of this vault may have written the note since this page loaded it, so the
+      // merge reads the stored record and writes it back inside one readwrite transaction.
+      const transaction = database.transaction('files', 'readwrite')
+      const done = transactionDone(transaction)
+      const store = transaction.objectStore('files')
+      // While the page is closing a read round trip would outlive it, and the write must be queued at once.
+      const stored = pageClosing ? undefined : await new Promise<FileRecord | undefined>((resolve, reject) => {
+        const request = store.get(famdPath)
+        request.onsuccess = () => resolve(request.result as FileRecord | undefined)
+        request.onerror = () => reject(request.error ?? new Error('Die Textfelder konnten nicht gelesen werden.'))
+      })
+      const existing = stored ?? files.get(famdPath)
+      const parsed = parseFamd(existing?.content ?? '')
+      if (!ops.upserts.length && !ops.deletes.length) {
+        if (stored) files.set(famdPath, stored)
+        await done
+        return existing ? parsed.payload?.textFields ?? [] : null
+      }
+      const merged = applyNoteTextFieldOps(parsed.payload?.textFields, parsed.payload?.textFieldTombstones, ops, Date.now())
+      const payload = {
+        ...(parsed.payload || emptyFamdPayload()),
+        updatedAt: new Date().toISOString(),
+        textFields: merged.fields,
+        textFieldTombstones: merged.tombstones,
+      }
+      const record = {
+        path: famdPath,
+        content: serializeFamd(parsed.markdown, payload, famdEncodingForSave(existing?.content ?? '')),
+        modifiedAt: new Date().toISOString(),
+      }
+      store.put(record)
+      await done
+      scheduleServerBackup()
+      files.set(famdPath, record)
+      cachedTree = null
+      try { textFieldChannel?.postMessage(record) } catch { /* the other tabs re-read on focus */ }
+      return merged.fields
     },
     readSubjectBooks: async () => {
       await ready

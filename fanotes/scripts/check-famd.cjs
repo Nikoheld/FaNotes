@@ -138,6 +138,15 @@ const textFieldWrite = main.slice(main.indexOf('handle(IPC.writeNoteTextFields')
 assert.match(textFieldWrite, /parseNoteTextFields\(rawFields\)/u)
 assert.match(textFieldWrite, /mutateFamdCompanion\(notePath/u)
 assert.doesNotMatch(textFieldWrite, /atomicWrite\(/u)
+// One window's box changes are merged into the boxes stored right now, inside the per-file write queue.
+const textFieldMerge = main.slice(main.indexOf('handle(IPC.mergeNoteTextFields'), main.indexOf('handle(IPC.writeNoteAnnotations'))
+assert.match(textFieldMerge, /parseNoteTextFieldOps\(rawOps\)/u)
+assert.match(textFieldMerge, /mutateFamdCompanion\(notePath, \(\{ payload \}\)/u)
+assert.match(textFieldMerge, /applyNoteTextFieldOps\(payload\.textFields, payload\.textFieldTombstones/u)
+assert.doesNotMatch(textFieldMerge, /atomicWrite\(/u)
+assert.match(preload, /mergeNoteTextFields:\s*\(relativePath, ops\)/u)
+assert.doesNotMatch(app, /noteTextFieldsEditedRef/u, 'no session-wide gate may keep remote boxes out')
+assert.match(app, /mergeNoteTextFields\(path, ops\)/u)
 assert.match(main, /textFields: loaded\.textFields/u)
 const drawingSave = main.slice(main.indexOf('handle(IPC.saveDrawing'), main.indexOf('handle(IPC.listDrawings'))
 const inkEmbed = drawingSave.slice(drawingSave.indexOf('queueFileWrite(famdTarget'))
@@ -297,6 +306,22 @@ assert.equal(repaired[0].text.length, 8000)
 assert.equal(parseNoteTextFields(Array.from({ length: 205 }, (_, index) => ({ id: `tf-${index}`, text: 'a' }))).length, 200)
 const cleared = serializeFamd('Hallo\n', { ...parseFamd(serializeFamd('Hallo\n', { ...emptyFamdPayload('2026-01-02T00:00:00.000Z'), textFields: [heavyField] })).payload, textFields: [] })
 assert.equal(cleared.includes('textFields'), false)
+// A box's edit stamp and the tombstones of deleted boxes survive both encodings. Tombstones sit in their own key,
+// so a build that only knows `textFields` never reads a deleted box as a live one; a legacy note gains neither key.
+const stampedField = { ...heavyField, updatedAt: 1_731_800_000_000 }
+const tombstones = [{ id: 'tf-gone', deletedAt: 1_731_800_000_500 }]
+assert.equal(emptySaved.includes('textFieldTombstones'), false)
+assert.equal(serializeFamd('Hallo\n', { ...emptyFamdPayload('2026-01-02T00:00:00.000Z'), textFields: [heavyField] }).includes('updatedAt":17'), false)
+for (const encoding of ['v1', 'v2']) {
+  const stored = serializeFamd('Hallo\n', { ...emptyFamdPayload('2026-01-02T00:00:00.000Z'), textFields: [stampedField], textFieldTombstones: tombstones }, encoding)
+  const back = parseFamd(stored).payload
+  assert.deepEqual(back.textFields, [stampedField], `${encoding} keeps the edit stamp`)
+  assert.deepEqual(back.textFieldTombstones, tombstones, `${encoding} keeps the tombstones`)
+  assert.deepEqual(readFamdCompanion(stored).textFields, [stampedField])
+  assert.equal(readFamdCompanion(stored).textFields.some((field) => field.id === 'tf-gone'), false)
+  const rewritten = serializeFamd('Neuer Text\n', back, encoding)
+  assert.deepEqual(parseFamd(rewritten).payload.textFieldTombstones, tombstones, `${encoding}: a text save keeps the tombstones`)
+}
 const payloadBytes = Buffer.byteLength(heavyEncoded, 'utf8')
 console.log(`payload size ${payloadBytes}`)
 console.log(`strip parse count ${stripped.count}`)
