@@ -107,6 +107,9 @@ export type PaperViewController = Pick<PaperViewApi, 'zoomBy' | 'zoomTo' | 'rota
   subscribe: (listener: (view: PaperViewSnapshot) => void) => () => void
 }
 
+/** Longest the sheet stays hidden while the remembered camera is applied. */
+const PAPER_VIEW_REVEAL_CAP_MS = 450
+
 const PaperViewContext = createContext<PaperViewApi | null>(null)
 const PaperViewControllerContext = createContext<PaperViewController | null>(null)
 
@@ -516,7 +519,19 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     let restoreObserver: ResizeObserver | null = null
     let restoreTimer = 0
     const restoreStartedAt = performance.now()
+    // Hide the sheet until the remembered camera has landed, so the note
+    // never shows at scroll 0 and then jumps. Capped so a spot that cannot be
+    // reached (shorter page) never leaves the note invisible.
+    let revealTimer = 0
+    const reveal = () => {
+      if (revealTimer) {
+        window.clearTimeout(revealTimer)
+        revealTimer = 0
+      }
+      delete scroller.dataset.cameraRestoring
+    }
     const stopRestoring = () => {
+      reveal()
       restoring = false
       restoreObserver?.disconnect()
       restoreObserver = null
@@ -544,6 +559,8 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     }
     if (remembered) {
       restoring = true
+      scroller.dataset.cameraRestoring = '1'
+      revealTimer = window.setTimeout(reveal, PAPER_VIEW_REVEAL_CAP_MS)
       restoreRemembered()
       // The editor measures its first line heights a frame or two after
       // mount and the ink layer resizes the sheet: re-apply on the first
@@ -553,6 +570,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         openCameraId = 0
         if (!restoring || userInteracted) return
         restoreRemembered()
+        if (paperCameraLanded(scroller, lastProgrammatic)) reveal()
         warmFrames -= 1
         if (warmFrames > 0) openCameraId = window.requestAnimationFrame(warm)
       }
