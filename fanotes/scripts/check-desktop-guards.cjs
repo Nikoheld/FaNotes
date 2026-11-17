@@ -5,6 +5,13 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { safeEntryName } = require('../electron/entry-names.cjs')
+const {
+  companionNameTaken,
+  companionPaths,
+  famdSiblingPaths,
+  firstFreeName,
+  lowerName,
+} = require('../electron/note-companions.cjs')
 const { publishNewFile } = require('../electron/exclusive-publish.cjs')
 const { MAX_RECORD_BYTES, createAddonStore } = require('../electron/addons.cjs')
 const { MAX_CAPTURE_BYTES, encodeWindowCapture } = require('../electron/window-capture.cjs')
@@ -84,6 +91,20 @@ async function assertAddonRecordCap() {
   }
 }
 
+function assertCompanionNames() {
+  const occupied = (names) => new Set(names.map((name) => lowerName(name)))
+  assert.deepEqual(companionPaths('Kurs/Essay.markdown'), ['Kurs/Essay.famd'])
+  assert.deepEqual(companionPaths('Kurs/Essay.famd'), ['Kurs/Essay.md', 'Kurs/Essay.markdown'])
+  assert.deepEqual(famdSiblingPaths('Kurs/Essay.famd'), ['Kurs/Essay.md', 'Kurs/Essay.markdown', 'Kurs/Essay.pdf'])
+  const taken = occupied(['B.famd'])
+  const own = occupied(['A.famd'])
+  assert.equal(firstFreeName('B.md', taken, (candidate) => companionNameTaken('A.md', candidate, taken, own)), 'B 2.md')
+  assert.equal(companionNameTaken('A.md', 'A.markdown', taken, own), false)
+  const markdownTaken = occupied(['B.markdown'])
+  assert.equal(companionNameTaken('A.famd', 'B.famd', markdownTaken, occupied(['A.markdown'])), true)
+  assert.equal(companionNameTaken('Heft.md', 'Heft.md', occupied(['Heft.famd']), null), true)
+}
+
 function assertWindowCaptureBound() {
   const encoded = encodeWindowCapture(fakeCapture(4000, 3000))
   assert.match(encoded, /^data:image\/jpeg;base64,/u)
@@ -93,8 +114,9 @@ function assertWindowCaptureBound() {
 }
 
 void Promise.all([assertExclusivePublish(), assertAddonRecordCap()]).then(() => {
+  assertCompanionNames()
   assertWindowCaptureBound()
-  console.log('Desktop-Schutz geprüft: reservierte Dateinamen, exklusives Anlegen, Add-on-Größe und Fensterbild.')
+  console.log('Desktop-Schutz geprüft: reservierte Dateinamen, exklusives Anlegen, Add-on-Größe, Notizbegleiter und Fensterbild.')
 }).catch((error) => {
   console.error(error)
   process.exit(1)

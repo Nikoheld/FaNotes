@@ -55,7 +55,6 @@ const {
   isNoteExtension,
   isPaperStyle,
   isPdfNoteExtension,
-  noteStem,
   FAMD_ASYNC_CHARS,
   composeFamdCompanion,
   famdLooksStored,
@@ -76,6 +75,14 @@ const {
 } = require('./famd.cjs')
 const { companionInkNeedsRecord, isUnexplainedEmptyPage, recordDocumentForEmptyCompanion, refusesEmptyInkSave } = require('./ink-save-guard.cjs')
 const { applyNoteTextFieldOps } = require('./noteTextFieldMerge.mjs')
+const {
+  companionNameTaken,
+  companionPaths,
+  famdSiblingPaths,
+  firstFreeName,
+  lowerName,
+  numberedName,
+} = require('./note-companions.cjs')
 const { packInk: packDrawingInk } = require('./famdPack.mjs')
 const pdfOcrStore = require('./pdf-ocr.cjs')
 const pageTextStore = require('./page-text.cjs')
@@ -2067,8 +2074,11 @@ async function mutateFamdCompanion(notePath, mutate) {
 async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink, inkJson) {
   invalidateFamdCompanion(famdRelativePath)
   const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
-  const mdRelativePath = companionNotePath(markdownRelativePath, '.md')
-  await snapshotNoteHistory(extension === '.famd' ? famdRelativePath : mdRelativePath)
+  // PDF notes and `.famd` files keep history on the `.famd`. A `.markdown`
+  // note keeps it on that file; a `.md` path would miss the history panel
+  // and, for PDF ink, would store the snapshot under a note that is not open.
+  const historyPath = extension === '.md' || extension === '.markdown' ? markdownRelativePath : famdRelativePath
+  await snapshotNoteHistory(historyPath)
   let text = null
   // Rewriting a heavy companion (a statistics tick, a text save) used to unpack
   // every sample on the main thread and freeze the window. The worker reads
@@ -2095,9 +2105,12 @@ async function writeFamdCompanionNow(markdownRelativePath, famdRelativePath, tar
   const body = stripFamdPayload(text)
   await atomicWrite(target, text, { encoding: 'utf8', mode: 0o600 })
   if (extension === '.famd') {
-    const mdTarget = (await resolveVaultPath(mdRelativePath, { allowMissing: true, expected: 'file' })).target
-    const mdExists = await fsp.lstat(mdTarget).then((info) => info.isFile() && !info.isSymbolicLink()).catch(() => false)
-    if (mdExists) await atomicWrite(mdTarget, body.endsWith('\n') ? body : `${body}\n`, { encoding: 'utf8', mode: 0o600 })
+    const prose = body.endsWith('\n') ? body : `${body}\n`
+    for (const proseRelative of companionPaths(markdownRelativePath)) {
+      const proseTarget = (await resolveVaultPath(proseRelative, { allowMissing: true, expected: 'file' })).target
+      const proseExists = await fsp.lstat(proseTarget).then((info) => info.isFile() && !info.isSymbolicLink()).catch(() => false)
+      if (proseExists) await atomicWrite(proseTarget, prose, { encoding: 'utf8', mode: 0o600 })
+    }
   }
 }
 
@@ -2254,12 +2267,6 @@ function splitName(name) {
   return { stem: extension ? name.slice(0, -extension.length) : name, extension }
 }
 
-function numberedName(name, number) {
-  if (number === 1) return name
-  const { stem, extension } = splitName(name)
-  return `${stem} ${number}${extension}`
-}
-
 async function siblingNames(parentTarget, excluding = null) {
   const directories = Array.isArray(parentTarget) ? parentTarget : [parentTarget]
   if (directories.length === 1) {
@@ -2273,13 +2280,12 @@ async function siblingNames(parentTarget, excluding = null) {
   return folderLocations.occupiedNames(directories, excluding)
 }
 
-async function availableName(parentTarget, desiredName, excluding = null) {
+async function availableName(parentTarget, desiredName, excluding = null, options = null) {
   const occupied = await siblingNames(parentTarget, excluding)
-  for (let number = 1; number <= 10000; number += 1) {
-    const candidate = numberedName(desiredName, number)
-    if (!occupied.has(candidate.normalize('NFC').toLocaleLowerCase('de-DE'))) return candidate
-  }
-  throw new Error('Es konnte kein eindeutiger Name erzeugt werden.')
+  const currentName = options?.currentName ?? ''
+  return firstFreeName(desiredName, occupied, (candidate) => (
+    Boolean(currentName) && companionNameTaken(currentName, candidate, occupied, options?.ownCompanionNames ?? null)
+  ))
 }
 
 function toRelativePosix(root, absolutePath) {
@@ -2304,6 +2310,38 @@ async function relocatePath(source, destination) {
   }
   await fsp.cp(source, destination, { recursive: true, errorOnExist: true })
   await fsp.rm(source, { recursive: true, force: true })
+}
+
+/** Move every prose or `.famd` sibling that belongs to this note. Missing siblings are skipped. */
+async function relocateNoteCompanions(root, oldRelativePath, nextRelativePath, destinationDir) {
+  if (!isNoteExtension(path.extname(oldRelativePath).toLocaleLowerCase('en-US'))) return
+  for (const oldCompanion of companionPaths(oldRelativePath)) {
+    const nextCompanion = companionNotePath(nextRelativePath, path.extname(oldCompanion).toLocaleLowerCase('en-US'))
+    try {
+      const companion = await resolveVaultPath(oldCompanion, { expected: 'file' })
+      const companionDest = path.join(destinationDir, path.basename(nextCompanion))
+      if (path.resolve(companion.target) === path.resolve(companionDest)) continue
+      if (physicalAllowed(root, companionDest)) await relocatePath(companion.target, companionDest)
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        console.warn('FaNotes: Notizbegleiter konnte nicht mit verschoben werden:', error?.message ?? error)
+      }
+    }
+  }
+}
+
+async function trashNoteCompanions(relativePath) {
+  if (!isNoteExtension(path.extname(relativePath).toLocaleLowerCase('en-US'))) return
+  for (const oldCompanion of companionPaths(relativePath)) {
+    try {
+      const companion = await resolveVaultPath(oldCompanion, { expected: 'file' })
+      await shell.trashItem(companion.target)
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        console.warn('FaNotes: Notizbegleiter konnte nicht mit gelöscht werden:', error?.message ?? error)
+      }
+    }
+  }
 }
 
 function fileBirthIso(info) {
@@ -4143,28 +4181,19 @@ function registerIpcHandlers() {
       }
 
       if (desiredName === currentName) return relativePath
-      const uniqueName = await availableName(parentTarget, desiredName, currentName)
+      const currentExtension = path.extname(currentName).toLocaleLowerCase('en-US')
+      const guardCompanions = info.isFile() && isNoteExtension(currentExtension)
+      const uniqueName = await availableName(parentTarget, desiredName, currentName, guardCompanions ? {
+        currentName,
+        ownCompanionNames: new Set(companionPaths(currentName).map((item) => lowerName(path.basename(item)))),
+      } : null)
       const destination = path.join(parentTarget, uniqueName)
       if (!physicalAllowed(root, destination)) throw new Error('Das Umbenennungsziel liegt außerhalb des Vaults.')
       await relocatePath(target, destination)
       mutationBarrier.invalidateQueuedWrites()
       const oldRelativePath = logicalIdentity(root, target)
       const nextRelativePath = logicalIdentity(root, destination)
-      if (info.isFile() && isNoteExtension(path.extname(oldRelativePath).toLocaleLowerCase('en-US'))) {
-        const oldCompanionExt = path.extname(oldRelativePath).toLocaleLowerCase('en-US') === '.famd' ? '.md' : '.famd'
-        const newCompanionExt = path.extname(nextRelativePath).toLocaleLowerCase('en-US') === '.famd' ? '.md' : '.famd'
-        const oldCompanion = companionNotePath(oldRelativePath, oldCompanionExt)
-        const nextCompanion = companionNotePath(nextRelativePath, newCompanionExt)
-        try {
-          const companion = await resolveVaultPath(oldCompanion, { expected: 'file' })
-          const companionDest = path.join(path.dirname(destination), path.basename(nextCompanion))
-          if (physicalAllowed(root, companionDest)) await relocatePath(companion.target, companionDest)
-        } catch (error) {
-          if (error?.code !== 'ENOENT') {
-            console.warn('FaNotes: Notizbegleiter konnte nicht mit umbenannt werden:', error?.message ?? error)
-          }
-        }
-      }
+      await relocateNoteCompanions(root, oldRelativePath, nextRelativePath, path.dirname(destination))
       if (info.isDirectory()) {
         const map = folderLocationMap(root)
         const renamed = folderLocations.retargetMap(map, oldRelativePath, nextRelativePath)
@@ -4236,24 +4265,16 @@ function registerIpcHandlers() {
       const destContent = folderLocations.contentRoots(folderLocationMap(root), root, destRelative)
       const occupied = await siblingNames(info.isFile() && destContent.mapped ? destContent.roots : destDir)
       const noteExtension = info.isFile() ? path.extname(currentName).toLocaleLowerCase('en-US') : ''
-      const companionExtension = isNoteExtension(noteExtension)
-        ? (noteExtension === '.famd' ? '.md' : '.famd')
-        : ''
-      let uniqueName = currentName
+      const guardCompanions = info.isFile() && isNoteExtension(noteExtension)
+      let uniqueName = ''
       for (let number = 1; number <= 10000; number += 1) {
         const candidate = numberedName(currentName, number)
-        const candidateLower = candidate.normalize('NFC').toLocaleLowerCase('de-DE')
-        if (occupied.has(candidateLower)) continue
-        if (companionExtension) {
-          const companionName = `${splitName(candidate).stem}${companionExtension}`
-          if (occupied.has(companionName.normalize('NFC').toLocaleLowerCase('de-DE'))) continue
-        }
+        if (occupied.has(lowerName(candidate))) continue
+        if (guardCompanions && companionNameTaken(currentName, candidate, occupied, null)) continue
         uniqueName = candidate
         break
       }
-      if (occupied.has(uniqueName.normalize('NFC').toLocaleLowerCase('de-DE'))) {
-        throw new Error('Es konnte kein eindeutiger Name erzeugt werden.')
-      }
+      if (!uniqueName) throw new Error('Es konnte kein eindeutiger Name erzeugt werden.')
 
       const destination = path.join(destDir, uniqueName)
       if (!physicalAllowed(root, destination)) throw new Error('Das Verschiebeziel liegt außerhalb des Vaults.')
@@ -4261,19 +4282,7 @@ function registerIpcHandlers() {
       mutationBarrier.invalidateQueuedWrites()
       const nextRelativePath = logicalIdentity(root, destination)
 
-      if (info.isFile() && isNoteExtension(noteExtension)) {
-        const oldCompanion = companionNotePath(oldRelativePath, companionExtension)
-        const nextCompanion = companionNotePath(nextRelativePath, companionExtension)
-        try {
-          const companion = await resolveVaultPath(oldCompanion, { expected: 'file' })
-          const companionDest = path.join(destDir, path.basename(nextCompanion))
-          if (physicalAllowed(root, companionDest)) await relocatePath(companion.target, companionDest)
-        } catch (error) {
-          if (error?.code !== 'ENOENT') {
-            console.warn('FaNotes: Notizbegleiter konnte nicht mit verschoben werden:', error?.message ?? error)
-          }
-        }
-      }
+      await relocateNoteCompanions(root, oldRelativePath, nextRelativePath, destDir)
       if (info.isDirectory()) {
         const map = folderLocationMap(root)
         const moved = folderLocations.retargetMap(map, oldRelativePath, nextRelativePath)
@@ -4332,17 +4341,7 @@ function registerIpcHandlers() {
         if (forgotten !== map) rememberFolderLocationMap(root, forgotten)
       }
       mutationBarrier.invalidateQueuedWrites()
-      if (trashedInfo.isFile() && isNoteExtension(path.extname(trashedRelativePath).toLocaleLowerCase('en-US'))) {
-        const companionExt = path.extname(trashedRelativePath).toLocaleLowerCase('en-US') === '.famd' ? '.md' : '.famd'
-        try {
-          const companion = await resolveVaultPath(companionNotePath(trashedRelativePath, companionExt), { expected: 'file' })
-          await shell.trashItem(companion.target)
-        } catch (error) {
-          if (error?.code !== 'ENOENT') {
-            console.warn('FaNotes: Notizbegleiter konnte nicht mit gelöscht werden:', error?.message ?? error)
-          }
-        }
-      }
+      if (trashedInfo.isFile()) await trashNoteCompanions(trashedRelativePath)
       try {
         await mutateFolderColors(root, requestedVaultGeneration, (colors) => {
           let changed = false
@@ -4496,12 +4495,8 @@ function registerIpcHandlers() {
       const relativePath = file.relativePath || toRelativePosix(root, file.absolutePath)
       const extension = path.extname(relativePath).toLocaleLowerCase('en-US')
       if (extension === '.famd') {
-        const siblingMd = companionNotePath(relativePath, '.md')
-        const siblingPdf = `${noteStem(relativePath)}.pdf`
-        if (markdownFiles.some((candidate) => {
-          const candidatePath = candidate.relativePath || toRelativePosix(root, candidate.absolutePath)
-          return candidatePath === siblingMd || candidatePath === siblingPdf
-        })) continue
+        const siblings = new Set(famdSiblingPaths(relativePath))
+        if (markdownFiles.some((candidate) => siblings.has(candidate.relativePath || toRelativePosix(root, candidate.absolutePath)))) continue
       }
       let content = ''
       let inkTranscript = ''

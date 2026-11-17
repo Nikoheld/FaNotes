@@ -399,6 +399,47 @@ assert.deepEqual(ics.importIcs(exported, personal)[0].exceptionDates, series[0].
 const shown = expandOccurrences({ ...doc, events: series }, startOfDay(new Date(2026, 9, 14)), addDays(startOfDay(new Date(2026, 9, 14)), 21))
 assert.equal(shown.some((item) => item.key.endsWith('@2026-10-14')), true)
 assert.equal(shown.some((item) => item.key.endsWith('@2026-10-21')), false)
+assert.equal(series[0].recurrenceUntil, null)
+assert.doesNotMatch(exported, /UNTIL=/u)
+
+const boundedEvent = (rule, start = '20261014T153000') => ics.importIcs([
+  'BEGIN:VCALENDAR',
+  'BEGIN:VEVENT',
+  'UID:bounded',
+  'SUMMARY:Kurs',
+  `DTSTART:${start}`,
+  'DURATION:PT45M',
+  rule,
+  'END:VEVENT',
+  'END:VCALENDAR',
+].join('\n'), personal)[0]
+const shownDays = (event) => expandOccurrences(
+  { ...doc, events: [event] },
+  startOfDay(new Date(2026, 9, 1)),
+  startOfDay(new Date(2026, 11, 1)),
+).map((item) => item.key.split('@')[1])
+const dateUntil = boundedEvent('RRULE:FREQ=WEEKLY;UNTIL=20261104')
+assert.equal(dateUntil.recurrenceUntil, '2026-11-04')
+assert.deepEqual(shownDays(dateUntil), ['2026-10-14', '2026-10-21', '2026-10-28', '2026-11-04'])
+const timeUntil = boundedEvent('RRULE:FREQ=WEEKLY;UNTIL=20261104T100000')
+assert.equal(timeUntil.recurrenceUntil, '2026-10-28')
+assert.deepEqual(shownDays(timeUntil), ['2026-10-14', '2026-10-21', '2026-10-28'])
+assert.equal(boundedEvent('RRULE:FREQ=WEEKLY;UNTIL=20261104T153000').recurrenceUntil, '2026-11-04')
+const counted = boundedEvent('RRULE:FREQ=WEEKLY;COUNT=3')
+assert.equal(counted.recurrenceUntil, '2026-10-28')
+assert.deepEqual(shownDays(counted), ['2026-10-14', '2026-10-21', '2026-10-28'])
+assert.equal(boundedEvent('RRULE:FREQ=WEEKLY;UNTIL=20261104;COUNT=2').recurrenceUntil, '2026-10-21')
+assert.equal(boundedEvent('RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=3').recurrenceUntil, null)
+assert.equal(boundedEvent('RRULE:FREQ=WEEKLY;INTERVAL=2;UNTIL=20261028').recurrenceUntil, '2026-10-28')
+assert.equal(boundedEvent('RRULE:FREQ=DAILY;COUNT=1', '20261014T090000').recurrenceUntil, '2026-10-14')
+assert.equal(boundedEvent('RRULE:FREQ=MONTHLY;COUNT=2', '20260131T090000').recurrenceUntil, '2026-02-28')
+const endedBeforeStart = boundedEvent('RRULE:FREQ=WEEKLY;UNTIL=20261001T153000')
+assert.equal(endedBeforeStart.recurrenceUntil, '2026-10-13')
+assert.deepEqual(shownDays(endedBeforeStart), [])
+assert.equal(boundedEvent('RRULE:FREQ=WEEKLY;UNTIL=20260231').recurrenceUntil, null)
+const exportedCount = ics.exportIcs({ ...doc, events: [counted] })
+assert.match(exportedCount, /UNTIL=20261028/u)
+assert.equal(ics.importIcs(exportedCount, personal)[0].recurrenceUntil, '2026-10-28')
 
 await server.close()
 console.log(JSON.stringify({

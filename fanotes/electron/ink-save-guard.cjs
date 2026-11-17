@@ -14,8 +14,8 @@
 const { famdLooksStored, parseFamd } = require('./famd.cjs')
 
 // Collapsed sections park their strokes in `hidden`, and a collapsed section
-// can hold collapsed subsections. famd.cjs `inkHasMarks` stops at depth 6,
-// which is one level short of a subsection's strokes.
+// can hold collapsed subsections. A large drawing's save document omits those
+// bodies, so this walk is what still sees the ink on disk.
 const MAX_WALK_DEPTH = 24
 
 /** Strokes anywhere on the page: live, in collapsed (sub)sections, packed (`famdPts`) or not. */

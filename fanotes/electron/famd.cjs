@@ -389,8 +389,9 @@ function openFamdFile(source) {
  * The text a companion write stores. `ink === undefined` keeps the ink already
  * in the file. Callers that already hold a large file run this off the UI thread.
  */
+// A collapsed subsection parks its strokes eight levels under the famd payload.
 function inkHasMarks(value, depth = 0) {
-  if (!value || depth > 6) return false
+  if (!value || depth > 24) return false
   if (Array.isArray(value)) return value.some((item) => inkHasMarks(item, depth + 1))
   if (typeof value !== 'object') return false
   if (typeof value.famdPts === 'string' && value.famdPts.length > 0) return true
