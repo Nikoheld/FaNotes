@@ -249,3 +249,25 @@ test('auto-approve marks a request approved when it reaches waiting_for_you', as
     }
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
+
+test('operator can mark a failed request with a hand-merged PR as merged', async () => {
+  const s = await start()
+  try {
+    const created = await create(s)
+    await s.worker('POST', '/claim', {})
+    await s.worker('POST', `/requests/${created.id}/status`, { status: 'working' })
+    assert.equal((await s.worker('POST', `/requests/${created.id}/merged`, { prNumber: 5 })).status, 409)
+    await s.worker('POST', `/requests/${created.id}/status`, { status: 'pr_open', prNumber: 5 })
+    await s.worker('POST', `/requests/${created.id}/status`, { status: 'failed', reason: 'CI-Zeitlimit überschritten' })
+    assert.equal((await s.call('POST', `/requests/${created.id}/merged`, { body: {} })).status, 404)
+    const marked = await s.worker('POST', `/requests/${created.id}/merged`, { prNumber: 5, prUrl: 'https://github.com/Nikoheld/FaNotes/pull/5' })
+    assert.equal(marked.status, 200)
+    assert.equal(marked.body.request.status, 'merged')
+    assert.equal(marked.body.request.reason, '')
+    assert.equal(marked.body.request.percent, 100)
+    const again = await s.worker('POST', `/requests/${created.id}/merged`, {})
+    assert.equal(again.body.request.status, 'merged')
+    const owner = await s.call('GET', `/requests/${created.id}`)
+    assert.equal(owner.body.request.status, 'merged')
+  } finally { await s.close() }
+})

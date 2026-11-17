@@ -10,7 +10,7 @@
 //   GET  /api/v1/requests/:id/attachments/(screenshot|logs)
 //   POST /api/v1/requests/:id/(approve|cancel|messages)
 //   POST /api/v1/worker/claim                  GET  /api/v1/worker/requests/:id/messages
-//   POST /api/v1/worker/requests/:id/(events|status)
+//   POST /api/v1/worker/requests/:id/(events|status|merged)
 //   GET  /api/v1/worker/requests/:id/attachments/(screenshot|logs)
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { EventEmitter } from 'node:events'
@@ -218,6 +218,23 @@ export const createWorkRequestsStore = (directory, options = {}) => {
       }
       return { request, event }
     }),
+    // Operator repair: the PR was merged by hand after the worker gave up (timeout, lost
+    // report). Moves an open or failed request with a PR to `merged`; nothing else may skip
+    // the approval, so this stays a worker-token action that the owner cannot trigger.
+    markMerged: (id, input = {}) => locked(async () => {
+      const request = await load(id)
+      if (!request) fail(404, 'Anfrage nicht gefunden.')
+      if (request.status === 'merged') return request
+      if (!['failed', 'pr_open', 'waiting_for_you'].includes(request.status) || request.cancelled) fail(409, 'Diese Anfrage kann nicht als übernommen markiert werden.')
+      if (input.pr) request.pr = { ...(request.pr ?? {}), ...input.pr }
+      if (!request.pr?.number) fail(400, 'Die PR-Nummer fehlt.')
+      const from = request.status
+      request.status = 'merged'
+      request.percent = 100
+      request.reason = ''
+      await record(request, { type: 'status', from, status: 'merged', pr: request.pr, by: 'operator' })
+      return request
+    }),
     async workerMessages(id, after) {
       const request = await load(id)
       if (!request) fail(404, 'Anfrage nicht gefunden.')
@@ -420,6 +437,11 @@ export const createWorkRequestsHandler = (store, options = {}) => {
             const found = await store.load(id)
             if (!found) fail(404, 'Anfrage nicht gefunden.')
             await sendAttachment(response, id, segments[3], found)
+          } else if (method === 'POST' && tail === 'merged') {
+            const body = await readJson(request)
+            const number = Number(body.prNumber)
+            const pr = Number.isInteger(number) && number > 0 ? { number, url: typeof body.prUrl === 'string' && /^https:\/\/github\.com\//u.test(body.prUrl) ? body.prUrl.slice(0, 300) : undefined } : null
+            writeJson(response, 200, { ok: true, request: await store.markMerged(id, { pr }) })
           } else if (method === 'POST' && tail === 'events') {
             const body = await readJson(request)
             const text = str(body.text, REQUESTS_MAX_PROGRESS_TEXT)

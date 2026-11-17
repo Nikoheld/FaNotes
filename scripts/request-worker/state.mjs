@@ -11,7 +11,7 @@ const ALLOWED = {
   running: ['running', 'pr_open', 'failed'],
   pr_open: ['waiting', 'running', 'failed'],
   waiting: ['running', 'merging', 'failed'],
-  merging: ['verifying', 'failed'],
+  merging: ['verifying', 'running', 'failed'],
   verifying: ['done', 'failed'],
   done: ['idle'],
   failed: ['idle'],

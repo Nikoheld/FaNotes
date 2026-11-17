@@ -3,10 +3,12 @@
 import fs from 'node:fs'
 const a = process.argv.slice(2)
 // Like gh 2.46 on the build host: `pr view --json statusCheckRollup` (no `pr checks --json`).
-if (a[0] === 'pr' && a[1] === 'view' && a.includes('statusCheckRollup')) {
+if (a[0] === 'pr' && a[1] === 'view' && a.some((x) => x.includes('statusCheckRollup'))) {
   const b = process.env.FAKE_GH_CI || 'pass'
   const run = b === 'pending' ? { status: 'IN_PROGRESS', conclusion: '' } : { status: 'COMPLETED', conclusion: b === 'pass' ? 'SUCCESS' : 'FAILURE' }
-  process.stdout.write(JSON.stringify({ statusCheckRollup: [{ __typename: 'CheckRun', name: 'build', ...run }] }))
+  // FAKE_GH_CONFLICT_FILE: while that file exists the PR reports CONFLICTING.
+  const conflict = process.env.FAKE_GH_CONFLICT_FILE && fs.existsSync(process.env.FAKE_GH_CONFLICT_FILE)
+  process.stdout.write(JSON.stringify({ mergeable: conflict ? 'CONFLICTING' : 'MERGEABLE', statusCheckRollup: [{ __typename: 'CheckRun', name: 'build', ...run }] }))
   process.exit(0)
 }
 if (a[0] === 'pr' && a[1] === 'list') { process.stdout.write('[]'); process.exit(0) }
