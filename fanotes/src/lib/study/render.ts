@@ -7,6 +7,8 @@ import { asImage, escapeHtml as esc, isVaultImageRef, type StudyKind } from './b
 import { LABEL_METRICS, layoutKeyTree, type KeyData } from './keyTree'
 import { layoutMap, type MapData } from './conceptMap'
 import { unsortedCards, type SortData } from './sortBoard'
+import { renderCryptoHtml } from './crypto/html'
+import type { CryptoData } from './crypto/model'
 import { plateColumns, type PlateData, type TermData } from './cardsModels'
 
 export type Palette = { text: string; muted: string; line: string; fill: string; accent: string; leaf: string; bg: string }
@@ -129,7 +131,7 @@ const renderTermHtml = (data: TermData) => data.terms.map((entry) => (
   `<div class="lw-term"><div class="lw-term-name">${esc(entry.term || 'Begriff')}</div>${entry.definition ? `<p>${esc(entry.definition)}</p>` : ''}${entry.example ? `<p class="lw-term-example"><b>Beispiel:</b> ${esc(entry.example)}</p>` : ''}${entry.source ? `<p class="lw-term-source">Quelle: ${esc(entry.source)}</p>` : ''}</div>`
 )).join('')
 
-export type StudyAnyData = KeyData | SortData | MapData | PlateData | TermData
+export type StudyAnyData = KeyData | SortData | MapData | PlateData | TermData | CryptoData
 
 export const renderStudyHtml = (kind: StudyKind, data: StudyAnyData): string => {
   switch (kind) {
@@ -138,5 +140,6 @@ export const renderStudyHtml = (kind: StudyKind, data: StudyAnyData): string => 
     case 'map': return `<div class="lw-svg">${(data as MapData).nodes.length ? renderMapSvg(data as MapData).svg : ''}</div>`
     case 'plate': return renderPlateHtml(data as PlateData)
     case 'term': return renderTermHtml(data as TermData)
+    case 'crypto': return renderCryptoHtml(data as CryptoData)
   }
 }

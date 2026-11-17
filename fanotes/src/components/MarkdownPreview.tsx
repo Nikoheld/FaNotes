@@ -199,7 +199,7 @@ function createComponents(onOpenLink?: MarkdownLinkHandler, resolveImage?: (src:
     pre: ({ node: _node, ...props }) => {
       // Study blocks (```fanotes-key etc.) render as diagrams; the JSON stays in the file.
       const child = Children.toArray(props.children)[0]
-      const language = isValidElement<{ className?: string; children?: ReactNode }>(child) ? /language-fanotes-(key|sort|map|plate|term)\b/u.exec(child.props.className ?? '')?.[1] : undefined
+      const language = isValidElement<{ className?: string; children?: ReactNode }>(child) ? /language-fanotes-(key|sort|map|plate|term|crypto)\b/u.exec(child.props.className ?? '')?.[1] : undefined
       if (language && isValidElement<{ children?: ReactNode }>(child)) {
         const body = Children.toArray(child.props.children).map((part) => (typeof part === 'string' ? part : '')).join('')
         return <div className="lw-block markdown-lw" ref={(node) => { if (node) hydrateVaultImages(node) }} dangerouslySetInnerHTML={{ __html: renderStudyBlockHtml(language as StudyKind, body) }} />

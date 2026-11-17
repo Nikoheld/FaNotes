@@ -10,7 +10,7 @@
  * Every parser here is total: bad JSON or odd values yield a safe default.
  */
 
-export const STUDY_KINDS = ['key', 'sort', 'map', 'plate', 'term'] as const
+export const STUDY_KINDS = ['key', 'sort', 'map', 'plate', 'term', 'crypto'] as const
 export type StudyKind = (typeof STUDY_KINDS)[number]
 
 export const STUDY_KIND_LABELS: Record<StudyKind, string> = {
@@ -19,6 +19,7 @@ export const STUDY_KIND_LABELS: Record<StudyKind, string> = {
   map: 'Begriffsnetz (Ursache und Wirkung)',
   plate: 'Bildtafel',
   term: 'Definitionskarten',
+  crypto: 'Krypto-Werkzeug',
 }
 
 export const isStudyKind = (value: unknown): value is StudyKind => typeof value === 'string' && (STUDY_KINDS as readonly string[]).includes(value)
@@ -35,7 +36,7 @@ export type StudyBlockRef = {
   endLine: number
 }
 
-const OPEN = /^( {0,3})(`{3,})fanotes-(key|sort|map|plate|term)[ \t]*$/u
+const OPEN = /^( {0,3})(`{3,})fanotes-(key|sort|map|plate|term|crypto)[ \t]*$/u
 
 /** All study blocks of a note, ignoring look-alikes inside other fences. */
 export const findStudyBlocks = (markdown: string): StudyBlockRef[] => {

@@ -21,13 +21,14 @@ import { memo, useEffect, useRef, useState } from 'react'
 import { operandsForButton, simpleLatexSnippet, type SimpleLatexButton, type SimpleLatexOperands } from '../lib/simpleLatex'
 import type { MarkdownFormatAction } from './MarkdownEditor'
 import { STUDY_KINDS, STUDY_KIND_LABELS, type StudyKind } from '../lib/study/blocks'
+import { CRYPTO_TOOLS, CRYPTO_TOOL_LABELS, type CryptoTool } from '../lib/study/crypto/model'
 
 type FormattingToolbarProps = {
   disabled?: boolean
   onFormat: (action: MarkdownFormatAction) => void
   onInsertLatex: (button: SimpleLatexButton, operands: SimpleLatexOperands) => void
   onLatexError?: (message: string) => void
-  onInsertStudy?: (kind: StudyKind) => void
+  onInsertStudy?: (kind: StudyKind, tool?: CryptoTool) => void
 }
 
 const LATEX_BUTTONS: Array<{ id: SimpleLatexButton; label: string; glyph: string }> = [
@@ -112,12 +113,16 @@ export const FormattingToolbar = memo(function FormattingToolbar({
       ))}
       {onInsertStudy && (
         <div className="lw-insert-menu has-divider" ref={studyRef}>
-          <button type="button" aria-label="Lernblöcke einfügen" aria-haspopup="menu" aria-expanded={studyOpen} disabled={disabled} title="Lernwerkzeuge: Tabelle und Schlüssel, Sortier-Board, Begriffsnetz, Bildtafel, Definitionen" onClick={() => setStudyOpen((open) => !open)}>
+          <button type="button" aria-label="Lernblöcke einfügen" aria-haspopup="menu" aria-expanded={studyOpen} disabled={disabled} title="Lernwerkzeuge: Tabelle und Schlüssel, Sortier-Board, Begriffsnetz, Bildtafel, Definitionen, Krypto-Werkzeug" onClick={() => setStudyOpen((open) => !open)}>
             <GraduationCap aria-hidden="true" size={14} strokeWidth={2} />
           </button>
           {studyOpen && (
             <div className="lw-insert-popover" role="menu" aria-label="Lernblöcke einfügen">
-              {STUDY_KINDS.map((kind) => <button key={kind} type="button" role="menuitem" onClick={() => { setStudyOpen(false); onInsertStudy(kind) }}>{STUDY_KIND_LABELS[kind]}</button>)}
+              {STUDY_KINDS.filter((kind) => kind !== 'crypto').map((kind) => <button key={kind} type="button" role="menuitem" onClick={() => { setStudyOpen(false); onInsertStudy(kind) }}>{STUDY_KIND_LABELS[kind]}</button>)}
+              <div className="lw-insert-group" role="group" aria-label={STUDY_KIND_LABELS.crypto}>
+                <span className="lw-insert-heading">{STUDY_KIND_LABELS.crypto}</span>
+                {CRYPTO_TOOLS.map((tool) => <button key={tool} type="button" role="menuitem" onClick={() => { setStudyOpen(false); onInsertStudy('crypto', tool) }}>{CRYPTO_TOOL_LABELS[tool]}</button>)}
+              </div>
             </div>
           )}
         </div>

@@ -18,6 +18,8 @@ import { SortEditor } from './SortEditor'
 import { MapEditor } from './MapEditor'
 import { PlateEditor, addPlateFiles } from './PlateEditor'
 import { TermEditor } from './TermEditor'
+import { CryptoEditor } from './CryptoEditor'
+import { defaultCryptoData, type CryptoData, type CryptoTool } from '../../lib/study/crypto/model'
 
 /**
  * `from` and `hash` identify the block in the note: its offset and a fingerprint of the body as we last
@@ -43,7 +45,7 @@ type Session = {
 const ADJUSTED_NOTICE = 'Einige Eingaben passten nicht in den Block und wurden angepasst.'
 
 type BlockTarget = { kind: StudyKind; from: number; hash: string }
-type HostEntry = { view: EditorView; open: (target: BlockTarget | StudyKind) => void }
+type HostEntry = { view: EditorView; open: (target: BlockTarget | StudyKind, tool?: CryptoTool) => void }
 const hosts = new Set<HostEntry>()
 let lastFocused: EditorView | null = null
 
@@ -77,7 +79,7 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
     return { ...current, data, from: ref.from, hash: hashText(body), changed: true }
   }, [])
 
-  const open = useCallback((target: BlockTarget | StudyKind) => {
+  const open = useCallback((target: BlockTarget | StudyKind, tool?: CryptoTool) => {
     const view = getView()
     if (!view || view.state.readOnly) return
     viewRef.current = view
@@ -96,7 +98,7 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
     const kind = target
     const doc = view.state.doc
     const line = doc.lineAt(view.state.selection.main.to)
-    const data = defaultStudyData(kind)
+    const data = kind === 'crypto' && tool ? defaultCryptoData(tool) : defaultStudyData(kind)
     const block = serializeStudyBlock(kind, data)
     const lead = line.text.trim() ? '\n\n' : '\n'
     const insert = `${lead}${block}\n`
@@ -116,9 +118,9 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
     const focus = () => { lastFocused = view }
     view.dom.addEventListener('focusin', focus)
     const onInsert = (event: Event) => {
-      const detail = (event as CustomEvent<{ kind?: StudyKind; view?: EditorView }>).detail
+      const detail = (event as CustomEvent<{ kind?: StudyKind; tool?: CryptoTool; view?: EditorView }>).detail
       if (!detail?.kind || pickHost(detail.view) !== entry) return
-      entry.open(detail.kind)
+      entry.open(detail.kind, detail.tool)
     }
     const onEdit = (event: Event) => {
       const detail = (event as CustomEvent<{ view?: EditorView; kind?: StudyKind; from?: number; hash?: string }>).detail
@@ -233,6 +235,7 @@ export function StudyHost({ getView }: { getView: () => EditorView | null }) {
           {session.kind === 'map' && <MapEditor data={session.data as MapData} onChange={update} />}
           {session.kind === 'plate' && <PlateEditor data={session.data as PlateData} onChange={update} onError={setError} onLearn={learn} />}
           {session.kind === 'term' && <TermEditor data={session.data as TermData} onChange={update} onLearn={learn} />}
+          {session.kind === 'crypto' && <CryptoEditor data={session.data as CryptoData} onChange={update} />}
         </div></fieldset>}
         {(error || notice) && <p className={error ? 'lw-error' : 'lw-notice'} role="status">{error || notice}</p>}
         <footer>

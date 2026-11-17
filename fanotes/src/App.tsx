@@ -84,6 +84,7 @@ import { hasConnectedAiProvider } from './lib/aiProviderConnection'
 import { clipboardImageFile } from './lib/clipboardImage'
 import { STUDY_EVENT, studyModalOpen } from './lib/study/imageTools'
 import { STUDY_KINDS, STUDY_KIND_LABELS, type StudyKind } from './lib/study/blocks'
+import { CRYPTO_TOOLS, CRYPTO_TOOL_LABELS, type CryptoTool } from './lib/study/crypto/model'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, inkHasMarks, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { inkJsonForRewrite } from './lib/packedInk'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
@@ -4776,13 +4777,13 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!commandEditor()?.format(action)) toast('Die Formatierung konnte nicht angewandt werden.', 'error')
   }, [drawingOpen, homeworkOpen, overviewOpen, toast])
 
-  const insertStudyBlock = useCallback((kind: StudyKind) => {
+  const insertStudyBlock = useCallback((kind: StudyKind, tool?: CryptoTool) => {
     const path = activePathRef.current
     if (!path || drawingOpen || overviewOpen || homeworkOpen || isPdfNotePath(path)) {
       toast('Öffne eine Markdown-Notiz im Editor, um ein Lernwerkzeug einzufügen.', 'info')
       return
     }
-    window.dispatchEvent(new CustomEvent(STUDY_EVENT.insert, { detail: { kind } }))
+    window.dispatchEvent(new CustomEvent(STUDY_EVENT.insert, { detail: { kind, tool } }))
   }, [drawingOpen, homeworkOpen, overviewOpen, toast])
 
   const handleDrawingDirtyChange = useMemo(() => {
@@ -5666,7 +5667,8 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht', detail: 'Ordner und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
     { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
-    ...STUDY_KINDS.map((kind) => ({ id: `study-${kind}`, label: `Lernwerkzeug: ${STUDY_KIND_LABELS[kind]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'lernwerkzeuge auftrag tabelle schlüssel bestimmungsschlüssel sortieren board begriffsnetz concept map bildtafel definition karten', icon: <GraduationCap size={15} />, run: () => insertStudyBlock(kind) })),
+    ...STUDY_KINDS.filter((kind) => kind !== 'crypto').map((kind) => ({ id: `study-${kind}`, label: `Lernwerkzeug: ${STUDY_KIND_LABELS[kind]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'lernwerkzeuge auftrag tabelle schlüssel bestimmungsschlüssel sortieren board begriffsnetz concept map bildtafel definition karten', icon: <GraduationCap size={15} />, run: () => insertStudyBlock(kind) })),
+    ...CRYPTO_TOOLS.map((tool) => ({ id: `study-crypto-${tool}`, label: `Lernwerkzeug: Krypto-Werkzeug, ${CRYPTO_TOOL_LABELS[tool]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'krypto kryptologie caesar vigenere häufigkeit xor ascii modulo diffie hellman verschlüsseln', icon: <GraduationCap size={15} />, run: () => insertStudyBlock('crypto', tool) })),
     { id: 'study-tasks', label: 'Lernwerkzeuge: Aufträge dieses PDFs', detail: 'Aufträge erkennen, abhaken und mit Timer bearbeiten', group: 'Lernwerkzeuge', keywords: 'auftrag aufgabe task exercise pdf arbeitsblatt timer fortschritt', icon: <ClipboardList size={15} />, run: () => { if (isPdfActive) setStudyPanel('tasks'); else toast('Öffne zuerst ein PDF.', 'info') } },
     { id: 'study-marks', label: 'Lernwerkzeuge: Markierungen-Übersicht', detail: 'Alle Textmarker-Stellen des PDFs nach Seite', group: 'Lernwerkzeuge', keywords: 'markierungen textmarker highlight wesentliche punkte pdf zusammenfassung', icon: <BookMarked size={15} />, run: () => { if (isPdfActive) setStudyPanel('marks'); else toast('Öffne zuerst ein PDF.', 'info') } },
     { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => { editorRef.current?.flushChanges(); setCardsOpen(true) } },

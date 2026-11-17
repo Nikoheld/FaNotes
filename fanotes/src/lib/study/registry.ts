@@ -3,6 +3,7 @@ import { defaultKeyData, normaliseKeyData, parseKeyData, type KeyData } from './
 import { defaultSortData, normaliseSortData, parseSortData, type SortData } from './sortBoard'
 import { defaultMapData, normaliseMapData, parseMapData, type MapData } from './conceptMap'
 import { defaultPlateData, defaultTermData, normalisePlateData, normaliseTermData, parsePlateData, parseTermData, type PlateData, type TermData } from './cardsModels'
+import { defaultCryptoData, normaliseCryptoData, parseCryptoData, CRYPTO_KEYS, type CryptoData } from './crypto/model'
 import { renderStudyHtml, type StudyAnyData } from './render'
 
 export const parseStudyData = (kind: StudyKind, body: string): StudyAnyData => {
@@ -12,6 +13,7 @@ export const parseStudyData = (kind: StudyKind, body: string): StudyAnyData => {
     case 'map': return parseMapData(body)
     case 'plate': return parsePlateData(body)
     case 'term': return parseTermData(body)
+    case 'crypto': return parseCryptoData(body)
   }
 }
 
@@ -22,6 +24,7 @@ export const defaultStudyData = (kind: StudyKind): StudyAnyData => {
     case 'map': return defaultMapData()
     case 'plate': return defaultPlateData()
     case 'term': return defaultTermData()
+    case 'crypto': return defaultCryptoData()
   }
 }
 
@@ -37,6 +40,7 @@ export const normaliseStudyData = (kind: StudyKind, data: StudyAnyData): StudyAn
     case 'map': return normaliseMapData(data as MapData)
     case 'plate': return normalisePlateData(data as PlateData)
     case 'term': return normaliseTermData(data as TermData)
+    case 'crypto': return normaliseCryptoData(data as CryptoData)
   }
 }
 
@@ -46,6 +50,7 @@ const KNOWN_KEYS: Record<StudyKind, readonly string[]> = {
   map: ['v', 'title', 'dir', 'nodes', 'edges'],
   plate: ['v', 'title', 'cols', 'showLabels', 'items'],
   term: ['v', 'terms'],
+  crypto: CRYPTO_KEYS,
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
