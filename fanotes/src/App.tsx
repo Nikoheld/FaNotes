@@ -124,6 +124,7 @@ import {
   type InkSummary,
   type PageStatsSession,
 } from './lib/pageStats'
+import { clearNoteTextFieldRescue, readNoteTextFieldRescue, writeNoteTextFieldRescue } from './lib/noteTextFieldRescue'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
 import { chooseStartSurface } from './lib/dashboardLayout'
 import {
@@ -1425,10 +1426,16 @@ export default function App({ startupBootstrap }: AppProps) {
       if (!textFieldBasesRef.current.has(path)) {
         const loadedFields = parseNoteTextFields(fields?.textFields)
         textFieldBasesRef.current.set(path, loadedFields)
+        // Boxes a closing browser tab could not save any more come back first.
+        const rescue = readNoteTextFieldRescue(path)
+        const fromRescue = rescue ? parseNoteTextFields(mergeNoteTextFields(rescue.base, rescue.fields, loadedFields)) : null
+        const rescuedSomething = fromRescue !== null && !noteTextFieldsEqual(fromRescue, loadedFields)
+        if (rescue && !rescuedSomething) clearNoteTextFieldRescue(path)
+        const rescued = rescuedSomething ? fromRescue : loadedFields
         const local = noteTextFieldsRef.current
-        if (local.length) {
+        if (local.length || rescuedSomething) {
           // The user placed or typed a box before the read came back: keep it next to the stored ones.
-          const merged = parseNoteTextFields(mergeNoteTextFields([], local, loadedFields))
+          const merged = local.length ? parseNoteTextFields(mergeNoteTextFields([], local, rescued)) : rescued
           noteTextFieldsRef.current = merged
           setNoteTextFields(merged)
           textFieldDirtyRef.current = true
@@ -3260,6 +3267,8 @@ export default function App({ startupBootstrap }: AppProps) {
           stored = parseNoteTextFields(await api.writeNoteTextFields!(path, persist))
         }
         absorbStoredTextFields(path, persist, stored, session)
+        // This window's boxes are on disk now, including anything a closed tab had rescued.
+        clearNoteTextFieldRescue(path)
         pushEditableShare(path, { textFields: publicShareTextFields(stored) })
         return true
       } catch (error) {
@@ -4831,12 +4840,19 @@ export default function App({ startupBootstrap }: AppProps) {
   // before it discards a page with unsaved work.
   useEffect(() => {
     if (!isWeb) return
+    // Keeps a synchronous copy of unsaved boxes; the async save may not outlive the page.
+    const rescueBoxes = () => {
+      const path = textFieldSavePathRef.current
+      const unsaved = textFieldDirtyRef.current || textFieldTimerRef.current !== null || textFieldQueueRef.current.writes() > 0
+      if (path && unsaved) writeNoteTextFieldRescue(path, noteTextFieldsRef.current, textFieldBasesRef.current.get(path) ?? [])
+      return unsaved
+    }
     const guard = (event: BeforeUnloadEvent) => {
       flushPaperViewMemory()
       editorRef.current?.flushChanges()
       splitEditorRef.current?.flushChanges()
       // A text box is unsaved while it waits for its debounce and while a write is still running.
-      const boxesUnsaved = textFieldDirtyRef.current || textFieldTimerRef.current !== null || textFieldQueueRef.current.writes() > 0
+      const boxesUnsaved = rescueBoxes()
       const unsaved = pendingWrites.current.size > 0 || drawingDirtyRef.current || worksheetDirtyIdsRef.current.size > 0 || boxesUnsaved
       if (!unsaved) return
       void flushDocumentLayers().then(() => flushPendingWrites()).catch(() => undefined)
@@ -4845,9 +4861,14 @@ export default function App({ startupBootstrap }: AppProps) {
     }
     // A tab that is hidden, frozen or put in the back/forward cache may never run beforeunload.
     const saveBoxesOnHide = () => {
-      if (document.visibilityState === 'hidden') void flushNoteTextFieldsRef.current()
+      if (document.visibilityState !== 'hidden') return
+      rescueBoxes()
+      void flushNoteTextFieldsRef.current()
     }
-    const saveBoxesOnPageHide = () => { void flushNoteTextFieldsRef.current(true) }
+    const saveBoxesOnPageHide = () => {
+      rescueBoxes()
+      void flushNoteTextFieldsRef.current(true)
+    }
     window.addEventListener('beforeunload', guard)
     window.addEventListener('pagehide', saveBoxesOnPageHide)
     document.addEventListener('visibilitychange', saveBoxesOnHide)

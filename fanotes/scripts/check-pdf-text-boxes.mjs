@@ -428,6 +428,13 @@ page.on('pageerror', (error) => pageErrors.push(String(error)))
 const shot = (name) => process.env.FANOTES_SHOT_DIR ? page.screenshot({ path: join(process.env.FANOTES_SHOT_DIR, name) }) : null
 
 const TOOL = 'button.toolbar-button[aria-label="Insert text field"]'
+// A box that is not being edited shows its rendered Markdown instead of the textarea; a user
+// clicks that text to open the box, so the check does the same.
+const openBox = async (selector) => {
+  const render = page.locator(`.note-text-field:has(${selector}) .note-text-field-render`).first()
+  if (await render.count()) await render.click()
+  else await page.locator(selector).first().click()
+}
 const boxes = () => page.evaluate(() => [...document.querySelectorAll('[data-note-text-field]')].map((node) => {
   const rect = node.getBoundingClientRect()
   const wrap = node.closest('.note-text-field')
@@ -631,7 +638,7 @@ try {
     return event.defaultPrevented
   })
   assert.equal(await idleGuard(), false, 'nothing unsaved: closing the tab does not ask')
-  await page.locator('[data-note-text-field]').first().click()
+  await openBox('[data-note-text-field]')
   await page.keyboard.press('Control+End')
   await page.keyboard.type(' +x')
   assert.equal(await idleGuard(), true, 'a typed box that is not saved yet makes the tab ask before it closes')
@@ -655,7 +662,7 @@ try {
   assert.equal((famdTs.parseFamd(await storedFamd()).payload?.textFieldTombstones ?? []).length, 0, 'no tombstone before anything was deleted')
   await scrollPaperTo(2)
   const doomed = (await boxes()).find((item) => item.value.startsWith('Seite zwei'))
-  await page.locator(`[data-note-text-field="${doomed.id}"]`).click()
+  await openBox(`[data-note-text-field="${doomed.id}"]`)
   await page.locator('.note-text-field-toolbar button[aria-label="Remove text field"], .note-text-field-toolbar button[aria-label="Textfeld entfernen"]').click()
   await settle(900)
   assert.equal((await boxes()).length, 1)
