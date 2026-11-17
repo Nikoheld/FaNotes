@@ -22,6 +22,7 @@ The agent token is read from the environment only, redacted in logs, and removed
 | `FANOTES_REQUEST_BUDGET_MIN` | `60` (whole request, then killed and `failed`) |
 | `FANOTES_MAX_TURNS` | unset (passed as `--max-turns`) |
 | `FANOTES_CLAUDE_MODEL` | unset (passed as `--model`) |
+| `FANOTES_MODEL_OVERRIDES` | `~/.config/fanotes-request-worker/models.json`: JSON `{"<request id>": "<model>"}`, overrides the model per request |
 | `FANOTES_CLAUDE_BIN`, `FANOTES_GH_BIN` | `claude`, `gh` |
 | `FANOTES_CLAUDE_PERMISSION_MODE` / `FANOTES_CLAUDE_ALLOWED_TOOLS` | `acceptEdits` / `Bash,Read,Edit,Write,Glob,Grep` |
 | `FANOTES_RULES_PATH` | `/srv/agents/fanotes/.site-redesign-tools/study/RULES.md` |

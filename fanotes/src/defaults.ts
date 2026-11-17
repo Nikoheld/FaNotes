@@ -46,6 +46,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   profilePublic: false,
   marginTranscript: true,
   showWordCount: true,
+  toolbarPosition: 'top',
   showOutline: true,
   defaultFolder: 'Eingang',
   dailyNotesFolder: 'Tagesnotizen',

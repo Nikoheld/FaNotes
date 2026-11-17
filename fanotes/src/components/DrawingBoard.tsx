@@ -250,6 +250,7 @@ import {
   tabletButtonActionFromPointer,
   tabletButtonIdentityFromPointer,
 } from '../lib/tabletButtons'
+import { nextPenEraserHold, penEraserHeldFor, type PenEraserHold } from '../lib/penEraserHold'
 import {
   type InkSection,
   type SerializedSection,
@@ -1700,6 +1701,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const activeStrokeRef = useRef<InkStroke | null>(null)
   const activePointerRef = useRef<number | null>(null)
   const inkSessionRef = useRef<InkPointerSessionSnapshot | null>(null)
+  // Eraser-mapped pen button held over the sheet, and whether the live gesture
+  // is such a button erase. That gesture survives tip lifts and hover moves.
+  const penEraserHoldRef = useRef<PenEraserHold | null>(null)
+  const buttonEraserGestureRef = useRef(false)
   const pendingSolverTapRef = useRef<PendingSolverTap | null>(null)
   const solverDoubleTapPointRef = useRef<Pick<StrokePoint, 'x' | 'y'> | null>(null)
   const mathSolverRunRef = useRef(0)
@@ -5415,7 +5420,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       lastPenContactRef.current > 0 && now - lastPenContactRef.current < POST_PEN_IGNORE_MS
     )
     const buttonIdentity = tabletButtonIdentityFromPointer(event.nativeEvent, asStylus)
-    const buttonAction = tabletButtonActionFromPointer(settings.tabletButtons, event.nativeEvent, asStylus)
+    // A still-held eraser button wins even when the sample dropped its bit.
+    const buttonAction = event.pointerType === 'pen' && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
+      ? 'eraser'
+      : tabletButtonActionFromPointer(settings.tabletButtons, event.nativeEvent, asStylus)
     if (!buttonIdentity && event.button !== 0 && event.pointerType !== 'pen') return
     if (buttonIdentity && buttonAction === 'os') return
     if (buttonIdentity && (buttonAction === 'none' || buttonAction === 'undo' || buttonAction === 'redo' || buttonAction === 'pan')) {
@@ -5737,6 +5745,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     gestureChangedRef.current = false
     eraserAnchorRef.current = null
     gestureToolRef.current = pointerEraser ? 'eraser' : tool
+    buttonEraserGestureRef.current = pointerEraser
     if (gestureToolRef.current === 'pen') {
       activeRenderedPointCountRef.current = 0
       activeStrokeRef.current = inkMode === 'drawing' ? {
@@ -5780,15 +5789,31 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       settings.penOnly,
       activePointerRef.current === event.pointerId,
     )) return
+    if (
+      activePointerRef.current === null
+      && event.pointerType === 'pen'
+      && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
+    ) {
+      // Chromium sends no new pointerdown while a pen button stays pressed:
+      // touching down again or hovering in with the eraser button held only
+      // moves. Re-open the button erase here instead of ignoring the pen.
+      handlePointerDown(event)
+      return
+    }
     if (activePointerRef.current !== event.pointerId) return
     const now = performance.now()
+    const heldEraser = buttonEraserGestureRef.current && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
     // End only when the helper says so — not because a few seconds elapsed
     // or Linux Wacom sent pressure 0 while the tip button is still down.
-    if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event.nativeEvent)) {
+    // A held eraser button keeps erasing through lifts and hover.
+    if (!heldEraser && shouldHardEndInkPointerSession(inkSessionRef.current, now, event.nativeEvent)) {
       forceEndActivePointerRef.current('watchdog', event.nativeEvent)
       return
     }
-    if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event.nativeEvent, now)
+    if (inkSessionRef.current) {
+      inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event.nativeEvent, now)
+      if (heldEraser) inkSessionRef.current = { ...inkSessionRef.current, lastContactAt: now }
+    }
     event.preventDefault()
     if (selectionLoopRef.current) {
       const samples = event.nativeEvent.getCoalescedEvents?.() ?? [event.nativeEvent]
@@ -5823,7 +5848,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       const latest = activeStrokeRef.current?.points.at(-1)
       if (latest) ensureWriteRoom(latest.y, latest.x)
     }
-  }, [appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
+  }, [appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, handlePointerDown, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
 
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
@@ -5853,6 +5878,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       })
       pointerBoundsRef.current = null
       eraserAnchorRef.current = null
+      buttonEraserGestureRef.current = false
       activePointerRef.current = cleanup.session.activePointerId
       inkSessionRef.current = null
       activePointerTargetRef.current = null
@@ -6426,6 +6452,36 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [cancelFingerPanFling, finishPointer, markPenContact, scheduleRedraw])
   forceEndActivePointerRef.current = forceEndActivePointer
 
+  // Track the eraser-mapped pen button on every pen sample, before the board
+  // handlers read it (window capture runs first). Releasing the button, a
+  // cancel, or the pen leaving the sheet ends a held-button erase.
+  const tabletButtonsRef = useRef(settings.tabletButtons)
+  tabletButtonsRef.current = settings.tabletButtons
+  useEffect(() => {
+    const overOwnSheet = (target: EventTarget | null) => (
+      target instanceof Element
+      && Boolean(boardRef.current?.contains(target))
+      && isInkSurfaceTarget(target)
+    )
+    const onPenSample = (event: PointerEvent) => {
+      if (event.pointerType !== 'pen') return
+      const overSheet = event.type !== 'pointercancel'
+        && overOwnSheet(event.type === 'pointerout' ? event.relatedTarget : event.target)
+      const hold = nextPenEraserHold(penEraserHoldRef.current, event, tabletButtonsRef.current, overSheet)
+      penEraserHoldRef.current = hold
+      if (!buttonEraserGestureRef.current || activePointerRef.current !== event.pointerId) return
+      if (penEraserHeldFor(hold, event.pointerId)) return
+      // No sample point: a release or leave must not erase where the pen went.
+      forceEndActivePointerRef.current('watchdog')
+    }
+    const types = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'pointerout'] as const
+    for (const type of types) window.addEventListener(type, onPenSample, true)
+    return () => {
+      for (const type of types) window.removeEventListener(type, onPenSample, true)
+      penEraserHoldRef.current = null
+    }
+  }, [])
+
   const discardHandGestureRef = useRef(() => {})
   discardHandGestureRef.current = () => {
     // Two fingers take the sheet. The one-finger pan must stop or both would scroll.
@@ -6519,12 +6575,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (dragSheetWithPointerRef.current(event.pointerId, event.clientX, event.clientY, event.buttons)) return
       if (!inputActive || activePointerRef.current !== event.pointerId) return
       const now = performance.now()
+      const heldEraser = buttonEraserGestureRef.current && penEraserHeldFor(penEraserHoldRef.current, event.pointerId)
       // Same helper as canvas move: pressure flicker must not cut a live stroke.
-      if (shouldHardEndInkPointerSession(inkSessionRef.current, now, event)) {
+      if (!heldEraser && shouldHardEndInkPointerSession(inkSessionRef.current, now, event)) {
         forceEndActivePointer('watchdog', event)
         return
       }
-      if (inkSessionRef.current) inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event, now)
+      if (inkSessionRef.current) {
+        inkSessionRef.current = touchInkPointerSession(inkSessionRef.current, event, now)
+        if (heldEraser) inkSessionRef.current = { ...inkSessionRef.current, lastContactAt: now }
+      }
       const canvas = canvasRef.current
       const hitTarget = inline ? surfaceRef.current : canvas
       if (hitTarget && (event.target === hitTarget || (event.target instanceof Node && hitTarget.contains(event.target)))) {
@@ -6630,7 +6690,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
     const onWatchdog = () => {
       const now = performance.now()
-      if (shouldHardEndInkPointerSession(inkSessionRef.current, now)) {
+      // A pen hovering still with the eraser button held sends no samples.
+      const heldEraser = buttonEraserGestureRef.current
+        && activePointerRef.current !== null
+        && penEraserHeldFor(penEraserHoldRef.current, activePointerRef.current)
+      if (!heldEraser && shouldHardEndInkPointerSession(inkSessionRef.current, now)) {
         forceEndActivePointer('watchdog')
         return
       }

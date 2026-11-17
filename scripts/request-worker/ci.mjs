@@ -1,4 +1,4 @@
-// CI state via gh. `gh pr checks --json` buckets: pass, fail, pending, skipping, cancel.
+// CI state via gh, summarised in the `gh pr checks` buckets: pass, fail, pending, skipping, cancel.
 import { run } from './exec.mjs'
 
 export function summarizeChecks(checks) {
@@ -9,10 +9,27 @@ export function summarizeChecks(checks) {
   return { state: 'green', failed: [] }
 }
 
+// Maps `gh pr view --json statusCheckRollup` entries (CheckRun and StatusContext) to the
+// `gh pr checks` buckets. `gh pr checks --json` needs gh >= 2.48; the build host has 2.46.
+const PASS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED'])
+export function bucketOf(check) {
+  if (check?.__typename === 'StatusContext' || (check && 'state' in check && !('status' in check))) {
+    if (check.state === 'SUCCESS') return 'pass'
+    if (check.state === 'PENDING' || check.state === 'EXPECTED') return 'pending'
+    return 'fail'
+  }
+  if (check?.status !== 'COMPLETED') return 'pending'
+  if (PASS.has(check.conclusion)) return check.conclusion === 'SUCCESS' ? 'pass' : 'skipping'
+  if (check.conclusion === 'CANCELLED') return 'cancel'
+  return 'fail'
+}
+
 export async function ciState(config, cwd, prNumber) {
-  const r = await run(config.ghBin, ['pr', 'checks', String(prNumber), '--json', 'name,bucket'], { cwd, timeoutMs: 60_000 })
-  // gh exits 8 while checks are pending and 1 on failures but still prints JSON.
-  try { return summarizeChecks(JSON.parse(r.stdout)) } catch { return { state: 'pending', failed: [], error: true } }
+  const r = await run(config.ghBin, ['pr', 'view', String(prNumber), '--json', 'statusCheckRollup'], { cwd, timeoutMs: 60_000 })
+  try {
+    const rollup = JSON.parse(r.stdout).statusCheckRollup
+    return summarizeChecks((rollup || []).map((c) => ({ name: c.name || c.context || '', bucket: bucketOf(c) })))
+  } catch { return { state: 'pending', failed: [], error: true } }
 }
 
 export async function findOpenPr(config, cwd, branch) {

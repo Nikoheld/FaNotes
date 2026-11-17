@@ -223,6 +223,7 @@ import {
   type NoteOverlaySession,
 } from './lib/overlayInteract'
 import { installChromeTextSelect } from './lib/chromeTextSelect'
+import { readDocInputMode, writeDocInputMode } from './lib/docInputMode'
 import { drawingSessionFromLoad, INK_OVERLAY_CRASH_TITLE, INK_TOOLBAR_SLOT_ID, overlayAfterNoteSwitch, PDF_TOOLBAR_SLOT_ID, penModeToolbarSlot } from './lib/pdfInkHit'
 import { APP_VERSION } from './lib/appVersion'
 import { defaultSettingsForPlatform } from './defaults'
@@ -985,6 +986,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const settingsPersistedRevisionRef = useRef(0)
   const lastHomeworkSecretRef = useRef('')
   const drawingOpenRef = useRef(drawingOpen)
+  const modePathRef = useRef<string | null>(null)
   const drawingDirtyRef = useRef(false)
   const drawingSessionRef = useRef(drawingSession)
   const drawingSessionKeyRef = useRef(0)
@@ -1171,6 +1173,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (bootstrap) void setUiLanguage(settings.uiLanguage)
   }, [bootstrap, settings.uiLanguage])
   useEffect(() => { drawingOpenRef.current = drawingOpen }, [drawingOpen])
+  useEffect(() => { if (modePathRef.current) writeDocInputMode(modePathRef.current, drawingOpen) }, [drawingOpen])
   useEffect(() => {
     if (!editorMenuOpen && !backupMenuOpen) return
     const close = () => {
@@ -1312,14 +1315,22 @@ export default function App({ startupBootstrap }: AppProps) {
     const initialNoteLoad = Boolean(path && initialDrawingLoadRef.current)
     if (path) initialDrawingLoadRef.current = false
     if (!path) {
+      if (modePathRef.current) writeDocInputMode(modePathRef.current, drawingOpenRef.current)
+      modePathRef.current = null
       drawingOpenRef.current = false
       setDrawingOpen(false)
       setDrawingSession(EMPTY_DRAWING_SESSION)
       return
     }
+    // Each document returns to the input mode it was last left in; a document
+    // without a record keeps the mode carried over from the previous one.
+    const previousModePath = modePathRef.current
+    if (previousModePath && previousModePath !== path) writeDocInputMode(previousModePath, drawingOpenRef.current)
+    modePathRef.current = path
+    const rememberedPen = readDocInputMode(path)
     const switched = overlayAfterNoteSwitch({
       session: { key: 0, document: null },
-      drawingOpen: drawingOpenRef.current,
+      drawingOpen: rememberedPen ?? drawingOpenRef.current,
       host: null,
     }, requestId)
     drawingOpenRef.current = switched.drawingOpen
@@ -6079,6 +6090,7 @@ export default function App({ startupBootstrap }: AppProps) {
     </div>
   )
   const editorToolbarVisible = !calendarOpen && !homeworkOpen && !overviewOpen && !glyphenWerkOpen
+  const sideToolbar = editorToolbarVisible && settings.toolbarPosition === 'side'
 
   return (
     <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
@@ -6219,7 +6231,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </>}
         </aside>
 
-        <main className="workspace">
+        <main className={`workspace ${sideToolbar ? 'has-side-toolbar' : ''}`}>
           <div className="tabs-bar">
             <div className="note-nav" role="group" aria-label="Verlauf">
               <button
@@ -6313,7 +6325,7 @@ export default function App({ startupBootstrap }: AppProps) {
               />
             )
           })()}
-          {editorToolbarVisible && <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'}`}>
+          {editorToolbarVisible && <div className={`editor-toolbar ${drawingOpen ? 'is-ink' : 'is-type'} ${sideToolbar ? 'is-vertical' : ''}`}>
             <div className="mode-switch" role="group" aria-label="Eingabemodus">
               <button
                 type="button"
