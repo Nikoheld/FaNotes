@@ -1,0 +1,75 @@
+# FaNotes baseline profile (human-readable ART profile rules).
+# AGP compiles this into the release APK (assets/dexopt/baseline.prof) and androidx.profileinstaller
+# installs it on first launch, so these paths run AOT-compiled from the start instead of interpreted
+# until JIT warms up. Compose, Material 3 and AndroidX ship their own profiles; these rules add the
+# app's hot paths: start-up, opening a note, the pen (touch, live stroke, tiles), PDF pages, autosave.
+# H = hot, S = start-up, P = post-start-up. See android/PERFORMANCE.md.
+
+# Start-up and the main screen
+HSPLch/fasrv/fanotes/FaNotesApplication;->**(**)**
+HSPLch/fasrv/fanotes/MainActivity;->**(**)**
+HSPLch/fasrv/fanotes/MainActivityKt**->**(**)**
+HSPLch/fasrv/fanotes/AppGraph;->**(**)**
+HSPLch/fasrv/fanotes/IoSyncHost;->**(**)**
+HSPLch/fasrv/fanotes/SafVault;->**(**)**
+HSPLch/fasrv/fanotes/FaNotesViewModel;->**(**)**
+HSPLch/fasrv/fanotes/FaNotesViewModel$**->**(**)**
+HSPLch/fasrv/fanotes/EditorFontsKt;->**(**)**
+HSPLch/fasrv/fanotes/WorkspaceBackdropKt;->**(**)**
+
+# Note page and pen
+HSPLch/fasrv/fanotes/NotePageView;->**(**)**
+HSPLch/fasrv/fanotes/NotePageView$**->**(**)**
+HSPLch/fasrv/fanotes/InkSurfaceView;->**(**)**
+HSPLch/fasrv/fanotes/InkSurfaceView$**->**(**)**
+HSPLch/fasrv/fanotes/LiveInkLayers;->**(**)**
+HSPLch/fasrv/fanotes/PencilGrainPaintKt;->**(**)**
+HSPLch/fasrv/fanotes/InkEffectPaintKt;->**(**)**
+HSPLch/fasrv/fanotes/MarkerPaintKt;->**(**)**
+HSPLch/fasrv/fanotes/CalligraphyPaintKt;->**(**)**
+HSPLch/fasrv/fanotes/ArtSymbolPaintKt;->**(**)**
+HSPLch/fasrv/fanotes/PaperCaret**->**(**)**
+HSPLch/fasrv/fanotes/LivePreviewSpans**->**(**)**
+HSPLch/fasrv/fanotes/SplitEditorView;->**(**)**
+HSPLch/fasrv/fanotes/StudyController;->**(**)**
+HSPLch/fasrv/fanotes/StudyImageCache;->**(**)**
+
+# Shared core: ink model and geometry, input policy, tiles, note parsing and storage
+HSPLch/fasrv/fanotes/ink/InkSession;->**(**)**
+HSPLch/fasrv/fanotes/ink/InkSessionKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/InkModelKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/InkBrushesKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/InkEffectsKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/LiveInkKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/JoinedList;->**(**)**
+HSPLch/fasrv/fanotes/ink/PaperGrowKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/ShapeSnapKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/DraftingToolsKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/InkViewTransformKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/PdfLayoutKt;->**(**)**
+HSPLch/fasrv/fanotes/ink/StrokePoint;->**(**)**
+HSPLch/fasrv/fanotes/ink/InkStroke;->**(**)**
+HSPLch/fasrv/fanotes/ink/InkDocument;->**(**)**
+HSPLch/fasrv/fanotes/ink/GrainSegment;->**(**)**
+HSPLch/fasrv/fanotes/input/**->**(**)**
+HSPLch/fasrv/fanotes/desk/InkRasterKt;->**(**)**
+HSPLch/fasrv/fanotes/desk/StrokeBoundsCache;->**(**)**
+HSPLch/fasrv/fanotes/desk/PdfThumbsKt;->**(**)**
+HSPLch/fasrv/fanotes/json/**->**(**)**
+HSPLch/fasrv/fanotes/famd/**->**(**)**
+HSPLch/fasrv/fanotes/text/**->**(**)**
+HSPLch/fasrv/fanotes/vault/NoteStore;->**(**)**
+HSPLch/fasrv/fanotes/vault/DocumentTree**->**(**)**
+
+# Classes loaded at start-up or on the first pen stroke
+Lch/fasrv/fanotes/MainActivity;
+Lch/fasrv/fanotes/FaNotesViewModel;
+Lch/fasrv/fanotes/NotePageView;
+Lch/fasrv/fanotes/InkSurfaceView;
+Lch/fasrv/fanotes/LiveInkLayers;
+Lch/fasrv/fanotes/ink/InkSession;
+Lch/fasrv/fanotes/ink/StrokePoint;
+Lch/fasrv/fanotes/ink/InkStroke;
+Lch/fasrv/fanotes/ink/InkDocument;
+Lch/fasrv/fanotes/ink/JoinedList;
+Lch/fasrv/fanotes/desk/StrokeBoundsCache;

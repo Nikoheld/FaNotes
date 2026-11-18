@@ -30,7 +30,7 @@ data class StudyScene(val width: Double, val height: Double, val ops: List<Scene
 private const val TEXT_SIZE = 12.5
 private const val CHAR_W = 6.7
 
-private class Sheet(val width: Double) {
+internal class Sheet(val width: Double) {
     val ops = ArrayList<SceneOp>()
     var y = 0.0
 
@@ -46,7 +46,7 @@ private class Sheet(val width: Double) {
     fun finish() = StudyScene(width, maxOf(y, 8.0), ops)
 }
 
-private fun charsFor(width: Double, size: Double = TEXT_SIZE) = maxOf(3, ((width) / (CHAR_W * size / TEXT_SIZE)).toInt())
+internal fun charsFor(width: Double, size: Double = TEXT_SIZE) = maxOf(3, ((width) / (CHAR_W * size / TEXT_SIZE)).toInt())
 
 /** The scene for a study block, or null when the JSON cannot be read (the caller shows the raw block). */
 fun buildStudyScene(kind: StudyKind, body: String, width: Double): StudyScene? {
@@ -57,6 +57,7 @@ fun buildStudyScene(kind: StudyKind, body: String, width: Double): StudyScene? {
         StudyKind.MAP -> mapScene(parseMapData(body) ?: return null, w)
         StudyKind.PLATE -> plateScene(parsePlateData(body) ?: return null, w)
         StudyKind.TERM -> termScene(parseTermData(body) ?: return null, w)
+        StudyKind.CRYPTO -> ch.fasrv.fanotes.study.crypto.cryptoScene(ch.fasrv.fanotes.study.crypto.cryptoReadable(body) ?: return null, w)
     }
 }
 

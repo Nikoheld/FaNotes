@@ -42,8 +42,13 @@ data class NormalizedRect(val x: Double, val y: Double, val width: Double, val h
 class InkSession(document: InkDocument) {
     var document: InkDocument = document
         private set
-    var livePoints: List<StrokePoint> = emptyList()
-        private set
+    /**
+     * The stroke under the pen. Appending a sample adds to one buffer instead of copying every sample before it.
+     * A list read from [livePoints] keeps growing while the stroke goes on (copy it for a snapshot); a restart,
+     * snap, regrow or the end of the stroke starts a fresh buffer, so the committed stroke's list never changes.
+     */
+    private var liveBuffer = ArrayList<StrokePoint>()
+    val livePoints: List<StrokePoint> get() = liveBuffer
     var selection: Set<Int> = emptySet()
         private set
     private val undo = ArrayDeque<List<InkStroke>>()
@@ -62,7 +67,7 @@ class InkSession(document: InkDocument) {
 
     fun replace(next: InkDocument) {
         document = next
-        livePoints = emptyList()
+        liveBuffer = ArrayList()
         selection = emptySet()
         undo.clear()
         redo.clear()
@@ -71,12 +76,12 @@ class InkSession(document: InkDocument) {
     }
 
     fun beginStroke() {
-        livePoints = emptyList()
+        liveBuffer = ArrayList()
     }
 
     /** Replaces the stroke still under the pen, used when a figure snaps clean. */
     fun replaceLive(points: List<StrokePoint>) {
-        livePoints = points
+        liveBuffer = ArrayList(points)
     }
 
     /**
@@ -91,7 +96,7 @@ class InkSession(document: InkDocument) {
         val grown = growDocument(document, pageX, pageY)
         if (grown.document !== document) {
             remapHistory(prevWidth, prevHeight, grown.document.sourceWidth, grown.document.sourceHeight, grown.padX, grown.padY)
-            livePoints = livePoints.map { sample ->
+            liveBuffer = liveBuffer.mapTo(ArrayList(liveBuffer.size + 64)) { sample ->
                 sample.copy(
                     x = keepMarkOnPage(sample.x, prevWidth, grown.document.sourceWidth, grown.padX),
                     y = keepMarkOnPage(sample.y, prevHeight, grown.document.sourceHeight, grown.padY),
@@ -105,9 +110,9 @@ class InkSession(document: InkDocument) {
             pressure = point.pressure.coerceIn(0.0, 1.0),
         )
         val action = classify(livePoints, mapped)
-        livePoints = when (action) {
-            "start", "append" -> livePoints + mapped
-            "restart" -> listOf(mapped)
+        when (action) {
+            "start", "append" -> liveBuffer.add(mapped)
+            "restart" -> liveBuffer = arrayListOf(mapped)
             else -> return false
         }
         return true
@@ -211,9 +216,10 @@ class InkSession(document: InkDocument) {
     }
 
     fun endStroke(style: StrokeStyle, now: String): InkStroke? {
-        val points = livePoints
-        livePoints = emptyList()
+        val points = liveBuffer
+        liveBuffer = ArrayList()
         if (points.isEmpty()) return null
+        points.trimToSize()
         val stroke = InkStroke(
             points = points,
             baseWidth = style.baseWidth,
@@ -241,7 +247,7 @@ class InkSession(document: InkDocument) {
     }
 
     fun cancelStroke() {
-        livePoints = emptyList()
+        liveBuffer = ArrayList()
     }
 
     /** Marks an eraser gesture so every sample shares one undo step. */

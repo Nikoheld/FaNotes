@@ -158,6 +158,7 @@ import ch.fasrv.fanotes.vault.OpenNote
 import ch.fasrv.fanotes.vault.VaultNode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import ch.fasrv.fanotes.ink.GlyphSample
 import ch.fasrv.fanotes.ink.HandwritingSynthesisResult
 import ch.fasrv.fanotes.ink.decodeGlyphLibrary
@@ -239,6 +240,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val showList = MutableStateFlow(true)
     val sidebarOpen = MutableStateFlow(true)
     val inspectorOpen = MutableStateFlow(false)
+    /** Split orientation chosen by the screen from the available space (used while the setting is unset). */
+    val splitRowsAuto = MutableStateFlow(false)
     val message = MutableStateFlow<String?>(null)
     val undoTrash = MutableStateFlow<ch.fasrv.fanotes.vault.TrashItem?>(null)
     val stampRequest = MutableStateFlow<String?>(null)
@@ -1065,7 +1068,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         requestGotoLine((ref.startLine + 1).toString())
     }
 
-    fun insertStudyTemplate(kind: ch.fasrv.fanotes.study.StudyKind) {
+    fun insertStudyTemplate(kind: ch.fasrv.fanotes.study.StudyKind, cryptoTool: ch.fasrv.fanotes.study.crypto.CryptoTool? = null) {
         if (open.value == null) {
             message.value = "Öffne zuerst eine Notiz."
             return
@@ -1074,13 +1077,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             message.value = "In ein PDF lassen sich keine Lernwerkzeuge einfügen. Öffne eine Textnotiz."
             return
         }
-        val data = when (kind) {
-            ch.fasrv.fanotes.study.StudyKind.SORT -> ch.fasrv.fanotes.study.sortDataJson(ch.fasrv.fanotes.study.defaultSortData())
-            ch.fasrv.fanotes.study.StudyKind.TERM -> ch.fasrv.fanotes.study.termDataJson(ch.fasrv.fanotes.study.defaultTermData())
-            else -> return
-        }
-        updateMarkdown(ch.fasrv.fanotes.study.insertStudyBlock(markdown.value, kind, data))
+        updateMarkdown(ch.fasrv.fanotes.study.insertStudyBlock(markdown.value, kind, ch.fasrv.fanotes.study.starterBlockJson(kind, cryptoTool)))
         showText.value = true
+        editorMenu.value = null
     }
 
     /** Opens the Aufträge or Markierungen panel of the open PDF. */
@@ -2567,6 +2566,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun recordPenSample(x: Double, y: Double) {
         notePenActivity()
         val now = System.currentTimeMillis()
+        // Most move events fall inside the log's sampling gap; skip building an event the log would drop.
+        if (!bugLog.penSampleDue(now)) return
         bugLog.recordPen(
             ch.fasrv.fanotes.desk.BugReportEvent(
                 at = now,
@@ -2893,23 +2894,127 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         graph.busyPaths = setOf(note.path, famd, asset)
     }
 
+    private var backdropGeneration = 0
+    private var backdropJob: Job? = null
+
     private suspend fun loadBackdrop(note: OpenNote) {
+        // A newer load (another note, a re-attached sheet) supersedes this one, also while its PDF still renders.
+        val generation = ++backdropGeneration
+        backdropJob?.cancel()
+        backdropJob = null
         backdrop.value.forEach { it.bitmap?.recycle() }
         backdrop.value = emptyList()
-        val slices = withContext(Dispatchers.Default) {
-            when (note.kind) {
-                NoteKind.PDF -> renderPdf(note)
-                else -> renderWorksheet(note)
-            }
+        if (note.kind == NoteKind.PDF) {
+            loadPdfBackdrop(note, generation)
+            return
+        }
+        val slices = withContext(Dispatchers.Default) { renderWorksheet(note) }
+        if (generation != backdropGeneration) {
+            slices.forEach { it.bitmap?.recycle() }
+            return
         }
         backdrop.value = slices
-        if (note.kind == NoteKind.PDF && session.document.strokes.isEmpty()) {
-            val height = slices.lastOrNull()?.let { it.topPagePx + it.heightPagePx } ?: return
-            if (height > 64) {
-                session.replace(
-                    session.document.copy(sourceWidth = PAGE_START_WIDTH, sourceHeight = height.toDouble(), paperStyle = "blank"),
-                )
+    }
+
+    /**
+     * Renders the note PDF page by page and shows the first pages as soon as they are drawn instead of after the
+     * last one. Returns once the first pages are on screen (or the PDF failed or needs a password); the rest keeps
+     * rendering in [backdropJob]. The final pages, sizes and page height are the same as a render in one go.
+     */
+    private suspend fun loadPdfBackdrop(note: OpenNote, generation: Int) {
+        val firstShown = kotlinx.coroutines.CompletableDeferred<Unit>()
+        backdropJob = viewModelScope.launch {
+            try {
+                streamPdf(note, generation) { firstShown.complete(Unit) }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // Before the first page the caller reports it, as when the whole PDF rendered in one call.
+                if (!firstShown.completeExceptionally(error) && generation == backdropGeneration) {
+                    message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Notiz konnte nicht geöffnet werden.")
+                }
+            } finally {
+                firstShown.complete(Unit)
             }
+        }
+        firstShown.await()
+    }
+
+    private suspend fun streamPdf(note: OpenNote, generation: Int, onFirstShown: () -> Unit) {
+        val built = ArrayList<BackdropSlice>()
+        var published = 0
+        try {
+            withContext(Dispatchers.Default) {
+                val bytes = graph.vault.read(note.path) ?: return@withContext
+                val file = File.createTempFile("fanotes-pdf", ".pdf")
+                try {
+                    file.writeBytes(bytes)
+                    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                        try {
+                            openNotePdf(descriptor).use { renderer ->
+                                pdfNeedsPassword.value = false
+                                pdfPasswordRejected.value = false
+                                val aspects = (0 until renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)).map { index ->
+                                    renderer.openPage(index).use { page -> page.height.toDouble() / page.width.toDouble() }
+                                }
+                                val boxes = layoutPdfStack(PAGE_START_WIDTH, aspects)
+                                val stack = pdfStackHeight(boxes)
+                                val scaleY = if (note.document.strokes.isEmpty() || stack <= 0) 1.0 else note.document.sourceHeight / stack
+                                val fullHeight = boxes.lastOrNull()?.let { (it.top * scaleY).toFloat() + (it.height * scaleY).toFloat() }
+                                for ((position, box) in boxes.withIndex()) {
+                                    ensureActive()
+                                    val page = renderer.openPage(box.index)
+                                    try {
+                                        val width = 1200
+                                        val height = (width * (page.height.toFloat() / page.width)).toInt().coerceAtLeast(1)
+                                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                        built += BackdropSlice(
+                                            topPagePx = (box.top * scaleY).toFloat(),
+                                            heightPagePx = (box.height * scaleY).toFloat(),
+                                            widthPagePx = PAGE_START_WIDTH.toFloat(),
+                                            bitmap = bitmap,
+                                        )
+                                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    } finally {
+                                        page.close()
+                                    }
+                                    if (!ch.fasrv.fanotes.desk.pdfBackdropPublishDue(position + 1, boxes.size)) continue
+                                    val shown = built.toList()
+                                    val current = withContext(Dispatchers.Main) {
+                                        if (generation != backdropGeneration) return@withContext false
+                                        if (published == 0) settlePdfPage(fullHeight)
+                                        backdrop.value = shown
+                                        published = shown.size
+                                        onFirstShown()
+                                        true
+                                    }
+                                    if (!current) return@withContext
+                                }
+                            }
+                        } catch (error: Exception) {
+                            if (error is kotlinx.coroutines.CancellationException) throw error
+                            if (!ch.fasrv.fanotes.desk.pdfNeedsPassword(error.javaClass.simpleName, error.message.orEmpty())) throw error
+                            pdfNeedsPassword.value = true
+                            pdfPasswordRejected.value = pdfPassword.isNotEmpty()
+                        }
+                    }
+                } finally {
+                    file.delete()
+                }
+            }
+        } finally {
+            // Pages drawn but never shown (superseded, cancelled, failed) are not on any canvas.
+            for (index in published until built.size) built[index].bitmap?.recycle()
+        }
+    }
+
+    /** A blank PDF note takes the height of its page stack, as after a render in one go. */
+    private fun settlePdfPage(height: Float?) {
+        if (height == null || !session.document.strokes.isEmpty()) return
+        if (height > 64) {
+            session.replace(
+                session.document.copy(sourceWidth = PAGE_START_WIDTH, sourceHeight = height.toDouble(), paperStyle = "blank"),
+            )
         }
     }
 
@@ -2928,49 +3033,6 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             return PdfRenderer(descriptor, params)
         }
         return PdfRenderer(descriptor)
-    }
-
-    private fun renderPdf(note: OpenNote): List<BackdropSlice> {
-        val bytes = graph.vault.read(note.path) ?: return emptyList()
-        val file = File.createTempFile("fanotes-pdf", ".pdf")
-        return try {
-        file.writeBytes(bytes)
-        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-            try {
-            openNotePdf(descriptor).use { renderer ->
-                pdfNeedsPassword.value = false
-                pdfPasswordRejected.value = false
-                val aspects = (0 until renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)).map { index ->
-                    renderer.openPage(index).use { page -> page.height.toDouble() / page.width.toDouble() }
-                }
-                val boxes = layoutPdfStack(PAGE_START_WIDTH, aspects)
-                val stack = pdfStackHeight(boxes)
-                val scaleY = if (note.document.strokes.isEmpty() || stack <= 0) 1.0 else note.document.sourceHeight / stack
-                return boxes.map { box ->
-                    val page = renderer.openPage(box.index)
-                    val width = 1200
-                    val height = (width * (page.height.toFloat() / page.width)).toInt().coerceAtLeast(1)
-                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    page.close()
-                    BackdropSlice(
-                        topPagePx = (box.top * scaleY).toFloat(),
-                        heightPagePx = (box.height * scaleY).toFloat(),
-                        widthPagePx = PAGE_START_WIDTH.toFloat(),
-                        bitmap = bitmap,
-                    )
-                }
-            }
-            } catch (error: Exception) {
-                if (!ch.fasrv.fanotes.desk.pdfNeedsPassword(error.javaClass.simpleName, error.message.orEmpty())) throw error
-                pdfNeedsPassword.value = true
-                pdfPasswordRejected.value = pdfPassword.isNotEmpty()
-                emptyList()
-            }
-        }
-        } finally {
-            file.delete()
-        }
     }
 
     private fun renderWorksheet(note: OpenNote): List<BackdropSlice> {
@@ -3709,8 +3771,15 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         destination.value = "notes"
     }
 
+    /** Orientation the split really has: the setting, or the screen's automatic choice while it is unset. */
+    fun effectiveSplitRows(): Boolean = when (deskSettings.value["split-orientation"]) {
+        "rows" -> true
+        "columns" -> false
+        else -> splitRowsAuto.value
+    }
+
     fun toggleSplitOrientation() {
-        val next = if (deskSettings.value["split-orientation"] == "rows") "columns" else "rows"
+        val next = if (effectiveSplitRows()) "columns" else "rows"
         updateDesk("split-orientation", next)
     }
 
@@ -3832,6 +3901,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun rememberLastOpen(path: String) {
         if (path.isEmpty() || deskSettings.value["last-open"] == path) return
         updateDesk("last-open", path)
+    }
+
+    /** Narrow windows: open or close the sidebar drawer without touching the pinned-sidebar preference. */
+    fun setDrawerOpen(open: Boolean) {
+        showList.value = open
     }
 
     fun setSidebarOpen(open: Boolean) {
@@ -4625,6 +4699,126 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         bytes?.let { decodePaperImage(it) }
     }
 
+    /** A small preview of a vault picture for the editors: decoded at about [edgePx], never at full size. */
+    suspend fun readStudyThumb(ref: String, edgePx: Int): Bitmap? = withContext(Dispatchers.IO) {
+        val bytes = if (ref.startsWith("data:image/")) {
+            runCatching { android.util.Base64.decode(ref.substringAfter("base64,"), android.util.Base64.DEFAULT) }.getOrNull()
+        } else {
+            runCatching { graph.vault.read(ref) }.getOrNull()
+        } ?: return@withContext null
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= edgePx.coerceAtLeast(32)) sample *= 2
+        runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) }.getOrNull()
+    }
+
+    /**
+     * A picture for a picture plate or a key's comparison image: shrunk like the note's other study pictures and stored
+     * as a file in the vault (`.fanotes/worksheets/`, the same place the desktop uses). [onDone] gets the vault path (null on
+     * failure) and a name taken from the file.
+     */
+    fun importStudyPlateImage(uri: Uri, onDone: (String?, String) -> Unit) {
+        val resolver = getApplication<Application>().contentResolver
+        val name = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.').orEmpty().take(120)
+        viewModelScope.launch {
+            var tooLarge = false
+            val path = withContext(Dispatchers.IO) {
+                try {
+                    val bytes = readUriCapped(uri, STUDY_IMAGE_INPUT_MAX_BYTES) ?: return@withContext null
+                    val payload = StudyImageImport.encode(bytes, resolver.getType(uri).orEmpty()) ?: return@withContext null
+                    val png = payload.dataUrl.startsWith("data:image/png")
+                    val raw = android.util.Base64.decode(payload.dataUrl.substringAfter("base64,"), android.util.Base64.DEFAULT)
+                    val target = ".fanotes/worksheets/${java.util.UUID.randomUUID()}.${if (png) "png" else "jpg"}"
+                    graph.vault.write(target, raw)
+                    target
+                } catch (_: StudyImageTooLarge) {
+                    tooLarge = true
+                    null
+                } catch (_: OutOfMemoryError) {
+                    tooLarge = true
+                    null
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (path == null) message.value = if (tooLarge) "Das Bild ist zu groß." else "Das Bild konnte nicht gelesen werden. Wähle eine andere Bilddatei."
+            onDone(path, name)
+        }
+    }
+
+    // -- deck-wide flashcards ---------------------------------------------------------------
+
+    data class DeckState(val loading: Boolean = false, val loaded: Boolean = false, val cards: List<ch.fasrv.fanotes.study.DeckCard> = emptyList())
+
+    val deck = MutableStateFlow(DeckState())
+    private val deckSources = HashMap<String, Pair<Long, String>>()
+
+    /** Scans the vault's Markdown notes for cards (only notes that can hold cards are kept in memory) and builds the queue. */
+    fun loadDeck() {
+        if (deck.value.loading) return
+        deck.value = deck.value.copy(loading = true)
+        viewModelScope.launch {
+            val today = java.time.LocalDate.now().toString()
+            val cards = withContext(Dispatchers.IO) {
+                val seen = HashSet<String>()
+                val notes = ArrayList<Pair<String, String>>()
+                for (entry in runCatching { graph.vault.walkFiles() }.getOrDefault(emptyList())) {
+                    if (entry.directory || entry.path.startsWith(".") || entry.path.contains("/.")) continue
+                    if (!(entry.path.endsWith(".md") || entry.path.endsWith(".markdown")) || entry.size > 2_000_000L) continue
+                    seen += entry.path
+                    val known = deckSources[entry.path]
+                    val text = if (known != null && known.first == entry.mtimeMs) known.second
+                    else (runCatching { graph.vault.read(entry.path)?.decodeToString() }.getOrNull().orEmpty()).also {
+                        deckSources[entry.path] = entry.mtimeMs to if (ch.fasrv.fanotes.study.noteMayHaveCards(it)) it else ""
+                    }
+                    if (text.isNotEmpty()) notes += entry.path to text
+                }
+                deckSources.keys.retainAll(seen)
+                ch.fasrv.fanotes.study.deckCardsOf(notes, today)
+            }
+            deck.value = DeckState(loading = false, loaded = true, cards = cards)
+        }
+    }
+
+    /** Grades a card of any note. The open note is changed in the editor, every other one is saved like a normal edit. */
+    fun reviewDeckCard(card: ch.fasrv.fanotes.study.DeckCard, grade: String) {
+        val today = java.time.LocalDate.now().toString()
+        if (card.path == open.value?.path) {
+            reviewFlashcard(card.card.id, grade)
+            replaceDeckNote(card.path, markdown.value, today)
+            return
+        }
+        viewModelScope.launch {
+            val next = withContext(Dispatchers.IO) {
+                runCatching {
+                    val note = graph.store.readNote(card.path)
+                    val updated = ch.fasrv.fanotes.desk.applyReview(note.markdown, card.card.id, grade, today)
+                    graph.store.save(note, note.document, updated)
+                    updated
+                }.getOrNull()
+            }
+            if (next == null) message.value = "Die Karte konnte nicht gespeichert werden."
+            else {
+                deckSources.remove(card.path)
+                replaceDeckNote(card.path, next, today)
+            }
+        }
+    }
+
+    private fun replaceDeckNote(path: String, markdown: String, today: String) {
+        val fresh = ch.fasrv.fanotes.study.deckCardsOf(listOf(path to markdown), today)
+        deck.value = deck.value.copy(cards = deck.value.cards.filter { it.path != path } + fresh)
+    }
+
+    /** Preselected actions for the AI panel, e.g. "Lernfragen erstellen" from the flashcard screen; read once. */
+    var aiPreset: Set<String>? = null
+
+    fun openAiFor(vararg actions: String) {
+        aiPreset = actions.toSet()
+        openAi()
+    }
+
     fun loadVaultMeta() {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
@@ -5232,7 +5426,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             penOpen = !showText.value,
             bookOpen = bookOpen.value,
             splitPath = splitPath.value,
-            splitRows = deskSettings.value["split-orientation"] == "rows",
+            splitRows = effectiveSplitRows(),
             focus = deskSettings.value["focus"] == "on",
             sidebar = sidebarOpen.value,
             inspector = inspectorOpen.value,
@@ -5282,6 +5476,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             "study-marks" -> openStudyPanel("study-marks")
             "study-sort" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.SORT)
             "study-term" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.TERM)
+            "study-key" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.KEY)
+            "study-map" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.MAP)
+            "study-plate" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.PLATE)
+            in ch.fasrv.fanotes.study.crypto.CRYPTO_COMMANDS.keys ->
+                insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.CRYPTO, ch.fasrv.fanotes.study.crypto.CRYPTO_COMMANDS[id])
             "homework" -> showDestination("tasks")
             "calendar" -> showDestination("calendar")
             "daily" -> openDaily()

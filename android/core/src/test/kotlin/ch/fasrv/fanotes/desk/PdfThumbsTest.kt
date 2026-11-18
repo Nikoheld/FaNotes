@@ -16,4 +16,12 @@ class PdfThumbsTest {
         assertEquals(2, pdfPageAt(1500.0, frames))
         assertEquals(2, pdfPageAt(1008.0, frames))
     }
+
+    @Test
+    fun theFirstPagesAndTheLastPagePublishAtOnceTheRestInFours() {
+        val due = (1..11).filter { pdfBackdropPublishDue(it, 11) }
+        assertEquals(listOf(1, 2, 4, 8, 11), due)
+        assertEquals(listOf(1), (1..1).filter { pdfBackdropPublishDue(it, 1) })
+        assertEquals(false, pdfBackdropPublishDue(0, 0))
+    }
 }

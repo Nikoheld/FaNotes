@@ -10,7 +10,9 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
@@ -23,6 +25,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -261,6 +268,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // targetSdk 36 enforces edge-to-edge; draw behind the bars and inset the Compose root instead.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
+        )
         paintWindowChrome()
         if (Build.VERSION.SDK_INT >= 30) {
             val best = display?.supportedModes?.maxByOrNull { it.refreshRate }
@@ -310,6 +322,8 @@ class MainActivity : ComponentActivity() {
                 desk["ui-font"].orEmpty(),
                 ch.fasrv.fanotes.desk.parseCustomChrome(css),
             ) {
+                val touchWidth = LocalConfiguration.current.screenWidthDp
+                CompositionLocalProvider(LocalTouch provides ch.fasrv.fanotes.desk.TouchMetrics(ch.fasrv.fanotes.desk.touchLarge(desk["touch-large"], touchWidth))) {
                 FaNotesScreen(
                     model = model,
                     onOpenVault = { openTree.launch(null) },
@@ -360,6 +374,7 @@ class MainActivity : ComponentActivity() {
                         onDismiss = { sheetDialog = false },
                     )
                 }
+                }
             }
         }
     }
@@ -407,8 +422,6 @@ class MainActivity : ComponentActivity() {
         val night = resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
         val systemDark = night == android.content.res.Configuration.UI_MODE_NIGHT_YES
         val chrome = ch.fasrv.fanotes.desk.windowChrome(model.deskSettings.value["theme"], systemDark)
-        window.statusBarColor = android.graphics.Color.parseColor(chrome.statusBar)
-        window.navigationBarColor = android.graphics.Color.parseColor(chrome.navigationBar)
         window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor(chrome.window)))
         androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
             isAppearanceLightStatusBars = !chrome.dark
@@ -485,8 +498,6 @@ fun FaNotesTheme(
     val bars = ch.fasrv.fanotes.desk.windowChrome(themeName, androidx.compose.foundation.isSystemInDarkTheme())
     androidx.compose.runtime.SideEffect {
         val window = view.context.findActivity()?.window ?: return@SideEffect
-        window.statusBarColor = android.graphics.Color.parseColor(bars.statusBar)
-        window.navigationBarColor = android.graphics.Color.parseColor(bars.navigationBar)
         window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor(bars.window)))
         androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
             isAppearanceLightStatusBars = !bars.dark
@@ -603,7 +614,15 @@ fun FaNotesScreen(
     val undoTrash by model.undoTrash.collectAsStateWithLifecycle()
     val trashOpen by model.trashOpen.collectAsStateWithLifecycle()
     val trashItems by model.trashItems.collectAsStateWithLifecycle()
-    val wide = LocalConfiguration.current.screenWidthDp >= 840
+    val windowConfig = LocalConfiguration.current
+    val widthClass = ch.fasrv.fanotes.desk.widthClass(windowConfig.screenWidthDp)
+    val wide = widthClass == ch.fasrv.fanotes.desk.WidthClass.EXPANDED
+    val touch = LocalTouch.current
+    val toggleSidebar: () -> Unit = {
+        if (wide) model.setSidebarOpen(!sidebarOpen) else model.setDrawerOpen(!showList)
+    }
+    var sidebarLive by remember { mutableStateOf<Int?>(null) }
+    var panelLive by remember { mutableStateOf<Int?>(null) }
     val signedIn = sync.account != null
     val syncText = if (syncPending && sync.status != SyncStatus.SYNCING) "Startet…" else syncDetail(sync)
     LaunchedEffect(sync.status) {
@@ -864,7 +883,9 @@ fun FaNotesScreen(
                 MaterialTheme.colorScheme.background,
                 MaterialTheme.colorScheme.primary,
                 MaterialTheme.colorScheme.secondary,
-            ),
+            )
+            // Edge-to-edge: keep the chrome clear of system bars, cutouts and the keyboard.
+            .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
         if (!focus) {
             DeskRibbon(
@@ -936,21 +957,35 @@ fun FaNotesScreen(
                 onPen = { model.togglePen(); model.showDestination("notes") },
             )
         }
-        val panels = ch.fasrv.fanotes.desk.noteWorkspacePanels(
+        val panels = ch.fasrv.fanotes.desk.adaptivePanels(
+            width = widthClass,
             focus = focus,
-            wide = wide,
-            showList = showList,
+            notes = ch.fasrv.fanotes.desk.workspaceKeepsNoteChrome(destination),
             sidebarOpen = sidebarOpen,
+            drawerOpen = showList,
             inspectorOpen = inspectorOpen,
             outlineEnabled = desk["outline"] != "off",
-            notes = ch.fasrv.fanotes.desk.workspaceKeepsNoteChrome(destination),
         )
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-        Row(Modifier.fillMaxSize()) {
-            if (panels.sidebar) {
+        val sidebarSavedDp = chrome.sidebarDp ?: ch.fasrv.fanotes.desk.sidebarWidthDp(desk["sidebar-width"])
+        val sidebarDp = sidebarLive ?: sidebarSavedDp
+        val panelSavedDp = chrome.panelDp ?: ch.fasrv.fanotes.desk.rightPanelWidthDp(desk["panel-width"])
+        val panelDp = panelLive ?: panelSavedDp
+        val pinnedSidebar = panels.sidebarMode == ch.fasrv.fanotes.desk.SidebarMode.PINNED && panels.sidebarVisible
+        val drawerShown = panels.sidebarMode == ch.fasrv.fanotes.desk.SidebarMode.DRAWER && panels.sidebarVisible
+        // The split follows the room the note area really has unless the user chose a direction.
+        val splitRowsNow = ch.fasrv.fanotes.desk.splitRowsFor(
+            desk["split-orientation"],
+            windowConfig.screenWidthDp - (if (pinnedSidebar) sidebarDp else 0) - (if (panels.inspectorInline) panelDp else 0),
+            windowConfig.screenHeightDp - 150,
+        )
+        LaunchedEffect(splitRowsNow) { model.splitRowsAuto.value = splitRowsNow }
+        androidx.activity.compose.BackHandler(enabled = drawerShown || panels.inspectorOverlay) {
+            if (drawerShown) model.setDrawerOpen(false) else model.toggleInspector()
+        }
+        val sidebarPane: @Composable (Modifier) -> Unit = { paneModifier ->
                 CompositionLocalProvider(LocalNewPaths provides ch.fasrv.fanotes.vault.withParentFolders(newPaths)) {
                 VaultPane(
-                    modifier = Modifier.width((chrome.sidebarDp ?: ch.fasrv.fanotes.desk.sidebarWidthDp(desk["sidebar-width"])).dp).fillMaxHeight(),
+                    modifier = paneModifier,
                     tree = filterVaultByTag(tree, tagFilter, tagIndex),
                     tags = collectVaultTags(tagIndex.values.map { noteTags -> noteTags.joinToString(" ") { "#$it" } }),
                     tagFilter = tagFilter,
@@ -1003,11 +1038,30 @@ fun FaNotesScreen(
                     radiusDp = chrome.radiusDp ?: 10,
                     conflicts = sync.conflicts,
                     onResolve = { conflict, choice -> model.resolveConflict(conflict, choice) },
-                    onCollapse = { model.setSidebarOpen(false) },
+                    onCollapse = { if (wide) model.setSidebarOpen(false) else model.setDrawerOpen(false) },
                 )
                 }
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Row(Modifier.fillMaxSize()) {
+            if (pinnedSidebar) {
+                sidebarPane(Modifier.width(sidebarDp.dp).fillMaxHeight())
+                if (chrome.sidebarDp == null) {
+                    PanelResizeHandle(
+                        startDp = sidebarDp,
+                        growsRight = true,
+                        description = "Seitenleiste verbreitern",
+                        hitDp = ch.fasrv.fanotes.desk.panelHandleHitDp(touch.large),
+                        onResize = { sidebarLive = ch.fasrv.fanotes.desk.clampSidebarDp(it) },
+                        onCommit = {
+                            sidebarLive?.let { model.updateDesk("sidebar-width", it.toString()) }
+                            sidebarLive = null
+                        },
+                        modifier = Modifier.zIndex(1f),
+                    )
+                }
             }
-            if (focus || wide || !showList || destination != "notes") {
+            if (panels.noteVisible) {
                 if (destination != "notes" && destination != "search") {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         when (destination) {
@@ -1036,7 +1090,7 @@ fun FaNotesScreen(
                     if (showBook && bookPlacement == "links") {
                         BookPane(model, Modifier.width(280.dp).fillMaxHeight(), openBook)
                     }
-                    val splitRows = split != null && desk["split-orientation"] == "rows"
+                    val splitRows = split != null && splitRowsNow
                     if (showBook && (bookPlacement == "oben" || bookPlacement == "unten")) {
                         Column(Modifier.weight(1f).fillMaxHeight()) {
                             if (bookPlacement == "oben") BookPane(model, Modifier.height(220.dp).fillMaxWidth(), openBook)
@@ -1048,9 +1102,9 @@ fun FaNotesScreen(
                         ) {
                                 NotePage(
                                     model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
-                                    syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
+                                    syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, toggleSidebar,
                                     editWorksheetBox, editingBox, { editingBox = null }, { mathOpen = true }, it.clipToBounds(),
-                                    showRelations = !panels.inspector,
+                                    showRelations = !(panels.inspectorInline || panels.inspectorOverlay),
                                     onExportPdf = onExportPdf,
                                     onImportSheet = onImportSheet,
                                     onImportPdf = onImportPdf,
@@ -1071,9 +1125,9 @@ fun FaNotesScreen(
                         ) {
                             NotePage(
                                 model, tool, style, finger, showText, markdown, backdrop, token, open?.path, syncText,
-                                syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
+                                syncPending || sync.status == SyncStatus.SYNCING, { requestSync() }, toggleSidebar,
                                 editWorksheetBox, editingBox, { editingBox = null }, { mathOpen = true }, it.clipToBounds(),
-                                showRelations = !panels.inspector,
+                                showRelations = !(panels.inspectorInline || panels.inspectorOverlay),
                                 onExportPdf = onExportPdf,
                                 onImportSheet = onImportSheet,
                                 onImportPdf = onImportPdf,
@@ -1088,10 +1142,67 @@ fun FaNotesScreen(
                         BookPane(model, Modifier.width(280.dp).fillMaxHeight(), openBook)
                     }
                 }
-                if (panels.inspector) {
-                    Box(Modifier.width((chrome.panelDp ?: ch.fasrv.fanotes.desk.rightPanelWidthDp(desk["panel-width"])).dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
+                if (panels.inspectorInline) {
+                    if (chrome.panelDp == null) {
+                        PanelResizeHandle(
+                            startDp = panelDp,
+                            growsRight = false,
+                            description = "Informationsleiste verbreitern",
+                            hitDp = ch.fasrv.fanotes.desk.panelHandleHitDp(touch.large),
+                            onResize = { panelLive = ch.fasrv.fanotes.desk.clampPanelDp(it) },
+                            onCommit = {
+                                panelLive?.let { model.updateDesk("panel-width", it.toString()) }
+                                panelLive = null
+                            },
+                            modifier = Modifier.zIndex(1f),
+                        )
+                    }
+                    Box(Modifier.width(panelDp.dp).fillMaxHeight()) { Inspector(model) { model.openPath(it) } }
                 }
             }
+        }
+        val calmDrawer = ch.fasrv.fanotes.desk.reduceMotion(desk["reduce-motion"])
+        val drawerScrim = remember { MutableInteractionSource() }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = drawerShown || panels.inspectorOverlay,
+            modifier = Modifier.fillMaxSize(),
+            enter = if (calmDrawer) androidx.compose.animation.EnterTransition.None else androidx.compose.animation.fadeIn(),
+            exit = if (calmDrawer) androidx.compose.animation.ExitTransition.None else androidx.compose.animation.fadeOut(),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.32f))
+                    .clickable(interactionSource = drawerScrim, indication = null) {
+                        if (drawerShown) model.setDrawerOpen(false) else model.toggleInspector()
+                    },
+            )
+        }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = drawerShown,
+            modifier = Modifier.align(Alignment.CenterStart),
+            enter = if (calmDrawer) androidx.compose.animation.EnterTransition.None else androidx.compose.animation.slideInHorizontally { -it },
+            exit = if (calmDrawer) androidx.compose.animation.ExitTransition.None else androidx.compose.animation.slideOutHorizontally { -it },
+        ) {
+            sidebarPane(
+                Modifier
+                    .width(ch.fasrv.fanotes.desk.drawerWidthDp(windowConfig.screenWidthDp, sidebarDp).dp)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.surface),
+            )
+        }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = panels.inspectorOverlay,
+            modifier = Modifier.align(Alignment.CenterEnd),
+            enter = if (calmDrawer) androidx.compose.animation.EnterTransition.None else androidx.compose.animation.slideInHorizontally { it },
+            exit = if (calmDrawer) androidx.compose.animation.ExitTransition.None else androidx.compose.animation.slideOutHorizontally { it },
+        ) {
+            Box(
+                Modifier
+                    .width(ch.fasrv.fanotes.desk.drawerWidthDp(windowConfig.screenWidthDp, panelDp).dp)
+                    .fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.surface),
+            ) { Inspector(model) { model.openPath(it) } }
         }
         if (destination == "search") {
             SearchScreen(
@@ -1150,7 +1261,7 @@ fun FaNotesScreen(
                 model.sidebarOpen.value = true
             },
             sidebarOpen = if (wide) sidebarOpen else showList,
-            onToggleSidebar = { model.setSidebarOpen(!(if (wide) sidebarOpen else showList)) },
+            onToggleSidebar = toggleSidebar,
             notice = null,
             onDismissNotice = { model.message.value = null },
             mode = ch.fasrv.fanotes.desk.statusModeLabel(
@@ -1177,7 +1288,8 @@ fun FaNotesScreen(
                 Modifier
                     .fillMaxSize()
                     .background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM))
-                    .clickable(interactionSource = scrim, indication = null, onClick = dismissPalette),
+                    .clickable(interactionSource = scrim, indication = null, onClick = dismissPalette)
+                    .imePadding(),
                 contentAlignment = Alignment.TopCenter,
             ) {
             Box(
@@ -1196,7 +1308,7 @@ fun FaNotesScreen(
                 onOpenNote = { model.openPath(it); model.showDestination("notes") },
                 onOpenNoteInSplit = { model.openInSplit(it); model.showDestination("notes") },
                 splitOpen = split != null,
-                splitRows = desk["split-orientation"] == "rows",
+                splitRows = model.effectiveSplitRows(),
                 focus = desk["focus"] == "on",
                 dailyFolder = desk["daily-folder"].orEmpty(),
                 penOpen = !showText,
@@ -1494,18 +1606,24 @@ private fun SidebarIconButton(label: String, onClick: () -> Unit, icon: @Composa
     val hot = hovered || pressed
     Box(
         Modifier
-            .size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_DP.dp)
-            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_RADIUS_DP.dp))
-            .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+            .size(LocalTouch.current.sidebarActionDp.dp)
             .hoverable(interaction)
             .clickable(interactionSource = interaction, indication = null, onClickLabel = label, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
+      Box(
+        Modifier
+            .size(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_DP.dp)
+            .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_RADIUS_DP.dp))
+            .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent),
+        contentAlignment = Alignment.Center,
+      ) {
         androidx.compose.runtime.CompositionLocalProvider(
             androidx.compose.material3.LocalContentColor provides if (hot) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
         ) {
             icon()
         }
+      }
     }
 }
 
@@ -1951,7 +2069,7 @@ private fun TreeMenuItem(label: String, danger: Boolean = false, onClick: () -> 
     Row(
         Modifier
             .fillMaxWidth()
-            .height(ch.fasrv.fanotes.desk.TREE_MENU_ROW_DP.dp)
+            .height(LocalTouch.current.menuRowDp.dp)
             .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.TREE_MENU_ROW_RADIUS_DP.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp),
@@ -2031,7 +2149,7 @@ private fun NoteRow(
         Modifier
             .fillMaxWidth()
             .padding(start = (depth * ch.fasrv.fanotes.desk.TREE_DEPTH_DP).dp)
-            .height(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact, rowHeightDp).dp)
+            .height(LocalTouch.current.treeRowHeightDp(ch.fasrv.fanotes.desk.chromeRowHeightDp(compact, rowHeightDp)).dp)
             .alpha(if (dragging) ch.fasrv.fanotes.desk.TREE_DRAG_ALPHA else 1f)
             .hoverable(rowInteraction)
             .border(
@@ -2640,8 +2758,7 @@ private fun SplitDivider(
     val boxState = androidx.compose.runtime.rememberUpdatedState(box)
     Box(
         Modifier
-            .then(if (rows) Modifier.fillMaxWidth().height(8.dp) else Modifier.fillMaxHeight().width(8.dp))
-            .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+            .then(if (rows) Modifier.fillMaxWidth().height(LocalTouch.current.dividerLayoutDp.dp) else Modifier.fillMaxHeight().width(LocalTouch.current.dividerLayoutDp.dp))
             .semantics { contentDescription = "Teilung anpassen" }
             .focusable()
             .onPreviewKeyEvent { event ->
@@ -2683,9 +2800,16 @@ private fun SplitDivider(
     ) {
         Box(
             Modifier
-                .then(if (rows) Modifier.width(28.dp).height(3.dp) else Modifier.width(3.dp).height(28.dp))
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)),
-        )
+                .then(if (rows) Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.SPLIT_DIVIDER_DP.dp) else Modifier.fillMaxHeight().width(ch.fasrv.fanotes.desk.SPLIT_DIVIDER_DP.dp))
+                .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .then(if (rows) Modifier.width(28.dp).height(3.dp) else Modifier.width(3.dp).height(28.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)),
+            )
+        }
     }
 }
 
@@ -3049,6 +3173,7 @@ private fun NotePage(
                                 "tags" -> "Tag hinzufügen"
                                 "search" -> "Im Text suchen …"
                                 "more" -> "Mehr"
+                                "study-insert" -> "Lernblock einfügen"
                                 else -> "Werkzeuge"
                             },
                         ),
@@ -3064,6 +3189,7 @@ private fun NotePage(
                     "pdf-thumbs" -> PdfThumbStrip(model)
                     "pdf-password" -> PdfPasswordPrompt(model)
                     "more" -> EditorMoreMenu(model, noteKind, backdrop, showRelations, onExportPdf, onDownload, onImportSheet)
+                    "study-insert" -> StudyInsertMenu(model)
                     else -> Unit
                 }
                 if (noteKind == NoteKind.PDF && editorMenu == "pdf-search") PdfQuoteMarks(model)
@@ -3630,7 +3756,7 @@ private fun SyncDialog(model: FaNotesViewModel, onDismiss: () -> Unit) {
         val shape = RoundedCornerShape(12.dp)
         val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
         Box(
-            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = onDismiss),
+            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = onDismiss).imePadding(),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -3912,7 +4038,7 @@ private fun TrashDialog(
         val shadow = ch.fasrv.fanotes.desk.calEditorShadow(MaterialTheme.colorScheme.background.luminance() < 0.5f)
         val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
         Box(
-            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = onDismiss),
+            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = onDismiss).imePadding(),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -4002,7 +4128,7 @@ private fun PromptCard(
         val shadow = ch.fasrv.fanotes.desk.calEditorShadow(MaterialTheme.colorScheme.background.luminance() < 0.5f)
         val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
         Box(
-            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = onDismiss),
+            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = onDismiss).imePadding(),
             contentAlignment = Alignment.Center,
         ) {
             Column(

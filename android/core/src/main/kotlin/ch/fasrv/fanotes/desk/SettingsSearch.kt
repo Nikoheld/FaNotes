@@ -49,6 +49,7 @@ val SETTINGS_SEARCH_ITEMS: List<SettingsSearchItem> = listOf(
     SettingsSearchItem("Automatische Updates", "Updates", "updates", "settings-updates", "download installieren starten prüfen version release"),
     SettingsSearchItem("Update-Kanal", "Updates", "updates", "settings-updates", "stable beta nightly kanal vorab version apk"),
     SettingsSearchItem("Bewegung reduzieren", "Bedienung", "accessibility", "settings-comfort", "animation transition barrierefrei fokus bewegung"),
+    SettingsSearchItem("Touch-Bedienung gross", "Bedienung", "accessibility", "settings-comfort", "touch finger tippfläche gross tablet bedienung"),
     SettingsSearchItem("Seitenleisten-Breite", "Bedienung", "accessibility", "settings-comfort", "sidebar informationsleiste panel breite layout"),
     SettingsSearchItem("Statistik", "Statistik", "statistics", "settings-stat-activity", "statistik aktivität kalender heatmap serie streak wörter notizen größe fächer lernzeit hausaufgaben karteikarten sync"),
     SettingsSearchItem("Diagnose & Verbesserung", "Statistik", "statistics", "settings-diagnostics", "diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz"),

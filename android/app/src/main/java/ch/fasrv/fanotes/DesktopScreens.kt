@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -289,7 +290,7 @@ private fun StatusLabel(
 ) {
     Box(
         modifier
-            .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
+            .height(LocalTouch.current.statusChipDp.dp)
             .then(if (maxWidthDp != null) Modifier.widthIn(max = maxWidthDp.dp) else Modifier)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.CenterStart,
@@ -323,7 +324,7 @@ fun DeskRibbon(
     LaunchedEffect(destination, aiOpen) { if (aiOpen || destination in toolIds) toolsOpen = true }
     val mark = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.brandMarkColor(LocalDeskThemeId.current, androidx.compose.foundation.isSystemInDarkTheme())))
     Row(
-        Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.RIBBON_HEIGHT_DP.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp + tabletSideInset()),
+        Modifier.fillMaxWidth().height(LocalTouch.current.ribbonHeightDp.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp + tabletSideInset()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("F", modifier = Modifier.padding(end = 8.dp), fontWeight = FontWeight.SemiBold, color = mark)
@@ -379,23 +380,31 @@ private fun RibbonButton(
     val shown = ch.fasrv.fanotes.desk.ChromeText.ui(label)
     val clickLabel = ch.fasrv.fanotes.desk.ChromeText.ui(onClickLabel)
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.RIBBON_BUTTON_RADIUS_DP.dp)
+    val touch = LocalTouch.current
+    // The hit box follows the touch layer; the drawn button keeps the compact desktop size.
     Box(
         Modifier
             .padding(horizontal = 1.dp)
-            .height(ch.fasrv.fanotes.desk.RIBBON_BUTTON_DP.dp)
-            .clip(shape)
-            .background(if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-            .clickable(onClickLabel = clickLabel, onClick = onClick)
-            .padding(horizontal = ch.fasrv.fanotes.desk.RIBBON_BUTTON_PAD_DP.dp),
+            .height(touch.ribbonButtonDp.dp)
+            .clickable(onClickLabel = clickLabel, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            shown,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
-        )
+        Box(
+            Modifier
+                .height(touch.ribbonButtonVisualDp.dp)
+                .clip(shape)
+                .background(if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                .padding(horizontal = ch.fasrv.fanotes.desk.RIBBON_BUTTON_PAD_DP.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                shown,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+            )
+        }
     }
 }
 
@@ -472,7 +481,7 @@ private fun StatusChip(
     val ink = if (ch.fasrv.fanotes.desk.statusChipInk(hot, "inherit") == "text") MaterialTheme.colorScheme.onSurface else idle
     Row(
         Modifier
-            .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
+            .height(LocalTouch.current.statusChipDp.dp)
             .then(if (maxWidthDp != null) Modifier.widthIn(max = maxWidthDp.dp) else Modifier)
             .clip(RoundedCornerShape(radiusDp.dp))
             .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
@@ -540,7 +549,7 @@ fun DeskStatusBar(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(ch.fasrv.fanotes.desk.STATUS_BAR_DP.dp)
+                .height(LocalTouch.current.statusBarDp.dp)
                 .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_PAD_DP.dp + tabletSideInset()),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -738,7 +747,7 @@ private fun NoteHistoryButton(back: Boolean, enabled: Boolean, onClick: () -> Un
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.noteNavRuleAlpha(back))
     Row(
         Modifier
-            .height(ch.fasrv.fanotes.desk.NOTE_NAV_HEIGHT_DP.dp)
+            .height(LocalTouch.current.navHeightDp.dp)
             .alpha(if (enabled) 1f else ch.fasrv.fanotes.desk.NOTE_NAV_DISABLED_ALPHA)
             .background(
                 if (hot) MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.NOTE_NAV_HOVER_ALPHA) else Color.Transparent,
@@ -846,7 +855,7 @@ private fun NoteTabChip(
         Box(
             Modifier
                 .padding(horizontal = box.marginXDp.dp, vertical = box.marginYDp.dp)
-                .height(box.heightDp.dp)
+                .height(maxOf(box.heightDp, LocalTouch.current.tabMinHeightDp).dp)
                 .then(
                     if (box.basisDp > 0) {
                         Modifier.widthIn(min = box.minWidthDp.dp, max = box.maxWidthDp.dp).width(box.basisDp.dp)
@@ -961,7 +970,7 @@ private fun NoteTabChip(
                 val showClose = ch.fasrv.fanotes.desk.noteTabShowsClose(selected, pinned, hot || closeHovered || closePressed)
                 Box(
                     Modifier
-                        .size(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_DP.dp)
+                        .size(LocalTouch.current.tabCloseHitDp.dp)
                         .alpha(if (showClose) 1f else 0f)
                         .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_RADIUS_DP.dp))
                         .background(
@@ -4320,46 +4329,103 @@ fun OverviewScreen(
     }
 }
 
+/** One card of the review queue: the note it comes from is empty for the open note's own cards. */
+private data class QueuedCard(val path: String?, val card: ch.fasrv.fanotes.desk.FlashCard) {
+    val key get() = "${path.orEmpty()}\u0000${card.id}"
+}
+
+/**
+ * Flashcards: the open note's cards or the whole deck (every note with `## Lernfragen`, definition cards and picture
+ * sheets), due cards first. The grade buttons are large so a finger or a pen hits them; swiping still works.
+ */
 @Composable
 fun CardsScreen(model: FaNotesViewModel) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
+    val deck by model.deck.collectAsStateWithLifecycle()
+    val settings by model.deskSettings.collectAsStateWithLifecycle()
+    val openNote by model.open.collectAsStateWithLifecycle()
     val today = LocalDate.now().toString()
-    val cards = dueCards(model.cardsToday(), today).ifEmpty { model.cardsToday() }
-    var index by remember(markdown) { mutableStateOf(0) }
-    var showBack by remember(markdown, index) { mutableStateOf(false) }
-    val card = cards.getOrNull(index)
+    var wholeDeck by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
+    LaunchedEffect(wholeDeck) { if (wholeDeck) model.loadDeck() }
+    // Cards sent to the end of the queue by "Nochmal" in this session, so they do not come straight back.
+    val again = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val queue = remember(markdown, deck, wholeDeck, again.size) {
+        val all = if (wholeDeck) {
+            ch.fasrv.fanotes.study.deckDue(deck.cards, today).map { QueuedCard(it.path, it.card) }
+        } else {
+            val cards = model.cardsToday()
+            dueCards(cards, today).ifEmpty { cards }.map { QueuedCard(null, it) }
+        }
+        val (late, first) = all.partition { it.key in again }
+        first + late
+    }
+    var showBack by remember(queue.firstOrNull()?.key) { mutableStateOf(false) }
+    val current = queue.firstOrNull()
+    val provider = settings["ai-provider"].orEmpty().ifBlank { "lmstudio" }
+    val aiReady = settings["ai-$provider-model"].orEmpty().isNotBlank()
+    fun applyGrade(grade: String) {
+        val item = current ?: return
+        if (grade == "again") again += item.key else again.remove(item.key)
+        if (item.path == null) model.reviewFlashcard(item.card.id, grade)
+        else model.reviewDeckCard(ch.fasrv.fanotes.study.DeckCard(item.path, item.card), grade)
+        showBack = false
+    }
     Column(
-        Modifier.fillMaxSize().padding(24.dp).pointerInput(card?.id, showBack) {
+        Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp).pointerInput(current?.key, showBack) {
             detectDeskSwipe { direction ->
-                val current = card ?: return@detectDeskSwipe
+                if (current == null) return@detectDeskSwipe
                 when (ch.fasrv.fanotes.desk.cardSwipeAction(showBack, direction)) {
                     "reveal" -> showBack = true
-                    else -> {
-                        val grade = ch.fasrv.fanotes.desk.cardSwipeAction(true, direction)
-                        model.reviewFlashcard(current.id, grade)
-                        showBack = false
-                    }
+                    else -> applyGrade(ch.fasrv.fanotes.desk.cardSwipeAction(true, direction))
                 }
             }
         },
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Karteikarten", style = MaterialTheme.typography.titleLarge)
-        Text("Fragen stehen unter ## Lernfragen, der Plan in fanotes-cards-v1.", fontSize = 13.sp)
-        if (card == null) {
-            Text("In dieser Notiz sind keine Karten fällig.")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            StudyChoice("Alle Notizen", wholeDeck, { wholeDeck = true })
+            StudyChoice("Diese Notiz", !wholeDeck, { wholeDeck = false })
+            if (aiReady && openNote != null) ActionButton("Karten erstellen") { model.openAiFor("study") }
+        }
+        val summary = if (wholeDeck) {
+            val s = ch.fasrv.fanotes.study.deckSummary(deck.cards, today)
+            when {
+                deck.loading && !deck.loaded -> "Karten werden gesucht …"
+                else -> "${queue.size} fällig · ${s.total} Karten in ${s.notes} Notizen"
+            }
+        } else "${queue.size} Karten in dieser Notiz"
+        Text(ch.fasrv.fanotes.desk.ChromeText.ui(summary), fontSize = 13.sp)
+        Text("Fragen stehen unter ## Lernfragen, der Plan in fanotes-cards-v1. Definitionskarten und Bildtafeln zählen mit.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+        if (current == null) {
+            Text(if (wholeDeck && deck.loading) "Einen Moment …" else if (wholeDeck) "Alles gelernt: In keiner Notiz ist heute eine Karte fällig." else "In dieser Notiz sind keine Karten fällig.", modifier = Modifier.padding(vertical = 24.dp))
         } else {
+            val card = current.card
             val picture by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, card.frontImage) {
                 value = card.frontImage?.let { model.readStudyBitmap(it) }?.asImageBitmap()
             }
-            Text(if (showBack) card.back.ifBlank { "Keine Antwort" } else card.front, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.clickable { showBack = !showBack }.padding(vertical = 24.dp))
-            picture?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) }
-            Row {
-                listOf("again" to "Nochmal", "hard" to "Schwer", "good" to "Gut", "easy" to "Leicht").forEach { (grade, label) ->
-                    TextButton(onClick = {
-                        model.reviewFlashcard(card.id, grade)
-                        showBack = false
-                    }) { Text(label) }
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(min = 220.dp).clickable { showBack = !showBack },
+            ) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.Center) {
+                    current.path?.let { Text(ch.fasrv.fanotes.study.deckNoteTitle(it), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)) }
+                    Text(if (showBack) card.back.ifBlank { "Keine Antwort" } else card.front, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(vertical = 12.dp))
+                    picture?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) }
+                    if (!showBack) Text("Antippen oder nach links wischen, um die Antwort zu zeigen.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                }
+            }
+            if (!showBack) {
+                androidx.compose.material3.Button(onClick = { showBack = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) { Text("Antwort zeigen", fontSize = 18.sp) }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf("again" to "Nochmal", "hard" to "Schwer", "good" to "Gut", "easy" to "Leicht").forEach { (grade, label) ->
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { applyGrade(grade) },
+                            modifier = Modifier.weight(1f).heightIn(min = 64.dp),
+                        ) { Text(label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
+                    }
                 }
             }
         }
@@ -6050,7 +6116,8 @@ fun AiScreen(model: FaNotesViewModel) {
     val models by model.aiModels.collectAsStateWithLifecycle()
     val provider = settings["ai-provider"].orEmpty().ifBlank { "lmstudio" }
     val definition = ch.fasrv.fanotes.desk.AI_PROVIDERS.firstOrNull { it.id == provider } ?: ch.fasrv.fanotes.desk.AI_PROVIDERS.first()
-    var actions by remember { mutableStateOf(setOf("spelling")) }
+    var actions by remember { mutableStateOf(model.aiPreset ?: setOf("spelling")) }
+    LaunchedEffect(Unit) { model.aiPreset = null }
     var instruction by remember { mutableStateOf("") }
     var pretty by remember { mutableStateOf(true) }
     val note by model.open.collectAsStateWithLifecycle()
@@ -7235,7 +7302,7 @@ internal fun SettingRow(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(min = ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP.dp)
+                        .heightIn(min = maxOf(ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP, LocalTouch.current.settingRowMinDp).dp)
                         .padding(
                             horizontal = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_X_DP.dp,
                             vertical = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_Y_DP.dp,
@@ -7254,7 +7321,7 @@ internal fun SettingRow(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(min = ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP.dp)
+                        .heightIn(min = maxOf(ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP, LocalTouch.current.settingRowMinDp).dp)
                         .padding(
                             horizontal = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_X_DP.dp,
                             vertical = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_Y_DP.dp,
@@ -7735,7 +7802,8 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 Modifier
                     .fillMaxSize()
                     .background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM))
-                    .clickable(interactionSource = scrim, indication = null, onClick = dismiss),
+                    .clickable(interactionSource = scrim, indication = null, onClick = dismiss)
+                    .imePadding(),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
@@ -8564,6 +8632,12 @@ private fun SettingsPage(
                         SettingRow("Bewegung reduzieren", "Deaktiviert dekorative Übergänge und Animationen.") {
                             Switch(checked = calm, onCheckedChange = { model.updateDesk("reduce-motion", if (it) "on" else "off") })
                         }
+                        SettingRow("Touch-Bedienung gross", "Grössere Tippflächen für Leiste, Tabs und Statuszeile (ab 48 dp). Standardmässig an, solange das Fenster schmaler als 840 dp ist.") {
+                            Switch(
+                                checked = LocalTouch.current.large,
+                                onCheckedChange = { model.updateDesk("touch-large", if (it) "on" else "off") },
+                            )
+                        }
                         SettingRow("Seitenleiste") {
                             SettingSlider(ch.fasrv.fanotes.desk.sidebarWidthDp(settings["sidebar-width"]).toFloat(), 210f, 430f, 10f, " px") {
                                 model.updateDesk("sidebar-width", it.toInt().toString())
@@ -8841,13 +8915,14 @@ fun PdfThumbStrip(model: FaNotesViewModel) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
         TextButton(onClick = { model.togglePdfThumbs() }) { Text(if (open) "Miniaturen ●" else "Miniaturen") }
         if (open) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            // Lazy: a page change or a scroll composes only the thumbnails on screen, not all 80.
+            androidx.compose.foundation.lazy.LazyRow(
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top,
             ) {
-                thumbs.forEachIndexed { index, bitmap ->
-                    if (bitmap.isRecycled) return@forEachIndexed
+                itemsIndexed(thumbs) { index, bitmap ->
+                    if (bitmap.isRecycled) return@itemsIndexed
                     val page = index + 1
                     val selected = page == active
                     Column(
@@ -9525,7 +9600,7 @@ fun CommandPalette(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .heightIn(min = (if (note != null) ch.fasrv.fanotes.desk.PALETTE_NOTE_DP else ch.fasrv.fanotes.desk.PALETTE_ROW_DP).dp)
+                            .heightIn(min = maxOf(if (note != null) ch.fasrv.fanotes.desk.PALETTE_NOTE_DP else ch.fasrv.fanotes.desk.PALETTE_ROW_DP, if (LocalTouch.current.large) ch.fasrv.fanotes.desk.TOUCH_MIN_DP else 0).dp)
                             .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_ROW_RADIUS_DP.dp))
                             .background(if (index == selected) MaterialTheme.colorScheme.surfaceVariant else androidx.compose.ui.graphics.Color.Transparent)
                             .clickable { openRow(index, false) }

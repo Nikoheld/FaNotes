@@ -39,3 +39,11 @@ fun pdfPageAt(centerPagePx: Double, frames: List<Pair<Double, Double>>): Int {
     }
     return nearest + 1
 }
+
+/**
+ * Whether the note PDF publishes its pages after [rendered] of [total] are drawn. The first pages show at once,
+ * so a long PDF opens without waiting for its last page; later pages arrive in batches of four to keep
+ * recompositions few.
+ */
+fun pdfBackdropPublishDue(rendered: Int, total: Int): Boolean =
+    rendered > 0 && (rendered >= total || rendered <= 2 || rendered % 4 == 0)

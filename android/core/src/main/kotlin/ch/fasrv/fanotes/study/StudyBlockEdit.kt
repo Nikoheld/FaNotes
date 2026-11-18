@@ -37,8 +37,12 @@ fun mergeJson(original: JsonValue?, updated: JsonValue): JsonValue {
 }
 
 /** The note with [ref] replaced by [updated] merged into the block's own JSON. */
-fun writeStudyBlockMerged(markdown: String, ref: StudyBlockRef, updated: JsonValue): String =
-    replaceStudyBlock(markdown, ref, mergeJson(parseJsonObjectOrNull(ref.body), updated))
+fun writeStudyBlockMerged(markdown: String, ref: StudyBlockRef, updated: JsonValue): String {
+    val original = parseJsonObjectOrNull(ref.body)
+    // Crypto answers are replaced as a whole (a removed letter of the frequency grid must not come back); only unknown fields stay.
+    val merged = if (ref.kind == StudyKind.CRYPTO && updated is JsonValue.Obj) ch.fasrv.fanotes.study.crypto.mergeCryptoJson(original, updated) else mergeJson(original, updated)
+    return replaceStudyBlock(markdown, ref, merged)
+}
 
 private fun JsonValue.Obj.longer(key: String, max: Int) = (this[key] as? JsonValue.Str)?.value?.let { it.length > max } == true
 

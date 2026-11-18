@@ -14,6 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -200,7 +201,7 @@ fun WorkRequestsDialog(model: FaNotesViewModel) {
         val card = remember { MutableInteractionSource() }
         val screen = androidx.compose.ui.platform.LocalConfiguration.current
         Box(
-            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = dismiss),
+            Modifier.fillMaxSize().background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM)).clickable(interactionSource = scrim, indication = null, onClick = dismiss).imePadding(),
             contentAlignment = Alignment.Center,
         ) {
             Column(
