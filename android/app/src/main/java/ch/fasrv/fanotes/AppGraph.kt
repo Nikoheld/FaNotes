@@ -15,6 +15,8 @@ import ch.fasrv.fanotes.vault.VaultIo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 import java.security.MessageDigest
 
@@ -27,6 +29,14 @@ class FaNotesApplication : Application() {
         graph = AppGraph(this)
         graph.handwritingLearning.attach()
         graph.installDiagnosticsHook()
+        graph.reminders.ensureChannel()
+        graph.reminders.onSystemChange()
+        graph.scope.launch {
+            // The search index and the public overview wait until the first screen is up.
+            delay(8_000)
+            graph.docIndex.refresh()
+            graph.shares.refreshPublicOverview()
+        }
         if (Build.VERSION.SDK_INT >= 26) {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(
@@ -106,7 +116,30 @@ class AppGraph(context: Context) {
     }
 
     val handwritingLearning by lazy { HandwritingLearning(context.applicationContext, this) }
-    var store: NoteStore = NoteStore(vault) { path -> handwritingLearning.changed(path) }
+
+    /** Search index, note links with the public profile, and system reminders (work package 6). */
+    val docIndex by lazy { DocIndexService(appContext, this) }
+    val shares by lazy { ShareService(appContext, this) }
+    val reminders by lazy { ReminderScheduler(appContext, this) }
+
+    private fun touchesReminderFiles(paths: Collection<String>) = paths.any {
+        it.startsWith("Kalender.") || it.startsWith("Hausaufgaben.")
+    }
+
+    /** A note was saved on this device. */
+    fun noteSaved(path: String) {
+        handwritingLearning.changed(path)
+        docIndex.changed()
+        shares.noteSaved(path)
+        if (touchesReminderFiles(listOf(path)) && reminders.settings.value.enabled) reminders.requestReplan()
+    }
+
+    /** Files arrived or went away through sync. */
+    private fun remoteApplied(written: List<String>, removed: List<String>) {
+        docIndex.changed()
+        if (touchesReminderFiles(written + removed) && reminders.settings.value.enabled) reminders.requestReplan()
+    }
+    var store: NoteStore = NoteStore(vault, ::noteSaved)
     var vaultId: String = fingerprint(defaultRoot.absolutePath)
     var initialVaultLabel: String = "Auf diesem Tablet"
     @Volatile var busyPaths: Set<String> = emptySet()
@@ -127,7 +160,7 @@ class AppGraph(context: Context) {
             }
             if (allowed) {
                 vault = SafVault(context, uri)
-                store = NoteStore(vault) { path -> handwritingLearning.changed(path) }
+                store = NoteStore(vault, ::noteSaved)
                 vaultId = fingerprint(savedUri)
                 initialVaultLabel = "Ausgewählter Ordner"
             }
@@ -144,6 +177,7 @@ class AppGraph(context: Context) {
                 onApplied = { written, removed ->
                     synchronized(remoteListeners) { remoteListeners.toList() }.forEach { it(written, removed) }
                     handwritingLearning.changed(written + removed)
+                    remoteApplied(written, removed)
                 },
             ),
         )
@@ -152,18 +186,20 @@ class AppGraph(context: Context) {
 
     fun useDirectory(root: File) {
         vault = DirectoryVault(root.toPath())
-        store = NoteStore(vault) { path -> handwritingLearning.changed(path) }
+        store = NoteStore(vault, ::noteSaved)
         vaultId = fingerprint(root.absolutePath)
         engine.attach(host())
         handwritingLearning.attach()
+        docIndex.changed()
     }
 
     fun useSaf(io: VaultIo, id: String) {
         vault = io
-        store = NoteStore(vault) { path -> handwritingLearning.changed(path) }
+        store = NoteStore(vault, ::noteSaved)
         vaultId = id
         engine.attach(host())
         handwritingLearning.attach()
+        docIndex.changed()
     }
 
     /**

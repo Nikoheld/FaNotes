@@ -21,6 +21,10 @@ private val SEARCH_LOCALE = Locale.forLanguageTag("de-CH")
 val SETTINGS_SEARCH_ITEMS: List<SettingsSearchItem> = listOf(
     SettingsSearchItem("Sync-Konto", "Sync", "sync", "settings-sync-account", "sync konto anmelden registrieren account login passwort e-mail cloud server geräte"),
     SettingsSearchItem("Angemeldete Geräte", "Sync", "sync", "settings-sync-devices", "sync geräte devices laptop tablet abmelden name"),
+    SettingsSearchItem("Sync-Konflikte", "Sync", "sync", "settings-conflicts", "konflikt konflikte kopie fassung vergleichen zusammenführen sync"),
+    SettingsSearchItem("Freigaben & Links", "Sync", "sync", "settings-shares", "teilen link freigabe freigeben share live kopie beenden"),
+    SettingsSearchItem("Öffentliches Profil", "Sync", "sync", "settings-profile", "profil benutzername name öffentlich übersicht aktivität user"),
+    SettingsSearchItem("Erinnerungen", "Bedienung", "accessibility", "settings-reminders", "erinnerung benachrichtigung alarm termin kalender hausaufgaben notification"),
     SettingsSearchItem("Farbschema & Themes", "Darstellung", "appearance", "settings-surface", "theme dunkel hell system graphit klar mitternacht wald aurora sepia farbe"),
     SettingsSearchItem("Arbeitsflächen-Design", "Darstellung", "appearance", "settings-surface", "hintergrund verlauf mesh papier clean"),
     SettingsSearchItem("Akzentfarben", "Darstellung", "appearance", "settings-accent", "farbe primär sekundär eigene accent"),
