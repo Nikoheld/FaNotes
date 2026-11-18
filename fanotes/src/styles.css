@@ -1174,6 +1174,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   white-space: nowrap;
 }
 .toolbar-context { min-width: 0; flex: 1 1 auto; display: flex; align-items: center; overflow: hidden; }
+.toolbar-context > .note-text-field-toolbar { flex: 0 0 auto; }
+.editor-toolbar:not(.is-vertical) .toolbar-context:has(> .note-text-field-toolbar) { overflow-x: auto; scrollbar-width: none; }
 .ink-toolbar-slot,
 .pdf-toolbar-slot {
   min-width: 0;
@@ -4528,6 +4530,9 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
   scrollbar-width: none;
 }
 .editor-toolbar.is-vertical .toolbar-context::-webkit-scrollbar { display: none; }
+.editor-toolbar.is-vertical .note-text-field-toolbar { flex-direction: column; flex: 0 0 auto; padding: 3px 2px; }
+.editor-toolbar.is-vertical .note-text-field-toolbar .note-text-field-sep { width: 16px; height: 1px; margin: 3px 0; }
+.editor-toolbar.is-vertical .note-text-field-toolbar .note-text-field-swatch { margin: 1px 0; }
 .editor-toolbar.is-vertical .ink-toolbar-slot,
 .editor-toolbar.is-vertical .pdf-toolbar-slot {
   flex: 1 1 auto;
