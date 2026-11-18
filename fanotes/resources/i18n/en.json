@@ -4857,5 +4857,22 @@
   "Die Handschrifterkennung hat zu lange gebraucht und wurde abgebrochen.": "Handwriting recognition took too long and was stopped.",
   "Das Handschriftmodell ist auf diesem Gerät nicht installiert.": "The handwriting model is not installed on this device.",
   "Das heruntergeladene Handschriftmodell hat die Integritätsprüfung nicht bestanden.": "The downloaded handwriting model failed the integrity check.",
-  "Das Handschriftmodell konnte nicht geladen werden.": "The handwriting model could not be downloaded."
+  "Das Handschriftmodell konnte nicht geladen werden.": "The handwriting model could not be downloaded.",
+  "Laser": "Laser",
+  "Graph": "Graph",
+  "Vor": "Forward",
+  "Farbe": "Colour",
+  "Zuletzt verwendet": "Recently used",
+  "Rechts (vertikal)": "Right (vertical)",
+  "Schnellmenü": "Quick menu",
+  "Schnellmenü mit langem Druck": "Quick menu on long press",
+  "Hex": "Hex",
+  "Zeichenfarbe": "Drawing colour",
+  "Schreibstift": "Writing pen",
+  "Zeichenstift": "Drawing pen",
+  "Ungültige Farbe": "Invalid colour",
+  "Für Stifte ohne Tasten: Die Spitze am Anfang eines Strichs still halten öffnet Farben und Werkzeuge am Stift. Mit Tasten: Schwenken-Taste + Spitze antippen oder eine Taste auf „Schnellmenü“ legen.": "For pens without buttons: hold the tip still at the start of a stroke to open colours and tools at the pen. With buttons: tap the tip while holding the pan button, or assign a button to “Quick menu”.",
+  "Legt die Werkzeugleiste des Editors oben (horizontal) oder am Rand (vertikal) ab.": "Places the editor toolbar at the top (horizontal) or at the edge (vertical).",
+  "Lasso: Handschrift frei umfahren und auswählen": "Lasso: draw around handwriting to select it",
+  "Zeichenstudio: Pinsel, Farben und Piktogramme": "Drawing studio: brushes, colours and pictograms"
 }

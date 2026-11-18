@@ -122,7 +122,8 @@ fun InkStroke.toJson(): JsonValue.Obj {
         obj.put("symbolRotation", jsonNumber(symbolRotation))
     }
     if (figureLineWidth != null) obj.put("figureLineWidth", jsonNumber(figureLineWidth))
-    if (figurePaths.isNotEmpty()) {
+    // Graph strokes keep their own `graphPaths` (in extras); figurePaths only mirrors them for drawing.
+    if (figurePaths.isNotEmpty() && !extras.fields.containsKey("graphPaths") && !extras.fields.containsKey("graphExpression")) {
         obj.put("figurePaths", JsonValue.Arr(figurePaths.map { jsonString(it) }.toMutableList()))
     }
     return obj
@@ -205,7 +206,8 @@ internal fun parseStroke(obj: JsonValue.Obj): InkStroke? {
         symbolId = obj.string("symbolId")?.takeIf { artSymbol(it) != null },
         symbolRotation = obj.double("symbolRotation")?.takeIf { it.isFinite() } ?: 0.0,
         figureLineWidth = obj.double("figureLineWidth")?.takeIf { it.isFinite() && it > 0.0 },
-        figurePaths = figurePathsOf(obj),
+        // A desktop function graph has no figurePaths; draw its graph paths the same way.
+        figurePaths = figurePathsOf(obj).ifEmpty { if (obj.fields.containsKey("graphPaths") || obj.fields.containsKey("graphExpression")) graphPathsOf(obj) else emptyList() },
         extras = extras,
     )
 }

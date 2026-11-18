@@ -1,0 +1,6 @@
+# Arbeitsblatt
+
+Text der Notiz.
+
+<!-- fanotes-famd:v1 chars=482 -->
+{"schema":"fanotes-famd-v1","updatedAt":"2026-11-17T08:30:00.000Z","ink":null,"worksheets":[],"textFields":[{"id":"tf-desk-md","page":2,"x":0.125,"y":0.4,"width":0.36,"fontSize":20,"text":"# Aufgabe\n- [ ] lesen\n- [x] **fertig**\n[Quelle](https://example.org)","color":"#2563c9","bold":true,"updatedAt":1763368200000},{"id":"tf-plain","page":1,"x":0.5,"y":0.5,"width":0.32,"fontSize":16,"text":"alt ohne Stempel"}],"textFieldTombstones":[{"id":"tf-weg","deletedAt":1763368100000}]}
