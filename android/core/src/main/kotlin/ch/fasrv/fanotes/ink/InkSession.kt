@@ -28,7 +28,8 @@ fun isInkCorridorLeap(previous: StrokePoint?, next: StrokePoint): Boolean {
     return dy > INK_JUMP_DY || hypot(next.x - previous.x, next.y - previous.y) > INK_JUMP_HYPOT
 }
 
-enum class InkTool { PEN, ERASER, SELECT, LASSO }
+/** [LASER] points without inking (desktop `laser` tool). */
+enum class InkTool { PEN, ERASER, SELECT, LASSO, LASER }
 
 data class NormalizedRect(val x: Double, val y: Double, val width: Double, val height: Double) {
     val right get() = x + width
@@ -175,7 +176,7 @@ class InkSession(document: InkDocument) {
             baseWidth = style.baseWidth,
             pressureEnabled = style.pressureEnabled,
             color = style.color,
-            purpose = "handwriting",
+            purpose = style.purpose,
             brush = style.brush,
             opacity = style.opacity ?: brushOpacity(style.brush) ?: 1.0,
             colorEffect = style.colorEffect,
@@ -215,6 +216,13 @@ class InkSession(document: InkDocument) {
         return stroke
     }
 
+    /** Adds a finished stamp (math figure, function graph) as one undo step. */
+    fun placeStamp(stroke: InkStroke, now: String): InkStroke {
+        pushUndo()
+        document = document.copy(strokes = document.strokes + stroke, updatedAt = now)
+        return stroke
+    }
+
     fun endStroke(style: StrokeStyle, now: String): InkStroke? {
         val points = liveBuffer
         liveBuffer = ArrayList()
@@ -225,7 +233,7 @@ class InkSession(document: InkDocument) {
             baseWidth = style.baseWidth,
             pressureEnabled = style.pressureEnabled,
             color = style.color,
-            purpose = "handwriting",
+            purpose = style.purpose,
             brush = style.brush,
             opacity = style.opacity ?: brushOpacity(style.brush) ?: 1.0,
             colorEffect = style.colorEffect,
@@ -478,6 +486,8 @@ data class StrokeStyle(
     val brush: String = "fineliner",
     val opacity: Double? = null,
     val colorEffect: String = "solid",
+    /** "art" for the drawing mode (Zeichnen), so recognition and search skip it like on the desktop. */
+    val purpose: String = "handwriting",
 )
 
 fun brushOpacity(brush: String?): Double? = when (brush) {

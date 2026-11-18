@@ -8296,6 +8296,21 @@ private fun SettingsPage(
                                 onCheckedChange = { model.updateDesk("words", if (it) "on" else "off") },
                             )
                         }
+                        SettingRow("Werkzeugleiste", "Legt die Werkzeugleiste des Editors oben (horizontal) oder am Rand (vertikal) ab.") {
+                            val position = ch.fasrv.fanotes.desk.toolbarPosition(settings["toolbar-position"])
+                            Column {
+                                ch.fasrv.fanotes.desk.ToolbarPosition.entries.forEach { option ->
+                                    val on = option == position
+                                    Text(
+                                        ch.fasrv.fanotes.desk.ChromeText.ui(option.label),
+                                        fontSize = 13.sp,
+                                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
+                                        modifier = Modifier.heightIn(min = 44.dp).clickable { model.updateDesk("toolbar-position", option.id) }.padding(vertical = 10.dp),
+                                    )
+                                }
+                            }
+                        }
                         SettingRow("Gliederung anzeigen", divider = false) {
                             Switch(
                                 checked = settings["outline"] != "off",
@@ -8349,6 +8364,15 @@ private fun SettingsPage(
                         }
                         SettingRow("Nur Stift", "Im Handschriftmodus schreiben nur echte Stifte. Finger, Handfläche und Maus zeichnen nicht. Zoom und Tasten bleiben nutzbar.") {
                             Switch(checked = penOnly, onCheckedChange = { model.updateDesk("pen-only", if (it) "on" else "off") })
+                        }
+                        SettingRow(
+                            "Schnellmenü mit langem Druck",
+                            "Für Stifte ohne Tasten: Die Spitze am Anfang eines Strichs still halten öffnet Farben und Werkzeuge am Stift. Mit Tasten: Schwenken-Taste + Spitze antippen oder eine Taste auf „Schnellmenü“ legen.",
+                        ) {
+                            Switch(
+                                checked = ch.fasrv.fanotes.desk.penQuickHoldEnabled(settings["pen-quick-hold"]),
+                                onCheckedChange = { model.updateDesk("pen-quick-hold", if (it) "on" else "off") },
+                            )
                         }
                         TabletButtonMap(
                             settings["tablet-buttons"],
