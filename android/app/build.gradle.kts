@@ -34,9 +34,19 @@ android {
         }
     }
 
+    // R8 shrinks and optimizes the libraries (Compose, Material icons, OkHttp, coroutines) in the release APK:
+    // a much smaller dex that loads and runs faster. App classes are kept as written (proguard-rules.pro, the
+    // same rules Kanti+ ships with). -Pfanotes.minify=false builds the release without R8, as before.
+    val minifyRelease = providers.gradleProperty("fanotes.minify").map { it != "false" }.orElse(true)
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = minifyRelease.get()
+            isShrinkResources = minifyRelease.get()
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -73,6 +83,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
+    // Installs src/main/baseline-prof.txt on sideloaded installs (the in-app updater), not only from a store.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")

@@ -2,6 +2,7 @@ package ch.fasrv.fanotes.desk
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -149,5 +150,17 @@ class BugReportTest {
         assertEquals(1, log.snapshot(1_100).size)
         log.recordPen(BugReportEvent(1_500, "pen", x = 0.5, y = 0.6), 1_500)
         assertEquals(2, log.snapshot(1_500).size)
+    }
+
+    @Test
+    fun penSampleDueMatchesWhatRecordPenKeeps() {
+        val log = BugReportLog()
+        assertTrue(log.penSampleDue(1_000))
+        log.recordPen(BugReportEvent(1_000, "pen", x = 0.1, y = 0.2), 1_000)
+        assertFalse(log.penSampleDue(1_100))
+        assertFalse(log.penSampleDue(1_399))
+        assertTrue(log.penSampleDue(1_400))
+        log.recordPen(BugReportEvent(1_400, "pen", x = 0.5, y = 0.6), 1_400)
+        assertEquals(2, log.snapshot(1_400).size)
     }
 }

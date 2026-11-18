@@ -8911,13 +8911,14 @@ fun PdfThumbStrip(model: FaNotesViewModel) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
         TextButton(onClick = { model.togglePdfThumbs() }) { Text(if (open) "Miniaturen ●" else "Miniaturen") }
         if (open) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            // Lazy: a page change or a scroll composes only the thumbnails on screen, not all 80.
+            androidx.compose.foundation.lazy.LazyRow(
+                Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Top,
             ) {
-                thumbs.forEachIndexed { index, bitmap ->
-                    if (bitmap.isRecycled) return@forEachIndexed
+                itemsIndexed(thumbs) { index, bitmap ->
+                    if (bitmap.isRecycled) return@itemsIndexed
                     val page = index + 1
                     val selected = page == active
                     Column(

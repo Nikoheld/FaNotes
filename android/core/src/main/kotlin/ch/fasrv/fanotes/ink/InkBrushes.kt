@@ -195,13 +195,43 @@ fun pencilGrainSegments(
     passIndex: Int,
     jitter: Double,
     scale: Double,
+): List<GrainSegment> = pencilGrainSegmentRange(
+    points, pageWidth, pageHeight, smoothing, baseWidth, pressureEnabled, widthFactor, textureSeed, passIndex, jitter, scale,
+    1, points.lastIndex,
+)
+
+/**
+ * Segments [first]..[last] (inclusive, 1-based: segment `i` runs from sample `i - 1` to sample `i`) of
+ * [pencilGrainSegments], with the same arithmetic, so a slice equals the matching sublist of the full call.
+ * Segment `i` depends only on samples `i - 2`..`i + 1`, which lets the live stroke recompute just its open tail.
+ */
+fun pencilGrainSegmentRange(
+    points: List<StrokePoint>,
+    pageWidth: Double,
+    pageHeight: Double,
+    smoothing: Double,
+    baseWidth: Double,
+    pressureEnabled: Boolean,
+    widthFactor: Double,
+    textureSeed: Int,
+    passIndex: Int,
+    jitter: Double,
+    scale: Double,
+    first: Int,
+    last: Int,
 ): List<GrainSegment> {
     if (points.size < 2 || scale <= 0.0) return emptyList()
-    val segments = ArrayList<GrainSegment>(points.size - 1)
-    var chainX = points[0].x * pageWidth
-    var chainY = points[0].y * pageHeight
-    for (index in 1 until points.size) {
-        val (offsetX, offsetY) = pencilJitterOffset(textureSeed, index, passIndex, jitter)
+    val from = first.coerceAtLeast(1)
+    val to = last.coerceAtMost(points.lastIndex)
+    if (from > to) return emptyList()
+    val segments = ArrayList<GrainSegment>(to - from + 1)
+    // The chain (where the previous segment ended) is all a segment takes from the one before it. Starting one
+    // segment early recovers it; that warm-up segment is computed but not emitted.
+    val start = if (from > 1) from - 1 else 1
+    var chainX = points[start - 1].x * pageWidth
+    var chainY = points[start - 1].y * pageHeight
+    for (index in start..to) {
+        val (offsetX, offsetY) = if (index < from) 0.0 to 0.0 else pencilJitterOffset(textureSeed, index, passIndex, jitter)
         val previous = points[index - 1]
         val point = points[index]
         val pointX = point.x * pageWidth
@@ -234,7 +264,7 @@ fun pencilGrainSegments(
                 endY = pointY
             }
         }
-        segments += GrainSegment(startX, startY, controlX, controlY, endX + offsetX, endY + offsetY, width)
+        if (index >= from) segments += GrainSegment(startX, startY, controlX, controlY, endX + offsetX, endY + offsetY, width)
         chainX = endX
         chainY = endY
     }

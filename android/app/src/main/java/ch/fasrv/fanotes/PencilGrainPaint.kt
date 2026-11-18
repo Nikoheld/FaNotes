@@ -4,10 +4,12 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import ch.fasrv.fanotes.ink.ConstantStroke
+import ch.fasrv.fanotes.ink.GrainSegment
 import ch.fasrv.fanotes.ink.InkStroke
 import ch.fasrv.fanotes.ink.StrokeCommand
 import ch.fasrv.fanotes.ink.brushPasses
 import ch.fasrv.fanotes.ink.constantWidthStroke
+import ch.fasrv.fanotes.ink.pencilGrainSegmentRange
 import ch.fasrv.fanotes.ink.pencilGrainSegments
 import ch.fasrv.fanotes.ink.strokeDotRadius
 
@@ -78,7 +80,6 @@ private fun drawSegments(
     jitter: Double,
     widthFactor: Double,
 ) {
-    val seed = stroke.extras.double("textureSeed")?.takeIf { it.isFinite() }?.toInt() ?: 1
     val segments = pencilGrainSegments(
         stroke.points,
         sourceWidth,
@@ -87,11 +88,18 @@ private fun drawSegments(
         stroke.baseWidth,
         stroke.pressureEnabled,
         widthFactor,
-        seed,
+        textureSeedOf(stroke),
         passIndex,
         jitter,
         scale.toDouble(),
     )
+    paintSegments(canvas, paint, segments, scale)
+}
+
+private fun textureSeedOf(stroke: InkStroke): Int =
+    stroke.extras.double("textureSeed")?.takeIf { it.isFinite() }?.toInt() ?: 1
+
+private fun paintSegments(canvas: Canvas, paint: Paint, segments: List<GrainSegment>, scale: Float) {
     val path = Path()
     val pixels = scale.toDouble()
     for (segment in segments) {
@@ -111,6 +119,70 @@ private fun drawSegments(
         }
         paint.strokeWidth = (segment.width * pixels).toFloat()
         canvas.drawPath(path, paint)
+    }
+}
+
+/** True when [drawBrushPasses] paints [stroke] one segment at a time, so a slice of it can be painted alone. */
+fun paintsPerSegment(stroke: InkStroke): Boolean =
+    stroke.pressureEnabled && stroke.points.size >= 2 && stroke.symbolId == null && stroke.figurePaths.isEmpty() &&
+        stroke.brush != "spray" && stroke.brush != "marker" && stroke.brush != "calligraphy"
+
+/**
+ * Grain segments [first]..[last] of every pass, as [drawBrushPasses] computes them for a per-segment stroke
+ * (see [paintsPerSegment]). One list per pass, widest pass first.
+ */
+fun passSegmentRange(
+    stroke: InkStroke,
+    sourceWidth: Double,
+    sourceHeight: Double,
+    scale: Float,
+    smoothing: Double,
+    first: Int,
+    last: Int,
+): List<List<GrainSegment>> = brushPasses(stroke.brush).mapIndexed { passIndex, pass ->
+    pencilGrainSegmentRange(
+        stroke.points,
+        sourceWidth,
+        sourceHeight,
+        smoothing,
+        stroke.baseWidth,
+        stroke.pressureEnabled,
+        pass.widthFactor,
+        textureSeedOf(stroke),
+        passIndex,
+        pass.jitter,
+        scale.toDouble(),
+        first,
+        last,
+    )
+}
+
+/**
+ * Paints [passes] (from [passSegmentRange]) with the paint state [drawBrushPasses] gives each pass, so a slice of
+ * a per-segment stroke looks the same as that part of the whole stroke.
+ */
+fun drawPassSegments(
+    canvas: Canvas,
+    paint: Paint,
+    stroke: InkStroke,
+    sourceWidth: Double,
+    sourceHeight: Double,
+    scale: Float,
+    color: Int,
+    passes: List<List<GrainSegment>>,
+) {
+    if (scale <= 0f) return
+    paint.color = color
+    val pageWidth = (sourceWidth * scale).toFloat()
+    val pageHeight = (sourceHeight * scale).toFloat()
+    val baseAlpha = if (stroke.purpose == "art") (stroke.opacity ?: 1.0) else 1.0
+    for ((passIndex, pass) in brushPasses(stroke.brush).withIndex()) {
+        val segments = passes.getOrNull(passIndex) ?: continue
+        if (segments.isEmpty()) continue
+        val alpha = (baseAlpha * pass.alpha * 255.0).toInt().coerceIn(0, 255)
+        drawStyled(canvas, paint, stroke.colorEffect, pageWidth, pageHeight, (stroke.baseWidth * pass.widthFactor * scale).toFloat(), alpha, Paint.Style.STROKE, Paint.Cap.ROUND) {
+            paintSegments(canvas, paint, segments, scale)
+        }
     }
 }
 
