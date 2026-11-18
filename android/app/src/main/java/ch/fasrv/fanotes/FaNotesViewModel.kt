@@ -1065,7 +1065,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         requestGotoLine((ref.startLine + 1).toString())
     }
 
-    fun insertStudyTemplate(kind: ch.fasrv.fanotes.study.StudyKind) {
+    fun insertStudyTemplate(kind: ch.fasrv.fanotes.study.StudyKind, cryptoTool: ch.fasrv.fanotes.study.crypto.CryptoTool? = null) {
         if (open.value == null) {
             message.value = "Öffne zuerst eine Notiz."
             return
@@ -1074,13 +1074,9 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             message.value = "In ein PDF lassen sich keine Lernwerkzeuge einfügen. Öffne eine Textnotiz."
             return
         }
-        val data = when (kind) {
-            ch.fasrv.fanotes.study.StudyKind.SORT -> ch.fasrv.fanotes.study.sortDataJson(ch.fasrv.fanotes.study.defaultSortData())
-            ch.fasrv.fanotes.study.StudyKind.TERM -> ch.fasrv.fanotes.study.termDataJson(ch.fasrv.fanotes.study.defaultTermData())
-            else -> return
-        }
-        updateMarkdown(ch.fasrv.fanotes.study.insertStudyBlock(markdown.value, kind, data))
+        updateMarkdown(ch.fasrv.fanotes.study.insertStudyBlock(markdown.value, kind, ch.fasrv.fanotes.study.starterBlockJson(kind, cryptoTool)))
         showText.value = true
+        editorMenu.value = null
     }
 
     /** Opens the Aufträge or Markierungen panel of the open PDF. */
@@ -4601,6 +4597,126 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         bytes?.let { decodePaperImage(it) }
     }
 
+    /** A small preview of a vault picture for the editors: decoded at about [edgePx], never at full size. */
+    suspend fun readStudyThumb(ref: String, edgePx: Int): Bitmap? = withContext(Dispatchers.IO) {
+        val bytes = if (ref.startsWith("data:image/")) {
+            runCatching { android.util.Base64.decode(ref.substringAfter("base64,"), android.util.Base64.DEFAULT) }.getOrNull()
+        } else {
+            runCatching { graph.vault.read(ref) }.getOrNull()
+        } ?: return@withContext null
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= edgePx.coerceAtLeast(32)) sample *= 2
+        runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) }.getOrNull()
+    }
+
+    /**
+     * A picture for a picture plate or a key's comparison image: shrunk like the note's other study pictures and stored
+     * as a file in the vault (`.fanotes/worksheets/`, the same place the desktop uses). [onDone] gets the vault path (null on
+     * failure) and a name taken from the file.
+     */
+    fun importStudyPlateImage(uri: Uri, onDone: (String?, String) -> Unit) {
+        val resolver = getApplication<Application>().contentResolver
+        val name = uri.lastPathSegment?.substringAfterLast('/')?.substringBeforeLast('.').orEmpty().take(120)
+        viewModelScope.launch {
+            var tooLarge = false
+            val path = withContext(Dispatchers.IO) {
+                try {
+                    val bytes = readUriCapped(uri, STUDY_IMAGE_INPUT_MAX_BYTES) ?: return@withContext null
+                    val payload = StudyImageImport.encode(bytes, resolver.getType(uri).orEmpty()) ?: return@withContext null
+                    val png = payload.dataUrl.startsWith("data:image/png")
+                    val raw = android.util.Base64.decode(payload.dataUrl.substringAfter("base64,"), android.util.Base64.DEFAULT)
+                    val target = ".fanotes/worksheets/${java.util.UUID.randomUUID()}.${if (png) "png" else "jpg"}"
+                    graph.vault.write(target, raw)
+                    target
+                } catch (_: StudyImageTooLarge) {
+                    tooLarge = true
+                    null
+                } catch (_: OutOfMemoryError) {
+                    tooLarge = true
+                    null
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (path == null) message.value = if (tooLarge) "Das Bild ist zu groß." else "Das Bild konnte nicht gelesen werden. Wähle eine andere Bilddatei."
+            onDone(path, name)
+        }
+    }
+
+    // -- deck-wide flashcards ---------------------------------------------------------------
+
+    data class DeckState(val loading: Boolean = false, val loaded: Boolean = false, val cards: List<ch.fasrv.fanotes.study.DeckCard> = emptyList())
+
+    val deck = MutableStateFlow(DeckState())
+    private val deckSources = HashMap<String, Pair<Long, String>>()
+
+    /** Scans the vault's Markdown notes for cards (only notes that can hold cards are kept in memory) and builds the queue. */
+    fun loadDeck() {
+        if (deck.value.loading) return
+        deck.value = deck.value.copy(loading = true)
+        viewModelScope.launch {
+            val today = java.time.LocalDate.now().toString()
+            val cards = withContext(Dispatchers.IO) {
+                val seen = HashSet<String>()
+                val notes = ArrayList<Pair<String, String>>()
+                for (entry in runCatching { graph.vault.walkFiles() }.getOrDefault(emptyList())) {
+                    if (entry.directory || entry.path.startsWith(".") || entry.path.contains("/.")) continue
+                    if (!(entry.path.endsWith(".md") || entry.path.endsWith(".markdown")) || entry.size > 2_000_000L) continue
+                    seen += entry.path
+                    val known = deckSources[entry.path]
+                    val text = if (known != null && known.first == entry.mtimeMs) known.second
+                    else (runCatching { graph.vault.read(entry.path)?.decodeToString() }.getOrNull().orEmpty()).also {
+                        deckSources[entry.path] = entry.mtimeMs to if (ch.fasrv.fanotes.study.noteMayHaveCards(it)) it else ""
+                    }
+                    if (text.isNotEmpty()) notes += entry.path to text
+                }
+                deckSources.keys.retainAll(seen)
+                ch.fasrv.fanotes.study.deckCardsOf(notes, today)
+            }
+            deck.value = DeckState(loading = false, loaded = true, cards = cards)
+        }
+    }
+
+    /** Grades a card of any note. The open note is changed in the editor, every other one is saved like a normal edit. */
+    fun reviewDeckCard(card: ch.fasrv.fanotes.study.DeckCard, grade: String) {
+        val today = java.time.LocalDate.now().toString()
+        if (card.path == open.value?.path) {
+            reviewFlashcard(card.card.id, grade)
+            replaceDeckNote(card.path, markdown.value, today)
+            return
+        }
+        viewModelScope.launch {
+            val next = withContext(Dispatchers.IO) {
+                runCatching {
+                    val note = graph.store.readNote(card.path)
+                    val updated = ch.fasrv.fanotes.desk.applyReview(note.markdown, card.card.id, grade, today)
+                    graph.store.save(note, note.document, updated)
+                    updated
+                }.getOrNull()
+            }
+            if (next == null) message.value = "Die Karte konnte nicht gespeichert werden."
+            else {
+                deckSources.remove(card.path)
+                replaceDeckNote(card.path, next, today)
+            }
+        }
+    }
+
+    private fun replaceDeckNote(path: String, markdown: String, today: String) {
+        val fresh = ch.fasrv.fanotes.study.deckCardsOf(listOf(path to markdown), today)
+        deck.value = deck.value.copy(cards = deck.value.cards.filter { it.path != path } + fresh)
+    }
+
+    /** Preselected actions for the AI panel, e.g. "Lernfragen erstellen" from the flashcard screen; read once. */
+    var aiPreset: Set<String>? = null
+
+    fun openAiFor(vararg actions: String) {
+        aiPreset = actions.toSet()
+        openAi()
+    }
+
     fun loadVaultMeta() {
         viewModelScope.launch {
             val loaded = withContext(Dispatchers.IO) {
@@ -5258,6 +5374,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             "study-marks" -> openStudyPanel("study-marks")
             "study-sort" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.SORT)
             "study-term" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.TERM)
+            "study-key" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.KEY)
+            "study-map" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.MAP)
+            "study-plate" -> insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.PLATE)
+            in ch.fasrv.fanotes.study.crypto.CRYPTO_COMMANDS.keys ->
+                insertStudyTemplate(ch.fasrv.fanotes.study.StudyKind.CRYPTO, ch.fasrv.fanotes.study.crypto.CRYPTO_COMMANDS[id])
             "homework" -> showDestination("tasks")
             "calendar" -> showDestination("calendar")
             "daily" -> openDaily()

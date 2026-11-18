@@ -134,6 +134,7 @@ class StudyToolsTest {
                 StudyKind.MAP -> mapDataJson(parseMapData(ref.body)!!)
                 StudyKind.PLATE -> plateDataJson(parsePlateData(ref.body)!!)
                 StudyKind.TERM -> termDataJson(parseTermData(ref.body)!!)
+                StudyKind.CRYPTO -> ch.fasrv.fanotes.study.crypto.cryptoDataJson(ch.fasrv.fanotes.study.crypto.parseCryptoData(ref.body))
             }
             assertEquals(expected, serializeStudyBlock(ref.kind, data), ref.kind.id)
         }
@@ -151,6 +152,7 @@ class StudyToolsTest {
                 StudyKind.MAP -> mapDataJson(parseMapData(ref.body)!!)
                 StudyKind.PLATE -> plateDataJson(parsePlateData(ref.body)!!)
                 StudyKind.TERM -> termDataJson(parseTermData(ref.body)!!)
+                StudyKind.CRYPTO -> ch.fasrv.fanotes.study.crypto.cryptoDataJson(ch.fasrv.fanotes.study.crypto.parseCryptoData(ref.body))
             }
             note = replaceStudyBlock(note, ref, json)
         }
