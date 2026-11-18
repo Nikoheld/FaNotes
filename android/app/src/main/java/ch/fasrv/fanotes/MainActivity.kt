@@ -253,6 +253,19 @@ class MainActivity : ComponentActivity() {
         if (uri != null && path != null) model.saveNoteCopy(path, uri)
     }
 
+    /** A reminder notification opens the calendar or the homework list. */
+    private fun handleOpenIntent(intent: Intent?) {
+        val destination = intent?.getStringExtra(ReminderScheduler.EXTRA_DESTINATION) ?: return
+        intent.removeExtra(ReminderScheduler.EXTRA_DESTINATION)
+        if (destination == "calendar" || destination == "tasks") model.showDestination(destination)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleOpenIntent(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // targetSdk 36 enforces edge-to-edge; draw behind the bars and inset the Compose root instead.
@@ -265,9 +278,8 @@ class MainActivity : ComponentActivity() {
             val best = display?.supportedModes?.maxByOrNull { it.refreshRate }
             if (best != null) window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
         }
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 21)
-        }
+        // The notification permission (Android 13+) is asked for where it is needed: Settings -> Bedienung -> Erinnerungen.
+        handleOpenIntent(intent)
         setContent {
             LaunchedEffect(model) {
                 model.glyphImports.collect {
@@ -1065,6 +1077,7 @@ fun FaNotesScreen(
                             "books" -> BooksScreen(model) { model.openPath(it); model.showDestination("notes") }
                             "history" -> HistoryScreen(model)
                             "study" -> StudyScreen(model)
+                            "conflicts" -> ConflictScreen(model) { model.showDestination("notes") }
                         }
                     }
                 } else {
@@ -1241,7 +1254,7 @@ fun FaNotesScreen(
             },
             desk["words"] != "off",
             sync.conflicts.size,
-            onConflicts = { model.showDestination("settings") },
+            onConflicts = { model.showDestination("conflicts") },
             crumbs = if (ch.fasrv.fanotes.desk.statusShowsPath(destination) && open?.path != null) breadcrumbsFor(open?.path.orEmpty()) else emptyList(),
             onCrumb = {
                 model.showList.value = true
@@ -1312,6 +1325,7 @@ fun FaNotesScreen(
     if (aiOpen) AiScreen(model)
     if (settingsOpen) SettingsScreen(model, { requestSync() }, onOpenVault, { model.usePrivateVault() })
     if (bugReportOpen) BugReportDialog(model)
+    ShareDialogHost(model)
     if (workRequestsOpen) WorkRequestsDialog(model)
     if (historyOpen) HistoryDialog(
         model,
@@ -3206,6 +3220,7 @@ private fun EditorMoreMenu(
         TextButton(onClick = onDownload) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Herunterladen")) }
         TextButton(onClick = onImportSheet) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Blatt")) }
         TextButton(onClick = { model.openGotoLine() }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Gehe zu Zeile")) }
+        TextButton(onClick = { model.open.value?.path?.let { model.shares.openDialog(it) } }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Link teilen") }
         TextButton(onClick = { model.performDesktopCommand("text-field") }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Textfeld einfügen")) }
         TextButton(onClick = { model.performDesktopCommand("export-latex") }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Notiz als LaTeX-Code exportieren")) }
         TextButton(onClick = { model.performDesktopCommand("glyphenwerk") }) { Text("GlyphenWerk öffnen") }

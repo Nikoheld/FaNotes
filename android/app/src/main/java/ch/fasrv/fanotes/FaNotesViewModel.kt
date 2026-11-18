@@ -3621,6 +3621,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             "calendar" -> loadCalendar()
             "overview", "books" -> loadVaultMeta()
             "study" -> loadStudy()
+            "search" -> graph.docIndex.refresh()
         }
     }
 
@@ -3986,34 +3987,57 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         destination.value = "notes"
     }
 
+    private var searchJob: Job? = null
+
+    /** Looks the query up in the local document index (see `DocIndexService`); the vault is not read per keystroke. */
     fun searchVaultText(query: String) {
         searchQuery.value = query
+        searchJob?.cancel()
         if (query.isBlank()) {
             searchHits.value = emptyList()
             return
         }
-        viewModelScope.launch {
-            searchHits.value = withContext(Dispatchers.IO) {
-                val files = graph.vault.walkFiles().filter {
-                    val path = it.path
-                    path.endsWith(".md", true) || path.endsWith(".markdown", true) ||
-                        (path.endsWith(".pdf", true) && !path.startsWith("."))
-                }
-                val texts = files.map { file ->
-                    val path = file.path
-                    if (path.endsWith(".pdf", true)) path to ""
-                    else path to (graph.vault.read(path)?.decodeToString().orEmpty())
-                }
-                val transcripts = texts.mapNotNull { (path, _) ->
-                    val famdPath = if (path.endsWith(".famd")) path else companionPath(path, ".famd")
-                    val ink = ch.fasrv.fanotes.famd.parseFamd(graph.vault.read(famdPath)?.decodeToString().orEmpty()).payload?.obj("ink")
-                    val transcript = ink?.string("searchTranscript") ?: return@mapNotNull null
-                    path to transcript
-                }
-                (searchVault(texts, query) + searchTranscriptHits(transcripts, query)).take(250)
+        searchJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(120)
+            searchHits.value = withContext(Dispatchers.Default) {
+                val job = kotlinx.coroutines.currentCoroutineContext()[Job]
+                graph.docIndex.search(query) { job?.isActive == false }
             }
         }
     }
+
+    // -- Work package 6: search index, sharing, reminders, conflict previews --------------------
+
+    val docIndexStatus get() = graph.docIndex.status
+    fun refreshDocIndex() = graph.docIndex.refresh()
+    val shares get() = graph.shares
+    val reminders get() = graph.reminders
+
+    /** The two versions of a conflicting file, decoded for the conflict screen. */
+    data class ConflictVersions(
+        val copyPath: String,
+        val remote: ch.fasrv.fanotes.sync.ConflictPreview,
+        val local: ch.fasrv.fanotes.sync.ConflictPreview,
+    )
+
+    val conflictVersions = MutableStateFlow<ConflictVersions?>(null)
+    private var conflictJob: Job? = null
+
+    fun loadConflictVersions(conflict: SyncConflict) {
+        conflictJob?.cancel()
+        if (conflictVersions.value?.copyPath != conflict.copyPath) conflictVersions.value = null
+        conflictJob = viewModelScope.launch {
+            conflictVersions.value = withContext(Dispatchers.IO) {
+                fun version(path: String) = runCatching {
+                    ch.fasrv.fanotes.sync.previewOfVersion(listOf(ch.fasrv.fanotes.sync.ConflictFileBytes(path, graph.vault.read(path))))
+                }.getOrDefault(ch.fasrv.fanotes.sync.ConflictPreview.Damaged(0))
+                ConflictVersions(conflict.copyPath, version(conflict.path), version(conflict.copyPath))
+            }
+        }
+    }
+
+    /** The bytes of one side of a conflict, for the PDF page preview. */
+    suspend fun conflictFileBytes(path: String): ByteArray? = withContext(Dispatchers.IO) { runCatching { graph.vault.read(path) }.getOrNull() }
 
     fun openHomeworkNote() {
         viewModelScope.launch {

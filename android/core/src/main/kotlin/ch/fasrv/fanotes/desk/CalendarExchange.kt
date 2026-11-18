@@ -491,3 +491,21 @@ private fun nextInstance(origin: ZonedDateTime, step: Int, recurrence: String): 
     val local = calendarInstanceStart(origin.toLocalDateTime(), step, recurrence)
     return ZonedDateTime.ofLocal(local, origin.zone, origin.offset)
 }
+
+/** One start of an event inside a time range, recurrences expanded (hidden calendars left out). */
+data class CalendarOccurrenceInfo(
+    val key: String,
+    val eventId: String,
+    val calendarId: String,
+    val title: String,
+    val start: ZonedDateTime,
+    val allDay: Boolean,
+    val location: String,
+    val notePath: String,
+)
+
+/** Public view of the occurrence expansion for code that schedules system reminders (`ReminderPlan.kt`). */
+fun calendarOccurrences(document: CalendarDocument, from: ZonedDateTime, to: ZonedDateTime): List<CalendarOccurrenceInfo> =
+    expandOccurrences(document, from, to).map {
+        CalendarOccurrenceInfo(it.key, it.event.id, it.event.calendarId, it.event.title, it.start, it.event.allDay, it.event.location, it.event.notePath)
+    }

@@ -1173,11 +1173,12 @@ fun SearchScreen(
         }
         VaultSearchField(query, { model.searchVaultText(it) }, searchKeys)
         Text(
-            if (query.trim().length >= 2) "${hits.size} Treffer" else "Text und unsichtbare Handschrift",
-            modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 14.dp, bottom = 7.dp),
+            if (query.trim().length >= 2) "${hits.size} Treffer" else "Text, Handschrift und PDFs",
+            modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 14.dp, bottom = 0.dp),
             fontSize = 12.sp,
             color = LocalStatusInk.current.muted,
         )
+        DocIndexStatusChip(model, query)
         if (query.trim().length < 2) {
             Column(
                 Modifier
@@ -8568,7 +8569,9 @@ private fun SettingsPage(
                     }
                     if (sync.account != null) SyncPasswordCards(model)
                     Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
-                    ConflictList(model)
+                    ConflictShortcutCard(model, Modifier.settingsAnchor("sync", "settings-conflicts", anchorY))
+                    ShareSettingsCard(model, Modifier.settingsAnchor("sync", "settings-shares", anchorY))
+                    ProfileSettingsCard(model, Modifier.settingsAnchor("sync", "settings-profile", anchorY))
                     SyncLogCard(sync.log)
                 }
                 "statistics" -> StatisticsSection(model, viewportWidth, anchorY)
@@ -8646,6 +8649,7 @@ private fun SettingsPage(
                             }
                         }
                     }
+                    ReminderSettingsCard(model, Modifier.settingsAnchor("accessibility", "settings-reminders", anchorY))
                 }
                 "experimental" -> {
                     val backups = settings["experimental-backup"] == "on"
