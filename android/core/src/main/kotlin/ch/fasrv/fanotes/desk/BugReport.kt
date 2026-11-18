@@ -223,6 +223,15 @@ class BugReportLog(private val windowMs: Long = BUG_REPORT_WINDOW_MS) {
         return events.toList()
     }
 
+    /**
+     * Whether [recordPen] would keep a pen sample at [now]. The pen calls this per move event first, so the
+     * dropped samples in between neither build an event nor copy the log.
+     */
+    fun penSampleDue(now: Long): Boolean {
+        val previous = lastPenAt
+        return previous == null || now - previous >= BUG_REPORT_PEN_SAMPLE_MS
+    }
+
     /** Pen samples closer than 400 ms are dropped so five minutes fit the event cap. */
     fun recordPen(event: BugReportEvent, now: Long = event.at): List<BugReportEvent> {
         val previous = lastPenAt

@@ -438,7 +438,10 @@ class InkSurfaceView @JvmOverloads constructor(
         color = Color.parseColor("#1B4F82")
         textAlign = Paint.Align.CENTER
     }
-    private val tiles = HashMap<Long, Bitmap>()
+    /** Committed-ink tiles by page position; a null value is a tile no stroke reaches, kept without a bitmap. */
+    private val tiles = HashMap<Long, Bitmap?>()
+    private val tileBounds = ch.fasrv.fanotes.desk.StrokeBoundsCache()
+    private val liveLayers = LiveInkLayers()
     private var palm = PalmState()
     private var inkPointer = MotionEvent.INVALID_POINTER_ID
     private var erasing = false
@@ -1258,7 +1261,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 } else {
                     val stroke = current.endStroke(style, nowIso())
                     if (stroke != null) {
-                        invalidateTiles(stroke)
+                        if (!paintIntoTiles(current, stroke)) invalidateTiles(stroke)
                         onStroke(stroke)
                         onChanged()
                         if (tookShape) onInkNotice(InkNotice("success", FORM_TAKEN_NOTICE_TEXT))
@@ -1500,14 +1503,18 @@ class InkSurfaceView @JvmOverloads constructor(
         drawTiles(canvas, current, scale)
         val live = current.livePoints
         if (live.isNotEmpty()) {
-            canvas.save()
-            canvas.translate(pageLeft, pageTop)
-            drawStroke(
-                canvas,
-                InkStroke(live + predicted, style.baseWidth, style.pressureEnabled, style.color, brush = style.brush, opacity = brushOpacity(style.brush), colorEffect = style.colorEffect),
-                scale,
-            )
-            canvas.restore()
+            val liveStroke = InkStroke(ch.fasrv.fanotes.ink.joinedPoints(live, predicted), style.baseWidth, style.pressureEnabled, style.color, brush = style.brush, opacity = brushOpacity(style.brush), colorEffect = style.colorEffect)
+            if (liveLayers.supports(canvas, liveStroke, rotation)) {
+                liveLayers.draw(canvas, inkPaint, liveStroke, live.size, pageLeft, pageTop, sessionWidth(), sessionHeight(), scale, strokeSmoothing.toDouble(), parseColor(liveStroke.color))
+            } else {
+                if (!liveLayers.isEmpty) liveLayers.clear()
+                canvas.save()
+                canvas.translate(pageLeft, pageTop)
+                drawStroke(canvas, liveStroke, scale)
+                canvas.restore()
+            }
+        } else if (!liveLayers.isEmpty) {
+            liveLayers.clear()
         }
         hoverPaint.color = accentColor
         selectPaint.color = accentColor
@@ -1747,11 +1754,13 @@ class InkSurfaceView @JvmOverloads constructor(
             var x = x0
             while (x <= x1) {
                 val bitmap = tileAt(current, x, y, tile)
-                val left = pageLeft + x * scale
-                val top = pageTop + y * scale
-                val side = tile * scale
-                tileDest.set(left, top, left + side, top + side)
-                canvas.drawBitmap(bitmap, null, tileDest, tilePaint)
+                if (bitmap != null) {
+                    val left = pageLeft + x * scale
+                    val top = pageTop + y * scale
+                    val side = tile * scale
+                    tileDest.set(left, top, left + side, top + side)
+                    canvas.drawBitmap(bitmap, null, tileDest, tilePaint)
+                }
                 x += tile
             }
             y += tile
@@ -1764,9 +1773,17 @@ class InkSurfaceView @JvmOverloads constructor(
      * Pinch-zoom only changes the destination rect, so a Galaxy Tab S6 Lite
      * does not allocate a new bitmap on every frame.
      */
-    private fun tileAt(current: InkSession, x: Int, y: Int, tile: Int): Bitmap {
+    private fun tileAt(current: InkSession, x: Int, y: Int, tile: Int): Bitmap? {
         val key = x.toLong() shl 32 or (y.toLong() and 0xffffffffL)
-        tiles[key]?.let { return it }
+        val cached = tiles[key]
+        if (cached != null || tiles.containsKey(key)) return cached
+        val strokes = current.document.strokes
+        val bounds = tileBounds.table(strokes)
+        // A tile no stroke reaches stays without a bitmap: no allocation, no texture upload, nothing to draw.
+        if (strokes.indices.none { intersectsTile(strokes[it], bounds[it], current, x, y, tile) }) {
+            tiles[key] = null
+            return null
+        }
         val raster = ch.fasrv.fanotes.desk.committedRasterScale(cacheScale)
         val size = ch.fasrv.fanotes.desk.tileBitmapSide(tile, raster)
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
@@ -1774,12 +1791,49 @@ class InkSurfaceView @JvmOverloads constructor(
         tileCanvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
         tileCanvas.translate(-x * raster, -y * raster)
         tileCanvas.scale(raster, raster)
-        for (stroke in current.document.strokes) {
-            if (!intersectsTile(stroke, current, x, y, tile)) continue
+        for (index in strokes.indices) {
+            val stroke = strokes[index]
+            if (!intersectsTile(stroke, bounds[index], current, x, y, tile)) continue
             drawStroke(tileCanvas, stroke, 1f)
         }
         tiles[key] = bitmap
         return bitmap
+    }
+
+    /**
+     * Paints a just-committed [stroke] into the tiles that already exist instead of dropping and re-rasterizing
+     * them. A tile holds the strokes before it in document order, so painting the new last stroke on top gives
+     * the same pixels as a fresh raster, without redrawing every stroke under the pen at each lift.
+     * False when that does not hold; the caller then drops the tiles as before.
+     */
+    private fun paintIntoTiles(current: InkSession, stroke: InkStroke): Boolean {
+        if (ch.fasrv.fanotes.desk.inkMoveAllocatesFullPage) return false
+        if (current.document.strokes.lastOrNull() !== stroke) return false
+        val bounds = ch.fasrv.fanotes.desk.strokeSampleBounds(stroke.points) ?: return false
+        val raster = ch.fasrv.fanotes.desk.committedRasterScale(cacheScale)
+        val side = ch.fasrv.fanotes.desk.tileBitmapSide(TILE_PAGE, raster)
+        val width = current.document.sourceWidth
+        val height = current.document.sourceHeight
+        val pad = ch.fasrv.fanotes.desk.tileStrokePad(stroke)
+        val entries = tiles.entries.iterator()
+        while (entries.hasNext()) {
+            val entry = entries.next()
+            val x = (entry.key shr 32).toInt()
+            val y = (entry.key and 0xffffffffL).toInt()
+            if (!ch.fasrv.fanotes.desk.boundsNearTile(bounds, width, height, pad, x, y, TILE_PAGE)) continue
+            val bitmap = entry.value
+            if (bitmap == null || bitmap.isRecycled || bitmap.width != side || bitmap.height != side) {
+                // An empty tile (or one from another raster scale) is rebuilt on the next frame.
+                bitmap?.recycle()
+                entries.remove()
+                continue
+            }
+            val tileCanvas = Canvas(bitmap)
+            tileCanvas.translate(-x * raster, -y * raster)
+            tileCanvas.scale(raster, raster)
+            drawStroke(tileCanvas, stroke, 1f)
+        }
+        return true
     }
 
     private fun evictDistantTiles(x0: Int, y0: Int, x1: Int, y1: Int, tile: Int) {
@@ -1821,17 +1875,21 @@ class InkSurfaceView @JvmOverloads constructor(
         nibY = if (index in 0 until event.pointerCount) event.getY(index) else event.y
     }
 
-    private fun intersectsTile(stroke: InkStroke, current: InkSession, x: Int, y: Int, tile: Int): Boolean {
-        val width = current.document.sourceWidth
-        val height = current.document.sourceHeight
-        return stroke.points.any { point ->
-            val px = point.x * width
-            val py = point.y * height
-            val pad = if (stroke.symbolId != null || stroke.figurePaths.isNotEmpty()) {
-                stroke.baseWidth + (stroke.figureLineWidth ?: 0.0)
-            } else 40.0
-            px >= x - pad && px <= x + tile + pad && py >= y - pad && py <= y + tile + pad
-        }
+    /**
+     * Whether [stroke] may paint into the tile at page px ([x], [y]). One box test against the stroke's cached
+     * sample [bounds] instead of a walk over every sample; it also catches a long segment crossing the tile.
+     */
+    private fun intersectsTile(stroke: InkStroke, bounds: DoubleArray?, current: InkSession, x: Int, y: Int, tile: Int): Boolean {
+        if (bounds == null) return false
+        return ch.fasrv.fanotes.desk.boundsNearTile(
+            bounds,
+            current.document.sourceWidth,
+            current.document.sourceHeight,
+            ch.fasrv.fanotes.desk.tileStrokePad(stroke),
+            x,
+            y,
+            tile,
+        )
     }
 
     private fun drawStroke(canvas: Canvas, stroke: InkStroke, scale: Float) {
@@ -2008,13 +2066,13 @@ class InkSurfaceView @JvmOverloads constructor(
     private fun invalidateTiles(stroke: InkStroke? = null) {
         if (ch.fasrv.fanotes.desk.inkMoveAllocatesFullPage) return
         if (stroke == null) {
-            tiles.values.forEach { it.recycle() }
+            tiles.values.forEach { it?.recycle() }
             tiles.clear()
             return
         }
         val current = session
         if (current == null || stroke.points.isEmpty()) {
-            tiles.values.forEach { it.recycle() }
+            tiles.values.forEach { it?.recycle() }
             tiles.clear()
             return
         }
@@ -2617,10 +2675,20 @@ class InkSurfaceView @JvmOverloads constructor(
         path.close()
     }
 
-    private fun parseColor(value: String): Int = try {
-        Color.parseColor(value)
-    } catch (_: IllegalArgumentException) {
-        Color.BLACK
+    private var parsedColorText: String? = null
+    private var parsedColor = Color.BLACK
+
+    /** Strokes mostly share a colour; the last parse is reused instead of parsing it per stroke and frame. */
+    private fun parseColor(value: String): Int {
+        if (value == parsedColorText) return parsedColor
+        val color = try {
+            Color.parseColor(value)
+        } catch (_: IllegalArgumentException) {
+            Color.BLACK
+        }
+        parsedColorText = value
+        parsedColor = color
+        return color
     }
 
     private inline fun <T> MotionEvent.use(block: (MotionEvent) -> T): T = try {
@@ -2643,7 +2711,7 @@ class InkSurfaceView @JvmOverloads constructor(
     private fun shapeCanArm(): Boolean {
         if (inkTool != InkTool.PEN) return false
         if (!inkStrokeAllowsShapeSnap("handwriting", null)) return false
-        if (style.brush in setOf("marker", "highlighter", "watercolor", "spray", "paintbrush")) return false
+        if (style.brush in NO_SHAPE_SNAP_BRUSHES) return false
         val points = session?.livePoints.orEmpty()
         return points.size >= shapeSnapProfile(shapeSnapSensitivity).minPoints
     }
@@ -2687,6 +2755,7 @@ class InkSurfaceView @JvmOverloads constructor(
         removeShadow.clear()
         clearShapeWatch()
         studyImages.clear()
+        liveLayers.clear()
         super.onDetachedFromWindow()
     }
 
@@ -3027,6 +3096,7 @@ class InkSurfaceView @JvmOverloads constructor(
 
     private companion object {
         const val TILE_PAGE = 192
+        val NO_SHAPE_SNAP_BRUSHES = setOf("marker", "highlighter", "watercolor", "spray", "paintbrush")
         const val MAX_TILES = 36
         const val MIN_CACHE_SCALE = 0.5f
         const val MAX_CACHE_SCALE = 1.75f

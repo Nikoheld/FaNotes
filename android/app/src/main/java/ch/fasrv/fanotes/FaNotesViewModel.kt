@@ -158,6 +158,7 @@ import ch.fasrv.fanotes.vault.OpenNote
 import ch.fasrv.fanotes.vault.VaultNode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import ch.fasrv.fanotes.ink.GlyphSample
 import ch.fasrv.fanotes.ink.HandwritingSynthesisResult
 import ch.fasrv.fanotes.ink.decodeGlyphLibrary
@@ -2567,6 +2568,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     fun recordPenSample(x: Double, y: Double) {
         notePenActivity()
         val now = System.currentTimeMillis()
+        // Most move events fall inside the log's sampling gap; skip building an event the log would drop.
+        if (!bugLog.penSampleDue(now)) return
         bugLog.recordPen(
             ch.fasrv.fanotes.desk.BugReportEvent(
                 at = now,
@@ -2893,23 +2896,127 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         graph.busyPaths = setOf(note.path, famd, asset)
     }
 
+    private var backdropGeneration = 0
+    private var backdropJob: Job? = null
+
     private suspend fun loadBackdrop(note: OpenNote) {
+        // A newer load (another note, a re-attached sheet) supersedes this one, also while its PDF still renders.
+        val generation = ++backdropGeneration
+        backdropJob?.cancel()
+        backdropJob = null
         backdrop.value.forEach { it.bitmap?.recycle() }
         backdrop.value = emptyList()
-        val slices = withContext(Dispatchers.Default) {
-            when (note.kind) {
-                NoteKind.PDF -> renderPdf(note)
-                else -> renderWorksheet(note)
-            }
+        if (note.kind == NoteKind.PDF) {
+            loadPdfBackdrop(note, generation)
+            return
+        }
+        val slices = withContext(Dispatchers.Default) { renderWorksheet(note) }
+        if (generation != backdropGeneration) {
+            slices.forEach { it.bitmap?.recycle() }
+            return
         }
         backdrop.value = slices
-        if (note.kind == NoteKind.PDF && session.document.strokes.isEmpty()) {
-            val height = slices.lastOrNull()?.let { it.topPagePx + it.heightPagePx } ?: return
-            if (height > 64) {
-                session.replace(
-                    session.document.copy(sourceWidth = PAGE_START_WIDTH, sourceHeight = height.toDouble(), paperStyle = "blank"),
-                )
+    }
+
+    /**
+     * Renders the note PDF page by page and shows the first pages as soon as they are drawn instead of after the
+     * last one. Returns once the first pages are on screen (or the PDF failed or needs a password); the rest keeps
+     * rendering in [backdropJob]. The final pages, sizes and page height are the same as a render in one go.
+     */
+    private suspend fun loadPdfBackdrop(note: OpenNote, generation: Int) {
+        val firstShown = kotlinx.coroutines.CompletableDeferred<Unit>()
+        backdropJob = viewModelScope.launch {
+            try {
+                streamPdf(note, generation) { firstShown.complete(Unit) }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                // Before the first page the caller reports it, as when the whole PDF rendered in one call.
+                if (!firstShown.completeExceptionally(error) && generation == backdropGeneration) {
+                    message.value = ch.fasrv.fanotes.desk.userVisibleFailure(error, "Die Notiz konnte nicht geöffnet werden.")
+                }
+            } finally {
+                firstShown.complete(Unit)
             }
+        }
+        firstShown.await()
+    }
+
+    private suspend fun streamPdf(note: OpenNote, generation: Int, onFirstShown: () -> Unit) {
+        val built = ArrayList<BackdropSlice>()
+        var published = 0
+        try {
+            withContext(Dispatchers.Default) {
+                val bytes = graph.vault.read(note.path) ?: return@withContext
+                val file = File.createTempFile("fanotes-pdf", ".pdf")
+                try {
+                    file.writeBytes(bytes)
+                    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                        try {
+                            openNotePdf(descriptor).use { renderer ->
+                                pdfNeedsPassword.value = false
+                                pdfPasswordRejected.value = false
+                                val aspects = (0 until renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)).map { index ->
+                                    renderer.openPage(index).use { page -> page.height.toDouble() / page.width.toDouble() }
+                                }
+                                val boxes = layoutPdfStack(PAGE_START_WIDTH, aspects)
+                                val stack = pdfStackHeight(boxes)
+                                val scaleY = if (note.document.strokes.isEmpty() || stack <= 0) 1.0 else note.document.sourceHeight / stack
+                                val fullHeight = boxes.lastOrNull()?.let { (it.top * scaleY).toFloat() + (it.height * scaleY).toFloat() }
+                                for ((position, box) in boxes.withIndex()) {
+                                    ensureActive()
+                                    val page = renderer.openPage(box.index)
+                                    try {
+                                        val width = 1200
+                                        val height = (width * (page.height.toFloat() / page.width)).toInt().coerceAtLeast(1)
+                                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                        built += BackdropSlice(
+                                            topPagePx = (box.top * scaleY).toFloat(),
+                                            heightPagePx = (box.height * scaleY).toFloat(),
+                                            widthPagePx = PAGE_START_WIDTH.toFloat(),
+                                            bitmap = bitmap,
+                                        )
+                                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                    } finally {
+                                        page.close()
+                                    }
+                                    if (!ch.fasrv.fanotes.desk.pdfBackdropPublishDue(position + 1, boxes.size)) continue
+                                    val shown = built.toList()
+                                    val current = withContext(Dispatchers.Main) {
+                                        if (generation != backdropGeneration) return@withContext false
+                                        if (published == 0) settlePdfPage(fullHeight)
+                                        backdrop.value = shown
+                                        published = shown.size
+                                        onFirstShown()
+                                        true
+                                    }
+                                    if (!current) return@withContext
+                                }
+                            }
+                        } catch (error: Exception) {
+                            if (error is kotlinx.coroutines.CancellationException) throw error
+                            if (!ch.fasrv.fanotes.desk.pdfNeedsPassword(error.javaClass.simpleName, error.message.orEmpty())) throw error
+                            pdfNeedsPassword.value = true
+                            pdfPasswordRejected.value = pdfPassword.isNotEmpty()
+                        }
+                    }
+                } finally {
+                    file.delete()
+                }
+            }
+        } finally {
+            // Pages drawn but never shown (superseded, cancelled, failed) are not on any canvas.
+            for (index in published until built.size) built[index].bitmap?.recycle()
+        }
+    }
+
+    /** A blank PDF note takes the height of its page stack, as after a render in one go. */
+    private fun settlePdfPage(height: Float?) {
+        if (height == null || !session.document.strokes.isEmpty()) return
+        if (height > 64) {
+            session.replace(
+                session.document.copy(sourceWidth = PAGE_START_WIDTH, sourceHeight = height.toDouble(), paperStyle = "blank"),
+            )
         }
     }
 
@@ -2928,49 +3035,6 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             return PdfRenderer(descriptor, params)
         }
         return PdfRenderer(descriptor)
-    }
-
-    private fun renderPdf(note: OpenNote): List<BackdropSlice> {
-        val bytes = graph.vault.read(note.path) ?: return emptyList()
-        val file = File.createTempFile("fanotes-pdf", ".pdf")
-        return try {
-        file.writeBytes(bytes)
-        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-            try {
-            openNotePdf(descriptor).use { renderer ->
-                pdfNeedsPassword.value = false
-                pdfPasswordRejected.value = false
-                val aspects = (0 until renderer.pageCount.coerceAtMost(ch.fasrv.fanotes.desk.PDF_NOTE_PAGE_CAP)).map { index ->
-                    renderer.openPage(index).use { page -> page.height.toDouble() / page.width.toDouble() }
-                }
-                val boxes = layoutPdfStack(PAGE_START_WIDTH, aspects)
-                val stack = pdfStackHeight(boxes)
-                val scaleY = if (note.document.strokes.isEmpty() || stack <= 0) 1.0 else note.document.sourceHeight / stack
-                return boxes.map { box ->
-                    val page = renderer.openPage(box.index)
-                    val width = 1200
-                    val height = (width * (page.height.toFloat() / page.width)).toInt().coerceAtLeast(1)
-                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    page.close()
-                    BackdropSlice(
-                        topPagePx = (box.top * scaleY).toFloat(),
-                        heightPagePx = (box.height * scaleY).toFloat(),
-                        widthPagePx = PAGE_START_WIDTH.toFloat(),
-                        bitmap = bitmap,
-                    )
-                }
-            }
-            } catch (error: Exception) {
-                if (!ch.fasrv.fanotes.desk.pdfNeedsPassword(error.javaClass.simpleName, error.message.orEmpty())) throw error
-                pdfNeedsPassword.value = true
-                pdfPasswordRejected.value = pdfPassword.isNotEmpty()
-                emptyList()
-            }
-        }
-        } finally {
-            file.delete()
-        }
     }
 
     private fun renderWorksheet(note: OpenNote): List<BackdropSlice> {
