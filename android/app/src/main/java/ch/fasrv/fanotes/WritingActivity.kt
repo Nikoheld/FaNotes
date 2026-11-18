@@ -39,6 +39,8 @@ class WritingActivity : ComponentActivity() {
     }
 
     @Volatile private var gate: OpenStoryGate? = null
+    /** The renderer died (memory pressure, or a crash in the shared WebView process): only destroy() is allowed. */
+    private var webGone = false
     private val storyListener: (List<String>, List<String>) -> Unit = { written, _ -> notifyWritten(written) }
 
     /**
@@ -69,13 +71,14 @@ class WritingActivity : ComponentActivity() {
         if (files.isEmpty()) return
         val json = JSONObject.quote(JSONArray(files).toString())
         runOnUiThread {
-            if (!isDestroyed) web.evaluateJavascript("window.fanotesStoryWritten && window.fanotesStoryWritten($json)", null)
+            if (!isDestroyed && !webGone) web.evaluateJavascript("window.fanotesStoryWritten && window.fanotesStoryWritten($json)", null)
         }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openCount += 1
         val graph = (application as FaNotesApplication).graph
         web = WebView(this)
         web.settings.javaScriptEnabled = true
@@ -83,7 +86,7 @@ class WritingActivity : ComponentActivity() {
         web.settings.allowFileAccess = false
         web.settings.allowContentAccess = false
         web.settings.mediaPlaybackRequiresUserGesture = true
-        web.webViewClient = AssetClient(this) { gate?.reset() }
+        web.webViewClient = AssetClient(this, onPageLoading = { gate?.reset() }, onGone = ::rendererGone)
         web.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
                 fileCallback?.onReceiveValue(emptyArray())
@@ -97,28 +100,41 @@ class WritingActivity : ComponentActivity() {
         setContentView(web)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             // The editor saves and then calls close(); a second press while it saves is ignored.
-            override fun handleOnBackPressed() { web.evaluateJavascript("window.dispatchEvent(new Event('fanotes-writing-close'))", null) }
+            override fun handleOnBackPressed() { if (webGone) finish() else web.evaluateJavascript("window.dispatchEvent(new Event('fanotes-writing-close'))", null) }
         })
         if (savedInstanceState == null) web.loadUrl(startUrl(intent)) else web.restoreState(savedInstanceState)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        web.saveState(outState)
+        if (!webGone) web.saveState(outState)
     }
 
     override fun onPause() {
         // The page saves on visibilitychange; pausing the WebView fires it.
-        web.onPause()
+        if (!webGone) web.onPause()
         super.onPause()
     }
 
     override fun onResume() {
         super.onResume()
-        web.onResume()
+        if (!webGone) web.onResume()
+    }
+
+    /**
+     * Without this the system kills the whole app when the renderer goes (the recognition host shares it). What the
+     * editor saved is on disk; the writing mode closes and can be opened again.
+     */
+    private fun rendererGone() {
+        if (webGone) return
+        webGone = true
+        releaseStory()
+        android.widget.Toast.makeText(this, ch.fasrv.fanotes.desk.ChromeText.ui(RENDERER_GONE), android.widget.Toast.LENGTH_LONG).show()
+        finish()
     }
 
     override fun onDestroy() {
+        openCount = (openCount - 1).coerceAtLeast(0)
         val graph = (application as FaNotesApplication).graph
         releaseStory()
         graph.engine.notifyLocalChange()
@@ -136,9 +152,14 @@ class WritingActivity : ComponentActivity() {
     }
 
     /** Serves `https://writing.fanotes.local/…` from `assets/writing/`; nothing else is loaded. */
-    private class AssetClient(private val context: Context, private val onPageLoading: () -> Unit) : WebViewClient() {
+    private class AssetClient(private val context: Context, private val onPageLoading: () -> Unit, private val onGone: () -> Unit) : WebViewClient() {
         /** A (re)loading page has not reported its editor state: everything waits again. */
         override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) { onPageLoading() }
+
+        override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+            onGone()
+            return true
+        }
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             val url = request.url
@@ -176,6 +197,10 @@ class WritingActivity : ComponentActivity() {
         private const val EXTRA_PATH = "path"
         private const val EXTRA_CREATE = "create"
         private const val EXTRA_IMPORT = "import"
+
+        /** Writing windows alive in this process (main thread); a share then must not clear them off the task. */
+        @Volatile internal var openCount = 0
+        const val RENDERER_GONE = "Der Schreibmodus wurde vom System beendet. Gespeichertes bleibt erhalten; öffne ihn erneut."
 
         fun intent(context: Context, storyPath: String): Intent = Intent(context, WritingActivity::class.java).putExtra(EXTRA_PATH, storyPath)
         fun createIntent(context: Context, parentFolder: String): Intent = Intent(context, WritingActivity::class.java).putExtra(EXTRA_CREATE, parentFolder)

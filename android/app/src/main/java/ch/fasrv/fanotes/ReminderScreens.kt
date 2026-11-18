@@ -104,10 +104,10 @@ fun ReminderSettingsCard(model: FaNotesViewModel, modifier: Modifier = Modifier)
             SettingRow("Zustand", readiness.summary, divider = settings.enabled) {
                 Column(horizontalAlignment = androidx.compose.ui.Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (readiness.access == NotificationAccess.NEEDS_SETTINGS || readiness.summary.startsWith("Der Kanal")) {
-                        OutlinedButton(onClick = { openNotificationSettings(context) }, modifier = Modifier.heightIn(min = Target)) { Text("Benachrichtigungen öffnen") }
+                        OutlinedButton(onClick = { openNotificationSettings(context) }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Benachrichtigungen öffnen")) }
                     }
                     if (readiness.offerExactAlarmSwitch) {
-                        OutlinedButton(onClick = { openExactAlarmSettings(context) }, modifier = Modifier.heightIn(min = Target)) { Text("Genaue Alarme erlauben") }
+                        OutlinedButton(onClick = { openExactAlarmSettings(context) }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Genaue Alarme erlauben")) }
                     }
                 }
             }
@@ -143,7 +143,7 @@ fun ReminderSettingsCard(model: FaNotesViewModel, modifier: Modifier = Modifier)
                 }
             }
             SettingRow("Als Nächstes", if (upcoming.isEmpty()) "Nichts in den nächsten 7 Tagen." else null, divider = true) {
-                OutlinedButton(onClick = { scheduler.sendTest() }, modifier = Modifier.heightIn(min = Target)) { Text("Test senden") }
+                OutlinedButton(onClick = { scheduler.sendTest() }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Test senden")) }
             }
             val formatter = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.GERMAN)
             upcoming.take(4).forEachIndexed { index, reminder ->

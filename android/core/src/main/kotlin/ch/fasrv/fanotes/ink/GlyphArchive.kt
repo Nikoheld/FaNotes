@@ -100,7 +100,7 @@ private fun manifestText(bytes: ByteArray): String {
                     if (read > GLYPH_ARCHIVE_MAX_BYTES) throw GlyphImportException("manifest.jsonl ist zu groß.")
                     out.write(buffer, 0, count)
                 }
-                found += out.toString(Charsets.UTF_8)
+                found += String(out.toByteArray(), Charsets.UTF_8)
             }
             zip.closeEntry()
             entry = zip.nextEntry

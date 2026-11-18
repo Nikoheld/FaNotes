@@ -309,6 +309,9 @@ class MainActivity : ComponentActivity() {
         // The notification permission (Android 13+) is asked for where it is needed: Settings -> Bedienung -> Erinnerungen.
         handleOpenIntent(intent)
         if (savedInstanceState == null) handleSharedImport(intent)
+        // A share that arrived while the writing mode was open and no editor window existed.
+        ShareIntakeActivity.takeParked()?.let { handleSharedImport(it) }
+        live = java.lang.ref.WeakReference(this)
         setContent {
             LaunchedEffect(model) {
                 model.glyphImports.collect {
@@ -408,6 +411,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onDestroy() {
+        if (live?.get() === this) live = null
+        super.onDestroy()
+    }
+
     override fun onResume() {
         super.onResume()
         // The task timer counts the time the app was away (up to its limit) and stops when it was gone for longer.
@@ -424,6 +432,21 @@ class MainActivity : ComponentActivity() {
             // A slow disk must not take the activity down. The next edit saves again.
         }
         super.onPause()
+    }
+
+    companion object {
+        private var live: java.lang.ref.WeakReference<MainActivity>? = null
+
+        /**
+         * Hands a share to the live editor window without bringing it to the top (main thread). [ShareIntakeActivity]
+         * uses it while the writing mode is open, so the share does not clear the writing mode off the task.
+         * False when there is no live window.
+         */
+        internal fun importInLiveWindow(handoff: Intent): Boolean {
+            val activity = live?.get()?.takeIf { !it.isFinishing && !it.isDestroyed } ?: return false
+            activity.handleSharedImport(handoff)
+            return true
+        }
     }
 
     private fun importPdfNote(uri: Uri?, folder: String?) {
@@ -3207,7 +3230,11 @@ private fun NotePage(
             }
         }
         StudyBlockDialog(model)
-        if (path != null && noteKind != NoteKind.PDF) RecognitionOverlays(model, Modifier.align(Alignment.BottomEnd))
+        if (path != null && noteKind != NoteKind.PDF) {
+            // The card sits bottom-right; a right-hand pen rail stays reachable beside it.
+            val railRight = ch.fasrv.fanotes.desk.toolbarPosition(model.effectiveDesk()["toolbar-position"]) == ch.fasrv.fanotes.desk.ToolbarPosition.SIDE_RIGHT
+            RecognitionOverlays(model, Modifier.align(Alignment.BottomEnd).padding(end = if (railRight) ch.fasrv.fanotes.desk.TOUCH_RAIL_DP.dp else 0.dp))
+        }
         if (showGoto) {
             GotoLineDialog { input ->
                 model.closeGotoLine()
@@ -3227,20 +3254,29 @@ private fun EditorMoreMenu(
     onDownload: () -> Unit,
     onImportSheet: () -> Unit,
 ) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        TextButton(onClick = onExportPdf) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Als PDF exportieren")) }
-        TextButton(onClick = onDownload) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Herunterladen")) }
-        TextButton(onClick = onImportSheet) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Blatt")) }
-        TextButton(onClick = { model.openGotoLine() }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Gehe zu Zeile")) }
-        TextButton(onClick = { model.open.value?.path?.let { model.shares.openDialog(it) } }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Link teilen") }
-        TextButton(onClick = { model.performDesktopCommand("text-field") }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Textfeld einfügen")) }
-        TextButton(onClick = { model.performDesktopCommand("export-latex") }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Notiz als LaTeX-Code exportieren")) }
+    // Grouped like a sheet: what goes on the page, what leaves the app, handwriting, imports, navigation.
+    MoreGroup("In die Notiz") {
+        MoreAction("Textfeld einfügen") { model.performDesktopCommand("text-field") }
+        MoreAction("Blatt", onImportSheet)
+    }
+    MoreGroup("Teilen und Exportieren") {
+        MoreAction("Link teilen") { model.open.value?.path?.let { model.shares.openDialog(it) } }
+        MoreAction("Als PDF exportieren", onExportPdf)
+        MoreAction("Herunterladen", onDownload)
+        MoreAction("Notiz als LaTeX-Code exportieren") { model.performDesktopCommand("export-latex") }
+    }
+    MoreGroup("Handschrift") {
         if (noteKind != NoteKind.PDF) {
-            TextButton(onClick = { model.recognition.startConversion(selectionOnly = false) }) { Text(ch.fasrv.fanotes.recognition.recognitionUi("Konvertieren")) }
+            TextButton(onClick = { model.recognition.startConversion(selectionOnly = false) }, modifier = Modifier.heightIn(min = 48.dp)) { Text(ch.fasrv.fanotes.recognition.recognitionUi("Konvertieren")) }
         }
-        TextButton(onClick = { model.performDesktopCommand("glyphenwerk") }) { Text("GlyphenWerk öffnen") }
-        TextButton(onClick = { model.performDesktopCommand("addon-store") }) { Text("Add-on-Store") }
-        TextButton(onClick = { model.performDesktopCommand("onenote-import") }) { Text("Microsoft OneNote importieren") }
+        MoreAction("GlyphenWerk öffnen") { model.performDesktopCommand("glyphenwerk") }
+    }
+    MoreGroup("Importieren") {
+        MoreAction("Microsoft OneNote importieren") { model.performDesktopCommand("onenote-import") }
+        MoreAction("Add-on-Store") { model.performDesktopCommand("addon-store") }
+    }
+    MoreGroup("Navigation") {
+        MoreAction("Gehe zu Zeile") { model.openGotoLine() }
     }
     val sheets = backdrop.filter { it.worksheetId.isNotEmpty() }.distinctBy { it.worksheetId }
     val placingSheetText by model.worksheetTextPlacing.collectAsStateWithLifecycle()
@@ -3256,6 +3292,23 @@ private fun EditorMoreMenu(
     }
     if (noteKind != NoteKind.PDF) MarginTranscript(model)
     if (showRelations) NoteRelations(model) { model.openPath(it); model.showDestination("notes") }
+}
+
+@Composable
+private fun MoreGroup(title: String, content: @Composable () -> Unit) {
+    Text(
+        ch.fasrv.fanotes.desk.ChromeText.ui(title),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = LocalStatusInk.current.muted,
+        modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+    )
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) { content() }
+}
+
+@Composable
+private fun MoreAction(label: String, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp)) { Text(ch.fasrv.fanotes.desk.ChromeText.ui(label)) }
 }
 
 @Composable
@@ -3634,8 +3687,8 @@ private fun PageSurface(
                 text = textMode,
                 syncLabel = syncText,
                 syncBusy = syncBusy,
-                canUndo = model.session.canUndo,
-                canRedo = model.session.canRedo,
+                canUndo = model.canUndo,
+                canRedo = model.canRedo,
                 darkChrome = dark,
                 theme = theme,
                 systemDark = systemDark,

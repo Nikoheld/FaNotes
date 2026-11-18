@@ -37,6 +37,7 @@ internal class NoteTextFieldBar(context: Context) : LinearLayout(context) {
     private val swatches = NOTE_TEXT_FIELD_COLORS.map { color -> color to swatch(color.css, color.label) }
     private val remove = button("🗑", "Textfeld entfernen").apply { setTextColor(0xFFA33F56.toInt()) }
     private var field: NoteTextField? = null
+    private var chrome: PenChromeColors? = null
 
     init {
         orientation = HORIZONTAL
@@ -65,6 +66,22 @@ internal class NoteTextFieldBar(context: Context) : LinearLayout(context) {
         remove.setOnClickListener { onRemove() }
     }
 
+    /** Theme colours of the pen chrome (dark themes get a dark bar, as on desktop). */
+    fun applyColors(colors: PenChromeColors) {
+        if (colors == chrome) return
+        chrome = colors
+        (background as? GradientDrawable)?.apply {
+            setColor(colors.panel)
+            setStroke(dp(1).coerceAtLeast(1), colors.border)
+        }
+        listOf(smaller, size, larger, bold).forEach { it.setTextColor(colors.ink) }
+        for (index in 0 until childCount) {
+            val child = getChildAt(index)
+            if (child !is TextView && child.layoutParams?.width == dp(1).coerceAtLeast(1)) child.setBackgroundColor(colors.border)
+        }
+        field?.let { bind(it) }
+    }
+
     fun bind(next: NoteTextField) {
         field = next
         size.text = next.fontSize.toString()
@@ -73,7 +90,7 @@ internal class NoteTextFieldBar(context: Context) : LinearLayout(context) {
         larger.isEnabled = next.fontSize < 48
         larger.alpha = if (larger.isEnabled) 1f else 0.4f
         bold.isSelected = next.bold
-        bold.background = if (next.bold) pill(0x1F2563C9) else null
+        bold.background = if (next.bold) pill(chrome?.active ?: 0x1F2563C9) else null
         swatches.forEach { (color, view) ->
             val on = color.value == next.color
             (view.background as? GradientDrawable)?.setStroke(if (on) dp(3) else dp(1).coerceAtLeast(1), if (on) 0xFF2563C9.toInt() else 0x4020222B)

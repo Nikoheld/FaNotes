@@ -890,7 +890,7 @@ class DirectoryVault(val root: Path) : VaultIo {
             stream.map { child ->
                 val relative = child.relativeTo(root).toString().replace('\\', '/')
                 VaultEntry(relative, Files.isDirectory(child), if (Files.isRegularFile(child)) Files.size(child) else 0L, Files.getLastModifiedTime(child).toMillis())
-            }.toList()
+            }.collect(java.util.stream.Collectors.toList()) // Stream.toList() is API 34
         }
     }
 
@@ -900,7 +900,7 @@ class DirectoryVault(val root: Path) : VaultIo {
             stream.filter { Files.isRegularFile(it) }.map { file ->
                 val relative = file.relativeTo(root).toString().replace('\\', '/')
                 VaultEntry(relative, false, Files.size(file), Files.getLastModifiedTime(file).toMillis())
-            }.toList()
+            }.collect(java.util.stream.Collectors.toList())
         }
     }
 

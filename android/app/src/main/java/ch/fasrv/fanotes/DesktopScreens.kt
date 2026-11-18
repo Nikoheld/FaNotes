@@ -8306,7 +8306,7 @@ private fun SettingsPage(
                                         fontSize = 13.sp,
                                         fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
                                         color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
-                                        modifier = Modifier.heightIn(min = 44.dp).clickable { model.updateDesk("toolbar-position", option.id) }.padding(vertical = 10.dp),
+                                        modifier = Modifier.heightIn(min = 48.dp).clickable { model.updateDesk("toolbar-position", option.id) }.padding(vertical = 10.dp),
                                     )
                                 }
                             }
