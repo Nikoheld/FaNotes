@@ -1,5 +1,15 @@
 # Änderungsverlauf
 
+## 2026.11.3-beta.5
+
+- Keep the current Vigenère cell visible in the square
+- Add the Krypto-Werkzeug study block and editor
+- Add pure logic and checks for the cryptology study tools
+- Rebuild the snow theme as a canvas physics simulation
+- Smoother, better looking handwriting frame and move tool
+- Hide the note sheet until the remembered camera has landed
+- Count tool switches and error toasts in the opt-in diagnostics
+
 ## 2026.11.3-beta.4
 
 - Keep text boxes typed right before a browser tab closes
