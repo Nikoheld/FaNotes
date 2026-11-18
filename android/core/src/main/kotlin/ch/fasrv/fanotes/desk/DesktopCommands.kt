@@ -141,13 +141,18 @@ private fun dispatch(work: DeskWork, id: String, extras: CommandExtras): DeskWor
     "study" -> work.copy(destination = "study", message = null)
     "flashcards" -> work.copy(overlays = work.overlays + "flashcards", destination = "notes", message = null)
     "homework" -> work.copy(destination = "homework", message = null)
-    // Assignments and highlights open as a panel of the open PDF; sorting boards and definition cards are inserted
-    // and edited on the tablet. Key tables, concept maps and picture sheets are drawn here but built on the computer.
+    // Assignments and highlights open as a panel of the open PDF; every other study block is inserted and edited on the tablet.
     "study-tasks", "study-marks" -> work.copy(overlays = work.overlays + id, message = null)
     "study-sort" -> insertStudyTemplate(work, ch.fasrv.fanotes.study.StudyKind.SORT, ch.fasrv.fanotes.study.sortDataJson(ch.fasrv.fanotes.study.defaultSortData()))
     "study-term" -> insertStudyTemplate(work, ch.fasrv.fanotes.study.StudyKind.TERM, ch.fasrv.fanotes.study.termDataJson(ch.fasrv.fanotes.study.defaultTermData()))
-    "study-key", "study-map", "study-plate" ->
-        work.copy(message = "Diesen Block legst du am Computer an. Auf dem Tablet siehst du ihn in der Notiz.")
+    "study-key" -> insertStudyTemplate(work, ch.fasrv.fanotes.study.StudyKind.KEY, ch.fasrv.fanotes.study.starterBlockJson(ch.fasrv.fanotes.study.StudyKind.KEY))
+    "study-map" -> insertStudyTemplate(work, ch.fasrv.fanotes.study.StudyKind.MAP, ch.fasrv.fanotes.study.starterBlockJson(ch.fasrv.fanotes.study.StudyKind.MAP))
+    "study-plate" -> insertStudyTemplate(work, ch.fasrv.fanotes.study.StudyKind.PLATE, ch.fasrv.fanotes.study.starterBlockJson(ch.fasrv.fanotes.study.StudyKind.PLATE))
+    in ch.fasrv.fanotes.study.crypto.CRYPTO_COMMANDS.keys -> insertStudyTemplate(
+        work,
+        ch.fasrv.fanotes.study.StudyKind.CRYPTO,
+        ch.fasrv.fanotes.study.starterBlockJson(ch.fasrv.fanotes.study.StudyKind.CRYPTO, ch.fasrv.fanotes.study.crypto.CRYPTO_COMMANDS[id]),
+    )
     "calendar" -> work.copy(destination = "calendar", message = null)
     "daily" -> openDaily(work, extras.today, extras)
     "daily-previous" -> openAdjacentDaily(work, extras, -1)

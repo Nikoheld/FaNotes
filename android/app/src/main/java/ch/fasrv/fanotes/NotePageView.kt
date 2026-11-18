@@ -1881,6 +1881,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             "quote" to "Zitat",
             "table" to "Tabelle",
         ).forEach { (action, label) -> tools.addView(chip(label) { format(action) }) }
+        tools.addView(chip("Lernblock", description = "Lernblock einfügen") { onToolbarAction("study-insert") })
         tools.addView(chip("↶", enabled = canUndo) { onUndo() })
         tools.addView(chip("↷", enabled = canRedo) { onRedo() })
     }

@@ -4328,46 +4328,103 @@ fun OverviewScreen(
     }
 }
 
+/** One card of the review queue: the note it comes from is empty for the open note's own cards. */
+private data class QueuedCard(val path: String?, val card: ch.fasrv.fanotes.desk.FlashCard) {
+    val key get() = "${path.orEmpty()}\u0000${card.id}"
+}
+
+/**
+ * Flashcards: the open note's cards or the whole deck (every note with `## Lernfragen`, definition cards and picture
+ * sheets), due cards first. The grade buttons are large so a finger or a pen hits them; swiping still works.
+ */
 @Composable
 fun CardsScreen(model: FaNotesViewModel) {
     val markdown by model.markdown.collectAsStateWithLifecycle()
+    val deck by model.deck.collectAsStateWithLifecycle()
+    val settings by model.deskSettings.collectAsStateWithLifecycle()
+    val openNote by model.open.collectAsStateWithLifecycle()
     val today = LocalDate.now().toString()
-    val cards = dueCards(model.cardsToday(), today).ifEmpty { model.cardsToday() }
-    var index by remember(markdown) { mutableStateOf(0) }
-    var showBack by remember(markdown, index) { mutableStateOf(false) }
-    val card = cards.getOrNull(index)
+    var wholeDeck by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
+    LaunchedEffect(wholeDeck) { if (wholeDeck) model.loadDeck() }
+    // Cards sent to the end of the queue by "Nochmal" in this session, so they do not come straight back.
+    val again = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val queue = remember(markdown, deck, wholeDeck, again.size) {
+        val all = if (wholeDeck) {
+            ch.fasrv.fanotes.study.deckDue(deck.cards, today).map { QueuedCard(it.path, it.card) }
+        } else {
+            val cards = model.cardsToday()
+            dueCards(cards, today).ifEmpty { cards }.map { QueuedCard(null, it) }
+        }
+        val (late, first) = all.partition { it.key in again }
+        first + late
+    }
+    var showBack by remember(queue.firstOrNull()?.key) { mutableStateOf(false) }
+    val current = queue.firstOrNull()
+    val provider = settings["ai-provider"].orEmpty().ifBlank { "lmstudio" }
+    val aiReady = settings["ai-$provider-model"].orEmpty().isNotBlank()
+    fun applyGrade(grade: String) {
+        val item = current ?: return
+        if (grade == "again") again += item.key else again.remove(item.key)
+        if (item.path == null) model.reviewFlashcard(item.card.id, grade)
+        else model.reviewDeckCard(ch.fasrv.fanotes.study.DeckCard(item.path, item.card), grade)
+        showBack = false
+    }
     Column(
-        Modifier.fillMaxSize().padding(24.dp).pointerInput(card?.id, showBack) {
+        Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp).pointerInput(current?.key, showBack) {
             detectDeskSwipe { direction ->
-                val current = card ?: return@detectDeskSwipe
+                if (current == null) return@detectDeskSwipe
                 when (ch.fasrv.fanotes.desk.cardSwipeAction(showBack, direction)) {
                     "reveal" -> showBack = true
-                    else -> {
-                        val grade = ch.fasrv.fanotes.desk.cardSwipeAction(true, direction)
-                        model.reviewFlashcard(current.id, grade)
-                        showBack = false
-                    }
+                    else -> applyGrade(ch.fasrv.fanotes.desk.cardSwipeAction(true, direction))
                 }
             }
         },
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Karteikarten", style = MaterialTheme.typography.titleLarge)
-        Text("Fragen stehen unter ## Lernfragen, der Plan in fanotes-cards-v1.", fontSize = 13.sp)
-        if (card == null) {
-            Text("In dieser Notiz sind keine Karten fällig.")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            StudyChoice("Alle Notizen", wholeDeck, { wholeDeck = true })
+            StudyChoice("Diese Notiz", !wholeDeck, { wholeDeck = false })
+            if (aiReady && openNote != null) ActionButton("Karten erstellen") { model.openAiFor("study") }
+        }
+        val summary = if (wholeDeck) {
+            val s = ch.fasrv.fanotes.study.deckSummary(deck.cards, today)
+            when {
+                deck.loading && !deck.loaded -> "Karten werden gesucht …"
+                else -> "${queue.size} fällig · ${s.total} Karten in ${s.notes} Notizen"
+            }
+        } else "${queue.size} Karten in dieser Notiz"
+        Text(ch.fasrv.fanotes.desk.ChromeText.ui(summary), fontSize = 13.sp)
+        Text("Fragen stehen unter ## Lernfragen, der Plan in fanotes-cards-v1. Definitionskarten und Bildtafeln zählen mit.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+        if (current == null) {
+            Text(if (wholeDeck && deck.loading) "Einen Moment …" else if (wholeDeck) "Alles gelernt: In keiner Notiz ist heute eine Karte fällig." else "In dieser Notiz sind keine Karten fällig.", modifier = Modifier.padding(vertical = 24.dp))
         } else {
+            val card = current.card
             val picture by androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, card.frontImage) {
                 value = card.frontImage?.let { model.readStudyBitmap(it) }?.asImageBitmap()
             }
-            Text(if (showBack) card.back.ifBlank { "Keine Antwort" } else card.front, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.clickable { showBack = !showBack }.padding(vertical = 24.dp))
-            picture?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) }
-            Row {
-                listOf("again" to "Nochmal", "hard" to "Schwer", "good" to "Gut", "easy" to "Leicht").forEach { (grade, label) ->
-                    TextButton(onClick = {
-                        model.reviewFlashcard(card.id, grade)
-                        showBack = false
-                    }) { Text(label) }
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                tonalElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(min = 220.dp).clickable { showBack = !showBack },
+            ) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.Center) {
+                    current.path?.let { Text(ch.fasrv.fanotes.study.deckNoteTitle(it), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)) }
+                    Text(if (showBack) card.back.ifBlank { "Keine Antwort" } else card.front, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(vertical = 12.dp))
+                    picture?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) }
+                    if (!showBack) Text("Antippen oder nach links wischen, um die Antwort zu zeigen.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                }
+            }
+            if (!showBack) {
+                androidx.compose.material3.Button(onClick = { showBack = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) { Text("Antwort zeigen", fontSize = 18.sp) }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf("again" to "Nochmal", "hard" to "Schwer", "good" to "Gut", "easy" to "Leicht").forEach { (grade, label) ->
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { applyGrade(grade) },
+                            modifier = Modifier.weight(1f).heightIn(min = 64.dp),
+                        ) { Text(label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
+                    }
                 }
             }
         }
@@ -6058,7 +6115,8 @@ fun AiScreen(model: FaNotesViewModel) {
     val models by model.aiModels.collectAsStateWithLifecycle()
     val provider = settings["ai-provider"].orEmpty().ifBlank { "lmstudio" }
     val definition = ch.fasrv.fanotes.desk.AI_PROVIDERS.firstOrNull { it.id == provider } ?: ch.fasrv.fanotes.desk.AI_PROVIDERS.first()
-    var actions by remember { mutableStateOf(setOf("spelling")) }
+    var actions by remember { mutableStateOf(model.aiPreset ?: setOf("spelling")) }
+    LaunchedEffect(Unit) { model.aiPreset = null }
     var instruction by remember { mutableStateOf("") }
     var pretty by remember { mutableStateOf(true) }
     val note by model.open.collectAsStateWithLifecycle()

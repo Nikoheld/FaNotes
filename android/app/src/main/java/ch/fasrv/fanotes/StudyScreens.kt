@@ -81,9 +81,16 @@ import ch.fasrv.fanotes.study.termDataJson
 import ch.fasrv.fanotes.study.unsortedCards
 import ch.fasrv.fanotes.study.addSortCards
 import ch.fasrv.fanotes.study.moveCard
+import ch.fasrv.fanotes.study.crypto.cryptoDataJson
+import ch.fasrv.fanotes.study.crypto.cryptoEditable
+import ch.fasrv.fanotes.study.keyDataJson
+import ch.fasrv.fanotes.study.keyEditable
+import ch.fasrv.fanotes.study.mapDataJson
+import ch.fasrv.fanotes.study.mapEditable
+import ch.fasrv.fanotes.study.plateDataJson
+import ch.fasrv.fanotes.study.plateEditable
 import kotlinx.coroutines.delay
 
-private fun ui(text: String) = ChromeText.ui(text)
 
 /** Sentences with numbers cannot come from the catalog; they follow the UI language here. */
 private fun counted(german: String, english: String) = if (ChromeText.language == "en") english else german
@@ -266,7 +273,7 @@ private fun TaskRow(model: FaNotesViewModel, task: StudyTask, seconds: Int, runn
 }
 
 @Composable
-private fun EditField(key: String, initial: String, label: String, modifier: Modifier, numeric: Boolean = false, onChange: (String) -> Unit) {
+internal fun EditField(key: String, initial: String, label: String, modifier: Modifier, numeric: Boolean = false, onChange: (String) -> Unit) {
     var value by remember(key) { mutableStateOf(initial) }
     OutlinedTextField(
         value = value,
@@ -319,7 +326,24 @@ private fun StudyMarksTab(model: FaNotesViewModel, onJump: (Int) -> Unit) {
 
 // -- study blocks -------------------------------------------------------------------------
 
-/** Editor for a tapped study block: the sorting board and definition cards are editable, the rest explain where to edit. */
+/** Holds the block's model in state that changes at once; every change is also written into the note. */
+@Composable
+private fun <T> Mirrored(initial: T, write: (T) -> Unit, content: @Composable (T, ((T) -> T) -> Unit) -> Unit) {
+    var local by remember { mutableStateOf(initial) }
+    content(local) { transform ->
+        val next = transform(local)
+        if (next != local) {
+            local = next
+            write(next)
+        }
+    }
+}
+
+/**
+ * Editor for a tapped study block. All six kinds can be edited here: sorting boards, definition cards, key tables and
+ * trees, concept maps, picture plates and the crypto tools. A block that cannot be read back without loss stays
+ * untouched and shows only the way to its source text.
+ */
 @Composable
 fun StudyBlockDialog(model: FaNotesViewModel) {
     val edit by model.studyEdit.collectAsStateWithLifecycle()
@@ -331,29 +355,42 @@ fun StudyBlockDialog(model: FaNotesViewModel) {
         model.message.value = "Deine Änderung wurde nicht gespeichert, weil sich die Notiz geändert hat. Öffne den Block neu."
         return
     }
+    // Reading the block is keyed by the kind and the block's place, not by its text: the editors keep their own live copy.
     val sort = if (ref.kind == StudyKind.SORT) remember(ref.body) { sortEditable(ref.body) } else null
     val terms = if (ref.kind == StudyKind.TERM) remember(ref.body) { termEditable(ref.body) } else null
+    val key = if (ref.kind == StudyKind.KEY) remember(target.kind, target.from) { keyEditable(ref.body) } else null
+    val map = if (ref.kind == StudyKind.MAP) remember(target.kind, target.from) { mapEditable(ref.body) } else null
+    val plate = if (ref.kind == StudyKind.PLATE) remember(target.kind, target.from) { plateEditable(ref.body) } else null
+    val crypto = if (ref.kind == StudyKind.CRYPTO) remember(target.kind, target.from) { cryptoEditable(ref.body) } else null
     val title = when (ref.kind) {
         StudyKind.SORT -> "Sortier-Board"
         StudyKind.TERM -> "Definitionskarten"
         StudyKind.KEY -> "Tabelle und Bestimmungsschlüssel"
         StudyKind.MAP -> "Begriffsnetz (Ursache und Wirkung)"
         StudyKind.PLATE -> "Bildtafel"
+        StudyKind.CRYPTO -> "Krypto-Werkzeug"
     }
+    val unreadable = "Dieser Block ist nicht lesbar oder zu groß für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."
+    val screenHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp
     AlertDialog(
         onDismissRequest = { model.closeStudyBlock() },
+        modifier = Modifier.fillMaxWidth(0.96f).widthIn(max = 920.dp),
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
         title = { Text(ui(title)) },
         text = {
-            Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.heightIn(max = (screenHeight * 0.68f).dp).verticalScroll(rememberScrollState())) {
                 when (ref.kind) {
-                    StudyKind.SORT -> if (sort != null) SortBoardEditor(sort) { model.writeStudyBlock(sortDataJson(it)) } else Text(ui("Dieser Block ist nicht lesbar oder zu groß für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."))
-                    StudyKind.TERM -> if (terms != null) TermEditor(terms) { model.writeStudyBlock(termDataJson(it)) } else Text(ui("Dieser Block ist nicht lesbar oder zu groß für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."))
-                    else -> Text(ui("Diesen Block bearbeitest du am Computer. Hier siehst du ihn in der Notiz; Änderungen vom Computer kommen per Sync."))
+                    StudyKind.SORT -> if (sort != null) SortBoardEditor(sort) { model.writeStudyBlock(sortDataJson(it)) } else Text(ui(unreadable))
+                    StudyKind.TERM -> if (terms != null) TermEditor(terms) { model.writeStudyBlock(termDataJson(it)) } else Text(ui(unreadable))
+                    StudyKind.KEY -> if (key != null) Mirrored(key, { model.writeStudyBlock(keyDataJson(it)) }) { data, update -> KeyEditor(model, data, update) } else Text(ui(unreadable))
+                    StudyKind.MAP -> if (map != null) Mirrored(map, { model.writeStudyBlock(mapDataJson(it)) }) { data, update -> MapEditor(data, update) } else Text(ui(unreadable))
+                    StudyKind.PLATE -> if (plate != null) Mirrored(plate, { model.writeStudyBlock(plateDataJson(it)) }) { data, update -> PlateEditor(model, data, update) } else Text(ui(unreadable))
+                    StudyKind.CRYPTO -> if (crypto != null) Mirrored(crypto, { model.writeStudyBlock(cryptoDataJson(it)) }) { data, update -> CryptoEditor(data) { next -> update { next } } } else Text(ui(unreadable))
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { model.closeStudyBlock() }) { Text(ui("Fertig")) } },
-        dismissButton = { TextButton(onClick = { model.showStudySource() }) { Text(ui("Quelltext zeigen")) } },
+        confirmButton = { ActionButton("Fertig") { model.closeStudyBlock() } },
+        dismissButton = { ActionButton("Quelltext zeigen") { model.showStudySource() } },
     )
 }
 
@@ -496,4 +533,31 @@ private fun TermEditor(data: TermData, onChange: (TermData) -> Unit) {
         enabled = data.terms.size < 30,
         onClick = { onChange(TermData(data.terms + TermEntry(newStudyId("t"), "", "", "", ""))) },
     ) { Text(ui("Begriff hinzufügen")) }
+}
+
+/** The insert menu for every study block (and the six crypto tools), as large buttons under the editor's top bar. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun StudyInsertMenu(model: FaNotesViewModel) {
+    var crypto by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().heightIn(max = 360.dp).verticalScroll(rememberScrollState()).padding(vertical = 4.dp)) {
+        Muted("Der Block kommt ans Ende der Notiz und bleibt reiner Text. Tippe ihn danach an, um ihn zu bearbeiten.")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                StudyKind.KEY to "Tabelle und Schlüssel",
+                StudyKind.SORT to "Sortier-Board",
+                StudyKind.MAP to "Begriffsnetz",
+                StudyKind.PLATE to "Bildtafel",
+                StudyKind.TERM to "Definitionskarten",
+            ).forEach { (kind, label) -> ActionButton(label) { model.insertStudyTemplate(kind) } }
+            StudyChoice("Krypto-Werkzeug …", crypto, { crypto = !crypto })
+        }
+        if (crypto) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                ch.fasrv.fanotes.study.crypto.CryptoTool.entries.forEach { tool ->
+                    ActionButton(tool.label) { model.insertStudyTemplate(StudyKind.CRYPTO, tool) }
+                }
+            }
+        }
+    }
 }

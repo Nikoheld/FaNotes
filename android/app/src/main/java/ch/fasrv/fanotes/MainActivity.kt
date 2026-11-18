@@ -3159,6 +3159,7 @@ private fun NotePage(
                                 "tags" -> "Tag hinzufügen"
                                 "search" -> "Im Text suchen …"
                                 "more" -> "Mehr"
+                                "study-insert" -> "Lernblock einfügen"
                                 else -> "Werkzeuge"
                             },
                         ),
@@ -3174,6 +3175,7 @@ private fun NotePage(
                     "pdf-thumbs" -> PdfThumbStrip(model)
                     "pdf-password" -> PdfPasswordPrompt(model)
                     "more" -> EditorMoreMenu(model, noteKind, backdrop, showRelations, onExportPdf, onDownload, onImportSheet)
+                    "study-insert" -> StudyInsertMenu(model)
                     else -> Unit
                 }
                 if (noteKind == NoteKind.PDF && editorMenu == "pdf-search") PdfQuoteMarks(model)

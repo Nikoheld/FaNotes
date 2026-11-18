@@ -7,7 +7,7 @@ import ch.fasrv.fanotes.json.JsonValue
  * then the closing fence). The note stays plain text. Ported from `lib/study/blocks.ts`.
  */
 enum class StudyKind(val id: String) {
-    KEY("key"), SORT("sort"), MAP("map"), PLATE("plate"), TERM("term");
+    KEY("key"), SORT("sort"), MAP("map"), PLATE("plate"), TERM("term"), CRYPTO("crypto");
 
     companion object {
         fun of(id: String): StudyKind? = entries.firstOrNull { it.id == id }
@@ -26,7 +26,7 @@ data class StudyBlockRef(
     val endLine: Int,
 )
 
-private val OPEN = Regex("""^( {0,3})(`{3,})fanotes-(key|sort|map|plate|term)[ \t]*$""")
+private val OPEN = Regex("""^( {0,3})(`{3,})fanotes-(key|sort|map|plate|term|crypto)[ \t]*$""")
 private val PLAIN_FENCE = Regex("""^ {0,3}(`{3,}|~{3,})""")
 
 /** All study blocks of a note, ignoring look-alikes inside other fences. */
