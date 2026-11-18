@@ -3466,7 +3466,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         if (open.value?.kind != NoteKind.PDF) return
         val marks = readPdfMarks(markdown.value)
         val next = addPdfMark(marks, page, quote, kind, nth)
-        if (next.size != marks.size) updateMarkdown(writePdfMarks(markdown.value, next))
+        if (next != marks) updateMarkdown(writePdfMarks(markdown.value, next))
     }
 
     /** Takes the highlight off character [ranges] of [page] (selection "Markierung entfernen", the eraser). */
