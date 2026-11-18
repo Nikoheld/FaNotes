@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -50,10 +52,14 @@ fun PanelResizeHandle(
     val commit = rememberUpdatedState(onCommit)
     var travelled by remember { mutableFloatStateOf(0f) }
     var base by remember { mutableFloatStateOf(0f) }
-    Box(modifier.width(visibleDp.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+    // Above its neighbours, so the grab area over the panel stays reachable whichever side the panel is on.
+    Box(modifier.zIndex(1f).width(visibleDp.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
         Box(Modifier.width(visibleDp.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)))
         Box(
             Modifier
+                // The grab area lies over the panel it resizes, never over the note: a pen stroke that
+                // starts at the note's edge must reach the canvas, not the handle.
+                .offset(x = ((if (growsRight) -1f else 1f) * (hitDp - visibleDp) / 2f).dp)
                 .requiredWidth(hitDp.dp)
                 .fillMaxHeight()
                 .semantics { contentDescription = description }
