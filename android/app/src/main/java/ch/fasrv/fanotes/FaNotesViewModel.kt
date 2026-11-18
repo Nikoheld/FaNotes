@@ -274,6 +274,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val vaultLabel = _vaultLabel.asStateFlow()
     val canvasToken = MutableStateFlow(0)
     val glyphSamples = MutableStateFlow<List<GlyphSample>>(emptyList())
+    /** Handwriting recognition, math solver and checker, the invisible transcript (RecognitionController). */
+    val recognition by lazy { RecognitionController(this, graph, viewModelScope) }
     val textHandOpen = MutableStateFlow(false)
     val handwritingLearning get() = graph.handwritingLearning.state
     fun setHandwritingLearning(enabled: Boolean) = graph.handwritingLearning.setEnabled(enabled)
@@ -1518,6 +1520,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                     graph.busyPaths = emptySet()
                     graph.engine.notifyLocalChange()
                     refreshTree()
+                    recognition.afterSave()
                     return
                 } catch (error: Exception) {
                     savePhase.value = "error"

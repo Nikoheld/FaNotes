@@ -8408,6 +8408,7 @@ private fun SettingsPage(
                             }
                         }
                     }
+                    RecognitionSettingsCard(model, settings, Modifier.settingsAnchor("drawing", "settings-recognition", anchorY))
                 }
                 "files" -> {
                     val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)

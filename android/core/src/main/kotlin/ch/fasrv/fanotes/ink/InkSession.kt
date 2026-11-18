@@ -435,6 +435,18 @@ class InkSession(document: InkDocument) {
         redo.clear()
     }
 
+    /**
+     * Replaces the invisible search transcript (model recognition after a save). Strokes, undo and
+     * redo stay as they are; returns false when nothing changed.
+     */
+    fun setSearchTranscript(transcript: String): Boolean {
+        if (document.extras.string("searchTranscript").orEmpty() == transcript) return false
+        val extras = document.extras.deepCopy() as JsonValue.Obj
+        extras.put("searchTranscript", jsonString(transcript))
+        document = document.copy(extras = extras)
+        return true
+    }
+
     /** Keeps an unreadable stroke, and does not repeat a line already stored. */
     private fun appendRecognizedTranscript(strokes: List<InkStroke>, recognized: String) {
         if (recognized.count { it.isLetterOrDigit() } < 2) return

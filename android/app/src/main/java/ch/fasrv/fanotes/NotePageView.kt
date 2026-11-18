@@ -2326,6 +2326,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         toolButton("redo", "redo-2", "Vor", false, "Wiederholen", enabled = canRedo) { onRedo() }
         toolButton("study", "graduation-cap", "Lernen", false, "Lernwerkzeuge") { setStudyOpen(true) }
         if (tool == InkTool.LASSO && ink.session?.selection?.isNotEmpty() == true) {
+            // Recognition of the selection (work package 4); the panel opens over the page.
+            listOf("ink-convert" to "Konvertieren", "ink-solve" to "Mathe-Löser", "ink-check" to "Mathe-Korrigierer").forEach { (action, label) ->
+                tools.addView(chip(label) { onToolbarAction(action) })
+            }
             listOf("move" to "Verschieben", "copy" to "Kopieren", "recolor" to "Färben", "delete" to "Löschen").forEach { (action, label) ->
                 tools.addView(chip(label) {
                     val session = ink.session ?: return@chip

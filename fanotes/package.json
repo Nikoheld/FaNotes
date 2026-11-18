@@ -106,6 +106,7 @@
     "check:letter-holdout": "node scripts/check-letter-holdout.mjs",
     "check:glyphenwerk-input": "node scripts/check-drawing-canvas-input.mjs",
     "check:math-solver": "node scripts/check-math-solver.mjs",
+    "check:android-recognition-host": "node scripts/check-android-recognition-host.mjs",
     "check:math-corrector": "node scripts/check-math-corrector.mjs",
     "check:enhanced-math": "node scripts/check-enhanced-math.cjs",
     "check:efficiency": "node scripts/check-efficiency.mjs",

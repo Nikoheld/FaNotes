@@ -12,3 +12,5 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+# ONNX Runtime (handwriting recognition) creates tensors, sessions and exceptions from native code through JNI.
+-keep class ai.onnxruntime.** { *; }

@@ -1407,28 +1407,8 @@ fun FaNotesScreen(
         if (model.pendingExport.value == export) model.pendingExport.value = null
     }
     if (glyphOpen) {
-        PromptCard(
-            "GlyphenWerk",
-            onDismiss = { model.glyphenWerkOpen.value = false },
-            confirmLabel = ch.fasrv.fanotes.desk.ChromeText.ui("Importieren"),
-            dismissLabel = ch.fasrv.fanotes.desk.ChromeText.ui("Schließen"),
-            onConfirm = { model.requestGlyphImport() },
-        ) {
-            val labels = glyphSamples.map { it.label }.distinct()
-            Text(
-                ch.fasrv.fanotes.desk.ChromeText.ui("Eigene Glyphen trainieren und in die Handschrift übernehmen."),
-                fontSize = 12.sp,
-                color = LocalStatusInk.current.muted,
-                lineHeight = 17.sp,
-            )
-            if (labels.isEmpty()) {
-                Text(ch.fasrv.fanotes.desk.ChromeText.ui("Noch keine Glyphen."), fontSize = 13.sp)
-            } else {
-                labels.forEach { label ->
-                    Text(ch.fasrv.fanotes.desk.presentNoteText(label), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
+        // GlyphenWerk on the tablet: write labelled characters with the pen (import stays available inside).
+        GlyphenWerkScreen(model, onDismiss = { model.glyphenWerkOpen.value = false })
     }
     if (addonOpen) {
         PromptCard(
@@ -3227,6 +3207,7 @@ private fun NotePage(
             }
         }
         StudyBlockDialog(model)
+        if (path != null && noteKind != NoteKind.PDF) RecognitionOverlays(model, Modifier.align(Alignment.BottomEnd))
         if (showGoto) {
             GotoLineDialog { input ->
                 model.closeGotoLine()
@@ -3254,6 +3235,9 @@ private fun EditorMoreMenu(
         TextButton(onClick = { model.open.value?.path?.let { model.shares.openDialog(it) } }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Link teilen") }
         TextButton(onClick = { model.performDesktopCommand("text-field") }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Textfeld einfügen")) }
         TextButton(onClick = { model.performDesktopCommand("export-latex") }) { Text(ch.fasrv.fanotes.desk.ChromeText.ui("Notiz als LaTeX-Code exportieren")) }
+        if (noteKind != NoteKind.PDF) {
+            TextButton(onClick = { model.recognition.startConversion(selectionOnly = false) }) { Text(ch.fasrv.fanotes.recognition.recognitionUi("Konvertieren")) }
+        }
         TextButton(onClick = { model.performDesktopCommand("glyphenwerk") }) { Text("GlyphenWerk öffnen") }
         TextButton(onClick = { model.performDesktopCommand("addon-store") }) { Text("Add-on-Store") }
         TextButton(onClick = { model.performDesktopCommand("onenote-import") }) { Text("Microsoft OneNote importieren") }
@@ -3426,6 +3410,9 @@ private fun PageSurface(
                         "pdf-prev" -> model.goToPdfPage(model.pdfThumbPage.value - 1)
                         "pdf-next" -> model.goToPdfPage(model.pdfThumbPage.value + 1)
                         "study-timer-stop" -> model.stopStudyTimer()
+                        "ink-convert" -> model.recognition.startConversion(selectionOnly = true)
+                        "ink-solve" -> model.recognition.startSolver()
+                        "ink-check" -> model.recognition.startCheck()
                         "tags", "search", "more", "pdf-search", "pdf-thumbs", "pdf-password" -> model.openEditorMenu(action)
                         else -> model.openEditorMenu(action)
                     }

@@ -122,6 +122,10 @@ class AppGraph(context: Context) {
     val shares by lazy { ShareService(appContext, this) }
     val reminders by lazy { ReminderScheduler(appContext, this) }
 
+    /** Handwriting recognition (work package 4): the on-demand ink model and the desktop recognizers. */
+    val inkModels by lazy { InkModelStore(appContext, scope).also { it.refresh() } }
+    val inkRecognizer by lazy { WebInkRecognizer(appContext, inkModels, OnnxInkModel { inkModels.modelFile() }) }
+
     private fun touchesReminderFiles(paths: Collection<String>) = paths.any {
         it.startsWith("Kalender.") || it.startsWith("Hausaufgaben.")
     }
