@@ -724,6 +724,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
     private val noteRemove = TextView(context)
+    private val noteBar = NoteTextFieldBar(context)
     private var requestedNoteFieldId: String? = null
     private var openNoteFieldId: String? = null
     private var acceptedNoteText = ""
@@ -905,6 +906,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     var onNoteTextFieldText: (String, String) -> Unit = { _, _ -> }
     var onNoteTextFieldRemove: (String) -> Unit = {}
     var onNoteTextFieldClosed: () -> Unit = {}
+    /** Box id, font size, whether to set the colour, colour (null: default ink), bold. */
+    var onNoteTextFieldStyle: (String, Int?, Boolean, String?, Boolean?) -> Unit = { _, _, _, _, _ -> }
     var onUnfoldHeading: (Int) -> Unit = {}
     var onToggleHeading: (Int) -> Unit = {}
     var onEditorFold: (String, Int) -> Unit = { _, _ -> }
@@ -1260,7 +1263,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         noteField.setOnFocusChangeListener { _, focused ->
             if (focused || suppressNoteClose || requestedNoteFieldId == null) return@setOnFocusChangeListener
             noteField.post {
-                if (suppressNoteClose || requestedNoteFieldId == null || noteRemovePressed) return@post
+                if (suppressNoteClose || requestedNoteFieldId == null || noteRemovePressed || noteBar.pressed) return@post
                 onNoteTextFieldClosed()
             }
         }
@@ -1289,6 +1292,22 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         addView(noteField, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
         addView(noteRemove, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        noteBar.visibility = GONE
+        noteBar.onStyle = { fontSize, setColor, color, bold ->
+            requestedNoteFieldId?.let { id -> onNoteTextFieldStyle(id, fontSize, setColor, color, bold) }
+        }
+        noteBar.onRemove = { requestedNoteFieldId?.let { id -> onNoteTextFieldRemove(id) } }
+        addView(noteBar, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        noteField.setOnKeyListener { _, keyCode, event ->
+            // Strg+B toggles bold for the whole box, as on the desktop.
+            if (keyCode != KeyEvent.KEYCODE_B || !event.isCtrlPressed || event.isAltPressed || event.isShiftPressed) return@setOnKeyListener false
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                val id = requestedNoteFieldId
+                val field = ink.noteTextFields.firstOrNull { it.id == id }
+                if (id != null && field != null) onNoteTextFieldStyle(id, null, false, null, !field.bold)
+            }
+            true
+        }
         editor.setOnScrollChangeListener { _, _, scrollY, _, _ ->
             lineNumbers.scrollTo(0, scrollY)
             foldMarks.scrollTo(0, scrollY)
@@ -2345,6 +2364,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.addView(chip("Nächste Seite") { onToolbarAction("pdf-next") })
         tools.addView(chip("Im PDF suchen") { onToolbarAction("pdf-search") })
         tools.addView(chip("Seiten") { onToolbarAction("pdf-thumbs") })
+        tools.addView(chip("Gliederung", description = "PDF-Gliederung") { onToolbarAction("pdf-outline") })
+        tools.addView(seg("Text markieren", ink.pdfText.armed) {
+            ink.pdfText.arm(!ink.pdfText.armed)
+            rebuildTools(builtTool, builtStyle, builtPaper, builtFinger, builtUndo, builtRedo)
+        })
         tools.addView(chip("Aufträge") { onToolbarAction("study-tasks") })
         studyTimerChip?.let { tools.addView(timerChip(it)) }
         tools.addView(chip("Markierungen") { onToolbarAction("study-marks") })
@@ -2960,7 +2984,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             acceptedNoteText = text
             noteField.hint = ch.fasrv.fanotes.desk.ChromeText.ui("Text eingeben …")
             noteField.visibility = VISIBLE
-            noteRemove.visibility = VISIBLE
+            noteBar.visibility = VISIBLE
             noteField.requestFocusFromTouch()
             val imm = context.getSystemService(InputMethodManager::class.java)
             imm?.showSoftInput(noteField, InputMethodManager.SHOW_IMPLICIT)
@@ -2977,9 +3001,22 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val right = (rect.left + rect.width).toInt().coerceAtLeast(left + 1)
         val bottom = (rect.top + rect.height).toInt().coerceAtLeast(top + 1)
         pinToSheet(noteField, left, top, right, bottom)
-        val size = dp(22).coerceAtLeast(1)
-        pinToSheet(noteRemove, right - size / 2, top - size / 2, right + size / 2, top + size / 2)
+        if (field != null) placeNoteTextFieldBar(field, left, top, bottom)
         ink.invalidate()
+    }
+
+    /** The style bar above the open field, or below it when the toolbar is in the way; kept on screen. */
+    private fun placeNoteTextFieldBar(field: ch.fasrv.fanotes.desk.NoteTextField, left: Int, top: Int, bottom: Int) {
+        noteBar.bind(field)
+        noteBar.measure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+        val barWidth = noteBar.measuredWidth
+        val barHeight = noteBar.measuredHeight
+        val margin = dp(8)
+        val ceiling = if (toolbar.visibility == VISIBLE) toolbar.bottom + margin else margin
+        val above = top - margin - barHeight
+        val y = if (above >= ceiling) above else (bottom + margin).coerceAtMost(height - barHeight - margin)
+        val x = left.coerceIn(margin, (width - barWidth - margin).coerceAtLeast(margin))
+        noteBar.layout(x, y, x + barWidth, y + barHeight)
     }
 
     private fun dismissNoteTextField() {
@@ -2989,6 +3026,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         suppressNoteClose = true
         noteField.visibility = GONE
         noteRemove.visibility = GONE
+        noteBar.visibility = GONE
         openNoteFieldId = null
         if (noteField.hasFocus()) noteField.clearFocus()
         val imm = context.getSystemService(InputMethodManager::class.java)
