@@ -18,7 +18,7 @@
         android:theme="@style/Theme.FaNotes">
         <activity
             android:name=".MainActivity"
-            android:configChanges="keyboard|keyboardHidden"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden"
             android:exported="true"
             android:screenOrientation="fullUser"
             android:windowSoftInputMode="adjustResize">
