@@ -264,6 +264,34 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleOpenIntent(intent)
+        handleSharedImport(intent)
+    }
+
+    /**
+     * Files [ShareIntakeActivity] copied in from another app. Only copies inside the app's own `incoming` cache folder
+     * are read: this activity is exported, and an outside app must not make it import the app's private files.
+     */
+    private fun handleSharedImport(intent: Intent?) {
+        if (intent?.action != ShareIntakeActivity.ACTION_IMPORT) return
+        val paths = intent.getStringArrayListExtra(ShareIntakeActivity.EXTRA_PATHS).orEmpty()
+        val names = intent.getStringArrayListExtra(ShareIntakeActivity.EXTRA_NAMES).orEmpty()
+        val mimes = intent.getStringArrayListExtra(ShareIntakeActivity.EXTRA_MIMES).orEmpty()
+        val text = intent.getStringExtra(ShareIntakeActivity.EXTRA_TEXT)
+        val subject = intent.getStringExtra(ShareIntakeActivity.EXTRA_SUBJECT)
+        intent.action = null
+        intent.replaceExtras(Bundle())
+        val inbox = java.io.File(cacheDir, ShareIntakeActivity.INCOMING_DIR).canonicalFile
+        Thread({
+            val files = paths.mapIndexed { index, path ->
+                val file = path.takeIf { it.isNotEmpty() }?.let { java.io.File(it).canonicalFile }
+                val bytes = if (file != null && file.parentFile == inbox && file.isFile) runCatching { file.readBytes() }.getOrNull() else null
+                file?.takeIf { it.parentFile == inbox }?.delete()
+                FaNotesViewModel.IncomingFile(names.getOrNull(index), mimes.getOrNull(index), bytes)
+            }
+            // Copies left by an interrupted share are not kept.
+            inbox.listFiles()?.forEach { if (System.currentTimeMillis() - it.lastModified() > 24L * 60 * 60 * 1000) it.delete() }
+            runOnUiThread { model.importIncoming(files, text?.let { subject to it }) }
+        }, "fanotes-share-import").start()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -280,6 +308,7 @@ class MainActivity : ComponentActivity() {
         }
         // The notification permission (Android 13+) is asked for where it is needed: Settings -> Bedienung -> Erinnerungen.
         handleOpenIntent(intent)
+        if (savedInstanceState == null) handleSharedImport(intent)
         setContent {
             LaunchedEffect(model) {
                 model.glyphImports.collect {
@@ -3174,6 +3203,7 @@ private fun NotePage(
                                 "search" -> "Im Text suchen …"
                                 "more" -> "Mehr"
                                 "study-insert" -> "Lernblock einfügen"
+                                "pdf-outline" -> "Gliederung"
                                 else -> "Werkzeuge"
                             },
                         ),
@@ -3187,6 +3217,7 @@ private fun NotePage(
                     "search" -> if (noteKind == NoteKind.PDF) PdfSearchBar(model) else NoteSearchBar(model)
                     "pdf-search" -> PdfSearchBar(model)
                     "pdf-thumbs" -> PdfThumbStrip(model)
+                    "pdf-outline" -> PdfOutlinePanel(model)
                     "pdf-password" -> PdfPasswordPrompt(model)
                     "more" -> EditorMoreMenu(model, noteKind, backdrop, showRelations, onExportPdf, onDownload, onImportSheet)
                     "study-insert" -> StudyInsertMenu(model)
@@ -3290,6 +3321,7 @@ private fun PageSurface(
     val worksheetTextRequest by model.worksheetTextRequest.collectAsStateWithLifecycle()
     val noteFields by model.noteTextFields.collectAsStateWithLifecycle()
     val noteFieldFocus by model.noteTextFieldFocus.collectAsStateWithLifecycle()
+    val pdfMarks = remember(markdown) { ch.fasrv.fanotes.desk.readPdfMarks(markdown) }
     val studyItems by model.studyAnnotations.collectAsStateWithLifecycle()
     val studyHistory by model.studyHistory.collectAsStateWithLifecycle()
     val studyPageRef = remember { arrayOfNulls<NotePageView>(1) }
@@ -3515,6 +3547,20 @@ private fun PageSurface(
             page.onNoteTextFieldText = { id, text -> model.updateNoteTextFieldText(id, text) }
             page.onNoteTextFieldRemove = { model.removeNoteTextField(it) }
             page.onNoteTextFieldClosed = { model.focusNoteTextField(null) }
+            page.onNoteTextFieldStyle = { id, size, setColor, color, bold -> model.styleNoteTextField(id, size, setColor, color, bold) }
+            page.ink.onToggleNoteTextTask = { id, line -> model.toggleNoteTextFieldTask(id, line) }
+            page.ink.onOpenNoteTextLink = { href -> openFollowedLink(page.context, model, href, true) }
+            page.ink.noteTextFontSize = model.noteTextFieldFontSize()
+            val pdfPath = path?.takeIf { model.open.value?.kind == NoteKind.PDF && model.open.value?.path == it }
+            page.ink.pdfText.setDocument(pdfPath, model.pdfTextPassword()) { pdfPath?.let(model::pdfBytesForText) }
+            page.ink.pdfText.marks = if (pdfPath != null) pdfMarks else emptyList()
+            page.ink.pdfText.onMark = { pageNumber, quote, kind, nth -> model.markPdfText(pageNumber, quote, kind, nth) }
+            page.ink.pdfText.onUnmark = { pageNumber, pageText, ranges -> model.unmarkPdfText(pageNumber, pageText, ranges) }
+            page.ink.pdfText.onNotice = { inkNotice = ch.fasrv.fanotes.ink.InkNotice("info", it) }
+            page.ink.pdfText.onCopy = { copied ->
+                val clipboard = page.context.getSystemService(ClipboardManager::class.java)
+                clipboard?.setPrimaryClip(ClipData.newPlainText("PDF", copied))
+            }
             page.ink.onOpenLink = { model.openPath(it); model.showDestination("notes") }
             page.ink.onRemoveLink = { model.askRemoveNoteLink(it) }
             page.onRestyleLink = { id, linkStyle -> model.restylePlacedNoteLink(id, linkStyle) }

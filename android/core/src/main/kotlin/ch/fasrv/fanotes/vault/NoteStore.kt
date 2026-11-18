@@ -205,7 +205,18 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         )
     }
 
-    fun save(note: OpenNote, document: InkDocument, markdown: String, now: String = isoNow()): OpenNote {
+    /**
+     * [textFieldBase] is the list of text boxes as this device last read or saved them. When given and the file on
+     * disk holds other boxes (another device or the desktop wrote it meanwhile), the boxes are merged box by box
+     * instead of overwritten, the way the desktop merges its windows.
+     */
+    fun save(
+        note: OpenNote,
+        document: InkDocument,
+        markdown: String,
+        now: String = isoNow(),
+        textFieldBase: List<ch.fasrv.fanotes.desk.NoteTextField>? = null,
+    ): OpenNote {
         val withMarker = attachNoteInk(markdown, note.inkId)
         val ink = document.copy(title = note.title, updatedAt = now).toJson()
         val payload = (note.payload.deepCopy() as JsonValue.Obj).also { obj ->
@@ -234,6 +245,7 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
             runCatching { recordNoteHistory(io, historyPath, previous.orEmpty(), companion = historyCompanion) }
         }
         val previousFamd = if (historyPath == famdPath) previous else io.read(famdPath)?.decodeToString()
+        if (textFieldBase != null && previousFamd != null) mergeTextFieldsFromDisk(payload, previousFamd, textFieldBase, now)
         io.write(famdPath, serializeFamd(withMarker, payload, famdEncodingForSave(previousFamd)).encodeToByteArray())
         if (note.kind == NoteKind.MARKDOWN && !note.path.endsWith(FAMD_EXTENSION)) {
             val body = stripFamdPayload(withMarker)
@@ -243,6 +255,22 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         writeInkAsset(note.inkId, ink)
         onSaved(famdPath)
         return note.copy(markdown = withMarker, document = document.copy(updatedAt = now), payload = payload, worksheets = worksheetIdsFromMarkdown(withMarker))
+    }
+
+    private fun mergeTextFieldsFromDisk(payload: JsonValue.Obj, previousFamd: String, base: List<ch.fasrv.fanotes.desk.NoteTextField>, now: String) {
+        val disk = runCatching { parseFamd(previousFamd).payload }.getOrNull() ?: return
+        val nowMs = runCatching { java.time.Instant.parse(now).toEpochMilli() }.getOrElse { System.currentTimeMillis() }
+        val merged = ch.fasrv.fanotes.desk.noteTextFieldsForSave(
+            base = base,
+            local = ch.fasrv.fanotes.desk.parseNoteTextFields(payload.array("textFields")),
+            localTombstones = ch.fasrv.fanotes.desk.parseNoteTextFieldTombstones(payload.array("textFieldTombstones")),
+            disk = ch.fasrv.fanotes.desk.parseNoteTextFields(disk.array("textFields")),
+            diskTombstones = ch.fasrv.fanotes.desk.parseNoteTextFieldTombstones(disk.array("textFieldTombstones")),
+            now = nowMs,
+        )
+        val written = ch.fasrv.fanotes.desk.writeNoteTextFieldsAndTombstones(payload, merged.fields, merged.tombstones)
+        payload.put("textFields", written.fields["textFields"])
+        payload.put("textFieldTombstones", written.fields["textFieldTombstones"])
     }
 
     fun createMarkdown(directory: String, title: String, now: String = isoNow(), paper: String = "dots"): String {
@@ -255,6 +283,21 @@ class NoteStore(private val io: VaultIo, private val onSaved: (String) -> Unit =
         val body = "# $name\n\n"
         val document = newInkDocument(name, paper, now)
         val note = OpenNote(path, NoteKind.MARKDOWN, name, body, document, emptyFamdPayload(now), emptyList(), UUID.randomUUID().toString())
+        save(note, document, body, now)
+        return path
+    }
+
+    /**
+     * A Markdown note with the given text, from a file another app shared. The name is numbered when taken; a
+     * FaNotes payload inside the text is not carried over (the note starts without ink).
+     */
+    fun importMarkdownNote(directory: String, fileName: String, text: String, now: String = isoNow(), paper: String = "dots"): String {
+        val folder = directory.trim('/')
+        val stem = nextFreeLeaf(folder, safeNoteName(fileName.substringBeforeLast('.').ifBlank { "Geteilte Notiz" }), ".md")
+        val path = if (folder.isEmpty()) "$stem.md" else "$folder/$stem.md"
+        val body = stripFamdPayload(text).let { if (it.isBlank()) "# $stem\n\n" else it }
+        val document = newInkDocument(stem, paper, now)
+        val note = OpenNote(path, NoteKind.MARKDOWN, stem, body, document, emptyFamdPayload(now), emptyList(), UUID.randomUUID().toString())
         save(note, document, body, now)
         return path
     }

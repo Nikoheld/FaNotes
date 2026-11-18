@@ -519,6 +519,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                 if (!force) saveNow()
                 val note = withContext(Dispatchers.IO) { graph.store.readNote(path) }
                 if (generation != openGeneration) return@launch
+                noteTextFieldBase = path to ch.fasrv.fanotes.desk.parseNoteTextFields(note.payload.array("textFields"))
                 session.replace(note.document)
                 open.value = noteOpened(note)
                 markdown.value = note.markdown
@@ -1503,11 +1504,13 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                         boxes.groupBy { it.worksheetId }.forEach { (id, group) ->
                             if (id.isNotEmpty() && group.isNotEmpty()) writeMovedBoxes(id, group.map { it.box })
                         }
-                        val written = graph.store.save(note, document, text)
+                        val base = noteTextFieldBase?.takeIf { it.first == note.path }?.second
+                        val written = graph.store.save(note, document, text, textFieldBase = base)
                         written to listNoteHistory(graph.vault, historyPathFor(written))
                     }
                     if (revision != editRevision) continue
                     open.value = saved.first
+                    adoptSavedTextFields(saved.first)
                     noteHistory.value = saved.second
                     dirty = false
                     unsaved.value = false
@@ -2904,6 +2907,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         backdropJob = null
         backdrop.value.forEach { it.bitmap?.recycle() }
         backdrop.value = emptyList()
+        refreshPdfOutline(note)
         if (note.kind == NoteKind.PDF) {
             loadPdfBackdrop(note, generation)
             return
@@ -3405,12 +3409,183 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
 
     fun removeNoteTextField(id: String) {
         val source = open.value ?: return
-        val next = ch.fasrv.fanotes.desk.removeNoteTextField(noteTextFields.value, id)
-        if (next.size == noteTextFields.value.size) return
-        open.value = source.copy(payload = ch.fasrv.fanotes.desk.writeNoteTextFields(source.payload, next))
+        if (noteTextFields.value.none { it.id == id }) return
+        // A tombstone keeps a desktop window or device that still has the box from bringing it back.
+        val (payload, next) = ch.fasrv.fanotes.desk.deleteNoteTextFieldInPayload(
+            ch.fasrv.fanotes.desk.writeNoteTextFields(source.payload, noteTextFields.value),
+            noteTextFields.value,
+            id,
+        )
+        open.value = source.copy(payload = payload)
         noteTextFields.value = next
         if (noteTextFieldFocus.value == id) noteTextFieldFocus.value = null
         noteChanged()
+    }
+
+    // ---- WP3: text-box styles, PDF text marks, outline, files shared in ----------------------------------------
+
+    /** Boxes of the open note as last read from or saved to disk; the base of the per-box merge on save. */
+    private var noteTextFieldBase: Pair<String, List<ch.fasrv.fanotes.desk.NoteTextField>>? = null
+
+    private val textFieldPrefs by lazy {
+        getApplication<Application>().getSharedPreferences("fanotes-text-fields", android.content.Context.MODE_PRIVATE)
+    }
+
+    /** Font size a new text field starts with: the size last chosen on this device (desktop `readLastNoteTextFieldFontSize`). */
+    fun noteTextFieldFontSize(): Int =
+        ch.fasrv.fanotes.desk.noteTextFieldFontSizeOrNull(textFieldPrefs.getInt("font-size", ch.fasrv.fanotes.desk.NOTE_TEXT_FIELD_FONT))
+            ?: ch.fasrv.fanotes.desk.NOTE_TEXT_FIELD_FONT
+
+    /** Toolbar of the open box: size, colour (null: default ink when [setColor]), bold. */
+    fun styleNoteTextField(id: String, fontSize: Int?, setColor: Boolean, color: String?, bold: Boolean?) {
+        val source = open.value ?: return
+        val next = ch.fasrv.fanotes.desk.restyleNoteTextField(noteTextFields.value, id, fontSize, setColor, color, bold)
+        if (next === noteTextFields.value) return
+        ch.fasrv.fanotes.desk.noteTextFieldFontSizeOrNull(fontSize)?.let { textFieldPrefs.edit().putInt("font-size", it).apply() }
+        open.value = source.copy(payload = ch.fasrv.fanotes.desk.writeNoteTextFields(source.payload, next))
+        noteTextFields.value = next
+        noteChanged()
+    }
+
+    /** A tick on a rendered task of a box writes back to its Markdown. */
+    fun toggleNoteTextFieldTask(id: String, line: Int) {
+        val field = noteTextFields.value.firstOrNull { it.id == id } ?: return
+        val text = ch.fasrv.fanotes.desk.toggleNoteTextTask(field.text, line)
+        if (text != field.text) updateNoteTextFieldText(id, text)
+    }
+
+    /** After a save that merged boxes from disk, the open note shows the merged list. */
+    private fun adoptSavedTextFields(saved: OpenNote) {
+        val fields = ch.fasrv.fanotes.desk.parseNoteTextFields(saved.payload.array("textFields"))
+        noteTextFieldBase = saved.path to fields
+        if (fields != noteTextFields.value) noteTextFields.value = fields
+    }
+
+    /** Desktop "Auswahl markieren" from an on-page selection; [nth] pins one occurrence of the quote. */
+    fun markPdfText(page: Int, quote: String, kind: String, nth: Int?) {
+        if (open.value?.kind != NoteKind.PDF) return
+        val marks = readPdfMarks(markdown.value)
+        val next = addPdfMark(marks, page, quote, kind, nth)
+        if (next.size != marks.size) updateMarkdown(writePdfMarks(markdown.value, next))
+    }
+
+    /** Takes the highlight off character [ranges] of [page] (selection "Markierung entfernen", the eraser). */
+    fun unmarkPdfText(page: Int, pageText: String, ranges: List<IntRange>) {
+        if (open.value?.kind != NoteKind.PDF) return
+        val before = readPdfMarks(markdown.value)
+        var marks = before
+        for (range in ranges) marks = ch.fasrv.fanotes.desk.unmarkPdfRange(marks, page, pageText, range.first, range.last + 1)
+        if (marks !== before) updateMarkdown(writePdfMarks(markdown.value, marks))
+    }
+
+    /** The PDF for the on-page text layer; called off the main thread. */
+    fun pdfBytesForText(path: String): ByteArray? = runCatching { graph.vault.read(path) }.getOrNull()
+
+    fun pdfTextPassword(): String = pdfPassword
+
+    /** Outline ("Gliederung") of the open PDF note; empty when it has none. */
+    val pdfOutline = MutableStateFlow<List<ch.fasrv.fanotes.desk.PdfOutlineItem>>(emptyList())
+    private var pdfOutlineJob: kotlinx.coroutines.Job? = null
+
+    private fun refreshPdfOutline(note: OpenNote) {
+        pdfOutlineJob?.cancel()
+        if (note.kind != NoteKind.PDF) {
+            pdfOutline.value = emptyList()
+            pdfOutlineFor = null
+            return
+        }
+        if (pdfOutlineFor == note.path) return
+        pdfOutline.value = emptyList()
+        pdfOutlineFor = null
+        pdfOutlineJob = viewModelScope.launch {
+            val items = withContext(Dispatchers.Default) {
+                graph.vault.read(note.path)?.let { ch.fasrv.fanotes.desk.readPdfOutline(it) }.orEmpty()
+            }
+            if (open.value?.path == note.path) {
+                pdfOutline.value = items
+                pdfOutlineFor = note.path
+            }
+        }
+    }
+
+    private var pdfOutlineFor: String? = null
+
+    /** A file another app shared or opened with FaNotes; null [bytes] means it was too large to take. */
+    class IncomingFile(val name: String?, val mime: String?, val bytes: ByteArray?)
+
+    /**
+     * Files and text shared in ("Teilen", "Öffnen mit"): each becomes a note in the default folder, the way the desktop
+     * imports PDFs, worksheets and Markdown files. The last one is opened.
+     */
+    fun importIncoming(files: List<IncomingFile>, sharedText: Pair<String?, String>? = null) {
+        if (files.isEmpty() && sharedText == null) return
+        viewModelScope.launch {
+            val folder = ch.fasrv.fanotes.desk.pdfNoteImportParent(null, defaultCreateFolder())
+            val paper = ch.fasrv.fanotes.desk.penSettings(deskSettings.value).paper
+            var imported = 0
+            var skipped = 0
+            var tooLarge = 0
+            var last: String? = null
+            for ((index, file) in files.take(ch.fasrv.fanotes.vault.INCOMING_MAX_FILES).withIndex()) {
+                val bytes = file.bytes
+                if (bytes == null) {
+                    tooLarge += 1
+                    continue
+                }
+                val kind = ch.fasrv.fanotes.vault.incomingKind(file.name, file.mime)
+                val name = ch.fasrv.fanotes.vault.incomingFileName(file.name, file.mime, kind, index)
+                val path = try {
+                    withContext(Dispatchers.IO) {
+                        when (kind) {
+                            ch.fasrv.fanotes.vault.IncomingKind.PDF -> graph.store.importUniquePdf(folder, name, bytes)
+                            ch.fasrv.fanotes.vault.IncomingKind.IMAGE -> importSharedImage(folder, name, bytes, file.mime.orEmpty(), paper)
+                            ch.fasrv.fanotes.vault.IncomingKind.MARKDOWN ->
+                                graph.store.importMarkdownNote(folder, name, ch.fasrv.fanotes.vault.incomingMarkdownText(bytes), paper = paper)
+                            ch.fasrv.fanotes.vault.IncomingKind.UNSUPPORTED -> null
+                        }
+                    }
+                } catch (_: Exception) {
+                    null
+                }
+                if (path == null) skipped += 1 else {
+                    imported += 1
+                    last = path
+                }
+            }
+            if (sharedText != null && sharedText.second.isNotBlank()) {
+                val (title, body) = ch.fasrv.fanotes.vault.sharedTextNote(sharedText.first, sharedText.second)
+                val path = runCatching {
+                    withContext(Dispatchers.IO) { graph.store.importMarkdownNote(folder, "$title.md", body, paper = paper) }
+                }.getOrNull()
+                if (path != null) {
+                    imported += 1
+                    last = path
+                }
+            }
+            if (imported > 0) {
+                openCreatedFolder(folder)
+                refreshTree()
+                last?.let { openPath(it, force = true) }
+                showDestination("notes")
+                graph.engine.notifyLocalChange()
+            }
+            message.value = ch.fasrv.fanotes.vault.incomingSummary(imported, skipped, tooLarge)
+        }
+    }
+
+    /** A shared photo becomes a note with it as a worksheet; the name is numbered when taken. */
+    private fun importSharedImage(folder: String, name: String, bytes: ByteArray, mime: String, paper: String): String {
+        val stem = name.substringBeforeLast('.')
+        val extension = name.substringAfterLast('.', "jpg")
+        for (attempt in 1..50) {
+            val candidate = if (attempt == 1) name else "$stem $attempt.$extension"
+            try {
+                return graph.store.importWorksheetNote(folder, candidate, bytes, mime, paper)
+            } catch (_: IllegalStateException) {
+                // Taken: try the next number.
+            }
+        }
+        throw IllegalStateException("No free name for $name")
     }
 
     private fun loadStudyAnnotations(note: ch.fasrv.fanotes.vault.OpenNote?) {

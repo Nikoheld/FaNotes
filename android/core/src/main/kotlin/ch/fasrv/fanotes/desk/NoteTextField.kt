@@ -54,8 +54,16 @@ fun newNoteTextFieldId(): String {
     return "tf-${System.currentTimeMillis().toString(36)}-$suffix"
 }
 
-/** Click point becomes the top-left of a new empty field, kept on the page. */
-fun placeNoteTextField(point: NoteLinkPoint, id: String? = null, now: Long = System.currentTimeMillis()): NoteTextField {
+/**
+ * Click point becomes the top-left of a new empty field, kept on the page. [fontSize] is the size the owner last
+ * chose on this device (desktop `readLastNoteTextFieldFontSize`).
+ */
+fun placeNoteTextField(
+    point: NoteLinkPoint,
+    id: String? = null,
+    now: Long = System.currentTimeMillis(),
+    fontSize: Int = NOTE_TEXT_FIELD_FONT,
+): NoteTextField {
     val width = NOTE_TEXT_FIELD_WIDTH
     return sanitizeNoteTextField(
         id = id,
@@ -64,7 +72,7 @@ fun placeNoteTextField(point: NoteLinkPoint, id: String? = null, now: Long = Sys
         y = min(clampUnit(point.y, 0.5), 0.92),
         width = width,
         text = "",
-        fontSize = NOTE_TEXT_FIELD_FONT,
+        fontSize = fontSize,
         updatedAt = now,
     )
 }
@@ -83,6 +91,7 @@ fun commitArmedTextFieldTap(
     sourceHeight: Double,
     existing: List<NoteTextField>,
     id: String? = null,
+    fontSize: Int = NOTE_TEXT_FIELD_FONT,
 ): ArmedTextFieldTap {
     val current = parseNoteTextFieldList(existing)
     if (!armed) return ArmedTextFieldTap(current, null, null, false)
@@ -90,7 +99,7 @@ fun commitArmedTextFieldTap(
         return ArmedTextFieldTap(current, null, TEXT_FIELD_LIMIT_MESSAGE, true)
     }
     val point = noteLinkPointOnSheet(x, y, frames, sourceWidth, sourceHeight)
-    return acceptPlacedTextField(current, placeNoteTextField(point, id))
+    return acceptPlacedTextField(current, placeNoteTextField(point, id, fontSize = fontSize))
 }
 
 fun acceptPlacedTextField(existing: List<NoteTextField>, field: NoteTextField): ArmedTextFieldTap {
