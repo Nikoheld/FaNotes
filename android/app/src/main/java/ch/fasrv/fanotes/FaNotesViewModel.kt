@@ -239,6 +239,8 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     val showList = MutableStateFlow(true)
     val sidebarOpen = MutableStateFlow(true)
     val inspectorOpen = MutableStateFlow(false)
+    /** Split orientation chosen by the screen from the available space (used while the setting is unset). */
+    val splitRowsAuto = MutableStateFlow(false)
     val message = MutableStateFlow<String?>(null)
     val undoTrash = MutableStateFlow<ch.fasrv.fanotes.vault.TrashItem?>(null)
     val stampRequest = MutableStateFlow<String?>(null)
@@ -3708,8 +3710,15 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         destination.value = "notes"
     }
 
+    /** Orientation the split really has: the setting, or the screen's automatic choice while it is unset. */
+    fun effectiveSplitRows(): Boolean = when (deskSettings.value["split-orientation"]) {
+        "rows" -> true
+        "columns" -> false
+        else -> splitRowsAuto.value
+    }
+
     fun toggleSplitOrientation() {
-        val next = if (deskSettings.value["split-orientation"] == "rows") "columns" else "rows"
+        val next = if (effectiveSplitRows()) "columns" else "rows"
         updateDesk("split-orientation", next)
     }
 
@@ -3831,6 +3840,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun rememberLastOpen(path: String) {
         if (path.isEmpty() || deskSettings.value["last-open"] == path) return
         updateDesk("last-open", path)
+    }
+
+    /** Narrow windows: open or close the sidebar drawer without touching the pinned-sidebar preference. */
+    fun setDrawerOpen(open: Boolean) {
+        showList.value = open
     }
 
     fun setSidebarOpen(open: Boolean) {
@@ -5208,7 +5222,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
             penOpen = !showText.value,
             bookOpen = bookOpen.value,
             splitPath = splitPath.value,
-            splitRows = deskSettings.value["split-orientation"] == "rows",
+            splitRows = effectiveSplitRows(),
             focus = deskSettings.value["focus"] == "on",
             sidebar = sidebarOpen.value,
             inspector = inspectorOpen.value,

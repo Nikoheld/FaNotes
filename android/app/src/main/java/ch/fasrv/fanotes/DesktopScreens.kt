@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -289,7 +290,7 @@ private fun StatusLabel(
 ) {
     Box(
         modifier
-            .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
+            .height(LocalTouch.current.statusChipDp.dp)
             .then(if (maxWidthDp != null) Modifier.widthIn(max = maxWidthDp.dp) else Modifier)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.CenterStart,
@@ -323,7 +324,7 @@ fun DeskRibbon(
     LaunchedEffect(destination, aiOpen) { if (aiOpen || destination in toolIds) toolsOpen = true }
     val mark = Color(android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.brandMarkColor(LocalDeskThemeId.current, androidx.compose.foundation.isSystemInDarkTheme())))
     Row(
-        Modifier.fillMaxWidth().height(ch.fasrv.fanotes.desk.RIBBON_HEIGHT_DP.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp + tabletSideInset()),
+        Modifier.fillMaxWidth().height(LocalTouch.current.ribbonHeightDp.dp).background(MaterialTheme.colorScheme.surface).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp + tabletSideInset()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("F", modifier = Modifier.padding(end = 8.dp), fontWeight = FontWeight.SemiBold, color = mark)
@@ -379,23 +380,31 @@ private fun RibbonButton(
     val shown = ch.fasrv.fanotes.desk.ChromeText.ui(label)
     val clickLabel = ch.fasrv.fanotes.desk.ChromeText.ui(onClickLabel)
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.RIBBON_BUTTON_RADIUS_DP.dp)
+    val touch = LocalTouch.current
+    // The hit box follows the touch layer; the drawn button keeps the compact desktop size.
     Box(
         Modifier
             .padding(horizontal = 1.dp)
-            .height(ch.fasrv.fanotes.desk.RIBBON_BUTTON_DP.dp)
-            .clip(shape)
-            .background(if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-            .clickable(onClickLabel = clickLabel, onClick = onClick)
-            .padding(horizontal = ch.fasrv.fanotes.desk.RIBBON_BUTTON_PAD_DP.dp),
+            .height(touch.ribbonButtonDp.dp)
+            .clickable(onClickLabel = clickLabel, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            shown,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
-        )
+        Box(
+            Modifier
+                .height(touch.ribbonButtonVisualDp.dp)
+                .clip(shape)
+                .background(if (active) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                .padding(horizontal = ch.fasrv.fanotes.desk.RIBBON_BUTTON_PAD_DP.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                shown,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
+            )
+        }
     }
 }
 
@@ -472,7 +481,7 @@ private fun StatusChip(
     val ink = if (ch.fasrv.fanotes.desk.statusChipInk(hot, "inherit") == "text") MaterialTheme.colorScheme.onSurface else idle
     Row(
         Modifier
-            .height(ch.fasrv.fanotes.desk.STATUS_BUTTON_DP.dp)
+            .height(LocalTouch.current.statusChipDp.dp)
             .then(if (maxWidthDp != null) Modifier.widthIn(max = maxWidthDp.dp) else Modifier)
             .clip(RoundedCornerShape(radiusDp.dp))
             .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
@@ -540,7 +549,7 @@ fun DeskStatusBar(
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(ch.fasrv.fanotes.desk.STATUS_BAR_DP.dp)
+                .height(LocalTouch.current.statusBarDp.dp)
                 .padding(horizontal = ch.fasrv.fanotes.desk.STATUS_PAD_DP.dp + tabletSideInset()),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -738,7 +747,7 @@ private fun NoteHistoryButton(back: Boolean, enabled: Boolean, onClick: () -> Un
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.noteNavRuleAlpha(back))
     Row(
         Modifier
-            .height(ch.fasrv.fanotes.desk.NOTE_NAV_HEIGHT_DP.dp)
+            .height(LocalTouch.current.navHeightDp.dp)
             .alpha(if (enabled) 1f else ch.fasrv.fanotes.desk.NOTE_NAV_DISABLED_ALPHA)
             .background(
                 if (hot) MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.NOTE_NAV_HOVER_ALPHA) else Color.Transparent,
@@ -846,7 +855,7 @@ private fun NoteTabChip(
         Box(
             Modifier
                 .padding(horizontal = box.marginXDp.dp, vertical = box.marginYDp.dp)
-                .height(box.heightDp.dp)
+                .height(maxOf(box.heightDp, LocalTouch.current.tabMinHeightDp).dp)
                 .then(
                     if (box.basisDp > 0) {
                         Modifier.widthIn(min = box.minWidthDp.dp, max = box.maxWidthDp.dp).width(box.basisDp.dp)
@@ -961,7 +970,7 @@ private fun NoteTabChip(
                 val showClose = ch.fasrv.fanotes.desk.noteTabShowsClose(selected, pinned, hot || closeHovered || closePressed)
                 Box(
                     Modifier
-                        .size(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_DP.dp)
+                        .size(LocalTouch.current.tabCloseHitDp.dp)
                         .alpha(if (showClose) 1f else 0f)
                         .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_RADIUS_DP.dp))
                         .background(
@@ -7234,7 +7243,7 @@ internal fun SettingRow(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(min = ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP.dp)
+                        .heightIn(min = maxOf(ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP, LocalTouch.current.settingRowMinDp).dp)
                         .padding(
                             horizontal = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_X_DP.dp,
                             vertical = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_Y_DP.dp,
@@ -7253,7 +7262,7 @@ internal fun SettingRow(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .heightIn(min = ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP.dp)
+                        .heightIn(min = maxOf(ch.fasrv.fanotes.desk.SETTING_ROW_MIN_DP, LocalTouch.current.settingRowMinDp).dp)
                         .padding(
                             horizontal = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_X_DP.dp,
                             vertical = ch.fasrv.fanotes.desk.SETTING_ROW_PAD_Y_DP.dp,
@@ -7734,7 +7743,8 @@ fun SettingsScreen(model: FaNotesViewModel, onSync: () -> Unit, onOpenVault: () 
                 Modifier
                     .fillMaxSize()
                     .background(Color(ch.fasrv.fanotes.desk.PALETTE_SCRIM))
-                    .clickable(interactionSource = scrim, indication = null, onClick = dismiss),
+                    .clickable(interactionSource = scrim, indication = null, onClick = dismiss)
+                    .imePadding(),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
@@ -8560,6 +8570,12 @@ private fun SettingsPage(
                     SettingCard("Komfort & Fokus", Icons.Filled.Accessibility, Modifier.settingsAnchor("accessibility", "settings-comfort", anchorY)) {
                         SettingRow("Bewegung reduzieren", "Deaktiviert dekorative Übergänge und Animationen.") {
                             Switch(checked = calm, onCheckedChange = { model.updateDesk("reduce-motion", if (it) "on" else "off") })
+                        }
+                        SettingRow("Touch-Bedienung gross", "Grössere Tippflächen für Leiste, Tabs und Statuszeile (ab 48 dp). Standardmässig an, solange das Fenster schmaler als 840 dp ist.") {
+                            Switch(
+                                checked = LocalTouch.current.large,
+                                onCheckedChange = { model.updateDesk("touch-large", if (it) "on" else "off") },
+                            )
                         }
                         SettingRow("Seitenleiste") {
                             SettingSlider(ch.fasrv.fanotes.desk.sidebarWidthDp(settings["sidebar-width"]).toFloat(), 210f, 430f, 10f, " px") {
@@ -9521,7 +9537,7 @@ fun CommandPalette(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .heightIn(min = (if (note != null) ch.fasrv.fanotes.desk.PALETTE_NOTE_DP else ch.fasrv.fanotes.desk.PALETTE_ROW_DP).dp)
+                            .heightIn(min = maxOf(if (note != null) ch.fasrv.fanotes.desk.PALETTE_NOTE_DP else ch.fasrv.fanotes.desk.PALETTE_ROW_DP, if (LocalTouch.current.large) ch.fasrv.fanotes.desk.TOUCH_MIN_DP else 0).dp)
                             .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_ROW_RADIUS_DP.dp))
                             .background(if (index == selected) MaterialTheme.colorScheme.surfaceVariant else androidx.compose.ui.graphics.Color.Transparent)
                             .clickable { openRow(index, false) }
