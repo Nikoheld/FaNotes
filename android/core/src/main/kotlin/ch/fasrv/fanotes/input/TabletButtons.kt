@@ -14,7 +14,8 @@ data class TabletButtonControl(
     val hint: String,
 )
 
-val TABLET_BUTTON_ACTIONS = listOf("ink", "eraser", "undo", "redo", "pan", "none", "os")
+/** "menu" is Android only: the pen quick menu at the tip (the desktop opens it with "pan" + tip). */
+val TABLET_BUTTON_ACTIONS = listOf("ink", "eraser", "undo", "redo", "pan", "menu", "none", "os")
 
 val TABLET_BUTTON_CONTROLS = listOf(
     TabletButtonControl("pen-tip", "pen", "Spitze", "Kontakt · Button 0"),
@@ -31,6 +32,7 @@ val TABLET_BUTTON_ACTION_LABELS = mapOf(
     "undo" to "Rückgängig",
     "redo" to "Wiederholen",
     "pan" to "Schwenken",
+    "menu" to "Schnellmenü",
     "none" to "Keine Aktion",
     "os" to "System / Rechtsklick",
 )
