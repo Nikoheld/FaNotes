@@ -67,6 +67,9 @@ android {
         jniLibs {
             // Extract libone2html.so and lib7za.so so the importer can exec them.
             useLegacyPackaging = true
+            // The importer binaries are arm64-v8a only, so the APK already installs on arm64 only. ONNX Runtime
+            // (handwriting recognition) ships the same ABI; the other three would add ~45 MB of unused libraries.
+            excludes += listOf("**/armeabi-v7a/libonnxruntime*.so", "**/x86/libonnxruntime*.so", "**/x86_64/libonnxruntime*.so")
         }
     }
 }
@@ -87,11 +90,14 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.documentfile:documentfile:1.1.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Runs the desktop's handwriting line model (fanotes-ink, ONNX) on the device. The model itself is an
+    // on-demand download into app storage (InkModelStore), not part of the APK.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.31.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }
 
-// The writing mode ("Schreiben") runs the shared web editor in a WebView. Its
-// bundle is built from fanotes/ into assets/writing/ (git-ignored). Without
+// The writing mode ("Schreiben") runs the shared web editor in a WebView, and handwriting recognition runs
+// the desktop recognizer in a headless one (recognition.html). The bundle is built from fanotes/ into assets/writing/ (git-ignored). Without
 // Node and fanotes/node_modules the build continues and the writing screen
 // reports that it is missing from this build.
 val writingBundle = tasks.register<Exec>("writingBundle") {
@@ -100,7 +106,7 @@ val writingBundle = tasks.register<Exec>("writingBundle") {
     workingDir = app
     commandLine("node", "scripts/build-android-writing.mjs")
     onlyIf {
-        val missing = !file("src/main/assets/writing/writing.html").exists() || project.hasProperty("fanotesWritingBundle")
+        val missing = !file("src/main/assets/writing/writing.html").exists() || !file("src/main/assets/writing/recognition.html").exists() || project.hasProperty("fanotesWritingBundle")
         val canBuild = File(app, "node_modules/vite").exists()
         if (missing && !canBuild) logger.warn("FaNotes: writing mode bundle missing and fanotes/node_modules not installed; the writing screen will be empty.")
         missing && canBuild
