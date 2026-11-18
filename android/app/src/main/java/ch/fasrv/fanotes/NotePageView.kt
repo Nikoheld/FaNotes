@@ -25,7 +25,6 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.SeekBar
 import android.widget.TextView
 import ch.fasrv.fanotes.desk.selectionWashArgb
 import ch.fasrv.fanotes.desk.bracketTyping
@@ -44,6 +43,8 @@ import ch.fasrv.fanotes.desk.pasteUrlAsMarkdownLink
 import ch.fasrv.fanotes.ink.DraftingKind
 import ch.fasrv.fanotes.ink.InkTool
 import ch.fasrv.fanotes.ink.StrokeStyle
+import ch.fasrv.fanotes.ink.remember
+import ch.fasrv.fanotes.ink.switchMode
 import ch.fasrv.fanotes.study.encode
 import ch.fasrv.fanotes.study.liveSeconds
 
@@ -743,6 +744,111 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private val tools = LinearLayout(context)
     private val handle = TextView(context)
     private val syncPill = TextView(context)
+
+    // ---- pen toolbar: touch sizes, side rail, Zeichenstudio, quick menu, laser ------------------
+    private val rail = EditorRailScroll(context)
+    private val penKit = PenToolbarKit(context)
+    private val penCard = PenCardFrame(context, penKit)
+    private val quickMenu = PenQuickMenuView(context)
+    private val laserLayer = LaserOverlayView(context)
+    private var barPosition = ch.fasrv.fanotes.desk.ToolbarPosition.TOP
+    private var toolMemory = ch.fasrv.fanotes.ink.InkToolMemory()
+    private var toolMemoryLoaded: String? = null
+    private var toolMemoryRestored = false
+    private var latestStyle = StrokeStyle()
+    private var toolsStale = false
+    private val penButtons = HashMap<String, View>()
+    private var widthDot: WidthDotView? = null
+    private var figureSpecState = ch.fasrv.fanotes.ink.FigureStampSpec("cube", ch.fasrv.fanotes.ink.defaultFigureParams("cube"))
+    private var graphSpecState: ch.fasrv.fanotes.ink.GraphStampSpec? = null
+    private val saveToolMemory = Runnable {
+        val encoded = ch.fasrv.fanotes.ink.encodeToolMemory(toolMemory)
+        // The setting comes back through the activity; the echo must not reset newer local state.
+        toolMemoryLoaded = encoded
+        onToolMemory(encoded)
+    }
+    /** Every style change made by the pen toolbar, its cards and the quick menu. */
+    var onStyle: (StrokeStyle) -> Unit = {}
+    /** Desk setting `tool-memory` (writing and drawing pen), saved a moment after the last change. */
+    var onToolMemory: (String) -> Unit = {}
+    var toolMemoryRaw: String?
+        get() = toolMemoryLoaded
+        set(value) {
+            if (value == toolMemoryLoaded) return
+            toolMemoryLoaded = value
+            toolMemory = ch.fasrv.fanotes.ink.decodeToolMemory(value)
+        }
+    /** Desk setting `toolbar-position`: top bar or side rail (desktop "Werkzeugleiste"). */
+    var toolbarPosition: ch.fasrv.fanotes.desk.ToolbarPosition
+        get() = barPosition
+        set(value) {
+            if (value == barPosition) return
+            barPosition = value
+            closeCard()
+            placeToolbar()
+            toolSignature = ""
+        }
+    private val cardHost = object : PenCardHost {
+        override val kit get() = penKit
+        override val currentStyle get() = latestStyle
+        override val drawingMode get() = toolMemory.drawingMode
+        override val recentColors get() = toolMemory.recentColors
+        override val armedSymbol get() = ink.placingSymbol
+        override val symbolSize get() = ink.symbolSize
+        override val symbolRotation get() = ink.symbolRotation
+        override val symbolOpacity get() = ink.symbolOpacity
+        override val symbolCategory get() = ink.symbolCategory
+        override var figureSpec: ch.fasrv.fanotes.ink.FigureStampSpec
+            get() = figureSpecState
+            set(value) { figureSpecState = value }
+        override var graphSpec: ch.fasrv.fanotes.ink.GraphStampSpec?
+            get() = graphSpecState
+            set(value) { graphSpecState = value }
+        override val figureArmed get() = ink.placingFigure != null || ink.placingGraph != null
+        override fun changeStyle(next: StrokeStyle) = changePenStyle(next)
+        override fun chooseBrush(id: String) {
+            ink.placingSymbol = null
+            changePenStyle(ch.fasrv.fanotes.ink.styleWithBrush(latestStyle, id))
+        }
+        override fun pickCustomColor(hex: String) = pickPenColor(hex, custom = true)
+        override fun armSymbol(id: String?) {
+            ink.placingFigure = null
+            ink.placingGraph = null
+            ink.placingSymbol = id
+            if (id != null && builtTool != InkTool.PEN) onTool(InkTool.PEN)
+            refreshTools()
+        }
+        override fun setSymbolSize(value: Double) {
+            ink.symbolSize = ch.fasrv.fanotes.ink.snapArtSymbolSize(value)
+            onSymbolSize(value)
+        }
+        override fun setSymbolRotation(value: Double) {
+            ink.symbolRotation = ch.fasrv.fanotes.ink.snapArtSymbolRotation(value)
+            onSymbolRotation(value)
+        }
+        override fun setSymbolOpacity(value: Double) {
+            ink.symbolOpacity = ch.fasrv.fanotes.ink.snapArtSymbolOpacity(value)
+            onSymbolOpacity(value)
+        }
+        override fun setSymbolCategory(value: String) {
+            ink.symbolCategory = ch.fasrv.fanotes.ink.artSymbolCategorySetting(value)
+            onSymbolCategory(value)
+        }
+        override fun armFigure(spec: ch.fasrv.fanotes.ink.FigureStampSpec?) {
+            ink.placingSymbol = null
+            ink.placingGraph = null
+            ink.placingFigure = spec
+            if (spec != null && builtTool != InkTool.PEN) onTool(InkTool.PEN)
+        }
+        override fun armGraph(spec: ch.fasrv.fanotes.ink.GraphStampSpec?) {
+            ink.placingSymbol = null
+            ink.placingFigure = null
+            ink.placingGraph = spec
+            if (spec != null && builtTool != InkTool.PEN) onTool(InkTool.PEN)
+        }
+        override fun closeCard() = this@NotePageView.closeCard()
+    }
+    private val penCards = PenCards(context, cardHost) { id -> refreshCard(id) }
     private var boundPath = ""
     private var writing = false
     private var tags: HtmlTagAssist? = null
@@ -1211,22 +1317,22 @@ class NotePageView(context: Context) : FrameLayout(context) {
         tools.gravity = Gravity.CENTER_VERTICAL
         toolbar.isHorizontalScrollBarEnabled = false
         toolbar.setPadding(dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP), 0, dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP), 0)
-        toolbar.addView(tools, LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP)))
+        toolbar.addView(tools, LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP)))
         toolbar.elevation = 12f
-        addView(toolbar, LayoutParams(LayoutParams.MATCH_PARENT, dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP), Gravity.TOP))
+        addView(toolbar, LayoutParams(LayoutParams.MATCH_PARENT, dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP), Gravity.TOP))
         addView(
             toolbarRule,
             LayoutParams(LayoutParams.MATCH_PARENT, dp(1).coerceAtLeast(1), Gravity.TOP).apply {
-                topMargin = dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP) - dp(1).coerceAtLeast(1)
+                topMargin = dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP) - dp(1).coerceAtLeast(1)
             },
         )
         handle.text = "Werkzeuge"
         handle.gravity = Gravity.CENTER
-        handle.textSize = 12f
+        handle.textSize = 13f
         handle.visibility = GONE
         handle.setOnClickListener { setChromeOpen(true) }
         handle.elevation = 12f
-        addView(handle, LayoutParams(dp(112), dp(28), Gravity.TOP or Gravity.END))
+        addView(handle, LayoutParams(dp(120), dp(40), Gravity.TOP or Gravity.END))
         ink.onPaperImages = { paintLivePreview() }
         ink.onCamera = { _, _, _ ->
             placeEditor()
@@ -1236,6 +1342,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         ink.onPenActive = { active ->
             penDown = active
             applyChromeVisibility()
+            penActiveChanged(active)
         }
         applyChromeColors()
         previewReady = true
@@ -1252,6 +1359,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val visible = ink.markdown
             ch.fasrv.fanotes.study.findStudyBlocks(visible).getOrNull(index)?.let { reportStudyBlock(kind, visible, it) }
         }
+        installPenChrome()
     }
 
     /** A tap on a rendered link opens the note or the web address. */
@@ -1580,6 +1688,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         ink.inkTool = tool
         ink.style = style
+        latestStyle = style
+        applyPenTool(tool, style)
         ink.fingerDraws = fingerDraws
         ink.editorFontPx = metrics.fontSizePx.toFloat()
         ink.editorLineHeight = metrics.lineHeight.toFloat()
@@ -1628,12 +1738,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val inset = ch.fasrv.fanotes.desk.editorSideInsetDp(metricsPx.widthPixels, metricsPx.heightPixels, metricsPx.densityDpi)
         val toolbarPad = ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_PAD_DP + inset
         toolbar.setPadding(dp(toolbarPad), 0, dp(toolbarPad), 0)
-        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$pdfNote|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen|$studyOpen|${ink.study.tool}|${ink.study.selected.hashCode()}|${ink.study.stampId}|${ink.study.numbered}|${ink.study.labelColor}|${ink.study.branchColor}|${ink.study.branchWidth}|$studyCanUndo|$studyCanRedo|${ink.study.crop?.rect}|$compareId|${studyTimerChip != null}"
+        val signature = "$tool|${style.color}|${style.brush}|${style.colorEffect}|${ink.placingSymbol}|${ink.placingSection}|${ink.symbolSize}|${ink.symbolRotation}|${ink.symbolOpacity}|${ink.symbolCategory}|$paper|$fingerDraws|$text|$pdfNote|$canUndo|$canRedo|$dark|$themeId|$systemDark|$followPen|$studyOpen|${ink.study.tool}|${ink.study.selected.hashCode()}|${ink.study.stampId}|${ink.study.numbered}|${ink.study.labelColor}|${ink.study.branchColor}|${ink.study.branchWidth}|$studyCanUndo|$studyCanRedo|${ink.study.crop?.rect}|$compareId|${studyTimerChip != null}|${toolMemory.inkMode}|$barPosition|${ink.placingFigure != null}|${ink.placingGraph != null}|${penCard.cardId}|${toolMemory.recentColors.firstOrNull()}|${ink.guideOn(DraftingKind.RULER)}${ink.guideOn(DraftingKind.SET_SQUARE)}${ink.guideOn(DraftingKind.COMPASS)}"
         if (signature != toolSignature) {
             toolSignature = signature
             rebuildTools(tool, style, paper, fingerDraws, canUndo, canRedo)
-        } else if (!widthFromUser) {
-            widthBar?.progress = widthProgress(style.baseWidth.toFloat())
+        } else {
+            widthDot?.value = style.baseWidth
         }
         placeEditor()
     }
@@ -1659,8 +1769,6 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private var builtFinger = false
     private var builtUndo = false
     private var builtRedo = false
-    private var widthBar: SeekBar? = null
-    private var widthFromUser = false
 
     fun configureSpelling(
         enabled: Boolean,
@@ -1792,9 +1900,294 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     private fun applyChromeVisibility() {
         val visible = userOpen && !(followPen && penDown)
-        toolbar.visibility = if (visible) VISIBLE else GONE
-        toolbarRule.visibility = if (visible) VISIBLE else GONE
+        val side = barPosition.vertical
+        toolbar.visibility = if (visible && !side) VISIBLE else GONE
+        toolbarRule.visibility = if (visible && !side) VISIBLE else GONE
+        rail.visibility = if (visible && side) VISIBLE else GONE
         handle.visibility = if (visible) GONE else VISIBLE
+    }
+
+    // ---- pen toolbar behaviour (desktop DrawingBoard activate*, PenQuickMenu, art studio) --------
+
+    private fun installPenChrome() {
+        rail.isVerticalScrollBarEnabled = false
+        rail.elevation = 12f
+        rail.visibility = GONE
+        rail.clipToPadding = false
+        addView(rail, LayoutParams(dp(ch.fasrv.fanotes.desk.TOUCH_RAIL_DP), LayoutParams.MATCH_PARENT, Gravity.START))
+        laserLayer.visibility = GONE
+        laserLayer.elevation = 11f
+        addView(laserLayer, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(penCard, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        quickMenu.elevation = 30f
+        addView(quickMenu, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        ink.onQuickMenu = { x, y, _ -> openQuickMenu(x + ink.left, y + ink.top) }
+        ink.onQuickMenuDrag = { x, y, lifted -> quickMenu.drag(x + ink.left, y + ink.top, lifted) }
+        ink.onLaser = { x, y, t, phase -> laserLayer.sample(x + ink.left, y + ink.top, t, phase) }
+        quickMenu.onTool = { id ->
+            when (id) {
+                "write" -> activateWriting()
+                "highlighter" -> activateHighlighter()
+                "eraser" -> activatePenTool(InkTool.ERASER)
+                "select" -> activatePenTool(InkTool.SELECT)
+                "laser" -> activatePenTool(InkTool.LASER)
+            }
+        }
+        quickMenu.onColor = { color -> chooseQuickColor(color) }
+        quickMenu.onClosed = { requestFocus() }
+        placeToolbar()
+    }
+
+    /** Moves the tool row between the top bar and the side rail. */
+    private fun placeToolbar() {
+        (tools.parent as? android.view.ViewGroup)?.removeView(tools)
+        val side = barPosition.vertical
+        if (side) {
+            tools.orientation = LinearLayout.VERTICAL
+            tools.gravity = Gravity.CENTER_HORIZONTAL
+            tools.setPadding(dp(4), dp(6), dp(4), dp(10))
+            rail.addView(tools, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+            val right = barPosition == ch.fasrv.fanotes.desk.ToolbarPosition.SIDE_RIGHT
+            rail.layoutParams = LayoutParams(dp(ch.fasrv.fanotes.desk.TOUCH_RAIL_DP), LayoutParams.MATCH_PARENT, if (right) Gravity.END else Gravity.START)
+            handle.text = if (right) "‹" else "›"
+            handle.textSize = 20f
+            handle.layoutParams = LayoutParams(dp(40), dp(96), Gravity.CENTER_VERTICAL or if (right) Gravity.END else Gravity.START)
+        } else {
+            tools.orientation = LinearLayout.HORIZONTAL
+            tools.gravity = Gravity.CENTER_VERTICAL
+            tools.setPadding(0, 0, dp(8), 0)
+            toolbar.addView(tools, LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP)))
+            handle.text = "Werkzeuge"
+            handle.textSize = 13f
+            handle.layoutParams = LayoutParams(dp(120), dp(40), Gravity.TOP or Gravity.END)
+        }
+        handle.contentDescription = ch.fasrv.fanotes.desk.ChromeText.ui("Werkzeuge")
+        applyChromeVisibility()
+    }
+
+    private fun refreshTools() = rebuildTools(builtTool, latestStyle, builtPaper, builtFinger, builtUndo, builtRedo)
+
+    /** Laser layer on for the laser tool; armed stamps end when the pen tool is left. */
+    private fun applyPenTool(tool: InkTool, style: StrokeStyle) {
+        val laser = tool == InkTool.LASER
+        if (laser != (laserLayer.visibility == VISIBLE)) {
+            laserLayer.visibility = if (laser) VISIBLE else GONE
+            if (!laser) laserLayer.clear()
+        }
+        if (tool != InkTool.PEN && (ink.placingFigure != null || ink.placingGraph != null || ink.placingSymbol != null)) {
+            ink.placingFigure = null
+            ink.placingGraph = null
+            ink.placingSymbol = null
+        }
+        if (!toolMemoryRestored) {
+            toolMemoryRestored = true
+            if (toolMemory.drawingMode) {
+                // Last session ended in the drawing mode: put its pen back (desktop restores inkMode too).
+                if (style != toolMemory.drawing) post { changePenStyle(toolMemory.drawing, remember = false) }
+            } else if (style.colorEffect != "solid" || style.purpose != "handwriting") {
+                // Special inks belong to the drawing pen now; an older single pen keeps its colour, drawn solid.
+                post { changePenStyle(latestStyle.copy(colorEffect = "solid", purpose = "handwriting"), remember = false) }
+            }
+        }
+    }
+
+    private fun scheduleToolMemorySave() {
+        removeCallbacks(saveToolMemory)
+        postDelayed(saveToolMemory, 450)
+    }
+
+    private fun changePenStyle(next: StrokeStyle, remember: Boolean = true) {
+        latestStyle = next
+        if (remember) {
+            toolMemory = toolMemory.remember(next)
+            scheduleToolMemorySave()
+        }
+        onStyle(next)
+        widthDot?.value = next.baseWidth
+    }
+
+    private fun switchInkMode(mode: String) {
+        if ((mode == ch.fasrv.fanotes.ink.INK_MODE_DRAWING) == toolMemory.drawingMode) return
+        val (memory, style) = toolMemory.switchMode(mode, latestStyle)
+        toolMemory = memory
+        scheduleToolMemorySave()
+        latestStyle = style
+        onStyle(style)
+    }
+
+    private fun disarmStamps() {
+        ink.placingSymbol = null
+        ink.placingFigure = null
+        ink.placingGraph = null
+    }
+
+    private fun activateWriting() {
+        disarmStamps()
+        closeCard()
+        switchInkMode(ch.fasrv.fanotes.ink.INK_MODE_WRITING)
+        onTool(InkTool.PEN)
+        refreshTools()
+    }
+
+    /** Zeichnen: the drawing pen; tapping it again toggles the Zeichenstudio (desktop `activateDrawing`). */
+    private fun activateDrawing() {
+        val already = toolMemory.drawingMode && builtTool == InkTool.PEN && ink.placingFigure == null && ink.placingGraph == null
+        ink.placingFigure = null
+        ink.placingGraph = null
+        if (penCard.cardId == "figures") penCard.hide()
+        switchInkMode(ch.fasrv.fanotes.ink.INK_MODE_DRAWING)
+        onTool(InkTool.PEN)
+        if (already && penCard.cardId == "studio") {
+            closeCard()
+        } else if (!(latestStyle.brush == "marker" || latestStyle.brush == "highlighter") || already) {
+            openCard("studio", "draw")
+        } else {
+            refreshTools()
+        }
+    }
+
+    /** Quick menu "Textmarker": drawing mode with the highlighter brush. */
+    private fun activateHighlighter() {
+        disarmStamps()
+        closeCard()
+        switchInkMode(ch.fasrv.fanotes.ink.INK_MODE_DRAWING)
+        changePenStyle(ch.fasrv.fanotes.ink.styleWithBrush(latestStyle, "highlighter"))
+        onTool(InkTool.PEN)
+        refreshTools()
+    }
+
+    private fun activatePenTool(tool: InkTool) {
+        disarmStamps()
+        closeCard()
+        onTool(tool)
+    }
+
+    /** A swatch or a custom colour: drawing colours reset a special ink to solid, like the desktop strip. */
+    private fun pickPenColor(color: String, custom: Boolean = false) {
+        val hex = ch.fasrv.fanotes.ink.normalizeInkHex(color) ?: return
+        if (custom) {
+            toolMemory = toolMemory.copy(recentColors = ch.fasrv.fanotes.ink.pushRecentColor(toolMemory.recentColors, hex))
+            scheduleToolMemorySave()
+        }
+        val next = if (toolMemory.drawingMode) latestStyle.copy(color = hex, colorEffect = "solid") else latestStyle.copy(color = hex)
+        changePenStyle(next)
+        if (builtTool != InkTool.PEN && ink.placingSymbol == null) onTool(InkTool.PEN)
+        if (custom && penCard.cardId == "color") closeCard()
+    }
+
+    /** Desktop `chooseQuickMenuColor`: the drawing pen keeps drawing; otherwise a colour is for writing. */
+    private fun chooseQuickColor(color: String) {
+        if (builtTool == InkTool.PEN && toolMemory.drawingMode) {
+            changePenStyle(latestStyle.copy(color = color, colorEffect = "solid"))
+        } else {
+            if (builtTool != InkTool.PEN || toolMemory.drawingMode) activateWriting()
+            changePenStyle(latestStyle.copy(color = color))
+        }
+    }
+
+    private fun openQuickMenu(x: Float, y: Float) {
+        closeCard()
+        val drawing = toolMemory.drawingMode
+        val active = buildSet {
+            if (builtTool == InkTool.PEN && !drawing) add("write")
+            if (builtTool == InkTool.PEN && drawing && latestStyle.brush == "highlighter") add("highlighter")
+            if (builtTool == InkTool.ERASER) add("eraser")
+            if (builtTool == InkTool.SELECT) add("select")
+            if (builtTool == InkTool.LASER) add("laser")
+        }
+        val ring = ch.fasrv.fanotes.ink.quickMenuColors(builtTool == InkTool.PEN && drawing, PenColors, toolMemory.recentColors)
+        quickMenu.open(x, y, penChromeColors(themeId, systemDark, dark, ink.accentColor), active, ring, latestStyle.color)
+    }
+
+    private fun toggleGuide(kind: DraftingKind) {
+        ink.toggleGuide(kind)
+        refreshTools()
+    }
+
+    /** Figuren / Funktionsgraph: the library card arms the stamp; closing it disarms. */
+    private fun toggleFigures(tab: String) {
+        val graph = tab == "graph"
+        val open = penCard.cardId == "figures" && (penCards.figureTab == "graph") == graph
+        if (open) {
+            closeCard()
+            return
+        }
+        if (graph) {
+            penCards.figureTab = "graph"
+            penCards.ensureGraph()
+        } else {
+            if (penCards.figureTab == "graph") penCards.figureTab = ch.fasrv.fanotes.ink.mathFigureById(figureSpecState.figureId).group
+            cardHost.armFigure(figureSpecState)
+        }
+        if (builtTool != InkTool.PEN) onTool(InkTool.PEN)
+        openCard("figures", if (graph) "graph" else "figures")
+    }
+
+    private fun anchorRect(id: String?): android.graphics.Rect {
+        val view = id?.let { penButtons[it] }
+        val rect = android.graphics.Rect()
+        if (view != null && view.isAttachedToWindow) {
+            view.getDrawingRect(rect)
+            runCatching { offsetDescendantRectToMyCoords(view, rect) }.onSuccess { return rect }
+        }
+        return android.graphics.Rect(dp(12), dp(12), dp(60), dp(60))
+    }
+
+    private fun toolbarBandPx(): Int =
+        if (barPosition.vertical) dp(ch.fasrv.fanotes.desk.TOUCH_RAIL_DP) else dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP)
+
+    private fun cardContent(id: String): View? = when (id) {
+        "studio" -> penCards.studioCard()
+        "width" -> penCards.widthCard()
+        "color" -> penCards.colorCard()
+        "figures" -> penCards.figureCard()
+        else -> null
+    }
+
+    private fun openCard(id: String, anchorId: String = id) {
+        val content = cardContent(id) ?: return
+        val anchor = anchorRect(anchorId)
+        if (penCard.cardId == "figures" && id != "figures") {
+            ink.placingFigure = null
+            ink.placingGraph = null
+        }
+        penCard.show(id, content, anchor, barPosition.vertical, barPosition == ch.fasrv.fanotes.desk.ToolbarPosition.SIDE_RIGHT, toolbarBandPx())
+        refreshTools()
+    }
+
+    private fun toggleCard(id: String) {
+        if (penCard.cardId == id) closeCard() else openCard(id)
+    }
+
+    /** Rebuilds the open card after a choice inside it, or opens another card from it. */
+    private fun refreshCard(id: String) {
+        if (penCard.cardId == id) {
+            cardContent(id)?.let { penCard.replace(it) }
+            refreshTools()
+        } else {
+            openCard(id)
+        }
+    }
+
+    private fun closeCard(rebuild: Boolean = true) {
+        val was = penCard.cardId ?: return
+        penCard.hide()
+        if (was == "figures") {
+            ink.placingFigure = null
+            ink.placingGraph = null
+        }
+        if (rebuild) refreshTools() else toolsStale = true
+    }
+
+    /** Pen down on the page closes the cards (desktop), except the figure library that keeps stamping. */
+    private fun penActiveChanged(active: Boolean) {
+        if (active) {
+            if (quickMenu.isOpen) quickMenu.close()
+            // The toolbar is rebuilt after the stroke, never at its start.
+            if (penCard.cardId != null && penCard.cardId != "figures") closeCard(rebuild = false)
+        } else if (toolsStale) {
+            post { if (toolsStale && !penDown) refreshTools() }
+        }
     }
 
     private fun rebuildTools(
@@ -1807,6 +2200,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
     ) {
         builtTool = tool
         builtStyle = style
+        toolsStale = false
+        penKit.vertical = barPosition.vertical
+        penKit.colors = penChromeColors(themeId, systemDark, dark, ink.accentColor)
+        penButtons.clear()
+        widthDot = null
         builtPaper = paper
         builtFinger = fingerDraws
         builtUndo = canUndo
@@ -1849,28 +2247,84 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     private fun modeSwitch(): LinearLayout {
         val row = LinearLayout(context)
-        row.orientation = LinearLayout.HORIZONTAL
+        row.orientation = if (barPosition.vertical) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        row.setPadding(dp(2), dp(2), dp(2), dp(2))
+        row.layoutParams = if (barPosition.vertical) {
+            LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) }
+        } else {
+            LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.TOUCH_TARGET_DP)).apply { gravity = Gravity.CENTER_VERTICAL }
+        }
         row.background = rounded(ch.fasrv.fanotes.desk.modeSwitchTrackColor(themeId, systemDark), dp(ch.fasrv.fanotes.desk.MODE_SWITCH_RADIUS_DP))
-        row.addView(seg("Tastatur", textMode) { onTextMode(true) })
-        row.addView(seg("Stift", !textMode) { onTextMode(false) })
+        val vertical = barPosition.vertical
+        fun segParams() = if (vertical) LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)
+            else LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT)
+        row.addView(seg("Tastatur", textMode) { onTextMode(true) }, segParams())
+        row.addView(seg("Stift", !textMode) { onTextMode(false) }, segParams())
         return row
     }
 
     private fun addInkTools(tool: InkTool, style: StrokeStyle, fingerDraws: Boolean, canUndo: Boolean, canRedo: Boolean) {
-        tools.addView(segment(tool))
-        PenColors.forEach { color ->
-            tools.addView(swatch(color, color.equals(style.color, true)) { onColor(color) })
+        val drawing = toolMemory.drawingMode
+        val stamping = ink.placingFigure != null || ink.placingGraph != null
+        fun add(id: String, view: View) {
+            penButtons[id] = view
+            tools.addView(view)
         }
-        tools.addView(widthSlider(style.baseWidth.toFloat()))
-        val brush = Brushes.firstOrNull { it.first == style.brush }?.second ?: "Fein"
-        tools.addView(chip(brush) {
-            val index = Brushes.indexOfFirst { it.first == style.brush }.let { if (it < 0) 0 else it }
-            onBrush(Brushes[(index + 1) % Brushes.size].first)
-        })
-        tools.addView(chip("↶", enabled = canUndo) { onUndo() })
-        tools.addView(chip("↷", enabled = canRedo) { onRedo() })
-        tools.addView(chip("Lasso") { onTool(InkTool.LASSO) })
-        tools.addView(chip("Lernen", description = "Lernwerkzeuge") { setStudyOpen(true) })
+        fun toolButton(id: String, icon: String, label: String, active: Boolean, description: String, enabled: Boolean = true, click: () -> Unit) =
+            add(id, penKit.toolButton(icon, label, active, enabled, description, click = click))
+        tools.addView(penKit.divider())
+        toolButton("write", "pen-line", "Schreiben", tool == InkTool.PEN && !drawing && !stamping, "Handschrift schreiben oder vorhandene Wörter mehrfach durchkritzeln") { activateWriting() }
+        toolButton("draw", "paintbrush", "Zeichnen", tool == InkTool.PEN && drawing && !stamping, "Zeichenstudio mit Pinseln und Spezialfarben öffnen") { activateDrawing() }
+        toolButton("eraser", "eraser", "Radierer", tool == InkTool.ERASER, "Radierer: löscht den Buchstaben, den er wirklich berührt") { activatePenTool(InkTool.ERASER) }
+        toolButton("select", "move", "Verschieben", tool == InkTool.SELECT, "Handschrift einrahmen und dann verschieben") { activatePenTool(InkTool.SELECT) }
+        toolButton("lasso", "lasso", "Lasso", tool == InkTool.LASSO, "Lasso: Handschrift frei umfahren und auswählen") { activatePenTool(InkTool.LASSO) }
+        toolButton("laser", "crosshair", "Laser", tool == InkTool.LASER, "Laserpointer: zeigt einen Punkt, ohne zu schreiben") { activatePenTool(InkTool.LASER) }
+        tools.addView(penKit.divider())
+        if (drawing) {
+            val brush = ch.fasrv.fanotes.ink.artBrush(style.brush)
+            val label = ink.placingSymbol?.let { ch.fasrv.fanotes.ink.artSymbol(it)?.label } ?: brush.label
+            toolButton("studio", "palette", label, penCard.cardId == "studio", "Zeichenstudio: Pinsel, Farben und Piktogramme") { toggleCard("studio") }
+            QUICK_DRAW_COLORS.forEach { color ->
+                add("color:$color", penKit.swatch(color, style.colorEffect == "solid" && color.equals(style.color, true), "Zeichenfarbe $color") { pickPenColor(color) })
+            }
+            if (style.colorEffect != "solid") {
+                add("effect", penKit.swatch(style.color, true, "${ch.fasrv.fanotes.ink.inkEffectLabel(style.colorEffect)} Spezialtinte", effect = style.colorEffect) {
+                    penCards.studioTab = "colors"
+                    openCard("studio", "studio")
+                })
+            }
+        } else {
+            PenColors.forEach { color ->
+                add("color:$color", penKit.swatch(color, color.equals(style.color, true), "Farbe $color") { pickPenColor(color) })
+            }
+            if (PenColors.none { it.equals(style.color, true) }) {
+                add("color:custom", penKit.swatch(style.color, true, "Eigene Farbe ${style.color}") { toggleCard("color") })
+            }
+        }
+        toolButton("color", "plus", "Farbe", penCard.cardId == "color", if (drawing) "Eigene Zeichenfarbe" else "Eigene Farbe") { toggleCard("color") }
+        val width = LinearLayout(context)
+        width.orientation = LinearLayout.VERTICAL
+        width.gravity = Gravity.CENTER
+        val dot = WidthDotView(context, style.baseWidth, penKit.colors, false)
+        widthDot = dot
+        width.addView(dot, LinearLayout.LayoutParams(dp(30), dp(24)))
+        width.addView(penKit.label("Breite", ch.fasrv.fanotes.desk.TOUCH_TOOL_LABEL_SP, penKit.colors.muted))
+        width.minimumWidth = dp(ch.fasrv.fanotes.desk.TOUCH_TARGET_DP)
+        width.background = penKit.rounded(if (penCard.cardId == "width") penKit.colors.active else android.graphics.Color.TRANSPARENT, 10)
+        width.contentDescription = ch.fasrv.fanotes.desk.ChromeText.ui("Breite")
+        width.setOnClickListener { toggleCard("width") }
+        width.layoutParams = penKit.itemParams(height = dp(if (barPosition.vertical) 54 else ch.fasrv.fanotes.desk.TOUCH_TARGET_DP))
+        add("width", width)
+        tools.addView(penKit.divider())
+        toolButton("ruler", "ruler", "Lineal", ink.guideOn(DraftingKind.RULER), "Lineal einblenden: verschieben, drehen und an beiden Kanten nachzeichnen") { toggleGuide(DraftingKind.RULER) }
+        toolButton("setsquare", "triangle", "Geodreieck", ink.guideOn(DraftingKind.SET_SQUARE), "Geodreieck einblenden: Winkel messen und an drei Kanten zeichnen") { toggleGuide(DraftingKind.SET_SQUARE) }
+        toolButton("compass", "compass", "Zirkel", ink.guideOn(DraftingKind.COMPASS), "Zirkel: Nadel setzen, Radius messen, Bogen zeichnen") { toggleGuide(DraftingKind.COMPASS) }
+        toolButton("figures", "box", "Figuren", ink.placingFigure != null, "Figurenbibliothek: Figur wählen und auf die Seite tippen") { toggleFigures("plane") }
+        toolButton("graph", "chart-spline", "Graph", ink.placingGraph != null, "Funktionsgraph einfügen: Formel wählen und auf die Seite tippen") { toggleFigures("graph") }
+        tools.addView(penKit.divider())
+        toolButton("undo", "undo-2", "Zurück", false, "Rückgängig", enabled = canUndo) { onUndo() }
+        toolButton("redo", "redo-2", "Vor", false, "Wiederholen", enabled = canRedo) { onRedo() }
+        toolButton("study", "graduation-cap", "Lernen", false, "Lernwerkzeuge") { setStudyOpen(true) }
         if (tool == InkTool.LASSO && ink.session?.selection?.isNotEmpty() == true) {
             listOf("move" to "Verschieben", "copy" to "Kopieren", "recolor" to "Färben", "delete" to "Löschen").forEach { (action, label) ->
                 tools.addView(chip(label) {
@@ -1974,7 +2428,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val lp = if (left) LayoutParams(dock.panelPx, LayoutParams.MATCH_PARENT, Gravity.START) else LayoutParams(LayoutParams.MATCH_PARENT, dock.panelPx, Gravity.BOTTOM)
             comparePanel.layoutParams = lp
             // Left panel starts under the toolbar; the bottom one has no toolbar above it.
-            compareSpacer.layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, if (left) dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP) else 0)
+            compareSpacer.layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, if (left && !barPosition.vertical) dp(ch.fasrv.fanotes.desk.TOUCH_TOOLBAR_DP) else 0)
             if (left) ps.leftMargin = dock.panelPx else ps.bottomMargin = dock.panelPx
             comparePanel.setBackgroundColor(if (dark) 0xFF1B1D23.toInt() else 0xFFF1F3F8.toInt())
             compareTitle.setTextColor(if (dark) 0xFFE6E8EE.toInt() else 0xFF1B1D23.toInt())
@@ -2249,23 +2703,14 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
     }
 
-    private fun segment(tool: InkTool): LinearLayout {
-        val row = LinearLayout(context)
-        row.orientation = LinearLayout.HORIZONTAL
-        row.background = rounded(ch.fasrv.fanotes.desk.modeSwitchTrackColor(themeId, systemDark), dp(ch.fasrv.fanotes.desk.MODE_SWITCH_RADIUS_DP))
-        row.addView(seg("Stift", tool == InkTool.PEN) { onTool(InkTool.PEN) })
-        row.addView(seg("Radierer", tool == InkTool.ERASER) { onTool(InkTool.ERASER) })
-        row.addView(seg("Auswahl", tool == InkTool.SELECT) { onTool(InkTool.SELECT) })
-        return row
-    }
-
     private fun seg(label: String, selected: Boolean, click: () -> Unit): TextView {
         val view = TextView(context)
         view.text = ch.fasrv.fanotes.desk.ChromeText.ui(label)
-        view.textSize = 12f
+        view.textSize = if (barPosition.vertical) 11f else 13f
         view.gravity = Gravity.CENTER
-        view.setPadding(dp(10), 0, dp(10), 0)
-        view.minHeight = dp(ch.fasrv.fanotes.desk.MODE_BUTTON_DP)
+        view.setPadding(dp(if (barPosition.vertical) 2 else 12), 0, dp(if (barPosition.vertical) 2 else 12), 0)
+        view.minHeight = dp(if (barPosition.vertical) 40 else 44)
+        view.maxLines = 1
         view.setTextColor(ch.fasrv.fanotes.desk.modeSwitchInk(themeId, systemDark, selected))
         view.typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 650, false)
         if (selected) {
@@ -2292,40 +2737,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
         return view
     }
 
-    private fun chip(label: String, enabled: Boolean = true, description: String = label, click: () -> Unit): TextView {
-        val view = TextView(context)
-        view.text = ch.fasrv.fanotes.desk.ChromeText.ui(label)
-        view.contentDescription = ch.fasrv.fanotes.desk.ChromeText.ui(description)
-        view.textSize = 12f
-        view.gravity = Gravity.CENTER
-        view.setPadding(dp(10), 0, dp(10), 0)
-        view.minHeight = dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_DP)
-        view.background = rounded(android.graphics.Color.TRANSPARENT, dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_RADIUS_DP))
-        view.isEnabled = enabled
-        view.alpha = if (enabled) 1f else ch.fasrv.fanotes.desk.FORMAT_DISABLED_ALPHA
-        view.setTextColor(ch.fasrv.fanotes.desk.formatChipInk(themeId, systemDark))
-        view.setOnClickListener { if (enabled) click() }
-        val params = LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_DP))
-        params.marginStart = dp(ch.fasrv.fanotes.desk.FORMAT_BUTTON_GAP_DP)
-        view.layoutParams = params
-        return view
-    }
+    private fun chip(label: String, enabled: Boolean = true, description: String = label, click: () -> Unit): TextView =
+        penKit.chip(label, enabled, description, click)
 
-    private fun swatch(color: String, selected: Boolean, click: () -> Unit): View {
-        val view = View(context)
-        val dot = GradientDrawable()
-        dot.shape = GradientDrawable.OVAL
-        dot.setColor(android.graphics.Color.parseColor(color))
-        if (selected) dot.setStroke(dp(2), if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt())
-        view.background = dot
-        val params = LinearLayout.LayoutParams(dp(18), dp(18))
-        params.marginStart = dp(6)
-        view.layoutParams = params
-        view.setOnClickListener { click() }
-        return view
-    }
-
-    private fun widthProgress(value: Float) = (((value - 1.2f) / (14f - 1.2f)) * 100f).toInt().coerceIn(0, 100)
+    private fun swatch(color: String, selected: Boolean, click: () -> Unit): View = penKit.swatch(color, selected, click = click)
 
     fun handleToolbarAction(action: String): Boolean {
         when (action) {
@@ -2342,34 +2757,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
             "clear" -> onClear()
             "duplicate" -> onDuplicate()
             "collapse" -> setChromeOpen(false)
+            "laser" -> activatePenTool(InkTool.LASER)
+            "pen-quick-menu" -> openQuickMenu(width / 2f, height / 2f)
+            "zeichenstudio" -> { if (toolMemory.drawingMode) openCard("studio") else activateDrawing() }
             "notes" -> onToggleRail()
             else -> return false
         }
         return true
-    }
-
-    private fun widthSlider(value: Float): SeekBar {
-        val slider = StylusSeekBar(context)
-        slider.max = 100
-        slider.progress = widthProgress(value)
-        val listener = object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) onWidth(1.2f + (14f - 1.2f) * progress / 100f)
-            }
-            override fun onStartTrackingTouch(seekBar: SeekBar?) { widthFromUser = true }
-            override fun onStopTrackingTouch(seekBar: SeekBar?) { widthFromUser = false }
-        }
-        slider.setOnSeekBarChangeListener(listener)
-        slider.onStylus = { progress ->
-            widthFromUser = true
-            listener.onProgressChanged(slider, progress, true)
-            widthFromUser = false
-        }
-        widthBar = slider
-        val params = LinearLayout.LayoutParams(dp(120), dp(ch.fasrv.fanotes.desk.EDITOR_TOOLBAR_DP))
-        params.marginStart = dp(6)
-        slider.layoutParams = params
-        return slider
     }
 
     private fun applyChromeColors() {
@@ -2378,6 +2772,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         toolbarRule.setBackgroundColor(ch.fasrv.fanotes.desk.editorToolbarRule(dark))
         val fg = if (dark) 0xFFEDEDEC.toInt() else 0xFF252630.toInt()
         toolbar.setBackgroundColor(bg)
+        rail.setBackgroundColor(bg)
         handle.setBackgroundColor(bg)
         handle.setTextColor(fg)
         syncPill.setTextColor(fg)
@@ -2831,16 +3226,8 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private companion object {
         val PenColors = listOf("#202333", "#2457D6", "#D23B4A", "#1F8A4C", "#E2A21B", "#7A4DD6")
         val Papers = ch.fasrv.fanotes.desk.PAPER_STYLES.map { it.id to it.label }
-        val Brushes = listOf(
-            "fineliner" to "Fineliner",
-            "pencil" to "Bleistift",
-            "marker" to "Marker",
-            "paintbrush" to "Pinsel",
-            "calligraphy" to "Kalligrafie",
-            "highlighter" to "Textmarker",
-            "watercolor" to "Aquarell",
-            "spray" to "Spray",
-        )
+        /** Drawing colours on the bar (desktop quick-menu ring, first six). */
+        val QUICK_DRAW_COLORS = ch.fasrv.fanotes.ink.QUICK_ART_COLORS.take(6)
     }
 }
 
@@ -2854,39 +3241,5 @@ private class EditorToolbarScroll(context: Context) : HorizontalScrollView(conte
             if (tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER) return false
         }
         return super.onInterceptTouchEvent(event)
-    }
-}
-
-private class StylusSeekBar(context: Context) : SeekBar(context) {
-    var onStylus: ((Int) -> Unit)? = null
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        parent?.requestDisallowInterceptTouchEvent(true)
-        val stylus = (0 until event.pointerCount).firstOrNull { index ->
-            val tool = event.getToolType(index)
-            tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
-        }
-        if (stylus != null) {
-            val span = (width - paddingLeft - paddingRight).coerceAtLeast(1)
-            val fraction = ((event.getX(stylus) - paddingLeft) / span).coerceIn(0f, 1f)
-            val fingerDown = (0 until event.pointerCount).any { index ->
-                event.getToolType(index) == MotionEvent.TOOL_TYPE_FINGER
-            }
-            val value = ch.fasrv.fanotes.desk.sliderValueFromPointers(
-                0f,
-                max.toFloat().coerceAtLeast(1f),
-                listOf(
-                    ch.fasrv.fanotes.desk.SliderPointer(0, ch.fasrv.fanotes.desk.PointerKind.FINGER, fingerDown, 0f),
-                    ch.fasrv.fanotes.desk.SliderPointer(1, ch.fasrv.fanotes.desk.PointerKind.STYLUS, true, fraction),
-                ),
-            )
-            if (value != null) {
-                val next = value.toInt().coerceIn(0, max)
-                progress = next
-                onStylus?.invoke(next)
-            }
-            return true
-        }
-        return super.onTouchEvent(event)
     }
 }

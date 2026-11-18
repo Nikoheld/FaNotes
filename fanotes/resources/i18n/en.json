@@ -4812,5 +4812,22 @@
   "Y muss kleiner als P sein.": "Y must be smaller than P.",
   "P muss mindestens 2 sein.": "P must be at least 2.",
   "s (Alice) und s (Bob) sind gleich.": "s (Alice) and s (Bob) are equal.",
-  "s (Alice) und s (Bob) sind verschieden. Mindestens eine Rechnung enthält einen Fehler.": "s (Alice) and s (Bob) differ. At least one calculation contains a mistake."
+  "s (Alice) und s (Bob) sind verschieden. Mindestens eine Rechnung enthält einen Fehler.": "s (Alice) and s (Bob) differ. At least one calculation contains a mistake.",
+  "Laser": "Laser",
+  "Graph": "Graph",
+  "Vor": "Forward",
+  "Farbe": "Colour",
+  "Zuletzt verwendet": "Recently used",
+  "Rechts (vertikal)": "Right (vertical)",
+  "Schnellmenü": "Quick menu",
+  "Schnellmenü mit langem Druck": "Quick menu on long press",
+  "Hex": "Hex",
+  "Zeichenfarbe": "Drawing colour",
+  "Schreibstift": "Writing pen",
+  "Zeichenstift": "Drawing pen",
+  "Ungültige Farbe": "Invalid colour",
+  "Für Stifte ohne Tasten: Die Spitze am Anfang eines Strichs still halten öffnet Farben und Werkzeuge am Stift. Mit Tasten: Schwenken-Taste + Spitze antippen oder eine Taste auf „Schnellmenü“ legen.": "For pens without buttons: hold the tip still at the start of a stroke to open colours and tools at the pen. With buttons: tap the tip while holding the pan button, or assign a button to “Quick menu”.",
+  "Legt die Werkzeugleiste des Editors oben (horizontal) oder am Rand (vertikal) ab.": "Places the editor toolbar at the top (horizontal) or at the edge (vertical).",
+  "Lasso: Handschrift frei umfahren und auswählen": "Lasso: draw around handwriting to select it",
+  "Zeichenstudio: Pinsel, Farben und Piktogramme": "Drawing studio: brushes, colours and pictograms"
 }

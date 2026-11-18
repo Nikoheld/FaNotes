@@ -3621,6 +3621,12 @@ private fun PageSurface(
             page.ink.strokeSmoothing = pen.smoothing.toFloat()
             page.ink.tabletButtons = model.effectiveDesk()["tablet-buttons"].orEmpty()
             page.ink.penOnly = ch.fasrv.fanotes.input.penOnlyEnabled(model.effectiveDesk()["pen-only"])
+            // Pen toolbar: position, tool memory (writing/drawing pen), quick menu by long press.
+            page.onStyle = { model.style.value = it }
+            page.onToolMemory = { model.updateDesk("tool-memory", it) }
+            page.toolMemoryRaw = model.effectiveDesk()["tool-memory"]
+            page.toolbarPosition = ch.fasrv.fanotes.desk.toolbarPosition(model.effectiveDesk()["toolbar-position"])
+            page.ink.quickMenuLongPress = ch.fasrv.fanotes.desk.penQuickHoldEnabled(model.effectiveDesk()["pen-quick-hold"])
             page.ink.accentSecondary = android.graphics.Color.parseColor(ch.fasrv.fanotes.desk.normalizeAccentSecondary(model.effectiveDesk()["accent-secondary"]))
             page.setWorkspace(model.effectiveDesk()["background"].orEmpty())
             page.ink.onPlaceHighlight = { worksheetId, mark -> model.addWorksheetHighlight(worksheetId, mark) }

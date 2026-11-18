@@ -483,6 +483,27 @@ class InkSurfaceView @JvmOverloads constructor(
     private var tabletPanId = MotionEvent.INVALID_POINTER_ID
     private var tabletPanX = 0f
     private var tabletPanY = 0f
+
+    // ---- pen quick menu, laser pointer, held eraser button (pointer path) --------------------
+    /** Desk setting `pen-quick-hold`: holding the bare tip still opens the quick menu (pens without buttons). */
+    var quickMenuLongPress: Boolean = false
+    /** Opens the quick menu at view coordinates; `held` when the opening tip is still down and slides. */
+    var onQuickMenu: (x: Float, y: Float, held: Boolean) -> Unit = { _, _, _ -> }
+    /** The tip that opened the menu moved or lifted (view coordinates). */
+    var onQuickMenuDrag: (x: Float, y: Float, lifted: Boolean) -> Unit = { _, _, _ -> }
+    /** Laser samples in view coordinates; phase 0 down, 1 move, 2 up. Never ink, never stored. */
+    var onLaser: (x: Float, y: Float, t: Long, phase: Int) -> Unit = { _, _, _, _ -> }
+    private val quickChord = ch.fasrv.fanotes.ink.QuickMenuGesture()
+    private var quickLastX = 0f
+    private var quickLastY = 0f
+    private val quickMenuDue = Runnable { fireQuickMenuHold() }
+    private var lasering = false
+    /** Desktop button mask of a held eraser-mapped pen button, fed by hover samples. */
+    private var eraserHold = 0
+    private var eraserHoverAt = 0L
+    private val ERASER_HOLD_FRESH_MS = 400L
+    private var buttonMapRaw: String? = null
+    private var buttonMap: Map<String, String> = emptyMap()
     private var selecting = false
     private var movingSelection = false
     private var anchorX = 0.0
@@ -860,6 +881,16 @@ class InkSurfaceView @JvmOverloads constructor(
             tool == MotionEvent.TOOL_TYPE_STYLUS || tool == MotionEvent.TOOL_TYPE_ERASER
         }
         if (stylusIndex == null) return super.onHoverEvent(event)
+        eraserHold = ch.fasrv.fanotes.input.nextPenEraserHold(
+            eraserHold,
+            event.getToolType(stylusIndex),
+            event.buttonState,
+            buttonAssignments(),
+            hovering = true,
+            // Android sends hover exit right before every touch-down, so only a cancel ends the latch here.
+            left = event.actionMasked == MotionEvent.ACTION_CANCEL,
+        )
+        eraserHoverAt = event.eventTime
         if (event.actionMasked == MotionEvent.ACTION_HOVER_EXIT || event.actionMasked == MotionEvent.ACTION_CANCEL) {
             hoverX = Float.NaN
             hoverY = Float.NaN
@@ -906,9 +937,21 @@ class InkSurfaceView @JvmOverloads constructor(
                     pointerButtonFromAndroid(event.getToolType(index), event.buttonState),
                     asStylus,
                 )
-                val buttonAction = tabletButtonAction(parseTabletButtonMap(tabletButtons), identity)
+                if (isPenTool(tool)) {
+                    eraserHold = ch.fasrv.fanotes.input.nextPenEraserHold(eraserHold, event.getToolType(index), event.buttonState, buttonAssignments(), hovering = false)
+                }
+                // A held eraser button keeps erasing even when this contact lost the button bit.
+                val buttonAction = if (isPenTool(tool) && event.eventTime - eraserHoverAt < ERASER_HOLD_FRESH_MS && ch.fasrv.fanotes.input.penEraserHeld(eraserHold, identity)) {
+                    "eraser"
+                } else {
+                    tabletButtonAction(buttonAssignments(), identity)
+                }
                 if (identity != null && !shouldInterceptTabletButton(buttonAction)) return true
-                if (identity != null && buttonAction in setOf("none", "undo", "redo", "pan")) {
+                if (identity != null && buttonAction == "menu" && isPenTool(tool) && inkPointer == MotionEvent.INVALID_POINTER_ID) {
+                    openQuickMenu(id, event.getX(index), event.getY(index), held = true)
+                    return true
+                }
+                if (identity != null && buttonAction in setOf("none", "undo", "redo", "pan", "menu")) {
                     when (buttonAction) {
                         "undo" -> if (session?.undo() == true) {
                             invalidateTiles()
@@ -922,7 +965,12 @@ class InkSurfaceView @JvmOverloads constructor(
                             tabletPanId = id
                             tabletPanX = event.getX(index)
                             tabletPanY = event.getY(index)
-                            if (isPenTool(tool)) requestUnbufferedDispatch(event)
+                            if (isPenTool(tool)) {
+                                requestUnbufferedDispatch(event)
+                                // Pan button + tip that stays put is the desktop quick-menu chord.
+                                quickChord.begin(id, ch.fasrv.fanotes.ink.QuickMenuSource.PAN, tabletPanX, tabletPanY, now)
+                                scheduleQuickMenu(ch.fasrv.fanotes.ink.QUICK_MENU_HOLD_MS)
+                            }
                         }
                     }
                     invalidate()
@@ -942,6 +990,10 @@ class InkSurfaceView @JvmOverloads constructor(
                     inkPointer = id
                     if (isPenTool(tool)) requestUnbufferedDispatch(event)
                     beginInk(event, index, tool, identity, buttonAction)
+                    if (quickMenuLongPress && isPenTool(tool) && inkPointer == id && session?.livePoints?.isNotEmpty() == true && !erasing) {
+                        quickChord.begin(id, ch.fasrv.fanotes.ink.QuickMenuSource.INK, event.getX(index), event.getY(index), now)
+                        scheduleQuickMenu(ch.fasrv.fanotes.ink.QUICK_MENU_LONG_PRESS_MS)
+                    }
                 } else if (guideDrag != null) {
                     // A tool already owns this gesture. A second finger does not pan it away.
                 } else if (fingerMayNavigate(palm, now)) {
@@ -969,11 +1021,23 @@ class InkSurfaceView @JvmOverloads constructor(
                 }
             }
             MotionEvent.ACTION_MOVE -> {
+                if (quickChord.menuPointer != MotionEvent.INVALID_POINTER_ID) {
+                    val menuIndex = event.findPointerIndex(quickChord.menuPointer)
+                    if (menuIndex >= 0) {
+                        onQuickMenuDrag(event.getX(menuIndex), event.getY(menuIndex), false)
+                        return true
+                    }
+                }
                 if (tabletPanId != MotionEvent.INVALID_POINTER_ID) {
                     val panIndex = event.findPointerIndex(tabletPanId)
                     if (panIndex >= 0) {
                         val x = event.getX(panIndex)
                         val y = event.getY(panIndex)
+                        quickLastX = x
+                        quickLastY = y
+                        // Inside the slop the sheet waits: the contact may still be the quick menu.
+                        if (quickChord.isCandidate(tabletPanId) && quickChord.move(tabletPanId, x, y, quickSlopPx())) return true
+                        if (!quickChord.pending) removeCallbacks(quickMenuDue)
                         pageLeft += x - tabletPanX
                         pageTop += y - tabletPanY
                         tabletPanX = x
@@ -985,7 +1049,14 @@ class InkSurfaceView @JvmOverloads constructor(
                 }
                 if (inkPointer != MotionEvent.INVALID_POINTER_ID) {
                     val inkIndex = event.findPointerIndex(inkPointer)
-                    if (inkIndex >= 0) moveInk(event, inkIndex)
+                    if (inkIndex >= 0) {
+                        if (quickChord.isCandidate(inkPointer)) {
+                            quickLastX = event.getX(inkIndex)
+                            quickLastY = event.getY(inkIndex)
+                            if (!quickChord.move(inkPointer, quickLastX, quickLastY, quickSlopPx())) removeCallbacks(quickMenuDue)
+                        }
+                        moveInk(event, inkIndex)
+                    }
                 } else if (guideDrag != null) {
                     moveGuide(event)
                 } else if (fingerMayNavigate(palm, now)) {
@@ -1012,6 +1083,20 @@ class InkSurfaceView @JvmOverloads constructor(
                     if (cancelled) List(event.pointerCount) { toolOf(event, it) } else emptyList(),
                     event.eventTime,
                 )
+                if (quickChord.isMenuPointer(id) || (cancelled && quickChord.menuPointer != MotionEvent.INVALID_POINTER_ID)) {
+                    // A cancelled slide picks nothing; the menu stays open for a tap.
+                    if (revoked) onQuickMenuDrag(Float.NaN, Float.NaN, true) else onQuickMenuDrag(event.getX(index), event.getY(index), true)
+                    quickChord.end()
+                } else if (id == tabletPanId && !revoked && quickChord.tapUp(id, now)) {
+                    // A quick pan-button tap without moving: the menu stays open for a tap choice.
+                    openQuickMenu(id, event.getX(index), event.getY(index), held = false)
+                    quickChord.end()
+                }
+                if (quickChord.pointerId == id || cancelled) {
+                    removeCallbacks(quickMenuDue)
+                    quickChord.end(if (cancelled) MotionEvent.INVALID_POINTER_ID else id)
+                }
+                if (cancelled) eraserHold = 0
                 if (id == tabletPanId || cancelled) tabletPanId = MotionEvent.INVALID_POINTER_ID
                 if (guideDrag?.pointerId == id || cancelled) guideDrag = null
                 val endingInk = id == inkPointer || cancelled
@@ -1042,6 +1127,49 @@ class InkSurfaceView @JvmOverloads constructor(
         return true
     }
 
+    private fun buttonAssignments(): Map<String, String> {
+        if (buttonMapRaw != tabletButtons) {
+            buttonMapRaw = tabletButtons
+            buttonMap = parseTabletButtonMap(tabletButtons)
+        }
+        return buttonMap
+    }
+
+    private fun quickSlopPx() = ch.fasrv.fanotes.ink.QUICK_MENU_SLOP_DP * resources.displayMetrics.density
+
+    private fun scheduleQuickMenu(delayMs: Long) {
+        removeCallbacks(quickMenuDue)
+        postDelayed(quickMenuDue, delayMs)
+    }
+
+    private fun openQuickMenu(pointer: Int, x: Float, y: Float, held: Boolean) {
+        removeCallbacks(quickMenuDue)
+        if (held) quickChord.open(pointer) else quickChord.end()
+        onQuickMenu(x, y, held)
+    }
+
+    /** The hold timer: the candidate stayed still long enough. A started stroke is dropped, not committed. */
+    private fun fireQuickMenuHold() {
+        val pointer = quickChord.pointerId
+        if (!quickChord.holdDue(pointer, SystemClock.uptimeMillis())) return
+        // Still inside the slop, so the start is where the pen is.
+        val x = quickChord.startX
+        val y = quickChord.startY
+        if (quickChord.source == ch.fasrv.fanotes.ink.QuickMenuSource.INK) {
+            if (inkPointer != pointer) return
+            finishInk(cancel = true)
+            inkPointer = MotionEvent.INVALID_POINTER_ID
+        } else {
+            tabletPanId = MotionEvent.INVALID_POINTER_ID
+        }
+        openQuickMenu(pointer, x, y, held = true)
+        invalidate()
+    }
+
+    /** Armed math figure / function graph: the next pen tap stamps it (Figuren, Funktionsgraph). */
+    var placingFigure: ch.fasrv.fanotes.ink.FigureStampSpec? = null
+    var placingGraph: ch.fasrv.fanotes.ink.GraphStampSpec? = null
+
     private fun beginInk(event: MotionEvent, index: Int, tool: PointerTool, identity: String?, action: String) {
         val current = session ?: return
         onPenActive(true)
@@ -1054,6 +1182,23 @@ class InkSurfaceView @JvmOverloads constructor(
         val (x, y) = screenToNorm(event.getX(index), event.getY(index))
         val sectionHit = sectionsOf(current.document).firstOrNull { y >= it.top && y < it.bodyTop && x < 0.08 }
         when {
+            inkTool == InkTool.LASER && !eraser -> {
+                lasering = true
+                onLaser(event.getX(index), event.getY(index), event.eventTime, 0)
+                return
+            }
+            !eraser && (placingFigure != null || placingGraph != null) -> {
+                val stamp = placingFigure?.let { ch.fasrv.fanotes.ink.figureStampStroke(it, x, y, style) }
+                    ?: placingGraph?.let { ch.fasrv.fanotes.ink.graphStampStroke(it, x, y, style) }
+                if (stamp != null) {
+                    current.placeStamp(stamp, nowIso())
+                    if (!paintIntoTiles(current, stamp)) invalidateTiles(stamp)
+                    onStroke(stamp)
+                    onChanged()
+                }
+                onPenActive(false)
+                inkPointer = MotionEvent.INVALID_POINTER_ID
+            }
             !eraser && placingSymbol != null -> {
                 val symbolId = placingSymbol!!
                 val stamped = current.placeSymbol(x, y, style, symbolId, nowIso(), symbolSize, symbolRotation, symbolOpacity)
@@ -1199,6 +1344,14 @@ class InkSurfaceView @JvmOverloads constructor(
 
     private fun moveInk(event: MotionEvent, index: Int) {
         val current = session ?: return
+        if (lasering) {
+            // Screen-space only: the page is not redrawn for a laser sample.
+            for (h in 0 until event.historySize) {
+                onLaser(event.getHistoricalX(index, h), event.getHistoricalY(index, h), event.getHistoricalEventTime(h), 1)
+            }
+            onLaser(event.getX(index), event.getY(index), event.eventTime, 1)
+            return
+        }
         trackNib(event, index)
         predictor?.record(event)
         if (study.dragging) {
@@ -1260,6 +1413,11 @@ class InkSurfaceView @JvmOverloads constructor(
         predicted = emptyList()
         snapLock = null
         onPenActive(false)
+        if (lasering) {
+            lasering = false
+            onLaser(Float.NaN, Float.NaN, SystemClock.uptimeMillis(), 2)
+            return
+        }
         if (study.dragging) {
             study.up(studyLastX, studyLastY, cancel)
             return
@@ -1337,7 +1495,7 @@ class InkSurfaceView @JvmOverloads constructor(
                 val tookShape = didShapeSnap
                 shapeSnapped = false
                 val live = current.livePoints
-                val scribble = if (inkTool == InkTool.PEN && live.size >= 8) {
+                val scribble = if (inkTool == InkTool.PEN && style.purpose != "art" && live.size >= 8) {
                     detectScribbleErase(
                         InkStroke(live, style.baseWidth, style.pressureEnabled, style.color),
                         current.document.strokes,
