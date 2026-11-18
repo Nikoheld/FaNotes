@@ -54,6 +54,10 @@ class InkSession(document: InkDocument) {
         private set
     private val undo = ArrayDeque<List<InkStroke>>()
     private val redo = ArrayDeque<List<InkStroke>>()
+    /** One id per [undo] / [redo] entry, so other histories (PDF marks) can interleave with the ink's. */
+    private val undoIds = ArrayDeque<Long>()
+    private val redoIds = ArrayDeque<Long>()
+    private var nextUndoId = 1L
     private var eraseCheckpoint = false
     /** Where the previous [eraseSamples] call of this gesture ended; see [eraserSweep]. */
     private var eraseCarry: EraserCarry? = null
@@ -65,6 +69,14 @@ class InkSession(document: InkDocument) {
         private set
     val canUndo get() = undo.isNotEmpty()
     val canRedo get() = redo.isNotEmpty()
+    /** Id of the newest undo entry (0: none). It changes with every new change, undo and redo. */
+    val undoStamp: Long get() = undoIds.lastOrNull() ?: 0L
+    /** Count of changes pushed so far; a new change also empties the redo list. */
+    val changeCount: Long get() = nextUndoId - 1
+    /** Counts [replace] calls: each one starts a new history. */
+    var generation: Long = 0
+        private set
+
 
     fun replace(next: InkDocument) {
         document = next
@@ -72,6 +84,9 @@ class InkSession(document: InkDocument) {
         selection = emptySet()
         undo.clear()
         redo.clear()
+        undoIds.clear()
+        redoIds.clear()
+        generation += 1
         eraseCheckpoint = false
         eraseCarry = null
     }
@@ -414,6 +429,7 @@ class InkSession(document: InkDocument) {
     fun undo(): Boolean {
         val previous = undo.removeLastOrNull() ?: return false
         redo.addLast(document.strokes)
+        redoIds.addLast(undoIds.removeLastOrNull() ?: 0L)
         document = document.copy(strokes = previous)
         selection = emptySet()
         eraseCarry = null
@@ -423,6 +439,7 @@ class InkSession(document: InkDocument) {
     fun redo(): Boolean {
         val next = redo.removeLastOrNull() ?: return false
         undo.addLast(document.strokes)
+        undoIds.addLast(redoIds.removeLastOrNull() ?: 0L)
         document = document.copy(strokes = next)
         selection = emptySet()
         eraseCarry = null
@@ -431,8 +448,13 @@ class InkSession(document: InkDocument) {
 
     private fun pushUndo() {
         undo.addLast(document.strokes)
-        if (undo.size > 100) undo.removeFirst()
+        undoIds.addLast(nextUndoId++)
+        if (undo.size > 100) {
+            undo.removeFirst()
+            undoIds.removeFirst()
+        }
         redo.clear()
+        redoIds.clear()
     }
 
     /**

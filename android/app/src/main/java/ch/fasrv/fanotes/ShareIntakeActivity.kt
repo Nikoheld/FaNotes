@@ -28,12 +28,34 @@ class ShareIntakeActivity : Activity() {
         Thread({
             val handoff = runCatching { copyIncoming(source) }.getOrNull()
             runOnUiThread {
-                if (handoff != null) {
-                    runCatching { startActivity(handoff) }
-                }
+                if (handoff != null) deliver(handoff)
                 finish()
             }
         }, "fanotes-share-intake").start()
+    }
+
+    /**
+     * Normally the editor comes forward with the import (CLEAR_TOP). While the writing mode is open, that would
+     * destroy its WebView in the middle of the save it starts on pause, so the editor window behind it imports the
+     * files and the task comes forward as it is; the writing mode stays open with everything typed in it.
+     */
+    private fun deliver(handoff: Intent) {
+        if (WritingActivity.openCount <= 0) {
+            runCatching { startActivity(handoff) }
+            return
+        }
+        if (!MainActivity.importInLiveWindow(handoff)) parked = handoff
+        val task = runCatching {
+            getSystemService(android.app.ActivityManager::class.java)?.appTasks?.firstOrNull {
+                it.taskInfo?.baseActivity?.className == MainActivity::class.java.name
+            }
+        }.getOrNull()
+        runCatching { task?.moveToFront() }
+        android.widget.Toast.makeText(
+            applicationContext,
+            ch.fasrv.fanotes.desk.ChromeText.ui(SHARED_WHILE_WRITING),
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
     }
 
     private fun copyIncoming(source: Intent): Intent? {
@@ -114,5 +136,11 @@ class ShareIntakeActivity : Activity() {
         const val EXTRA_TEXT = "ch.fasrv.fanotes.extra.SHARED_TEXT"
         const val EXTRA_SUBJECT = "ch.fasrv.fanotes.extra.SHARED_SUBJECT"
         const val INCOMING_DIR = "incoming"
+        const val SHARED_WHILE_WRITING = "In FaNotes importiert. Die Notiz ist offen, sobald du den Schreibmodus schliesst."
+
+        /** A hand-off that arrived with the writing mode open but no editor window; the next one imports it. */
+        @Volatile private var parked: Intent? = null
+
+        fun takeParked(): Intent? = parked.also { parked = null }
     }
 }

@@ -35,7 +35,7 @@ fun modProblem(op: ModOp, a: String, b: String, m: String): String {
     val vb = bigOrNull(b)
     val vm = bigOrNull(m)
     if (va == null || vb == null || vm == null) return "Gib a, b und m als ganze Zahlen ein."
-    if (vm < BigInteger.TWO) return "m muss mindestens 2 sein."
+    if (vm < BigInteger.valueOf(2)) return "m muss mindestens 2 sein."
     if (op == ModOp.POWER && vb > BigInteger.valueOf(MOD_POWER_MAX.toLong())) return "Der Exponent ist für die Zwischenrechnung zu gross (höchstens $MOD_POWER_MAX)."
     return ""
 }

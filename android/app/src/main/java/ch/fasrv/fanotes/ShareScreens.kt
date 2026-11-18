@@ -59,7 +59,7 @@ fun ShareDialogHost(model: FaNotesViewModel) {
     val context = LocalContext.current
     AlertDialog(
         onDismissRequest = { service.closeDialog() },
-        title = { Text(if (current.isFolder) "Ordner teilen" else "Notiz teilen") },
+        title = { Text(ui(if (current.isFolder) "Ordner teilen" else "Notiz teilen")) },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(current.rootPath.substringAfterLast('/').ifEmpty { current.rootPath }, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
@@ -68,7 +68,7 @@ fun ShareDialogHost(model: FaNotesViewModel) {
                     ModeRow("Kopie", "Der Stand von jetzt. Spätere Änderungen erscheinen nicht im Link.", mode == ShareMode.COPY) { mode = ShareMode.COPY }
                     ModeRow("Live", "Der Link wird nach dem Speichern aktualisiert.", mode == ShareMode.LIVE) { mode = ShareMode.LIVE }
                     Text(
-                        "Wer den Link kennt, kann die Notiz lesen. Text und sichtbare Handschrift werden hochgeladen, der Verlauf nicht.",
+                        ui("Wer den Link kennt, kann die Notiz lesen. Text und sichtbare Handschrift werden hochgeladen, der Verlauf nicht."),
                         fontSize = 12.sp,
                         color = LocalStatusInk.current.muted,
                     )
@@ -76,24 +76,24 @@ fun ShareDialogHost(model: FaNotesViewModel) {
                     Text(if (created.mode == ShareMode.LIVE) "Live-Link erstellt" else "Link erstellt", fontSize = 13.sp, color = LocalStatusInk.current.success)
                     SelectionContainer { Text(created.link, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { clipboard.setText(AnnotatedString(created.link)); model.message.value = "Link kopiert." }, modifier = Modifier.heightIn(min = Target)) { Text("Kopieren") }
-                        OutlinedButton(onClick = { shareChooser(context, created.link) }, modifier = Modifier.heightIn(min = Target)) { Text("Senden …") }
+                        OutlinedButton(onClick = { clipboard.setText(AnnotatedString(created.link)); model.message.value = "Link kopiert." }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Kopieren")) }
+                        OutlinedButton(onClick = { shareChooser(context, created.link) }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Senden …")) }
                     }
-                    TextButton(onClick = { service.stop(created.id) { model.message.value = it } }, modifier = Modifier.heightIn(min = Target)) { Text("Freigabe beenden", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { service.stop(created.id) { model.message.value = it } }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Freigabe beenden"), color = MaterialTheme.colorScheme.error) }
                 }
                 current.error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
-                if (current.busy) Text("Wird hochgeladen …", fontSize = 13.sp, color = LocalStatusInk.current.muted)
+                if (current.busy) Text(ui("Wird hochgeladen …"), fontSize = 13.sp, color = LocalStatusInk.current.muted)
             }
         },
         confirmButton = {
             if (current.created == null) {
-                Button(onClick = { service.publish(mode) }, enabled = !current.busy, modifier = Modifier.heightIn(min = Target)) { Text("Link erstellen") }
+                Button(onClick = { service.publish(mode) }, enabled = !current.busy, modifier = Modifier.heightIn(min = Target)) { Text(ui("Link erstellen")) }
             } else {
-                TextButton(onClick = { service.closeDialog() }, modifier = Modifier.heightIn(min = Target)) { Text("Fertig") }
+                TextButton(onClick = { service.closeDialog() }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Fertig")) }
             }
         },
         dismissButton = {
-            if (current.created == null) TextButton(onClick = { service.closeDialog() }, modifier = Modifier.heightIn(min = Target)) { Text("Abbrechen") }
+            if (current.created == null) TextButton(onClick = { service.closeDialog() }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Abbrechen")) }
         },
     )
 }
@@ -106,8 +106,8 @@ private fun ModeRow(title: String, text: String, selected: Boolean, onClick: () 
     ) {
         RadioButton(selected = selected, onClick = onClick)
         Column(Modifier.padding(start = 4.dp)) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(text, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ui(title), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(ui(text), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
     }
 }
@@ -120,7 +120,7 @@ fun ShareSettingsCard(model: FaNotesViewModel, modifier: Modifier = Modifier) {
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     LaunchedEffect(Unit) { service.checkLinks() }
-    SettingCard("Freigaben", Icons.Filled.Share, modifier) {
+    SettingCard("Freigaben & Links", Icons.Filled.Share, modifier) {
         if (shares.isEmpty()) {
             SettingRow("Noch keine Links", "Öffne eine Notiz und wähle „Mehr“ → „Link teilen“.", divider = false) {}
         }
@@ -143,11 +143,11 @@ private fun ShareRow(share: ShareLinkRecord, divider: Boolean, onCopy: () -> Uni
     SettingRow(share.title.ifBlank { share.rootPath }, "${if (share.kind == "folder") "Ordner" else "Notiz"} · $kind · ${share.createdAt.take(10)}", divider = divider) {
         Row {
             if (!share.stopped) {
-                TextButton(onClick = onCopy, modifier = Modifier.heightIn(min = Target)) { Text("Kopieren") }
-                TextButton(onClick = onSend, modifier = Modifier.heightIn(min = Target)) { Text("Senden") }
-                TextButton(onClick = onStop, modifier = Modifier.heightIn(min = Target)) { Text("Beenden") }
+                TextButton(onClick = onCopy, modifier = Modifier.heightIn(min = Target)) { Text(ui("Kopieren")) }
+                TextButton(onClick = onSend, modifier = Modifier.heightIn(min = Target)) { Text(ui("Senden")) }
+                TextButton(onClick = onStop, modifier = Modifier.heightIn(min = Target)) { Text(ui("Beenden")) }
             } else {
-                TextButton(onClick = onForget, modifier = Modifier.heightIn(min = Target)) { Text("Entfernen") }
+                TextButton(onClick = onForget, modifier = Modifier.heightIn(min = Target)) { Text(ui("Entfernen")) }
             }
         }
     }
@@ -175,7 +175,7 @@ fun ProfileSettingsCard(model: FaNotesViewModel, modifier: Modifier = Modifier) 
                 onClick = { service.claim() },
                 enabled = !profile.busy && profile.username.isNotBlank(),
                 modifier = Modifier.heightIn(min = Target),
-            ) { Text(if (profile.claimed) "Ändern" else "Festlegen") }
+            ) { Text(ui(if (profile.claimed) "Ändern" else "Festlegen")) }
         }
         if (profile.claimed) {
             SettingRow("Übersicht öffentlich", "Zeigt Zahl der Notizen, Zeit in FaNotes und die aktiven Tage. Keine Titel, keine Texte.", divider = profile.public) {
@@ -184,7 +184,7 @@ fun ProfileSettingsCard(model: FaNotesViewModel, modifier: Modifier = Modifier) 
             val link = service.profileLink()
             if (profile.public && link != null) {
                 SettingRow("Link", link, divider = profile.overview != null) {
-                    TextButton(onClick = { clipboard.setText(AnnotatedString(link)); model.message.value = "Link kopiert." }, modifier = Modifier.heightIn(min = Target)) { Text("Kopieren") }
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(link)); model.message.value = "Link kopiert." }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Kopieren")) }
                 }
             }
             profile.overview?.let { overview ->
@@ -205,7 +205,7 @@ fun ConflictShortcutCard(model: FaNotesViewModel, modifier: Modifier = Modifier)
             "Vergleiche beide Fassungen und entscheide, welche gilt.",
             divider = false,
         ) {
-            Button(onClick = { model.showDestination("conflicts") }, modifier = Modifier.heightIn(min = Target)) { Text("Konflikte öffnen") }
+            Button(onClick = { model.showDestination("conflicts") }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Konflikte öffnen")) }
         }
     }
 }

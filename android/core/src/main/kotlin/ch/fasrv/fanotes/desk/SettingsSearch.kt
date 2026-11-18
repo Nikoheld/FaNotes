@@ -41,6 +41,8 @@ val SETTINGS_SEARCH_ITEMS: List<SettingsSearchItem> = listOf(
     SettingsSearchItem("Stifte- und Tablett-Tasten", "Stift & Erkennung", "drawing", "settings-tablet-buttons", "wacom tablett taste barrel radierer expresskey stift knopf mapping"),
     SettingsSearchItem("Durchkritzel-Empfindlichkeit", "Stift & Erkennung", "drawing", "settings-tablet", "löschen radierer scribble sensitivity"),
     SettingsSearchItem("Form-Erkennung", "Stift & Erkennung", "drawing", "settings-tablet", "form zirkel kreis linie rechteck dreieck glätten snap stillhalten empfindlichkeit"),
+    SettingsSearchItem("Handschrifterkennung", "Stift & Erkennung", "drawing", "settings-recognition", "erkennung konvertieren umwandeln mathe formel löser korrigierer modell download transkript suche ink"),
+    SettingsSearchItem("Werkzeugleiste", "Editor", "editor", "settings-editor", "toolbar leiste oben seitlich rand vertikal horizontal links rechts rail"),
     SettingsSearchItem("Alte Notizen auf den aktuellen Standard", "Stift & Erkennung", "drawing", "settings-note-standard", "hidpi scharf qualität standard konvertieren alte notizen pixel"),
     SettingsSearchItem("Notiz-Backup", "Experimentell", "experimental", "settings-note-backup", "backup sichern wiederherstellen snapshot notiz"),
     SettingsSearchItem("Vault & Speicherort", "Dateien & Vault", "files", "settings-vault", "ordner wechseln pfad notizen markdown vault"),

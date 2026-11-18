@@ -137,14 +137,14 @@ private fun Box1pxDivider() {
 @Composable
 private fun EmptyConflicts(onClose: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("Keine Konflikte", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text(ui("Keine Konflikte"), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         Text(
-            "Alle Geräte haben dieselbe Fassung. Ein Konflikt entsteht, wenn dieselbe Datei auf zwei Geräten geändert wurde.",
+            ui("Alle Geräte haben dieselbe Fassung. Ein Konflikt entsteht, wenn dieselbe Datei auf zwei Geräten geändert wurde."),
             fontSize = 14.sp,
             color = LocalStatusInk.current.muted,
             modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
         )
-        OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = Target)) { Text("Zu den Notizen") }
+        OutlinedButton(onClick = onClose, modifier = Modifier.heightIn(min = Target)) { Text(ui("Zu den Notizen")) }
     }
 }
 
@@ -152,10 +152,10 @@ private fun EmptyConflicts(onClose: () -> Unit) {
 private fun ConflictListHeader(count: Int, onClear: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("Sync-Konflikte", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
+            Text(ui("Sync-Konflikte"), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
             Text(if (count == 1) "1 Datei" else "$count Dateien", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         }
-        TextButton(onClick = onClear, modifier = Modifier.heightIn(min = Target)) { Text("Liste leeren") }
+        TextButton(onClick = onClear, modifier = Modifier.heightIn(min = Target)) { Text(ui("Liste leeren")) }
     }
 }
 
@@ -202,7 +202,7 @@ private fun ConflictDetail(
             )
         }
         if (ready == null) {
-            Text("Fassungen werden gelesen …", fontSize = 14.sp, color = LocalStatusInk.current.muted)
+            Text(ui("Fassungen werden gelesen …"), fontSize = 14.sp, color = LocalStatusInk.current.muted)
         } else {
             val diff = if (ready.remote is ConflictPreview.Note && ready.local is ConflictPreview.Note) {
                 changedLines(ready.remote.lines, ready.local.lines)
@@ -220,7 +220,7 @@ private fun ConflictDetail(
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Welche Fassung soll gelten?", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(ui("Welche Fassung soll gelten?"), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             val buttons = listOf(
                 Triple("remote", conflictChoiceLabel("remote"), true),
                 Triple("local", conflictChoiceLabel("local"), true),
@@ -234,7 +234,7 @@ private fun ConflictDetail(
                 buttons.forEach { (id, label, _) -> ChoiceButton(id, label, Modifier.fillMaxWidth()) { model.resolveConflict(conflict, id) } }
             }
             Text(
-                if (markdown) "„Zusammenführen“ hängt Absätze, die nur auf dem Tablet stehen, an die Serverfassung an." else "Die andere Fassung wird gelöscht, sobald du dich entschieden hast.",
+                ui(if (markdown) "„Zusammenführen“ hängt Absätze, die nur auf dem Tablet stehen, an die Serverfassung an." else "Die andere Fassung wird gelöscht, sobald du dich entschieden hast."),
                 fontSize = 12.sp,
                 color = LocalStatusInk.current.muted,
             )
@@ -273,23 +273,23 @@ private fun VersionPanel(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text(subtitle, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ui(title), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(ui(subtitle), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
         Text(conflictSummary(preview), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         when (preview) {
-            ConflictPreview.Missing -> Text("Diese Fassung gibt es nicht mehr.", fontSize = 13.sp)
-            is ConflictPreview.Damaged -> Text("Die Datei ist beschädigt und lässt sich nicht lesen.", fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+            ConflictPreview.Missing -> Text(ui("Diese Fassung gibt es nicht mehr."), fontSize = 13.sp)
+            is ConflictPreview.Damaged -> Text(ui("Die Datei ist beschädigt und lässt sich nicht lesen."), fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
             is ConflictPreview.Note -> {
                 preview.ink?.let { InkThumb(it) }
                 TextLines(preview.lines, changed)
             }
-            is ConflictPreview.Ink -> preview.ink?.let { InkThumb(it) } ?: Text("Leere Seite", fontSize = 13.sp)
+            is ConflictPreview.Ink -> preview.ink?.let { InkThumb(it) } ?: Text(ui("Leere Seite"), fontSize = 13.sp)
             is ConflictPreview.Text -> TextLines(preview.lines, null)
             is ConflictPreview.Story -> TextLines(preview.lines, null)
             is ConflictPreview.Image -> BitmapPreview(preview.bytes)
             is ConflictPreview.Pdf -> PdfFirstPage(path, model)
-            is ConflictPreview.Binary -> Text("Für diesen Dateityp gibt es keine Vorschau.", fontSize = 13.sp)
+            is ConflictPreview.Binary -> Text(ui("Für diesen Dateityp gibt es keine Vorschau."), fontSize = 13.sp)
         }
     }
 }
@@ -297,7 +297,7 @@ private fun VersionPanel(
 @Composable
 private fun TextLines(lines: List<String>, changed: Set<Int>?) {
     if (lines.isEmpty()) {
-        Text("Kein Text", fontSize = 13.sp, color = LocalStatusInk.current.muted)
+        Text(ui("Kein Text"), fontSize = 13.sp, color = LocalStatusInk.current.muted)
         return
     }
     val highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
@@ -376,7 +376,7 @@ private fun PdfFirstPage(path: String, model: FaNotesViewModel) {
 @Composable
 private fun ShowBitmap(bitmap: Bitmap?, missing: String = "Vorschau wird geladen …") {
     if (bitmap == null) {
-        Text(missing, fontSize = 13.sp, color = LocalStatusInk.current.muted)
+        Text(ui(missing), fontSize = 13.sp, color = LocalStatusInk.current.muted)
         return
     }
     Image(

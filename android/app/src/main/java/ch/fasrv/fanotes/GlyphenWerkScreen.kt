@@ -170,7 +170,7 @@ fun GlyphenWerkScreen(model: FaNotesViewModel, onDismiss: () -> Unit) {
                                 val on = index == categoryIndex
                                 Box(
                                     Modifier
-                                        .heightIn(min = 40.dp)
+                                        .heightIn(min = 48.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else ink.copy(alpha = 0.05f))
                                         .clickable { categoryIndex = index; strokes.clear() }

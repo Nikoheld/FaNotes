@@ -3,7 +3,6 @@ package ch.fasrv.fanotes.schulnetz
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.time.Period
 
@@ -98,7 +97,7 @@ private val PORTRAIT_FILE = Regex("""^[^/\\?#]{1,180}\.(?:jpg|jpeg|png|webp)$"""
 fun portraitUrl(file: String): String? {
     val trimmed = file.trim()
     if (trimmed.isEmpty() || trimmed.contains("..") || !PORTRAIT_FILE.matches(trimmed)) return null
-    val encoded = URLEncoder.encode(trimmed, StandardCharsets.UTF_8).replace("+", "%20")
+    val encoded = URLEncoder.encode(trimmed, "UTF-8").replace("+", "%20")
     return "https://commons.wikimedia.org/wiki/Special:FilePath/$encoded?width=640"
 }
 

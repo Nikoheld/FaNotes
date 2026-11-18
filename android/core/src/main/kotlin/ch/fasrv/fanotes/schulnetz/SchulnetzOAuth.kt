@@ -123,10 +123,10 @@ private fun form(vararg pairs: Pair<String, String>): String =
     pairs.joinToString("&") { (key, value) -> "$key=${oauthEncode(value)}" }
 
 private fun oauthEncode(value: String): String =
-    URLEncoder.encode(value, Charsets.UTF_8).replace("+", "%20")
+    URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
 private fun oauthDecode(value: String): String =
-    runCatching { URLDecoder.decode(value, Charsets.UTF_8) }.getOrDefault(value)
+    runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
 
 private fun queryParam(decoded: String, name: String): String? =
     decoded.split('&').firstNotNullOfOrNull { part ->

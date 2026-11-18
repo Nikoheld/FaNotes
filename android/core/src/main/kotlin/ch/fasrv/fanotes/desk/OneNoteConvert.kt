@@ -193,7 +193,7 @@ private fun contentPages(root: Path): List<HtmlPage> {
         val size = Files.size(path)
         if (size <= 0L) continue
         if (size > 128L * 1024 * 1024) throw OneNoteFailure("Eine OneNote-Seite ist leer oder zu groß.")
-        val text = Files.readString(path)
+        val text = String(Files.readAllBytes(path), Charsets.UTF_8)
         if (text.isBlank() || previewIsNav(text)) continue
         pages += HtmlPage(htmlTitle(text, path.name), text)
     }
@@ -206,7 +206,7 @@ private fun htmlFiles(root: Path): List<Path> {
         stream.filter { path ->
             val name = path.name.lowercase()
             Files.isRegularFile(path) && !Files.isSymbolicLink(path) && (name.endsWith(".html") || name.endsWith(".htm"))
-        }.sorted().toList()
+        }.sorted().collect(java.util.stream.Collectors.toList())
     }
 }
 
@@ -241,12 +241,12 @@ private fun prepareTools(one2htmlPath: String?, sevenZipPath: String?, dir: Path
 private fun locateOneNoteTools(one2htmlPath: String?, sevenZipPath: String?): Pair<Path, Path>? {
     if (!one2htmlPath.isNullOrBlank() || !sevenZipPath.isNullOrBlank()) {
         if (one2htmlPath.isNullOrBlank() || sevenZipPath.isNullOrBlank()) return null
-        return Path.of(one2htmlPath) to Path.of(sevenZipPath)
+        return java.nio.file.Paths.get(one2htmlPath) to java.nio.file.Paths.get(sevenZipPath)
     }
     val roots = ArrayList<Path>()
     val env = System.getenv("FANOTES_ONENOTE_DIR")
-    if (!env.isNullOrBlank()) roots.add(Path.of(env))
-    var dir = Path.of(System.getProperty("user.dir") ?: ".").toAbsolutePath().normalize()
+    if (!env.isNullOrBlank()) roots.add(java.nio.file.Paths.get(env))
+    var dir = java.nio.file.Paths.get(System.getProperty("user.dir") ?: ".").toAbsolutePath().normalize()
     repeat(6) {
         roots.add(dir.resolve("fanotes/resources/onenote"))
         roots.add(dir.resolve("resources/onenote"))
@@ -324,7 +324,7 @@ private fun runTool(tool: Path, args: List<String>, label: String): String {
 
 private fun readTail(path: Path): String {
     if (!Files.isRegularFile(path)) return ""
-    val text = Files.readString(path)
+    val text = String(Files.readAllBytes(path), Charsets.UTF_8)
     return if (text.length <= 256 * 1024) text else text.takeLast(256 * 1024)
 }
 
@@ -343,7 +343,7 @@ private fun filesWithExtension(root: Path, extension: String): List<Path> {
     return Files.walk(root).use { stream ->
         stream.filter { path ->
             Files.isRegularFile(path) && !Files.isSymbolicLink(path) && path.name.endsWith(suffix, ignoreCase = true)
-        }.sorted().toList()
+        }.sorted().collect(java.util.stream.Collectors.toList())
     }
 }
 

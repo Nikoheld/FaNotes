@@ -2165,11 +2165,35 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun undo() {
+        val marks = pdfMarkHistory()
+        if (marks.canUndo(session.undoStamp)) {
+            marks.undo(readPdfMarks(markdown.value), session.changeCount)?.let { updateMarkdown(writePdfMarks(markdown.value, it)) }
+            return
+        }
         if (session.undo()) noteChanged()
     }
 
     fun redo() {
+        val marks = pdfMarkHistory()
+        if (marks.canRedo(session.undoStamp, session.changeCount)) {
+            marks.redo(readPdfMarks(markdown.value))?.let { updateMarkdown(writePdfMarks(markdown.value, it)) }
+            return
+        }
         if (session.redo()) noteChanged()
+    }
+
+    /** Ink undo plus the PDF text marks ([ch.fasrv.fanotes.desk.PdfMarkHistory]). */
+    val canUndo: Boolean get() = session.canUndo || pdfMarkHistory().canUndo(session.undoStamp)
+    val canRedo: Boolean get() = session.canRedo || pdfMarkHistory().canRedo(session.undoStamp, session.changeCount)
+
+    private val markHistory = ch.fasrv.fanotes.desk.PdfMarkHistory()
+
+    /** The mark history of the open note; it starts empty for another note or a replaced ink history. */
+    private fun pdfMarkHistory(): ch.fasrv.fanotes.desk.PdfMarkHistory {
+        val note = open.value
+        val key = if (note?.kind == NoteKind.PDF) "${note.path}#${session.generation}" else null
+        if (markHistory.key != key) markHistory.reset(key)
+        return markHistory
     }
 
     fun deleteSelection() {
@@ -2968,13 +2992,24 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                                 val stack = pdfStackHeight(boxes)
                                 val scaleY = if (note.document.strokes.isEmpty() || stack <= 0) 1.0 else note.document.sourceHeight / stack
                                 val fullHeight = boxes.lastOrNull()?.let { (it.top * scaleY).toFloat() + (it.height * scaleY).toFloat() }
+                                var outOfMemory = false
                                 for ((position, box) in boxes.withIndex()) {
                                     ensureActive()
                                     val page = renderer.openPage(box.index)
                                     try {
                                         val width = 1200
                                         val height = (width * (page.height.toFloat() / page.width)).toInt().coerceAtLeast(1)
-                                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                        // Every page stays in memory (~8 MB each): a long PDF on a small heap shows the
+                                        // pages that fit instead of taking the app down.
+                                        val bitmap = try {
+                                            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                        } catch (_: OutOfMemoryError) {
+                                            null
+                                        }
+                                        if (bitmap == null) {
+                                            outOfMemory = true
+                                            break
+                                        }
                                         built += BackdropSlice(
                                             topPagePx = (box.top * scaleY).toFloat(),
                                             heightPagePx = (box.height * scaleY).toFloat(),
@@ -2996,6 +3031,17 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
                                         true
                                     }
                                     if (!current) return@withContext
+                                }
+                                if (outOfMemory) {
+                                    val shown = built.toList()
+                                    withContext(Dispatchers.Main) {
+                                        if (generation != backdropGeneration) return@withContext
+                                        if (published == 0) settlePdfPage(fullHeight)
+                                        backdrop.value = shown
+                                        published = shown.size
+                                        onFirstShown()
+                                        message.value = "Nicht genug Speicher für alle Seiten: Es werden die ersten ${shown.size} von ${boxes.size} Seiten gezeigt."
+                                    }
                                 }
                             }
                         } catch (error: Exception) {
@@ -3469,7 +3515,10 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         if (open.value?.kind != NoteKind.PDF) return
         val marks = readPdfMarks(markdown.value)
         val next = addPdfMark(marks, page, quote, kind, nth)
-        if (next != marks) updateMarkdown(writePdfMarks(markdown.value, next))
+        if (next != marks) {
+            pdfMarkHistory().record(marks, next, session.undoStamp, android.os.SystemClock.uptimeMillis())
+            updateMarkdown(writePdfMarks(markdown.value, next))
+        }
     }
 
     /** Takes the highlight off character [ranges] of [page] (selection "Markierung entfernen", the eraser). */
@@ -3478,7 +3527,11 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val before = readPdfMarks(markdown.value)
         var marks = before
         for (range in ranges) marks = ch.fasrv.fanotes.desk.unmarkPdfRange(marks, page, pageText, range.first, range.last + 1)
-        if (marks !== before) updateMarkdown(writePdfMarks(markdown.value, marks))
+        if (marks !== before) {
+            // One eraser gesture calls this per word it reaches: merged into one undo step.
+            pdfMarkHistory().record(before, marks, session.undoStamp, android.os.SystemClock.uptimeMillis(), merge = true)
+            updateMarkdown(writePdfMarks(markdown.value, marks))
+        }
     }
 
     /** The PDF for the on-page text layer; called off the main thread. */
@@ -5387,7 +5440,7 @@ class FaNotesViewModel(app: Application) : AndroidViewModel(app) {
         val session = executeAi(ch.fasrv.fanotes.desk.AiCall("${job.origin}/session", headers, ch.fasrv.fanotes.desk.openCodeSessionBody(title)))
         val id = (ch.fasrv.fanotes.json.parseJson(session) as? ch.fasrv.fanotes.json.JsonValue.Obj)?.string("id")
             ?: throw IllegalArgumentException("OpenCode konnte keine kurzlebige Sitzung erstellen.")
-        val encoded = java.net.URLEncoder.encode(id, Charsets.UTF_8)
+        val encoded = java.net.URLEncoder.encode(id, "UTF-8")
         return try {
             val message = executeAi(
                 ch.fasrv.fanotes.desk.AiCall(

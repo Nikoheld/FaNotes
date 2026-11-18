@@ -3011,6 +3011,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
 
     /** The style bar above the open field, or below it when the toolbar is in the way; kept on screen. */
     private fun placeNoteTextFieldBar(field: ch.fasrv.fanotes.desk.NoteTextField, left: Int, top: Int, bottom: Int) {
+        noteBar.applyColors(penKit.colors)
         noteBar.bind(field)
         noteBar.measure(MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
         val barWidth = noteBar.measuredWidth
@@ -3019,7 +3020,11 @@ class NotePageView(context: Context) : FrameLayout(context) {
         val ceiling = if (toolbar.visibility == VISIBLE) toolbar.bottom + margin else margin
         val above = top - margin - barHeight
         val y = if (above >= ceiling) above else (bottom + margin).coerceAtMost(height - barHeight - margin)
-        val x = left.coerceIn(margin, (width - barWidth - margin).coerceAtLeast(margin))
+        // A side rail covers one edge of the page: keep the bar beside it, not under it.
+        val railOpen = rail.visibility == VISIBLE
+        val minX = if (railOpen && barPosition == ch.fasrv.fanotes.desk.ToolbarPosition.SIDE) rail.right + margin else margin
+        val maxX = (if (railOpen && barPosition == ch.fasrv.fanotes.desk.ToolbarPosition.SIDE_RIGHT) rail.left - margin else width - margin) - barWidth
+        val x = left.coerceIn(minX, maxX.coerceAtLeast(minX))
         noteBar.layout(x, y, x + barWidth, y + barHeight)
     }
 

@@ -130,7 +130,7 @@ private fun <T> Segmented(options: List<Pair<T, String>>, selected: T, enabled: 
             val on = value == selected
             Box(
                 Modifier
-                    .heightIn(min = 40.dp)
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(if (on) MaterialTheme.colorScheme.surface else Color.Transparent)
                     .clickable(enabled = enabled && !on) { onSelect(value) }

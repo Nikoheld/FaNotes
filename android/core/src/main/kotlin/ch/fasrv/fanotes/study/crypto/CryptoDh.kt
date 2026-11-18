@@ -13,9 +13,9 @@ fun dhProblems(y: String, p: String, a: String, b: String): List<String> {
     val vp = bigOrNull(p)
     val va = bigOrNull(a)
     val vb = bigOrNull(b)
-    if (vp == null) problems += "P muss eine ganze Zahl sein." else if (vp < BigInteger.TWO) problems += "P muss mindestens 2 sein."
+    if (vp == null) problems += "P muss eine ganze Zahl sein." else if (vp < BigInteger.valueOf(2)) problems += "P muss mindestens 2 sein."
     if (vy == null) problems += "Y muss eine ganze Zahl sein."
-    else if (vp != null && vp >= BigInteger.TWO && vy >= vp) problems += "Y muss kleiner als P sein."
+    else if (vp != null && vp >= BigInteger.valueOf(2) && vy >= vp) problems += "Y muss kleiner als P sein."
     else if (vy < BigInteger.ONE) problems += "Y muss mindestens 1 sein."
     if (va == null) problems += "A muss eine ganze Zahl sein."
     if (vb == null) problems += "B muss eine ganze Zahl sein."
