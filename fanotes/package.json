@@ -116,6 +116,7 @@
     "measure:startup:linux": "node scripts/measure-linux-startup.cjs",
     "measure:efficiency:linux": "node scripts/measure-linux-efficiency.cjs",
     "check:updater": "node scripts/check-updater.cjs",
+    "check:updater-vectors": "node scripts/check-updater-vectors.mjs",
     "version:nightly": "node scripts/nightly-version.cjs",
     "version:set": "node scripts/set-version.mjs",
     "release:policy": "node scripts/check-release-policy.mjs",
