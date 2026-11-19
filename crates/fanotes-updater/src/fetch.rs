@@ -288,6 +288,7 @@ fn fetch_manifest_inner(
         request.platform,
         request.expected_key_id,
         picked.kind,
+        Some(&picked.tag_version),
     )
 }
 

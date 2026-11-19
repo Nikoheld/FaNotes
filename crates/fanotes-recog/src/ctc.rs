@@ -60,9 +60,11 @@ pub fn decode_ctc(
     language: Language,
     extra_words: &HashSet<String>,
 ) -> Result<CtcDecoded, DecodeError> {
+    // `time_steps * classes` is checked: wrapped (wasm32) it could match the
+    // buffer length and size the allocations below from a bogus step count.
     if time_steps == 0
         || classes != characters.len() + 1
-        || probabilities.len() != time_steps * classes
+        || time_steps.checked_mul(classes) != Some(probabilities.len())
     {
         return Err(DecodeError);
     }

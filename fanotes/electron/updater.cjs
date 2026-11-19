@@ -365,7 +365,15 @@ const validateDelta = (candidate, payload, platformConfig, packages) => {
   }
 }
 
-const verifyManifest = (candidate, currentVersion, publicKeyPem, targetPlatform = process.platform, expectedKeyId = EXPECTED_KEY_ID, expectedChannel = 'stable') => {
+/**
+ * `expectedChannel` is the kind of the release that was picked and
+ * `expectedVersion` its tag version. The signed `latestVersion` must be that
+ * tag, and its kind must be the manifest's channel: an older signed manifest
+ * re-attached to a newer release, or one channel's manifest offered as
+ * another's, is refused even on a fresh profile that has no highest-seen
+ * version yet.
+ */
+const verifyManifest = (candidate, currentVersion, publicKeyPem, targetPlatform = process.platform, expectedKeyId = EXPECTED_KEY_ID, expectedChannel = 'stable', expectedVersion = null) => {
   const platformConfig = PLATFORM_RELEASES[targetPlatform]
   if (!platformConfig) throw new Error('Automatische Updates werden auf dieser Plattform nicht unterstützt.')
   if (!isPlainObject(candidate) || !isPlainObject(candidate.signature)) throw new Error('Das Update-Manifest ist ungültig.')
@@ -390,6 +398,8 @@ const verifyManifest = (candidate, currentVersion, publicKeyPem, targetPlatform 
     payload.platform !== platformConfig.manifestPlatform || payload.arch !== 'x64'
   ) throw new Error('Das Update-Manifest ist nicht für diese FaNotes-Ausgabe bestimmt.')
   if (typeof payload.latestVersion !== 'string' || !VERSION_PATTERN.test(payload.latestVersion)) throw new Error('Die angebotene Version ist ungültig.')
+  if (versionChannel(payload.latestVersion) !== payload.channel) throw new Error('Die angebotene Version passt nicht zum Kanal des Update-Manifests.')
+  if (expectedVersion !== null && payload.latestVersion !== expectedVersion) throw new Error('Das Update-Manifest gehört zu einem anderen Release.')
   const updateAvailable = compareVersions(payload.latestVersion, currentVersion) > 0
   if (typeof payload.mandatory !== 'boolean') throw new Error('Der Update-Status im Manifest ist widersprüchlich.')
   // A GitHub release manifest is one file for every install. It names the
@@ -1050,7 +1060,7 @@ function createUpdateManager({
         signal: controller.signal,
       })
       const candidate = await readJsonResponse(manifestResponse, manifestUrl, 'GitHub hat kein gültiges JSON-Manifest geliefert.')
-      return verifyManifest(candidate, currentVersion, publicKeyPem, platform, expectedKeyId, picked.kind)
+      return verifyManifest(candidate, currentVersion, publicKeyPem, platform, expectedKeyId, picked.kind, picked.tagVersion)
     } catch (error) {
       if (!error?.diagnosis) {
         const resolvedAddress = await lookupHost(hostOf(listUrl))

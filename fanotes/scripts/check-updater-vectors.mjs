@@ -103,10 +103,13 @@ const windowsPayload = (current, latest, channel = 'stable') => {
 
 const manifestCases = []
 // Intent: 'ok' (accepted) or 'reject' (refused). The oracle must agree.
-const addManifest = (name, intent, { platform = 'linux', currentVersion, channel = 'stable', manifest, publicKeyPem, keyId }) => {
+// `channel` is the kind of the picked release; `tagVersion`, when set, is its
+// tag version, which the signed latestVersion must equal.
+const addManifest = (name, intent, { platform = 'linux', currentVersion, channel = 'stable', manifest, publicKeyPem, keyId, tagVersion }) => {
   const input = { platform, currentVersion, channel, manifest }
   if (publicKeyPem !== undefined) input.publicKeyPem = publicKeyPem
   if (keyId !== undefined) input.keyId = keyId
+  if (tagVersion !== undefined) input.tagVersion = tagVersion
   manifestCases.push({ name, intent, input })
 }
 const LINUX_CURRENT = '2026.11.2'
@@ -147,9 +150,33 @@ addManifest('stable newer than installed beta of the same triple', 'ok', { curre
   const nightly = '2026.11.3-nightly.20261111120000.abcdef0'
   const p = linuxPayload(LINUX_CURRENT, nightly, 'nightly'); p.delta = null
   addManifest('nightly manifest with nightly version', 'ok', { currentVersion: LINUX_CURRENT, channel: 'nightly', manifest: signed(p) })
-  addManifest('nightly channel manifest naming a stable version', 'ok', { currentVersion: LINUX_CURRENT, channel: 'nightly', manifest: signed(linuxPayload(LINUX_CURRENT, LINUX_LATEST, 'nightly')) })
+  // The manifest channel is bound to the kind of the version it offers.
+  addManifest('nightly channel manifest naming a stable version', 'reject', { currentVersion: LINUX_CURRENT, channel: 'nightly', manifest: signed(linuxPayload(LINUX_CURRENT, LINUX_LATEST, 'nightly')) })
   addManifest('nightly manifest is refused on the stable channel', 'reject', { currentVersion: LINUX_CURRENT, channel: 'stable', manifest: signed(p) })
   addManifest('nightly manifest is refused on the beta channel', 'reject', { currentVersion: LINUX_CURRENT, channel: 'beta', manifest: signed(p) })
+}
+
+// Replay on a fresh profile (no highest-seen version yet): the manifest must
+// name the picked release tag, and its channel must be its version's kind.
+{
+  const older = signed(linuxPayload(LINUX_CURRENT, LINUX_LATEST))
+  addManifest('tag binding: the manifest names the picked release', 'ok', { currentVersion: LINUX_CURRENT, tagVersion: LINUX_LATEST, manifest: older })
+  addManifest('replay: an older signed manifest attached to a newer release', 'reject', { currentVersion: LINUX_CURRENT, tagVersion: '2026.11.5', manifest: older })
+  addManifest('replay: a newer signed manifest attached to an older release', 'reject', { currentVersion: LINUX_CURRENT, tagVersion: '2026.11.2', manifest: older })
+  addManifest('replay: an older beta manifest attached to a newer beta release', 'reject', { currentVersion: '2026.11.3-beta.1', channel: 'beta', tagVersion: '2026.11.3-beta.2', manifest: signed(linuxPayload('2026.11.3-beta.1', '2026.11.3-beta.1', 'beta')) })
+  addManifest('replay: an old release that is still newer than this install', 'reject', { currentVersion: '2026.11.1', tagVersion: '2026.11.4', manifest: signed(linuxPayload('2026.11.1', LINUX_LATEST)) })
+  addManifest('replay: an older windows manifest attached to a newer release', 'reject', { platform: 'win32', currentVersion: LINUX_CURRENT, tagVersion: '2026.11.4', manifest: signed(win()) })
+  addManifest('tag binding: windows manifest names the picked release', 'ok', { platform: 'win32', currentVersion: LINUX_CURRENT, tagVersion: LINUX_LATEST, manifest: signed(win()) })
+  addManifest('tag binding: a v prefix is not part of the version', 'reject', { currentVersion: LINUX_CURRENT, tagVersion: `v${LINUX_LATEST}`, manifest: older })
+  const beta = '2026.11.4-beta.1'
+  addManifest('tag binding: beta manifest names the picked beta release', 'ok', { currentVersion: LINUX_CURRENT, channel: 'beta', tagVersion: beta, manifest: signed(linuxPayload(LINUX_CURRENT, beta, 'beta')) })
+  addManifest('channel binding: stable manifest offering a beta version', 'reject', { currentVersion: LINUX_CURRENT, channel: 'stable', tagVersion: beta, manifest: signed(linuxPayload(LINUX_CURRENT, beta, 'stable')) })
+  addManifest('channel binding: beta manifest offering a stable version', 'reject', { currentVersion: LINUX_CURRENT, channel: 'beta', tagVersion: LINUX_LATEST, manifest: signed(linuxPayload(LINUX_CURRENT, LINUX_LATEST, 'beta')) })
+  const nightly = '2026.11.4-nightly.20261118120000.abcdef0'
+  const nightlyPayload = linuxPayload(LINUX_CURRENT, nightly, 'beta'); nightlyPayload.delta = null
+  addManifest('channel binding: beta manifest offering a nightly version', 'reject', { currentVersion: LINUX_CURRENT, channel: 'beta', tagVersion: nightly, manifest: signed(nightlyPayload) })
+  const stableAsNightly = linuxPayload(LINUX_CURRENT, LINUX_LATEST, 'nightly')
+  addManifest('channel binding: nightly manifest offering a stable version on the nightly tag', 'reject', { currentVersion: LINUX_CURRENT, channel: 'nightly', tagVersion: LINUX_LATEST, manifest: signed(stableAsNightly) })
 }
 okLinux('quirk: delta file name with the literal "undefined" when currentVersion is absent', (() => {
   const p = lin(); delete p.currentVersion; delete p.updateAvailable
@@ -611,7 +638,7 @@ const evaluators = {
     return { diagnosis: JSON.parse(JSON.stringify(diagnosis)) }
   },
   manifest: (input) => attempt(() => ({
-    ok: summarizeManifest(verifyManifest(input.manifest, input.currentVersion, input.publicKeyPem ?? main.publicPem, input.platform, input.keyId ?? main.keyId, input.channel)),
+    ok: summarizeManifest(verifyManifest(input.manifest, input.currentVersion, input.publicKeyPem ?? main.publicPem, input.platform, input.keyId ?? main.keyId, input.channel, input.tagVersion ?? null)),
   })),
   delta: async (input) => {
     const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-updater-vectors-'))

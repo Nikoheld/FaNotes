@@ -6,11 +6,14 @@
 
 use std::fs;
 use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
+use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver};
+use ureq::unversioned::transport::{DefaultConnector, NextTimeout};
 use ureq::Agent;
 
 use crate::policy::addon_request_allowed;
@@ -187,7 +190,6 @@ pub fn fetch_text(raw_url: &str) -> Result<Value, String> {
 
 pub fn net_fetch(raw_url: &str, init: &Value) -> Result<Value, String> {
     addon_request_allowed(raw_url)?;
-    assert_public_resolution(&hostname_of(raw_url)?)?;
     let method = init
         .get("method")
         .and_then(Value::as_str)
@@ -268,20 +270,14 @@ fn request_text(
 ) -> Result<HttpText, String> {
     let mut url = raw_url.to_owned();
     let mut redirects_left = MAX_REDIRECTS;
-    let agent: Agent = Agent::config_builder()
-        .max_redirects(0)
-        .timeout_global(Some(Duration::from_secs(20)))
-        .http_status_as_error(false)
-        .build()
-        .into();
+    let (agent, refusal) = pinned_agent(DefaultResolver::default());
     loop {
         if registry {
             assert_registry_url(&url)?;
-            assert_public_resolution(&hostname_of(&url)?)?;
         } else {
             addon_request_allowed(&url)?;
-            assert_public_resolution(&hostname_of(&url)?)?;
         }
+        refusal.take();
         let mut builder = ureq::http::Request::builder()
             .method(method)
             .uri(&url)
@@ -305,9 +301,11 @@ fn request_text(
             builder.body(String::new())
         }
         .map_err(|_| "Ungültige URL.".to_owned())?;
-        let mut response = agent
-            .run(request)
-            .map_err(|error| transport_message(&error.to_string(), registry))?;
+        let mut response = agent.run(request).map_err(|error| {
+            refusal
+                .take()
+                .unwrap_or_else(|| transport_message(&error.to_string(), registry))
+        })?;
         let status = response.status().as_u16();
         let location = response
             .headers()
@@ -400,25 +398,87 @@ fn assert_registry_url(raw_url: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn assert_public_resolution(hostname: &str) -> Result<(), String> {
-    if hostname.parse::<IpAddr>().is_ok() {
-        return Ok(());
+const UNRESOLVED: &str = "Der Add-on-Host konnte nicht aufgelöst werden.";
+const PRIVATE_ANSWER: &str = "Add-ons dürfen keine privaten oder lokalen Adressen aufrufen.";
+
+/// Why the pinned resolver refused the last connection, in the desktop wording.
+#[derive(Clone, Debug, Default)]
+struct Refusal(Arc<Mutex<Option<&'static str>>>);
+
+impl Refusal {
+    fn set(&self, message: &'static str) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(message);
     }
-    let addresses = (hostname, 443)
-        .to_socket_addrs()
-        .map_err(|_| "Der Add-on-Host konnte nicht aufgelöst werden.".to_owned())?;
-    let mut seen = false;
-    for address in addresses {
-        seen = true;
-        if ip_is_private(address.ip()) {
-            return Err("Add-ons dürfen keine privaten oder lokalen Adressen aufrufen.".to_owned());
+
+    fn take(&self) -> Option<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+            .map(str::to_owned)
+    }
+}
+
+/// Resolves each connection's host exactly once, refuses the connection when
+/// any answer is private or local, and hands ureq only the checked addresses.
+///
+/// The check therefore runs on the very addresses the socket connects to: a
+/// DNS server cannot answer with a public address for the check and with
+/// `127.0.0.1` for the connection (DNS rebinding). `electron/addons.cjs` pins
+/// the same way through the `lookup` option of `https.request`.
+#[derive(Debug)]
+struct PinnedResolver<R> {
+    inner: R,
+    refusal: Refusal,
+}
+
+impl<R: Resolver> Resolver for PinnedResolver<R> {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        config: &ureq::config::Config,
+        timeout: NextTimeout,
+    ) -> Result<ResolvedSocketAddrs, ureq::Error> {
+        let addresses = self.inner.resolve(uri, config, timeout).inspect_err(|_| {
+            self.refusal.set(UNRESOLVED);
+        })?;
+        if addresses.is_empty() {
+            self.refusal.set(UNRESOLVED);
+            return Err(ureq::Error::HostNotFound);
         }
+        if addresses.iter().any(|address| ip_is_private(address.ip())) {
+            self.refusal.set(PRIVATE_ANSWER);
+            return Err(ureq::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                PRIVATE_ANSWER,
+            )));
+        }
+        Ok(addresses)
     }
-    if seen {
-        Ok(())
-    } else {
-        Err("Der Add-on-Host konnte nicht aufgelöst werden.".to_owned())
-    }
+}
+
+/// An agent for add-on traffic: no automatic redirects (each hop is checked
+/// by the caller), no proxy (the connection must go to the pinned address),
+/// and the pinned resolver.
+fn pinned_agent<R: Resolver>(inner: R) -> (Agent, Refusal) {
+    let refusal = Refusal::default();
+    let config = Agent::config_builder()
+        .max_redirects(0)
+        .timeout_global(Some(Duration::from_secs(20)))
+        .http_status_as_error(false)
+        .proxy(None)
+        .build();
+    let resolver = PinnedResolver {
+        inner,
+        refusal: refusal.clone(),
+    };
+    (
+        Agent::with_parts(config, DefaultConnector::default(), resolver),
+        refusal,
+    )
 }
 
 fn ip_is_private(ip: IpAddr) -> bool {
@@ -739,6 +799,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 fn write_temp(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
+    crate::notes::no_follow(&mut options);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -765,7 +826,80 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{redirect_step, resolve_redirect, transport_message, RedirectStep};
+    use super::{
+        pinned_agent, redirect_step, resolve_redirect, transport_message, RedirectStep,
+        PRIVATE_ANSWER,
+    };
+    use std::net::{SocketAddr, TcpListener};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use ureq::unversioned::resolver::{ResolvedSocketAddrs, Resolver};
+
+    /// A DNS server under an attacker's control: each lookup pops the next answer.
+    #[derive(Debug)]
+    struct ScriptedDns {
+        answers: Mutex<Vec<Vec<SocketAddr>>>,
+        lookups: Arc<AtomicUsize>,
+    }
+
+    impl Resolver for ScriptedDns {
+        fn resolve(
+            &self,
+            _uri: &ureq::http::Uri,
+            _config: &ureq::config::Config,
+            _timeout: ureq::unversioned::transport::NextTimeout,
+        ) -> Result<ResolvedSocketAddrs, ureq::Error> {
+            self.lookups.fetch_add(1, Ordering::SeqCst);
+            let mut result = self.empty();
+            for address in self.answers.lock().unwrap().remove(0) {
+                result.push(address);
+            }
+            Ok(result)
+        }
+    }
+
+    fn rebinding_request(answers: Vec<Vec<SocketAddr>>) -> (Result<(), String>, usize, bool) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let local = listener.local_addr().unwrap();
+        let answers = answers
+            .into_iter()
+            .map(|answer| {
+                answer
+                    .into_iter()
+                    .map(|address| if address.port() == 0 { local } else { address })
+                    .collect()
+            })
+            .collect();
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let (agent, refusal) = pinned_agent(ScriptedDns {
+            answers: Mutex::new(answers),
+            lookups: lookups.clone(),
+        });
+        let result = agent
+            .get(format!("http://rebind.example:{}/", local.port()))
+            .call()
+            .map(|_| ())
+            .map_err(|error| refusal.take().unwrap_or_else(|| error.to_string()));
+        let connected = listener.accept().is_ok();
+        (result, lookups.load(Ordering::SeqCst), connected)
+    }
+
+    #[test]
+    fn a_private_dns_answer_is_refused_before_any_connection() {
+        // Port 0 stands for the local listener the attacker wants to reach.
+        let loopback: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let public: SocketAddr = "93.184.215.14:443".parse().unwrap();
+        let (result, lookups, connected) = rebinding_request(vec![vec![loopback], vec![public]]);
+        assert_eq!(result.unwrap_err(), PRIVATE_ANSWER);
+        assert_eq!(lookups, 1, "the checked answer is the one used to connect");
+        assert!(!connected, "no socket reached the private address");
+
+        // A mixed answer is refused as a whole, as on the desktop.
+        let (result, _, connected) = rebinding_request(vec![vec![public, loopback]]);
+        assert_eq!(result.unwrap_err(), PRIVATE_ANSWER);
+        assert!(!connected);
+    }
 
     #[test]
     fn addon_timeouts_use_the_desktop_messages() {

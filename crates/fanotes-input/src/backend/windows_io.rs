@@ -53,6 +53,10 @@ pub struct WindowsPenOptions {
     pub mouse_in_pointer: bool,
 }
 
+/// Samples kept for a consumer that has not polled yet; the oldest are dropped
+/// beyond this, so an idle consumer cannot grow the queue without bound.
+const MAX_QUEUED_SAMPLES: usize = 16_384;
+
 struct Shared {
     translator: WindowsTranslator,
     queue: Vec<PenSample>,
@@ -60,20 +64,39 @@ struct Shared {
     consume: bool,
 }
 
+/// The `WM_POINTER*` subclass on one window.
+///
+/// Win32 subclasses are thread-affine: `RemoveWindowSubclass` only works on
+/// the thread that owns the window, and the subclass procedure dereferences
+/// the reference data until the subclass is removed. So this type is neither
+/// `Send` nor `Sync` (the raw pointer field makes sure of that): it is created,
+/// used and dropped on the window's thread. To read samples from another
+/// thread, take a [`WindowsPenQueue`] with [`WindowsPen::queue`].
 pub struct WindowsPen {
     hwnd: HWND,
     shared: Arc<Mutex<Shared>>,
+    /// Reference data handed to the subclass procedure; freed in `Drop` once
+    /// the subclass is gone.
     raw: *mut Arc<Mutex<Shared>>,
+    /// Unique per attachment (the reference data address), so a second
+    /// `attach` on the same window installs a second subclass instead of
+    /// overwriting the first one's reference data.
+    subclass_id: usize,
+    owner: std::thread::ThreadId,
 }
 
-// The subclass id; one per process is enough for this crate.
-const SUBCLASS_ID: usize = 0xFA_5E_17;
-
-unsafe impl Send for WindowsPen {}
+/// A `Send + Sync` handle that drains the samples of a [`WindowsPen`] from any
+/// thread. It shares only the sample queue, never the subclass, so it stays
+/// valid (and simply runs dry) after the `WindowsPen` is dropped.
+#[derive(Clone)]
+pub struct WindowsPenQueue {
+    shared: Arc<Mutex<Shared>>,
+}
 
 impl WindowsPen {
     /// Attach to `hwnd`. Must be called on the thread that owns the window; samples are
-    /// produced from that thread's message loop and drained with [`PenSource::poll`].
+    /// produced from that thread's message loop and drained with [`PenSource::poll`]
+    /// (here or on a [`WindowsPenQueue`]).
     pub fn attach(hwnd: isize, options: WindowsPenOptions) -> Result<Self, PenError> {
         let hwnd = HWND(hwnd as *mut _);
         if options.mouse_in_pointer {
@@ -87,22 +110,56 @@ impl WindowsPen {
             consume: options.consume,
         }));
         let raw = Box::into_raw(Box::new(shared.clone()));
-        let ok = unsafe { SetWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID, raw as usize) };
+        let subclass_id = raw as usize;
+        // SAFETY: `raw` stays valid until `Drop` has removed this subclass.
+        let ok = unsafe { SetWindowSubclass(hwnd, Some(subclass_proc), subclass_id, raw as usize) };
         if !ok.as_bool() {
+            // SAFETY: the subclass was not installed, so nothing else holds `raw`.
             drop(unsafe { Box::from_raw(raw) });
             return Err(PenError::Unavailable("SetWindowSubclass failed".into()));
         }
-        Ok(Self { hwnd, shared, raw })
+        Ok(Self {
+            hwnd,
+            shared,
+            raw,
+            subclass_id,
+            owner: std::thread::current().id(),
+        })
+    }
+
+    /// A handle that drains this pen's samples from any thread.
+    pub fn queue(&self) -> WindowsPenQueue {
+        WindowsPenQueue {
+            shared: self.shared.clone(),
+        }
     }
 }
 
 impl Drop for WindowsPen {
     fn drop(&mut self) {
+        // `WindowsPen` is `!Send`, so this always runs on the owning thread.
+        // Should that ever not hold, leaking the reference data is the only
+        // sound choice: the subclass would stay installed and keep using it.
+        if std::thread::current().id() != self.owner {
+            return;
+        }
+        // SAFETY: on the owning thread, `RemoveWindowSubclass` either removes
+        // the subclass or fails because it is already gone (the window was
+        // destroyed). Either way the procedure can no longer see `raw`; window
+        // messages for this thread are dispatched on this thread, so none is
+        // running concurrently.
         unsafe {
-            let _ = RemoveWindowSubclass(self.hwnd, Some(subclass_proc), SUBCLASS_ID);
+            let _ = RemoveWindowSubclass(self.hwnd, Some(subclass_proc), self.subclass_id);
             drop(Box::from_raw(self.raw));
         }
     }
+}
+
+fn drain(shared: &Mutex<Shared>, out: &mut Vec<PenSample>) -> Result<usize, PenError> {
+    let mut s = shared.lock().map_err(|_| PenError::Io("poisoned".into()))?;
+    let n = s.queue.len();
+    out.append(&mut s.queue);
+    Ok(n)
 }
 
 impl PenSource for WindowsPen {
@@ -115,15 +172,42 @@ impl PenSource for WindowsPen {
         _timeout: Option<Duration>,
         out: &mut Vec<PenSample>,
     ) -> Result<usize, PenError> {
-        let mut s = self
-            .shared
-            .lock()
-            .map_err(|_| PenError::Io("poisoned".into()))?;
-        let n = s.queue.len();
-        out.append(&mut s.queue);
-        Ok(n)
+        drain(&self.shared, out)
     }
 }
+
+impl PenSource for WindowsPenQueue {
+    fn backend(&self) -> &'static str {
+        "windows-wm-pointer"
+    }
+    /// Never blocks: the window's message loop produces the samples.
+    fn poll(
+        &mut self,
+        _timeout: Option<Duration>,
+        out: &mut Vec<PenSample>,
+    ) -> Result<usize, PenError> {
+        drain(&self.shared, out)
+    }
+}
+
+// Compile-time proof of the thread contract: `WindowsPenQueue` crosses
+// threads, `WindowsPen` cannot (if it were `Send`, the call below would be
+// ambiguous and fail to compile).
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<WindowsPenQueue>();
+};
+#[allow(dead_code)]
+trait AmbiguousIfSend<A> {
+    fn some_item() {}
+}
+impl<T: ?Sized> AmbiguousIfSend<()> for T {}
+#[allow(dead_code)]
+struct IsSend;
+impl<T: ?Sized + Send> AmbiguousIfSend<IsSend> for T {}
+const _: fn() = || {
+    let _ = <WindowsPen as AmbiguousIfSend<_>>::some_item;
+};
 
 fn kind_of(t: POINTER_INPUT_TYPE) -> Option<WinPointerKind> {
     if t == PT_PEN {
@@ -206,9 +290,27 @@ unsafe extern "system" fn subclass_proc(
     let Some(wm) = msg_kind else {
         return DefSubclassProc(hwnd, msg, wparam, lparam);
     };
-    let shared = &*(refdata as *const Arc<Mutex<Shared>>);
+    // Keep our own reference: the original window procedure (reached through
+    // `DefSubclassProc` below) may drop the `WindowsPen`, which frees `refdata`.
+    let shared = Arc::clone(&*(refdata as *const Arc<Mutex<Shared>>));
+    let consume = handle_pointer_message(&shared, hwnd, wm, wparam);
+    if consume {
+        LRESULT(0)
+    } else {
+        DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
+}
+
+/// Translates one pointer message; returns whether to swallow it. The lock is
+/// released before the caller forwards the message.
+unsafe fn handle_pointer_message(
+    shared: &Mutex<Shared>,
+    hwnd: HWND,
+    wm: WinMsg,
+    wparam: WPARAM,
+) -> bool {
     let Ok(mut sh) = shared.lock() else {
-        return DefSubclassProc(hwnd, msg, wparam, lparam);
+        return false;
     };
     let pointer_id = (wparam.0 & 0xFFFF) as u32;
     let Shared {
@@ -249,11 +351,11 @@ unsafe extern "system" fn subclass_proc(
                 let device = last.device;
                 translator.push(wm, &history, device, queue);
             }
+            if queue.len() > MAX_QUEUED_SAMPLES {
+                let excess = queue.len() - MAX_QUEUED_SAMPLES;
+                queue.drain(..excess);
+            }
         }
     }
-    if *consume {
-        LRESULT(0)
-    } else {
-        DefSubclassProc(hwnd, msg, wparam, lparam)
-    }
+    *consume
 }

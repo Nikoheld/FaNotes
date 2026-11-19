@@ -1,5 +1,6 @@
 'use strict'
 
+const { randomBytes } = require('node:crypto')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
@@ -42,9 +43,26 @@ function saveStore(userData, store) {
   if (Buffer.byteLength(snapshot, 'utf8') > 512 * 1024) {
     throw new Error('Zu viele Ordnerpfade.')
   }
-  const temporary = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(temporary, snapshot, { mode: 0o600 })
-  fs.renameSync(temporary, file)
+  // A random name opened exclusively with O_NOFOLLOW (from fs.constants, so
+  // it is the right value on every platform): a planted file or symlink under
+  // the temporary name is never written through.
+  const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
+  const fd = fs.openSync(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0), 0o600)
+  try {
+    fs.writeFileSync(fd, snapshot)
+    fs.fsyncSync(fd)
+  } catch (error) {
+    fs.closeSync(fd)
+    fs.rmSync(temporary, { force: true })
+    throw error
+  }
+  fs.closeSync(fd)
+  try {
+    fs.renameSync(temporary, file)
+  } catch (error) {
+    fs.rmSync(temporary, { force: true })
+    throw error
+  }
 }
 
 function vaultKey(vaultPath) {

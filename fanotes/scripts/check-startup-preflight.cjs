@@ -333,7 +333,7 @@ try {
   const preloadSource = fs.readFileSync(path.join(root, 'electron', 'preload.cjs'), 'utf8')
   const appSource = fs.readFileSync(path.join(root, 'src', 'App.tsx'), 'utf8')
   const packageMetadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
-  assert.deepEqual(packageMetadata.build.asarUnpack, ['dist/ocr/pylaia-iam.onnx'])
+  assert.deepEqual(packageMetadata.build.asarUnpack, ['dist/ocr/pylaia-iam.onnx', 'dist/ocr/fanotes-ink/ink.onnx'])
   const hardeningSource = fs.readFileSync(path.join(root, 'scripts', 'harden-appimage.cjs'), 'utf8')
   assert.match(hardeningSource, /linuxOzoneAppRunExecLine\(/u, 'AppRun must be generated from the shipped Ozone helper, not a copy')
   assert.deepEqual(packageMetadata.build?.appImage?.executableArgs, [...ozonePlan.argv])

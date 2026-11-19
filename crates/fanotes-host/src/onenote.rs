@@ -28,7 +28,6 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(12 * 60);
 const ARCHIVE_LISTING_TIMEOUT: Duration = Duration::from_secs(90);
 /// JavaScript `/u` `\s`: includes U+FEFF and excludes U+0085.
 const JS_WS: &str = r"[\t\n\u{000B}\u{000C}\r \u{00A0}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}]";
-const JS_NOT_WS_OR_GT: &str = r"[^\t\n\u{000B}\u{000C}\r \u{00A0}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}\u{FEFF}>]";
 
 pub fn import_onenote(host: &Host, args: &[Value]) -> Result<Value, String> {
     if let Some(path) = args
@@ -333,16 +332,14 @@ fn sanitize_page(page_path: &Path, output_root: &Path) -> Result<Page, String> {
     let transcript = extract_search_text(&html);
     let (width, height) = page_dimensions(&html);
     html = inline_images(&html, page_path, output_root);
-    html = strip_active_html(&html);
+    html = clean_page_html(&html);
     let policy = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; media-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
     let guard = format!(
         "<meta name=\"fanotes-onenote-safe-v1\" content=\"1\"><meta http-equiv=\"Content-Security-Policy\" content=\"{policy}\"><style id=\"fanotes-page-guard\">html,body{{width:{width}px;min-width:{width}px;min-height:{height}px;overflow:hidden;background:#fff;color:#111}}a{{color:inherit;text-decoration:underline;pointer-events:none}}</style>"
     );
-    if html.contains("<head>") {
-        html = html.replacen("<head>", &format!("<head>{guard}"), 1);
-    } else {
-        html = format!("<!doctype html><html><head>{guard}</head><body>{html}</body></html>");
-    }
+    // The sanitised page is a body fragment; the guard always heads a fresh
+    // document, never the first literal `<head>` in untrusted markup.
+    html = format!("<!doctype html><html><head>{guard}</head><body>{html}</body></html>");
     if html.len() > MAX_HTML_BYTES {
         return Err("Eine eingebettete OneNote-Seite überschreitet nach der Bildübernahme die sichere Größe.".to_owned());
     }
@@ -479,18 +476,19 @@ fn iu_is_match(regex: &Regex, text: &str) -> bool {
     regex.is_match(&mark_iu_word(text).text)
 }
 
-fn strip_active_html(html: &str) -> String {
+/// Neutralises CSS that could fetch or run something, then sanitises the
+/// markup with a real HTML parser. The sanitiser runs last, so no later text
+/// edit can turn escaped text back into markup.
+fn clean_page_html(html: &str) -> String {
+    sanitize_onenote_html(&neutralize_active_css(html))
+}
+
+/// `javascript:`/`vbscript:`, `@import`, `url(...)` and `expression(...)` with
+/// the desktop's `/iu` patterns. `<style>` blocks and `style` attributes stay
+/// (OneNote lays pages out with them); the page CSP allows no fetch anyway.
+fn neutralize_active_css(html: &str) -> String {
     let mut html = html.to_owned();
     let patterns = [
-        r"(?is)<script\b[^>]*>.*?</script>".to_owned(),
-        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*>.*?</(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)>".to_owned(),
-        r"(?is)<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*/?>".to_owned(),
-        format!(
-            r#"(?i){JS_WS}+on[a-z][a-z0-9_-]*{JS_WS}*={JS_WS}*(?:"[^"]*"|'[^']*'|{JS_NOT_WS_OR_GT}+)"#
-        ),
-        format!(
-            r#"(?i){JS_WS}+(?:href|action|formaction|poster){JS_WS}*={JS_WS}*(?:"[^"]*"|'[^']*'|{JS_NOT_WS_OR_GT}+)"#
-        ),
         format!(r"(?i)(?:javascript|vbscript){JS_WS}*:"),
         format!(r"(?i)@import{JS_WS}+[^;]+;?"),
         format!(r"(?i)url{JS_WS}*\([^)]*\)"),
@@ -507,6 +505,104 @@ fn strip_active_html(html: &str) -> String {
         }
     }
     html
+}
+
+/// The allowlist shared with `electron/onenote-sanitize-policy.json`.
+///
+/// ammonia takes one tag list and checks namespaces itself (only SVG names
+/// inside `<svg>`, only MathML names inside `<math>`), so the three lists are
+/// merged here.
+struct SanitizePolicy {
+    html_tags: Vec<String>,
+    svg_tags: Vec<String>,
+    math_tags: Vec<String>,
+    drop_with_content: Vec<String>,
+    attributes: Vec<String>,
+    image_source: String,
+}
+
+fn sanitize_policy() -> &'static SanitizePolicy {
+    static POLICY: std::sync::OnceLock<SanitizePolicy> = std::sync::OnceLock::new();
+    POLICY.get_or_init(|| {
+        let raw: Value = serde_json::from_str(include_str!(
+            "../../../fanotes/electron/onenote-sanitize-policy.json"
+        ))
+        .expect("the OneNote sanitiser policy is valid JSON");
+        let list = |key: &str| -> Vec<String> {
+            raw[key]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        SanitizePolicy {
+            html_tags: list("htmlTags"),
+            svg_tags: list("svgTags"),
+            math_tags: list("mathTags"),
+            drop_with_content: list("dropWithContent"),
+            attributes: list("attributes"),
+            image_source: raw["imageSource"]
+                .as_str()
+                .unwrap_or("data:image/")
+                .to_owned(),
+        }
+    })
+}
+
+/// Sanitises an imported page with ammonia (html5ever) against the shared
+/// allowlist: event handlers, scripts, frames, forms, comments and every URL
+/// attribute except an inline `data:image/` source are dropped, whatever the
+/// markup looks like (`<svg/onload=…>` included). ammonia removes an element
+/// that would change namespace when the saved page is parsed again (an HTML
+/// `<img>` inside `<svg>`, say), with its content.
+fn sanitize_onenote_html(html: &str) -> String {
+    let policy = sanitize_policy();
+    let tags: std::collections::HashSet<&str> = policy
+        .html_tags
+        .iter()
+        .chain(&policy.svg_tags)
+        .chain(&policy.math_tags)
+        .map(String::as_str)
+        .collect();
+    let image_source = policy.image_source.as_str();
+    let mut builder = ammonia::Builder::empty();
+    builder
+        .tags(tags)
+        .clean_content_tags(
+            policy
+                .drop_with_content
+                .iter()
+                .map(String::as_str)
+                .collect(),
+        )
+        .tag_attributes(HashMap::from([(
+            "img",
+            std::collections::HashSet::from(["src"]),
+        )]))
+        .tag_attribute_values(HashMap::new())
+        .set_tag_attribute_values(HashMap::new())
+        .generic_attributes(policy.attributes.iter().map(String::as_str).collect())
+        .allowed_classes(HashMap::new())
+        .url_schemes(std::collections::HashSet::from(["data"]))
+        .url_relative(ammonia::UrlRelative::Deny)
+        .link_rel(None)
+        .id_prefix(None)
+        .strip_comments(true)
+        .attribute_filter(move |element, attribute, value| {
+            if attribute == "src"
+                && !(element == "img" && value.to_ascii_lowercase().starts_with(image_source))
+            {
+                None
+            } else {
+                Some(value.into())
+            }
+        });
+    builder.clean(html).to_string()
 }
 
 fn inline_images(html: &str, page_path: &Path, output_root: &Path) -> String {
@@ -1284,10 +1380,15 @@ fn embedded_root() -> Result<PathBuf, String> {
     if let Ok(path) = std::env::var("FANOTES_ONENOTE_DIR") {
         return Ok(PathBuf::from(path));
     }
-    let compiled =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fanotes/resources/onenote");
-    if compiled.join("linux/one2html").is_file() {
-        return Ok(compiled);
+    // The compile-time source tree is a debug-build fallback only; release
+    // builds use the tools beside the executable (they are hash-checked too).
+    #[cfg(debug_assertions)]
+    {
+        let compiled =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fanotes/resources/onenote");
+        if compiled.join("linux/one2html").is_file() {
+            return Ok(compiled);
+        }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
@@ -1578,8 +1679,11 @@ fn onenote_temporary(target: &Path) -> Result<PathBuf, String> {
 }
 
 fn write_onenote_temp(path: &Path, bytes: &[u8]) -> Result<(), std::io::Error> {
+    // The temporary name is random; an exclusive, no-follow create makes sure
+    // nothing planted under that name is opened instead.
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
+    crate::notes::no_follow(&mut options);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -1600,6 +1704,7 @@ fn copy_onenote_temp(source: &Path, destination: &Path) -> Result<(), std::io::E
     let mut input = File::open(source)?;
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
+    crate::notes::no_follow(&mut options);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -1618,8 +1723,8 @@ fn open_exclusive_markdown(path: &Path, bytes: &[u8]) -> Result<(), std::io::Err
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
-        options.custom_flags(libc::O_NOFOLLOW);
     }
+    crate::notes::no_follow(&mut options);
     let mut file = options.open(path)?;
     std::io::Write::write_all(&mut file, bytes)?;
     file.sync_all()?;
@@ -2134,15 +2239,17 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        atomic_copy_onenote, atomic_write_onenote, common_ancestor, create_onenote_temp_dir,
-        ensure_note_directory, extract_search_text, import_folder_segment, import_in_temp,
-        import_rendered_pages, inline_images, materialize_tools, note_directory_segments,
-        outline_level, page_dimensions, page_parents, page_title, prepare_input, preserve_sources,
-        preview_is_nav, render_inputs, render_sections, safe_segment, sanitize_page, sha256_file,
-        stored_relative_path, strip_active_html, tool_failure_message, tool_limit,
-        unique_directory, urlencoding_decode, validate_listing, walk_limited,
+        atomic_copy_onenote, atomic_write_onenote, clean_page_html, common_ancestor,
+        create_onenote_temp_dir, ensure_note_directory, extract_search_text, import_folder_segment,
+        import_in_temp, import_rendered_pages, inline_images, materialize_tools,
+        note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
+        prepare_input, preserve_sources, preview_is_nav, render_inputs, render_sections,
+        safe_segment, sanitize_page, sha256_file, stored_relative_path, tool_failure_message,
+        tool_limit, unique_directory, urlencoding_decode, validate_listing, walk_limited,
         write_unique_markdown,
     };
+    use regex::Regex;
+    use serde_json::Value;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -2895,6 +3002,31 @@ mod tests {
         assert_eq!(extract_search_text(&long).encode_utf16().count(), 2_000_000);
     }
 
+    /// Shared with `scripts/check-onenote-import.cjs`, which runs the same
+    /// vectors through the desktop's hast-util-sanitize bundle.
+    #[test]
+    fn onenote_pages_are_sanitised_like_the_desktop_vectors() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../fanotes/scripts/fixtures/onenote/sanitize-vectors.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 20);
+        for case in cases {
+            let html = case["html"].as_str().unwrap();
+            let clean = clean_page_html(html);
+            for pattern in case["absent"].as_array().unwrap() {
+                let regex = Regex::new(&format!("(?i){}", pattern.as_str().unwrap())).unwrap();
+                assert!(!regex.is_match(&clean), "{html} -> {clean}");
+            }
+            for pattern in case["present"].as_array().unwrap() {
+                let regex = Regex::new(&format!("(?i){}", pattern.as_str().unwrap())).unwrap();
+                assert!(regex.is_match(&clean), "{html} -> {clean}");
+            }
+            assert_eq!(clean_page_html(&clean), clean, "re-parse of {clean}");
+        }
+    }
+
     #[test]
     fn an_onenote_tag_boundary_is_ascii() {
         assert!(preview_is_nav("<navä>"));
@@ -2902,8 +3034,12 @@ mod tests {
         assert!(preview_is_nav("<nav>"));
         assert!(!preview_is_nav("<navigation>"));
         assert!(!preview_is_nav("<iframeextra>"));
-        assert!(!strip_active_html("<scriptä>alert(1)</script>").contains("alert"));
-        assert!(strip_active_html("<scripted>alert(1)</scripted>").contains("alert"));
+        // A real parser decides what an element is: `<scriptä>` and `<scripted>`
+        // are unknown elements, unwrapped to harmless text; `<script>` goes
+        // with its content.
+        assert_eq!(clean_page_html("<scriptä>alert(1)</script>"), "alert(1)");
+        assert_eq!(clean_page_html("<scripted>alert(1)</scripted>"), "alert(1)");
+        assert_eq!(clean_page_html("<script>alert(1)</script>"), "");
         assert_eq!(
             extract_search_text("<styleä>SECRET</style> visible"),
             "visible"
@@ -2921,16 +3057,27 @@ mod tests {
         assert!(!preview_is_nav("<iframe\u{017F}>"));
         assert!(!preview_is_nav("<iframe\u{212A}>"));
         assert!(preview_is_nav("<navä>"));
-        assert_eq!(strip_active_html("<\u{017F}cript>alert(1)</script>"), "");
-        assert!(strip_active_html("<script\u{017F}>alert(1)</script>").contains("alert"));
-        assert!(strip_active_html("<script\u{212A}>alert(1)</script>").contains("alert"));
-        assert_eq!(strip_active_html("java\u{017F}cript:alert(1)"), "alert(1)");
-        assert_eq!(strip_active_html("vb\u{017F}cript:go"), "go");
+        // `<ſcript>` is text to the HTML parser (a tag name starts with an
+        // ASCII letter), so it is escaped, never run.
         assert_eq!(
-            strip_active_html("<div on\u{017F}click=\"alert(1)\">x</div>"),
+            clean_page_html("<\u{017F}cript>alert(1)</script>"),
+            "&lt;\u{017F}cript&gt;alert(1)"
+        );
+        assert_eq!(
+            clean_page_html("<script\u{017F}>alert(1)</script>"),
+            "alert(1)"
+        );
+        assert_eq!(
+            clean_page_html("<script\u{212A}>alert(1)</script>"),
+            "alert(1)"
+        );
+        assert_eq!(clean_page_html("java\u{017F}cript:alert(1)"), "alert(1)");
+        assert_eq!(clean_page_html("vb\u{017F}cript:go"), "go");
+        assert_eq!(
+            clean_page_html("<div on\u{017F}click=\"alert(1)\">x</div>"),
             "<div>x</div>"
         );
-        assert_eq!(strip_active_html("<lin\u{212A} href=\"x\">"), "");
+        assert_eq!(clean_page_html("<lin\u{212A} href=\"x\">"), "");
         assert_eq!(
             extract_search_text("<\u{017F}tyle>SECRET</style> visible"),
             "visible"
@@ -3025,12 +3172,21 @@ mod tests {
 
     #[test]
     fn an_event_handler_after_a_byte_order_mark_is_removed() {
-        let stripped = strip_active_html("<div\u{FEFF}onclick=\"alert(1)\">x</div>");
-        assert!(!stripped.to_ascii_lowercase().contains("onclick"));
-        assert!(stripped.contains(">x</div>"));
-        let kept = strip_active_html("<div\u{0085}onclick=\"alert(1)\">x</div>");
-        assert!(kept.contains("onclick"));
-        let styled = strip_active_html("a{background:url(javascript:alert(1))}");
+        // Neither U+FEFF nor U+0085 ends an HTML tag name, so the parser sees
+        // one unknown element and unwraps it: no handler survives either way.
+        for html in [
+            "<div\u{FEFF}onclick=\"alert(1)\">x</div>",
+            "<div\u{0085}onclick=\"alert(1)\">x</div>",
+            "<div onclick=\"alert(1)\">x</div>",
+        ] {
+            let cleaned = clean_page_html(html);
+            assert!(
+                !cleaned.to_ascii_lowercase().contains("onclick"),
+                "{cleaned}"
+            );
+            assert!(cleaned.contains('x'));
+        }
+        let styled = clean_page_html("a{background:url(javascript:alert(1))}");
         assert!(!styled.contains("javascript:"));
         assert!(!styled.contains("url("));
         assert!(styled.contains("none"));

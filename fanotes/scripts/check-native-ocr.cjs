@@ -18,7 +18,7 @@ assert.ok(manifest.models.web.size < manifest.models.desktop.size * 0.4)
 
 // Packaging: the sidecar plus the pinned CPU-only ONNX Runtime library, no Node addon.
 const packageMetadata = JSON.parse(read('package.json'))
-assert.deepEqual(packageMetadata.build.asarUnpack, ['dist/ocr/pylaia-iam.onnx'])
+assert.deepEqual(packageMetadata.build.asarUnpack, ['dist/ocr/pylaia-iam.onnx', 'dist/ocr/fanotes-ink/ink.onnx'])
 assert.ok(packageMetadata.build.files.includes('!dist/ocr/fanotes-trocr-web/**/*'))
 assert.ok(packageMetadata.build.files.includes('!dist/ocr/pylaia-iam-q8.onnx'))
 assert.equal(packageMetadata.devDependencies['onnxruntime-node'], '1.21.0')
@@ -134,6 +134,29 @@ async function main() {
   const tampered = createNativeOcrHost({ executable, runtime, model: { ...model, sha256: `${model.sha256[0] === '0' ? '1' : '0'}${model.sha256.slice(1)}` } })
   await assert.rejects(tampered.recognize({ input: new Float32Array(32 * 128), width: 32, height: 128, threads: 2 }), /Das native Handschriftmodell ist beschädigt\./u)
   tampered.stop()
+
+  // The executable gate: a sidecar that is not the build its runtime-manifest.json pins never starts.
+  const os = require('node:os')
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-native-ocr-'))
+  try {
+    const copy = path.join(scratch, path.basename(executable))
+    const copyManifest = path.join(scratch, 'runtime-manifest.json')
+    const spawned = []
+    const spawnImpl = (...args) => { spawned.push(args); throw new Error('spawned') }
+    const attempt = () => createNativeOcrHost({ executable: copy, runtime, model, spawnImpl }).recognize({ input: new Float32Array(32 * 128), width: 32, height: 128, threads: 1 })
+    fs.copyFileSync(executable, copy)
+    fs.chmodSync(copy, 0o755)
+    await assert.rejects(attempt(), /Die native OCR-Laufzeit ist beschädigt\./u, 'missing runtime-manifest.json')
+    fs.copyFileSync(path.join(path.dirname(executable), 'runtime-manifest.json'), copyManifest)
+    await assert.rejects(attempt(), /spawned/u, 'the pinned build starts')
+    const bytes = fs.readFileSync(copy)
+    bytes[bytes.length - 1] ^= 0xff
+    fs.writeFileSync(copy, bytes)
+    await assert.rejects(attempt(), /Die native OCR-Laufzeit ist beschädigt\./u, 'a modified executable')
+    assert.equal(spawned.length, 1, 'only the verified executable was spawned')
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true })
+  }
 
   console.log(`Native ONNX OCR: fanotes-ocr (ort, ONNX Runtime 1.21.0) als eigener Prozess, 2 begrenzte Threads, ${first.dims.join('×')} Ausgabewerte, maximal ${largest.toExponential(1)} Abweichung zu onnxruntime-node; SHA-256-Sperre aktiv; Linux-/Windows-Pakete ohne CUDA/DirectML-Ballast.`)
 }

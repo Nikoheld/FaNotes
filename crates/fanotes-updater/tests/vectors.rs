@@ -219,6 +219,7 @@ fn eval_manifest(input: &Value, keys: &Value) -> Value {
         platform,
         key_id,
         channel,
+        input.get("tagVersion").and_then(Value::as_str),
     ) {
         Ok(verified) => json!({ "ok": summarize(&verified) }),
         Err(error) => error_value(&error),

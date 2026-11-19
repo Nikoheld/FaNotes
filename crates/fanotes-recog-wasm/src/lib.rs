@@ -85,20 +85,30 @@ fn unpack_ink(packed: &[f64]) -> Result<Vec<Vec<(f64, f64)>>, JsError> {
     while index < packed.len() {
         let count = packed[index] as usize;
         index += 1;
-        if index + count * 2 > packed.len() {
+        let Some(end) = packed_end(index, count, packed.len()) else {
             return Err(JsError::new("Unvollständige Stiftdaten."));
-        }
+        };
         strokes.push(
-            packed[index..index + count * 2]
+            packed[index..end]
                 .as_chunks::<2>()
                 .0
                 .iter()
                 .map(|pair| (pair[0], pair[1]))
                 .collect(),
         );
-        index += count * 2;
+        index = end;
     }
     Ok(strokes)
+}
+
+/// The end of `count` untrusted `x, y` pairs starting at `index`, or `None`
+/// when the count overflows or runs past `len` (on wasm32 `count * 2` wraps
+/// for a count near 2^31).
+fn packed_end(index: usize, count: usize, len: usize) -> Option<usize> {
+    count
+        .checked_mul(2)
+        .and_then(|pairs| index.checked_add(pairs))
+        .filter(|end| *end <= len)
 }
 
 /// Packed strokes are `pointCount, x, y, x, y, …` per stroke in page pixels. Returns the lines
@@ -422,12 +432,12 @@ fn unpack_strokes(packed: &[f64]) -> Result<Vec<LineStroke>, &'static str> {
         let base_width = packed[index];
         let count = packed[index + 1] as usize;
         index += 2;
-        if index + count * 2 > packed.len() {
+        let Some(end) = packed_end(index, count, packed.len()) else {
             return Err("Unvollständige Stiftzeile.");
-        }
-        let (pairs, _) = packed[index..index + count * 2].as_chunks::<2>();
+        };
+        let (pairs, _) = packed[index..end].as_chunks::<2>();
         let points = pairs.iter().map(|pair| (pair[0], pair[1])).collect();
-        index += count * 2;
+        index = end;
         strokes.push(LineStroke { base_width, points });
     }
     Ok(strokes)
@@ -435,7 +445,26 @@ fn unpack_strokes(packed: &[f64]) -> Result<Vec<LineStroke>, &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fold_word, ExactWords, Lexicon};
+    use super::{fold_word, unpack_strokes, ExactWords, Lexicon};
+
+    #[test]
+    fn a_huge_stroke_point_count_is_refused_without_overflow() {
+        for count in [
+            f64::MAX,
+            usize::MAX as f64,
+            (usize::MAX / 2 + 1) as f64,
+            3.0,
+        ] {
+            assert_eq!(
+                unpack_strokes(&[4.0, count, 1.0, 2.0]).err(),
+                Some("Unvollständige Stiftzeile.")
+            );
+        }
+        let strokes = unpack_strokes(&[4.0, 1.0, 1.0, 2.0])
+            .ok()
+            .unwrap_or_default();
+        assert_eq!(strokes[0].points, vec![(1.0, 2.0)]);
+    }
 
     #[test]
     fn a_personal_word_with_eszett_is_known_and_a_removed_word_is_not() {

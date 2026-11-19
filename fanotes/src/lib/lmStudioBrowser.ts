@@ -1,5 +1,6 @@
 import type { LmStudioAction, LmStudioModel, LmStudioTransformResult } from '../types'
 import { isPdfImportantAction, PDF_IMPORTANT_SYSTEM } from './pdfImportantMarks'
+import { isLocalAiHostname } from '../../electron/localAiHost.mjs'
 
 type TransformRequest = {
   baseUrl: string
@@ -32,17 +33,7 @@ const normalizeLocalBaseUrl = (raw: string) => {
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error('Die LM-Studio-Adresse darf nur eine lokale HTTP(S)-Adresse ohne Zugangsdaten enthalten.')
   }
-  const hostname = parsed.hostname.toLocaleLowerCase('en-US').replace(/^\[|\]$/gu, '')
-  const octets = hostname.split('.').map(Number)
-  const ipv4 = octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
-  const privateIpv4 = ipv4 && (
-    octets[0] === 10 || octets[0] === 127 ||
-    (octets[0] === 169 && octets[1] === 254) ||
-    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
-    (octets[0] === 192 && octets[1] === 168)
-  )
-  const privateIpv6 = hostname === '::1' || hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:')
-  if (hostname !== 'localhost' && !privateIpv4 && !privateIpv6) {
+  if (!isLocalAiHostname(parsed.hostname)) {
     throw new Error('Aus Datenschutzgründen verbindet sich die Web-App nur mit LM Studio auf localhost oder im privaten LAN.')
   }
   const path = parsed.pathname.replace(/\/+$/gu, '')

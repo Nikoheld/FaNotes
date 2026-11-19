@@ -90,7 +90,43 @@ function checkedExecutable(executable) {
     || info.size > MAX_EXECUTABLE_BYTES
     || (process.platform !== 'win32' && (info.mode & 0o111) === 0)
   ) throw new Error('Die native OCR-Laufzeit ist nicht verfügbar.')
+  verifyExecutableDigest(executable, info.size)
   return executable
+}
+
+/**
+ * The sidecar must be the build `runtime-manifest.json` beside it describes
+ * (packaged: `resources/native-ocr`, checkout: `native-ocr/<platform>-<arch>`):
+ * same file name, size and SHA-256. A replaced or truncated executable is
+ * never started.
+ */
+function verifyExecutableDigest(executable, size) {
+  const broken = () => new Error('Die native OCR-Laufzeit ist beschädigt.')
+  let manifest
+  try {
+    const manifestPath = path.join(path.dirname(executable), 'runtime-manifest.json')
+    const manifestInfo = fs.lstatSync(manifestPath)
+    if (!manifestInfo.isFile() || manifestInfo.isSymbolicLink() || manifestInfo.size > 64 * 1024) throw broken()
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+  } catch {
+    throw broken()
+  }
+  const expected = manifest?.executable
+  if (
+    manifest?.format !== 'fanotes-native-ocr-runtime-v1'
+    || manifest.engine !== ENGINE
+    || expected?.file !== path.basename(executable)
+    || expected.size !== size
+    || typeof expected.sha256 !== 'string'
+    || !/^[a-f0-9]{64}$/u.test(expected.sha256)
+  ) throw broken()
+  let actual
+  try {
+    actual = crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex')
+  } catch {
+    throw broken()
+  }
+  if (actual !== expected.sha256) throw broken()
 }
 
 /**

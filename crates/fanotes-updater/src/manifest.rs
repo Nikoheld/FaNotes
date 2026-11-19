@@ -21,7 +21,7 @@ use crate::hosts::{assert_github_release_url, PRODUCT_ORIGIN};
 use crate::json::stable_stringify;
 use crate::platform::{PackageKind, Platform, MAX_PACKAGE_BYTES, MIN_PACKAGE_BYTES};
 use crate::util::{plain_object, safe_integer, str_eq, utf16_len};
-use crate::version::{compare_versions, is_valid_version, Channel};
+use crate::version::{compare_versions, is_valid_version, version_channel, Channel};
 
 /// Key id of the production signing key (`update-public-key.pem`).
 pub const EXPECTED_KEY_ID: &str = "33006e5c06939bc9";
@@ -303,6 +303,13 @@ fn validate_delta(
 /// `expected_channel` is the channel the manifest must declare. The updater
 /// passes the channel of the release it picked (not the user's channel), so a
 /// beta user reading a stable release verifies it as `Stable`.
+///
+/// `expected_version` is the picked release's tag version (without the `v`).
+/// The signed `latestVersion` must equal it, and its kind must be the
+/// manifest's channel, so an older signed manifest re-attached to a newer
+/// release, or one channel's manifest offered as another's, is refused even on
+/// a fresh profile that has no highest-seen version yet. `None` skips only the
+/// tag check (for verifying a manifest that did not come from a release list).
 pub fn verify_manifest(
     candidate: &Value,
     current_version: &str,
@@ -310,6 +317,7 @@ pub fn verify_manifest(
     platform: Platform,
     expected_key_id: &str,
     expected_channel: Channel,
+    expected_version: Option<&str>,
 ) -> Result<VerifiedManifest> {
     let Some(candidate_object) = candidate.as_object() else {
         return err(ErrorKind::Manifest, "Das Update-Manifest ist ungültig.");
@@ -361,6 +369,19 @@ pub fn verify_manifest(
         Some(version) if is_valid_version(version) => version.to_owned(),
         _ => return err(ErrorKind::Manifest, "Die angebotene Version ist ungültig."),
     };
+    if version_channel(&latest_version)? != expected_channel {
+        // `channel == Some(expected_channel)` was checked above.
+        return err(
+            ErrorKind::Manifest,
+            "Die angebotene Version passt nicht zum Kanal des Update-Manifests.",
+        );
+    }
+    if expected_version.is_some_and(|tag| tag != latest_version) {
+        return err(
+            ErrorKind::Manifest,
+            "Das Update-Manifest gehört zu einem anderen Release.",
+        );
+    }
     let update_available = compare_versions(&latest_version, current_version)?.is_gt();
     let Some(mandatory) = payload.get("mandatory").and_then(Value::as_bool) else {
         return err(

@@ -10,6 +10,7 @@ const { spawnSync } = require('node:child_process')
 const {
   decodeHtmlEntities,
   importOneNoteToVault,
+  sanitizeOneNoteHtml,
   materializeOneNoteTools,
   pageDimensions,
   safeSegment,
@@ -114,7 +115,24 @@ async function verifyImport(inputPath, suffix) {
   return result
 }
 
+async function assertSanitizerVectors() {
+  // The committed bundle is what the entry and the pinned packages build.
+  const { bundleOneNoteSanitizer } = await import('./build-onenote-sanitizer.mjs')
+  assert.equal(await bundleOneNoteSanitizer(), fs.readFileSync(path.join(root, 'electron', 'onenote-sanitizer.bundle.cjs'), 'utf8'), 'electron/onenote-sanitizer.bundle.cjs is stale: run node scripts/build-onenote-sanitizer.mjs')
+  // Shared with crates/fanotes-host/src/onenote.rs (ammonia).
+  const { cases } = JSON.parse(fs.readFileSync(path.join(fixtures, 'sanitize-vectors.json'), 'utf8'))
+  assert.ok(cases.length >= 20)
+  for (const { html, absent, present } of cases) {
+    const clean = sanitizeOneNoteHtml(html)
+    for (const pattern of absent) assert.doesNotMatch(clean, new RegExp(pattern, 'iu'), `${html} -> ${clean}`)
+    for (const pattern of present) assert.match(clean, new RegExp(pattern, 'iu'), `${html} -> ${clean}`)
+    // Idempotent: cleaning the cleaned page changes nothing (no mutation on re-parse).
+    assert.equal(sanitizeOneNoteHtml(clean), clean, `re-parse of ${clean}`)
+  }
+}
+
 void (async () => {
+  await assertSanitizerVectors()
   await assertUniqueNoteDoesNotReplace()
   if (process.platform !== 'linux') {
     console.log('Der binäre OneNote-Regressionstest läuft auf dem Linux-Buildhost.')

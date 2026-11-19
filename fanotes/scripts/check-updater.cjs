@@ -277,8 +277,12 @@ async function main() {
         value: crypto.sign(null, Buffer.from(stableStringify(betaPayload)), privateKey).toString('base64'),
       },
     }
-    assert.equal(verifyManifest(signedBetaManifest, baseVersion, publicPem, 'linux', keyId, 'beta').channel, 'beta')
+    // The channel is bound to the kind of latestVersion: a beta manifest offering a stable version is refused.
+    assert.throws(() => verifyManifest(signedBetaManifest, baseVersion, publicPem, 'linux', keyId, 'beta'), /Kanal des Update-Manifests/u)
     assert.throws(() => verifyManifest(signedBetaManifest, baseVersion, publicPem, 'linux', keyId, 'stable'), /FaNotes-Ausgabe/u)
+    // latestVersion is bound to the picked release tag: an older signed manifest under a newer tag is refused.
+    assert.equal(verifyManifest(signedManifest, baseVersion, publicPem, 'linux', keyId, 'stable', targetVersion).latestVersion, targetVersion)
+    assert.throws(() => verifyManifest(signedManifest, baseVersion, publicPem, 'linux', keyId, 'stable', '2099.1.1'), /anderen Release/u)
     assert.throws(() => verifyManifest(signedManifest, baseVersion, publicPem, 'linux', keyId, 'nightly'), /FaNotes-Ausgabe/u)
 
     const nightlyLatest = `${targetVersion}-nightly.20261011120000.abcdef0`
@@ -316,10 +320,8 @@ async function main() {
         value: crypto.sign(null, Buffer.from(stableStringify(nightlyStablePayload)), privateKey).toString('base64'),
       },
     }
-    const nightlyStableVerified = verifyManifest(signedNightlyStableManifest, baseVersion, publicPem, 'linux', keyId, 'nightly')
-    assert.equal(nightlyStableVerified.channel, 'nightly')
-    assert.equal(nightlyStableVerified.latestVersion, targetVersion)
-    assert.equal(nightlyStableVerified.packages.appimage.url, githubReleaseAssetUrl(targetVersion, path.basename(targetPath)))
+    // A nightly manifest that offers a stable version is refused: the picked release kind and the manifest channel always match.
+    assert.throws(() => verifyManifest(signedNightlyStableManifest, baseVersion, publicPem, 'linux', keyId, 'nightly'), /Kanal des Update-Manifests/u)
 
     const patchBytes = await fsp.readFile(patchPath)
     const releaseListUrl = 'https://api.github.com/repos/Nikoheld/FaNotes/releases/latest'
