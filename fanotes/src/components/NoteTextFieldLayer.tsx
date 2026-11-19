@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { Bold, Minus, Plus, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
+import { FormattingToolbar } from './FormattingToolbar'
+import type { MarkdownFormatAction } from './MarkdownEditor'
+import { formatTextFieldText } from '../lib/noteTextFieldFormat'
 import { noteLinkMarkerCss } from '../lib/noteLink'
 import {
   NOTE_TEXT_FIELD_COLORS,
   NOTE_TEXT_FIELD_MAX_CHARS,
   NOTE_TEXT_FIELD_REFERENCE_PAGE_WIDTH,
   noteTextFieldPointFromRects,
-  stepNoteTextFieldFontSize,
   type NoteTextField,
   type NoteTextFieldPageRect,
 } from '../lib/noteTextField'
@@ -55,26 +57,56 @@ const fitTextArea = (node: HTMLTextAreaElement) => {
   node.style.height = `${Math.max(node.scrollHeight, 0)}px`
 }
 
-/** Size, bold and colour controls of the selected text box; shown in the top toolbar. */
-export function NoteTextFieldToolbar({ field, onStyle, onRemove }: {
+/** Same toolbar as the note editor (markdown actions) plus size, colour and remove for the selected text box. */
+export function NoteTextFieldToolbar({ field, onStyle, onText, onRemove }: {
   field: NoteTextField
   onStyle: (id: string, patch: StylePatch) => void
+  onText: (id: string, text: string) => void
   onRemove: (id: string) => void
 }) {
+  const format = (action: MarkdownFormatAction) => {
+    const area = document.querySelector<HTMLTextAreaElement>(`[data-note-text-field="${CSS.escape(field.id)}"]`)
+    const start = area?.selectionStart ?? field.text.length
+    const end = area?.selectionEnd ?? field.text.length
+    const edit = formatTextFieldText(area?.value ?? field.text, start, end, action)
+    if (edit.text.length > NOTE_TEXT_FIELD_MAX_CHARS) return
+    onText(field.id, edit.text)
+    requestAnimationFrame(() => {
+      if (!area) return
+      area.focus({ preventScroll: true })
+      area.setSelectionRange(edit.start, edit.end)
+    })
+  }
+  const custom = field.color ?? '#20222b'
   return (
     <div
       className="note-text-field-toolbar"
       role="toolbar"
       aria-label="Textfeld-Werkzeuge"
-      onPointerDown={(event) => { event.preventDefault(); event.stopPropagation() }}
-      onMouseDown={(event) => event.preventDefault()}
+      onPointerDown={(event) => {
+        // The colour input needs its own press to open the picker.
+        if (event.target instanceof Element && event.target.closest('.lw-color-custom')) { event.stopPropagation(); return }
+        event.preventDefault(); event.stopPropagation()
+      }}
+      onMouseDown={(event) => { if (!(event.target instanceof Element && event.target.closest('.lw-color-custom'))) event.preventDefault() }}
     >
-      <button type="button" aria-label="Schrift kleiner" title="Schrift kleiner" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, -1) })}><Minus size={13} aria-hidden="true" /></button>
-        <span className="note-text-field-size" title="Schriftgröße">{field.fontSize}</span>
-        <button type="button" aria-label="Schrift größer" title="Schrift größer" onClick={() => onStyle(field.id, { fontSize: stepNoteTextFieldFontSize(field.fontSize, 1) })}><Plus size={13} aria-hidden="true" /></button>
-        <i className="note-text-field-sep" aria-hidden="true" />
-        <button type="button" className={field.bold ? 'is-on' : ''} aria-pressed={Boolean(field.bold)} aria-label="Fett" title="Fett (Strg+B)" onClick={() => onStyle(field.id, { bold: field.bold ? undefined : true })}><Bold size={13} aria-hidden="true" /></button>
-        <i className="note-text-field-sep" aria-hidden="true" />
+      <FormattingToolbar hideLatex onFormat={format} onInsertLatex={() => undefined} />
+      <i className="note-text-field-sep" aria-hidden="true" />
+      <label className="note-text-field-range" title="Schriftgröße">
+        <span>Größe</span>
+        <input
+          type="range"
+          aria-label="Schriftgröße"
+          min={10}
+          max={48}
+          step={1}
+          value={field.fontSize}
+          onChange={(event) => onStyle(field.id, { fontSize: Number(event.target.value) })}
+        />
+        <output>{field.fontSize} px</output>
+      </label>
+      <i className="note-text-field-sep" aria-hidden="true" />
+      <div className="note-text-field-colors" role="group" aria-label="Schriftfarbe">
         {NOTE_TEXT_FIELD_COLORS.map((color) => (
           <button
             key={color.label}
@@ -87,8 +119,13 @@ export function NoteTextFieldToolbar({ field, onStyle, onRemove }: {
             onClick={() => onStyle(field.id, { color: color.value })}
           />
         ))}
-        <i className="note-text-field-sep" aria-hidden="true" />
-        <button type="button" className="is-danger" aria-label="Textfeld entfernen" title="Textfeld entfernen" onClick={() => onRemove(field.id)}><Trash2 size={13} aria-hidden="true" /></button>
+        <label className="lw-color-custom" title="Eigene Farbe">
+          <input type="color" aria-label="Eigene Farbe" value={custom} onChange={(event) => onStyle(field.id, { color: event.target.value })} />
+          <span style={{ background: custom }} />
+        </label>
+      </div>
+      <i className="note-text-field-sep" aria-hidden="true" />
+      <button type="button" className="is-danger" aria-label="Textfeld entfernen" title="Textfeld entfernen" onClick={() => onRemove(field.id)}><Trash2 size={13} aria-hidden="true" /></button>
     </div>
   )
 }
