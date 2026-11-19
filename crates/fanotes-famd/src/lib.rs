@@ -1,14 +1,29 @@
-//! `fanotes-famd-v1` codec.
+//! `fanotes-famd-v1` and `fanotes-famd:v2` codec.
 //!
 //! The byte layout matches `fanotes/electron/famd.cjs`: a markdown body, a
 //! length-prefixed `<!-- fanotes-famd:v1 chars=N -->` header, then JSON.
-//! `N` is the JavaScript string length of that JSON.
+//! `N` is the JavaScript string length of that JSON. The compact v2 layout
+//! (`famdV2.mjs`) lives in [`v2`].
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
 
+pub mod annotations;
+mod v2;
 mod v8_date;
+
+pub use annotations::{annotations_have_content, parse_annotations};
+
+pub use v2::{
+    crc32, crc_hex, decode85, is_active_v2, js_float_text, js_stringify, pack_v2_ink,
+    unpack_v2_ink, FamdCorruptError, FAMD_V2_SCHEMA, FAMD_V2_TOKEN, POINT_STRIDE,
+};
+
+/// The message `composeFamdCompanion` and `rewriteFamdText` throw when a
+/// stored note cannot be parsed. The note on disk is left alone.
+pub const UNREADABLE_NOTE_MESSAGE: &str =
+    "Die Notiz konnte nicht gelesen werden und wurde nicht überschrieben.";
 
 pub const FAMD_SCHEMA: &str = "fanotes-famd-v1";
 pub const FAMD_EXTENSION: &str = ".famd";
@@ -47,6 +62,19 @@ pub struct NoteTextField {
     pub width: f64,
     pub font_size: i64,
     pub text: String,
+    /// `#rrggbb`, lower case. `None`: the default ink color.
+    pub color: Option<String>,
+    pub bold: bool,
+    /// Epoch milliseconds of the last edit, when known.
+    pub updated_at: Option<i64>,
+}
+
+/// A text box deleted in one window (`{ id, deletedAt }`), so a stale edit of
+/// it elsewhere can be told from a box that never existed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoteTextFieldTombstone {
+    pub id: String,
+    pub deleted_at: i64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -60,6 +88,9 @@ pub struct FamdPayload {
     pub note_backups: Vec<NoteBackup>,
     pub page_stats: Option<Value>,
     pub text_fields: Vec<NoteTextField>,
+    pub text_field_tombstones: Vec<NoteTextFieldTombstone>,
+    /// Sanitized study annotations (`noteAnnotation.mjs`), as stored.
+    pub annotations: Vec<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,6 +110,8 @@ pub fn empty_famd_payload(updated_at: impl Into<String>) -> FamdPayload {
         note_backups: Vec::new(),
         page_stats: None,
         text_fields: Vec::new(),
+        text_field_tombstones: Vec::new(),
+        annotations: Vec::new(),
     }
 }
 
@@ -146,7 +179,14 @@ pub fn strip_famd_payload(source: &str) -> String {
         return String::new();
     }
     let mut text = source.to_string();
-    if let Some((index, _, _)) = last_header(&text) {
+    // The later of the last v1 header and the v2 header ends the markdown.
+    let mut cut = last_header(&text).map(|(index, _, _)| index);
+    if let Some(v2_cut) = v2::v2_cut_index(&text) {
+        if cut.is_none_or(|v1_cut| v2_cut > v1_cut) {
+            cut = Some(v2_cut);
+        }
+    }
+    if let Some(index) = cut {
         text.truncate(index);
     }
     let trimmed = trim_end_js(&text).to_string();
@@ -159,59 +199,118 @@ pub fn strip_famd_payload(source: &str) -> String {
     trimmed
 }
 
+/// `parseFamd(source)`. A damaged v2 note has no payload here; use
+/// [`try_parse_famd`] or [`famd_looks_stored`] to tell it from a plain note.
 pub fn parse_famd(source: &str) -> ParsedFamd {
+    parse_famd_with(source, true).unwrap_or_else(|_| ParsedFamd {
+        markdown: strip_famd_payload(source),
+        payload: None,
+    })
+}
+
+/// `parseFamd(source)` including its `FamdCorruptError` for a damaged v2 note.
+pub fn try_parse_famd(source: &str) -> Result<ParsedFamd, FamdCorruptError> {
+    parse_famd_with(source, true)
+}
+
+/// `parseFamd(source, { unpack: false })`: v2 ink stays in its packed columns.
+///
+/// Only a caller that writes the payload back with the encoding of the same
+/// source may use it. That is v2 again, and packed strokes pass through.
+pub fn try_parse_famd_packed(source: &str) -> Result<ParsedFamd, FamdCorruptError> {
+    parse_famd_with(source, false)
+}
+
+fn parse_famd_with(source: &str, unpack: bool) -> Result<ParsedFamd, FamdCorruptError> {
     let markdown = strip_famd_payload(source);
+    let empty = |markdown: String| ParsedFamd {
+        markdown,
+        payload: None,
+    };
     if source.is_empty() {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+        return Ok(empty(markdown));
     }
-    let Some((index, end, length)) = last_header(source) else {
-        return ParsedFamd {
+    if is_active_v2(source) {
+        let object = v2::read_v2_payload(source, unpack)?;
+        return Ok(ParsedFamd {
             markdown,
-            payload: None,
-        };
+            payload: Some(FamdPayload::from_object(&object)),
+        });
+    }
+    let Some((_, end, length)) = last_header(source) else {
+        return Ok(empty(markdown));
     };
     if !(2..=MAX_FAMD_JSON_CHARS).contains(&length) {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+        return Ok(empty(markdown));
     }
     let Some(json) = slice_js(source, end, length as usize) else {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+        return Ok(empty(markdown));
     };
-    let _ = index;
-    let Ok(parsed) = serde_json::from_str::<Value>(json) else {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(json) else {
+        return Ok(empty(markdown));
     };
-    let Value::Object(object) = parsed else {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
-    };
-    if object.get("schema").and_then(Value::as_str) != Some(FAMD_SCHEMA) {
-        return ParsedFamd {
-            markdown,
-            payload: None,
-        };
+    // `payloadFromParsed` takes either schema name.
+    let schema = object.get("schema").and_then(Value::as_str);
+    if schema != Some(FAMD_SCHEMA) && schema != Some(FAMD_V2_SCHEMA) {
+        return Ok(empty(markdown));
     }
-    ParsedFamd {
+    Ok(ParsedFamd {
         markdown,
         payload: Some(FamdPayload::from_object(&object)),
+    })
+}
+
+/// The two on-disk layouts `serializeFamd` can write.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FamdEncoding {
+    V1,
+    V2,
+}
+
+/// `famdEncodingForSave`: a v2 or new note stays v2, a v1 note stays v1.
+pub fn famd_encoding_for_save(existing: Option<&str>) -> FamdEncoding {
+    match existing {
+        None | Some("") => FamdEncoding::V2,
+        Some(source) if is_active_v2(source) => FamdEncoding::V2,
+        Some(source) if source.contains(v2::FAMD_V1_TOKEN) => FamdEncoding::V1,
+        Some(_) => FamdEncoding::V2,
     }
 }
 
+/// `famdLooksStored`: the text carries a v1 or v2 marker. A stored note
+/// without a payload is damaged and must not be overwritten.
+pub fn famd_looks_stored(source: &str) -> bool {
+    source.contains(v2::FAMD_V1_TOKEN) || source.contains(FAMD_V2_TOKEN)
+}
+
+/// `serializeFamd(markdown, payload)` in the v1 layout.
 pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
+    serialize_famd_with(markdown, payload, FamdEncoding::V1)
+}
+
+/// `serializeFamd(markdown, payload, encoding)`.
+pub fn serialize_famd_with(
+    markdown: &str,
+    payload: &FamdPayload,
+    encoding: FamdEncoding,
+) -> String {
     let body = strip_famd_payload(markdown);
+    let object = famd_object(&body, payload);
+    if encoding == FamdEncoding::V2 {
+        return v2::encode_v2_document(&body, object);
+    }
+    // `JSON.stringify`: JavaScript number text and key order, not serde's.
+    let json = v2::js_stringify(&Value::Object(object));
+    let header = format!("<!-- fanotes-famd:v1 chars={} -->\n{json}\n", js_len(&json));
+    if body.is_empty() {
+        header
+    } else {
+        format!("{body}\n\n{header}")
+    }
+}
+
+/// The sanitized object `serializeFamd` writes, in its key order.
+fn famd_object(body: &str, payload: &FamdPayload) -> Map<String, Value> {
     // `payload.updatedAt || now`. An empty string is the only missing time.
     // A month name or other text is written unchanged.
     let updated_at = if payload.updated_at.is_empty() {
@@ -220,14 +319,19 @@ pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
         payload.updated_at.clone()
     };
     let worksheets = if payload.worksheets.is_empty() {
-        worksheet_ids_from_markdown(&body)
+        worksheet_ids_from_markdown(body)
     } else {
         payload.worksheets.clone()
+    };
+    // `payload.ink && typeof payload.ink === 'object' ? payload.ink : null`.
+    let ink = match &payload.ink {
+        Some(ink @ (Value::Object(_) | Value::Array(_))) => ink.clone(),
+        _ => Value::Null,
     };
     let mut object = Map::new();
     object.insert("schema".into(), Value::String(FAMD_SCHEMA.into()));
     object.insert("updatedAt".into(), Value::String(updated_at));
-    object.insert("ink".into(), payload.ink.clone().unwrap_or(Value::Null));
+    object.insert("ink".into(), ink);
     object.insert(
         "worksheets".into(),
         Value::Array(worksheets.into_iter().map(Value::String).collect()),
@@ -263,13 +367,23 @@ pub fn serialize_famd(markdown: &str, payload: &FamdPayload) -> String {
             Value::Array(text_fields.iter().map(NoteTextField::to_json).collect()),
         );
     }
-    let json = Value::Object(object).to_string();
-    let header = format!("<!-- fanotes-famd:v1 chars={} -->\n{json}\n", js_len(&json));
-    if body.is_empty() {
-        header
-    } else {
-        format!("{body}\n\n{header}")
+    let tombstones = sanitize_note_text_field_tombstones(&payload.text_field_tombstones);
+    if !tombstones.is_empty() {
+        object.insert(
+            "textFieldTombstones".into(),
+            Value::Array(
+                tombstones
+                    .iter()
+                    .map(NoteTextFieldTombstone::to_json)
+                    .collect(),
+            ),
+        );
     }
+    let annotations = parse_annotations(Some(&Value::Array(payload.annotations.clone())));
+    if !annotations.is_empty() {
+        object.insert("annotations".into(), Value::Array(annotations));
+    }
+    object
 }
 
 impl FamdPayload {
@@ -313,6 +427,11 @@ impl FamdPayload {
             .get("textFields")
             .map(parse_note_text_fields_value)
             .unwrap_or_default();
+        let text_field_tombstones = object
+            .get("textFieldTombstones")
+            .map(parse_note_text_field_tombstones)
+            .unwrap_or_default();
+        let annotations = parse_annotations(object.get("annotations"));
         Self {
             schema: FAMD_SCHEMA.to_string(),
             updated_at,
@@ -323,7 +442,477 @@ impl FamdPayload {
             note_backups,
             page_stats,
             text_fields,
+            text_field_tombstones,
+            annotations,
         }
+    }
+}
+
+impl FamdPayload {
+    /// The object `payloadFromParsed` returns, in its key order.
+    pub fn to_json(&self) -> Value {
+        let mut object = Map::new();
+        object.insert("schema".into(), Value::String(self.schema.clone()));
+        object.insert("updatedAt".into(), Value::String(self.updated_at.clone()));
+        object.insert("ink".into(), self.ink.clone().unwrap_or(Value::Null));
+        object.insert(
+            "worksheets".into(),
+            Value::Array(self.worksheets.iter().cloned().map(Value::String).collect()),
+        );
+        if let Some(style) = &self.paper_style {
+            object.insert("paperStyle".into(), Value::String(style.clone()));
+        }
+        if !self.note_links.is_empty() {
+            object.insert(
+                "noteLinks".into(),
+                Value::Array(self.note_links.iter().map(NoteLink::to_json).collect()),
+            );
+        }
+        if !self.note_backups.is_empty() {
+            object.insert(
+                "noteBackups".into(),
+                Value::Array(self.note_backups.iter().map(NoteBackup::to_json).collect()),
+            );
+        }
+        if let Some(stats) = &self.page_stats {
+            object.insert("pageStats".into(), stats.clone());
+        }
+        if !self.text_fields.is_empty() {
+            object.insert(
+                "textFields".into(),
+                Value::Array(
+                    self.text_fields
+                        .iter()
+                        .map(NoteTextField::to_json)
+                        .collect(),
+                ),
+            );
+        }
+        if !self.text_field_tombstones.is_empty() {
+            object.insert(
+                "textFieldTombstones".into(),
+                Value::Array(
+                    self.text_field_tombstones
+                        .iter()
+                        .map(NoteTextFieldTombstone::to_json)
+                        .collect(),
+                ),
+            );
+        }
+        if !self.annotations.is_empty() {
+            object.insert("annotations".into(), Value::Array(self.annotations.clone()));
+        }
+        Value::Object(object)
+    }
+}
+
+/// Why a companion write refused to produce new bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FamdWriteError {
+    /// `parseFamd` threw `FamdCorruptError` for the stored note or the incoming text.
+    Corrupt(FamdCorruptError),
+    /// The stored note carries a famd marker but no payload could be read.
+    Unreadable,
+}
+
+impl std::fmt::Display for FamdWriteError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Corrupt(error) => error.fmt(formatter),
+            Self::Unreadable => formatter.write_str(UNREADABLE_NOTE_MESSAGE),
+        }
+    }
+}
+
+impl std::error::Error for FamdWriteError {}
+
+impl From<FamdCorruptError> for FamdWriteError {
+    fn from(error: FamdCorruptError) -> Self {
+        Self::Corrupt(error)
+    }
+}
+
+/// `createNoteCompanion`: a new note is written in the compact v2 layout.
+pub fn create_note_companion(markdown: &str, updated_at: &str) -> String {
+    serialize_famd_with(markdown, &empty_famd_payload(updated_at), FamdEncoding::V2)
+}
+
+/// `rewriteFamdText`: the next bytes of a `.famd` note after a text save.
+///
+/// The stored payload and ink stay as they are on disk (packed v2 ink is not
+/// unpacked and packed again). The update time moves only when the text changed.
+pub fn rewrite_famd_text(
+    existing: Option<&str>,
+    markdown_body: &str,
+    now: &str,
+) -> Result<String, FamdWriteError> {
+    let source = existing.unwrap_or("");
+    let parsed = try_parse_famd_packed(source)?;
+    if !source.is_empty() && famd_looks_stored(source) && parsed.payload.is_none() {
+        return Err(FamdWriteError::Unreadable);
+    }
+    let mut payload = parsed.payload.unwrap_or_else(|| empty_famd_payload(now));
+    let text_changed = markdown_body != strip_famd_payload(&parsed.markdown);
+    if text_changed || payload.updated_at.is_empty() {
+        payload.updated_at = now.to_owned();
+    }
+    payload.worksheets = worksheet_ids_from_markdown(markdown_body);
+    Ok(serialize_famd_with(
+        markdown_body,
+        &payload,
+        famd_encoding_for_save(existing),
+    ))
+}
+
+/// `composeFamdCompanion(existing, markdown, ink, settingsPaperStyle)`.
+///
+/// `ink` is `None` for JavaScript `undefined` (keep the stored ink) and
+/// `Some(Value::Null)` for an explicit `null`. A v2 note stays v2 and new ink
+/// is packed once; a v1 note stays v1.
+pub fn compose_famd_companion(
+    existing: Option<&str>,
+    markdown: &str,
+    ink: Option<&Value>,
+    settings_paper_style: Option<&str>,
+    now: &str,
+) -> Result<String, FamdWriteError> {
+    let encoding = famd_encoding_for_save(existing);
+    let source = existing.unwrap_or("");
+    let stored = if source.is_empty() {
+        ParsedFamd {
+            markdown: String::new(),
+            payload: Some(empty_famd_payload(now)),
+        }
+    } else {
+        try_parse_famd_packed(source)?
+    };
+    if !source.is_empty() && famd_looks_stored(source) && stored.payload.is_none() {
+        return Err(FamdWriteError::Unreadable);
+    }
+    let incoming = try_parse_famd(markdown)?;
+    let body = if incoming.markdown.is_empty() {
+        strip_famd_payload(markdown)
+    } else {
+        incoming.markdown.clone()
+    };
+    let existing_payload = stored.payload.unwrap_or_else(|| empty_famd_payload(now));
+    let existing_ink = existing_payload.ink.clone().unwrap_or(Value::Null);
+    let ink_document = match ink {
+        None => existing_ink.clone(),
+        Some(ink) if encoding == FamdEncoding::V2 => pack_v2_ink(ink),
+        Some(ink) => ink.clone(),
+    };
+    let paper_from_ink = match &ink_document {
+        Value::Object(map) => map
+            .get("paperStyle")
+            .and_then(Value::as_str)
+            .filter(|style| is_paper_style(style))
+            .map(str::to_owned),
+        _ => None,
+    };
+    let text_changed = body != strip_famd_payload(&stored.markdown);
+    let ink_changed = ink.is_some() && js_stringify(&ink_document) != js_stringify(&existing_ink);
+    let mut payload = existing_payload.clone();
+    let incoming_paper = incoming
+        .payload
+        .as_ref()
+        .and_then(|payload| payload.paper_style.clone());
+    if let Some(incoming) = incoming.payload {
+        // `...incoming.payload` replaces only the keys that payload has.
+        if !incoming.note_links.is_empty() {
+            payload.note_links = incoming.note_links;
+        }
+        if !incoming.note_backups.is_empty() {
+            payload.note_backups = incoming.note_backups;
+        }
+        if incoming.page_stats.is_some() {
+            payload.page_stats = incoming.page_stats;
+        }
+        if !incoming.text_fields.is_empty() {
+            payload.text_fields = incoming.text_fields;
+        }
+        if !incoming.text_field_tombstones.is_empty() {
+            payload.text_field_tombstones = incoming.text_field_tombstones;
+        }
+        if !incoming.annotations.is_empty() {
+            payload.annotations = incoming.annotations;
+        }
+    }
+    payload.updated_at = if text_changed || ink_changed || existing_payload.updated_at.is_empty() {
+        now.to_owned()
+    } else {
+        existing_payload.updated_at.clone()
+    };
+    payload.worksheets = worksheet_ids_from_markdown(&body);
+    payload.ink = match ink_document {
+        Value::Object(_) | Value::Array(_) => Some(ink_document),
+        _ => None,
+    };
+    payload.paper_style = existing_payload
+        .paper_style
+        .clone()
+        .or(incoming_paper)
+        .or(paper_from_ink)
+        .or_else(|| {
+            settings_paper_style
+                .filter(|style| is_paper_style(style))
+                .map(str::to_owned)
+        });
+    Ok(serialize_famd_with(&body, &payload, encoding))
+}
+
+/// `inkHasMarks`: the ink holds at least one point, packed point block, or
+/// figure path, looking 24 levels deep (a collapsed subsection parks its
+/// strokes eight levels under the famd payload).
+pub fn ink_has_marks(value: &Value) -> bool {
+    ink_has_marks_at(value, 0)
+}
+
+fn ink_has_marks_at(value: &Value, depth: usize) -> bool {
+    if v2::js_falsy(value) || depth > 24 {
+        return false;
+    }
+    let map = match value {
+        Value::Array(items) => return items.iter().any(|item| ink_has_marks_at(item, depth + 1)),
+        Value::Object(map) => map,
+        _ => return false,
+    };
+    if map
+        .get("famdPts")
+        .and_then(Value::as_str)
+        .is_some_and(|points| !points.is_empty())
+    {
+        return true;
+    }
+    for key in ["points", "figurePaths"] {
+        if map
+            .get(key)
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+        {
+            return true;
+        }
+    }
+    if map
+        .get("strokes")
+        .and_then(Value::as_array)
+        .is_some_and(|strokes| {
+            strokes
+                .iter()
+                .any(|stroke| ink_has_marks_at(stroke, depth + 1))
+        })
+    {
+        return true;
+    }
+    ["ink", "hidden", "sections"].iter().any(|key| {
+        map.get(*key)
+            .is_some_and(|nested| ink_has_marks_at(nested, depth + 1))
+    })
+}
+
+/// `sameFamdPayload`: equal after a v2 round trip, with point coordinates
+/// within the 1/65535 quantization step.
+pub fn same_famd_payload(left: &FamdPayload, right: &FamdPayload) -> bool {
+    let list = |values: Vec<Value>| js_stringify(&Value::Array(values));
+    left.updated_at == right.updated_at
+        && left.paper_style == right.paper_style
+        && left.worksheets == right.worksheets
+        && list(left.note_links.iter().map(NoteLink::to_json).collect())
+            == list(right.note_links.iter().map(NoteLink::to_json).collect())
+        && list(left.note_backups.iter().map(NoteBackup::to_json).collect())
+            == list(right.note_backups.iter().map(NoteBackup::to_json).collect())
+        && js_stringify(left.page_stats.as_ref().unwrap_or(&Value::Null))
+            == js_stringify(right.page_stats.as_ref().unwrap_or(&Value::Null))
+        && list(
+            left.text_fields
+                .iter()
+                .map(NoteTextField::to_json)
+                .collect(),
+        ) == list(
+            right
+                .text_fields
+                .iter()
+                .map(NoteTextField::to_json)
+                .collect(),
+        )
+        && js_stringify(&Value::Array(left.annotations.clone()))
+            == js_stringify(&Value::Array(right.annotations.clone()))
+        && same_ink(left.ink.as_ref(), right.ink.as_ref())
+}
+
+const POINT_TOLERANCE: f64 = 1e-4;
+
+/// JavaScript `===` between two parsed values. Objects and arrays are never
+/// the same reference after two parses.
+fn strict_equal(left: Option<&Value>, right: Option<&Value>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(Value::Null), Some(Value::Null)) => true,
+        (Some(Value::Bool(left)), Some(Value::Bool(right))) => left == right,
+        (Some(Value::Number(left)), Some(Value::Number(right))) => left.as_f64() == right.as_f64(),
+        (Some(Value::String(left)), Some(Value::String(right))) => left == right,
+        _ => false,
+    }
+}
+
+fn is_js_object(value: &Value) -> bool {
+    matches!(value, Value::Object(_) | Value::Array(_))
+}
+
+fn utf16_sorted(mut keys: Vec<String>) -> Vec<String> {
+    keys.sort_by(|left, right| left.encode_utf16().cmp(right.encode_utf16()));
+    keys
+}
+
+fn keys_without(value: &Value, skip: &str) -> Vec<String> {
+    utf16_sorted(
+        v2::js_keys(value)
+            .into_iter()
+            .filter(|key| key != skip)
+            .collect(),
+    )
+}
+
+fn same_keyed_values(left: &Value, right: &Value, keys: &[String]) -> bool {
+    keys.iter().all(|key| {
+        let stringify = |value: &Value| v2::js_get(value, key).map(js_stringify);
+        stringify(left) == stringify(right)
+    })
+}
+
+fn list_of<'a>(value: &'a Value, key: &str) -> &'a [Value] {
+    v2::js_get(value, key)
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+fn same_ink(left: Option<&Value>, right: Option<&Value>) -> bool {
+    let left = left.filter(|value| !value.is_null());
+    let right = right.filter(|value| !value.is_null());
+    let (left, right) = match (left, right) {
+        (None, None) => return true,
+        (Some(left), Some(right)) if is_js_object(left) && is_js_object(right) => (left, right),
+        _ => return false,
+    };
+    let left_keys = keys_without(left, "strokes");
+    if left_keys != keys_without(right, "strokes") || !same_keyed_values(left, right, &left_keys) {
+        return false;
+    }
+    let left_strokes = list_of(left, "strokes");
+    let right_strokes = list_of(right, "strokes");
+    left_strokes.len() == right_strokes.len()
+        && left_strokes
+            .iter()
+            .zip(right_strokes)
+            .all(|(left, right)| same_stroke(left, right))
+}
+
+fn same_stroke(left: &Value, right: &Value) -> bool {
+    // JavaScript also calls two primitive strokes equal when neither has
+    // keys; a stroke that is not an object only matches an equal value here.
+    if v2::js_falsy(left) || v2::js_falsy(right) || !is_js_object(left) || !is_js_object(right) {
+        return strict_equal(Some(left), Some(right));
+    }
+    let left_points = list_of(left, "points");
+    let right_points = list_of(right, "points");
+    if left_points.len() != right_points.len()
+        || !left_points
+            .iter()
+            .zip(right_points)
+            .all(|(left, right)| same_point(left, right))
+    {
+        return false;
+    }
+    let left_keys = keys_without(left, "points");
+    left_keys == keys_without(right, "points") && same_keyed_values(left, right, &left_keys)
+}
+
+fn same_point(left: &Value, right: &Value) -> bool {
+    if v2::js_falsy(left) || v2::js_falsy(right) || !is_js_object(left) || !is_js_object(right) {
+        return strict_equal(Some(left), Some(right));
+    }
+    for axis in ["x", "y"] {
+        // A `NaN` difference is not greater than the tolerance.
+        let difference =
+            (js_number(v2::js_get(left, axis)) - js_number(v2::js_get(right, axis))).abs();
+        if difference > POINT_TOLERANCE {
+            return false;
+        }
+    }
+    let mut keys = v2::js_keys(left);
+    for key in v2::js_keys(right) {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    keys.iter()
+        .filter(|key| *key != "x" && *key != "y")
+        .all(|key| strict_equal(v2::js_get(left, key), v2::js_get(right, key)))
+}
+
+/// What `convertFamdSource` did with one file's text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConvertStatus {
+    Converted,
+    Skipped,
+    Failed,
+}
+
+impl ConvertStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Converted => "converted",
+            Self::Skipped => "skipped",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FamdConversion {
+    pub status: ConvertStatus,
+    /// The v2 text when converted, otherwise the original text.
+    pub source: String,
+}
+
+/// `convertFamdSource`: a v1 note becomes v2 only when the v2 text reads
+/// back to the same markdown and payload. Anything else keeps its text.
+pub fn convert_famd_source(source: &str) -> FamdConversion {
+    let keep = |status| FamdConversion {
+        status,
+        source: source.to_owned(),
+    };
+    if is_active_v2(source) {
+        return match try_parse_famd(source) {
+            Ok(_) => keep(ConvertStatus::Skipped),
+            Err(_) => keep(ConvertStatus::Failed),
+        };
+    }
+    if !source.contains(v2::FAMD_V1_TOKEN) {
+        return keep(ConvertStatus::Skipped);
+    }
+    let Ok(parsed) = try_parse_famd(source) else {
+        return keep(ConvertStatus::Failed);
+    };
+    let Some(payload) = parsed.payload.as_ref() else {
+        return keep(ConvertStatus::Failed);
+    };
+    let next = serialize_famd_with(&parsed.markdown, payload, FamdEncoding::V2);
+    let Ok(back) = try_parse_famd(&next) else {
+        return keep(ConvertStatus::Failed);
+    };
+    let same = back.markdown == parsed.markdown
+        && back
+            .payload
+            .as_ref()
+            .is_some_and(|back| same_famd_payload(payload, back));
+    if !same {
+        return keep(ConvertStatus::Failed);
+    }
+    FamdConversion {
+        status: ConvertStatus::Converted,
+        source: next,
     }
 }
 
@@ -546,8 +1135,81 @@ impl NoteTextField {
         object.insert("width".into(), json_number(self.width));
         object.insert("fontSize".into(), Value::from(self.font_size));
         object.insert("text".into(), Value::String(self.text.clone()));
+        if let Some(color) = &self.color {
+            object.insert("color".into(), Value::String(color.clone()));
+        }
+        if self.bold {
+            object.insert("bold".into(), Value::Bool(true));
+        }
+        if let Some(updated_at) = self.updated_at {
+            object.insert("updatedAt".into(), Value::from(updated_at));
+        }
         Value::Object(object)
     }
+}
+
+impl NoteTextFieldTombstone {
+    pub fn to_json(&self) -> Value {
+        let mut object = Map::new();
+        object.insert("id".into(), Value::String(self.id.clone()));
+        object.insert("deletedAt".into(), Value::from(self.deleted_at));
+        Value::Object(object)
+    }
+}
+
+/// Largest epoch millisecond a JS Date can hold; a stamp beyond it is junk.
+const TEXT_FIELD_STAMP_MAX: f64 = 8.64e15;
+
+/// `sanitizeTextFieldStamp`: epoch milliseconds of an edit or delete. Anything
+/// that is not a positive finite JSON number is unknown.
+fn sanitize_text_field_stamp(value: Option<&Value>) -> Option<i64> {
+    let number = value.filter(|value| value.is_number())?.as_f64()?;
+    (number.is_finite() && number > 0.0 && number <= TEXT_FIELD_STAMP_MAX)
+        .then(|| number.floor() as i64)
+}
+
+/// `parseNoteTextFieldTombstones`: deleted boxes, newest first, one per id.
+pub fn parse_note_text_field_tombstones(value: &Value) -> Vec<NoteTextFieldTombstone> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    let mut latest: Vec<(String, i64)> = Vec::new();
+    for entry in items {
+        let Some(object) = entry.as_object() else {
+            continue;
+        };
+        let Some(id) = object
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| is_record_id(id))
+        else {
+            continue;
+        };
+        let Some(deleted_at) = sanitize_text_field_stamp(object.get("deletedAt")) else {
+            continue;
+        };
+        match latest.iter_mut().find(|(known, _)| known == id) {
+            Some((_, stamp)) => *stamp = (*stamp).max(deleted_at),
+            None => latest.push((id.to_owned(), deleted_at)),
+        }
+    }
+    latest.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+    latest
+        .into_iter()
+        .take(TEXT_FIELD_LIMIT)
+        .map(|(id, deleted_at)| NoteTextFieldTombstone { id, deleted_at })
+        .collect()
+}
+
+fn sanitize_note_text_field_tombstones(
+    tombstones: &[NoteTextFieldTombstone],
+) -> Vec<NoteTextFieldTombstone> {
+    parse_note_text_field_tombstones(&Value::Array(
+        tombstones
+            .iter()
+            .map(NoteTextFieldTombstone::to_json)
+            .collect(),
+    ))
 }
 
 fn finite_unit(value: f64, fallback: f64) -> f64 {
@@ -595,6 +1257,15 @@ fn sanitize_note_text_field(value: &Value) -> Option<NoteTextField> {
         object.get("text").and_then(Value::as_str).unwrap_or(""),
         TEXT_FIELD_MAX_CHARS,
     );
+    let color = object
+        .get("color")
+        .and_then(Value::as_str)
+        .filter(|color| {
+            color.len() == 7
+                && color.starts_with('#')
+                && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+        .map(str::to_ascii_lowercase);
     Some(NoteTextField {
         id,
         page,
@@ -603,6 +1274,9 @@ fn sanitize_note_text_field(value: &Value) -> Option<NoteTextField> {
         width,
         font_size,
         text,
+        color,
+        bold: object.get("bold") == Some(&Value::Bool(true)),
+        updated_at: sanitize_text_field_stamp(object.get("updatedAt")),
     })
 }
 
@@ -1209,6 +1883,7 @@ mod tests {
         assert_eq!(super::canonical_iso("2026-13"), None);
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_local_time_uses_the_desktop_daylight_saving_choice() {
         // `Date.parse` without a zone uses the local zone. In an overlap it
@@ -1266,6 +1941,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_name_is_local_midnight() {
         with_tz("America/New_York", || {
@@ -1284,6 +1960,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_hyphenated_month_matches_date_parse() {
         with_tz("America/New_York", || {
@@ -1347,6 +2024,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_and_one_number_defaults_the_missing_field() {
         with_tz("America/New_York", || {
@@ -1425,6 +2103,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn words_before_a_month_date_are_ignored() {
         with_tz("America/New_York", || {
@@ -1486,6 +2165,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_word_between_the_month_and_its_number_is_ignored() {
         with_tz("America/New_York", || {
@@ -1563,6 +2243,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_trailing_number_after_a_month_date_is_ignored() {
         with_tz("America/New_York", || {
@@ -1632,6 +2313,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_out_of_range_month_time_field_is_a_date_number() {
         with_tz("America/New_York", || {
@@ -1822,6 +2504,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_hyphen_run_after_an_open_clock_is_an_offset() {
         with_tz("America/New_York", || {
@@ -1869,6 +2552,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_sign_after_a_leading_word_is_padding() {
         with_tz("America/New_York", || {
@@ -1904,6 +2588,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_numeric_offset_after_a_time_is_a_fixed_zone() {
         with_tz("America/New_York", || {
@@ -2010,6 +2695,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_longer_month_word_uses_its_first_three_letters() {
         with_tz("America/New_York", || {
@@ -2108,6 +2794,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_zone_keyword_glued_to_digits_is_still_a_zone() {
         with_tz("America/New_York", || {
@@ -2353,6 +3040,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_meridiem_glued_to_digits_is_still_a_meridiem() {
         with_tz("America/New_York", || {
@@ -2444,6 +3132,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_number_without_a_month_is_a_legacy_date() {
         with_tz("America/New_York", || {
@@ -2609,6 +3298,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_hyphen_date_keeps_a_zone_keyword() {
         with_tz("America/New_York", || {
@@ -2692,6 +3382,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_leading_gmt_offset_is_a_date_field() {
         with_tz("America/New_York", || {
@@ -2805,6 +3496,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn parentheses_are_comments_in_a_date() {
         with_tz("America/New_York", || {
@@ -2929,6 +3621,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_glued_parenthetical_keeps_a_date_local() {
         with_tz("America/New_York", || {
@@ -3022,6 +3715,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_space_before_an_open_clock_fills_the_missing_fields() {
         with_tz("America/New_York", || {
@@ -3145,6 +3839,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_later_zone_replaces_a_numeric_offset() {
         with_tz("America/New_York", || {
@@ -3318,6 +4013,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_meridiem_can_carry_an_offset() {
         with_tz("America/New_York", || {
@@ -3424,6 +4120,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_later_meridiem_replaces_an_earlier_one() {
         with_tz("America/New_York", || {
@@ -3527,6 +4224,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_fraction_can_carry_a_glued_meridiem() {
         with_tz("America/New_York", || {
@@ -3664,6 +4362,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_extra_colon_in_an_offset_is_ignored() {
         with_tz("America/New_York", || {
@@ -3716,6 +4415,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_field_may_start_with_a_colon() {
         with_tz("America/New_York", || {
@@ -3784,6 +4484,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_later_sign_replaces_a_glued_offset() {
         with_tz("America/New_York", || {
@@ -4108,6 +4809,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_name_replaces_a_slash_date() {
         with_tz("America/New_York", || {
@@ -4215,6 +4917,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_trailing_hyphen_is_padding_before_a_month() {
         with_tz("America/New_York", || {
@@ -4287,6 +4990,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_non_ascii_letter_does_not_panic() {
         with_tz("America/New_York", || {
@@ -4331,6 +5035,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_comma_glued_to_a_finished_clock_is_empty() {
         with_tz("America/New_York", || {
@@ -4468,6 +5173,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn junk_glued_to_a_finished_clock_is_empty() {
         with_tz("America/New_York", || {
@@ -4578,6 +5284,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dot_after_a_fraction_starts_a_new_field() {
         with_tz("America/New_York", || {
@@ -4635,6 +5342,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_inside_an_offset_is_a_separator() {
         with_tz("America/New_York", || {
@@ -4694,6 +5402,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn ignored_symbols_and_leading_words_make_a_legacy_date() {
         with_tz("America/New_York", || {
@@ -4804,6 +5513,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_date_is_local_midnight() {
         with_tz("America/New_York", || {
@@ -4831,6 +5541,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dot_after_minutes_fills_seconds() {
         with_tz("America/New_York", || {
@@ -4899,6 +5610,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_clock_before_a_slash_date_stays_on_that_day() {
         with_tz("America/New_York", || {
@@ -4977,6 +5689,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_extra_sign_after_a_number_is_empty() {
         with_tz("America/New_York", || {
@@ -5037,6 +5750,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_keyword_glued_to_a_number_is_empty() {
         with_tz("America/New_York", || {
@@ -5318,6 +6032,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_nul_ends_the_date_string() {
         with_tz("America/New_York", || {
@@ -5384,6 +6099,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_date_keeps_a_named_zone() {
         with_tz("America/New_York", || {
@@ -5398,6 +6114,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_date_keeps_a_zone_keyword() {
         with_tz("America/New_York", || {
@@ -5468,6 +6185,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_two_field_slash_date_is_a_legacy_date() {
         with_tz("America/New_York", || {
@@ -5573,6 +6291,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn repeated_leading_signs_are_padding() {
         with_tz("America/New_York", || {
@@ -5659,6 +6378,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_pm_clock_is_twelve_hours_later() {
         with_tz("America/New_York", || {
@@ -5677,6 +6397,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_named_zone_after_a_hyphen_date_is_a_fixed_offset() {
         with_tz("America/New_York", || {
@@ -5691,6 +6412,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_numeric_offset_glued_to_a_named_zone_replaces_that_zone() {
         with_tz("America/New_York", || {
@@ -5828,6 +6550,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_short_hyphen_date_is_local_midnight() {
         // `2026-01` and `2026-10-03` are UTC. A one-digit month or day is local.
@@ -5863,6 +6586,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn whitespace_around_a_date_makes_it_local_midnight() {
         // `2026-10-13` is UTC. The same text with surrounding whitespace is local.
@@ -5919,6 +6643,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_wide_year_is_local_midnight() {
         // Four digits and `+YYYYYY` stay UTC. Any other year width is local.
@@ -5971,6 +6696,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_extra_month_digit_is_local_midnight() {
         // Two digits stay UTC. Any other month or day width is local.
@@ -6005,6 +6731,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_negative_expanded_year_stays_utc() {
         with_tz("America/New_York", || {
@@ -6043,6 +6770,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn an_expanded_year_keeps_its_clock() {
         with_tz("America/New_York", || {
@@ -6086,6 +6814,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_short_first_field_is_month_day_year() {
         // A hyphen date that is not `YYYY-MM-DD` or `±YYYYYY-MM-DD` uses the
@@ -6144,6 +6873,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_comma_separates_a_date_from_its_clock() {
         with_tz("America/New_York", || {
@@ -6180,6 +6910,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_period_separates_a_date_from_its_clock() {
         with_tz("America/New_York", || {
@@ -6246,6 +6977,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dotted_date_keeps_a_zone_keyword() {
         with_tz("America/New_York", || {
@@ -6327,6 +7059,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_line_separator_is_not_date_padding() {
         with_tz("America/New_York", || {
@@ -6374,12 +7107,11 @@ mod tests {
             note_backups: Vec::new(),
             page_stats: None,
             text_fields: Vec::new(),
+            text_field_tombstones: Vec::new(),
+            annotations: Vec::new(),
         };
         let saved = serialize_famd("", &payload);
-        assert!(
-            saved.contains("\"updatedAt\":\"Oct 13, 2026\""),
-            "{saved}"
-        );
+        assert!(saved.contains("\"updatedAt\":\"Oct 13, 2026\""), "{saved}");
         let invalid = FamdPayload {
             updated_at: "not-a-date".to_string(),
             ..payload
@@ -6388,6 +7120,7 @@ mod tests {
         assert!(saved.contains("\"updatedAt\":\"not-a-date\""), "{saved}");
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dotted_meridiem_is_not_a_clock() {
         with_tz("America/New_York", || {
@@ -6408,6 +7141,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_gmt_colon_offset_can_pass_twenty_three_hours() {
         with_tz("America/New_York", || {
@@ -6559,6 +7293,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_dotted_offset_keeps_the_hour_and_a_later_number() {
         with_tz("America/New_York", || {
@@ -6686,6 +7421,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_later_number_can_be_the_offset_minute() {
         with_tz("America/New_York", || {
@@ -6816,6 +7552,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_colon_after_an_offset_starts_a_clock() {
         with_tz("America/New_York", || {
@@ -6950,6 +7687,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_space_before_hour_24_ignores_later_fraction_digits() {
         with_tz("America/New_York", || {
@@ -7015,6 +7753,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_trailing_hyphen_keeps_an_unfinished_date_local() {
         with_tz("America/New_York", || {
@@ -7129,12 +7868,14 @@ mod tests {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = LOCK.lock().unwrap_or_else(|error| error.into_inner());
         unsafe extern "C" {
+            #[cfg_attr(windows, link_name = "_tzset")]
             fn tzset();
         }
         struct Restore(Option<String>);
         impl Drop for Restore {
             fn drop(&mut self) {
                 unsafe extern "C" {
+                    #[cfg_attr(windows, link_name = "_tzset")]
                     fn tzset();
                 }
                 match self.0.take() {
@@ -7245,6 +7986,8 @@ mod tests {
             note_backups: Vec::new(),
             page_stats: Some(serde_json::json!({ "words": 2 })),
             text_fields: Vec::new(),
+            text_field_tombstones: Vec::new(),
+            annotations: Vec::new(),
         };
         let saved = serialize_famd("", &payload);
         assert!(parse_famd(&saved).payload.unwrap().page_stats.is_none());
@@ -7265,6 +8008,9 @@ mod tests {
             width: 0.32,
             font_size: 16,
             text: "Hallo Feld".into(),
+            color: Some("#c62f4a".into()),
+            bold: true,
+            updated_at: Some(1_790_000_000_000),
         }];
         let saved = serialize_famd("Hallo\n", &payload);
         let parsed = parse_famd(&saved).payload.unwrap();
@@ -7273,6 +8019,9 @@ mod tests {
         assert_eq!(parsed.text_fields[0].page, 2);
         assert_eq!(parsed.text_fields[0].text, "Hallo Feld");
         assert_eq!(parsed.text_fields[0].font_size, 16);
+        assert_eq!(parsed.text_fields[0].color.as_deref(), Some("#c62f4a"));
+        assert!(parsed.text_fields[0].bold);
+        assert_eq!(parsed.text_fields[0].updated_at, Some(1_790_000_000_000));
         assert!((parsed.text_fields[0].x - 0.2).abs() < 1e-9);
         assert!((parsed.text_fields[0].width - 0.32).abs() < 1e-9);
 
@@ -7296,6 +8045,7 @@ mod tests {
         assert!(!again.contains("textFields"), "{again}");
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn page_stats_follow_the_desktop_creation_time() {
         with_tz("America/New_York", || {
@@ -7340,6 +8090,7 @@ mod tests {
         assert_eq!(super::js_json_number(0.5).to_string(), "0.5");
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_compact_gmt_offset_matches_date_parse() {
         with_tz("America/New_York", || {
@@ -7350,22 +8101,43 @@ mod tests {
                 ("2026-10-13 16:00 GMT+530", Some("2026-10-13T10:30:00.000Z")),
                 ("2026-10-13 16:00 GMT+53", Some("2026-10-11T11:00:00.000Z")),
                 ("2026-10-13 16:00 GMT+24", Some("2026-10-12T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT+24:00", Some("2026-10-12T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT+2360", Some("2026-10-12T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT+2399", Some("2026-10-12T15:21:00.000Z")),
+                (
+                    "2026-10-13 16:00 GMT+24:00",
+                    Some("2026-10-12T16:00:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+2360",
+                    Some("2026-10-12T16:00:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+2399",
+                    Some("2026-10-12T15:21:00.000Z"),
+                ),
                 ("2026-10-13 16:00 GMT+130", Some("2026-10-13T14:30:00.000Z")),
                 ("2026-10-13 16:00 GMT+001", Some("2026-10-13T15:59:00.000Z")),
                 ("2026-10-13 16:00 GMT+5:", Some("2026-10-13T11:00:00.000Z")),
                 ("2026-10-13 16:00 GMT+5:3", Some("2026-10-13T10:57:00.000Z")),
                 ("2026-10-13 16:00 GMT+3:5", Some("2026-10-13T12:55:00.000Z")),
-                ("2026-10-13 16:00 GMT+0530", Some("2026-10-13T10:30:00.000Z")),
-                ("2026-10-13 16:00 GMT+2400", Some("2026-10-12T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT+9999", Some("2026-10-09T11:21:00.000Z")),
+                (
+                    "2026-10-13 16:00 GMT+0530",
+                    Some("2026-10-13T10:30:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+2400",
+                    Some("2026-10-12T16:00:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+9999",
+                    Some("2026-10-09T11:21:00.000Z"),
+                ),
                 ("2026-10-13 16:00 GMT+90", Some("2026-10-09T22:00:00.000Z")),
                 ("2026-10-13 16:00 GMT-530", Some("2026-10-13T21:30:00.000Z")),
                 ("2026-10-13 16:00 GMT-53", Some("2026-10-15T21:00:00.000Z")),
                 ("2026-10-13 16:00 GMT-24", Some("2026-10-14T16:00:00.000Z")),
-                ("2026-10-13 16:00 GMT-2360", Some("2026-10-14T16:00:00.000Z")),
+                (
+                    "2026-10-13 16:00 GMT-2360",
+                    Some("2026-10-14T16:00:00.000Z"),
+                ),
                 ("2026-10-13 16:00 GMT-5:", Some("2026-10-13T21:00:00.000Z")),
                 ("2026-10-13 16:00 UTC-530", Some("2026-10-13T21:30:00.000Z")),
                 ("2026-10-13 16:00 UT-530", Some("2026-10-13T21:30:00.000Z")),
@@ -7373,7 +8145,10 @@ mod tests {
                 ("2026-10-13 GMT-530", Some("2026-10-13T05:30:00.000Z")),
                 ("2026-10-13 GMT-53", Some("2026-10-15T05:00:00.000Z")),
                 ("Oct 13 2026 GMT-530", Some("2026-10-13T05:30:00.000Z")),
-                ("Oct 13 2026 16:00 GMT-530", Some("2026-10-13T21:30:00.000Z")),
+                (
+                    "Oct 13 2026 16:00 GMT-530",
+                    Some("2026-10-13T21:30:00.000Z"),
+                ),
                 ("Oct 13 2026 GMT-53", Some("2026-10-15T05:00:00.000Z")),
                 ("10/13/2026 16:00 GMT-530", Some("2026-10-13T21:30:00.000Z")),
                 ("10/13/2026 GMT-530", Some("2026-10-13T05:30:00.000Z")),
@@ -7388,26 +8163,32 @@ mod tests {
                 ("2026-10-13 16:00 gmt+530", Some("2026-10-13T10:30:00.000Z")),
                 ("2026-10-13 GMT+530", Some("2026-10-12T18:30:00.000Z")),
                 ("2026-10-13 GMT+53", Some("2026-10-10T19:00:00.000Z")),
-                ("Oct 13 2026 16:00 GMT+530", Some("2026-10-13T10:30:00.000Z")),
+                (
+                    "Oct 13 2026 16:00 GMT+530",
+                    Some("2026-10-13T10:30:00.000Z"),
+                ),
                 ("Oct 13 2026 16:00 GMT+53", Some("2026-10-11T11:00:00.000Z")),
                 ("10/13/2026 16:00 GMT+530", Some("2026-10-13T10:30:00.000Z")),
-                ("2026-10-13 4:00 PM GMT+530", Some("2026-10-13T10:30:00.000Z")),
-                ("2026-10-13 16:00 GMT+530 EST", Some("2026-10-13T21:00:00.000Z")),
+                (
+                    "2026-10-13 4:00 PM GMT+530",
+                    Some("2026-10-13T10:30:00.000Z"),
+                ),
+                (
+                    "2026-10-13 16:00 GMT+530 EST",
+                    Some("2026-10-13T21:00:00.000Z"),
+                ),
                 ("2026-10-13 16:00 GMT+5:60", None),
                 ("2026-10-13 16:00 GMT+5:30.5", None),
                 ("2026-10-13 16:00 GMT+12345", None),
                 ("2026-10-13T16:00:00 GMT+530", None),
             ];
             for (input, expected) in cases {
-                assert_eq!(
-                    super::canonical_iso(input).as_deref(),
-                    expected,
-                    "{input}"
-                );
+                assert_eq!(super::canonical_iso(input).as_deref(), expected, "{input}");
             }
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_repeated_colon_after_an_empty_minute_is_a_separator() {
         with_tz("America/New_York", || {
@@ -7446,6 +8227,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_third_offset_field_on_a_hyphen_date_is_empty() {
         with_tz("America/New_York", || {
@@ -7465,6 +8247,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_strict_iso_year_before_the_epoch_keeps_its_calendar() {
         with_tz("America/New_York", || {
@@ -7834,6 +8617,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_name_year_10000_is_local_midnight() {
         with_tz("America/New_York", || {
@@ -7856,6 +8640,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_slash_or_colon_between_a_date_and_a_clock_is_a_separator() {
         with_tz("America/New_York", || {
@@ -7892,6 +8677,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_glued_irregular_gmt_offset_matches_the_spaced_form() {
         with_tz("America/New_York", || {
@@ -7946,6 +8732,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_long_fraction_keeps_nine_significant_digits() {
         with_tz("America/New_York", || {
@@ -7986,10 +8773,7 @@ mod tests {
                     "1970-01-01T00:00:00.000000001234Z",
                     Some("1970-01-01T00:00:00.000Z"),
                 ),
-                (
-                    "1970-01-01T00:00:00.5Z",
-                    Some("1970-01-01T00:00:00.500Z"),
-                ),
+                ("1970-01-01T00:00:00.5Z", Some("1970-01-01T00:00:00.500Z")),
                 (
                     "1970-01-01t00:00:00.0001234567z",
                     Some("1970-01-01T00:00:00.001Z"),
@@ -8052,6 +8836,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_word_continues_through_characters_at_or_above_a() {
         with_tz("America/New_York", || {
@@ -8116,6 +8901,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_colon_after_a_word_is_a_separator() {
         with_tz("America/New_York", || {
@@ -8138,7 +8924,10 @@ mod tests {
                 ("note: 16:00 Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
                 ("note:16:00 Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
                 ("note : 16:00 Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
-                ("note: 4:00 PM Oct 13 2026", Some("2026-10-13T20:00:00.000Z")),
+                (
+                    "note: 4:00 PM Oct 13 2026",
+                    Some("2026-10-13T20:00:00.000Z"),
+                ),
                 ("note:4:5 Oct 13 2026", Some("2026-10-13T08:05:00.000Z")),
                 ("note: 10/13/1950", Some("1950-10-13T05:00:00.000Z")),
                 ("note:10/13/1950", Some("1950-10-13T05:00:00.000Z")),
@@ -8202,6 +8991,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_month_after_a_time_colon_defaults_the_day() {
         with_tz("America/New_York", || {
@@ -8263,6 +9053,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_second_clock_after_a_time_colon_month_is_empty() {
         with_tz("America/New_York", || {
@@ -8279,6 +9070,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_positive_expanded_year_with_a_clock_is_local() {
         with_tz("America/New_York", || {
@@ -8323,6 +9115,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn date_parse_reads_open_clocks_and_dotted_seconds() {
         with_tz("America/New_York", || {
@@ -8377,6 +9170,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_line_separator_inside_a_month_is_not_a_year() {
         with_tz("America/New_York", || {
@@ -8397,6 +9191,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_colon_takes_the_last_short_hyphen_field_as_the_hour() {
         with_tz("America/New_York", || {
@@ -8459,6 +9254,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_fullwidth_digit_prefix_is_a_word() {
         with_tz("America/New_York", || {
@@ -8489,6 +9285,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_sign_after_a_slash_field_is_empty() {
         with_tz("America/New_York", || {
@@ -8514,6 +9311,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_negative_expanded_year_keeps_slash_fields() {
         with_tz("America/New_York", || {
@@ -8576,6 +9374,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_trailing_dot_keeps_a_negative_expanded_year() {
         with_tz("America/New_York", || {
@@ -8616,6 +9415,7 @@ mod tests {
         });
     }
 
+    #[cfg_attr(windows, ignore = "TZ with IANA zone names needs a POSIX C library")]
     #[test]
     fn a_newline_before_a_negative_year_clock_is_a_separator() {
         with_tz("America/New_York", || {

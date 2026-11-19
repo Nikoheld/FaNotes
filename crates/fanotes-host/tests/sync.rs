@@ -18,6 +18,7 @@ fn host() -> (std::path::PathBuf, std::path::PathBuf, Host) {
     (vault, app, host)
 }
 
+#[cfg(unix)]
 #[test]
 fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
     let (vault, app, mut host) = host();
@@ -231,7 +232,8 @@ fn a_missing_sync_payload_does_not_clear_the_saved_login() {
     host.dispatch("fanotes:sync-write-secrets", &[json!(secret)])
         .unwrap();
     assert_eq!(
-        host.dispatch("fanotes:sync-write-secrets", &[]).unwrap_err(),
+        host.dispatch("fanotes:sync-write-secrets", &[])
+            .unwrap_err(),
         "Die Sync-Anmeldedaten sind ungültig."
     );
     assert_eq!(
@@ -609,8 +611,7 @@ fn an_unreadable_sync_state_uses_the_desktop_open_error() {
     fs::set_permissions(&secret, fs::Permissions::from_mode(0o000)).unwrap();
     let _restore_secret = Restore(secret.clone(), 0o600);
     assert_eq!(
-        host.dispatch("fanotes:sync-read-secrets", &[])
-            .unwrap_err(),
+        host.dispatch("fanotes:sync-read-secrets", &[]).unwrap_err(),
         format!("EACCES: permission denied, open '{}'", secret.display())
     );
 }
@@ -707,7 +708,9 @@ fn an_unwritable_sync_folder_uses_a_sixteen_hex_temporary_name() {
     let suffix = error[prefix.len()..].trim_end_matches(".tmp'");
     assert_eq!(suffix.len(), 16, "{error}");
     assert!(
-        suffix.chars().all(|character| character.is_ascii_hexdigit()),
+        suffix
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()),
         "{error}"
     );
     assert!(error.ends_with(".tmp'"), "{error}");
@@ -735,7 +738,10 @@ fn a_sync_write_onto_a_directory_reports_the_desktop_rename_error() {
     assert!(error.starts_with(&prefix), "{error}");
     let hex = error[prefix.len()..].split(".tmp'").next().unwrap();
     assert_eq!(hex.len(), 16, "{error}");
-    assert!(hex.chars().all(|character| character.is_ascii_hexdigit()), "{error}");
+    assert!(
+        hex.chars().all(|character| character.is_ascii_hexdigit()),
+        "{error}"
+    );
     assert!(
         error.ends_with(&format!(".tmp' -> '{}'", target.display())),
         "{error}"
@@ -862,10 +868,7 @@ fn an_unwritable_sync_profile_reports_the_desktop_mkdir_error() {
     assert_eq!(
         host.dispatch("fanotes:sync-write-state", &[json!(id), payload.clone()])
             .unwrap_err(),
-        format!(
-            "EACCES: permission denied, mkdir '{}'",
-            sync_dir.display()
-        )
+        format!("EACCES: permission denied, mkdir '{}'", sync_dir.display())
     );
     assert!(!sync_dir.exists());
 
@@ -874,7 +877,10 @@ fn an_unwritable_sync_profile_reports_the_desktop_mkdir_error() {
     assert_eq!(
         host.dispatch("fanotes:sync-write-state", &[json!(id), payload.clone()])
             .unwrap_err(),
-        format!("EEXIST: file already exists, mkdir '{}'", sync_dir.display())
+        format!(
+            "EEXIST: file already exists, mkdir '{}'",
+            sync_dir.display()
+        )
     );
     assert_eq!(fs::read(&sync_dir).unwrap(), b"datei");
     fs::remove_file(&sync_dir).unwrap();
@@ -888,7 +894,11 @@ fn an_unwritable_sync_profile_reports_the_desktop_mkdir_error() {
             sync_dir.display()
         )
     );
-    assert!(sync_dir.symlink_metadata().unwrap().file_type().is_symlink());
+    assert!(sync_dir
+        .symlink_metadata()
+        .unwrap()
+        .file_type()
+        .is_symlink());
     fs::remove_file(&sync_dir).unwrap();
 
     let elsewhere = app.join("elsewhere");
@@ -897,5 +907,9 @@ fn an_unwritable_sync_profile_reports_the_desktop_mkdir_error() {
     host.dispatch("fanotes:sync-write-state", &[json!(id), payload])
         .unwrap();
     assert!(elsewhere.join(format!("state-{id}.json")).is_file());
-    assert!(sync_dir.symlink_metadata().unwrap().file_type().is_symlink());
+    assert!(sync_dir
+        .symlink_metadata()
+        .unwrap()
+        .file_type()
+        .is_symlink());
 }

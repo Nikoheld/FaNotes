@@ -1,0 +1,547 @@
+{
+ "scenario": "famd-sidecars",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (4 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Heft.famd 200",
+    "PUT /files/Neu.famd 200",
+    "PUT /files/Paar.famd 200",
+    "PUT /files/Paar.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Heft.famd",
+    "Neu.famd",
+    "Paar.famd",
+    "Paar.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Heft.famd 200",
+    "GET /files/Neu.famd 200",
+    "GET /files/Paar.famd 200",
+    "GET /files/Paar.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Heft.famd 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Heft.famd"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Heft.famd 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Neu.famd 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Neu.famd"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Neu.famd 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Paar.famd 200",
+    "PUT /files/Paar.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Paar.famd",
+    "Paar.md"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Paar.famd -> Paar (Konflikt Tablet 2030-01-01 00-00).famd",
+    "Paar.md -> Paar (Konflikt Tablet 2030-01-01 00-00).md"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht, 2 Konflikt(e)).",
+    "warn: Konflikt bei „Paar.famd“: die lokale Fassung liegt jetzt unter „Paar (Konflikt Tablet 2030-01-01 00-00).famd“.",
+    "warn: Konflikt bei „Paar.md“: die lokale Fassung liegt jetzt unter „Paar (Konflikt Tablet 2030-01-01 00-00).md“."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Paar.famd 200",
+    "GET /files/Paar.md 200",
+    "PUT /files/Paar (Konflikt Tablet 2030-01-01 00-00).famd 200",
+    "PUT /files/Paar (Konflikt Tablet 2030-01-01 00-00).md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Paar (Konflikt Tablet 2030-01-01 00-00).famd",
+    "Paar (Konflikt Tablet 2030-01-01 00-00).md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Paar (Konflikt Tablet 2030-01-01 00-00).famd 200",
+    "GET /files/Paar (Konflikt Tablet 2030-01-01 00-00).md 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Heft.famd": {
+     "sha256": "f30568bde271af7529716225b81c505efb9f9c95870cd27d205d973ec3461d79",
+     "size": 6887
+    },
+    "Neu.famd": {
+     "sha256": "09fab2b3396a4001c2b00054612322c014c6b7dd7aa28066cac9d70875c24f52",
+     "size": 9122
+    },
+    "Paar (Konflikt Tablet 2030-01-01 00-00).famd": {
+     "sha256": "1aa9a4bd47e4f335d4e781c569b1a3e482e4339f1807049da60e3f8c84770ffe",
+     "size": 3012
+    },
+    "Paar (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "816ec763a5cc779df4f26ef1a5b5a130e8d214e8bfb55930ec035bb9c96050a9",
+     "size": 15
+    },
+    "Paar.famd": {
+     "sha256": "3d6e35255a1baf0d7ccf14d0d271d958f330a04beb6654c97110611f027f54c0",
+     "size": 2072
+    },
+    "Paar.md": {
+     "sha256": "964b202c5ab5a6996122bbc5c2b72f3affaae92814ac0b26cc135f80d020db4e",
+     "size": 15
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Heft.famd": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "14fb0944849c3ca8961d59e8c06bf19756b013414c5f6e44b38550bfbefd8db8",
+      "size": 6887,
+      "mtimeMs": 1700000007000,
+      "contentSha256": "1930615ef14c3da98a51e1a78e4c9d993fb28c6b9c086bec2a35c421a5a26fd6",
+      "blank": false
+     },
+     "Neu.famd": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "ca3cb3c81d409626cfffcf9e1d4c8fd12b7ea8c2d860ea791238ab1ec2cc55b8",
+      "size": 9122,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "fb27e416818a00ceec31e01da6071fe66c3c7f3b9d43aa02a6982730114d923a",
+      "blank": false
+     },
+     "Paar (Konflikt Tablet 2030-01-01 00-00).famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "1aa9a4bd47e4f335d4e781c569b1a3e482e4339f1807049da60e3f8c84770ffe",
+      "size": 3012,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "694d4a44e13be3db55ade6f0db16f67b489c7202f7b8544fb2ca7579a962bfd3",
+      "blank": false
+     },
+     "Paar (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "816ec763a5cc779df4f26ef1a5b5a130e8d214e8bfb55930ec035bb9c96050a9",
+      "size": 15,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "816ec763a5cc779df4f26ef1a5b5a130e8d214e8bfb55930ec035bb9c96050a9",
+      "blank": false
+     },
+     "Paar.famd": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "3d6e35255a1baf0d7ccf14d0d271d958f330a04beb6654c97110611f027f54c0",
+      "size": 2072,
+      "mtimeMs": 1700000009000,
+      "contentSha256": "eceb4d439b0a69a74a234d7894cff1057280eef19448cef03cc74b9e74ae2f39",
+      "blank": false
+     },
+     "Paar.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "964b202c5ab5a6996122bbc5c2b72f3affaae92814ac0b26cc135f80d020db4e",
+      "size": 15,
+      "mtimeMs": 1700000008000,
+      "contentSha256": "964b202c5ab5a6996122bbc5c2b72f3affaae92814ac0b26cc135f80d020db4e",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Heft.famd": {
+     "sha256": "88a08bc52ddfbdec6c36e24cc4b6a6763fb48bb240cdacba0d5aae158a0af22c",
+     "size": 6887
+    },
+    "Neu.famd": {
+     "sha256": "fc9b17779bd41406dcde4ec45824cf890045a7c73c351e938fb842b9e38c200d",
+     "size": 9122
+    },
+    "Paar (Konflikt Tablet 2030-01-01 00-00).famd": {
+     "sha256": "1aa9a4bd47e4f335d4e781c569b1a3e482e4339f1807049da60e3f8c84770ffe",
+     "size": 3012
+    },
+    "Paar (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "816ec763a5cc779df4f26ef1a5b5a130e8d214e8bfb55930ec035bb9c96050a9",
+     "size": 15
+    },
+    "Paar.famd": {
+     "sha256": "3d6e35255a1baf0d7ccf14d0d271d958f330a04beb6654c97110611f027f54c0",
+     "size": 2072
+    },
+    "Paar.md": {
+     "sha256": "964b202c5ab5a6996122bbc5c2b72f3affaae92814ac0b26cc135f80d020db4e",
+     "size": 15
+    }
+   },
+   "state": {
+    "cursorLag": 2,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Heft.famd": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "14fb0944849c3ca8961d59e8c06bf19756b013414c5f6e44b38550bfbefd8db8",
+      "size": 6887,
+      "mtimeMs": 1700000007000,
+      "contentSha256": "1930615ef14c3da98a51e1a78e4c9d993fb28c6b9c086bec2a35c421a5a26fd6",
+      "blank": false
+     },
+     "Neu.famd": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "ca3cb3c81d409626cfffcf9e1d4c8fd12b7ea8c2d860ea791238ab1ec2cc55b8",
+      "size": 9122,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "fb27e416818a00ceec31e01da6071fe66c3c7f3b9d43aa02a6982730114d923a",
+      "blank": false
+     },
+     "Paar (Konflikt Tablet 2030-01-01 00-00).famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "1aa9a4bd47e4f335d4e781c569b1a3e482e4339f1807049da60e3f8c84770ffe",
+      "size": 3012,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "694d4a44e13be3db55ade6f0db16f67b489c7202f7b8544fb2ca7579a962bfd3",
+      "blank": false
+     },
+     "Paar (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "816ec763a5cc779df4f26ef1a5b5a130e8d214e8bfb55930ec035bb9c96050a9",
+      "size": 15,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "816ec763a5cc779df4f26ef1a5b5a130e8d214e8bfb55930ec035bb9c96050a9",
+      "blank": false
+     },
+     "Paar.famd": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "3d6e35255a1baf0d7ccf14d0d271d958f330a04beb6654c97110611f027f54c0",
+      "size": 2072,
+      "mtimeMs": 1700000009000,
+      "contentSha256": "eceb4d439b0a69a74a234d7894cff1057280eef19448cef03cc74b9e74ae2f39",
+      "blank": false
+     },
+     "Paar.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "964b202c5ab5a6996122bbc5c2b72f3affaae92814ac0b26cc135f80d020db4e",
+      "size": 15,
+      "mtimeMs": 1700000008000,
+      "contentSha256": "964b202c5ab5a6996122bbc5c2b72f3affaae92814ac0b26cc135f80d020db4e",
+      "blank": false
+     }
+    },
+    "conflicts": [
+     "Paar.famd -> Paar (Konflikt Tablet 2030-01-01 00-00).famd",
+     "Paar.md -> Paar (Konflikt Tablet 2030-01-01 00-00).md"
+    ],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "Heft.famd": {
+   "deleted": false,
+   "sha256": "14fb0944849c3ca8961d59e8c06bf19756b013414c5f6e44b38550bfbefd8db8",
+   "revisions": 2
+  },
+  "Neu.famd": {
+   "deleted": false,
+   "sha256": "ca3cb3c81d409626cfffcf9e1d4c8fd12b7ea8c2d860ea791238ab1ec2cc55b8",
+   "revisions": 2
+  },
+  "Paar (Konflikt Tablet 2030-01-01 00-00).famd": {
+   "deleted": false,
+   "sha256": "1aa9a4bd47e4f335d4e781c569b1a3e482e4339f1807049da60e3f8c84770ffe",
+   "revisions": 1
+  },
+  "Paar (Konflikt Tablet 2030-01-01 00-00).md": {
+   "deleted": false,
+   "sha256": "816ec763a5cc779df4f26ef1a5b5a130e8d214e8bfb55930ec035bb9c96050a9",
+   "revisions": 1
+  },
+  "Paar.famd": {
+   "deleted": false,
+   "sha256": "3d6e35255a1baf0d7ccf14d0d271d958f330a04beb6654c97110611f027f54c0",
+   "revisions": 2
+  },
+  "Paar.md": {
+   "deleted": false,
+   "sha256": "964b202c5ab5a6996122bbc5c2b72f3affaae92814ac0b26cc135f80d020db4e",
+   "revisions": 2
+  }
+ }
+}

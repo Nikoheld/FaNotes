@@ -1,0 +1,29 @@
+{
+  "version": 2,
+  "vaultPath": "/home/fixture-user/Documents/FaNotes",
+  "settings": {
+    "uiLanguage": "en",
+    "theme": "dark",
+    "accent": "#aa3366",
+    "editorFontSize": 18,
+    "lineHeight": 1.6,
+    "spellcheck": false,
+    "syncDeviceName": "Fixture laptop",
+    "syncExcludedFolders": "Private",
+    "recognitionMode": "math",
+    "customCss": ".fixture { color: red; }",
+    "lmStudioApiToken": "",
+    "ollamaApiToken": "",
+    "openAiApiKey": "fanotes-secret-v1:djEw7qDcEQBxw7crYTObSItlrevR6458XVErtWigvcqM48MKgJF3Ef7osYrWKeK0pJAp",
+    "geminiApiKey": "fanotes-secret-v1:djEwCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+    "anthropicApiKey": "fanotes-secret-v1:djEwXwBpnbYuzFQHXRwbUzsVKaA9Hp79sw4huZ8qoMY8AqeMQ2NQ4lm5bXiya1tvT4hI",
+    "grokApiKey": "",
+    "grokBuildAccessToken": "",
+    "grokBuildRefreshToken": "fanotes-secret-v1:djEwjDrFNwWf8+uABBAyVaZf5ZieYhW2zEbbrK8R1s7ydO0bv/WZLWKMyNKlwZvGwEh8suHdJoHUkv8qt9SjH20KmrEYkNYWZ/LVddOmcx758gV6KKWojUZLpCZZkYg3pjmu9/BegSGeCTdBjkrDfQ5JjBJsgyrzcRrp1UQSUbkKJbzwT9DsndIVZ+0Rw0gvTGy8DVR9c/H5QUMz7GllWJtZ8wvYKv3YRnn0Z0AzLK4D2pI6QzZUbupJ/sl1IRlzA7Hyk6QZRXyb2QScXbETH86e41vszs8QUUe53dpuRWg+s3RV5mxqDESynzI3o7yxyP6+Bi1urhxrNN+iFyfy0i9tUDjf0ojcRv2kniEN4b45ql2hGV+eusA6c9PbmlG5Yw/k7rM5tEtJ07uWFMkoUfckPLh7+rigmN7gNCAtaH+k0N4=",
+    "openCodePassword": "",
+    "homeworkApiSecret": "fanotes-secret-v1:djEwuJfE2Fo5m5QogQ/J5DQGhmJZU52z/ZLoNlh2fGPhGa97UA58hPcgHXf54A8lFfKU"
+  },
+  "resourceLimits": {
+    "heapMb": 4096
+  }
+}

@@ -1,0 +1,116 @@
+{
+ "about": "A 24 MB binary, images and a PDF; concurrent binary edits keep both.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Daten/gross.bin",
+   "gen": {
+    "bytes": 24000000,
+    "seed": 5
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Bilder/a.jpg",
+   "gen": {
+    "bytes": 400000,
+    "seed": 6
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Skript.pdf",
+   "gen": {
+    "bytes": 900000,
+    "seed": 7
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Bilder/a.jpg",
+   "gen": {
+    "bytes": 410000,
+    "seed": 8
+   }
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Bilder/a.jpg",
+   "gen": {
+    "bytes": 390000,
+    "seed": 10
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "Daten/gross.bin",
+   "gen": {
+    "bytes": 24000000,
+    "seed": 5
+   }
+  },
+  {
+   "device": "Tablet",
+   "path": "Bilder/a.jpg",
+   "gen": {
+    "bytes": 410000,
+    "seed": 8
+   }
+  },
+  {
+   "device": "Laptop",
+   "path": "Bilder/a (Konflikt Tablet 2030-01-01 00-00).jpg",
+   "gen": {
+    "bytes": 390000,
+    "seed": 10
+   }
+  }
+ ]
+}

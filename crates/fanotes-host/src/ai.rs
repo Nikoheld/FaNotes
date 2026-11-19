@@ -30,7 +30,10 @@ struct AiReply {
     stats: Value,
 }
 
-pub fn list_lm_studio(base_url: Option<&Value>, api_token: Option<&Value>) -> Result<Value, String> {
+pub fn list_lm_studio(
+    base_url: Option<&Value>,
+    api_token: Option<&Value>,
+) -> Result<Value, String> {
     let Some(Value::String(base_url)) = base_url else {
         return Err("Die LM-Studio-Adresse ist ungültig.".to_owned());
     };
@@ -1882,10 +1885,9 @@ fn unwrap_markdown_with(value: &str, empty_message: &str) -> Result<String, Stri
 mod tests {
     use super::{
         build_prompt, finish_models, lm_studio_text, output_token_limit, parse_anthropic_models,
-        prompt_path, vault_notes,
         parse_gemini_models, parse_lmstudio_legacy, parse_lmstudio_models, parse_lmstudio_native,
         parse_lmstudio_native_legacy, parse_ollama_models, parse_openai_models,
-        parse_opencode_models, provider_http_error, unwrap_markdown,
+        parse_opencode_models, prompt_path, provider_http_error, unwrap_markdown, vault_notes,
     };
     use base64::Engine;
     use serde_json::json;

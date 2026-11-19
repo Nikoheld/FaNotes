@@ -1,0 +1,194 @@
+{
+ "about": "Both devices edit the same note; a second conflict in the same minute gets a number; Hausaufgaben.md merges task by task.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Algebra.md",
+   "text": "# Algebra\n\nAlt."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Algebra.md",
+   "text": "# Algebra\n\nLaptop."
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Algebra.md",
+   "text": "# Algebra\n\nTablet."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Algebra.md",
+   "text": "# Algebra\n\nLaptop 2."
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Algebra.md",
+   "text": "# Algebra\n\nTablet 2."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Algebra.md",
+   "text": "# Algebra\n\nLaptop 2."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Hausaufgaben.md",
+   "homework": [
+    {
+     "id": "x",
+     "updatedAt": "2029-10-01T10:00:00.000Z"
+    },
+    {
+     "id": "y",
+     "updatedAt": "2029-10-01T10:00:00.000Z"
+    }
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Hausaufgaben.md",
+   "homework": [
+    {
+     "id": "x",
+     "done": true,
+     "updatedAt": "2029-10-02T10:00:00.000Z"
+    },
+    {
+     "id": "y",
+     "updatedAt": "2029-10-01T10:00:00.000Z"
+    }
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Hausaufgaben.md",
+   "homework": [
+    {
+     "id": "x",
+     "updatedAt": "2029-10-01T10:00:00.000Z"
+    },
+    {
+     "id": "y",
+     "done": true,
+     "updatedAt": "2029-10-02T09:00:00.000Z"
+    },
+    {
+     "id": "z",
+     "updatedAt": "2029-10-02T09:00:00.000Z"
+    }
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "Algebra.md",
+   "text": "# Algebra\n\nLaptop 2."
+  },
+  {
+   "device": "Laptop",
+   "path": "Algebra (Konflikt Tablet 2030-01-01 00-00).md",
+   "text": "# Algebra\n\nTablet."
+  },
+  {
+   "device": "Laptop",
+   "path": "Algebra (Konflikt Tablet 2030-01-01 00-00 2).md",
+   "text": "# Algebra\n\nTablet 2."
+  },
+  {
+   "device": "Tablet",
+   "path": "Hausaufgaben (Konflikt Tablet 2030-01-01 00-00).md",
+   "absent": true
+  }
+ ]
+}

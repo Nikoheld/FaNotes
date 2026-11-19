@@ -1,0 +1,159 @@
+{
+ "about": "An open note is not replaced until it is idle; a damaged entry and an excluded folder are fetched later; opt-in paths.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Offen.md",
+   "text": "# Offen\n\nAlt."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Offen.md",
+   "text": "# Offen\n\nNeu."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "set": {
+    "busy": [
+     "Offen.md"
+    ]
+   }
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Offen.md",
+   "text": "# Offen\n\nTippt gerade."
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "set": {
+    "busy": []
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "set": {
+    "excluded": [
+     "Privat"
+    ]
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Privat/Geheim.md",
+   "text": "# Geheim\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "set": {
+    "excluded": []
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "settings",
+   "device": "Laptop",
+   "set": {
+    "includeHistory": true
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": ".fanotes/history/n/1.json",
+   "text": "{\"v\":1}"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "restart",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "Offen.md",
+   "text": "# Offen\n\nNeu."
+  },
+  {
+   "device": "Laptop",
+   "path": "Offen (Konflikt Tablet 2030-01-01 00-00).md",
+   "text": "# Offen\n\nTippt gerade."
+  },
+  {
+   "device": "Tablet",
+   "path": "Privat/Geheim.md",
+   "text": "# Geheim\n"
+  }
+ ]
+}

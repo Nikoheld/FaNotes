@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fanotes_famd::{companion_note_path, empty_famd_payload, serialize_famd};
+use fanotes_famd::companion_note_path;
 use serde_json::{json, Value};
 
 use crate::vault;
@@ -178,11 +178,18 @@ fn import_pdf_file(
     };
     let famd_relative = companion_note_path(&relative, ".famd");
     if let Ok(famd_path) = vault::resolve_inside(&root, &famd_relative) {
-        let _ = crate::notes::atomic_write(
+        // `writeFamdCompanion(path, '')`: a new compact companion with the
+        // settings paper. An existing companion is composed, never replaced.
+        let existing = crate::notes::read_optional_text(
             &famd_path,
-            serialize_famd("", &empty_famd_payload(now_iso())).as_bytes(),
-            0o600,
-        );
+            crate::notes::optional_note_limit(&famd_path),
+        )
+        .ok()
+        .flatten();
+        let paper = host.settings.get("paperStyle").and_then(Value::as_str);
+        if let Ok(text) = crate::notes::compose_companion(existing.as_deref(), "", None, paper) {
+            let _ = crate::notes::atomic_write(&famd_path, text.as_bytes(), 0o600);
+        }
     }
     let meta = fs::symlink_metadata(&absolute)
         .map_err(|_| "Die PDF-Datei konnte nicht gespeichert werden.".to_owned())?;
@@ -221,10 +228,7 @@ fn read_dialog_pdf(path: &Path, name: &str, not_pdf: &str) -> Result<Vec<u8>, St
 }
 
 fn pdf_payload_is_empty(payload: &Value) -> bool {
-    match payload
-        .get("bytesBase64")
-        .or_else(|| payload.get("bytes"))
-    {
+    match payload.get("bytesBase64").or_else(|| payload.get("bytes")) {
         Some(Value::Array(items)) => items.is_empty(),
         Some(Value::String(text)) => text.is_empty(),
         _ => false,
@@ -363,7 +367,10 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error,
-            format!("EACCES: permission denied, scandir '{}'", canonical.display())
+            format!(
+                "EACCES: permission denied, scandir '{}'",
+                canonical.display()
+            )
         );
         std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(
@@ -503,10 +510,8 @@ mod tests {
             struct Restore(std::path::PathBuf);
             impl Drop for Restore {
                 fn drop(&mut self) {
-                    let _ = std::fs::set_permissions(
-                        &self.0,
-                        std::fs::Permissions::from_mode(0o600),
-                    );
+                    let _ =
+                        std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600));
                 }
             }
             let _restore = Restore(locked.clone());
@@ -528,6 +533,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_pdf_dialog_checks_the_extension_before_the_file() {
         let dir = std::env::temp_dir().join(format!(
@@ -594,10 +600,8 @@ mod tests {
             struct Restore(std::path::PathBuf);
             impl Drop for Restore {
                 fn drop(&mut self) {
-                    let _ = std::fs::set_permissions(
-                        &self.0,
-                        std::fs::Permissions::from_mode(0o700),
-                    );
+                    let _ =
+                        std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o700));
                 }
             }
             let _restore = Restore(locked.clone());

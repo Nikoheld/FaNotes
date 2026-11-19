@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use fanotes_gpu::Camera;
 use fanotes_ink::{InkDocument, InkError, PointerKind, StrokeId, StrokePoint};
 use fanotes_paper::{
     grow_page_from_mark, keep_mark_on_page, Mark, PageExtent, Painted, PAGE_START_HEIGHT,
@@ -53,6 +54,22 @@ impl Session {
 
     pub fn zoom(&self) -> f64 {
         self.zoom
+    }
+
+    pub fn doc(&self) -> &InkDocument {
+        &self.doc
+    }
+
+    /// The page engine's camera for a `width` × `height` px window.
+    /// Window pixels are the session's screen units, so the device pixel ratio is 1.
+    pub fn camera(&self, width: u32, height: u32) -> Camera {
+        let mut camera = Camera::new(width, height);
+        camera.zoom = self.zoom;
+        camera.scroll_x = self.scroll_x * self.zoom;
+        camera.scroll_y = self.scroll_y * self.zoom;
+        camera.origin_x = self.doc.origin_x();
+        camera.origin_y = self.doc.origin_y();
+        camera
     }
 
     pub fn page_height(&self) -> f64 {

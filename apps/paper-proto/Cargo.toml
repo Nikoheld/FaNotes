@@ -1,7 +1,7 @@
 [package]
 name = "paper-proto"
 version = "0.1.0"
-description = "Minimal paper surface: load and save DrawingDocument JSON, draw, zoom, grow, undo"
+description = "Minimal paper surface on the fanotes-gpu page engine: load and save DrawingDocument JSON, draw, zoom, grow, undo"
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
@@ -9,6 +9,9 @@ publish.workspace = true
 [dependencies]
 fanotes-ink = { path = "../../crates/fanotes-ink" }
 fanotes-paper = { path = "../../crates/fanotes-paper" }
+fanotes-gpu = { path = "../../crates/fanotes-gpu" }
+png = "=0.18.1"
+wgpu = "=29.0.4"
 # Window shell for this prototype. The ink and paper crates stay on serde, serde_json, thiserror, and slotmap.
 softbuffer = "0.4.6"
 winit = "0.30.13"

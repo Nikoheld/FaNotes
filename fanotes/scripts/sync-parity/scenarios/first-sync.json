@@ -1,0 +1,31 @@
+{
+  "about": "First sync: an empty account, then one populated side, then a second populated device with equal, different and new files.",
+  "devices": ["Laptop", "Tablet"],
+  "steps": [
+    { "do": "register", "device": "Laptop" },
+    { "do": "sync", "device": "Laptop" },
+    { "do": "login", "device": "Tablet" },
+    { "do": "sync", "device": "Tablet" },
+    { "do": "put", "device": "Laptop", "path": "Mathe/Algebra.md", "text": "# Algebra\n\nErste Fassung." },
+    { "do": "put", "device": "Laptop", "path": ".fanotes/folder-colors.json", "text": "{\"version\":1,\"colors\":{\"Mathe\":\"#ff0000\"}}" },
+    { "do": "put", "device": "Laptop", "path": ".fanotes/history/abc/index.json", "text": "{\"local\":true}" },
+    { "do": "put", "device": "Laptop", "path": "Physik/Bild.png", "b64": "iVBORwECAwQF" },
+    { "do": "put", "device": "Laptop", "path": "Gleich.md", "text": "# Gleich\n" },
+    { "do": "put", "device": "Laptop", "path": "Anders.md", "text": "# Anders\n\nLaptop." },
+    { "do": "sync", "device": "Laptop" },
+    { "do": "put", "device": "Tablet", "path": "Gleich.md", "text": "# Gleich\n" },
+    { "do": "put", "device": "Tablet", "path": "Anders.md", "text": "# Anders\n\nTablet." },
+    { "do": "put", "device": "Tablet", "path": "Nur Tablet.md", "text": "# Nur hier\n" },
+    { "do": "sync", "device": "Tablet" },
+    { "do": "sync", "device": "Laptop" },
+    { "do": "sync", "device": "Tablet" }
+  ],
+  "expect": [
+    { "device": "Tablet", "path": "Mathe/Algebra.md", "text": "# Algebra\n\nErste Fassung." },
+    { "device": "Tablet", "path": "Anders.md", "text": "# Anders\n\nLaptop." },
+    { "device": "Tablet", "path": "Anders (Konflikt Tablet 2030-01-01 00-00).md", "text": "# Anders\n\nTablet." },
+    { "device": "Laptop", "path": "Anders (Konflikt Tablet 2030-01-01 00-00).md", "text": "# Anders\n\nTablet." },
+    { "device": "Laptop", "path": "Nur Tablet.md", "text": "# Nur hier\n" },
+    { "device": "Tablet", "path": ".fanotes/history/abc/index.json", "absent": true }
+  ]
+}

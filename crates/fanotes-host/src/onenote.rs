@@ -99,7 +99,8 @@ fn import_in_temp(
     let parents = page_parents(&html_files, &output_root)?;
     let mut pages = Vec::new();
     for path in &html_files {
-        let preview = fs::read(path).map_err(|error| crate::notes::node_open_error(path, &error))?;
+        let preview =
+            fs::read(path).map_err(|error| crate::notes::node_open_error(path, &error))?;
         let preview = String::from_utf8_lossy(&preview);
         if preview_is_nav(&preview) {
             continue;
@@ -215,79 +216,79 @@ fn import_rendered_pages(
     let mut created = Vec::new();
     let result = (|| -> Result<(), String> {
         for page_path in pages {
-        let page = sanitize_page(page_path, output_root)?;
-        let relative = page_path.strip_prefix(output_root).unwrap_or(page_path);
-        let mut hierarchy: Vec<String> = relative
-            .parent()
-            .map(|parent| {
-                parent
-                    .components()
-                    .filter_map(|component| component.as_os_str().to_str())
-                    .filter(|segment| !segment.is_empty() && *segment != ".")
-                    .map(|segment| segment.to_owned())
-                    .collect()
-            })
-            .unwrap_or_default();
-        if hierarchy.first().is_some_and(|segment| {
-            crate::base_dictionary_order(segment, notebook_name) == std::cmp::Ordering::Equal
-        }) {
-            hierarchy.remove(0);
-        }
-        let mut directory = note_root.to_path_buf();
-        for segment in note_directory_segments(
-            hierarchy,
-            parents.get(page_path).cloned().unwrap_or_default(),
-        ) {
-            directory.push(segment);
-        }
-        ensure_note_directory(note_root, &directory)?;
-        let id = uuid();
-        let worksheets = vault.join(".fanotes").join("worksheets");
-        let html_path = worksheets.join(format!("{id}.html"));
-        let json_path = worksheets.join(format!("{id}.json"));
-        atomic_write_onenote(&html_path, page.html.as_bytes())?;
-        created.push(html_path);
-        let worksheet = json!({
-            "schemaVersion": 1,
-            "id": id,
-            "title": page.title,
-            "kind": "html",
-            "mimeType": "text/html",
-            "sourceRelativePath": format!(".fanotes/worksheets/{id}.html"),
-            "dataRelativePath": format!(".fanotes/worksheets/{id}.json"),
-            "createdAt": now,
-            "updatedAt": now,
-            "pageWidth": page.width,
-            "pageHeight": page.height,
-            "textBoxes": [],
-        });
-        let worksheet_json = format!(
-            "{}\n",
-            serde_json::to_string_pretty(&worksheet).unwrap_or_default()
-        );
-        atomic_write_onenote(&json_path, worksheet_json.as_bytes())?;
-        created.push(json_path);
-        let searchable = if page.transcript.is_empty() {
-            String::new()
-        } else {
-            format!(
+            let page = sanitize_page(page_path, output_root)?;
+            let relative = page_path.strip_prefix(output_root).unwrap_or(page_path);
+            let mut hierarchy: Vec<String> = relative
+                .parent()
+                .map(|parent| {
+                    parent
+                        .components()
+                        .filter_map(|component| component.as_os_str().to_str())
+                        .filter(|segment| !segment.is_empty() && *segment != ".")
+                        .map(|segment| segment.to_owned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            if hierarchy.first().is_some_and(|segment| {
+                crate::base_dictionary_order(segment, notebook_name) == std::cmp::Ordering::Equal
+            }) {
+                hierarchy.remove(0);
+            }
+            let mut directory = note_root.to_path_buf();
+            for segment in note_directory_segments(
+                hierarchy,
+                parents.get(page_path).cloned().unwrap_or_default(),
+            ) {
+                directory.push(segment);
+            }
+            ensure_note_directory(note_root, &directory)?;
+            let id = uuid();
+            let worksheets = vault.join(".fanotes").join("worksheets");
+            let html_path = worksheets.join(format!("{id}.html"));
+            let json_path = worksheets.join(format!("{id}.json"));
+            atomic_write_onenote(&html_path, page.html.as_bytes())?;
+            created.push(html_path);
+            let worksheet = json!({
+                "schemaVersion": 1,
+                "id": id,
+                "title": page.title,
+                "kind": "html",
+                "mimeType": "text/html",
+                "sourceRelativePath": format!(".fanotes/worksheets/{id}.html"),
+                "dataRelativePath": format!(".fanotes/worksheets/{id}.json"),
+                "createdAt": now,
+                "updatedAt": now,
+                "pageWidth": page.width,
+                "pageHeight": page.height,
+                "textBoxes": [],
+            });
+            let worksheet_json = format!(
+                "{}\n",
+                serde_json::to_string_pretty(&worksheet).unwrap_or_default()
+            );
+            atomic_write_onenote(&json_path, worksheet_json.as_bytes())?;
+            created.push(json_path);
+            let searchable = if page.transcript.is_empty() {
+                String::new()
+            } else {
+                format!(
                 "\n<details>\n<summary>Importierter Text · suchbar und bearbeitbar</summary>\n\n```text\n{}\n```\n\n</details>\n",
                 page.transcript.replace("```", "ˋˋˋ")
             )
-        };
-        let markdown = format!(
+            };
+            let markdown = format!(
             "# {}\n\n<!-- fanotes-onenote:{} -->\n<!-- fanotes-worksheet:{id} -->\n{searchable}",
             markdown_title(&page.title),
             &source_digest[..24]
         );
-        let note = write_unique_markdown(&directory, &page.title, &markdown)?;
-        let relative_note = note
-            .strip_prefix(vault)
-            .unwrap_or(&note)
-            .components()
-            .map(|component| component.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/");
+            let note = write_unique_markdown(&directory, &page.title, &markdown)?;
+            let relative_note = note
+                .strip_prefix(vault)
+                .unwrap_or(&note)
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
             imported.push(relative_note);
         }
         Ok(())
@@ -1238,8 +1239,8 @@ fn materialize_tools(app_data: &Path) -> Result<(PathBuf, PathBuf), String> {
 }
 
 fn require_tool_cache(path: &Path) -> Result<PathBuf, String> {
-    let info = fs::symlink_metadata(path)
-        .map_err(|error| crate::vault::node_lstat_error(path, &error))?;
+    let info =
+        fs::symlink_metadata(path).map_err(|error| crate::vault::node_lstat_error(path, &error))?;
     if info.file_type().is_symlink() || !info.is_dir() {
         return Err("Der lokale OneNote-Werkzeugcache ist unsicher.".to_owned());
     }
@@ -1472,8 +1473,8 @@ fn walk_limited(root: &Path, max_bytes: u64, max_entries: usize) -> Result<Vec<P
     let mut total_bytes = 0u64;
     while let Some(directory) = pending.pop() {
         let mut listed = Vec::new();
-        for entry in fs::read_dir(&directory)
-            .map_err(|error| crate::scandir_error(&directory, &error))?
+        for entry in
+            fs::read_dir(&directory).map_err(|error| crate::scandir_error(&directory, &error))?
         {
             listed.push(entry.map_err(|error| crate::scandir_error(&directory, &error))?);
         }
@@ -1548,7 +1549,9 @@ fn atomic_write_onenote(target: &Path, bytes: &[u8]) -> Result<(), String> {
 fn atomic_copy_onenote(source: &Path, target: &Path) -> Result<(), String> {
     let temporary = onenote_temporary(target)?;
     if let Err(error) = copy_onenote_temp(source, &temporary) {
-        return Err(crate::vault::node_copyfile_error(source, &temporary, &error));
+        return Err(crate::vault::node_copyfile_error(
+            source, &temporary, &error,
+        ));
     }
     #[cfg(unix)]
     {
@@ -1633,16 +1636,17 @@ fn open_exclusive_markdown(path: &Path, bytes: &[u8]) -> Result<(), std::io::Err
 /// The created name is the prefix plus six characters. A failure names the
 /// `XXXXXX` template.
 fn create_onenote_temp_dir(parent: &Path) -> Result<PathBuf, String> {
-    let template = format!(
-        "{}XXXXXX",
-        parent.join("fanotes-onenote-").display()
-    );
+    let template = format!("{}XXXXXX", parent.join("fanotes-onenote-").display());
     match unix_mkdtemp(&template) {
         Ok(path) => Ok(path),
-        Err(error) => Err(crate::vault::node_mkdtemp_error(Path::new(&template), &error)),
+        Err(error) => Err(crate::vault::node_mkdtemp_error(
+            Path::new(&template),
+            &error,
+        )),
     }
 }
 
+#[cfg(unix)]
 fn unix_mkdtemp(template: &str) -> Result<PathBuf, std::io::Error> {
     let mut bytes = template.as_bytes().to_vec();
     bytes.push(0);
@@ -1650,8 +1654,38 @@ fn unix_mkdtemp(template: &str) -> Result<PathBuf, std::io::Error> {
     if result.is_null() {
         return Err(std::io::Error::last_os_error());
     }
-    let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
-    Ok(PathBuf::from(String::from_utf8_lossy(&bytes[..end]).into_owned()))
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    Ok(PathBuf::from(
+        String::from_utf8_lossy(&bytes[..end]).into_owned(),
+    ))
+}
+
+/// libuv `uv_fs_mkdtemp` on Windows: the trailing `XXXXXX` becomes six random
+/// letters or digits, and the directory is created exclusively.
+#[cfg(not(unix))]
+fn unix_mkdtemp(template: &str) -> Result<PathBuf, std::io::Error> {
+    const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let prefix = template
+        .strip_suffix("XXXXXX")
+        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+    for _ in 0..100 {
+        let mut random = [0u8; 6];
+        getrandom::getrandom(&mut random).map_err(|_| std::io::Error::other("getrandom"))?;
+        let suffix: String = random
+            .iter()
+            .map(|byte| CHARS[*byte as usize % CHARS.len()] as char)
+            .collect();
+        let path = PathBuf::from(format!("{prefix}{suffix}"));
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
 }
 
 fn ensure_note_directory(note_root: &Path, directory: &Path) -> Result<(), String> {
@@ -2100,14 +2134,14 @@ fn civil_date(mut days: u64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        common_ancestor, extract_search_text, import_folder_segment, inline_images, sha256_file,
-        note_directory_segments, outline_level, page_dimensions, page_parents, page_title,
-        preview_is_nav, render_inputs, safe_segment, sanitize_page, stored_relative_path,
-        strip_active_html, tool_failure_message, tool_limit, unique_directory, urlencoding_decode,
-        validate_listing, walk_limited, write_unique_markdown, atomic_copy_onenote,
-        atomic_write_onenote, ensure_note_directory, create_onenote_temp_dir,
-        materialize_tools, preserve_sources, import_rendered_pages,
-        prepare_input, import_in_temp, render_sections,
+        atomic_copy_onenote, atomic_write_onenote, common_ancestor, create_onenote_temp_dir,
+        ensure_note_directory, extract_search_text, import_folder_segment, import_in_temp,
+        import_rendered_pages, inline_images, materialize_tools, note_directory_segments,
+        outline_level, page_dimensions, page_parents, page_title, prepare_input, preserve_sources,
+        preview_is_nav, render_inputs, render_sections, safe_segment, sanitize_page, sha256_file,
+        stored_relative_path, strip_active_html, tool_failure_message, tool_limit,
+        unique_directory, urlencoding_decode, validate_listing, walk_limited,
+        write_unique_markdown,
     };
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2196,7 +2230,9 @@ mod tests {
         let write_hex = written[write_prefix.len()..].trim_end_matches('\'');
         assert_eq!(write_hex.len(), 12, "hex {write_hex:?} error {written}");
         assert!(
-            write_hex.chars().all(|character| character.is_ascii_hexdigit()),
+            write_hex
+                .chars()
+                .all(|character| character.is_ascii_hexdigit()),
             "{written}"
         );
 
@@ -2212,7 +2248,9 @@ mod tests {
         let copy_hex = copied[copy_prefix.len()..].trim_end_matches('\'');
         assert_eq!(copy_hex.len(), 12, "{copied}");
         assert!(
-            copy_hex.chars().all(|character| character.is_ascii_hexdigit()),
+            copy_hex
+                .chars()
+                .all(|character| character.is_ascii_hexdigit()),
             "{copied}"
         );
     }
@@ -2431,7 +2469,10 @@ mod tests {
         std::fs::create_dir(&extracted).unwrap();
         assert_eq!(
             prepare_input(&archive, &open, Path::new("7za")).unwrap_err(),
-            format!("EEXIST: file already exists, mkdir '{}'", extracted.display())
+            format!(
+                "EEXIST: file already exists, mkdir '{}'",
+                extracted.display()
+            )
         );
         assert!(extracted.is_dir());
 
@@ -2610,10 +2651,7 @@ mod tests {
         let original = batch.join("original");
         assert_eq!(
             preserve_sources(&source, &batch).unwrap_err(),
-            format!(
-                "EACCES: permission denied, mkdir '{}'",
-                original.display()
-            )
+            format!("EACCES: permission denied, mkdir '{}'", original.display())
         );
         assert!(std::fs::read_dir(&batch).unwrap().next().is_none());
 
@@ -2621,7 +2659,10 @@ mod tests {
         std::fs::write(&original, b"datei").unwrap();
         assert_eq!(
             preserve_sources(&source, &batch).unwrap_err(),
-            format!("EEXIST: file already exists, mkdir '{}'", original.display())
+            format!(
+                "EEXIST: file already exists, mkdir '{}'",
+                original.display()
+            )
         );
         assert_eq!(std::fs::read(&original).unwrap(), b"datei");
         std::fs::remove_file(&original).unwrap();
@@ -2634,10 +2675,7 @@ mod tests {
             0o700
         );
         assert_eq!(
-            std::fs::read(original.join(
-                preserved[0]["storedName"].as_str().unwrap()
-            ))
-            .unwrap(),
+            std::fs::read(original.join(preserved[0]["storedName"].as_str().unwrap())).unwrap(),
             b"one-bytes"
         );
     }
@@ -3213,10 +3251,7 @@ mod tests {
         let _restore = Restore(hidden.clone());
         assert_eq!(
             walk_limited(&root, 1_000_000, 20).err().expect("scandir"),
-            format!(
-                "EACCES: permission denied, scandir '{}'",
-                hidden.display()
-            )
+            format!("EACCES: permission denied, scandir '{}'", hidden.display())
         );
         std::fs::set_permissions(&hidden, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert_eq!(
@@ -3370,10 +3405,7 @@ mod tests {
         let _restore = Restore(source.clone());
         assert_eq!(
             sha256_file(&source).unwrap_err(),
-            format!(
-                "EACCES: permission denied, open '{}'",
-                source.display()
-            )
+            format!("EACCES: permission denied, open '{}'", source.display())
         );
         std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(std::fs::read(&source).unwrap(), b"one-bytes");

@@ -108,9 +108,8 @@ fn load_handwriting_in(directory: &Path) -> Result<Value, String> {
     // compares it with 40% of the desktop model and does not open the web file.
     let web_size = json_safe_i64(web.get("size"));
     let desktop_size = fanotes_famd::js_number(desktop.get("size"));
-    let web_is_too_large = web_size.is_some_and(|size| {
-        desktop_size.is_finite() && size as f64 >= desktop_size * 0.4
-    });
+    let web_is_too_large =
+        web_size.is_some_and(|size| desktop_size.is_finite() && size as f64 >= desktop_size * 0.4);
     if manifest.get("format").and_then(Value::as_str) != Some("fanotes-neural-handwriting-v3")
         || desktop.get("name").and_then(Value::as_str) != Some("PyLaia_IAM_CTC")
         || desktop.get("precision").and_then(Value::as_str) != Some("fp32")
@@ -341,10 +340,7 @@ pub(crate) fn json_safe_u64(value: Option<&Value>) -> Option<u64> {
 /// `Number.isSafeInteger`, including a negative spelling bit count such as `-8`.
 pub(crate) fn json_safe_i64(value: Option<&Value>) -> Option<i64> {
     let number = value?.as_f64()?;
-    if number.is_finite()
-        && number.fract() == 0.0
-        && number.abs() <= 9_007_199_254_740_991.0
-    {
+    if number.is_finite() && number.fract() == 0.0 && number.abs() <= 9_007_199_254_740_991.0 {
         Some(number as i64)
     } else {
         None

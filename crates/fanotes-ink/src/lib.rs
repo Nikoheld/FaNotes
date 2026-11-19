@@ -165,6 +165,21 @@ impl InkDocument {
         self.strokes.get(id).map(|stroke| stroke.base_width)
     }
 
+    /// The stroke's JSON fields as loaded or written (`purpose`, `brush`, `opacity`, ...).
+    pub fn stroke_fields(&self, id: StrokeId) -> Option<&Map<String, Value>> {
+        self.strokes.get(id).map(|stroke| &stroke.raw)
+    }
+
+    /// Whether the stroke's width follows pen pressure.
+    pub fn stroke_pressure_enabled(&self, id: StrokeId) -> Option<bool> {
+        self.strokes.get(id).map(|stroke| stroke.pressure_enabled)
+    }
+
+    /// The stroke being drawn, if any.
+    pub fn active_id(&self) -> Option<StrokeId> {
+        self.active
+    }
+
     pub fn active_points(&self) -> Option<&[StrokePoint]> {
         let id = self.active?;
         self.stroke_points(id)
@@ -362,7 +377,10 @@ impl InkDocument {
             return Err(InkError::Schema);
         };
         // `schemaVersion !== 1` is false for the JSON number `1.0`.
-        let schema = raw.get("schemaVersion").and_then(json_whole_u64).unwrap_or(0);
+        let schema = raw
+            .get("schemaVersion")
+            .and_then(json_whole_u64)
+            .unwrap_or(0);
         if schema != SCHEMA_VERSION {
             return Err(InkError::Schema);
         }

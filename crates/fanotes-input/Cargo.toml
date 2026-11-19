@@ -8,3 +8,46 @@ publish.workspace = true
 
 [dependencies]
 fanotes-paper = { path = "../fanotes-paper" }
+thiserror = "2"
+
+[features]
+default = []
+# Native pen backends. Each one is opt-in so the policy crate stays dependency-light.
+wayland = ["dep:wayland-client", "dep:wayland-protocols", "dep:rustix"]
+x11 = ["dep:x11rb", "dep:rustix"]
+windows = ["dep:windows"]
+
+[dependencies.wayland-client]
+version = "0.31"
+optional = true
+
+[dependencies.wayland-protocols]
+version = "0.32"
+features = ["client", "unstable"]
+optional = true
+
+[dependencies.rustix]
+version = "1"
+features = ["event"]
+optional = true
+
+[dependencies.x11rb]
+version = "0.13"
+features = ["xinput"]
+optional = true
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.62"
+optional = true
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Controls",
+    "Win32_UI_Input_Pointer",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell",
+]
+
+[[example]]
+name = "pen-dump"
+path = "examples/pen-dump.rs"

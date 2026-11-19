@@ -1,0 +1,11 @@
+[package]
+name = "fanotes-spell"
+version = "0.1.0"
+description = "Spelling lexicon load and validation, correction candidates and the n-gram word context index, ported from the TypeScript implementation"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+unicode-general-category = "1"
+unicode-normalization = "0.1"
