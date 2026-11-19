@@ -237,8 +237,9 @@ pub fn ink_stroke_paint_margin(stroke: &InkStroke, scale: f64) -> f64 {
     widest / 2.0 + glow + 2.0
 }
 
+/// One stroked pass of a brush: width factor, alpha, optional pencil grain.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Pass {
+pub struct Pass {
     pub width_factor: f64,
     pub alpha: f64,
     /// Pencil grain: per-segment offset in bitmap px per unit scale.
@@ -308,7 +309,7 @@ const MARKER: [Pass; 1] = [Pass {
 }];
 
 /// Stroked passes of a brush, widest first.
-pub(crate) fn brush_passes(brush: Brush) -> &'static [Pass] {
+pub fn brush_passes(brush: Brush) -> &'static [Pass] {
     match brush {
         Brush::Pencil => &PENCIL,
         Brush::Paintbrush => &PAINTBRUSH,
@@ -323,7 +324,7 @@ pub(crate) fn opaque_pass() -> &'static [Pass] {
     &OPAQUE_PASS
 }
 
-pub(crate) fn ink_brush_of(stroke: &InkStroke) -> Brush {
+pub fn ink_brush_of(stroke: &InkStroke) -> Brush {
     if stroke.art {
         stroke.brush.unwrap_or(Brush::Fineliner)
     } else {
@@ -331,7 +332,7 @@ pub(crate) fn ink_brush_of(stroke: &InkStroke) -> Brush {
     }
 }
 
-pub(crate) fn ink_opacity_of(stroke: &InkStroke) -> f64 {
+pub fn ink_opacity_of(stroke: &InkStroke) -> f64 {
     if stroke.art {
         clamp(stroke.opacity.unwrap_or(1.0), 0.08, 1.0)
     } else {
@@ -355,7 +356,7 @@ pub fn ink_stroke_is_translucent(stroke: &InkStroke) -> bool {
     brush_passes(brush).iter().any(|pass| pass.alpha < 0.999)
 }
 
-pub(crate) fn seeded_unit(seed: f64) -> f64 {
+pub fn seeded_unit(seed: f64) -> f64 {
     let value = (seed * 12.9898 + 78.233).sin() * 43_758.545_3;
     value - value.floor()
 }
@@ -366,12 +367,7 @@ pub(crate) fn js_round(value: f64) -> f64 {
 }
 
 /// Last sample index to paint. Matches `inkQuickTurnKeep` in `inkTurn.ts`.
-pub(crate) fn ink_quick_turn_keep(
-    points: &[InkPoint],
-    scale_x: f64,
-    scale_y: f64,
-    nib_px: f64,
-) -> usize {
+pub fn ink_quick_turn_keep(points: &[InkPoint], scale_x: f64, scale_y: f64, nib_px: f64) -> usize {
     let mut end = points.len().saturating_sub(1);
     if end < 1 {
         return end;

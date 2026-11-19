@@ -1,0 +1,39 @@
+[package]
+name = "fanotes-gpu"
+version = "0.1.0"
+description = "FaNotes native page engine: one camera, ink + ruling + PDF in one frame on vello_hybrid (wgpu), vello_cpu, or the tiny-skia reference"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["gpu"]
+# vello_hybrid on wgpu. Without it only the CPU backends build.
+gpu = ["dep:vello_hybrid", "dep:vello_common_hybrid", "dep:wgpu", "dep:pollster"]
+# PDF page textures through PDFium (fanotes-pdf). Off so tests run without PDFium.
+pdf = ["dep:fanotes-pdf"]
+
+[dependencies]
+fanotes-ink = { path = "../fanotes-ink" }
+fanotes-paper = { path = "../fanotes-paper" }
+fanotes-raster = { path = "../fanotes-raster" }
+fanotes-pdf = { path = "../fanotes-pdf", optional = true }
+# Pinned exactly: vello and wgpu break API on minor/major bumps.
+vello_cpu = { version = "=0.4.0", default-features = false, features = ["std", "u8_pipeline", "multithreading"] }
+# vello_hybrid 0.2.0 is built on vello_common 0.2.0 and wgpu 29 (wgpu 30 is not supported yet).
+vello_hybrid = { version = "=0.2.0", optional = true, default-features = false, features = ["std", "wgpu"] }
+vello_common_hybrid = { package = "vello_common", version = "=0.2.0", optional = true, default-features = false, features = ["std"] }
+wgpu = { version = "=29.0.4", optional = true }
+pollster = { version = "=1.0.3", optional = true }
+kurbo = "=0.13.1"
+peniko = "=0.6.1"
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]
+png = "=0.18.1"
+
+[[bench]]
+name = "page_engine"
+harness = false
