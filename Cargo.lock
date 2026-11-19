@@ -1610,6 +1610,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "fanotes-spell"
+version = "0.1.0"
+dependencies = [
+ "unicode-general-category",
+ "unicode-normalization",
+]
+
+[[package]]
+name = "fanotes-spell-wasm"
+version = "0.1.0"
+dependencies = [
+ "fanotes-spell",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "fanotes-story"
 version = "0.1.0"
 dependencies = [
@@ -6024,6 +6042,12 @@ name = "unicode-ccc"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce61d488bcdc9bc8b5d1772c404828b17fc481c0a582b5581e95fb233aef503e"
+
+[[package]]
+name = "unicode-general-category"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
 
 [[package]]
 name = "unicode-ident"
