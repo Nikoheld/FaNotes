@@ -16,6 +16,7 @@ members = [
     "crates/fanotes-host",
     "crates/fanotes-pdf",
     "crates/fanotes-updater",
+    "crates/fanotes-gpu",
     "apps/paper-proto",
     "fanotes/src-tauri",
 ]
