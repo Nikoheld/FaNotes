@@ -41,11 +41,8 @@ fn a_pdf_book_can_pop_out_and_another_file_cannot() {
     assert_eq!(folder["bookPath"], "Mathe/Ordner.pdf");
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(
-            vault.join("Mathe/Buch.pdf"),
-            vault.join("Mathe/Link.pdf"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(vault.join("Mathe/Buch.pdf"), vault.join("Mathe/Link.pdf"))
+            .unwrap();
         let link = host
             .dispatch(
                 "fanotes:open-subject-book-popout",

@@ -1,0 +1,240 @@
+{
+ "scenario": "many-files",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "bulk 2000",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (2000 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": {
+    "count": 2001,
+    "sha256": "53a1c74dd69b3fbf04722794b85c3a0ed9ea4726d01d7edc95c8c45e241227e9"
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": {
+    "count": 2000,
+    "sha256": "981658632376b0804927a8c4c107f0ed721a23ff3419c3fac1efd1367d4dbde2"
+   },
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": {
+    "count": 2004,
+    "sha256": "f6ff9d08c0506eb9c23b7c0b0836bc2b81d9cc1233ff946efac6d6537b4de767"
+   }
+  },
+  {
+   "do": "edit-bulk 20",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (20 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /changes 200",
+    "GET /changes 200",
+    "GET /changes 200",
+    "PUT /files/Vault/Notiz 00000.md 200",
+    "PUT /files/Vault/Notiz 00001.md 200",
+    "PUT /files/Vault/Notiz 00002.md 200",
+    "PUT /files/Vault/Notiz 00003.md 200",
+    "PUT /files/Vault/Notiz 00004.md 200",
+    "PUT /files/Vault/Notiz 00005.md 200",
+    "PUT /files/Vault/Notiz 00006.md 200",
+    "PUT /files/Vault/Notiz 00007.md 200",
+    "PUT /files/Vault/Notiz 00008.md 200",
+    "PUT /files/Vault/Notiz 00009.md 200",
+    "PUT /files/Vault/Notiz 00010.md 200",
+    "PUT /files/Vault/Notiz 00011.md 200",
+    "PUT /files/Vault/Notiz 00012.md 200",
+    "PUT /files/Vault/Notiz 00013.md 200",
+    "PUT /files/Vault/Notiz 00014.md 200",
+    "PUT /files/Vault/Notiz 00015.md 200",
+    "PUT /files/Vault/Notiz 00016.md 200",
+    "PUT /files/Vault/Notiz 00017.md 200",
+    "PUT /files/Vault/Notiz 00018.md 200",
+    "PUT /files/Vault/Notiz 00019.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Vault/Notiz 00000.md",
+    "Vault/Notiz 00001.md",
+    "Vault/Notiz 00002.md",
+    "Vault/Notiz 00003.md",
+    "Vault/Notiz 00004.md",
+    "Vault/Notiz 00005.md",
+    "Vault/Notiz 00006.md",
+    "Vault/Notiz 00007.md",
+    "Vault/Notiz 00008.md",
+    "Vault/Notiz 00009.md",
+    "Vault/Notiz 00010.md",
+    "Vault/Notiz 00011.md",
+    "Vault/Notiz 00012.md",
+    "Vault/Notiz 00013.md",
+    "Vault/Notiz 00014.md",
+    "Vault/Notiz 00015.md",
+    "Vault/Notiz 00016.md",
+    "Vault/Notiz 00017.md",
+    "Vault/Notiz 00018.md",
+    "Vault/Notiz 00019.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Vault/Notiz 00000.md 200",
+    "GET /files/Vault/Notiz 00001.md 200",
+    "GET /files/Vault/Notiz 00002.md 200",
+    "GET /files/Vault/Notiz 00003.md 200",
+    "GET /files/Vault/Notiz 00004.md 200",
+    "GET /files/Vault/Notiz 00005.md 200",
+    "GET /files/Vault/Notiz 00006.md 200",
+    "GET /files/Vault/Notiz 00007.md 200",
+    "GET /files/Vault/Notiz 00008.md 200",
+    "GET /files/Vault/Notiz 00009.md 200",
+    "GET /files/Vault/Notiz 00010.md 200",
+    "GET /files/Vault/Notiz 00011.md 200",
+    "GET /files/Vault/Notiz 00012.md 200",
+    "GET /files/Vault/Notiz 00013.md 200",
+    "GET /files/Vault/Notiz 00014.md 200",
+    "GET /files/Vault/Notiz 00015.md 200",
+    "GET /files/Vault/Notiz 00016.md 200",
+    "GET /files/Vault/Notiz 00017.md 200",
+    "GET /files/Vault/Notiz 00018.md 200",
+    "GET /files/Vault/Notiz 00019.md 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "count": 2000,
+    "sha256": "bcac0da09a0bc049def952dfb162cd8a0027e4d1ec48f8fc83a6d5db6c48b041"
+   },
+   "state": {
+    "cursorLag": 20,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "count": 2000,
+     "sha256": "d86335db09c06133247be31204f14260b8756372a26ed129bcb453f74fa05a57"
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "count": 2000,
+    "sha256": "bcac0da09a0bc049def952dfb162cd8a0027e4d1ec48f8fc83a6d5db6c48b041"
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "count": 2000,
+     "sha256": "d86335db09c06133247be31204f14260b8756372a26ed129bcb453f74fa05a57"
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "count": 2000,
+  "sha256": "89f50f8af5af9b615eb3fc0d70ee8cd5b3e7ee8889ccaade4696fba2ae360452"
+ }
+}

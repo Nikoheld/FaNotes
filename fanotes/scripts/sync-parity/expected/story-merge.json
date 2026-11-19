@@ -1,0 +1,377 @@
+{
+ "scenario": "story-merge",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Roman.story/scenes/scene000001.json 200",
+    "PUT /files/Roman.story/story.json 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Roman.story/scenes/scene000001.json",
+    "Roman.story/story.json"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Roman.story/scenes/scene000001.json 200",
+    "GET /files/Roman.story/story.json 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Roman.story/scenes/scene000001.json 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Roman.story/scenes/scene000001.json"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht).",
+    "info: „Roman.story/scenes/scene000001.json“ wurde Absatz für Absatz zusammengeführt.",
+    "info: „Roman.story/scenes/scene000001.json“ wurde stark gekürzt; alle Absätze sind als gelöscht vermerkt, die Kürzung wird hochgeladen."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Roman.story/scenes/scene000001.json 200",
+    "GET /files/Roman.story/scenes/scene000001.json 200",
+    "PUT /files/Roman.story/scenes/scene000001.json 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Roman.story/scenes/scene000001.json"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Roman.story/scenes/scene000001.json 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Roman.story/scenes/scene000001.json 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Roman.story/scenes/scene000001.json"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Roman.story/scenes/scene000001.json -> Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht, 1 Konflikt(e)).",
+    "warn: Konflikt bei „Roman.story/scenes/scene000001.json“: die neuere Fassung dieses Geräts bleibt, die andere liegt unter „Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json“."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Roman.story/scenes/scene000001.json 200",
+    "GET /files/Roman.story/scenes/scene000001.json 200",
+    "PUT /files/Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json 200",
+    "PUT /files/Roman.story/scenes/scene000001.json 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json",
+    "Roman.story/scenes/scene000001.json"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json 200",
+    "GET /files/Roman.story/scenes/scene000001.json 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json": {
+     "sha256": "4644206b551f217af18eb9faf65c715b64f0c80a189e85c6ad85776520d5b876",
+     "size": 77
+    },
+    "Roman.story/scenes/scene000001.json": {
+     "sha256": "f8dc3d4525a5a2735aac8f0ec3f0107db9405c04fa6dcc3b1a0ffdeffe8772e3",
+     "size": 345
+    },
+    "Roman.story/story.json": {
+     "sha256": "9e66b30d662ff1653fb771a85717fddbf1b3d8c67cc3949b36016348a4cd7a5f",
+     "size": 165
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "4644206b551f217af18eb9faf65c715b64f0c80a189e85c6ad85776520d5b876",
+      "size": 77,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "4644206b551f217af18eb9faf65c715b64f0c80a189e85c6ad85776520d5b876",
+      "blank": false
+     },
+     "Roman.story/scenes/scene000001.json": {
+      "idMatchesPath": true,
+      "revision": 5,
+      "sha256": "f8dc3d4525a5a2735aac8f0ec3f0107db9405c04fa6dcc3b1a0ffdeffe8772e3",
+      "size": 345,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "f8dc3d4525a5a2735aac8f0ec3f0107db9405c04fa6dcc3b1a0ffdeffe8772e3",
+      "blank": false
+     },
+     "Roman.story/story.json": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "9e66b30d662ff1653fb771a85717fddbf1b3d8c67cc3949b36016348a4cd7a5f",
+      "size": 165,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "9e66b30d662ff1653fb771a85717fddbf1b3d8c67cc3949b36016348a4cd7a5f",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json": {
+     "sha256": "4644206b551f217af18eb9faf65c715b64f0c80a189e85c6ad85776520d5b876",
+     "size": 77
+    },
+    "Roman.story/scenes/scene000001.json": {
+     "sha256": "f8dc3d4525a5a2735aac8f0ec3f0107db9405c04fa6dcc3b1a0ffdeffe8772e3",
+     "size": 345
+    },
+    "Roman.story/story.json": {
+     "sha256": "9e66b30d662ff1653fb771a85717fddbf1b3d8c67cc3949b36016348a4cd7a5f",
+     "size": 165
+    }
+   },
+   "state": {
+    "cursorLag": 2,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "4644206b551f217af18eb9faf65c715b64f0c80a189e85c6ad85776520d5b876",
+      "size": 77,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "4644206b551f217af18eb9faf65c715b64f0c80a189e85c6ad85776520d5b876",
+      "blank": false
+     },
+     "Roman.story/scenes/scene000001.json": {
+      "idMatchesPath": true,
+      "revision": 5,
+      "sha256": "f8dc3d4525a5a2735aac8f0ec3f0107db9405c04fa6dcc3b1a0ffdeffe8772e3",
+      "size": 345,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "f8dc3d4525a5a2735aac8f0ec3f0107db9405c04fa6dcc3b1a0ffdeffe8772e3",
+      "blank": false
+     },
+     "Roman.story/story.json": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "9e66b30d662ff1653fb771a85717fddbf1b3d8c67cc3949b36016348a4cd7a5f",
+      "size": 165,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "9e66b30d662ff1653fb771a85717fddbf1b3d8c67cc3949b36016348a4cd7a5f",
+      "blank": false
+     }
+    },
+    "conflicts": [
+     "Roman.story/scenes/scene000001.json -> Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json"
+    ],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "Roman.story/scenes/scene000001 (Konflikt Tablet 2030-01-01 00-00).json": {
+   "deleted": false,
+   "sha256": "4644206b551f217af18eb9faf65c715b64f0c80a189e85c6ad85776520d5b876",
+   "revisions": 1
+  },
+  "Roman.story/scenes/scene000001.json": {
+   "deleted": false,
+   "sha256": "f8dc3d4525a5a2735aac8f0ec3f0107db9405c04fa6dcc3b1a0ffdeffe8772e3",
+   "revisions": 5
+  },
+  "Roman.story/story.json": {
+   "deleted": false,
+   "sha256": "9e66b30d662ff1653fb771a85717fddbf1b3d8c67cc3949b36016348a4cd7a5f",
+   "revisions": 1
+  }
+ }
+}

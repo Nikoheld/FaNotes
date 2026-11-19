@@ -377,7 +377,10 @@ impl InkDocument {
             return Err(InkError::Schema);
         };
         // `schemaVersion !== 1` is false for the JSON number `1.0`.
-        let schema = raw.get("schemaVersion").and_then(json_whole_u64).unwrap_or(0);
+        let schema = raw
+            .get("schemaVersion")
+            .and_then(json_whole_u64)
+            .unwrap_or(0);
         if schema != SCHEMA_VERSION {
             return Err(InkError::Schema);
         }

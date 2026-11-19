@@ -159,13 +159,14 @@ fn setup_still_answers_the_channels_the_desktop_leaves_open() {
         .dispatch("fanotes:addons-list", &[])
         .unwrap()
         .is_array());
-    assert!(host
-        .dispatch("fanotes:sync-vault-id", &[])
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .len()
-        >= 16);
+    assert!(
+        host.dispatch("fanotes:sync-vault-id", &[])
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .len()
+            >= 16
+    );
     assert_eq!(
         host.dispatch("fanotes:close-subject-book-popout", &[])
             .unwrap()["open"],
@@ -786,7 +787,10 @@ fn a_cached_tree_sorts_each_level_like_the_desktop() {
     let child_names = names(&zoo_tree["children"]);
     assert_eq!(names(&zoo_cached["children"]), child_names);
     assert_ne!(child_names, stored_children);
-    assert_eq!(child_names, vec!["Anfang.md".to_owned(), "Zettel.md".to_owned()]);
+    assert_eq!(
+        child_names,
+        vec!["Anfang.md".to_owned(), "Zettel.md".to_owned()]
+    );
 }
 
 #[test]
@@ -810,7 +814,12 @@ fn an_oversized_onboarding_file_does_not_keep_setup_open() {
         format!("{{\"version\":1,\"status\":\"pending\",\"pad\":\"{padding}\"}}\n"),
     )
     .unwrap();
-    assert!(fs::metadata(vault.join(".fanotes/onboarding.json")).unwrap().len() > 4096);
+    assert!(
+        fs::metadata(vault.join(".fanotes/onboarding.json"))
+            .unwrap()
+            .len()
+            > 4096
+    );
     let mut host = Host::open(dir.join("app"));
     host.set_vault(vault).unwrap();
     assert_eq!(

@@ -1,0 +1,6 @@
+# Golden fixtures are compared byte for byte (sha256, sizes, text offsets):
+# never convert their line endings on checkout (Windows runners use autocrlf).
+fanotes/scripts/fixtures/** -text
+fanotes/scripts/sync-parity/** -text
+crates/*/tests/fixtures/** -text
+crates/*/src/**/fixtures/** -text

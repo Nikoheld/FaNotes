@@ -365,12 +365,7 @@ pub(crate) fn node_copyfile_error(from: &Path, to: &Path, error: &std::io::Error
     node_two_path_error("copyfile", from, to, error)
 }
 
-fn node_two_path_error(
-    syscall: &str,
-    from: &Path,
-    to: &Path,
-    error: &std::io::Error,
-) -> String {
+fn node_two_path_error(syscall: &str, from: &Path, to: &Path, error: &std::io::Error) -> String {
     #[cfg(unix)]
     let (name, detail) = match error.raw_os_error() {
         Some(libc::EISDIR) => ("EISDIR", "illegal operation on a directory"),
@@ -507,8 +502,7 @@ pub(crate) fn ensure_internal_directory(root: &Path) -> Result<PathBuf, String> 
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             if !rename_legacy_internal(root, &directory)? {
-                fs::create_dir(&directory)
-                    .map_err(|error| node_mkdir_error(&directory, &error))?;
+                fs::create_dir(&directory).map_err(|error| node_mkdir_error(&directory, &error))?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
@@ -580,7 +574,10 @@ mod tests {
         assert_eq!(super::entry_name_key("ΑΣ"), "ας");
         assert_eq!(super::entry_name_key("Α\u{A7CE}Σ"), "α\u{A7CE}σ");
         assert_eq!(super::entry_name_key("Α\u{A7CE}.Σ"), "α\u{A7CE}.σ");
-        assert_eq!(super::entry_name_key("Mu\u{0308}he"), super::entry_name_key("Mühe"));
+        assert_eq!(
+            super::entry_name_key("Mu\u{0308}he"),
+            super::entry_name_key("Mühe")
+        );
     }
 
     #[test]
@@ -726,10 +723,7 @@ mod tests {
         let internal = vault.join(".fanotes");
         assert_eq!(
             ensure_internal_directory(&vault).unwrap_err(),
-            format!(
-                "EACCES: permission denied, mkdir '{}'",
-                internal.display()
-            )
+            format!("EACCES: permission denied, mkdir '{}'", internal.display())
         );
         assert!(!internal.exists());
 

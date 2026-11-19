@@ -214,7 +214,7 @@ fn open_subject_book_popout(
     let book = result["bookPath"].as_str().unwrap_or("").to_owned();
     let fragment = format!("subject-book={}", encode_uri_component(&book));
     if let Some(existing) = app.get_webview_window("subject-book") {
-        let _ = existing.eval(&subject_book_hash_assignment(&book));
+        let _ = existing.eval(subject_book_hash_assignment(&book));
         let _ = existing.set_focus();
         return Ok(result);
     }
@@ -636,6 +636,7 @@ fn install_webview_guards(window: &tauri::WebviewWindow, emit_sheet_zoom: bool) 
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)] // `run` stays last, after the helpers it wires up.
 mod tests {
     use super::sheet_zoom_direction;
 
@@ -694,10 +695,8 @@ mod tests {
 
     #[test]
     fn an_english_setting_selects_the_english_close_warning() {
-        let dir = std::env::temp_dir().join(format!(
-            "fanotes-close-warning-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("fanotes-close-warning-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let mut host = fanotes_host::Host::open(dir.join("app"));
         host.settings

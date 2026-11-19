@@ -612,7 +612,9 @@ fn addon_dir(host: &Host, id: &str) -> Result<PathBuf, String> {
 fn store_root(host: &Host) -> Result<PathBuf, String> {
     let root = host.app_data.join("addons");
     match fs::symlink_metadata(&root) {
-        Ok(meta) if meta.file_type().is_symlink() => Err("Der Add-on-Ordner ist unsicher.".to_owned()),
+        Ok(meta) if meta.file_type().is_symlink() => {
+            Err("Der Add-on-Ordner ist unsicher.".to_owned())
+        }
         // A missing folder, a file, and a folder that cannot be searched all
         // continue. Listing then stats `addons.json`. Saving calls `mkdir`.
         _ => Ok(root),
@@ -632,7 +634,8 @@ fn ensure_store_root(host: &Host) -> Result<PathBuf, String> {
     match fs::create_dir(&root) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            if fs::symlink_metadata(&root).is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+            if fs::symlink_metadata(&root)
+                .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
             {
                 return Ok(root);
             }

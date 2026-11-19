@@ -1,0 +1,22 @@
+{
+  "comment": "PDFium build loaded by fanotes-pdf. BSD-3-Clause (PDFium) plus the third-party notices in the archive's licenses/ folder. Bump only together with the digests: download each archive, check `gh api repos/bblanchon/pdfium-binaries/attestations/sha256:<archive digest>` lists a release attestation for this tag and SLSA provenance from build-all.yml, then hash the library inside.",
+  "source": "https://github.com/bblanchon/pdfium-binaries",
+  "tag": "chromium/8066",
+  "build": "8066",
+  "platforms": {
+    "linux-x64": {
+      "archive": "pdfium-linux-x64.tgz",
+      "archiveSha256": "0b43f405477cf2cfc4dbff06905093c3309756c6bca1fb9da99234a2ca97fed2",
+      "library": "lib/libpdfium.so",
+      "libraryName": "libpdfium.so",
+      "librarySha256": "7670b3c597b02dfa3f98b23b49c3bb52536312f1ea686b739321731b6011f5a9"
+    },
+    "win-x64": {
+      "archive": "pdfium-win-x64.tgz",
+      "archiveSha256": "739a57d597d864297909cc40a2411eba728490c76a0fa25e3ea299c7f6b07020",
+      "library": "bin/pdfium.dll",
+      "libraryName": "pdfium.dll",
+      "librarySha256": "d42c452a4cf8ca19a87e9c659d4e05035be742c21696ac13431cf73ac1bbf14b"
+    }
+  }
+}

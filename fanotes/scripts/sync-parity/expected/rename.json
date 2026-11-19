@@ -1,0 +1,347 @@
+{
+ "scenario": "rename",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Alt.md 200",
+    "PUT /files/Zwei.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Alt.md",
+    "Zwei.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Alt.md 200",
+    "GET /files/Zwei.md 200"
+   ]
+  },
+  {
+   "do": "rename",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 1 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "DELETE /files/Alt.md 200",
+    "GET /changes 200",
+    "PUT /files/Neu.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Neu.md"
+   ],
+   "removed": [
+    "Alt.md"
+   ],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Neu.md 200"
+   ]
+  },
+  {
+   "do": "rename",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Zwei.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Zwei.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Zwei.md 200",
+    "PUT /files/Ordner/Zwei.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Ordner/Zwei.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Ordner/Zwei.md 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Neu.md": {
+     "sha256": "d7946738fa0f5994f7a42b0a0460997c76779461a9e44cd2cbd8e1ae45ec610f",
+     "size": 6
+    },
+    "Ordner/Zwei.md": {
+     "sha256": "c4cc37e394433a51a7d77acdb443c176542a9a060f972848b80ac039631074c9",
+     "size": 7
+    },
+    "Zwei.md": {
+     "sha256": "4719059a23ffdae17c1f8febcd53187af4902d7c24319cf0aecd7db53d0cc1ba",
+     "size": 29
+    }
+   },
+   "state": {
+    "cursorLag": 1,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Neu.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "d7946738fa0f5994f7a42b0a0460997c76779461a9e44cd2cbd8e1ae45ec610f",
+      "size": 6,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "d7946738fa0f5994f7a42b0a0460997c76779461a9e44cd2cbd8e1ae45ec610f",
+      "blank": false
+     },
+     "Ordner/Zwei.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "c4cc37e394433a51a7d77acdb443c176542a9a060f972848b80ac039631074c9",
+      "size": 7,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "c4cc37e394433a51a7d77acdb443c176542a9a060f972848b80ac039631074c9",
+      "blank": false
+     },
+     "Zwei.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "4719059a23ffdae17c1f8febcd53187af4902d7c24319cf0aecd7db53d0cc1ba",
+      "size": 29,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "4719059a23ffdae17c1f8febcd53187af4902d7c24319cf0aecd7db53d0cc1ba",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Neu.md": {
+     "sha256": "d7946738fa0f5994f7a42b0a0460997c76779461a9e44cd2cbd8e1ae45ec610f",
+     "size": 6
+    },
+    "Ordner/Zwei.md": {
+     "sha256": "c4cc37e394433a51a7d77acdb443c176542a9a060f972848b80ac039631074c9",
+     "size": 7
+    },
+    "Zwei.md": {
+     "sha256": "4719059a23ffdae17c1f8febcd53187af4902d7c24319cf0aecd7db53d0cc1ba",
+     "size": 29
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Neu.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "d7946738fa0f5994f7a42b0a0460997c76779461a9e44cd2cbd8e1ae45ec610f",
+      "size": 6,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "d7946738fa0f5994f7a42b0a0460997c76779461a9e44cd2cbd8e1ae45ec610f",
+      "blank": false
+     },
+     "Ordner/Zwei.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "c4cc37e394433a51a7d77acdb443c176542a9a060f972848b80ac039631074c9",
+      "size": 7,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "c4cc37e394433a51a7d77acdb443c176542a9a060f972848b80ac039631074c9",
+      "blank": false
+     },
+     "Zwei.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "4719059a23ffdae17c1f8febcd53187af4902d7c24319cf0aecd7db53d0cc1ba",
+      "size": 29,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "4719059a23ffdae17c1f8febcd53187af4902d7c24319cf0aecd7db53d0cc1ba",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "Alt.md": {
+   "deleted": true,
+   "sha256": null,
+   "revisions": 2
+  },
+  "Neu.md": {
+   "deleted": false,
+   "sha256": "d7946738fa0f5994f7a42b0a0460997c76779461a9e44cd2cbd8e1ae45ec610f",
+   "revisions": 1
+  },
+  "Ordner/Zwei.md": {
+   "deleted": false,
+   "sha256": "c4cc37e394433a51a7d77acdb443c176542a9a060f972848b80ac039631074c9",
+   "revisions": 1
+  },
+  "Zwei.md": {
+   "deleted": false,
+   "sha256": "4719059a23ffdae17c1f8febcd53187af4902d7c24319cf0aecd7db53d0cc1ba",
+   "revisions": 2
+  }
+ }
+}
