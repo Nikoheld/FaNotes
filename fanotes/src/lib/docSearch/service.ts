@@ -28,6 +28,20 @@ const installActivityTracking = () => {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms) })
 
+const LOW_BATTERY_LEVEL = 0.2
+const LOW_BATTERY_RECHECK_MS = 60_000
+type BatteryLike = { charging: boolean; level: number }
+const onLowBattery = async () => {
+  try {
+    const getBattery = (navigator as Navigator & { getBattery?: () => Promise<BatteryLike> }).getBattery
+    if (typeof getBattery !== 'function') return false
+    const battery = await getBattery.call(navigator)
+    return !battery.charging && battery.level < LOW_BATTERY_LEVEL
+  } catch {
+    return false
+  }
+}
+
 const idle = () => new Promise<void>((resolve) => {
   if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(() => resolve(), { timeout: 1000 })
   else window.setTimeout(resolve, 50)
@@ -79,6 +93,8 @@ class DocSearchService {
           await sleep(QUIET_MS - quietFor + 50)
         }
         await idle()
+        // On a low battery, background OCR waits until the device is charging (or the level recovers).
+        while (generation === this.generation && await onLowBattery()) await sleep(LOW_BATTERY_RECHECK_MS)
       },
       onProgress: (progress) => {
         if (generation !== this.generation) return
