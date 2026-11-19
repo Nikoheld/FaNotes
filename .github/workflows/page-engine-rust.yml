@@ -1,0 +1,57 @@
+name: Page engine (Rust)
+
+# The native page engine (crates/fanotes-gpu) and the paper-proto window that
+# uses it. Golden frames compare vello_cpu and vello_hybrid against the
+# tiny-skia reference; on Linux vello_hybrid runs on Mesa's lavapipe (software
+# Vulkan). Not wired into the app. Never builds or publishes a release.
+on:
+  pull_request:
+    paths:
+      - 'crates/fanotes-gpu/**'
+      - 'crates/fanotes-raster/**'
+      - 'crates/fanotes-ink/**'
+      - 'crates/fanotes-paper/**'
+      - 'apps/paper-proto/**'
+      - 'fanotes/src/lib/inkStrokePaint.ts'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/page-engine-rust.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_BUILD_JOBS: '2'
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Software Vulkan for the vello_hybrid goldens
+        run: sudo apt-get update -q && sudo apt-get install -y -q mesa-vulkan-drivers
+      - name: Toolchain components
+        run: rustup component add rustfmt clippy
+      - name: TypeScript width vectors are current
+        run: node crates/fanotes-gpu/tests/fixtures/gen_ts_ink_vectors.cjs fanotes/src/lib/inkStrokePaint.ts | cmp - crates/fanotes-gpu/tests/fixtures/ts_ink_vectors.json
+      - run: cargo fmt -p fanotes-gpu -p paper-proto -- --check
+      - run: cargo clippy -p fanotes-gpu -p paper-proto --all-targets --locked -- -D warnings
+      - name: Engine, golden and paper-proto tests
+        env:
+          FANOTES_GPU_REQUIRE: '1'
+        run: cargo test -p fanotes-gpu -p paper-proto -p fanotes-raster -p fanotes-ink --locked -- --nocapture
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: Engine and golden tests (vello_cpu; vello_hybrid if an adapter exists)
+        run: cargo test -p fanotes-gpu -p paper-proto --locked

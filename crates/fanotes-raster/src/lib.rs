@@ -22,9 +22,9 @@ pub use scene::{
     BUCKET_MIN_SHARPNESS, TILE_BUDGET, TILE_GUTTER, TILE_PX, ZOOM_BUCKETS,
 };
 pub use stroke::{
-    ink_stroke_bitmap_width, ink_stroke_is_translucent, ink_stroke_paint_margin,
-    ink_stroke_paint_scale, pressure_width, Brush, Effect, InkPoint, InkStroke, Symbol,
-    INK_MIN_BITMAP_PX,
+    brush_passes, ink_brush_of, ink_opacity_of, ink_quick_turn_keep, ink_stroke_bitmap_width,
+    ink_stroke_is_translucent, ink_stroke_paint_margin, ink_stroke_paint_scale, pressure_width,
+    seeded_unit, Brush, Effect, InkPoint, InkStroke, Pass, Symbol, INK_MIN_BITMAP_PX,
 };
 pub use svg::parse_svg_path;
 pub use tiny_skia::{IntRect, Pixmap};
