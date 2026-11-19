@@ -10,16 +10,30 @@ fn fresh_local_date() -> (i32, u32, u32) {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
-        .as_secs() as libc::time_t;
+        .as_secs() as i64;
+    let (year, month, day) = local_year_month_day(seconds);
+    (year + 1900, month as u32 + 1, day as u32)
+}
+
+#[cfg(unix)]
+fn local_year_month_day(seconds: i64) -> (i32, i32, i32) {
+    let seconds = seconds as libc::time_t;
     let mut time = unsafe { std::mem::zeroed::<libc::tm>() };
     unsafe {
         libc::localtime_r(&seconds, &mut time);
     }
-    (
-        (time.tm_year + 1900) as i32,
-        (time.tm_mon + 1) as u32,
-        time.tm_mday as u32,
-    )
+    (time.tm_year, time.tm_mon, time.tm_mday)
+}
+
+#[cfg(windows)]
+fn local_year_month_day(seconds: i64) -> (i32, i32, i32) {
+    // UCRT `struct tm`: sec, min, hour, mday, mon, year, wday, yday, isdst.
+    unsafe extern "C" {
+        fn _localtime64_s(tm: *mut [i32; 9], time: *const i64) -> i32;
+    }
+    let mut time = [0i32; 9];
+    assert_eq!(unsafe { _localtime64_s(&mut time, &seconds) }, 0);
+    (time[5], time[4], time[3])
 }
 
 /// The first day of next month stays inside `Date.parse`'s future, so a
@@ -92,7 +106,8 @@ fn a_whole_setting_is_stored_like_javascript() {
     .unwrap();
     let settings = fs::read_to_string(app.join("settings.json")).unwrap();
     assert!(
-        settings.contains("\"editorFontSize\": 18\n") || settings.contains("\"editorFontSize\": 18,"),
+        settings.contains("\"editorFontSize\": 18\n")
+            || settings.contains("\"editorFontSize\": 18,"),
         "{settings}"
     );
     assert!(
@@ -172,13 +187,10 @@ fn a_non_object_settings_save_keeps_the_current_settings() {
         &[json!({ "theme": "midnight", "openAiApiKey": "sk-keep" })],
     )
     .unwrap();
-    let kept = host
-        .dispatch("fanotes:save-settings", &[json!(1)])
-        .unwrap();
+    let kept = host.dispatch("fanotes:save-settings", &[json!(1)]).unwrap();
     assert_eq!(kept["theme"], "midnight");
     assert_eq!(
-        host.dispatch("fanotes:load-secure-settings", &[])
-            .unwrap()["openAiApiKey"],
+        host.dispatch("fanotes:load-secure-settings", &[]).unwrap()["openAiApiKey"],
         "sk-keep"
     );
     let cleared = host
@@ -189,8 +201,7 @@ fn a_non_object_settings_save_keeps_the_current_settings() {
         .unwrap();
     assert_eq!(cleared["theme"], "midnight");
     assert_eq!(
-        host.dispatch("fanotes:load-secure-settings", &[])
-            .unwrap()["openAiApiKey"],
+        host.dispatch("fanotes:load-secure-settings", &[]).unwrap()["openAiApiKey"],
         ""
     );
 }
@@ -343,7 +354,13 @@ fn resetting_app_data_waits_for_the_next_launch_and_keeps_the_vault() {
     assert!(marker.is_file());
     let marker_text = fs::read_to_string(&marker).unwrap();
     assert!(marker_text.ends_with('\n'), "{marker_text}");
-    assert_eq!(marker_text.chars().filter(|character| *character == '\n').count(), 1);
+    assert_eq!(
+        marker_text
+            .chars()
+            .filter(|character| *character == '\n')
+            .count(),
+        1
+    );
     let parsed: serde_json::Value = serde_json::from_str(marker_text.trim_end()).unwrap();
     assert_eq!(parsed["version"], json!(1));
     assert!(parsed["userDataPath"].as_str().unwrap().ends_with("app"));
@@ -981,6 +998,7 @@ fn a_reset_marker_with_an_expanded_year_wipes_the_profile() {
     assert!(!marker.exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_symlinked_reset_marker_is_discarded() {
     let (app, mut host) = host();
@@ -1248,5 +1266,8 @@ fn an_unwritable_profile_keeps_the_saved_theme_and_reports_the_open_error() {
         host.dispatch("fanotes:bootstrap", &[]).unwrap()["settings"]["theme"],
         "midnight"
     );
-    assert_eq!(fs::read_to_string(app.join("settings.json")).unwrap(), saved);
+    assert_eq!(
+        fs::read_to_string(app.join("settings.json")).unwrap(),
+        saved
+    );
 }

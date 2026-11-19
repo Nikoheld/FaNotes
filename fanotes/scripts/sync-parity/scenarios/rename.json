@@ -1,0 +1,105 @@
+{
+ "about": "A rename is a new path plus a delete mark; a rename racing an edit keeps the edit.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Alt.md",
+   "text": "# Alt\n"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Zwei.md",
+   "text": "# Zwei\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "rename",
+   "device": "Laptop",
+   "path": "Alt.md",
+   "to": "Neu.md"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "rename",
+   "device": "Laptop",
+   "path": "Zwei.md",
+   "to": "Ordner/Zwei.md"
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Zwei.md",
+   "text": "# Zwei\n\nVom Tablet geändert."
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "Neu.md",
+   "text": "# Alt\n"
+  },
+  {
+   "device": "Tablet",
+   "path": "Alt.md",
+   "absent": true
+  },
+  {
+   "device": "Laptop",
+   "path": "Zwei.md",
+   "text": "# Zwei\n\nVom Tablet geändert."
+  },
+  {
+   "device": "Tablet",
+   "path": "Ordner/Zwei.md",
+   "text": "# Zwei\n"
+  }
+ ]
+}

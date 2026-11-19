@@ -29,11 +29,8 @@ fn a_file_in_a_reveal_path_is_not_a_folder() {
         "Ein Pfadbestandteil ist kein Ordner."
     );
     assert_eq!(
-        host.dispatch(
-            "fanotes:reveal-in-folder",
-            &[json!("Seite.md/innen/noch")],
-        )
-        .unwrap_err(),
+        host.dispatch("fanotes:reveal-in-folder", &[json!("Seite.md/innen/noch")],)
+            .unwrap_err(),
         "Ein Pfadbestandteil ist kein Ordner."
     );
     let missing = fs::canonicalize(&vault).unwrap().join("Fehlt");
@@ -57,10 +54,7 @@ fn a_file_in_a_reveal_path_is_not_a_folder() {
         "reveal {}",
         vault.join("Mathe/Kraft.md").display()
     )));
-    assert!(log.contains(&format!(
-        "reveal {}",
-        vault.join(".fanotes").display()
-    )));
+    assert!(log.contains(&format!("reveal {}", vault.join(".fanotes").display())));
 }
 
 #[test]
@@ -151,7 +145,8 @@ fn a_non_string_argument_uses_the_desktop_message() {
         "Ungültige Suchanfrage."
     );
     assert_eq!(
-        host.dispatch("fanotes:read-drawing", &[json!(1)]).unwrap_err(),
+        host.dispatch("fanotes:read-drawing", &[json!(1)])
+            .unwrap_err(),
         "Ungültige Zeichnungs-ID."
     );
     assert_eq!(
@@ -220,8 +215,11 @@ fn a_non_string_argument_uses_the_desktop_message() {
         "Ungültiger Notizpfad."
     );
     assert_eq!(
-        host.dispatch("fanotes:set-note-paper-style", &[json!("Seite.md"), json!(1)])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:set-note-paper-style",
+            &[json!("Seite.md"), json!(1)]
+        )
+        .unwrap_err(),
         "Diese Papierart wird nicht unterstützt."
     );
     assert_eq!(
@@ -246,13 +244,17 @@ fn a_non_string_argument_uses_the_desktop_message() {
         "Ungültiger Vault-Pfad."
     );
     assert_eq!(
-        host.dispatch("fanotes:move-entry", &[json!("Ordner/Innen.md"), json!(false)])
-            .unwrap(),
+        host.dispatch(
+            "fanotes:move-entry",
+            &[json!("Ordner/Innen.md"), json!(false)]
+        )
+        .unwrap(),
         json!("Innen.md")
     );
     assert!(vault.join("Innen.md").is_file());
     assert_eq!(
-        host.dispatch("fanotes:trash-entry", &[json!(1)]).unwrap_err(),
+        host.dispatch("fanotes:trash-entry", &[json!(1)])
+            .unwrap_err(),
         "Ungültiger Vault-Pfad."
     );
     assert_eq!(
@@ -276,8 +278,11 @@ fn a_non_string_argument_uses_the_desktop_message() {
         "Ungültiger Vault-Pfad."
     );
     assert_eq!(
-        host.dispatch("fanotes:read-note-history", &[json!("../Seite.md"), json!(" ")])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:read-note-history",
+            &[json!("../Seite.md"), json!(" ")]
+        )
+        .unwrap_err(),
         "Pfad-Traversal ist nicht erlaubt."
     );
     assert_eq!(
@@ -311,7 +316,8 @@ fn a_non_string_argument_uses_the_desktop_message() {
         "Ungültiger Dateipfad."
     );
     assert_eq!(
-        host.dispatch("fanotes:open-external", &[json!(1)]).unwrap_err(),
+        host.dispatch("fanotes:open-external", &[json!(1)])
+            .unwrap_err(),
         "Ungültiger externer Link."
     );
 }
@@ -330,11 +336,8 @@ fn a_non_string_addon_or_sync_argument_uses_the_desktop_message() {
         "Ungültige Add-on-ID."
     );
     assert_eq!(
-        host.dispatch(
-            "fanotes:addons-read-file",
-            &[json!("Not An Id"), json!(1)],
-        )
-        .unwrap_err(),
+        host.dispatch("fanotes:addons-read-file", &[json!("Not An Id"), json!(1)],)
+            .unwrap_err(),
         "Ungültige Add-on-ID."
     );
     assert_eq!(
@@ -364,12 +367,16 @@ fn a_non_string_addon_or_sync_argument_uses_the_desktop_message() {
         "Add-on-Daten müssen ein String sein."
     );
     assert_eq!(
-        host.dispatch("fanotes:addons-write-data", &[json!(1), json!("{\"ok\":1}")])
-            .unwrap_err(),
+        host.dispatch(
+            "fanotes:addons-write-data",
+            &[json!(1), json!("{\"ok\":1}")]
+        )
+        .unwrap_err(),
         "Ungültige Add-on-ID."
     );
     assert_eq!(
-        host.dispatch("fanotes:addons-fetch", &[json!(1)]).unwrap_err(),
+        host.dispatch("fanotes:addons-fetch", &[json!(1)])
+            .unwrap_err(),
         "Ungültige Add-on-Adresse."
     );
     assert_eq!(

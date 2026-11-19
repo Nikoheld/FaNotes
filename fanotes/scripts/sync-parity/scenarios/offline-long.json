@@ -1,0 +1,184 @@
+{
+ "about": "A device offline for a long time syncs after newer versions were published and notes deleted; nothing newer is lost.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "A.md",
+   "text": "# A\n\nv1"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "B.md",
+   "text": "# B\n\nv1"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "C.md",
+   "text": "# C\n\nv1"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "D.md",
+   "text": "# D\n\nv1"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "fault",
+   "device": "Tablet",
+   "rule": {
+    "method": "GET",
+    "path": "/changes",
+    "mode": "offline",
+    "count": 6
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "A.md",
+   "text": "# A\n\nv2"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "A.md",
+   "text": "# A\n\nv3"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "delete",
+   "device": "Laptop",
+   "path": "C.md"
+  },
+  {
+   "do": "delete",
+   "device": "Laptop",
+   "path": "D.md"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "B.md",
+   "text": "# B\n\nv2 Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "A.md",
+   "text": "# A\n\nv1 Tablet offline"
+  },
+  {
+   "do": "delete",
+   "device": "Tablet",
+   "path": "B.md"
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "D.md",
+   "text": "# D\n\nv1 Tablet bearbeitet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "clearFaults",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "A.md",
+   "text": "# A\n\nv3"
+  },
+  {
+   "device": "Laptop",
+   "path": "A (Konflikt Tablet 2030-01-01 00-00).md",
+   "text": "# A\n\nv1 Tablet offline"
+  },
+  {
+   "device": "Tablet",
+   "path": "B.md",
+   "text": "# B\n\nv2 Laptop"
+  },
+  {
+   "device": "Laptop",
+   "path": "B.md",
+   "text": "# B\n\nv2 Laptop"
+  },
+  {
+   "device": "Tablet",
+   "path": "C.md",
+   "absent": true
+  },
+  {
+   "device": "Laptop",
+   "path": "D.md",
+   "text": "# D\n\nv1 Tablet bearbeitet"
+  }
+ ]
+}

@@ -1,0 +1,26 @@
+[package]
+name = "fanotes-index"
+version = "0.1.0"
+description = "Incremental full-text index of a FaNotes vault, ranked like the TypeScript document search"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "fanotes-index-bench"
+path = "src/bin/bench.rs"
+
+[dependencies]
+# Story manifests and scenes are read with the writing engine's sanitizers (`writing/searchUnits.ts`).
+fanotes-story = { path = "../fanotes-story", default-features = false }
+icu_collator = "2.3"
+icu_locale_core = "2.3"
+icu_properties = "2.3"
+indexmap = "2.14"
+notify = { version = "8.2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+unicode-normalization = "0.1"
+
+[dev-dependencies]

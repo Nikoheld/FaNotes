@@ -1,0 +1,130 @@
+# Rust workspace checks: format, lint and test on Linux, test the
+# platform-independent crates on Windows. Never builds installers, tags,
+# releases or publishes anything.
+#
+# The parity tests compare the Rust crates with the TypeScript code they port
+# (sync engine, document search, writing mode, famd codec), so the job also
+# runs when those TypeScript modules or their fixtures change.
+name: Rust
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "apps/**"
+      - "fanotes/src-tauri/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust.yml"
+      # Parity fixtures and the TypeScript modules they are generated from.
+      - "fanotes/scripts/sync-parity/**"
+      - "fanotes/scripts/search-parity.mjs"
+      - "fanotes/scripts/fixtures/search-parity/**"
+      - "fanotes/scripts/gen-story-fixtures.mjs"
+      - "fanotes/src/lib/sync/**"
+      - "fanotes/src/lib/famd.ts"
+      - "fanotes/src/lib/noteTextField.ts"
+      - "fanotes/src/lib/docSearch/**"
+      - "fanotes/src/writing/**"
+      - "fanotes/electron/famd.cjs"
+      - "fanotes/electron/famdV2.mjs"
+      - "fanotes/electron/noteAnnotation.mjs"
+      - "fanotes-site/sync-api.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  # The PyLaia line test loads the ONNX model through the system ONNX Runtime,
+  # which a runner does not have.
+  TEST_SKIPS: --skip a_blank_line_returns_pylaia_probabilities
+
+jobs:
+  linux:
+    name: Rust (ubuntu)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install the Tauri build dependencies
+        # fanotes-tauri links WebKitGTK and GTK 3.
+        run: |
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y -o Acquire::Retries=3 --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libssl-dev libxdo-dev libdbus-1-dev
+      - name: Install the pinned Rust toolchain
+        run: |
+          toolchain="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$toolchain" --profile minimal --component rustfmt,clippy
+          rustc --version
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-linux
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - name: Install the npm packages the parity tests load
+        # The sync parity test runs the TypeScript engine and the sync server
+        # module through Vite; fanotes-ort loads ONNX Runtime from onnxruntime-node;
+        # the host's spelling test and the recognition decoder test read the
+        # bundles `build:spelling` writes to public/spell (ignored by git).
+        working-directory: fanotes
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build:spelling
+      - name: Placeholder frontend
+        # `tauri::generate_context!` embeds ../dist at compile time; lints and
+        # tests do not need the real React bundle.
+        run: |
+          mkdir -p fanotes/dist
+          [ -f fanotes/dist/index.html ] || echo '<!doctype html><title>FaNotes</title>' > fanotes/dist/index.html
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --workspace --no-fail-fast -- $TEST_SKIPS
+
+  windows:
+    name: Rust (windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install the pinned Rust toolchain
+        run: |
+          toolchain="$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$toolchain" --profile minimal
+          rustc --version
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-windows
+      - name: Test the platform-independent crates
+        # The sync parity test needs the Node sync server module, which fsyncs
+        # directories (not possible on Windows); the Linux job runs it.
+        # fanotes-host, fanotes-input, fanotes-pdf, fanotes-ort and the Tauri
+        # shell are platform-specific and stay on the Linux job.
+        env:
+          FANOTES_SYNC_PARITY_SKIP: "1"
+        run: >-
+          cargo test --locked --no-fail-fast
+          -p fanotes-famd -p fanotes-ink -p fanotes-paper -p fanotes-raster
+          -p fanotes-story -p fanotes-index -p fanotes-sync
+          -- $TEST_SKIPS

@@ -1,0 +1,85 @@
+{
+ "about": "A local file that is listed but cannot be read is never overwritten or removed by the server's version (PR #1156); it syncs once it can be read.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Geheim.md",
+   "text": "# Geheim\n\nAlt.\n"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Weg.md",
+   "text": "# Weg\n\nText.\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Geheim.md",
+   "text": "# Geheim\n\nNeu vom Laptop.\n"
+  },
+  {
+   "do": "delete",
+   "device": "Laptop",
+   "path": "Weg.md"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "set": {
+    "unreadable": [
+     "Geheim.md",
+     "Weg.md"
+    ]
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "set": {
+    "unreadable": []
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  }
+ ]
+}

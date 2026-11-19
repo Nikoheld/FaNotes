@@ -1,0 +1,140 @@
+{
+ "about": "Devices whose clocks are years apart: conflict names follow each clock, merges follow the task times, nothing is lost.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "set": {
+    "now": 1592222400000
+   }
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Plan.md",
+   "text": "# Plan\n\nAlt."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Plan.md",
+   "text": "# Plan\n\nLaptop."
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Plan.md",
+   "text": "# Plan\n\nTablet."
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Hausaufgaben.md",
+   "homework": [
+    {
+     "id": "a",
+     "updatedAt": "2020-06-15T12:00:00.000Z"
+    }
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Hausaufgaben.md",
+   "homework": [
+    {
+     "id": "a",
+     "done": true,
+     "updatedAt": "2030-01-01T00:00:00.000Z"
+    }
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Hausaufgaben.md",
+   "homework": [
+    {
+     "id": "a",
+     "updatedAt": "2020-06-15T12:00:00.000Z"
+    },
+    {
+     "id": "b",
+     "updatedAt": "2020-06-15T12:05:00.000Z"
+    }
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Laptop",
+   "path": "Plan.md",
+   "text": "# Plan\n\nTablet."
+  },
+  {
+   "device": "Laptop",
+   "path": "Plan (Konflikt Laptop 2030-01-01 00-00).md",
+   "text": "# Plan\n\nLaptop."
+  }
+ ]
+}

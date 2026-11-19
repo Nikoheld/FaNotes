@@ -1,0 +1,3 @@
+# Notizen
+
+Spannung und Elektron.
