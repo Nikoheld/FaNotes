@@ -1,0 +1,59 @@
+name: Updater (Rust port)
+
+# Checks the Rust port of the desktop updater (crates/fanotes-updater) against
+# the JavaScript updater: both read the same vectors in
+# fanotes/scripts/fixtures/updater/. Never builds or publishes a release.
+on:
+  pull_request:
+    paths:
+      - 'crates/fanotes-updater/**'
+      - 'fanotes/electron/updater.cjs'
+      - 'fanotes/electron/delta.cjs'
+      - 'fanotes/electron/releaseVersion.cjs'
+      - 'fanotes/electron/download-hosts.cjs'
+      - 'fanotes/electron/update-public-key.pem'
+      - 'fanotes/scripts/check-updater-vectors.mjs'
+      - 'fanotes/scripts/release-policy-core.mjs'
+      - 'fanotes/scripts/check-release-policy.mjs'
+      - 'fanotes/scripts/fixtures/updater/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/updater-rust.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_BUILD_JOBS: '2'
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Toolchain components
+        run: rustup component add rustfmt clippy
+      - name: JavaScript side of the shared vectors
+        run: node fanotes/scripts/check-updater-vectors.mjs
+      - run: cargo fmt -p fanotes-updater -- --check
+      - run: cargo clippy -p fanotes-updater --all-targets --all-features --locked -- -D warnings
+      - name: Rust side of the shared vectors and behaviour tests
+        run: cargo test -p fanotes-updater --all-features --locked
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: node fanotes/scripts/check-updater-vectors.mjs
+      - run: cargo test -p fanotes-updater --locked
