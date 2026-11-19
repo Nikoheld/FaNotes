@@ -96,6 +96,8 @@ export type OrientedResult = {
 
 const SAMPLE_LINES = 3
 const GOOD_ENOUGH = 0.55
+/** Summed line votes (see ascenderBias) above which the upright/upside-down call needs no second opinion. */
+const DECISIVE_BIAS = 1.5
 
 type Bitmap = { pixels: Uint8ClampedArray; width: number; height: number }
 
@@ -127,7 +129,10 @@ export const preparePageSync = (input: Bitmap, maxLines: number) => {
   // ascenderBias). Turning a view by 180° flips the sign, so two views
   // score all four orientations. Recognition quality only breaks near-ties.
   const upright = ascenderBias(view(0))
-  const sideways = ascenderBias(view(90))
+  // A clearly upright or upside-down page already decides the turn. Skipping the sideways
+  // view saves a full-page rotation and a second line segmentation (the main per-page CPU cost
+  // besides recognition); the sideways views are still built on demand if ever read.
+  const sideways = Math.abs(upright) >= DECISIVE_BIAS ? 0 : ascenderBias(view(90))
   const ranked = ([[0, upright], [180, -upright], [90, sideways], [270, -sideways]] as Array<[Rotation, number]>)
     .sort((left, right) => right[1] - left[1])
   return { ranked, view }
