@@ -29,6 +29,8 @@ type FormattingToolbarProps = {
   onInsertLatex: (button: SimpleLatexButton, operands: SimpleLatexOperands) => void
   onLatexError?: (message: string) => void
   onInsertStudy?: (kind: StudyKind, tool?: CryptoTool) => void
+  /** Text boxes on the sheet take plain markdown only: no formula inputs. */
+  hideLatex?: boolean
 }
 
 const LATEX_BUTTONS: Array<{ id: SimpleLatexButton; label: string; glyph: string }> = [
@@ -74,6 +76,7 @@ export const FormattingToolbar = memo(function FormattingToolbar({
   onInsertLatex,
   onLatexError,
   onInsertStudy,
+  hideLatex = false,
 }: FormattingToolbarProps) {
   const [studyOpen, setStudyOpen] = useState(false)
   const studyRef = useRef<HTMLDivElement>(null)
@@ -127,7 +130,7 @@ export const FormattingToolbar = memo(function FormattingToolbar({
           )}
         </div>
       )}
-      <div className="simple-latex-tools" role="group" aria-label="Einfaches LaTeX" title="Zahlen oder Wörter. Die Schaltflächen setzen die Formel.">
+      {!hideLatex && <div className="simple-latex-tools" role="group" aria-label="Einfaches LaTeX" title="Zahlen oder Wörter. Die Schaltflächen setzen die Formel.">
         <input
           aria-label="Erstes Stück"
           disabled={disabled}
@@ -156,7 +159,7 @@ export const FormattingToolbar = memo(function FormattingToolbar({
             {glyph}
           </button>
         ))}
-      </div>
+      </div>}
     </div>
   )
 })

@@ -4607,3 +4607,14 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
   overflow-y: auto;
 }
 .editor-toolbar.is-vertical.is-type .toolbar-end { height: auto; }
+/* Text-box toolbar: same look as the note formatting bar and the pen strip. */
+.note-text-field-toolbar { flex-wrap: nowrap; max-width: 100%; overflow: auto hidden; scrollbar-width: none; }
+.note-text-field-toolbar .formatting-toolbar { flex: none; }
+.note-text-field-range { display: grid; grid-template-columns: auto minmax(64px, 105px) 42px; align-items: center; gap: 7px; color: var(--text-muted, #9999a7); font: 12px/1 var(--ui-font); white-space: nowrap; }
+.note-text-field-range input { width: 100%; accent-color: var(--accent); }
+.note-text-field-range output { text-align: right; font-variant-numeric: tabular-nums; }
+.note-text-field-colors { display: flex; align-items: center; gap: 3px; }
+.note-text-field-toolbar .lw-color-custom { position: relative; display: block; width: 18px; height: 18px; flex: none; margin: 0 2px; overflow: hidden; border-radius: 50%; background: conic-gradient(from 0deg in hsl longer hue, #ff2d2d 0deg, #ff2d2d 360deg); box-shadow: inset 0 0 0 1px rgba(15, 18, 28, .28); cursor: pointer; }
+.note-text-field-toolbar .lw-color-custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.note-text-field-toolbar .lw-color-custom span { position: absolute; inset: 4px; border-radius: 50%; }
+@media (max-width: 900px) { .note-text-field-range span { display: none; } }

@@ -6522,7 +6522,7 @@ export default function App({ startupBootstrap }: AppProps) {
             <div className="toolbar-context">
               {(() => {
                 const selectedTextField = selectedTextFieldId ? noteTextFields.find((field) => field.id === selectedTextFieldId) : undefined
-                if (selectedTextField) return <NoteTextFieldToolbar field={selectedTextField} onStyle={changeTextFieldStyle} onRemove={removePlacedTextField} />
+                if (selectedTextField) return <NoteTextFieldToolbar field={selectedTextField} onStyle={changeTextFieldStyle} onText={changeTextFieldText} onRemove={removePlacedTextField} />
                 const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
                 if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
                 if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
