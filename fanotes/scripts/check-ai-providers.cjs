@@ -56,6 +56,19 @@ const payload = (connection) => ({ connection, title: 'Test', relativePath: 'Tes
   assert.match(openCodeMessage.headers.authorization, /^Basic /u)
   assert.throws(() => normalizeLocalUrl('https://example.com', 'ollama'), /localhost|privaten LAN/u)
 
+  // Shared privacy vectors (also read by crates/fanotes-host/src/policy.rs):
+  // only real loopback, RFC 1918, link-local and fc00::/7 literals are local.
+  const { isLocalAiHostname } = require('../electron/localAiHost.mjs')
+  const hostVectors = JSON.parse(await fs.readFile(path.join(__dirname, 'fixtures', 'local-ai-hosts.json'), 'utf8')).cases
+  assert.ok(hostVectors.length >= 50)
+  for (const { url, local } of hostVectors) {
+    assert.equal(isLocalAiHostname(new URL(url).hostname), local, `isLocalAiHostname(${url})`)
+    for (const provider of ['lmstudio', 'ollama', 'opencode']) {
+      if (local) assert.equal(normalizeLocalUrl(url, provider), new URL(url).origin, `${provider} ${url}`)
+      else assert.throws(() => normalizeLocalUrl(url, provider), /localhost|privaten LAN/u, `${provider} ${url}`)
+    }
+  }
+
   const nativeFetch = global.fetch
   const cloudRequests = []
   global.fetch = async (url, options = {}) => {

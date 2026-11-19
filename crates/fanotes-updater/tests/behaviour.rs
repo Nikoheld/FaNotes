@@ -233,6 +233,60 @@ fn a_beta_manifest_is_refused_when_the_picked_release_is_stable() {
 }
 
 #[test]
+fn an_older_signed_manifest_replayed_under_a_newer_release_is_refused_on_a_fresh_profile() {
+    // 2026.11.5 is the newest release, but its manifest asset is the genuine,
+    // signed 2026.11.3 manifest. A fresh profile has no highest-seen version,
+    // so only the binding of latestVersion to the picked tag catches it.
+    let w = World::new();
+    w.serve_stable_latest("2026.11.5");
+    w.serve_manifest(
+        "2026.11.5",
+        "stable",
+        &linux_payload("2026.11.2", "2026.11.3", "stable", &w.build, false),
+    );
+    let error = w
+        .client("2026.11.2", Channel::Stable, None)
+        .check()
+        .unwrap_err();
+    assert!(error.message.contains("anderen Release"), "{error}");
+}
+
+#[test]
+fn a_stable_version_in_a_beta_manifest_is_refused() {
+    // The manifest channel is bound to the kind of the version it offers.
+    let w = World::new();
+    w.serve_stable_latest("2026.11.2");
+    w.mock.json(
+        &format!("{API}?per_page=100"),
+        &json!([release_row("2026.11.3-beta.1", "beta")]),
+    );
+    w.serve_manifest(
+        "2026.11.3-beta.1",
+        "beta",
+        &linux_payload("2026.11.2", "2026.11.3-beta.1", "beta", &w.build, false),
+    );
+    let mut client = w.client("2026.11.2", Channel::Beta, None);
+    expect_available(client.check().unwrap());
+    let w = World::new();
+    w.serve_stable_latest("2026.11.2");
+    w.mock.json(
+        &format!("{API}?per_page=100"),
+        &json!([release_row("2026.11.3-beta.1", "beta")]),
+    );
+    let mut payload = linux_payload("2026.11.2", "2026.11.3-beta.1", "beta", &w.build, false);
+    payload["latestVersion"] = json!("2026.11.4");
+    w.serve_manifest("2026.11.3-beta.1", "beta", &payload);
+    let error = w
+        .client("2026.11.2", Channel::Beta, None)
+        .check()
+        .unwrap_err();
+    assert!(
+        error.message.contains("Kanal des Update-Manifests"),
+        "{error}"
+    );
+}
+
+#[test]
 fn switching_beta_to_stable_never_downgrades() {
     let w = World::new();
     w.serve_stable_latest("2026.11.2");
@@ -681,6 +735,7 @@ fn the_production_key_is_pinned_and_parses() {
         Platform::Linux,
         fanotes_updater::EXPECTED_KEY_ID,
         Channel::Stable,
+        None,
     )
     .unwrap_err();
     assert!(error.message.contains("unbekannten Schlüssel"), "{error}");
@@ -693,6 +748,7 @@ fn the_production_key_is_pinned_and_parses() {
         Platform::Linux,
         fanotes_updater::EXPECTED_KEY_ID,
         Channel::Stable,
+        None,
     )
     .unwrap_err();
     assert!(
@@ -1299,6 +1355,7 @@ fn divergence_non_string_urls_are_rejected_not_coerced() {
         Platform::Linux,
         KEY_ID,
         Channel::Stable,
+        None,
     )
     .unwrap_err();
     assert!(error.message.contains("ungültig"), "{error}");

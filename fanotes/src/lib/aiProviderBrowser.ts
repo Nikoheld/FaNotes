@@ -1,6 +1,7 @@
 import type { AiConnection, AiModel, AiProviderId, AiTransformResult, LmStudioAction } from '../types'
 import { isPdfImportantAction, PDF_IMPORTANT_SYSTEM } from './pdfImportantMarks'
 import { listBrowserLmStudioModels, transformWithBrowserLmStudio } from './lmStudioBrowser'
+import { isLocalAiHostname } from '../../electron/localAiHost.mjs'
 
 type JsonObject = Record<string, unknown>
 type TransformPayload = {
@@ -26,12 +27,7 @@ const normalizeLocalUrl = (raw: string, provider: AiProviderId) => {
   let parsed: URL
   try { parsed = new URL(raw.trim()) } catch { throw new Error('Gib eine vollständige lokale Server-Adresse ein.') }
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname.replace(/\/+$/gu, '')) throw new Error('Die lokale AI-Adresse darf nur aus Protokoll, Host und Port bestehen.')
-  const hostname = parsed.hostname.toLocaleLowerCase('en-US').replace(/^\[|\]$/gu, '')
-  const octets = hostname.split('.').map(Number)
-  const ipv4 = octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
-  const privateIpv4 = ipv4 && (octets[0] === 10 || octets[0] === 127 || (octets[0] === 169 && octets[1] === 254) || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168))
-  const privateIpv6 = hostname === '::1' || hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:')
-  if (hostname !== 'localhost' && !privateIpv4 && !privateIpv6) throw new Error(`${provider} darf nur auf localhost oder im privaten LAN liegen.`)
+  if (!isLocalAiHostname(parsed.hostname)) throw new Error(`${provider} darf nur auf localhost oder im privaten LAN liegen.`)
   return parsed.origin
 }
 

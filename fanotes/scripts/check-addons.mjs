@@ -482,8 +482,11 @@ try {
   assert.match(electron, /cookie|authorization/iu)
   const main = src('electron/main.cjs')
   assert.match(main, /registerAddonIpc\(/u)
-  assert.match(main, /addonSource: \{ type: 'string', max: 400 \}/u)
-  assert.match(main, /addonsAutoUpdate: \{ type: 'boolean' \}/u)
+  // The settings schema moved from main.cjs to settings-sanitize.cjs.
+  assert.match(main, /require\('\.\/settings-sanitize\.cjs'\)/u)
+  const settingsSchema = src('electron/settings-sanitize.cjs')
+  assert.match(settingsSchema, /addonSource: \{ type: 'string', max: 400 \}/u)
+  assert.match(settingsSchema, /addonsAutoUpdate: \{ type: 'boolean' \}/u)
   const preload = src('electron/preload.cjs')
   for (const channel of ['addonsFetch', 'addonsList', 'addonsSave', 'addonsRemove', 'addonsReadFile', 'addonsWriteFiles', 'addonsReadData', 'addonsWriteData', 'addonsNetFetch']) {
     assert.ok(preload.includes(channel), `preload exposes ${channel}`)

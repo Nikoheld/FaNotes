@@ -9,6 +9,7 @@
 // touches the vault; a broken add-on file can never corrupt a note.
 
 const dns = require('node:dns')
+const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const https = require('node:https')
 const net = require('node:net')
@@ -247,7 +248,14 @@ const createAddonStore = (rootDir) => {
   const writeAtomic = async (target, content) => {
     const temp = `${target}.${process.pid}.${Date.now()}.tmp`
     try {
-      await fsp.writeFile(temp, content, { encoding: 'utf8', mode: 0o600 })
+      // Exclusive and O_NOFOLLOW: never write through something planted at the temporary name.
+      const handle = await fsp.open(temp, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0), 0o600)
+      try {
+        await handle.writeFile(content, 'utf8')
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
       await fsp.rename(temp, target)
     } catch (error) {
       await fsp.rm(temp, { force: true }).catch(() => {})

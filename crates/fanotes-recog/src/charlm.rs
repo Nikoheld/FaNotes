@@ -119,36 +119,35 @@ impl CharLm {
         for _ in 1..order {
             let contexts = reader.u32()? as usize;
             let entries = reader.u32()? as usize;
-            let mut table = Table {
-                hashes: Vec::with_capacity(contexts),
-                first: Vec::with_capacity(contexts),
-                backoff: Vec::with_capacity(contexts),
-                symbols: Vec::with_capacity(entries),
-                costs: Vec::with_capacity(entries),
-            };
-            let raw = reader.take(
+            // Both counts are untrusted. Take (and so length-check) their bytes
+            // before allocating anything: a corrupt header claiming 4 G records
+            // must fail with an error, not abort the process on a huge
+            // `Vec::with_capacity`. Every capacity below is bounded by the file.
+            let context_bytes = reader.take(
                 contexts
                     .checked_mul(9)
                     .ok_or(CharLmError("Das Sprachmodell ist ungültig."))?,
             )?;
-            for record in raw.as_chunks::<9>().0 {
-                table.hashes.push(u32::from_le_bytes([
-                    record[0], record[1], record[2], record[3],
-                ]));
-                table.first.push(u32::from_le_bytes([
-                    record[4], record[5], record[6], record[7],
-                ]));
-                table.backoff.push(record[8]);
-            }
-            let raw = reader.take(
+            let entry_bytes = reader.take(
                 entries
                     .checked_mul(2)
                     .ok_or(CharLmError("Das Sprachmodell ist ungültig."))?,
             )?;
-            for entry in raw.as_chunks::<2>().0 {
-                table.symbols.push(entry[0]);
-                table.costs.push(entry[1]);
-            }
+            let records = context_bytes.as_chunks::<9>().0;
+            let pairs = entry_bytes.as_chunks::<2>().0;
+            let table = Table {
+                hashes: records
+                    .iter()
+                    .map(|record| u32::from_le_bytes([record[0], record[1], record[2], record[3]]))
+                    .collect(),
+                first: records
+                    .iter()
+                    .map(|record| u32::from_le_bytes([record[4], record[5], record[6], record[7]]))
+                    .collect(),
+                backoff: records.iter().map(|record| record[8]).collect(),
+                symbols: pairs.iter().map(|entry| entry[0]).collect(),
+                costs: pairs.iter().map(|entry| entry[1]).collect(),
+            };
             let sorted = table.hashes.windows(2).all(|pair| pair[0] < pair[1]);
             let ordered = table.first.windows(2).all(|pair| pair[0] <= pair[1])
                 && table
@@ -215,5 +214,43 @@ impl CharLm {
             }
         }
         (backoff + u32::from(self.unigram[usize::from(symbol)])) as f32 / COST_SCALE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CharLm, MAGIC};
+
+    fn header(contexts: u32, entries: u32) -> Vec<u8> {
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend(1u16.to_le_bytes());
+        bytes.push(2); // order
+        bytes.push(0); // flags
+        bytes.extend(2u32.to_le_bytes());
+        bytes.extend(b"ab");
+        bytes.extend([10, 20, 30]); // unigram: blank + two letters
+        bytes.extend(contexts.to_le_bytes());
+        bytes.extend(entries.to_le_bytes());
+        bytes
+    }
+
+    /// The counts used to size `Vec::with_capacity` before the length check,
+    /// so a few corrupt header bytes could demand tens of gigabytes.
+    #[test]
+    fn corrupt_counts_fail_without_a_huge_allocation() {
+        for (contexts, entries) in [(u32::MAX, u32::MAX), (u32::MAX, 0), (0, u32::MAX), (1, 0)] {
+            let error = CharLm::parse(&header(contexts, entries)).err();
+            assert!(error.is_some(), "{contexts} contexts, {entries} entries");
+        }
+        // The same header with real records still parses.
+        let mut valid = header(1, 1);
+        valid.extend(0u32.to_le_bytes()); // hash
+        valid.extend(0u32.to_le_bytes()); // first entry
+        valid.push(0); // backoff
+        valid.extend([1, 5]); // symbol, cost
+        let Ok(lm) = CharLm::parse(&valid) else {
+            panic!("a valid model must parse");
+        };
+        assert_eq!(lm.order(), 2);
     }
 }

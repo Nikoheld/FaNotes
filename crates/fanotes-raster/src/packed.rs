@@ -32,11 +32,18 @@ pub fn strokes_from_packed(
     let mut strokes = Vec::with_capacity(header.len() / PACKED_STROKE_FIELDS);
     let mut cursor = 0_usize;
     for fields in header.as_chunks::<PACKED_STROKE_FIELDS>().0 {
+        // The count is untrusted (it comes across wasm from the page). `as`
+        // saturates a huge float at `usize::MAX`, so the arithmetic is checked:
+        // an overflowing or out-of-range count ends the list like a truncated
+        // tail. Every allocation below is bounded by the slices' real lengths.
         let count = finite_or(fields[0], 0.0).max(0.0) as usize;
-        let end = cursor + count * PACKED_POINT_FIELDS;
-        if end > points.len() {
+        let Some(end) = count
+            .checked_mul(PACKED_POINT_FIELDS)
+            .and_then(|len| cursor.checked_add(len))
+            .filter(|end| *end <= points.len())
+        else {
             break;
-        }
+        };
         let stroke_points = points[cursor..end]
             .as_chunks::<PACKED_POINT_FIELDS>()
             .0
@@ -97,4 +104,47 @@ pub fn pack_strokes(strokes: &[InkStroke], symbols: &[Arc<Symbol>]) -> (Vec<f64>
         }
     }
     (header, points)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{strokes_from_packed, PACKED_STROKE_FIELDS};
+
+    fn header(count: f64) -> Vec<f64> {
+        let mut fields = vec![0.0; PACKED_STROKE_FIELDS];
+        fields[0] = count;
+        fields[1] = 4.0;
+        fields[7] = f64::NAN;
+        fields[8] = f64::NAN;
+        fields[9] = -1.0;
+        fields
+    }
+
+    /// A hostile count used to overflow `count * 3` (a debug-build panic, a
+    /// wrapped and possibly in-range `end` in release builds).
+    #[test]
+    fn a_huge_point_count_ends_the_list_instead_of_overflowing() {
+        let points = vec![1.0, 2.0, 0.5, 3.0, 4.0, 0.5];
+        for hostile in [
+            f64::MAX,
+            1e300,
+            usize::MAX as f64,
+            (usize::MAX / 3 + 1) as f64,
+            ((usize::MAX / 3) * 2) as f64,
+        ] {
+            let mut packed = header(2.0);
+            packed.extend(header(hostile));
+            packed.extend(header(0.0));
+            let strokes = strokes_from_packed(&packed, &points, &[]);
+            assert_eq!(strokes.len(), 1, "count {hostile}");
+            assert_eq!(strokes[0].points.len(), 2);
+        }
+        // A count past the end of the points is a truncated tail, too.
+        let strokes = strokes_from_packed(&header(3.0), &points, &[]);
+        assert!(strokes.is_empty());
+        // Infinity is not finite, so it counts as zero points.
+        let strokes = strokes_from_packed(&header(f64::INFINITY), &points, &[]);
+        assert_eq!(strokes.len(), 1);
+        assert!(strokes[0].points.is_empty());
+    }
 }

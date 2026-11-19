@@ -75,6 +75,7 @@ const {
 } = require('./famd.cjs')
 const { companionInkNeedsRecord, isUnexplainedEmptyPage, recordDocumentForEmptyCompanion, refusesEmptyInkSave } = require('./ink-save-guard.cjs')
 const { applyNoteTextFieldOps } = require('./noteTextFieldMerge.mjs')
+const { isLocalAiHostname } = require('./localAiHost.mjs')
 const {
   companionNameTaken,
   companionPaths,
@@ -3300,19 +3301,7 @@ function normalizeLmStudioBaseUrl(rawUrl) {
     throw new Error('Die LM-Studio-Adresse darf nur eine lokale HTTP(S)-Adresse ohne Zugangsdaten enthalten.')
   }
 
-  const hostname = parsed.hostname.toLocaleLowerCase('en-US').replace(/^\[|\]$/gu, '')
-  const octets = hostname.split('.').map((part) => Number(part))
-  const isIpv4 = octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
-  const isPrivateIpv4 = isIpv4 && (
-    octets[0] === 0 ||
-    octets[0] === 10 ||
-    octets[0] === 127 ||
-    (octets[0] === 169 && octets[1] === 254) ||
-    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
-    (octets[0] === 192 && octets[1] === 168)
-  )
-  const isPrivateIpv6 = hostname === '::1' || hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:')
-  if (hostname !== 'localhost' && !isPrivateIpv4 && !isPrivateIpv6) {
+  if (!isLocalAiHostname(parsed.hostname)) {
     throw new Error('Aus Datenschutzgründen sind für LM Studio nur localhost und private LAN-Adressen erlaubt.')
   }
 

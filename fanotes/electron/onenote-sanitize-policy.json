@@ -1,0 +1,34 @@
+{
+  "description": "Allowlist for imported OneNote pages. Read by electron/onenote-sanitizer.bundle.cjs (built from scripts/onenote-sanitizer-entry.mjs with hast-util-sanitize, the sanitiser behind rehype-sanitize) and by crates/fanotes-host/src/onenote.rs (ammonia). Elements outside the tag lists are unwrapped; inside <svg> only `svgTags` and inside <math> only `mathTags` may appear (anything else is removed with its content, so nothing can change namespace when the page is parsed again); `dropWithContent` elements are removed with everything inside them. No URL attribute except `img src` with a data:image/ URL survives.",
+  "htmlTags": [
+    "a", "abbr", "b", "bdi", "bdo", "big", "blockquote", "br", "caption", "center", "cite", "code", "col", "colgroup",
+    "dd", "del", "dfn", "div", "dl", "dt", "em", "figcaption", "figure", "font", "h1", "h2", "h3", "h4", "h5", "h6",
+    "hr", "i", "img", "ins", "kbd", "li", "mark", "ol", "p", "pre", "q", "rp", "rt", "ruby", "s", "samp", "small",
+    "span", "strike", "strong", "style", "sub", "sup", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "tt",
+    "u", "ul", "var", "wbr", "svg", "math"
+  ],
+  "svgTags": [
+    "svg", "a", "g", "path", "circle", "ellipse", "line", "polyline", "polygon", "rect", "defs", "clipPath",
+    "linearGradient", "radialGradient", "stop", "text", "tspan"
+  ],
+  "mathTags": [
+    "math", "mi", "mo", "mn", "ms", "mtext", "mrow", "msup", "msub", "msubsup", "mfrac", "msqrt", "mroot", "mover",
+    "munder", "munderover", "mtable", "mtr", "mtd", "mspace", "mstyle", "mpadded", "mphantom", "menclose"
+  ],
+  "dropWithContent": [
+    "script", "noscript", "template", "title", "iframe", "frame", "frameset", "noframes", "object", "embed", "applet",
+    "audio", "video", "source", "track", "form", "button", "textarea", "select", "option", "datalist", "canvas"
+  ],
+  "attributes": [
+    "class", "id", "style", "title", "lang", "dir", "role", "width", "height", "align", "valign", "border",
+    "cellspacing", "cellpadding", "colspan", "rowspan", "span", "alt", "start", "type", "value", "color", "face", "size",
+    "aria-checked", "aria-disabled", "aria-hidden", "aria-label", "data-fanotes-missing-image",
+    "viewBox", "d", "fill", "fill-opacity", "fill-rule", "clip-rule", "clip-path", "stroke", "stroke-width",
+    "stroke-linejoin", "stroke-linecap", "stroke-opacity", "stroke-dasharray", "stroke-miterlimit", "opacity",
+    "transform", "x", "y", "x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "points", "offset", "stop-color",
+    "stop-opacity", "gradientUnits", "gradientTransform", "display", "preserveAspectRatio", "version",
+    "mathvariant", "displaystyle", "scriptlevel", "fence", "stretchy", "separator", "lspace", "rspace", "accent",
+    "linethickness", "columnalign", "rowalign", "notation"
+  ],
+  "imageSource": "data:image/"
+}

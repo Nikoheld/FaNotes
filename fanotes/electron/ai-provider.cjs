@@ -2,6 +2,7 @@
 
 const { Buffer } = require('node:buffer')
 const { completeGrokBuild, listGrokBuildModels } = require('./grok-build.cjs')
+const { isLocalAiHostname } = require('./localAiHost.mjs')
 
 const PROVIDERS = new Set(['lmstudio', 'ollama', 'openai', 'gemini', 'anthropic', 'grok', 'opencode'])
 const LOCAL_PROVIDERS = new Set(['lmstudio', 'ollama', 'opencode'])
@@ -40,12 +41,7 @@ function normalizeLocalUrl(rawUrl, provider) {
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) {
     throw new Error(`Die ${label}-Adresse darf nur eine lokale HTTP(S)-Adresse ohne eingebettete Zugangsdaten enthalten.`)
   }
-  const hostname = parsed.hostname.toLocaleLowerCase('en-US').replace(/^\[|\]$/gu, '')
-  const octets = hostname.split('.').map(Number)
-  const ipv4 = octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255)
-  const privateIpv4 = ipv4 && (octets[0] === 0 || octets[0] === 10 || octets[0] === 127 || (octets[0] === 169 && octets[1] === 254) || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168))
-  const privateIpv6 = hostname === '::1' || hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:')
-  if (hostname !== 'localhost' && !privateIpv4 && !privateIpv6) throw new Error(`${label} darf aus Datenschutzgründen nur auf localhost oder im privaten LAN liegen.`)
+  if (!isLocalAiHostname(parsed.hostname)) throw new Error(`${label} darf aus Datenschutzgründen nur auf localhost oder im privaten LAN liegen.`)
   if (parsed.pathname.replace(/\/+$/gu, '')) throw new Error(`Die ${label}-Adresse darf keinen zusätzlichen Pfad enthalten.`)
   return parsed.origin
 }

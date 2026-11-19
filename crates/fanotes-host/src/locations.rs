@@ -97,11 +97,9 @@ impl FolderLocations {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         }
-        let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
-        fs::write(&temporary, text.as_bytes()).map_err(|error| error.to_string())?;
-        fs::rename(&temporary, &path)
-            .map_err(|error| vault::node_rename_error(&temporary, &path, &error))?;
-        Ok(())
+        // The shared writer: a random temporary name opened exclusively with
+        // `O_NOFOLLOW`, fsync, rename, then a parent fsync.
+        crate::notes::atomic_write(&path, text.as_bytes(), 0o600)
     }
 
     pub fn paths(&self, logical: &str) -> Option<&[PathBuf]> {

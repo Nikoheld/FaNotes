@@ -308,21 +308,55 @@ fn load_characters(directory: &Path, manifest_text: &str) -> Result<Vec<String>,
     Ok(characters)
 }
 
+/// Where the model, the sidecar and ONNX Runtime are looked up.
+///
+/// Release builds search only the explicit `FANOTES_*` overrides and the
+/// directories beside the running executable. The current working directory
+/// and the compile-time source tree are development fallbacks that exist only
+/// in debug builds, so a `fanotes-ocr` planted in the directory FaNotes was
+/// started from is never executed.
+fn exe_dir() -> Option<PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+}
+
+/// Debug builds also look in the checkout: the working directory (the repo
+/// root or `fanotes/`) and the source tree this crate was compiled from.
+#[cfg(debug_assertions)]
+fn dev_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd.clone());
+        roots.push(cwd.join(".."));
+    }
+    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
+    roots
+}
+
 fn ocr_directory() -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     if let Ok(dir) = std::env::var("FANOTES_OCR_DIR") {
         candidates.push(PathBuf::from(dir));
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("fanotes/public/ocr"));
-        candidates.push(cwd.join("public/ocr"));
+    candidates.extend(
+        crate::resources::candidate_roots()
+            .into_iter()
+            .map(|root| root.join("ocr")),
+    );
+    #[cfg(debug_assertions)]
+    for root in dev_roots() {
+        candidates.push(root.join("fanotes/public/ocr"));
     }
-    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fanotes/public/ocr"));
     candidates
         .into_iter()
         .find(|path| path.join("manifest.json").is_file())
         .ok_or_else(|| "Unbekanntes natives Handschriftmodell.".to_owned())
 }
+
+const OCR_UNAVAILABLE: &str = "Die native ONNX-Laufzeit ist nicht verfügbar.";
+const OCR_BROKEN: &str = "Die native OCR-Laufzeit ist beschädigt.";
+const MAX_EXECUTABLE_BYTES: u64 = 64 * 1024 * 1024;
 
 fn ocr_executable() -> Result<PathBuf, String> {
     let name = if cfg!(windows) {
@@ -330,50 +364,115 @@ fn ocr_executable() -> Result<PathBuf, String> {
     } else {
         "fanotes-ocr"
     };
-    let platform = format!("{}-{}", std::env::consts::OS, arch_name());
-    let mut candidates = Vec::new();
+    // Every candidate here must match the `runtime-manifest.json` beside it.
+    let mut pinned = Vec::new();
     if let Ok(path) = std::env::var("FANOTES_OCR_BIN") {
-        candidates.push(PathBuf::from(path));
+        pinned.push(PathBuf::from(path));
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("fanotes/native-ocr").join(&platform).join(name));
-        candidates.push(cwd.join("target/debug").join(name));
-        candidates.push(cwd.join("target/release").join(name));
+    if let Some(dir) = exe_dir() {
+        pinned.push(dir.join("native-ocr").join(name));
+        pinned.push(dir.join("resources/native-ocr").join(name));
+        pinned.push(dir.join("../resources/native-ocr").join(name));
     }
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    candidates.push(root.join("fanotes/native-ocr").join(&platform).join(name));
-    candidates.push(root.join("target/debug").join(name));
-    candidates
-        .into_iter()
-        .find(|path| path.is_file())
-        .ok_or_else(|| "Die native ONNX-Laufzeit ist nicht verfügbar.".to_owned())
+    #[cfg(debug_assertions)]
+    {
+        // The committed builds: `native-ocr/linux-x64`, `native-ocr/win32-x64`.
+        let os = match std::env::consts::OS {
+            "windows" => "win32",
+            other => other,
+        };
+        let platform = format!("{os}-{}", arch_name());
+        for root in dev_roots() {
+            pinned.push(root.join("fanotes/native-ocr").join(&platform).join(name));
+        }
+    }
+    if let Some(found) = pinned.into_iter().find(|path| path.is_file()) {
+        verify_executable(&found)?;
+        return Ok(found);
+    }
+    // A freshly built sidecar in a checkout has no manifest; debug builds only.
+    #[cfg(debug_assertions)]
+    for root in dev_roots() {
+        for profile in ["target/debug", "target/release"] {
+            let path = root.join(profile).join(name);
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
+    }
+    Err(OCR_UNAVAILABLE.to_owned())
+}
+
+/// The sidecar must be the build its `runtime-manifest.json` pins: same file
+/// name, size and SHA-256, the check `electron/native-ocr.cjs` runs.
+fn verify_executable(executable: &Path) -> Result<(), String> {
+    let meta = std::fs::symlink_metadata(executable).map_err(|_| OCR_UNAVAILABLE.to_owned())?;
+    if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_EXECUTABLE_BYTES {
+        return Err(OCR_UNAVAILABLE.to_owned());
+    }
+    let manifest_path = executable
+        .parent()
+        .map(|dir| dir.join("runtime-manifest.json"))
+        .ok_or_else(|| OCR_BROKEN.to_owned())?;
+    let manifest_meta =
+        std::fs::symlink_metadata(&manifest_path).map_err(|_| OCR_BROKEN.to_owned())?;
+    if !manifest_meta.is_file() || manifest_meta.len() > 64 * 1024 {
+        return Err(OCR_BROKEN.to_owned());
+    }
+    let manifest: Value = std::fs::read(&manifest_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .ok_or_else(|| OCR_BROKEN.to_owned())?;
+    let expected = &manifest["executable"];
+    let file_name = executable.file_name().and_then(|name| name.to_str());
+    let expected_sha = expected["sha256"].as_str().unwrap_or("");
+    if manifest["format"] != "fanotes-native-ocr-runtime-v1"
+        || manifest["engine"] != ENGINE
+        || expected["file"].as_str() != file_name
+        || expected["size"].as_u64() != Some(meta.len())
+        || expected_sha.len() != 64
+    {
+        return Err(OCR_BROKEN.to_owned());
+    }
+    let bytes = std::fs::read(executable).map_err(|_| OCR_BROKEN.to_owned())?;
+    let actual = Sha256::digest(&bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if actual != expected_sha {
+        return Err(OCR_BROKEN.to_owned());
+    }
+    Ok(())
 }
 
 fn runtime_library() -> Result<PathBuf, String> {
     let file = fanotes_ort::default_runtime_file();
-    let napi = PathBuf::from("node_modules/onnxruntime-node/bin/napi-v3")
-        .join(std::env::consts::OS)
-        .join(arch_name())
-        .join(file);
     let mut candidates = Vec::new();
     if let Ok(path) = std::env::var("FANOTES_ORT_RUNTIME") {
         candidates.push(PathBuf::from(path));
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("fanotes").join(&napi));
-        candidates.push(cwd.join(&napi));
+    if let Some(dir) = exe_dir() {
+        candidates.push(dir.join("native-ocr").join(file));
+        candidates.push(dir.join("resources/native-ocr").join(file));
+        candidates.push(dir.join("../resources/native-ocr").join(file));
     }
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../fanotes")
-            .join(&napi),
-    );
+    #[cfg(debug_assertions)]
+    {
+        let napi = PathBuf::from("node_modules/onnxruntime-node/bin/napi-v3")
+            .join(std::env::consts::OS)
+            .join(arch_name())
+            .join(file);
+        for root in dev_roots() {
+            candidates.push(root.join("fanotes").join(&napi));
+        }
+    }
     candidates
         .into_iter()
         .find(|path| path.is_file())
         .ok_or_else(|| format!("Die native ONNX-Laufzeit ist nicht verfügbar: {file}"))
 }
 
+#[cfg(debug_assertions)]
 fn arch_name() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "x64",
@@ -384,11 +483,62 @@ fn arch_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_characters, native_ocr_idle_delay, ocr_thread_count, parse_line};
+    use super::{
+        load_characters, native_ocr_idle_delay, ocr_thread_count, parse_line, verify_executable,
+        OCR_BROKEN,
+    };
     use base64::Engine;
     use serde_json::json;
     use sha2::{Digest, Sha256};
     use std::time::Duration;
+
+    #[test]
+    fn only_the_sidecar_its_runtime_manifest_pins_may_start() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-ocr-pin-{}-{}",
+            std::process::id(),
+            crate::notes::random_suffix().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let executable = dir.join("fanotes-ocr");
+        let body = b"#!/bin/sh\nexit 0\n".to_vec();
+        std::fs::write(&executable, &body).unwrap();
+        let manifest = |sha: String, size: usize| {
+            json!({
+                "format": "fanotes-native-ocr-runtime-v1",
+                "engine": "fanotes-ort-cpu",
+                "executable": { "file": "fanotes-ocr", "size": size, "sha256": sha },
+            })
+            .to_string()
+        };
+        let digest = Sha256::digest(&body)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let manifest_path = dir.join("runtime-manifest.json");
+        assert_eq!(verify_executable(&executable).unwrap_err(), OCR_BROKEN);
+        std::fs::write(&manifest_path, manifest(digest.clone(), body.len())).unwrap();
+        verify_executable(&executable).unwrap();
+        // A replaced executable of the same size is refused.
+        let mut swapped = body.clone();
+        swapped[body.len() - 2] = b'1';
+        std::fs::write(&executable, &swapped).unwrap();
+        assert_eq!(verify_executable(&executable).unwrap_err(), OCR_BROKEN);
+        std::fs::write(&executable, &body).unwrap();
+        std::fs::write(&manifest_path, manifest(digest, body.len() + 1)).unwrap();
+        assert_eq!(verify_executable(&executable).unwrap_err(), OCR_BROKEN);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The committed sidecar passes the same check.
+    #[test]
+    fn the_committed_sidecar_matches_its_manifest() {
+        let staged = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fanotes/native-ocr/linux-x64/fanotes-ocr");
+        if staged.is_file() {
+            verify_executable(&staged).unwrap();
+        }
+    }
 
     #[test]
     fn native_ocr_idle_delay_follows_the_desktop() {

@@ -1133,6 +1133,21 @@ fn write_exclusive(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// Adds `O_NOFOLLOW` on Unix, so the open fails with `ELOOP` instead of
+/// following a symlink planted at the final path component.
+///
+/// The flag's value differs per target (`0x20000` on x86_64 Linux, `0x8000`
+/// on aarch64 Linux, where `0x20000` is `O_LARGEFILE`, and `0x100` on macOS),
+/// so it always comes from `libc`, never from a literal.
+pub(crate) fn no_follow(options: &mut fs::OpenOptions) -> &mut fs::OpenOptions {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    options
+}
+
 fn open_new_file(path: &Path, mode: u32) -> Result<fs::File, String> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -1140,17 +1155,8 @@ fn open_new_file(path: &Path, mode: u32) -> Result<fs::File, String> {
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(mode);
-        let nofollow = if cfg!(target_os = "linux") {
-            0x20000
-        } else if cfg!(target_os = "macos") {
-            0x0100
-        } else {
-            0
-        };
-        if nofollow != 0 {
-            options.custom_flags(nofollow);
-        }
     }
+    no_follow(&mut options);
     #[cfg(not(unix))]
     {
         let _ = mode;
@@ -1313,6 +1319,31 @@ mod publish_tests {
         mtime_millis_of, publish_new_file, record_history, write_note_file, NewFileError,
     };
     use std::time::UNIX_EPOCH;
+
+    /// `0x20000` was hard-coded as `O_NOFOLLOW`; on aarch64 Linux that is
+    /// `O_LARGEFILE`, which silently dropped the symlink guard.
+    #[cfg(unix)]
+    #[test]
+    fn no_follow_refuses_a_symlink_on_this_target() {
+        let dir = std::env::temp_dir().join(format!(
+            "fanotes-nofollow-{}-{}",
+            std::process::id(),
+            super::random_suffix().unwrap()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let real = dir.join("real.md");
+        std::fs::write(&real, b"keep").unwrap();
+        let link = dir.join("link.md");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true);
+        let error = super::no_follow(&mut options).open(&link).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::ELOOP));
+        // The writer's own open is refused too, and the link target is untouched.
+        assert!(super::open_new_file(&link, 0o600).is_err());
+        assert_eq!(std::fs::read(&real).unwrap(), b"keep");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn a_new_file_stays_private_and_an_existing_name_is_left_alone() {

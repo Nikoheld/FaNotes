@@ -284,16 +284,24 @@ fn locate(folder: &str, error: &str) -> Result<PathBuf, String> {
     Err(error.to_owned())
 }
 
-fn candidate_roots() -> Vec<PathBuf> {
+/// Resource roots: the explicit override, then the directories beside the
+/// running executable. The source tree this crate was compiled from is a
+/// development fallback for debug builds only; in a release build that path
+/// names a directory on the build machine, which anyone could create on the
+/// user's machine.
+pub(crate) fn candidate_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(dir) = std::env::var("FANOTES_RESOURCES_DIR") {
         if !dir.is_empty() {
             roots.push(PathBuf::from(dir));
         }
     }
-    let compiled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fanotes");
-    roots.push(compiled.join("public"));
-    roots.push(compiled.join("dist"));
+    #[cfg(debug_assertions)]
+    {
+        let compiled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fanotes");
+        roots.push(compiled.join("public"));
+        roots.push(compiled.join("dist"));
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             roots.push(dir.join("public"));

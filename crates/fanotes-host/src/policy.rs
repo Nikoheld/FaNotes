@@ -34,20 +34,10 @@ pub fn local_ai_origin(raw_url: &str, provider: &str) -> Result<String, String> 
     {
         return Err(format!("Die {label}-Adresse darf nur eine lokale HTTP(S)-Adresse ohne eingebettete Zugangsdaten enthalten."));
     }
-    let hostname = url
-        .host_str()
-        .unwrap_or("")
-        .trim_matches(['[', ']'])
-        .to_lowercase();
-    if hostname.is_empty() {
+    if url.host_str().unwrap_or("").is_empty() {
         return Err(format!("Gib eine vollständige {label}-Adresse ein."));
     }
-    let private_ipv4 = parse_ipv4(&hostname).is_some_and(is_lan_ipv4);
-    let private_ipv6 = hostname == "::1"
-        || hostname.starts_with("fc")
-        || hostname.starts_with("fd")
-        || hostname.starts_with("fe80:");
-    if hostname != "localhost" && !private_ipv4 && !private_ipv6 {
+    if !is_local_ai_host(&url) {
         return Err(format!(
             "{label} darf aus Datenschutzgründen nur auf localhost oder im privaten LAN liegen."
         ));
@@ -76,17 +66,7 @@ pub fn lm_studio_origin(raw_url: &str) -> Result<String, String> {
     {
         return Err("Die LM-Studio-Adresse darf nur eine lokale HTTP(S)-Adresse ohne Zugangsdaten enthalten.".to_owned());
     }
-    let hostname = url
-        .host_str()
-        .unwrap_or("")
-        .trim_matches(['[', ']'])
-        .to_lowercase();
-    let private_ipv4 = parse_ipv4(&hostname).is_some_and(is_lan_ipv4);
-    let private_ipv6 = hostname == "::1"
-        || hostname.starts_with("fc")
-        || hostname.starts_with("fd")
-        || hostname.starts_with("fe80:");
-    if hostname != "localhost" && !private_ipv4 && !private_ipv6 {
+    if !is_local_ai_host(&url) {
         return Err("Aus Datenschutzgründen sind für LM Studio nur localhost und private LAN-Adressen erlaubt.".to_owned());
     }
     let path = url.path().trim_end_matches('/');
@@ -151,40 +131,21 @@ fn parse_net_ipv4(value: &str) -> Option<[u8; 4]> {
     (count == 4).then_some(parts)
 }
 
-fn parse_ipv4(value: &str) -> Option<[u8; 4]> {
-    let mut parts = [0u8; 4];
-    let mut count = 0;
-    for part in value.split('.') {
-        if count == 4 {
-            return None;
-        }
-        parts[count] = js_number_octet(part)?;
-        count += 1;
-    }
-    (count == 4).then_some(parts)
-}
-
-/// One dotted label the way `Number(part)` accepts it in the desktop address check.
+/// Whether a local AI server URL names this device or the private LAN, the
+/// same rule as `electron/localAiHost.mjs` (shared vectors:
+/// `fanotes/scripts/fixtures/local-ai-hosts.json`).
 ///
-/// `1e1` is 10, `0b10` is 2, and `+1` is 1. A fraction is not an address byte.
-fn js_number_octet(part: &str) -> Option<u8> {
-    if part.is_empty() {
-        return None;
+/// The URL parser has already turned decimal, octal and hex IPv4 forms into
+/// addresses. Every other name goes through DNS and may point anywhere, so
+/// only the literal `localhost` is accepted: `fd.example.com` and
+/// `fcbank.com` are not IPv6 unique-local addresses.
+fn is_local_ai_host(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => is_lan_ipv4(address.octets()),
+        Some(url::Host::Ipv6(address)) => is_lan_ipv6(address),
+        None => false,
     }
-    let value = if let Some(digits) = part.strip_prefix("0b") {
-        u32::from_str_radix(digits, 2).ok()?
-    } else if let Some(digits) = part.strip_prefix("0o") {
-        u32::from_str_radix(digits, 8).ok()?
-    } else if let Some(digits) = part.strip_prefix("0x") {
-        u32::from_str_radix(digits, 16).ok()?
-    } else {
-        let number: f64 = part.parse().ok()?;
-        if !number.is_finite() || number < 0.0 || number > 255.0 || number.fract() != 0.0 {
-            return None;
-        }
-        number as u32
-    };
-    u8::try_from(value).ok()
 }
 
 /// Local model servers use the desktop LAN list. Carrier-grade `100.64/10`
@@ -197,6 +158,18 @@ fn is_lan_ipv4(address: [u8; 4]) -> bool {
         || (a == 169 && b == 254)
         || (a == 172 && (16..=31).contains(&b))
         || (a == 192 && b == 168)
+}
+
+/// Loopback, link-local `fe80::/10`, unique-local `fc00::/7`, and IPv4-mapped
+/// addresses whose IPv4 part is on the LAN list.
+fn is_lan_ipv6(address: std::net::Ipv6Addr) -> bool {
+    let first = address.segments()[0];
+    address.is_loopback()
+        || (first & 0xffc0) == 0xfe80
+        || (first & 0xfe00) == 0xfc00
+        || address
+            .to_ipv4_mapped()
+            .is_some_and(|mapped| is_lan_ipv4(mapped.octets()))
 }
 
 fn is_private_ipv4(address: [u8; 4]) -> bool {
@@ -271,19 +244,12 @@ mod tests {
     }
 
     #[test]
-    fn a_scientific_octet_is_the_same_address_as_on_the_desktop() {
-        assert_eq!(
-            local_ai_origin("http://10.1.2.3e1:11434", "ollama").unwrap(),
-            "http://10.1.2.3e1:11434"
-        );
-        assert_eq!(
-            lm_studio_origin("http://127.0.0.0b10:1234").unwrap(),
-            "http://127.0.0.0b10:1234"
-        );
-        assert_eq!(
-            local_ai_origin("http://192.168.0.+1:9", "ollama").unwrap(),
-            "http://192.168.0.+1:9"
-        );
+    fn a_scientific_octet_is_a_dns_name_not_an_address() {
+        // `10.1.2.3e1` is a DNS name (the last label is not a number), so it
+        // may resolve anywhere and is not local.
+        assert!(local_ai_origin("http://10.1.2.3e1:11434", "ollama").is_err());
+        assert!(lm_studio_origin("http://127.0.0.0b10:1234").is_err());
+        assert!(local_ai_origin("http://192.168.0.+1:9", "ollama").is_err());
         assert!(local_ai_origin("http://8.8.8.1e1:11434", "ollama").is_err());
         assert!(addon_request_allowed("https://10.0.0.1e1/hook").is_ok());
         assert!(addon_request_allowed("https://10.0.0.0b1/hook").is_ok());
@@ -296,6 +262,38 @@ mod tests {
             addon_request_allowed("https://localhost/hook").unwrap_err(),
             "Add-ons dürfen nur öffentliche https-Adressen aufrufen."
         );
+    }
+
+    #[test]
+    fn local_ai_hosts_match_the_shared_vectors() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fanotes/scripts/fixtures/local-ai-hosts.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 50);
+        for case in cases {
+            let raw = case["url"].as_str().unwrap();
+            let local = case["local"].as_bool().unwrap();
+            let origin = url::Url::parse(raw).unwrap().origin().ascii_serialization();
+            for provider in ["lmstudio", "ollama", "opencode"] {
+                let got = local_ai_origin(raw, provider);
+                if local {
+                    assert_eq!(got.as_deref(), Ok(origin.as_str()), "{provider} {raw}");
+                } else {
+                    assert!(
+                        got.unwrap_err().contains("privaten LAN"),
+                        "{provider} {raw}"
+                    );
+                }
+            }
+            let got = lm_studio_origin(raw);
+            if local {
+                assert_eq!(got.as_deref(), Ok(origin.as_str()), "lm studio {raw}");
+            } else {
+                assert!(got.unwrap_err().contains("LAN"), "lm studio {raw}");
+            }
+        }
     }
 
     #[test]

@@ -398,6 +398,22 @@ async function inlineImages(html, pagePath, outputRoot) {
   })
 }
 
+let oneNoteSanitizer = null
+/**
+ * Parses the page with parse5 and cleans it with hast-util-sanitize (the
+ * sanitiser behind rehype-sanitize) against onenote-sanitize-policy.json, the
+ * allowlist the Rust host applies with ammonia. Event handlers, scripts, frames,
+ * forms and every URL attribute except inline `data:image/` sources are dropped,
+ * whatever the markup looks like (`<svg/onload=…>` included).
+ */
+function sanitizeOneNoteHtml(html) {
+  if (!oneNoteSanitizer) {
+    const { createOneNoteSanitizer } = require('./onenote-sanitizer.bundle.cjs')
+    oneNoteSanitizer = createOneNoteSanitizer(require('./onenote-sanitize-policy.json'))
+  }
+  return oneNoteSanitizer(html)
+}
+
 async function sanitizePage(pagePath, outputRoot) {
   const info = await fsp.lstat(pagePath)
   if (!info.isFile() || info.isSymbolicLink() || !info.size || info.size > MAX_HTML_BYTES) throw new Error('Eine OneNote-Seite ist leer oder zu groß.')
@@ -406,18 +422,17 @@ async function sanitizePage(pagePath, outputRoot) {
   const transcript = extractSearchText(html)
   const dimensions = pageDimensions(html)
   html = await inlineImages(html, pagePath, outputRoot)
+  // CSS that could fetch or run something is neutralised first; the HTML
+  // sanitiser runs last, so nothing after it can turn text back into markup.
   html = html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/giu, '')
-    .replace(/<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*>[\s\S]*?<\/(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)>/giu, '')
-    .replace(/<(?:iframe|frame|frameset|object|embed|audio|video|source|track|link|base|form|input|button|textarea|select)\b[^>]*\/?>/giu, '')
-    .replace(/\s+on[a-z][a-z0-9_-]*\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/giu, '')
-    .replace(/\s+(?:href|action|formaction|poster)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/giu, '')
     .replace(/(?:javascript|vbscript)\s*:/giu, '')
     .replace(/@import\s+[^;]+;?/giu, '')
     .replace(/url\s*\([^)]*\)/giu, 'none')
     .replace(/expression\s*\([^)]*\)/giu, '')
+  html = sanitizeOneNoteHtml(html)
   const guard = `${ONENOTE_PAGE_MARKER}${ONENOTE_PAGE_POLICY_META}<style id="fanotes-page-guard">html,body{width:${dimensions.width}px;min-width:${dimensions.width}px;min-height:${dimensions.height}px;overflow:hidden;background:#fff;color:#111}a{color:inherit;text-decoration:underline;pointer-events:none}</style>`
-  html = html.includes('<head>') ? html.replace('<head>', `<head>${guard}`) : `<!doctype html><html><head>${guard}</head><body>${html}</body></html>`
+  // The sanitised page is a body fragment; the guard always heads a fresh document.
+  html = `<!doctype html><html><head>${guard}</head><body>${html}</body></html>`
   if (Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) throw new Error('Eine eingebettete OneNote-Seite überschreitet nach der Bildübernahme die sichere Größe.')
   return { html, title: safeSegment(title, 'OneNote-Seite'), transcript, ...dimensions }
 }
@@ -643,6 +658,7 @@ async function importOneNoteToVault({ inputPath, vaultRoot, one2html, sevenZip }
 
 module.exports = {
   decodeHtmlEntities,
+  sanitizeOneNoteHtml,
   importOneNoteToVault,
   materializeOneNoteTools,
   pageDimensions,
