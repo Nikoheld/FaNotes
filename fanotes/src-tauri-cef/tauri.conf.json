@@ -1,0 +1,30 @@
+{
+  "productName": "FaNotes",
+  "version": "2026.11.3-beta.5",
+  "identifier": "de.fanotes.app",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "FaNotes",
+        "width": 1480,
+        "height": 940,
+        "minWidth": 940,
+        "minHeight": 640,
+        "resizable": true,
+        "backgroundColor": "#f7f6f3"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["../src-tauri/icons/32x32.png", "../src-tauri/icons/128x128.png", "../src-tauri/icons/icon.png"]
+  }
+}

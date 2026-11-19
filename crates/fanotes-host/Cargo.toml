@@ -19,13 +19,21 @@ sha1 = "0.10"
 sha2 = "0.10"
 regex = "1"
 unicode-normalization = "0.1"
-rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
+rfd = { version = "0.15", default-features = false }
 ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
 keyring = "4.2.0"
 libc = "0.2"
 url = "2.5"
 icu_collator = "2.3"
 icu_locale_core = "2.3"
+
+[features]
+default = ["dialogs-gtk3"]
+# File dialogs through GTK 3 (the Tauri 2 / WebKitGTK shell).
+dialogs-gtk3 = ["rfd/gtk3"]
+# File dialogs through the XDG desktop portal. A GTK 4 host (Tauri 3 + CEF,
+# spike S1) must not load GTK 3 into the same process.
+dialogs-portal = ["rfd/xdg-portal", "rfd/tokio"]
 
 [dev-dependencies]
 filetime = "0.2"

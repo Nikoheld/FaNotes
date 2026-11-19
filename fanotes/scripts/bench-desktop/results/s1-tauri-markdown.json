@@ -1,0 +1,795 @@
+{
+ "metric": "desktop",
+ "host": "tauri",
+ "label": "tauri",
+ "variant": "markdown",
+ "app": "/target/release/fanotes-tauri",
+ "chromiumArgs": [],
+ "date": "2026-11-19T21:09:05.182Z",
+ "machine": {
+  "cpuModel": "12th Gen Intel(R) Core(TM) i3-12100F",
+  "logicalCpus": 8,
+  "containerCpuLimit": 4,
+  "containerMemoryLimitMb": 6144,
+  "totalMemoryMb": 39871,
+  "kernel": "6.17.13-13-pve",
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "node": "v22.23.2",
+  "webkitgtk": "2.54.0",
+  "hostname": "12ddd03dae26"
+ },
+ "screen": {
+  "width": 1440,
+  "height": 900
+ },
+ "fixture": "/srv/agents/fanotes/.site-redesign-tools/tmp/w1b-bench/fx1",
+ "settings": {
+  "uiLanguage": "de",
+  "autoCheckUpdates": false,
+  "autoDownloadUpdates": false,
+  "spellcheck": false,
+  "lastOpenNotePath": "Start/Letzte Notiz.md"
+ },
+ "coldEvictionFiles": 7560,
+ "startupCold": [
+  {
+   "run": 1,
+   "startupMs": 1336.1,
+   "treeMs": 1200.1,
+   "noteMs": 1336.1,
+   "pageOriginMs": 725.1,
+   "clockRttMs": 2.8,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+   "cachedBefore": 0,
+   "cachedAfterEvict": 0,
+   "load": [
+    6.37,
+    6.06,
+    6.64
+   ]
+  },
+  {
+   "run": 2,
+   "startupMs": 1358.9,
+   "treeMs": 1227.9,
+   "noteMs": 1358.9,
+   "pageOriginMs": 790.9,
+   "clockRttMs": 2.86,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+   "cachedBefore": 0,
+   "cachedAfterEvict": 0,
+   "load": [
+    6.97,
+    6.21,
+    6.69
+   ]
+  },
+  {
+   "run": 3,
+   "startupMs": 1184,
+   "treeMs": 1040,
+   "noteMs": 1184,
+   "pageOriginMs": 638,
+   "clockRttMs": 1.92,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+   "cachedBefore": 0,
+   "cachedAfterEvict": 0,
+   "load": [
+    6.4,
+    6.12,
+    6.65
+   ]
+  }
+ ],
+ "startupWarm": [
+  {
+   "run": 1,
+   "startupMs": 667,
+   "treeMs": 517,
+   "noteMs": 667,
+   "pageOriginMs": 293,
+   "clockRttMs": 2.73,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+   "load": [
+    6.53,
+    6.17,
+    6.65
+   ]
+  },
+  {
+   "run": 2,
+   "startupMs": 888.5,
+   "treeMs": 757.5,
+   "noteMs": 888.5,
+   "pageOriginMs": 525.5,
+   "clockRttMs": 4.02,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+   "load": [
+    6.91,
+    6.77,
+    6.8
+   ]
+  },
+  {
+   "run": 3,
+   "startupMs": 870.8,
+   "treeMs": 708.8,
+   "noteMs": 870.8,
+   "pageOriginMs": 462.8,
+   "clockRttMs": 1.91,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+   "load": [
+    6.88,
+    7.33,
+    7.06
+   ]
+  }
+ ],
+ "memoryIdle": [
+  {
+   "run": 1,
+   "rssMb": 872.5,
+   "pssMb": 685.4,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 197.9,
+     "pssMb": 120.3
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 66.7,
+     "pssMb": 33.3
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 607.8,
+     "pssMb": 531.7
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 1072,
+   "pssMb": 885.7,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 203.3,
+     "pssMb": 126
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 67.9,
+     "pssMb": 34.8
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 800.8,
+     "pssMb": 724.9
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 1110.4,
+   "pssMb": 922.8,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 201.1,
+     "pssMb": 123.2
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 69.4,
+     "pssMb": 35.9
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 839.9,
+     "pssMb": 763.6
+    }
+   ]
+  }
+ ],
+ "cpuIdle": [
+  {
+   "run": 1,
+   "percentOfOneCore": 136.5,
+   "byProcess": {
+    "fanotes-tauri": 25.1,
+    "WebKitNetworkProcess": 21.6,
+    "WebKitWebProcess": 89.8
+   }
+  },
+  {
+   "run": 2,
+   "percentOfOneCore": 42,
+   "byProcess": {
+    "fanotes-tauri": 10,
+    "WebKitNetworkProcess": 0,
+    "WebKitWebProcess": 32
+   }
+  },
+  {
+   "run": 3,
+   "percentOfOneCore": 59.8,
+   "byProcess": {
+    "fanotes-tauri": 14.7,
+    "WebKitNetworkProcess": 0,
+    "WebKitWebProcess": 45.1
+   }
+  }
+ ],
+ "memoryIdleCold": [
+  {
+   "run": 1,
+   "rssMb": 840.9,
+   "pssMb": 651.4,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 201.5,
+     "pssMb": 122
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 65.6,
+     "pssMb": 33.1
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 573.8,
+     "pssMb": 496.3
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 852.2,
+   "pssMb": 664,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 202.2,
+     "pssMb": 123.3
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 65.4,
+     "pssMb": 33.1
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 584.6,
+     "pssMb": 507.6
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 851.4,
+   "pssMb": 662.6,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 201.6,
+     "pssMb": 122.4
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 65.4,
+     "pssMb": 32.9
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 584.4,
+     "pssMb": 507.3
+    }
+   ]
+  }
+ ],
+ "memoryLongNote": [
+  {
+   "run": 1,
+   "rssMb": 1142.4,
+   "pssMb": 954.7,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 212.7,
+     "pssMb": 135
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 67.4,
+     "pssMb": 33.7
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 862.4,
+     "pssMb": 786
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 1101.2,
+   "pssMb": 914.8,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 204.5,
+     "pssMb": 127.2
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 66.3,
+     "pssMb": 33.2
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 830.4,
+     "pssMb": 754.4
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 1140.2,
+   "pssMb": 952.3,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 207.6,
+     "pssMb": 129.7
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 67,
+     "pssMb": 33.4
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 865.5,
+     "pssMb": 789.1
+    }
+   ]
+  }
+ ],
+ "memoryPdf": [
+  {
+   "run": 1,
+   "rssMb": 1171,
+   "pssMb": 983.1,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 214.6,
+     "pssMb": 136.8
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 67,
+     "pssMb": 33.3
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 889.4,
+     "pssMb": 813
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 1209,
+   "pssMb": 1022.1,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 212,
+     "pssMb": 134.6
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 66.6,
+     "pssMb": 33.2
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 930.4,
+     "pssMb": 854.2
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 1187.5,
+   "pssMb": 999.2,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 209.8,
+     "pssMb": 131.9
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 67.2,
+     "pssMb": 33.4
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 910.5,
+     "pssMb": 833.9
+    }
+   ]
+  }
+ ],
+ "memoryStory": [],
+ "typing": [
+  {
+   "run": 1,
+   "keys": 500,
+   "paceMs": 60,
+   "measured": 500,
+   "clickFocused": false,
+   "textGrowth": 495,
+   "changedFrames": 500,
+   "framesToChange": {
+    "p50": 1,
+    "max": 1
+   },
+   "eventToPaint": {
+    "p50": 20.5,
+    "p95": 86.05,
+    "max": 129
+   },
+   "handlerToPaint": {
+    "p50": 19,
+    "p95": 86
+   },
+   "injectToPaint": {
+    "p50": 20.33,
+    "p95": 86.16,
+    "clockRttMs": 2.73
+   },
+   "load": [
+    8.3,
+    6.66,
+    6.79
+   ]
+  },
+  {
+   "run": 2,
+   "keys": 500,
+   "paceMs": 60,
+   "measured": 500,
+   "clickFocused": false,
+   "textGrowth": 495,
+   "changedFrames": 500,
+   "framesToChange": {
+    "p50": 1,
+    "max": 1
+   },
+   "eventToPaint": {
+    "p50": 17,
+    "p95": 56.05,
+    "max": 131
+   },
+   "handlerToPaint": {
+    "p50": 17,
+    "p95": 54.1
+   },
+   "injectToPaint": {
+    "p50": 16.92,
+    "p95": 55.69,
+    "clockRttMs": 4.02
+   },
+   "load": [
+    8.59,
+    7.25,
+    6.97
+   ]
+  },
+  {
+   "run": 3,
+   "keys": 500,
+   "paceMs": 60,
+   "measured": 500,
+   "clickFocused": false,
+   "textGrowth": 35,
+   "changedFrames": 35,
+   "framesToChange": {
+    "p50": 30,
+    "max": 30
+   },
+   "eventToPaint": {
+    "p50": 480,
+    "p95": 503.05,
+    "max": 646
+   },
+   "handlerToPaint": {
+    "p50": 477,
+    "p95": 502
+   },
+   "injectToPaint": {
+    "p50": 480.93,
+    "p95": 506.44,
+    "clockRttMs": 1.91
+   },
+   "load": [
+    5.33,
+    6.81,
+    6.9
+   ]
+  }
+ ],
+ "scrollLongNote": [
+  {
+   "run": 1,
+   "openMs": 236,
+   "frames": 694,
+   "durationMs": 69122,
+   "scrollHeight": 1265435,
+   "scroller": "div.paper-view.unified-note-view.paper-dots",
+   "refreshMs": 16,
+   "p50": 93,
+   "p95": 180.35,
+   "p99": 221.28,
+   "max": 301,
+   "dropped": 3630,
+   "over50ms": 626,
+   "load": [
+    7.11,
+    6.55,
+    6.74
+   ]
+  },
+  {
+   "run": 2,
+   "openMs": 186,
+   "frames": 694,
+   "durationMs": 68501,
+   "scrollHeight": 1264881,
+   "scroller": "div.paper-view.unified-note-view.paper-dots",
+   "refreshMs": 16,
+   "p50": 91,
+   "p95": 176,
+   "p99": 220.49,
+   "max": 313,
+   "dropped": 3597,
+   "over50ms": 630,
+   "load": [
+    7.36,
+    7.22,
+    6.98
+   ]
+  },
+  {
+   "run": 3,
+   "openMs": 236,
+   "frames": 694,
+   "durationMs": 73631,
+   "scrollHeight": 1265731,
+   "scroller": "div.paper-view.unified-note-view.paper-dots",
+   "refreshMs": 16,
+   "p50": 101,
+   "p95": 186.35,
+   "p99": 226.07,
+   "max": 261,
+   "dropped": 3924,
+   "over50ms": 643,
+   "load": [
+    5.97,
+    6.66,
+    6.84
+   ]
+  }
+ ],
+ "scrollPdf": [
+  {
+   "run": 1,
+   "openMs": 479,
+   "frames": 599,
+   "durationMs": 63671,
+   "scrollHeight": 322260,
+   "scroller": "div.paper-view.unified-note-view.paper-blank.is-pdf-note.is-view-transformed.is-view-zoomed",
+   "refreshMs": 17,
+   "p50": 88,
+   "p95": 237.1,
+   "p99": 343.28,
+   "max": 465,
+   "dropped": 3127,
+   "over50ms": 536,
+   "load": [
+    7.9,
+    6.95,
+    6.86
+   ]
+  },
+  {
+   "run": 2,
+   "openMs": 321,
+   "frames": 599,
+   "durationMs": 60239,
+   "scrollHeight": 322260,
+   "scroller": "div.paper-view.unified-note-view.paper-blank.is-pdf-note.is-view-transformed.is-view-zoomed",
+   "refreshMs": 18,
+   "p50": 85,
+   "p95": 214.1,
+   "p99": 289.16,
+   "max": 347,
+   "dropped": 2761,
+   "over50ms": 535,
+   "load": [
+    8.2,
+    7.53,
+    7.11
+   ]
+  },
+  {
+   "run": 3,
+   "openMs": 351,
+   "frames": 599,
+   "durationMs": 52838,
+   "scrollHeight": 322260,
+   "scroller": "div.paper-view.unified-note-view.paper-blank.is-pdf-note.is-view-transformed.is-view-zoomed",
+   "refreshMs": 18,
+   "p50": 84,
+   "p95": 146,
+   "p99": 210.06,
+   "max": 275,
+   "dropped": 2351,
+   "over50ms": 546,
+   "load": [
+    11.4,
+    7.88,
+    7.23
+   ]
+  }
+ ],
+ "scrollStory": [],
+ "errors": [],
+ "renderer": {
+  "vendor": "Apple Inc.",
+  "webgl": "Apple GPU",
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+  "bridge": true
+ },
+ "summary": {
+  "startupColdMs": {
+   "n": 3,
+   "median": 1336.1,
+   "min": 1184,
+   "max": 1358.9,
+   "spreadPct": 6.545168774792309
+  },
+  "startupWarmMs": {
+   "n": 3,
+   "median": 870.8,
+   "min": 667,
+   "max": 888.5,
+   "spreadPct": 12.71819016995866
+  },
+  "memoryIdleRssMb": {
+   "n": 3,
+   "median": 1072,
+   "min": 872.5,
+   "max": 1110.4,
+   "spreadPct": 11.096082089552244
+  },
+  "memoryIdlePssMb": {
+   "n": 3,
+   "median": 885.7,
+   "min": 685.4,
+   "max": 922.8,
+   "spreadPct": 13.401829061759058
+  },
+  "cpuIdlePercent": {
+   "n": 3,
+   "median": 59.8,
+   "min": 42,
+   "max": 136.5,
+   "spreadPct": 79.01337792642141
+  },
+  "memoryLongNoteRssMb": {
+   "n": 3,
+   "median": 1140.2,
+   "min": 1101.2,
+   "max": 1142.4,
+   "spreadPct": 1.8067005788458186
+  },
+  "memoryPdfRssMb": {
+   "n": 3,
+   "median": 1187.5,
+   "min": 1171,
+   "max": 1209,
+   "spreadPct": 1.6
+  },
+  "memoryPdfPssMb": {
+   "n": 3,
+   "median": 999.2,
+   "min": 983.1,
+   "max": 1022.1,
+   "spreadPct": 1.9515612489991994
+  },
+  "memoryStoryRssMb": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "typingP50Ms": {
+   "n": 3,
+   "median": 20.5,
+   "min": 17,
+   "max": 480,
+   "spreadPct": 1129.2682926829268
+  },
+  "typingP95Ms": {
+   "n": 3,
+   "median": 86.05,
+   "min": 56.05,
+   "max": 503.05,
+   "spreadPct": 259.7327135386403
+  },
+  "typingInjectP50Ms": {
+   "n": 3,
+   "median": 20.33,
+   "min": 16.92,
+   "max": 480.93,
+   "spreadPct": 1141.1952779144124
+  },
+  "typingInjectP95Ms": {
+   "n": 3,
+   "median": 86.16,
+   "min": 55.69,
+   "max": 506.44,
+   "spreadPct": 261.5772980501393
+  },
+  "scrollLongNoteP95Ms": {
+   "n": 3,
+   "median": 180.35,
+   "min": 176,
+   "max": 186.35,
+   "spreadPct": 2.8694205711117258
+  },
+  "scrollLongNoteDropped": {
+   "n": 3,
+   "median": 3630,
+   "min": 3597,
+   "max": 3924,
+   "spreadPct": 4.5041322314049586
+  },
+  "scrollPdfP95Ms": {
+   "n": 3,
+   "median": 214.1,
+   "min": 146,
+   "max": 237.1,
+   "spreadPct": 21.275105091078935
+  },
+  "scrollPdfDropped": {
+   "n": 3,
+   "median": 2761,
+   "min": 2351,
+   "max": 3127,
+   "spreadPct": 14.052879391524808
+  },
+  "scrollStoryP95Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "scrollStoryDropped": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  }
+ }
+}

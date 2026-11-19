@@ -1,0 +1,215 @@
+{
+ "host": "electron",
+ "app": "/work/fanotes/release/linux-unpacked/fanotes",
+ "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) FaNotes/2026.11.3-beta.5 Chrome/150.0.7871.47 Electron/43.1.0 Safari/537.36",
+ "xorgLog": [
+  "[174363.431] (**) pen: always reports core events",
+  "[174363.431] (**) evdev: pen: Device: \"/dev/input/event14\"",
+  "[174363.431] (--) evdev: pen: Vendor 0x56a Product 0x357",
+  "[174363.431] (--) evdev: pen: Found absolute axes",
+  "[174363.431] (--) evdev: pen: Found x and y absolute axes",
+  "[174363.431] (--) evdev: pen: Found absolute tablet.",
+  "[174363.431] (II) evdev: pen: Configuring as tablet",
+  "[174363.431] (**) evdev: pen: YAxisMapping: buttons 4 and 5",
+  "[174363.431] (**) evdev: pen: EmulateWheelButton: 4, EmulateWheelInertia: 10, EmulateWheelTimeout: 200",
+  "[174363.431] (II) XINPUT: Adding extended input device \"pen\" (type: TABLET, id 6)",
+  "[174363.431] (II) evdev: pen: initialized for absolute axes.",
+  "[174363.431] (**) pen: (accel) keeping acceleration scheme 1",
+  "[174363.431] (**) pen: (accel) acceleration profile 0",
+  "[174363.431] (**) pen: (accel) acceleration factor: 2.000",
+  "[174363.431] (**) pen: (accel) acceleration threshold: 4",
+  "[174363.431] (II) Using input driver 'evdev' for 'pen'",
+  "[174363.431] (**) pen: always reports core events",
+  "[174363.431] (**) evdev: pen: Device: \"/dev/input/event14\"",
+  "[174363.431] (WW) evdev: pen: device file is duplicate. Ignoring.",
+  "[174363.436] (EE) PreInit returned 8 for \"pen\"",
+  "[174363.436] (WW) Warning, couldn't open module kbd",
+  "[174363.436] (EE) Failed to load module \"kbd\" (module does not exist, 0)",
+  "[174363.436] (WW) Warning, couldn't open module libinput",
+  "[174363.436] (EE) Failed to load module \"libinput\" (module does not exist, 0)",
+  "[174363.456] (EE) dbus-core: error connecting to system bus: org.freedesktop.DBus.Error.FileNotFound (Failed to connect to socket /run/dbus/system_bus_socket: No such file or directory)"
+ ],
+ "windowRect": {
+  "x": 0,
+  "y": 0,
+  "width": 1439,
+  "height": 899,
+  "inner": [
+   1439,
+   899
+  ]
+ },
+ "xinputPenDevice": [
+  "\tReporting 6 classes:",
+  "\t\tClass originated from: 6. Type: XIButtonClass",
+  "\t\tClass originated from: 6. Type: XIValuatorClass",
+  "\t\tDetail for Valuator 0:",
+  "\t\t  Label: Abs X",
+  "\t\t  Mode: absolute",
+  "\t\tClass originated from: 6. Type: XIValuatorClass",
+  "\t\tDetail for Valuator 1:",
+  "\t\t  Label: Abs Y",
+  "\t\t  Mode: absolute",
+  "\t\tClass originated from: 6. Type: XIValuatorClass",
+  "\t\tDetail for Valuator 2:",
+  "\t\t  Label: Abs Pressure",
+  "\t\t  Mode: absolute",
+  "\t\tClass originated from: 6. Type: XIValuatorClass",
+  "\t\tDetail for Valuator 3:",
+  "\t\t  Label: Abs Tilt X",
+  "\t\t  Mode: absolute",
+  "\t\tClass originated from: 6. Type: XIValuatorClass",
+  "\t\tDetail for Valuator 4:",
+  "\t\t  Label: Abs Tilt Y",
+  "\t\t  Mode: absolute",
+  "\tReporting 3 classes:",
+  "\t\tClass originated from: 4. Type: XIButtonClass",
+  "\t\tClass originated from: 4. Type: XIValuatorClass",
+  "\t\tDetail for Valuator 0:",
+  "\t\tClass originated from: 4. Type: XIValuatorClass",
+  "\t\tDetail for Valuator 1:",
+  "⎜   ↳ pen                                     \tid=6\t[slave  pointer  (2)]",
+  "\tReporting 6 classes:",
+  "\t\tClass originated from: 6. Type: XIButtonClass",
+  "\t\tClass originated from: 6. Type: XIValuatorClass",
+  "\t\tDetail for Valuator 0:",
+  "\t\t  Label: Abs X",
+  "\t\t  Mode: absolute",
+  "\t\tClass originated from: 6. Type: XIValuatorClass",
+  "\t\tDetail for Valuator 1:",
+  "\t\t  Label: Abs Y",
+  "\t\t  Mode: absolute",
+  "\t\tClass originated from: 6. Type: XIValuatorClass"
+ ],
+ "events": 73,
+ "summary": {
+  "pointerover/pen": {
+   "count": 17,
+   "distinctPressures": 13,
+   "pressureRange": [
+    0,
+    0.714
+   ],
+   "tilts": [
+    "20,-20",
+    "0,0",
+    "-30,30"
+   ]
+  },
+  "pointermove/pen": {
+   "count": 24,
+   "distinctPressures": 19,
+   "pressureRange": [
+    0,
+    0.714
+   ],
+   "tilts": [
+    "20,-20",
+    "0,0",
+    "-30,30"
+   ]
+  },
+  "pointerout/mouse": {
+   "count": 6,
+   "distinctPressures": 2,
+   "pressureRange": [
+    0,
+    0.5
+   ],
+   "tilts": [
+    "0,0"
+   ]
+  },
+  "pointerover/mouse": {
+   "count": 6,
+   "distinctPressures": 2,
+   "pressureRange": [
+    0,
+    0.5
+   ],
+   "tilts": [
+    "0,0"
+   ]
+  },
+  "pointerdown/pen": {
+   "count": 2,
+   "distinctPressures": 1,
+   "pressureRange": [
+    0,
+    0
+   ],
+   "tilts": [
+    "0,0"
+   ]
+  },
+  "pointerout/pen": {
+   "count": 16,
+   "distinctPressures": 13,
+   "pressureRange": [
+    0,
+    0.714
+   ],
+   "tilts": [
+    "0,0",
+    "-30,30"
+   ]
+  },
+  "pointerup/pen": {
+   "count": 2,
+   "distinctPressures": 1,
+   "pressureRange": [
+    0,
+    0
+   ],
+   "tilts": [
+    "0,0"
+   ]
+  }
+ },
+ "sample": [
+  {
+   "type": "pointermove",
+   "pointerType": "pen",
+   "pressure": 0.568,
+   "tiltX": 0,
+   "tiltY": 0,
+   "buttons": 1,
+   "coalesced": 4,
+   "x": 739,
+   "y": 482
+  },
+  {
+   "type": "pointermove",
+   "pointerType": "pen",
+   "pressure": 0.613,
+   "tiltX": 0,
+   "tiltY": 0,
+   "buttons": 1,
+   "coalesced": 5,
+   "x": 789,
+   "y": 489
+  },
+  {
+   "type": "pointermove",
+   "pointerType": "pen",
+   "pressure": 0.65,
+   "tiltX": 0,
+   "tiltY": 0,
+   "buttons": 1,
+   "coalesced": 4,
+   "x": 829,
+   "y": 495
+  },
+  {
+   "type": "pointermove",
+   "pointerType": "pen",
+   "pressure": 0.678,
+   "tiltX": 0,
+   "tiltY": 0,
+   "buttons": 1,
+   "coalesced": 3,
+   "x": 859,
+   "y": 500
+  }
+ ]
+}

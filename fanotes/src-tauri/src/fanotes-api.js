@@ -16,7 +16,9 @@ function listedBytes(value, message) {
 if (typeof window !== 'undefined') {
 (() => {
   const internals = window.__TAURI_INTERNALS__
-  if (!internals || typeof internals.invoke !== 'function') return
+  // Init scripts can run before Tauri defines `internals.invoke` on the same
+  // object, so it is looked up per call (bridge fix from RUST_DESKTOP_BENCHMARKS.md).
+  if (!internals || typeof internals !== 'object') return
   const decodeByteFields = (value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return value
     const next = { ...value }

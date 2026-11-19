@@ -1,0 +1,1092 @@
+{
+ "metric": "desktop",
+ "host": "cef",
+ "label": "cef",
+ "variant": "markdown",
+ "app": "/target/release/fanotes-tauri-cef",
+ "chromiumArgs": [],
+ "date": "2026-11-19T21:02:52.489Z",
+ "machine": {
+  "cpuModel": "12th Gen Intel(R) Core(TM) i3-12100F",
+  "logicalCpus": 8,
+  "containerCpuLimit": 4,
+  "containerMemoryLimitMb": 6144,
+  "totalMemoryMb": 39871,
+  "kernel": "6.17.13-13-pve",
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "node": "v22.23.2",
+  "webkitgtk": "2.54.0",
+  "hostname": "f55fe21a8d42"
+ },
+ "screen": {
+  "width": 1440,
+  "height": 900
+ },
+ "fixture": "/srv/agents/fanotes/.site-redesign-tools/tmp/w1b-bench/fx1",
+ "settings": {
+  "uiLanguage": "de",
+  "autoCheckUpdates": false,
+  "autoDownloadUpdates": false,
+  "spellcheck": false,
+  "lastOpenNotePath": "Start/Letzte Notiz.md"
+ },
+ "coldEvictionFiles": 8734,
+ "startupCold": [
+  {
+   "run": 1,
+   "startupMs": 1362.7,
+   "treeMs": 1314.3,
+   "noteMs": 1362.7,
+   "pageOriginMs": 923,
+   "clockRttMs": 0.17,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "cachedBefore": 0,
+   "cachedAfterEvict": 0,
+   "load": [
+    4.85,
+    5.85,
+    6.93
+   ]
+  },
+  {
+   "run": 2,
+   "startupMs": 1415.9,
+   "treeMs": 1365.2,
+   "noteMs": 1415.9,
+   "pageOriginMs": 1002.4,
+   "clockRttMs": 0.16,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "cachedBefore": 0,
+   "cachedAfterEvict": 0,
+   "load": [
+    4.65,
+    5.76,
+    6.88
+   ]
+  },
+  {
+   "run": 3,
+   "startupMs": 1456.9,
+   "treeMs": 1397.5,
+   "noteMs": 1456.9,
+   "pageOriginMs": 1030.5,
+   "clockRttMs": 0.14,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "cachedBefore": 0,
+   "cachedAfterEvict": 0,
+   "load": [
+    4.22,
+    5.61,
+    6.81
+   ]
+  }
+ ],
+ "startupWarm": [
+  {
+   "run": 1,
+   "startupMs": 896.5,
+   "treeMs": 803.8,
+   "noteMs": 896.5,
+   "pageOriginMs": 345,
+   "clockRttMs": 0.17,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "load": [
+    4.43,
+    5.6,
+    6.8
+   ]
+  },
+  {
+   "run": 2,
+   "startupMs": 676.8,
+   "treeMs": 607.2,
+   "noteMs": 676.8,
+   "pageOriginMs": 357.7,
+   "clockRttMs": 0.21,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "load": [
+    5.4,
+    5.98,
+    6.83
+   ]
+  },
+  {
+   "run": 3,
+   "startupMs": 757.4,
+   "treeMs": 692.9,
+   "noteMs": 757.4,
+   "pageOriginMs": 344.9,
+   "clockRttMs": 0.17,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+   "load": [
+    5.68,
+    5.77,
+    6.65
+   ]
+  }
+ ],
+ "memoryIdle": [
+  {
+   "run": 1,
+   "rssMb": 1308.4,
+   "pssMb": 788.6,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 357.7,
+     "pssMb": 248
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 76.7,
+     "pssMb": 21.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 76.4,
+     "pssMb": 17
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 108.1,
+     "pssMb": 41.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 148.1,
+     "pssMb": 68.5
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 42.5,
+     "pssMb": 9.3
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 429.3,
+     "pssMb": 360.8
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 69.5,
+     "pssMb": 22.1
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 1264.8,
+   "pssMb": 745.3,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 349.2,
+     "pssMb": 240.2
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.3,
+     "pssMb": 21.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.4,
+     "pssMb": 17.7
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 107.7,
+     "pssMb": 41.2
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 146.9,
+     "pssMb": 69.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 42.9,
+     "pssMb": 9.4
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 391.7,
+     "pssMb": 323.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 69.8,
+     "pssMb": 22.2
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 1300.6,
+   "pssMb": 780.9,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 392.9,
+     "pssMb": 283.9
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.2,
+     "pssMb": 21.8
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.2,
+     "pssMb": 17.7
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 108.3,
+     "pssMb": 41.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 147,
+     "pssMb": 69.2
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 42.9,
+     "pssMb": 9.4
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 383.4,
+     "pssMb": 315.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 69.7,
+     "pssMb": 22.2
+    }
+   ]
+  }
+ ],
+ "cpuIdle": [
+  {
+   "run": 1,
+   "percentOfOneCore": 100.5,
+   "byProcess": {
+    "fanotes-tauri-cef": 97.8,
+    "fanotes-tauri-cef zygote": 2.7,
+    "exe utility": 0
+   }
+  },
+  {
+   "run": 2,
+   "percentOfOneCore": 102.6,
+   "byProcess": {
+    "fanotes-tauri-cef": 100.1,
+    "fanotes-tauri-cef zygote": 2.5,
+    "exe utility": 0
+   }
+  },
+  {
+   "run": 3,
+   "percentOfOneCore": 102.7,
+   "byProcess": {
+    "fanotes-tauri-cef": 100,
+    "fanotes-tauri-cef zygote": 2.7,
+    "exe utility": 0
+   }
+  }
+ ],
+ "memoryIdleCold": [
+  {
+   "run": 1,
+   "rssMb": 1204.8,
+   "pssMb": 703.4,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 346.5,
+     "pssMb": 240.6
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 73.4,
+     "pssMb": 20.5
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 73.4,
+     "pssMb": 16.6
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 106.1,
+     "pssMb": 42.2
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 145.8,
+     "pssMb": 68.4
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 40.8,
+     "pssMb": 9.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 350.4,
+     "pssMb": 283.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 68.4,
+     "pssMb": 22.3
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 1212.9,
+   "pssMb": 712.6,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 346.1,
+     "pssMb": 241.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 73.1,
+     "pssMb": 20.5
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 73,
+     "pssMb": 16.5
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 106,
+     "pssMb": 42.2
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 147.2,
+     "pssMb": 69.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 40.8,
+     "pssMb": 9.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 358.4,
+     "pssMb": 291.3
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 68.3,
+     "pssMb": 22.2
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 1186.2,
+   "pssMb": 686.6,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 344,
+     "pssMb": 238.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 73.9,
+     "pssMb": 20.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 73.9,
+     "pssMb": 16.6
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 105.9,
+     "pssMb": 42
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 143.3,
+     "pssMb": 67.2
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 40.8,
+     "pssMb": 9.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 336,
+     "pssMb": 270.6
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 68.4,
+     "pssMb": 22.3
+    }
+   ]
+  }
+ ],
+ "memoryLongNote": [
+  {
+   "run": 1,
+   "rssMb": 1489.3,
+   "pssMb": 944.1,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 360.2,
+     "pssMb": 250
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 76.7,
+     "pssMb": 21.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 76.4,
+     "pssMb": 17
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 108.5,
+     "pssMb": 41.9
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 172.2,
+     "pssMb": 80.5
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 42.7,
+     "pssMb": 9.4
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 583,
+     "pssMb": 502.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 69.5,
+     "pssMb": 22.2
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 1508.8,
+   "pssMb": 959.4,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 374.9,
+     "pssMb": 265.5
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.3,
+     "pssMb": 21.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.4,
+     "pssMb": 17.7
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 108.5,
+     "pssMb": 41.5
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 175.1,
+     "pssMb": 83.2
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 42.9,
+     "pssMb": 9.4
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 580.8,
+     "pssMb": 498.2
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 69.8,
+     "pssMb": 22.2
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 1537.5,
+   "pssMb": 986.1,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 394.3,
+     "pssMb": 284.8
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.2,
+     "pssMb": 21.8
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.2,
+     "pssMb": 17.7
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 108.6,
+     "pssMb": 41.8
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 177.4,
+     "pssMb": 84.3
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 42.9,
+     "pssMb": 9.4
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 588.2,
+     "pssMb": 504.3
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 69.7,
+     "pssMb": 22.2
+    }
+   ]
+  }
+ ],
+ "memoryPdf": [
+  {
+   "run": 1,
+   "rssMb": 1918.1,
+   "pssMb": 1358.5,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 386.3,
+     "pssMb": 275.9
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 76.7,
+     "pssMb": 21.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 76.4,
+     "pssMb": 17
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 108.5,
+     "pssMb": 41.9
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 185.8,
+     "pssMb": 87.3
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 42.7,
+     "pssMb": 9.4
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 972,
+     "pssMb": 883.9
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 69.5,
+     "pssMb": 22.2
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 1902.8,
+   "pssMb": 1347,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 396.9,
+     "pssMb": 287.1
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.3,
+     "pssMb": 21.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.4,
+     "pssMb": 17.7
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 108.5,
+     "pssMb": 41.5
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 180.6,
+     "pssMb": 85.9
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 42.9,
+     "pssMb": 9.5
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 947.5,
+     "pssMb": 861.4
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 69.8,
+     "pssMb": 22.2
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 1917,
+   "pssMb": 1356.5,
+   "processes": [
+    {
+     "name": "fanotes-tauri-cef",
+     "rssMb": 407.3,
+     "pssMb": 297.5
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.2,
+     "pssMb": 21.8
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 78.2,
+     "pssMb": 17.7
+    },
+    {
+     "name": "exe utility",
+     "rssMb": 108.6,
+     "pssMb": 41.7
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 185.8,
+     "pssMb": 88.6
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 42.9,
+     "pssMb": 9.4
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 946.4,
+     "pssMb": 857.6
+    },
+    {
+     "name": "fanotes-tauri-cef zygote",
+     "rssMb": 69.7,
+     "pssMb": 22.2
+    }
+   ]
+  }
+ ],
+ "memoryStory": [],
+ "typing": [
+  {
+   "run": 1,
+   "keys": 500,
+   "paceMs": 60,
+   "measured": 500,
+   "clickFocused": false,
+   "textGrowth": 495,
+   "changedFrames": 500,
+   "framesToChange": {
+    "p50": 1,
+    "max": 1
+   },
+   "eventToPaint": {
+    "p50": 13.65,
+    "p95": 20.91,
+    "max": 35.1
+   },
+   "handlerToPaint": {
+    "p50": 11.45,
+    "p95": 18.91
+   },
+   "injectToPaint": {
+    "p50": 12.21,
+    "p95": 19.53,
+    "clockRttMs": 0.17
+   },
+   "load": [
+    6.99,
+    6.31,
+    6.98
+   ]
+  },
+  {
+   "run": 2,
+   "keys": 500,
+   "paceMs": 60,
+   "measured": 500,
+   "clickFocused": false,
+   "textGrowth": 495,
+   "changedFrames": 500,
+   "framesToChange": {
+    "p50": 1,
+    "max": 1
+   },
+   "eventToPaint": {
+    "p50": 13.85,
+    "p95": 21,
+    "max": 39.1
+   },
+   "handlerToPaint": {
+    "p50": 11.5,
+    "p95": 18.71
+   },
+   "injectToPaint": {
+    "p50": 12.25,
+    "p95": 19.42,
+    "clockRttMs": 0.21
+   },
+   "load": [
+    4.59,
+    5.63,
+    6.66
+   ]
+  },
+  {
+   "run": 3,
+   "keys": 500,
+   "paceMs": 60,
+   "measured": 500,
+   "clickFocused": false,
+   "textGrowth": 495,
+   "changedFrames": 500,
+   "framesToChange": {
+    "p50": 1,
+    "max": 2
+   },
+   "eventToPaint": {
+    "p50": 12.8,
+    "p95": 20.2,
+    "max": 30.2
+   },
+   "handlerToPaint": {
+    "p50": 10.5,
+    "p95": 17.8
+   },
+   "injectToPaint": {
+    "p50": 11.08,
+    "p95": 18.53,
+    "clockRttMs": 0.17
+   },
+   "load": [
+    5.75,
+    5.74,
+    6.58
+   ]
+  }
+ ],
+ "scrollLongNote": [
+  {
+   "run": 1,
+   "openMs": 197,
+   "frames": 693,
+   "durationMs": 14898,
+   "scrollHeight": 1231008,
+   "scroller": "div.paper-view.unified-note-view.paper-dots",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 33.4,
+   "p99": 50.1,
+   "max": 66.7,
+   "dropped": 199,
+   "over50ms": 9,
+   "load": [
+    6.12,
+    6.15,
+    6.91
+   ]
+  },
+  {
+   "run": 2,
+   "openMs": 200,
+   "frames": 694,
+   "durationMs": 18299,
+   "scrollHeight": 1231329,
+   "scroller": "div.paper-view.unified-note-view.paper-dots",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 66.6,
+   "p99": 83.31,
+   "max": 116.7,
+   "dropped": 402,
+   "over50ms": 47,
+   "load": [
+    5.46,
+    5.72,
+    6.66
+   ]
+  },
+  {
+   "run": 3,
+   "openMs": 315,
+   "frames": 693,
+   "durationMs": 21446,
+   "scrollHeight": 1231099,
+   "scroller": "div.paper-view.unified-note-view.paper-dots",
+   "refreshMs": 16.7,
+   "p50": 33.2,
+   "p95": 66.7,
+   "p99": 83.4,
+   "max": 100,
+   "dropped": 591,
+   "over50ms": 85,
+   "load": [
+    8.04,
+    6.26,
+    6.74
+   ]
+  }
+ ],
+ "scrollPdf": [
+  {
+   "run": 1,
+   "openMs": 173,
+   "frames": 599,
+   "durationMs": 10007,
+   "scrollHeight": 322260,
+   "scroller": "div.paper-view.unified-note-view.paper-blank.is-pdf-note.is-view-transformed.is-view-zoomed",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 16.7,
+   "p99": 16.8,
+   "max": 16.8,
+   "dropped": 0,
+   "over50ms": 0,
+   "load": [
+    5.6,
+    6.03,
+    6.85
+   ]
+  },
+  {
+   "run": 2,
+   "openMs": 258,
+   "frames": 599,
+   "durationMs": 10084,
+   "scrollHeight": 322260,
+   "scroller": "div.paper-view.unified-note-view.paper-blank.is-pdf-note.is-view-transformed.is-view-zoomed",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 16.71,
+   "p99": 16.8,
+   "max": 33.4,
+   "dropped": 5,
+   "over50ms": 0,
+   "load": [
+    5.91,
+    5.81,
+    6.67
+   ]
+  },
+  {
+   "run": 3,
+   "openMs": 182,
+   "frames": 599,
+   "durationMs": 10007,
+   "scrollHeight": 322260,
+   "scroller": "div.paper-view.unified-note-view.paper-blank.is-pdf-note.is-view-transformed.is-view-zoomed",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 16.7,
+   "p99": 16.8,
+   "max": 16.8,
+   "dropped": 0,
+   "over50ms": 0,
+   "load": [
+    7.09,
+    6.16,
+    6.69
+   ]
+  }
+ ],
+ "scrollStory": [],
+ "errors": [],
+ "renderer": {
+  "webgl": null
+ },
+ "summary": {
+  "startupColdMs": {
+   "n": 3,
+   "median": 1415.9,
+   "min": 1362.7,
+   "max": 1456.9,
+   "spreadPct": 3.3265061091885033
+  },
+  "startupWarmMs": {
+   "n": 3,
+   "median": 757.4,
+   "min": 676.8,
+   "max": 896.5,
+   "spreadPct": 14.503564827039877
+  },
+  "memoryIdleRssMb": {
+   "n": 3,
+   "median": 1300.6,
+   "min": 1264.8,
+   "max": 1308.4,
+   "spreadPct": 1.676149469475632
+  },
+  "memoryIdlePssMb": {
+   "n": 3,
+   "median": 780.9,
+   "min": 745.3,
+   "max": 788.6,
+   "spreadPct": 2.772442054040215
+  },
+  "cpuIdlePercent": {
+   "n": 3,
+   "median": 102.6,
+   "min": 100.5,
+   "max": 102.7,
+   "spreadPct": 1.0721247563352843
+  },
+  "memoryLongNoteRssMb": {
+   "n": 3,
+   "median": 1508.8,
+   "min": 1489.3,
+   "max": 1537.5,
+   "spreadPct": 1.597295864262992
+  },
+  "memoryPdfRssMb": {
+   "n": 3,
+   "median": 1917,
+   "min": 1902.8,
+   "max": 1918.1,
+   "spreadPct": 0.3990610328638486
+  },
+  "memoryPdfPssMb": {
+   "n": 3,
+   "median": 1356.5,
+   "min": 1347,
+   "max": 1358.5,
+   "spreadPct": 0.4238849981570218
+  },
+  "memoryStoryRssMb": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "typingP50Ms": {
+   "n": 3,
+   "median": 13.65,
+   "min": 12.8,
+   "max": 13.85,
+   "spreadPct": 3.8461538461538423
+  },
+  "typingP95Ms": {
+   "n": 3,
+   "median": 20.91,
+   "min": 20.2,
+   "max": 21,
+   "spreadPct": 1.9129603060736509
+  },
+  "typingInjectP50Ms": {
+   "n": 3,
+   "median": 12.21,
+   "min": 11.08,
+   "max": 12.25,
+   "spreadPct": 4.79115479115479
+  },
+  "typingInjectP95Ms": {
+   "n": 3,
+   "median": 19.42,
+   "min": 18.53,
+   "max": 19.53,
+   "spreadPct": 2.5746652935118433
+  },
+  "scrollLongNoteP95Ms": {
+   "n": 3,
+   "median": 66.6,
+   "min": 33.4,
+   "max": 66.7,
+   "spreadPct": 25.000000000000007
+  },
+  "scrollLongNoteDropped": {
+   "n": 3,
+   "median": 402,
+   "min": 199,
+   "max": 591,
+   "spreadPct": 48.756218905472636
+  },
+  "scrollPdfP95Ms": {
+   "n": 3,
+   "median": 16.7,
+   "min": 16.7,
+   "max": 16.71,
+   "spreadPct": 0.029940119760483726
+  },
+  "scrollPdfDropped": {
+   "n": 3,
+   "median": 0,
+   "min": 0,
+   "max": 5,
+   "spreadPct": null
+  },
+  "scrollStoryP95Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "scrollStoryDropped": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  }
+ }
+}

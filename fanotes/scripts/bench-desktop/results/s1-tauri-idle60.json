@@ -1,0 +1,326 @@
+{
+ "metric": "desktop",
+ "host": "tauri",
+ "label": "tauri",
+ "variant": "markdown",
+ "app": "/target/release/fanotes-tauri",
+ "chromiumArgs": [],
+ "date": "2026-11-19T21:44:28.683Z",
+ "machine": {
+  "cpuModel": "12th Gen Intel(R) Core(TM) i3-12100F",
+  "logicalCpus": 8,
+  "containerCpuLimit": 4,
+  "containerMemoryLimitMb": 6144,
+  "totalMemoryMb": 39871,
+  "kernel": "6.17.13-13-pve",
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "node": "v22.23.2",
+  "webkitgtk": "2.54.0",
+  "hostname": "c561a9cf5a56"
+ },
+ "screen": {
+  "width": 1440,
+  "height": 900
+ },
+ "fixture": "/srv/agents/fanotes/.site-redesign-tools/tmp/w1b-bench/fx1",
+ "settings": {
+  "uiLanguage": "de",
+  "autoCheckUpdates": false,
+  "autoDownloadUpdates": false,
+  "spellcheck": false,
+  "lastOpenNotePath": "Start/Letzte Notiz.md"
+ },
+ "coldEvictionFiles": 0,
+ "startupCold": [],
+ "startupWarm": [
+  {
+   "run": 1,
+   "startupMs": 907.1,
+   "treeMs": 773.1,
+   "noteMs": 907.1,
+   "pageOriginMs": 537.1,
+   "clockRttMs": 2.78,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+   "load": [
+    4.29,
+    5.7,
+    5.97
+   ]
+  },
+  {
+   "run": 2,
+   "startupMs": 997.9,
+   "treeMs": 869.9,
+   "noteMs": 997.9,
+   "pageOriginMs": 627.9,
+   "clockRttMs": 1.95,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+   "load": [
+    6.87,
+    6.61,
+    6.29
+   ]
+  },
+  {
+   "run": 3,
+   "startupMs": 856.8,
+   "treeMs": 726.8,
+   "noteMs": 856.8,
+   "pageOriginMs": 468.8,
+   "clockRttMs": 2.96,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+   "load": [
+    4.55,
+    6.08,
+    6.14
+   ]
+  }
+ ],
+ "memoryIdle": [
+  {
+   "run": 1,
+   "rssMb": 920.2,
+   "pssMb": 731.9,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 199.4,
+     "pssMb": 121.3
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 67,
+     "pssMb": 33.5
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 653.8,
+     "pssMb": 577.1
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 1041.2,
+   "pssMb": 853.4,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 197.8,
+     "pssMb": 119.5
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 66.2,
+     "pssMb": 33.1
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 777.2,
+     "pssMb": 700.8
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 1040.5,
+   "pssMb": 853.1,
+   "processes": [
+    {
+     "name": "fanotes-tauri",
+     "rssMb": 198.3,
+     "pssMb": 120.2
+    },
+    {
+     "name": "WebKitNetworkProcess",
+     "rssMb": 66.3,
+     "pssMb": 33.3
+    },
+    {
+     "name": "WebKitWebProcess",
+     "rssMb": 775.9,
+     "pssMb": 699.6
+    }
+   ]
+  }
+ ],
+ "cpuIdle": [
+  {
+   "run": 1,
+   "percentOfOneCore": 53.4,
+   "byProcess": {
+    "fanotes-tauri": 12.8,
+    "WebKitNetworkProcess": 0,
+    "WebKitWebProcess": 40.6
+   }
+  },
+  {
+   "run": 2,
+   "percentOfOneCore": 60.7,
+   "byProcess": {
+    "fanotes-tauri": 14.9,
+    "WebKitNetworkProcess": 0,
+    "WebKitWebProcess": 45.8
+   }
+  },
+  {
+   "run": 3,
+   "percentOfOneCore": 60.3,
+   "byProcess": {
+    "fanotes-tauri": 14.8,
+    "WebKitNetworkProcess": 0,
+    "WebKitWebProcess": 45.5
+   }
+  }
+ ],
+ "memoryIdleCold": [],
+ "memoryLongNote": [],
+ "memoryPdf": [],
+ "memoryStory": [],
+ "typing": [],
+ "scrollLongNote": [],
+ "scrollPdf": [],
+ "scrollStory": [],
+ "errors": [],
+ "renderer": {
+  "vendor": "Apple Inc.",
+  "webgl": "Apple GPU",
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/60.5 Safari/605.1.15",
+  "bridge": true
+ },
+ "summary": {
+  "startupColdMs": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "startupWarmMs": {
+   "n": 3,
+   "median": 907.1,
+   "min": 856.8,
+   "max": 997.9,
+   "spreadPct": 7.7775327968250485
+  },
+  "memoryIdleRssMb": {
+   "n": 3,
+   "median": 1040.5,
+   "min": 920.2,
+   "max": 1041.2,
+   "spreadPct": 5.814512253724171
+  },
+  "memoryIdlePssMb": {
+   "n": 3,
+   "median": 853.1,
+   "min": 731.9,
+   "max": 853.4,
+   "spreadPct": 7.1210877974446145
+  },
+  "cpuIdlePercent": {
+   "n": 3,
+   "median": 60.3,
+   "min": 53.4,
+   "max": 60.7,
+   "spreadPct": 6.053067993366504
+  },
+  "memoryLongNoteRssMb": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "memoryPdfRssMb": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "memoryPdfPssMb": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "memoryStoryRssMb": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "typingP50Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "typingP95Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "typingInjectP50Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "typingInjectP95Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "scrollLongNoteP95Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "scrollLongNoteDropped": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "scrollPdfP95Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "scrollPdfDropped": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "scrollStoryP95Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "scrollStoryDropped": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  }
+ }
+}

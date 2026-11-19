@@ -57,6 +57,7 @@ import {
 } from '@codemirror/view'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { createEditorFindPanel } from '../lib/editorFindBar'
+import { markOnce } from '../lib/benchMarks'
 import type { AppSettings, DetectedTextLanguage } from '../types'
 import type { EditActivity } from '../lib/pageStats'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
@@ -1637,6 +1638,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
+    // Inert startup mark for scripts/bench-desktop: a note with content is in the editor.
+    if (state.doc.length) markOnce('fanotes:note-open')
     bindPaperNoteText(resolvePaperCaretScroller(host), state.doc.toString())
     // The paper camera remembers the text under the viewport edge, not a
     // pixel offset: CodeMirror only estimates the height of unrendered lines.

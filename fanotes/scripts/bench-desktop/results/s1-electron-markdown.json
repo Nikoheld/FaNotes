@@ -1,0 +1,981 @@
+{
+ "metric": "desktop",
+ "host": "electron",
+ "label": "electron",
+ "variant": "markdown",
+ "app": "/work/fanotes/release/linux-unpacked/fanotes",
+ "chromiumArgs": [],
+ "date": "2026-11-19T20:56:27.290Z",
+ "machine": {
+  "cpuModel": "12th Gen Intel(R) Core(TM) i3-12100F",
+  "logicalCpus": 8,
+  "containerCpuLimit": 4,
+  "containerMemoryLimitMb": 6144,
+  "totalMemoryMb": 39871,
+  "kernel": "6.17.13-13-pve",
+  "os": "Debian GNU/Linux 13 (trixie)",
+  "node": "v22.23.2",
+  "webkitgtk": "2.54.0",
+  "hostname": "eec667b68574"
+ },
+ "screen": {
+  "width": 1440,
+  "height": 900
+ },
+ "fixture": "/srv/agents/fanotes/.site-redesign-tools/tmp/w1b-bench/fx1",
+ "settings": {
+  "uiLanguage": "de",
+  "autoCheckUpdates": false,
+  "autoDownloadUpdates": false,
+  "spellcheck": false,
+  "lastOpenNotePath": "Start/Letzte Notiz.md"
+ },
+ "coldEvictionFiles": 2167,
+ "startupCold": [
+  {
+   "run": 1,
+   "startupMs": 1203.6,
+   "treeMs": 1146,
+   "noteMs": 1203.6,
+   "pageOriginMs": 496.6,
+   "clockRttMs": 0.32,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) FaNotes/2026.11.3-beta.5 Chrome/150.0.7871.47 Electron/43.1.0 Safari/537.36",
+   "cachedBefore": 0,
+   "cachedAfterEvict": 0,
+   "load": [
+    6.45,
+    7.15,
+    7.66
+   ]
+  },
+  {
+   "run": 2,
+   "startupMs": 1015.1,
+   "treeMs": 930.2,
+   "noteMs": 1015.1,
+   "pageOriginMs": 452.6,
+   "clockRttMs": 0.27,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) FaNotes/2026.11.3-beta.5 Chrome/150.0.7871.47 Electron/43.1.0 Safari/537.36",
+   "cachedBefore": 0,
+   "cachedAfterEvict": 0,
+   "load": [
+    6.87,
+    7.21,
+    7.67
+   ]
+  },
+  {
+   "run": 3,
+   "startupMs": 776.4,
+   "treeMs": 731.8,
+   "noteMs": 776.4,
+   "pageOriginMs": 389.7,
+   "clockRttMs": 0.14,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) FaNotes/2026.11.3-beta.5 Chrome/150.0.7871.47 Electron/43.1.0 Safari/537.36",
+   "cachedBefore": 0,
+   "cachedAfterEvict": 0,
+   "load": [
+    6.74,
+    7.18,
+    7.65
+   ]
+  }
+ ],
+ "startupWarm": [
+  {
+   "run": 1,
+   "startupMs": 464,
+   "treeMs": 366.2,
+   "noteMs": 464,
+   "pageOriginMs": 143.6,
+   "clockRttMs": 0.11,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) FaNotes/2026.11.3-beta.5 Chrome/150.0.7871.47 Electron/43.1.0 Safari/537.36",
+   "load": [
+    5.91,
+    6.97,
+    7.57
+   ]
+  },
+  {
+   "run": 2,
+   "startupMs": 582.6,
+   "treeMs": 473.2,
+   "noteMs": 582.6,
+   "pageOriginMs": 191.9,
+   "clockRttMs": 0.29,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) FaNotes/2026.11.3-beta.5 Chrome/150.0.7871.47 Electron/43.1.0 Safari/537.36",
+   "load": [
+    6.78,
+    6.92,
+    7.48
+   ]
+  },
+  {
+   "run": 3,
+   "startupMs": 485.2,
+   "treeMs": 396.6,
+   "noteMs": 485.2,
+   "pageOriginMs": 130.7,
+   "clockRttMs": 2.05,
+   "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) FaNotes/2026.11.3-beta.5 Chrome/150.0.7871.47 Electron/43.1.0 Safari/537.36",
+   "load": [
+    5.54,
+    6.47,
+    7.25
+   ]
+  }
+ ],
+ "memoryIdle": [
+  {
+   "run": 1,
+   "rssMb": 768.3,
+   "pssMb": 472,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 177.3,
+     "pssMb": 113.2
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 51,
+     "pssMb": 14.3
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 51.6,
+     "pssMb": 14.7
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,15869872256727855837,14709402239652535794,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 70.4,
+     "pssMb": 25.6
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetPro",
+     "rssMb": 141.6,
+     "pssMb": 80.2
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=38824 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175362363429 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --dis",
+     "rssMb": 276.4,
+     "pssMb": 224.1
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 918.7,
+   "pssMb": 618.4,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 253.8,
+     "pssMb": 188.7
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 52.8,
+     "pssMb": 14.5
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 53.1,
+     "pssMb": 15
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,3663595828701170855,8402232002302554282,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 70.4,
+     "pssMb": 25.1
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProce",
+     "rssMb": 140.7,
+     "pssMb": 79.5
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=38240 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175472051553 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disab",
+     "rssMb": 348,
+     "pssMb": 295.5
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 840.8,
+   "pssMb": 540.5,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 194.7,
+     "pssMb": 129.8
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 52.6,
+     "pssMb": 14.8
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 53,
+     "pssMb": 14.8
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,1927382705977528758,372341852450940900,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 70.7,
+     "pssMb": 25.6
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProce",
+     "rssMb": 141.3,
+     "pssMb": 80.1
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=29068 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077725 --launch-time-ticks=175577156890 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disab",
+     "rssMb": 328.4,
+     "pssMb": 275.4
+    }
+   ]
+  }
+ ],
+ "cpuIdle": [
+  {
+   "run": 1,
+   "percentOfOneCore": 70,
+   "byProcess": {
+    "fanotes": 64.5,
+    "fanotes --type=zygote --no-zygote-sandbox --no-sandbox": 0,
+    "fanotes --type=zygote --no-sandbox": 0,
+    "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,15869872256727855837,14709402239652535794,4 --trace-process-track-uuid=3190708989122997041": 0,
+    "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetPro": 1.9,
+    "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=38824 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175362363429 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --dis": 3.6
+   }
+  },
+  {
+   "run": 2,
+   "percentOfOneCore": 47.1,
+   "byProcess": {
+    "fanotes": 30.1,
+    "fanotes --type=zygote --no-zygote-sandbox --no-sandbox": 0,
+    "fanotes --type=zygote --no-sandbox": 0,
+    "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,3663595828701170855,8402232002302554282,4 --trace-process-track-uuid=3190708989122997041": 0,
+    "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProce": 1.5,
+    "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=38240 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175472051553 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disab": 15.5
+   }
+  },
+  {
+   "run": 3,
+   "percentOfOneCore": 26.8,
+   "byProcess": {
+    "fanotes": 22.2,
+    "fanotes --type=zygote --no-zygote-sandbox --no-sandbox": 0,
+    "fanotes --type=zygote --no-sandbox": 0,
+    "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,1927382705977528758,372341852450940900,4 --trace-process-track-uuid=3190708989122997041": 0,
+    "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProce": 2,
+    "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=29068 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077725 --launch-time-ticks=175577156890 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disab": 2.6
+   }
+  }
+ ],
+ "memoryIdleCold": [
+  {
+   "run": 1,
+   "rssMb": 782,
+   "pssMb": 490.2,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 192.3,
+     "pssMb": 130.3
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 48.6,
+     "pssMb": 13.8
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 48.9,
+     "pssMb": 13.8
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,13934442013880275394,309330598230950229,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,1567993035681261662,5258876050237713022,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 74.6,
+     "pssMb": 28.2
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,13934442013880275394,309330598230950229,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreati",
+     "rssMb": 147.8,
+     "pssMb": 86.1
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=38362 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175307895884 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,13934442013880275394,309330598230950229,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-featu",
+     "rssMb": 269.8,
+     "pssMb": 218.1
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 742.9,
+   "pssMb": 450.9,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 186.1,
+     "pssMb": 123.9
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 49.8,
+     "pssMb": 14.1
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 50.3,
+     "pssMb": 14.2
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,17183175617389897219,7858096591111206711,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,9165237319843414912,17395912380467003753,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 73.9,
+     "pssMb": 27.8
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,17183175617389897219,7858096591111206711,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreat",
+     "rssMb": 146.4,
+     "pssMb": 85.5
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=35706 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175321426031 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,17183175617389897219,7858096591111206711,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-feat",
+     "rssMb": 236.4,
+     "pssMb": 185.3
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 915.5,
+   "pssMb": 621.5,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 271.6,
+     "pssMb": 209
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 49.8,
+     "pssMb": 13.9
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 49.7,
+     "pssMb": 14.1
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,774613801804405606,13040111564012696802,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,5462417490229256012,1104511246776194246,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 74.4,
+     "pssMb": 28
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,774613801804405606,13040111564012696802,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreati",
+     "rssMb": 147.9,
+     "pssMb": 86.2
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=29350 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175349796618 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,774613801804405606,13040111564012696802,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-featu",
+     "rssMb": 322.1,
+     "pssMb": 270.3
+    }
+   ]
+  }
+ ],
+ "memoryLongNote": [
+  {
+   "run": 1,
+   "rssMb": 1097.6,
+   "pssMb": 774.4,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 282.2,
+     "pssMb": 216.8
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 51,
+     "pssMb": 14.3
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 51.6,
+     "pssMb": 14.7
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,15869872256727855837,14709402239652535794,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 70.4,
+     "pssMb": 25.4
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetPro",
+     "rssMb": 165.4,
+     "pssMb": 91.8
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=38824 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175362363429 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --dis",
+     "rssMb": 477,
+     "pssMb": 411.4
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 1159.3,
+   "pssMb": 831.6,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 273.4,
+     "pssMb": 207.4
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 52.8,
+     "pssMb": 14.5
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 53.1,
+     "pssMb": 15
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,3663595828701170855,8402232002302554282,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 70.4,
+     "pssMb": 25
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProce",
+     "rssMb": 165.6,
+     "pssMb": 91.7
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=38240 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175472051553 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disab",
+     "rssMb": 543.9,
+     "pssMb": 477.9
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 1138.6,
+   "pssMb": 811.8,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 272.6,
+     "pssMb": 206.5
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 52.6,
+     "pssMb": 14.8
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 53,
+     "pssMb": 14.8
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,1927382705977528758,372341852450940900,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 70.6,
+     "pssMb": 25.5
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProce",
+     "rssMb": 165.9,
+     "pssMb": 92.5
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=29068 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077725 --launch-time-ticks=175577156890 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disab",
+     "rssMb": 523.9,
+     "pssMb": 457.8
+    }
+   ]
+  }
+ ],
+ "memoryPdf": [
+  {
+   "run": 1,
+   "rssMb": 2809.8,
+   "pssMb": 2346.4,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 274.6,
+     "pssMb": 208.7
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 51,
+     "pssMb": 14.3
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 51.6,
+     "pssMb": 14.7
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,15869872256727855837,14709402239652535794,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 70.5,
+     "pssMb": 25.4
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetPro",
+     "rssMb": 305.6,
+     "pssMb": 162.4
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=38824 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175362363429 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,10520056975516667772,17471632692873459857,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --dis",
+     "rssMb": 2056.4,
+     "pssMb": 1920.9
+    }
+   ]
+  },
+  {
+   "run": 2,
+   "rssMb": 2015.9,
+   "pssMb": 1620.8,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 288.9,
+     "pssMb": 222.5
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 52.8,
+     "pssMb": 14.5
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 53.1,
+     "pssMb": 15
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,3663595828701170855,8402232002302554282,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 70.4,
+     "pssMb": 25
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProce",
+     "rssMb": 239.9,
+     "pssMb": 132.6
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=38240 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077724 --launch-time-ticks=175472051553 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,3442997810515977700,7619715062277656622,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disab",
+     "rssMb": 1310.7,
+     "pssMb": 1211.1
+    }
+   ]
+  },
+  {
+   "run": 3,
+   "rssMb": 2660.2,
+   "pssMb": 2110.4,
+   "processes": [
+    {
+     "name": "fanotes",
+     "rssMb": 283.5,
+     "pssMb": 217
+    },
+    {
+     "name": "fanotes --type=zygote --no-zygote-sandbox --no-sandbox",
+     "rssMb": 52.6,
+     "pssMb": 14.8
+    },
+    {
+     "name": "fanotes --type=zygote --no-sandbox",
+     "rssMb": 53,
+     "pssMb": 14.7
+    },
+    {
+     "name": "FaNotes --standard-schemes=fanotes-model --secure-schemes=fanotes-model --cors-schemes=fanotes-model --fetch-schemes=fanotes-model --streaming-schemes=fanotes-model --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProcessCreation,Translate --variations-seed-version --pseudonymization-salt-handle=7,i,1927382705977528758,372341852450940900,4 --trace-process-track-uuid=3190708989122997041",
+     "rssMb": 70.7,
+     "pssMb": 25.4
+    },
+    {
+     "name": "FaNotes --gpu-preferences=WAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAQAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAABAAAAAAAAAAgAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disable-features=AutofillServerCommunication,CertificateTransparencyComponentUpdater,DropInputEventsWhilePaintHolding,GlobalMediaControls,InterestFeedContentSuggestions,LocalNetworkAccessChecks,MediaRouter,OptimizationHints,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TraceSiteInstanceGetProce",
+     "rssMb": 387.5,
+     "pssMb": 203.1
+    },
+    {
+     "name": "app.asar --enable-sandbox --no-sandbox --disable-breakpad --remote-debugging-port=29068 --ozone-platform=x11 --lang=en-US --num-raster-threads=4 --enable-main-frame-before-activation --renderer-client-id=5 --time-ticks-at-unix-epoch=-1794946490077725 --launch-time-ticks=175577156890 --shared-files=v8_context_snapshot_data:100 --field-trial-handle=3,i,7085518095380655265,4256004044554414466,262144 --enable-features=CanvasOopRasterization,PdfUseShowSaveFilePicker --disab",
+     "rssMb": 1812.8,
+     "pssMb": 1635.3
+    }
+   ]
+  }
+ ],
+ "memoryStory": [],
+ "typing": [
+  {
+   "run": 1,
+   "keys": 500,
+   "paceMs": 60,
+   "measured": 500,
+   "clickFocused": false,
+   "textGrowth": 495,
+   "changedFrames": 500,
+   "framesToChange": {
+    "p50": 1,
+    "max": 1
+   },
+   "eventToPaint": {
+    "p50": 11.8,
+    "p95": 19.3,
+    "max": 24.3
+   },
+   "handlerToPaint": {
+    "p50": 10.1,
+    "p95": 17.5
+   },
+   "injectToPaint": {
+    "p50": 10.62,
+    "p95": 18.03,
+    "clockRttMs": 0.11
+   },
+   "load": [
+    7.29,
+    7.03,
+    7.55
+   ]
+  },
+  {
+   "run": 2,
+   "keys": 500,
+   "paceMs": 60,
+   "measured": 500,
+   "clickFocused": false,
+   "textGrowth": 495,
+   "changedFrames": 500,
+   "framesToChange": {
+    "p50": 1,
+    "max": 2
+   },
+   "eventToPaint": {
+    "p50": 17.7,
+    "p95": 25.5,
+    "max": 42.3
+   },
+   "handlerToPaint": {
+    "p50": 15.15,
+    "p95": 22.9
+   },
+   "injectToPaint": {
+    "p50": 16.35,
+    "p95": 24.15,
+    "clockRttMs": 0.29
+   },
+   "load": [
+    5.49,
+    6.56,
+    7.32
+   ]
+  },
+  {
+   "run": 3,
+   "keys": 500,
+   "paceMs": 60,
+   "measured": 500,
+   "clickFocused": false,
+   "textGrowth": 495,
+   "changedFrames": 500,
+   "framesToChange": {
+    "p50": 1,
+    "max": 2
+   },
+   "eventToPaint": {
+    "p50": 13.2,
+    "p95": 20.91,
+    "max": 28.8
+   },
+   "handlerToPaint": {
+    "p50": 11.5,
+    "p95": 19.21
+   },
+   "injectToPaint": {
+    "p50": 11.46,
+    "p95": 19.16,
+    "clockRttMs": 2.05
+   },
+   "load": [
+    4.24,
+    5.87,
+    7
+   ]
+  }
+ ],
+ "scrollLongNote": [
+  {
+   "run": 1,
+   "openMs": 383,
+   "frames": 694,
+   "durationMs": 16342,
+   "scrollHeight": 1231724,
+   "scroller": "div.paper-view.unified-note-view.paper-dots",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 49.9,
+   "p99": 50.1,
+   "max": 83.3,
+   "dropped": 285,
+   "over50ms": 9,
+   "load": [
+    6.86,
+    6.95,
+    7.51
+   ]
+  },
+  {
+   "run": 2,
+   "openMs": 333,
+   "frames": 694,
+   "durationMs": 14908,
+   "scrollHeight": 1231976,
+   "scroller": "div.paper-view.unified-note-view.paper-dots",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 33.4,
+   "p99": 50.1,
+   "max": 66.8,
+   "dropped": 199,
+   "over50ms": 8,
+   "load": [
+    6.81,
+    6.77,
+    7.37
+   ]
+  },
+  {
+   "run": 3,
+   "openMs": 453,
+   "frames": 694,
+   "durationMs": 15450,
+   "scrollHeight": 1231474,
+   "scroller": "div.paper-view.unified-note-view.paper-dots",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 50,
+   "p99": 66.6,
+   "max": 83.4,
+   "dropped": 232,
+   "over50ms": 12,
+   "load": [
+    6.15,
+    6.22,
+    7.09
+   ]
+  }
+ ],
+ "scrollPdf": [
+  {
+   "run": 1,
+   "openMs": 716,
+   "frames": 599,
+   "durationMs": 14680,
+   "scrollHeight": 322260,
+   "scroller": "div.paper-view.unified-note-view.paper-blank.is-pdf-note.is-view-transformed.is-view-zoomed",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 49.9,
+   "p99": 50,
+   "max": 66.6,
+   "dropped": 280,
+   "over50ms": 5,
+   "load": [
+    7.19,
+    7,
+    7.51
+   ]
+  },
+  {
+   "run": 2,
+   "openMs": 516,
+   "frames": 599,
+   "durationMs": 11829,
+   "scrollHeight": 322260,
+   "scroller": "div.paper-view.unified-note-view.paper-blank.is-pdf-note.is-view-transformed.is-view-zoomed",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 33.4,
+   "p99": 50,
+   "max": 66.6,
+   "dropped": 109,
+   "over50ms": 4,
+   "load": [
+    5.67,
+    6.51,
+    7.27
+   ]
+  },
+  {
+   "run": 3,
+   "openMs": 571,
+   "frames": 599,
+   "durationMs": 10585,
+   "scrollHeight": 322260,
+   "scroller": "div.paper-view.unified-note-view.paper-blank.is-pdf-note.is-view-transformed.is-view-zoomed",
+   "refreshMs": 16.7,
+   "p50": 16.7,
+   "p95": 33.3,
+   "p99": 33.4,
+   "max": 33.4,
+   "dropped": 35,
+   "over50ms": 0,
+   "load": [
+    4.95,
+    5.93,
+    6.97
+   ]
+  }
+ ],
+ "scrollStory": [],
+ "errors": [],
+ "renderer": {
+  "webgl": null
+ },
+ "summary": {
+  "startupColdMs": {
+   "n": 3,
+   "median": 1015.1,
+   "min": 776.4,
+   "max": 1203.6,
+   "spreadPct": 21.04226184612353
+  },
+  "startupWarmMs": {
+   "n": 3,
+   "median": 485.2,
+   "min": 464,
+   "max": 582.6,
+   "spreadPct": 12.221764220939821
+  },
+  "memoryIdleRssMb": {
+   "n": 3,
+   "median": 840.8,
+   "min": 768.3,
+   "max": 918.7,
+   "spreadPct": 8.943862987630833
+  },
+  "memoryIdlePssMb": {
+   "n": 3,
+   "median": 540.5,
+   "min": 472,
+   "max": 618.4,
+   "spreadPct": 13.54301572617946
+  },
+  "cpuIdlePercent": {
+   "n": 3,
+   "median": 47.1,
+   "min": 26.8,
+   "max": 70,
+   "spreadPct": 45.85987261146497
+  },
+  "memoryLongNoteRssMb": {
+   "n": 3,
+   "median": 1138.6,
+   "min": 1097.6,
+   "max": 1159.3,
+   "spreadPct": 2.7094677674336927
+  },
+  "memoryPdfRssMb": {
+   "n": 3,
+   "median": 2660.2,
+   "min": 2015.9,
+   "max": 2809.8,
+   "spreadPct": 14.921810390196228
+  },
+  "memoryPdfPssMb": {
+   "n": 3,
+   "median": 2110.4,
+   "min": 1620.8,
+   "max": 2346.4,
+   "spreadPct": 17.191053828658077
+  },
+  "memoryStoryRssMb": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "typingP50Ms": {
+   "n": 3,
+   "median": 13.2,
+   "min": 11.8,
+   "max": 17.7,
+   "spreadPct": 22.348484848484844
+  },
+  "typingP95Ms": {
+   "n": 3,
+   "median": 20.91,
+   "min": 19.3,
+   "max": 25.5,
+   "spreadPct": 14.825442372070777
+  },
+  "typingInjectP50Ms": {
+   "n": 3,
+   "median": 11.46,
+   "min": 10.62,
+   "max": 16.35,
+   "spreadPct": 25.000000000000007
+  },
+  "typingInjectP95Ms": {
+   "n": 3,
+   "median": 19.16,
+   "min": 18.03,
+   "max": 24.15,
+   "spreadPct": 15.970772442588721
+  },
+  "scrollLongNoteP95Ms": {
+   "n": 3,
+   "median": 49.9,
+   "min": 33.4,
+   "max": 50,
+   "spreadPct": 16.633266533066134
+  },
+  "scrollLongNoteDropped": {
+   "n": 3,
+   "median": 232,
+   "min": 199,
+   "max": 285,
+   "spreadPct": 18.53448275862069
+  },
+  "scrollPdfP95Ms": {
+   "n": 3,
+   "median": 33.4,
+   "min": 33.3,
+   "max": 49.9,
+   "spreadPct": 24.85029940119761
+  },
+  "scrollPdfDropped": {
+   "n": 3,
+   "median": 109,
+   "min": 35,
+   "max": 280,
+   "spreadPct": 112.38532110091744
+  },
+  "scrollStoryP95Ms": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  },
+  "scrollStoryDropped": {
+   "n": 0,
+   "median": null,
+   "min": null,
+   "max": null,
+   "spreadPct": null
+  }
+ }
+}

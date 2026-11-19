@@ -1,0 +1,32 @@
+# fanotes-bench-trixie:1 — spike S1 build and measurement image.
+#
+# Tauri 3 + tauri-runtime-cef needs GTK >= 4.14 (gdk4-sys 0.11), which Debian 12
+# (GTK 4.8, the base of fanotes-bench:1) does not have. This image is Debian 13
+# with everything the three hosts need to build and run, so Electron, Tauri 2
+# (WebKitGTK) and Tauri 3 + CEF are all measured in one container under one Xvfb.
+#
+#   sudo docker build -t fanotes-bench-trixie:1 -f fanotes/scripts/bench-desktop/docker/Dockerfile.trixie fanotes/scripts/bench-desktop/docker
+FROM rust:1.99.0-trixie
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libwebkit2gtk-4.1-dev libgtk-3-dev libgtk-4-dev libayatana-appindicator3-dev librsvg2-dev \
+      libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libssl-dev libxdo-dev libdbus-1-dev \
+      pkg-config build-essential patchelf file xdg-utils curl ca-certificates xz-utils zstd \
+      webkit2gtk-driver xvfb xauth dbus-x11 gnome-keyring \
+      libnss3 libnspr4 libxss1 libxtst-dev libgl1-mesa-dri libegl1 libgles2 libgbm1 libdrm2 \
+      libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1 libxdamage1 \
+      libxrandr2 libpango-1.0-0 libasound2 libxshmfence1 mesa-utils \
+      x11-utils xinput xdotool util-linux util-linux-extra procps time \
+    && rm -rf /var/lib/apt/lists/*
+RUN rustup component add rustfmt clippy
+
+ARG NODE_VERSION=22.23.2
+ARG NODE_SHA256=d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307
+RUN curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+    && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
+    && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --exclude='*.md' --exclude=LICENSE \
+    && rm /tmp/node.tar.xz && node --version
+
+COPY xinject.c execstamp.c /opt/bench/
+RUN cc -O2 -Wall -o /usr/local/bin/fanotes-xinject /opt/bench/xinject.c -lX11 -lXtst \
+    && cc -O2 -Wall -o /usr/local/bin/fanotes-execstamp /opt/bench/execstamp.c

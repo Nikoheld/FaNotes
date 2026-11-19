@@ -1,0 +1,12 @@
+# fanotes-bench-pen:1 — spike S1 pen probe: a real Xorg (dummy video driver,
+# evdev input; libinput needs a udev database the container lacks) instead of Xvfb, so a uinput tablet reaches Chromium as an XI2
+# device with pressure and tilt valuators. Xvfb only has the XTest core
+# devices and cannot deliver pen input at all.
+#
+#   sudo docker build -t fanotes-bench-pen:1 -f fanotes/scripts/bench-desktop/docker/Dockerfile.pen fanotes/scripts/bench-desktop/docker
+FROM fanotes-bench-trixie:1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      xserver-xorg-core xserver-xorg-video-dummy xserver-xorg-input-evdev \
+    && rm -rf /var/lib/apt/lists/*
+COPY pen-uinput.c /opt/bench/
+RUN cc -O2 -Wall -o /usr/local/bin/fanotes-pen-uinput /opt/bench/pen-uinput.c

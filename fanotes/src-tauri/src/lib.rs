@@ -510,6 +510,19 @@ fn navigation_allowed(url: &tauri::Url) -> bool {
     }
 }
 
+/// The bridge runs as a plugin init script, after Tauri's own core script. As an
+/// `append_invoke_initialization_script` it never ran in the page, so the bundle
+/// fell back to the browser vault (see RUST_DESKTOP_BENCHMARKS.md).
+fn bridge_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("fanotes-bridge")
+        .js_init_script(format!(
+            "{}{}",
+            system_language_script(fanotes_host::desktop_navigator_language()),
+            include_str!("fanotes-api.js")
+        ))
+        .build()
+}
+
 fn navigation_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri::plugin::Builder::new("fanotes-navigation")
         .on_navigation(|_webview, url| navigation_allowed(url))
@@ -873,10 +886,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(register())
-        .append_invoke_initialization_script(system_language_script(
-            fanotes_host::desktop_navigator_language(),
-        ))
-        .append_invoke_initialization_script(include_str!("fanotes-api.js"))
+        .plugin(bridge_plugin())
         .run(tauri::generate_context!())
         .expect("FaNotes Tauri host failed");
 }
