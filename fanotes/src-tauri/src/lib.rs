@@ -636,6 +636,7 @@ fn install_webview_guards(window: &tauri::WebviewWindow, emit_sheet_zoom: bool) 
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)] // `run` stays last, after the helpers it wires up.
 mod tests {
     use super::sheet_zoom_direction;
 
