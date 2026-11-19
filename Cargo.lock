@@ -1424,6 +1424,12 @@ name = "fanotes-input"
 version = "0.1.0"
 dependencies = [
  "fanotes-paper",
+ "rustix 1.1.6",
+ "thiserror 2.0.21",
+ "wayland-client",
+ "wayland-protocols",
+ "windows",
+ "x11rb",
 ]
 
 [[package]]
