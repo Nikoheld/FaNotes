@@ -98,6 +98,7 @@ class BloomFilter {
 
 type Dictionaries = Record<SpellingLanguage, BloomFilter>
 let dictionariesPromise: Promise<Dictionaries> | null = null
+let loadedResources: SpellingResources | null = null
 let warnedAboutResources = false
 
 const sha256 = async (bytes: Uint8Array) => {
@@ -126,6 +127,7 @@ const loadDictionaries = async (): Promise<Dictionaries> => {
     if (de.byteLength * 8 !== resources.manifest.languages.de.bitCount || en.byteLength * 8 !== resources.manifest.languages.en.bitCount) {
       throw new Error('Die lokalen Rechtschreibdaten besitzen eine ungültige Länge.')
     }
+    loadedResources = resources
     loadedDictionaries = {
       de: new BloomFilter(de, resources.manifest.languages.de, hashes),
       en: new BloomFilter(en, resources.manifest.languages.en, hashes),
@@ -203,16 +205,64 @@ export const loadSpellingWordMembership = async (language: SpellingLanguage) => 
 
 const candidatePromises = new Map<SpellingLanguage, Promise<Set<string>>>()
 
+const fetchCandidateResource = (language: SpellingLanguage) => (
+  Promise.resolve()
+    .then(() => window.fanotes.loadSpellingWordCandidates(language))
+    .catch((hostError: unknown) => (
+      loadBrowserSpellingWordCandidates(language).catch(() => {
+        throw hostError
+      })
+    ))
+)
+
+export type SpellingWorkerInput = {
+  bloom: Record<SpellingLanguage, { bytes: Uint8Array; bitCount: number }>
+  hashes: number
+  words: Record<SpellingLanguage, { bytes: Uint8Array; size: number; count: number; sha256: string }>
+}
+
+/** The raw bytes the spelling worker validates and indexes off the main thread. The Bloom filters
+ * were already hash-checked here; the exact word lists are only fetched, never parsed. */
+export const loadSpellingWorkerInput = async (): Promise<SpellingWorkerInput> => {
+  await loadDictionaries()
+  const resources = loadedResources
+  if (!resources) throw new Error('Die Rechtschreibdaten sind nicht geladen.')
+  const [de, en] = await Promise.all([fetchCandidateResource('de'), fetchCandidateResource('en')])
+  const word = (language: SpellingLanguage, resource: typeof de) => {
+    if (resource.language !== language) throw new Error('Die OCR-Wortliste gehört zur falschen Sprache.')
+    return {
+      bytes: new Uint8Array(resource.bytes),
+      size: resource.descriptor.size,
+      count: resource.descriptor.wordCount,
+      sha256: resource.descriptor.sha256,
+    }
+  }
+  const bloom = (language: SpellingLanguage) => ({
+    // A copy: the worker gets the buffer transferred, this thread keeps its own filter.
+    bytes: new Uint8Array(resources[language]).slice(),
+    bitCount: resources.manifest.languages[language].bitCount,
+  })
+  return {
+    bloom: { de: bloom('de'), en: bloom('en') },
+    hashes: resources.manifest.hashes,
+    words: { de: word('de', de), en: word('en', en) },
+  }
+}
+
+/** True when the word would be underlined, using only the compact Bloom filters. Resolves after
+ * the filters loaded; false for a word that cannot be judged yet. */
+export const loadMisspellingCheck = async () => {
+  const dictionaries = await loadDictionaries()
+  return (word: string) => {
+    const membership = wordMembership(word, dictionaries)
+    return !membership.de && !membership.en
+  }
+}
+
 export const loadRecognitionCandidates = async (language: SpellingLanguage) => {
   let pending = candidatePromises.get(language)
   if (!pending) {
-    pending = Promise.resolve()
-      .then(() => window.fanotes.loadSpellingWordCandidates(language))
-      .catch((hostError: unknown) => (
-        loadBrowserSpellingWordCandidates(language).catch(() => {
-          throw hostError
-        })
-      )).then(async (resource) => {
+    pending = fetchCandidateResource(language).then(async (resource) => {
       if (resource.language !== language) throw new Error('Die OCR-Wortliste gehört zur falschen Sprache.')
       const bytes = new Uint8Array(resource.bytes)
       if (bytes.byteLength !== resource.descriptor.size || bytes.byteLength > 8 * 1024 * 1024) {

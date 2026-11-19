@@ -36,6 +36,13 @@ const modules = [
     constant: 'RECOG_WASM_BASE64',
     bindgenFlags: ['--remove-name-section', '--remove-producers-section'],
   },
+  {
+    crate: 'fanotes-spell-wasm',
+    artifact: 'fanotes_spell_wasm',
+    dir: join(appRoot, 'src', 'lib', 'spellWasm'),
+    constant: 'SPELL_WASM_BASE64',
+    bindgenFlags: ['--remove-name-section', '--remove-producers-section'],
+  },
 ]
 
 const lockedBindgen = () => {

@@ -267,6 +267,15 @@ export const personalWords = (storage = safeStorage()): Set<string> => {
   return personalWordsCache
 }
 
+const personalWordListeners = new Set<() => void>()
+
+/** Calls `listener` whenever the personal dictionary changes (the spelling worker keeps a copy). */
+export const onPersonalWordsChanged = (listener: () => void) => {
+  personalWordListeners.add(listener)
+  return () => { personalWordListeners.delete(listener) }
+}
+const notifyPersonalWordsChanged = () => personalWordListeners.forEach((listener) => listener())
+
 export const addPersonalWord = (word: string, storage = safeStorage()) => {
   const normalized = normalizeForDictionary(word)
   if (!normalized) return false
@@ -279,12 +288,14 @@ export const addPersonalWord = (word: string, storage = safeStorage()) => {
   } catch {
     // Storage full or unavailable: the word still counts for this session.
   }
+  notifyPersonalWordsChanged()
   return true
 }
 
 export const removePersonalWord = (word: string, storage = safeStorage()) => {
   const words = personalWords(storage)
   if (!words.delete(normalizeForDictionary(word))) return false
+  notifyPersonalWordsChanged()
   try {
     storage?.setItem(PERSONAL_DICTIONARY_STORAGE_KEY, JSON.stringify([...words]))
   } catch {
@@ -315,6 +326,7 @@ export const isUserAcceptedWord = (word: string, storage = safeStorage()) => {
 /** Test hook: forgets cached personal words so a different storage can be read. */
 export const resetPersonalDictionaryCache = () => {
   personalWordsCache = null
+  notifyPersonalWordsChanged()
   sessionIgnoredWords.clear()
   autocorrectDeclinedWords.clear()
 }

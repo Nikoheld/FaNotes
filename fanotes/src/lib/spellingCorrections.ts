@@ -13,13 +13,12 @@ import { Decoration, EditorView, keymap, showTooltip, tooltips, type DecorationS
 import type { SpellingLanguage } from '../types'
 import {
   addPersonalWord,
-  decideAutocorrect,
   declineAutocorrect,
   ignoreWordForSession,
   isAutocorrectDeclined,
-  suggestCorrections,
   type SpellingSuggestion,
 } from './spellingSuggest'
+import type { SpellingEngine } from './spellingEngine'
 
 /**
  * Corrections for the spellchecker: an autocorrect that fires when a word is
@@ -29,15 +28,19 @@ import {
 
 type SpellingModule = typeof import('./spelling')
 let spellingModule: SpellingModule | null = null
-let primePromise: Promise<SpellingModule> | null = null
+let spellingEngine: SpellingEngine | null = null
+let primePromise: Promise<SpellingEngine> | null = null
 
-/** Loads dictionaries and exact word lists once; autocorrect is silent until this resolved. */
+/** Loads the dictionaries and the exact word lists once, off the main thread (a Web Worker with
+ * the Rust wasm; the TypeScript lexicon if that cannot start). Autocorrect is silent until this
+ * resolved. */
 export const primeSpellingCorrections = () => {
-  primePromise ??= import('./spelling')
-    .then(async (module) => {
-      await module.loadSpellingLexicon()
+  primePromise ??= Promise.all([import('./spelling'), import('./spellingEngine')])
+    .then(async ([module, { loadSpellingEngine }]) => {
+      const engine = await loadSpellingEngine()
       spellingModule = module
-      return module
+      spellingEngine = engine
+      return engine
     })
     .catch((error) => {
       primePromise = null
@@ -119,12 +122,22 @@ const opensSentence = (state: EditorState, from: number) => {
 
 type PlannedAutocorrect = { from: number; to: number; word: string; replacement: string }
 
-/** The one sure fix for the word ending exactly at `wordEnd`, or null. */
-const planAutocorrect = (state: EditorState, wordEnd: number, options: SpellingCorrectionsOptions): PlannedAutocorrect | null => {
+/** A word that autocorrect may fix once the engine answered; everything the engine cannot know
+ * (editor syntax, line language, sentence start) is decided here, synchronously. */
+type AutocorrectRequest = {
+  from: number
+  to: number
+  word: string
+  language: SpellingLanguage | null
+  sentenceStart: boolean
+  properName: boolean
+}
+
+/** The misspelled word ending exactly at `wordEnd`, or null. */
+const requestAutocorrect = (state: EditorState, wordEnd: number, options: SpellingCorrectionsOptions): AutocorrectRequest | null => {
   const module = spellingModule
-  if (!module || state.readOnly) return null
-  const lexicon = module.loadedSpellingLexicon()
-  if (!lexicon) return null
+  const engine = spellingEngine
+  if (!module || !engine || state.readOnly) return null
   const line = state.doc.lineAt(wordEnd)
   const offset = wordEnd - line.from
   let start = offset
@@ -133,17 +146,17 @@ const planAutocorrect = (state: EditorState, wordEnd: number, options: SpellingC
   // Part of a tag, path, e-mail, hyphenated or apostrophised token: leave it.
   if (start > 0 && /[\p{L}\p{M}\d'’\-_#@/\\.:&+]/u.test(line.text[start - 1])) return null
   const word = line.text.slice(start, offset)
-  if (isAutocorrectDeclined(word) || !lexicon.isMisspelled(word)) return null
+  if (isAutocorrectDeclined(word) || !engine.isMisspelled(word)) return null
   const from = line.from + start
   if (inIgnoredContext(state, from, wordEnd)) return null
-  const language = options.languageAt(state, line.from)
-  const suggestions = suggestCorrections(word, language ? [language] : lexicon.languages, lexicon, { limit: 4, maxDistance: 1 })
-  const decision = decideAutocorrect(word, suggestions, {
-    language,
+  return {
+    from,
+    to: wordEnd,
+    word,
+    language: options.languageAt(state, line.from),
     sentenceStart: opensSentence(state, from),
-    isProperName: module.isCanonicalProperName,
-  })
-  return decision ? { from, to: wordEnd, word, replacement: decision.word } : null
+    properName: module.isCanonicalProperName(word.normalize('NFC').toLocaleLowerCase('en-US')),
+  }
 }
 
 /**
@@ -160,6 +173,37 @@ const commitAutocorrect = (view: EditorView, plan: PlannedAutocorrect, boundary:
     effects: setAutocorrect.of({ from: plan.from, to: plan.from + plan.replacement.length, original: plan.word, replacement: plan.replacement, boundary }),
     annotations: [isolateHistory.of('full'), Transaction.userEvent.of('input.autocorrect')],
   })
+}
+
+/**
+ * Asks the engine about `request` and applies the fix once it answered. The boundary typed after
+ * the word has been inserted by the editor by then, so the fix follows as its own undo step. It
+ * is dropped when the text moved on in the meantime. `boundaryAt` reports how many characters
+ * the boundary is long, or null when the document no longer looks like it did.
+ */
+const resolveAutocorrect = (
+  view: EditorView,
+  request: AutocorrectRequest,
+  options: SpellingCorrectionsOptions,
+  boundaryAt: (state: EditorState) => number | null,
+) => {
+  const engine = spellingEngine
+  if (!engine) return
+  engine
+    .planAutocorrect(request.word, request.language ? [request.language] : null, {
+      language: request.language,
+      sentenceStart: request.sentenceStart,
+      properName: request.properName,
+    })
+    .then((decision) => {
+      if (!decision || !view.dom.isConnected || !readyForAutocorrect(view, options)) return
+      const state = view.state
+      if (state.doc.sliceString(request.from, request.to) !== request.word) return
+      const boundary = boundaryAt(state)
+      if (boundary === null) return
+      commitAutocorrect(view, { from: request.from, to: request.to, word: request.word, replacement: decision.word }, boundary)
+    })
+    .catch(() => undefined)
 }
 
 const readyForAutocorrect = (view: EditorView, options: SpellingCorrectionsOptions) => (
@@ -382,13 +426,12 @@ export const openSpellingMenuAt = (view: EditorView, pos: number, options: Spell
   const menu: MenuState = { ...range, language, suggestions: null, autocorrected, focusOnOpen }
   view.dispatch({ effects: openMenu.of(menu) })
   void primeSpellingCorrections()
-    .then((module) => {
-      const lexicon = module.loadedSpellingLexicon()
-      const current = view.state.field(spellingMenu, false)
-      if (!lexicon || !current || current.word !== range.word) return
-      const suggestions = lexicon.isMisspelled(range.word)
-        ? suggestCorrections(range.word, language ? [language] : lexicon.languages, lexicon, { limit: 6 })
+    .then(async (engine) => {
+      const suggestions = engine.isMisspelled(range.word)
+        ? await engine.suggest(range.word, language ? [language] : null, { limit: 6 })
         : []
+      const current = view.state.field(spellingMenu, false)
+      if (!current || current.word !== range.word) return
       view.dispatch({ effects: menuSuggestions.of({ word: range.word, suggestions }) })
     })
     .catch(() => {
@@ -411,17 +454,17 @@ export function spellingCorrections(options: SpellingCorrectionsOptions): Extens
     EditorView.inputHandler.of((view, from, to, text) => {
       if (from !== to || !BOUNDARY.test(text) || !readyForAutocorrect(view, options)) return false
       if (view.state.selection.main.head !== from) return false
-      const plan = planAutocorrect(view.state, from, options)
-      if (!plan) return false
-      // The boundary goes in first as ordinary typing; the fix follows as its own step.
-      view.dispatch({
-        changes: { from, insert: text },
-        selection: EditorSelection.cursor(from + text.length),
-        scrollIntoView: true,
-        userEvent: 'input.type',
-      })
-      commitAutocorrect(view, plan, text.length)
-      return true
+      const request = requestAutocorrect(view.state, from, options)
+      if (!request) return false
+      // The boundary is typed as usual; the fix follows as its own step once the engine answered.
+      resolveAutocorrect(view, request, options, (state) => (
+        state.selection.main.empty
+        && state.selection.main.head === from + text.length
+        && state.doc.sliceString(from, from + text.length) === text
+          ? text.length
+          : null
+      ))
+      return false
     }),
     Prec.highest(keymap.of([
       {
@@ -429,11 +472,19 @@ export function spellingCorrections(options: SpellingCorrectionsOptions): Extens
         run: (view) => {
           if (!readyForAutocorrect(view, options)) return false
           const wordEnd = view.state.selection.main.head
-          const plan = planAutocorrect(view.state, wordEnd, options)
-          if (!plan) return false
-          if (!insertNewlineAndIndent(view)) return false
-          commitAutocorrect(view, plan, view.state.selection.main.head - wordEnd)
-          return true
+          const request = requestAutocorrect(view.state, wordEnd, options)
+          if (!request) return false
+          // The newline is inserted by the regular Enter handling that runs after this one.
+          resolveAutocorrect(view, request, options, (state) => {
+            const head = state.selection.main.head
+            return state.selection.main.empty
+              && head > wordEnd
+              && state.doc.sliceString(wordEnd, wordEnd + 1) === '\n'
+              && state.doc.lineAt(head).number === state.doc.lineAt(wordEnd).number + 1
+              ? head - wordEnd
+              : null
+          })
+          return false
         },
       },
       { key: 'Backspace', run: revertAutocorrect },

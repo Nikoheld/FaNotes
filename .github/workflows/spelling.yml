@@ -1,0 +1,53 @@
+name: Spelling checks
+
+# The Rust spelling core (crates/fanotes-spell), its wasm facade and the web code that runs it in a
+# Web Worker. The parity check runs the TypeScript implementation and the wasm side by side on the
+# shipped word lists. Never builds or publishes a release.
+on:
+  pull_request:
+    paths:
+      - 'crates/fanotes-spell/**'
+      - 'crates/fanotes-spell-wasm/**'
+      - 'fanotes/src/lib/spell*.ts'
+      - 'fanotes/src/lib/spellWasm/**'
+      - 'fanotes/src/lib/neuralWordContext.ts'
+      - 'fanotes/scripts/check-spell*.mjs'
+      - 'Cargo.lock'
+      - '.github/workflows/spelling.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - run: cargo test -p fanotes-spell -p fanotes-spell-wasm
+      - run: cargo clippy -p fanotes-spell -p fanotes-spell-wasm --all-targets -- -D warnings
+
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:spelling
+      - run: node scripts/stage-main-i18n.cjs
+      - run: npx tsc -b
+      - run: node scripts/check-spelling.mjs
+      - run: node scripts/check-spelling-suggest.mjs
+      - run: node scripts/check-spell-wasm-parity.mjs
+      - run: node scripts/check-writing-assist.mjs
+      - run: node scripts/check-context-recognition.mjs
+      - run: node scripts/check-markdown.mjs
