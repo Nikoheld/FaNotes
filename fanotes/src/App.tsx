@@ -886,6 +886,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [noteTextFields, setNoteTextFields] = useState<NoteTextField[]>([])
   const [noteLinkPlacing, setNoteLinkPlacing] = useState(false)
   const [textFieldPlacing, setTextFieldPlacing] = useState(false)
+  const unifiedPaperRef = useRef<HTMLElement | null>(null)
   const [selectedTextFieldId, setSelectedTextFieldId] = useState<string | null>(null)
   const [studyToolsOpen, setStudyToolsOpen] = useState(false)
   const [textFieldFocusId, setTextFieldFocusId] = useState<string | null>(null)
@@ -3491,6 +3492,15 @@ export default function App({ startupBootstrap }: AppProps) {
     await saveContent(path, content)
     toast('Backup wiederhergestellt.', 'success')
   }, [saveContent, toast, updateContent])
+
+  // Toggled on the element, not through className: the drawing board adds its own classes
+  // (has-ink-extent) to the sheet, and a className re-render would wipe them and squish the ink.
+  useLayoutEffect(() => {
+    const paper = unifiedPaperRef.current
+    if (!paper) return
+    paper.classList.toggle('is-placing-note-link', noteLinkPlacing)
+    paper.classList.toggle('is-placing-text-field', textFieldPlacing)
+  }, [noteLinkPlacing, textFieldPlacing, activeTab?.path])
 
   const startNoteLinkPlacement = useCallback(() => {
     if (!activePathRef.current) {
@@ -6796,7 +6806,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onPointerDownCapture={() => setFocusedPane('main')}
                 onFocusCapture={() => setFocusedPane('main')}
               >
-                <article className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''} ${isPdfActive ? 'is-pdf-note' : ''} ${noteLinkPlacing ? 'is-placing-note-link' : ''} ${textFieldPlacing ? 'is-placing-text-field' : ''}`} aria-label={`${activeTab.title} · ${isPdfActive ? 'PDF-Notiz mit Handschrift' : 'gemeinsame Tastatur- und Handschriftseite'}`}>
+                <article ref={unifiedPaperRef} className={`unified-paper ${worksheetSession.documents.length ? 'has-worksheet' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`} aria-label={`${activeTab.title} · ${isPdfActive ? 'PDF-Notiz mit Handschrift' : 'gemeinsame Tastatur- und Handschriftseite'}`}>
                   {isPdfActive ? (
                     <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={20} /> PDF wird geladen …</div>}>
                       <SafeBoundary name="PDF-Notiz" fallbackTitle="Der PDF-Viewer ist abgestürzt">
