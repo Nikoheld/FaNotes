@@ -214,7 +214,7 @@ fn open_subject_book_popout(
     let book = result["bookPath"].as_str().unwrap_or("").to_owned();
     let fragment = format!("subject-book={}", encode_uri_component(&book));
     if let Some(existing) = app.get_webview_window("subject-book") {
-        let _ = existing.eval(&subject_book_hash_assignment(&book));
+        let _ = existing.eval(subject_book_hash_assignment(&book));
         let _ = existing.set_focus();
         return Ok(result);
     }
