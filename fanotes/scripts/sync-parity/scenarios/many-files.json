@@ -1,0 +1,69 @@
+{
+ "about": "2,000 notes: a first sync of both devices, then 20 edits.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "bulk",
+   "device": "Laptop",
+   "count": 2000,
+   "prefix": "Vault/Notiz "
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "label": "full"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "label": "full-pull"
+  },
+  {
+   "do": "edit-bulk",
+   "device": "Laptop",
+   "count": 20,
+   "prefix": "Vault/Notiz "
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "label": "incremental"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "label": "incremental-pull"
+  }
+ ],
+ "expect": [
+  {
+   "device": "Tablet",
+   "path": "Vault/Notiz 01999.md",
+   "text": "# Notiz 1999\n\nText Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text Text \n"
+  },
+  {
+   "device": "Tablet",
+   "path": "Vault/Notiz 00019.md",
+   "text": "# Notiz 19\n\nGeändert.\n"
+  }
+ ]
+}

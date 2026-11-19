@@ -1,0 +1,548 @@
+{
+ "scenario": "deliberate-shrink",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (4 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Gross.md 200",
+    "PUT /files/Gross2.md 200",
+    "PUT /files/Kurz.md 200",
+    "PUT /files/Leeren.famd 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Gross.md",
+    "Gross2.md",
+    "Kurz.md",
+    "Leeren.famd"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Gross.md 200",
+    "GET /files/Gross2.md 200",
+    "GET /files/Kurz.md 200",
+    "GET /files/Leeren.famd 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Kurz.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Kurz.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Kurz.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Gross (Konflikt Laptop 2030-01-01 00-00).md",
+    "Gross.md"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Gross.md -> Gross (Konflikt Laptop 2030-01-01 00-00).md"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht).",
+    "warn: Leere Fassung von „Gross.md“ wurde nicht hochgeladen. Die lokale Kopie liegt unter „Gross (Konflikt Laptop 2030-01-01 00-00).md“.",
+    "warn: „Gross.md“ ist leer und wird nicht über die vorhandene Fassung hochgeladen."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /changes 200",
+    "GET /files/Gross.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "markCleared",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Gross (Konflikt Laptop 2030-01-01 00-00).md 200",
+    "PUT /files/Leeren.famd 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Gross (Konflikt Laptop 2030-01-01 00-00).md",
+    "Leeren.famd"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Leeren.famd -> Leeren (Konflikt Tablet 2030-01-01 00-00).famd"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht, 1 Konflikt(e)).",
+    "warn: Konflikt bei „Leeren.famd“: die lokale Fassung liegt jetzt unter „Leeren (Konflikt Tablet 2030-01-01 00-00).famd“."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Gross (Konflikt Laptop 2030-01-01 00-00).md 200",
+    "GET /files/Leeren.famd 200",
+    "PUT /files/Leeren (Konflikt Tablet 2030-01-01 00-00).famd 200"
+   ]
+  },
+  {
+   "do": "markCleared",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Gross2 (Konflikt Laptop 2030-01-01 00-00).md",
+    "Gross2.md",
+    "Leeren (Konflikt Tablet 2030-01-01 00-00).famd"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Gross2.md -> Gross2 (Konflikt Laptop 2030-01-01 00-00).md"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht).",
+    "warn: Der Sync-Server hat die stark gekürzte Fassung von „Gross2.md“ nicht übernommen. Die lokale Kopie liegt unter „Gross2 (Konflikt Laptop 2030-01-01 00-00).md“."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /changes 200",
+    "GET /files/Gross2.md 200",
+    "GET /files/Leeren (Konflikt Tablet 2030-01-01 00-00).famd 200",
+    "PUT /files/Gross2.md 409"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [
+    "Gross2.md"
+   ],
+   "files": {
+    "Gross (Konflikt Laptop 2030-01-01 00-00).md": {
+     "sha256": "136790ab0421c503a71f11110d4517ca04e0cabcd7e6ce047db530df287b6072",
+     "size": 27
+    },
+    "Gross.md": {
+     "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+     "size": 7800
+    },
+    "Gross2 (Konflikt Laptop 2030-01-01 00-00).md": {
+     "sha256": "6f5ff8ec1e7299f2d90307ccd553baf439bf26ff93f23a9a57c09ef181477917",
+     "size": 18
+    },
+    "Gross2.md": {
+     "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+     "size": 7800
+    },
+    "Kurz.md": {
+     "sha256": "9168caa9d7fc7364daaba3e36c4975d72f89e6e659d726ec9e6ae37d4119e2bd",
+     "size": 38
+    },
+    "Leeren (Konflikt Tablet 2030-01-01 00-00).famd": {
+     "sha256": "0de3124b430b0bb5339ce788b380a66f219c244cd155f10b1df621a612286d77",
+     "size": 7969
+    },
+    "Leeren.famd": {
+     "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+     "size": 129
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Gross (Konflikt Laptop 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "136790ab0421c503a71f11110d4517ca04e0cabcd7e6ce047db530df287b6072",
+      "size": 27,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "136790ab0421c503a71f11110d4517ca04e0cabcd7e6ce047db530df287b6072",
+      "blank": false
+     },
+     "Gross.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+      "size": 7800,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+      "blank": false
+     },
+     "Gross2.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+      "size": 7800,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+      "blank": false
+     },
+     "Kurz.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "9168caa9d7fc7364daaba3e36c4975d72f89e6e659d726ec9e6ae37d4119e2bd",
+      "size": 38,
+      "mtimeMs": 1700000005000,
+      "contentSha256": "9168caa9d7fc7364daaba3e36c4975d72f89e6e659d726ec9e6ae37d4119e2bd",
+      "blank": false
+     },
+     "Leeren (Konflikt Tablet 2030-01-01 00-00).famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "0de3124b430b0bb5339ce788b380a66f219c244cd155f10b1df621a612286d77",
+      "size": 7969,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "b916765da86cc02ed9b2ed1144f746fd4767bb4e45b3aadbc0172b46efef4af9",
+      "blank": false
+     },
+     "Leeren.famd": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+      "size": 129,
+      "mtimeMs": 1700000007000,
+      "contentSha256": "dd5f27a8362591be8312f691776bbe9b9fdeb673db46d613fd342f8e96475271",
+      "blank": true
+     }
+    },
+    "conflicts": [
+     "Gross.md -> Gross (Konflikt Laptop 2030-01-01 00-00).md",
+     "Gross2.md -> Gross2 (Konflikt Laptop 2030-01-01 00-00).md"
+    ],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Gross (Konflikt Laptop 2030-01-01 00-00).md": {
+     "sha256": "136790ab0421c503a71f11110d4517ca04e0cabcd7e6ce047db530df287b6072",
+     "size": 27
+    },
+    "Gross.md": {
+     "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+     "size": 7800
+    },
+    "Gross2.md": {
+     "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+     "size": 7800
+    },
+    "Kurz.md": {
+     "sha256": "9168caa9d7fc7364daaba3e36c4975d72f89e6e659d726ec9e6ae37d4119e2bd",
+     "size": 38
+    },
+    "Leeren (Konflikt Tablet 2030-01-01 00-00).famd": {
+     "sha256": "0de3124b430b0bb5339ce788b380a66f219c244cd155f10b1df621a612286d77",
+     "size": 7969
+    },
+    "Leeren.famd": {
+     "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+     "size": 129
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Gross (Konflikt Laptop 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "136790ab0421c503a71f11110d4517ca04e0cabcd7e6ce047db530df287b6072",
+      "size": 27,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "136790ab0421c503a71f11110d4517ca04e0cabcd7e6ce047db530df287b6072",
+      "blank": false
+     },
+     "Gross.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+      "size": 7800,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+      "blank": false
+     },
+     "Gross2.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+      "size": 7800,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+      "blank": false
+     },
+     "Kurz.md": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "9168caa9d7fc7364daaba3e36c4975d72f89e6e659d726ec9e6ae37d4119e2bd",
+      "size": 38,
+      "mtimeMs": 1700000005000,
+      "contentSha256": "9168caa9d7fc7364daaba3e36c4975d72f89e6e659d726ec9e6ae37d4119e2bd",
+      "blank": false
+     },
+     "Leeren (Konflikt Tablet 2030-01-01 00-00).famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "0de3124b430b0bb5339ce788b380a66f219c244cd155f10b1df621a612286d77",
+      "size": 7969,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "b916765da86cc02ed9b2ed1144f746fd4767bb4e45b3aadbc0172b46efef4af9",
+      "blank": false
+     },
+     "Leeren.famd": {
+      "idMatchesPath": true,
+      "revision": 2,
+      "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+      "size": 129,
+      "mtimeMs": 1700000007000,
+      "contentSha256": "dd5f27a8362591be8312f691776bbe9b9fdeb673db46d613fd342f8e96475271",
+      "blank": true
+     }
+    },
+    "conflicts": [
+     "Leeren.famd -> Leeren (Konflikt Tablet 2030-01-01 00-00).famd"
+    ],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "Gross (Konflikt Laptop 2030-01-01 00-00).md": {
+   "deleted": false,
+   "sha256": "136790ab0421c503a71f11110d4517ca04e0cabcd7e6ce047db530df287b6072",
+   "revisions": 1
+  },
+  "Gross.md": {
+   "deleted": false,
+   "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+   "revisions": 1
+  },
+  "Gross2.md": {
+   "deleted": false,
+   "sha256": "3db75f1027094a78e0854435ad3836e040dc9f7c8ba66930d7239f298e983bd7",
+   "revisions": 1
+  },
+  "Kurz.md": {
+   "deleted": false,
+   "sha256": "9168caa9d7fc7364daaba3e36c4975d72f89e6e659d726ec9e6ae37d4119e2bd",
+   "revisions": 2
+  },
+  "Leeren (Konflikt Tablet 2030-01-01 00-00).famd": {
+   "deleted": false,
+   "sha256": "0de3124b430b0bb5339ce788b380a66f219c244cd155f10b1df621a612286d77",
+   "revisions": 1
+  },
+  "Leeren.famd": {
+   "deleted": false,
+   "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+   "revisions": 2
+  }
+ }
+}

@@ -171,7 +171,11 @@ fn blue(pixel: [u8; 4]) -> bool {
 }
 
 fn turned(rotation: i32, width: i32, height: i32) -> RenderRequest {
-    let (w, h) = if rotation % 180 == 0 { (width, height) } else { (height, width) };
+    let (w, h) = if rotation % 180 == 0 {
+        (width, height)
+    } else {
+        (height, width)
+    };
     let mut job = request(w, h, w, h, 0, 0);
     job.rotation = rotation;
     job
@@ -189,8 +193,14 @@ fn each_quarter_turn_moves_the_quadrants_clockwise() {
     ];
     for (rotation, (rx, ry), (bx, by)) in cases {
         let bitmap = render_pdf_page(&pdf, &turned(rotation, 200, 100)).expect("turned page");
-        assert!(red(pixel(&bitmap.rgba, bitmap.width, rx, ry)), "{rotation}°: red quadrant");
-        assert!(blue(pixel(&bitmap.rgba, bitmap.width, bx, by)), "{rotation}°: blue quadrant");
+        assert!(
+            red(pixel(&bitmap.rgba, bitmap.width, rx, ry)),
+            "{rotation}°: red quadrant"
+        );
+        assert!(
+            blue(pixel(&bitmap.rgba, bitmap.width, bx, by)),
+            "{rotation}°: blue quadrant"
+        );
     }
 }
 
@@ -200,7 +210,11 @@ fn a_window_is_the_same_pixels_as_that_crop_of_the_page() {
     for rotation in [0, 90, 180, 270] {
         let full_job = turned(rotation, 400, 200);
         let full = render_pdf_page(&pdf, &full_job).expect("full page");
-        for (x, y, w, h) in [(37, 23, 150, 90), (0, 0, 64, 64), (full.width as i32 - 50, full.height as i32 - 40, 50, 40)] {
+        for (x, y, w, h) in [
+            (37, 23, 150, 90),
+            (0, 0, 64, 64),
+            (full.width as i32 - 50, full.height as i32 - 40, 50, 40),
+        ] {
             let mut job = full_job.clone();
             job.pixel_width = w;
             job.pixel_height = h;
@@ -225,11 +239,17 @@ fn a_window_is_the_same_pixels_as_that_crop_of_the_page() {
 fn a_toolbar_turn_adds_to_the_page_rotate() {
     let pdf = quadrant_pdf(90);
     let upright = render_pdf_page(&pdf, &request(100, 200, 100, 200, 0, 0)).expect("/Rotate 90");
-    assert!(red(pixel(&upright.rgba, upright.width, 75, 50)), "/Rotate 90 alone turns the page clockwise");
+    assert!(
+        red(pixel(&upright.rgba, upright.width, 75, 50)),
+        "/Rotate 90 alone turns the page clockwise"
+    );
     let mut job = request(200, 100, 200, 100, 0, 0);
     job.rotation = 90;
     let half = render_pdf_page(&pdf, &job).expect("/Rotate 90 + toolbar 90");
-    assert!(red(pixel(&half.rgba, half.width, 150, 75)), "/Rotate 90 and a 90° toolbar turn make a half turn");
+    assert!(
+        red(pixel(&half.rgba, half.width, 150, 75)),
+        "/Rotate 90 and a 90° toolbar turn make a half turn"
+    );
     assert!(blue(pixel(&half.rgba, half.width, 50, 25)));
 }
 
@@ -237,6 +257,12 @@ fn a_toolbar_turn_adds_to_the_page_rotate() {
 fn a_window_past_the_page_edge_is_white() {
     let pdf = quadrant_pdf(0);
     let window = render_pdf_page(&pdf, &request(60, 40, 200, 100, 170, 70)).expect("edge window");
-    assert!(blue(pixel(&window.rgba, window.width, 10, 10)), "inside the page");
-    assert!(white(pixel(&window.rgba, window.width, 50, 35)), "past the page edge");
+    assert!(
+        blue(pixel(&window.rgba, window.width, 10, 10)),
+        "inside the page"
+    );
+    assert!(
+        white(pixel(&window.rgba, window.width, 50, 35)),
+        "past the page edge"
+    );
 }

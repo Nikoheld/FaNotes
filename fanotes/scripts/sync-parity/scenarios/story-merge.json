@@ -1,0 +1,93 @@
+{
+ "about": "Story scenes edited on two devices merge paragraph by paragraph (footnotes too); a damaged remote scene keeps the local one and is kept beside it.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Roman.story/story.json",
+   "text": "{\"format\":\"fanotes-story-v1\",\"id\":\"story00001\",\"title\":\"Roman\",\"updatedAt\":\"2029-12-01T00:00:00.000Z\",\"binder\":[{\"id\":\"scene000001\",\"kind\":\"scene\",\"title\":\"Eins\"}]}\n"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Roman.story/scenes/scene000001.json",
+   "text": "{\"format\":\"fanotes-story-scene-v1\",\"id\":\"scene000001\",\"paragraphs\":[{\"id\":\"para000001\",\"key\":\"a0\",\"v\":{\"laptop\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Es war einmal.\"}]},{\"id\":\"para000002\",\"key\":\"a1\",\"v\":{\"laptop\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Mitte.\"}]},{\"id\":\"para000003\",\"key\":\"a2\",\"v\":{\"laptop\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Ende.\"}]}]}\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Roman.story/scenes/scene000001.json",
+   "text": "{\"format\":\"fanotes-story-scene-v1\",\"id\":\"scene000001\",\"paragraphs\":[{\"id\":\"para000001\",\"key\":\"a0\",\"v\":{\"laptop\":2},\"style\":\"body\",\"runs\":[{\"text\":\"Es war einmal ein Mädchen.\"}]},{\"id\":\"para000002\",\"key\":\"a1\",\"v\":{\"laptop\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Mitte.\"}]},{\"id\":\"para000003\",\"key\":\"a2\",\"v\":{\"laptop\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Ende.\"}]}]}\n"
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Roman.story/scenes/scene000001.json",
+   "text": "{\"format\":\"fanotes-story-scene-v1\",\"id\":\"scene000001\",\"paragraphs\":[{\"id\":\"para000001\",\"key\":\"a0\",\"v\":{\"laptop\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Es war einmal.\"}]},{\"id\":\"para000002\",\"key\":\"a1\",\"v\":{\"laptop\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Mitte.\"}]},{\"id\":\"para000003\",\"key\":\"a2\",\"v\":{\"laptop\":1,\"tablet\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Ende gut, alles gut.\"}]}],\"footnotes\":{\"fn00000001\":{\"id\":\"fn00000001\",\"runs\":[{\"text\":\"Fussnote\"}]}}}\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Roman.story/scenes/scene000001.json",
+   "text": "{\"format\":\"fanotes-story-scene-v1\",\"id\":\"scene000001\",\"paragraphs\":[{\"id\":\"x\""
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "path": "Roman.story/scenes/scene000001.json",
+   "text": "{\"format\":\"fanotes-story-scene-v1\",\"id\":\"scene000001\",\"paragraphs\":[{\"id\":\"para000001\",\"key\":\"a0\",\"v\":{\"laptop\":3},\"style\":\"body\",\"runs\":[{\"text\":\"Laptop sagt.\"}]},{\"id\":\"para000002\",\"key\":\"a1\",\"v\":{\"laptop\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Mitte.\"}]},{\"id\":\"para000003\",\"key\":\"a2\",\"v\":{\"laptop\":1},\"style\":\"body\",\"runs\":[{\"text\":\"Ende.\"}]}]}\n"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  }
+ ]
+}

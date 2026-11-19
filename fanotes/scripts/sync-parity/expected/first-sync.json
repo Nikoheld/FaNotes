@@ -1,0 +1,443 @@
+{
+ "scenario": "first-sync",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (5 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/.fanotes/folder-colors.json 200",
+    "PUT /files/Anders.md 200",
+    "PUT /files/Gleich.md 200",
+    "PUT /files/Mathe/Algebra.md 200",
+    "PUT /files/Physik/Bild.png 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    ".fanotes/folder-colors.json",
+    "Anders.md",
+    "Mathe/Algebra.md",
+    "Physik/Bild.png"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Anders.md -> Anders (Konflikt Tablet 2030-01-01 00-00).md"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht, 1 Konflikt(e)).",
+    "warn: Konflikt bei „Anders.md“: die lokale Fassung liegt jetzt unter „Anders (Konflikt Tablet 2030-01-01 00-00).md“."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/.fanotes/folder-colors.json 200",
+    "GET /files/Anders.md 200",
+    "GET /files/Mathe/Algebra.md 200",
+    "GET /files/Physik/Bild.png 200",
+    "PUT /files/Anders (Konflikt Tablet 2030-01-01 00-00).md 200",
+    "PUT /files/Nur Tablet.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Anders (Konflikt Tablet 2030-01-01 00-00).md",
+    "Nur Tablet.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Anders (Konflikt Tablet 2030-01-01 00-00).md 200",
+    "GET /files/Nur Tablet.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    ".fanotes/folder-colors.json": {
+     "sha256": "50c70a4dc8b3fa5cc7c4168c494bf976d2629aa67c660fc62b8e41ca5e7a1dd6",
+     "size": 42
+    },
+    ".fanotes/history/abc/index.json": {
+     "sha256": "cc6c10e9d60911a3e38890d4160d9708cf0fc1887a3c90da9c00be0d11fbdff3",
+     "size": 14
+    },
+    "Anders (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "b5617afdc1cc9ea2121fe153c2e1296bc3ed16f042a76fa32707166e779f456d",
+     "size": 17
+    },
+    "Anders.md": {
+     "sha256": "27502544dbe8f3d2e43c16c3c65e6b9483b88042c7e91e903b0b6f8947d27e19",
+     "size": 17
+    },
+    "Gleich.md": {
+     "sha256": "f714174d23f81b812ed20a2c7aa05c398c68596e513254eee60cc5ca936b5a7e",
+     "size": 9
+    },
+    "Mathe/Algebra.md": {
+     "sha256": "c20d9b993655f3a477c4a0bfea8d735426482c1b53578ab4011edd5f9caae70e",
+     "size": 25
+    },
+    "Nur Tablet.md": {
+     "sha256": "a06463c295d3f68e0c69529d873dd4b9095b64e386b7b70d7afa761a6b2e699b",
+     "size": 11
+    },
+    "Physik/Bild.png": {
+     "sha256": "3ac1c50a39a7c7dac6e362c0011146823c4dae131657479ac4d16bcc076fc40a",
+     "size": 9
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     ".fanotes/folder-colors.json": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "50c70a4dc8b3fa5cc7c4168c494bf976d2629aa67c660fc62b8e41ca5e7a1dd6",
+      "size": 42,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "50c70a4dc8b3fa5cc7c4168c494bf976d2629aa67c660fc62b8e41ca5e7a1dd6",
+      "blank": false
+     },
+     "Anders (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "b5617afdc1cc9ea2121fe153c2e1296bc3ed16f042a76fa32707166e779f456d",
+      "size": 17,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "b5617afdc1cc9ea2121fe153c2e1296bc3ed16f042a76fa32707166e779f456d",
+      "blank": false
+     },
+     "Anders.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "27502544dbe8f3d2e43c16c3c65e6b9483b88042c7e91e903b0b6f8947d27e19",
+      "size": 17,
+      "mtimeMs": 1700000006000,
+      "contentSha256": "27502544dbe8f3d2e43c16c3c65e6b9483b88042c7e91e903b0b6f8947d27e19",
+      "blank": false
+     },
+     "Gleich.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "f714174d23f81b812ed20a2c7aa05c398c68596e513254eee60cc5ca936b5a7e",
+      "size": 9,
+      "mtimeMs": 1700000005000,
+      "contentSha256": "f714174d23f81b812ed20a2c7aa05c398c68596e513254eee60cc5ca936b5a7e",
+      "blank": false
+     },
+     "Mathe/Algebra.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "c20d9b993655f3a477c4a0bfea8d735426482c1b53578ab4011edd5f9caae70e",
+      "size": 25,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "c20d9b993655f3a477c4a0bfea8d735426482c1b53578ab4011edd5f9caae70e",
+      "blank": false
+     },
+     "Nur Tablet.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "a06463c295d3f68e0c69529d873dd4b9095b64e386b7b70d7afa761a6b2e699b",
+      "size": 11,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "a06463c295d3f68e0c69529d873dd4b9095b64e386b7b70d7afa761a6b2e699b",
+      "blank": false
+     },
+     "Physik/Bild.png": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "3ac1c50a39a7c7dac6e362c0011146823c4dae131657479ac4d16bcc076fc40a",
+      "size": 9,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "3ac1c50a39a7c7dac6e362c0011146823c4dae131657479ac4d16bcc076fc40a",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    ".fanotes/folder-colors.json": {
+     "sha256": "50c70a4dc8b3fa5cc7c4168c494bf976d2629aa67c660fc62b8e41ca5e7a1dd6",
+     "size": 42
+    },
+    "Anders (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "b5617afdc1cc9ea2121fe153c2e1296bc3ed16f042a76fa32707166e779f456d",
+     "size": 17
+    },
+    "Anders.md": {
+     "sha256": "27502544dbe8f3d2e43c16c3c65e6b9483b88042c7e91e903b0b6f8947d27e19",
+     "size": 17
+    },
+    "Gleich.md": {
+     "sha256": "f714174d23f81b812ed20a2c7aa05c398c68596e513254eee60cc5ca936b5a7e",
+     "size": 9
+    },
+    "Mathe/Algebra.md": {
+     "sha256": "c20d9b993655f3a477c4a0bfea8d735426482c1b53578ab4011edd5f9caae70e",
+     "size": 25
+    },
+    "Nur Tablet.md": {
+     "sha256": "a06463c295d3f68e0c69529d873dd4b9095b64e386b7b70d7afa761a6b2e699b",
+     "size": 11
+    },
+    "Physik/Bild.png": {
+     "sha256": "3ac1c50a39a7c7dac6e362c0011146823c4dae131657479ac4d16bcc076fc40a",
+     "size": 9
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     ".fanotes/folder-colors.json": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "50c70a4dc8b3fa5cc7c4168c494bf976d2629aa67c660fc62b8e41ca5e7a1dd6",
+      "size": 42,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "50c70a4dc8b3fa5cc7c4168c494bf976d2629aa67c660fc62b8e41ca5e7a1dd6",
+      "blank": false
+     },
+     "Anders (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "b5617afdc1cc9ea2121fe153c2e1296bc3ed16f042a76fa32707166e779f456d",
+      "size": 17,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "b5617afdc1cc9ea2121fe153c2e1296bc3ed16f042a76fa32707166e779f456d",
+      "blank": false
+     },
+     "Anders.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "27502544dbe8f3d2e43c16c3c65e6b9483b88042c7e91e903b0b6f8947d27e19",
+      "size": 17,
+      "mtimeMs": 1700000006000,
+      "contentSha256": "27502544dbe8f3d2e43c16c3c65e6b9483b88042c7e91e903b0b6f8947d27e19",
+      "blank": false
+     },
+     "Gleich.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "f714174d23f81b812ed20a2c7aa05c398c68596e513254eee60cc5ca936b5a7e",
+      "size": 9,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "f714174d23f81b812ed20a2c7aa05c398c68596e513254eee60cc5ca936b5a7e",
+      "blank": false
+     },
+     "Mathe/Algebra.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "c20d9b993655f3a477c4a0bfea8d735426482c1b53578ab4011edd5f9caae70e",
+      "size": 25,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "c20d9b993655f3a477c4a0bfea8d735426482c1b53578ab4011edd5f9caae70e",
+      "blank": false
+     },
+     "Nur Tablet.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "a06463c295d3f68e0c69529d873dd4b9095b64e386b7b70d7afa761a6b2e699b",
+      "size": 11,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "a06463c295d3f68e0c69529d873dd4b9095b64e386b7b70d7afa761a6b2e699b",
+      "blank": false
+     },
+     "Physik/Bild.png": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "3ac1c50a39a7c7dac6e362c0011146823c4dae131657479ac4d16bcc076fc40a",
+      "size": 9,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "3ac1c50a39a7c7dac6e362c0011146823c4dae131657479ac4d16bcc076fc40a",
+      "blank": false
+     }
+    },
+    "conflicts": [
+     "Anders.md -> Anders (Konflikt Tablet 2030-01-01 00-00).md"
+    ],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  ".fanotes/folder-colors.json": {
+   "deleted": false,
+   "sha256": "50c70a4dc8b3fa5cc7c4168c494bf976d2629aa67c660fc62b8e41ca5e7a1dd6",
+   "revisions": 1
+  },
+  "Anders (Konflikt Tablet 2030-01-01 00-00).md": {
+   "deleted": false,
+   "sha256": "b5617afdc1cc9ea2121fe153c2e1296bc3ed16f042a76fa32707166e779f456d",
+   "revisions": 1
+  },
+  "Anders.md": {
+   "deleted": false,
+   "sha256": "27502544dbe8f3d2e43c16c3c65e6b9483b88042c7e91e903b0b6f8947d27e19",
+   "revisions": 1
+  },
+  "Gleich.md": {
+   "deleted": false,
+   "sha256": "f714174d23f81b812ed20a2c7aa05c398c68596e513254eee60cc5ca936b5a7e",
+   "revisions": 1
+  },
+  "Mathe/Algebra.md": {
+   "deleted": false,
+   "sha256": "c20d9b993655f3a477c4a0bfea8d735426482c1b53578ab4011edd5f9caae70e",
+   "revisions": 1
+  },
+  "Nur Tablet.md": {
+   "deleted": false,
+   "sha256": "a06463c295d3f68e0c69529d873dd4b9095b64e386b7b70d7afa761a6b2e699b",
+   "revisions": 1
+  },
+  "Physik/Bild.png": {
+   "deleted": false,
+   "sha256": "3ac1c50a39a7c7dac6e362c0011146823c4dae131657479ac4d16bcc076fc40a",
+   "revisions": 1
+  }
+ }
+}

@@ -1,0 +1,125 @@
+{
+ "about": "Changes to an open or unreadable note wait on the skip list while the cursor moves on; an unreadable file is reported once; a 429 pauses the sync instead of failing it.",
+ "devices": [
+  "Laptop",
+  "Tablet"
+ ],
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Offen.md",
+   "text": "# Offen\n\nAlt."
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Andere.md",
+   "text": "# Andere\n\nAlt."
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Notiz.md",
+   "text": "# Notiz\n\nAlt."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "login",
+   "device": "Tablet"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Offen.md",
+   "text": "# Offen\n\nNeu vom Laptop."
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Andere.md",
+   "text": "# Andere\n\nNeu vom Laptop."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "set": {
+    "busy": [
+     "Offen.md"
+    ],
+    "unreadable": [
+     "Andere.md"
+    ]
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "label": "held: busy and unreadable"
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "path": "Notiz.md",
+   "text": "# Notiz\n\nNeu vom Laptop."
+  },
+  {
+   "do": "sync",
+   "device": "Laptop"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "label": "the cursor moves on; the unreadable file is not reported again"
+  },
+  {
+   "do": "settings",
+   "device": "Tablet",
+   "set": {
+    "unreadable": []
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "label": "the readable file arrives; the open note still waits"
+  },
+  {
+   "do": "fault",
+   "device": "Tablet",
+   "rule": {
+    "method": "GET",
+    "path": "/changes",
+    "mode": "status",
+    "status": 429,
+    "message": "Zu viele Anfragen.",
+    "count": 1
+   }
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "label": "throttled: a pause, not an error"
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "label": "no request goes out during the pause"
+  }
+ ]
+}

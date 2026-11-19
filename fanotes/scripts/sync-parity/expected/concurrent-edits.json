@@ -1,0 +1,549 @@
+{
+ "scenario": "concurrent-edits",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Algebra.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Algebra.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Algebra.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Algebra.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Algebra.md"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Algebra.md -> Algebra (Konflikt Tablet 2030-01-01 00-00).md"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht, 1 Konflikt(e)).",
+    "warn: Konflikt bei „Algebra.md“: die lokale Fassung liegt jetzt unter „Algebra (Konflikt Tablet 2030-01-01 00-00).md“."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Algebra.md 200",
+    "PUT /files/Algebra (Konflikt Tablet 2030-01-01 00-00).md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Algebra (Konflikt Tablet 2030-01-01 00-00).md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Algebra (Konflikt Tablet 2030-01-01 00-00).md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Algebra.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Algebra.md"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Algebra.md -> Algebra (Konflikt Tablet 2030-01-01 00-00 2).md"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht, 1 Konflikt(e)).",
+    "warn: Konflikt bei „Algebra.md“: die lokale Fassung liegt jetzt unter „Algebra (Konflikt Tablet 2030-01-01 00-00 2).md“."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Algebra.md 200",
+    "PUT /files/Algebra (Konflikt Tablet 2030-01-01 00-00 2).md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Algebra (Konflikt Tablet 2030-01-01 00-00 2).md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Algebra (Konflikt Tablet 2030-01-01 00-00 2).md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Hausaufgaben.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Hausaufgaben.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Hausaufgaben.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Hausaufgaben.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Hausaufgaben.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht).",
+    "info: „Hausaufgaben.md“ wurde Aufgabe für Aufgabe zusammengeführt."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Hausaufgaben.md 200",
+    "PUT /files/Hausaufgaben.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Hausaufgaben.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Hausaufgaben.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Algebra (Konflikt Tablet 2030-01-01 00-00 2).md": {
+     "sha256": "558a204f28aba1f0b4b8e212f70a6c0162115403b945ce7f40425aec16a30fc1",
+     "size": 20
+    },
+    "Algebra (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "dff55fbe134d2657b798d7050e9c4ddc0cb9a4cc61eabc62f7a264b430edba7f",
+     "size": 18
+    },
+    "Algebra.md": {
+     "sha256": "10781084cf02e5df461fec899c9340512bc3f1cc026c4def0002dd788769d930",
+     "size": 20
+    },
+    "Hausaufgaben.md": {
+     "sha256": "794a75ba4d019bc91727d3127a6d87532cdab6e126ac912e8914f12ab042d474",
+     "size": 1141
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Algebra (Konflikt Tablet 2030-01-01 00-00 2).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "558a204f28aba1f0b4b8e212f70a6c0162115403b945ce7f40425aec16a30fc1",
+      "size": 20,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "558a204f28aba1f0b4b8e212f70a6c0162115403b945ce7f40425aec16a30fc1",
+      "blank": false
+     },
+     "Algebra (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "dff55fbe134d2657b798d7050e9c4ddc0cb9a4cc61eabc62f7a264b430edba7f",
+      "size": 18,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "dff55fbe134d2657b798d7050e9c4ddc0cb9a4cc61eabc62f7a264b430edba7f",
+      "blank": false
+     },
+     "Algebra.md": {
+      "idMatchesPath": true,
+      "revision": 3,
+      "sha256": "10781084cf02e5df461fec899c9340512bc3f1cc026c4def0002dd788769d930",
+      "size": 20,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "10781084cf02e5df461fec899c9340512bc3f1cc026c4def0002dd788769d930",
+      "blank": false
+     },
+     "Hausaufgaben.md": {
+      "idMatchesPath": true,
+      "revision": 3,
+      "sha256": "794a75ba4d019bc91727d3127a6d87532cdab6e126ac912e8914f12ab042d474",
+      "size": 1141,
+      "mtimeMs": "<now>",
+      "contentSha256": "794a75ba4d019bc91727d3127a6d87532cdab6e126ac912e8914f12ab042d474",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Algebra (Konflikt Tablet 2030-01-01 00-00 2).md": {
+     "sha256": "558a204f28aba1f0b4b8e212f70a6c0162115403b945ce7f40425aec16a30fc1",
+     "size": 20
+    },
+    "Algebra (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "dff55fbe134d2657b798d7050e9c4ddc0cb9a4cc61eabc62f7a264b430edba7f",
+     "size": 18
+    },
+    "Algebra.md": {
+     "sha256": "10781084cf02e5df461fec899c9340512bc3f1cc026c4def0002dd788769d930",
+     "size": 20
+    },
+    "Hausaufgaben.md": {
+     "sha256": "794a75ba4d019bc91727d3127a6d87532cdab6e126ac912e8914f12ab042d474",
+     "size": 1141
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Algebra (Konflikt Tablet 2030-01-01 00-00 2).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "558a204f28aba1f0b4b8e212f70a6c0162115403b945ce7f40425aec16a30fc1",
+      "size": 20,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "558a204f28aba1f0b4b8e212f70a6c0162115403b945ce7f40425aec16a30fc1",
+      "blank": false
+     },
+     "Algebra (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "dff55fbe134d2657b798d7050e9c4ddc0cb9a4cc61eabc62f7a264b430edba7f",
+      "size": 18,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "dff55fbe134d2657b798d7050e9c4ddc0cb9a4cc61eabc62f7a264b430edba7f",
+      "blank": false
+     },
+     "Algebra.md": {
+      "idMatchesPath": true,
+      "revision": 3,
+      "sha256": "10781084cf02e5df461fec899c9340512bc3f1cc026c4def0002dd788769d930",
+      "size": 20,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "10781084cf02e5df461fec899c9340512bc3f1cc026c4def0002dd788769d930",
+      "blank": false
+     },
+     "Hausaufgaben.md": {
+      "idMatchesPath": true,
+      "revision": 3,
+      "sha256": "794a75ba4d019bc91727d3127a6d87532cdab6e126ac912e8914f12ab042d474",
+      "size": 1141,
+      "mtimeMs": "<now>",
+      "contentSha256": "794a75ba4d019bc91727d3127a6d87532cdab6e126ac912e8914f12ab042d474",
+      "blank": false
+     }
+    },
+    "conflicts": [
+     "Algebra.md -> Algebra (Konflikt Tablet 2030-01-01 00-00 2).md",
+     "Algebra.md -> Algebra (Konflikt Tablet 2030-01-01 00-00).md"
+    ],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "Algebra (Konflikt Tablet 2030-01-01 00-00 2).md": {
+   "deleted": false,
+   "sha256": "558a204f28aba1f0b4b8e212f70a6c0162115403b945ce7f40425aec16a30fc1",
+   "revisions": 1
+  },
+  "Algebra (Konflikt Tablet 2030-01-01 00-00).md": {
+   "deleted": false,
+   "sha256": "dff55fbe134d2657b798d7050e9c4ddc0cb9a4cc61eabc62f7a264b430edba7f",
+   "revisions": 1
+  },
+  "Algebra.md": {
+   "deleted": false,
+   "sha256": "10781084cf02e5df461fec899c9340512bc3f1cc026c4def0002dd788769d930",
+   "revisions": 3
+  },
+  "Hausaufgaben.md": {
+   "deleted": false,
+   "sha256": "794a75ba4d019bc91727d3127a6d87532cdab6e126ac912e8914f12ab042d474",
+   "revisions": 3
+  }
+ }
+}

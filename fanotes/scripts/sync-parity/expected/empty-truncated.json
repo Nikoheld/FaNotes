@@ -1,0 +1,622 @@
+{
+ "scenario": "empty-truncated",
+ "steps": [
+  {
+   "do": "register",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "login",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (3 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "PUT /files/Bild.png 200",
+    "PUT /files/Seite.famd 200",
+    "PUT /files/Text.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Bild.png",
+    "Seite.famd",
+    "Text.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Bild.png 200",
+    "GET /files/Seite.famd 200",
+    "GET /files/Text.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Seite (Konflikt Tablet 2030-01-01 00-00).famd",
+    "Seite.famd"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Seite.famd -> Seite (Konflikt Tablet 2030-01-01 00-00).famd"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht).",
+    "warn: Leere Fassung von „Seite.famd“ wurde nicht hochgeladen. Die lokale Kopie liegt unter „Seite (Konflikt Tablet 2030-01-01 00-00).famd“.",
+    "warn: „Seite.famd“ ist leer und wird nicht über die vorhandene Fassung hochgeladen."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /changes 200",
+    "GET /files/Seite.famd 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Seite (Konflikt Tablet 2030-01-01 00-00 2).famd",
+    "Seite.famd"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Seite.famd -> Seite (Konflikt Tablet 2030-01-01 00-00 2).famd"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht).",
+    "warn: Leere Fassung von „Seite.famd“ wurde nicht hochgeladen. Die lokale Kopie liegt unter „Seite (Konflikt Tablet 2030-01-01 00-00 2).famd“.",
+    "warn: „Seite.famd“ konnte nicht gelesen werden und wird nicht hochgeladen."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /changes 200",
+    "GET /files/Seite.famd 200",
+    "PUT /files/Seite (Konflikt Tablet 2030-01-01 00-00).famd 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Text (Konflikt Tablet 2030-01-01 00-00).md",
+    "Text.md"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Text.md -> Text (Konflikt Tablet 2030-01-01 00-00).md"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht).",
+    "warn: Leere Fassung von „Text.md“ wurde nicht hochgeladen. Die lokale Kopie liegt unter „Text (Konflikt Tablet 2030-01-01 00-00).md“.",
+    "warn: „Seite (Konflikt Tablet 2030-01-01 00-00 2).famd“ konnte nicht gelesen werden und wird nicht hochgeladen.",
+    "warn: „Text.md“ ist leer und wird nicht über die vorhandene Fassung hochgeladen."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /changes 200",
+    "GET /files/Text.md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Tablet",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Bild (Konflikt Tablet 2030-01-01 00-00).png",
+    "Bild.png"
+   ],
+   "removed": [],
+   "conflicts": [
+    "Bild.png -> Bild (Konflikt Tablet 2030-01-01 00-00).png"
+   ],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht).",
+    "warn: Leere Fassung von „Bild.png“ wurde nicht hochgeladen. Die lokale Kopie liegt unter „Bild (Konflikt Tablet 2030-01-01 00-00).png“.",
+    "warn: „Bild.png“ ist leer und wird nicht über die vorhandene Fassung hochgeladen.",
+    "warn: „Seite (Konflikt Tablet 2030-01-01 00-00 2).famd“ konnte nicht gelesen werden und wird nicht hochgeladen."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /changes 200",
+    "GET /files/Bild.png 200",
+    "PUT /files/Text (Konflikt Tablet 2030-01-01 00-00).md 200"
+   ]
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "put",
+   "device": "Laptop",
+   "ok": true
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Seite (Konflikt Tablet 2030-01-01 00-00).famd",
+    "Text (Konflikt Tablet 2030-01-01 00-00).md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (2 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Seite (Konflikt Tablet 2030-01-01 00-00).famd 200",
+    "GET /files/Text (Konflikt Tablet 2030-01-01 00-00).md 200",
+    "PUT /files/Leer.bin 200",
+    "PUT /files/Leer.md 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Tablet",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Leer.bin",
+    "Leer.md"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (1 hochgeladen, 0 gelöscht).",
+    "warn: „Seite (Konflikt Tablet 2030-01-01 00-00 2).famd“ konnte nicht gelesen werden und wird nicht hochgeladen."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Leer.bin 200",
+    "GET /files/Leer.md 200",
+    "PUT /files/Bild (Konflikt Tablet 2030-01-01 00-00).png 200"
+   ]
+  },
+  {
+   "do": "sync",
+   "device": "Laptop",
+   "ok": true,
+   "status": "idle",
+   "error": null,
+   "written": [
+    "Bild (Konflikt Tablet 2030-01-01 00-00).png"
+   ],
+   "removed": [],
+   "conflicts": [],
+   "logs": [
+    "info: Sync abgeschlossen (0 hochgeladen, 0 gelöscht)."
+   ],
+   "signedOut": 0,
+   "requests": [
+    "GET /changes 200",
+    "GET /files/Bild (Konflikt Tablet 2030-01-01 00-00).png 200"
+   ]
+  }
+ ],
+ "devices": {
+  "Laptop": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Bild (Konflikt Tablet 2030-01-01 00-00).png": {
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "size": 0
+    },
+    "Bild.png": {
+     "sha256": "f2a5cc32f53c8334a3ec0b3bc41d5e4f35c9edfea5b03a359a0324041d2e3d1d",
+     "size": 5000
+    },
+    "Leer.bin": {
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "size": 0
+    },
+    "Leer.md": {
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "size": 0
+    },
+    "Seite (Konflikt Tablet 2030-01-01 00-00).famd": {
+     "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+     "size": 129
+    },
+    "Seite.famd": {
+     "sha256": "75bdef4d3f3810e6c7efeea4d475d02a1734b2d39be6812783afc4c7cf52027d",
+     "size": 8870
+    },
+    "Text (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "size": 0
+    },
+    "Text.md": {
+     "sha256": "5399c2c4bcc797f7c52d27fc418e9950a99c4928b31ce3590061352d42606e8f",
+     "size": 6009
+    }
+   },
+   "state": {
+    "cursorLag": 0,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Bild (Konflikt Tablet 2030-01-01 00-00).png": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "blank": true
+     },
+     "Bild.png": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "f2a5cc32f53c8334a3ec0b3bc41d5e4f35c9edfea5b03a359a0324041d2e3d1d",
+      "size": 5000,
+      "mtimeMs": 1700000003000,
+      "contentSha256": "f2a5cc32f53c8334a3ec0b3bc41d5e4f35c9edfea5b03a359a0324041d2e3d1d",
+      "blank": false
+     },
+     "Leer.bin": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "mtimeMs": 1700000005000,
+      "contentSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "blank": true
+     },
+     "Leer.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "blank": true
+     },
+     "Seite (Konflikt Tablet 2030-01-01 00-00).famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+      "size": 129,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "dd5f27a8362591be8312f691776bbe9b9fdeb673db46d613fd342f8e96475271",
+      "blank": true
+     },
+     "Seite.famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "75bdef4d3f3810e6c7efeea4d475d02a1734b2d39be6812783afc4c7cf52027d",
+      "size": 8870,
+      "mtimeMs": 1700000001000,
+      "contentSha256": "f09885923ca8b23cc386a82e4780029469841a1356f49a0f96737be3d31df274",
+      "blank": false
+     },
+     "Text (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "blank": true
+     },
+     "Text.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "5399c2c4bcc797f7c52d27fc418e9950a99c4928b31ce3590061352d42606e8f",
+      "size": 6009,
+      "mtimeMs": 1700000002000,
+      "contentSha256": "5399c2c4bcc797f7c52d27fc418e9950a99c4928b31ce3590061352d42606e8f",
+      "blank": false
+     }
+    },
+    "conflicts": [],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  },
+  "Tablet": {
+   "signedIn": true,
+   "cleared": [],
+   "files": {
+    "Bild (Konflikt Tablet 2030-01-01 00-00).png": {
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "size": 0
+    },
+    "Bild.png": {
+     "sha256": "f2a5cc32f53c8334a3ec0b3bc41d5e4f35c9edfea5b03a359a0324041d2e3d1d",
+     "size": 5000
+    },
+    "Leer.bin": {
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "size": 0
+    },
+    "Leer.md": {
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "size": 0
+    },
+    "Seite (Konflikt Tablet 2030-01-01 00-00 2).famd": {
+     "sha256": "53978139c3e0d62f5c56147acfed7cc714de9859206a17f5f90dda0e3c0feb28",
+     "size": 47
+    },
+    "Seite (Konflikt Tablet 2030-01-01 00-00).famd": {
+     "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+     "size": 129
+    },
+    "Seite.famd": {
+     "sha256": "75bdef4d3f3810e6c7efeea4d475d02a1734b2d39be6812783afc4c7cf52027d",
+     "size": 8870
+    },
+    "Text (Konflikt Tablet 2030-01-01 00-00).md": {
+     "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+     "size": 0
+    },
+    "Text.md": {
+     "sha256": "5399c2c4bcc797f7c52d27fc418e9950a99c4928b31ce3590061352d42606e8f",
+     "size": 6009
+    }
+   },
+   "state": {
+    "cursorLag": 1,
+    "lastSyncAt": "2030-01-01T00:00:00.000Z",
+    "files": {
+     "Bild (Konflikt Tablet 2030-01-01 00-00).png": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "blank": true
+     },
+     "Bild.png": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "f2a5cc32f53c8334a3ec0b3bc41d5e4f35c9edfea5b03a359a0324041d2e3d1d",
+      "size": 5000,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "f2a5cc32f53c8334a3ec0b3bc41d5e4f35c9edfea5b03a359a0324041d2e3d1d",
+      "blank": false
+     },
+     "Leer.bin": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "mtimeMs": 1700000005000,
+      "contentSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "blank": true
+     },
+     "Leer.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "mtimeMs": 1700000004000,
+      "contentSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "blank": true
+     },
+     "Seite (Konflikt Tablet 2030-01-01 00-00).famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+      "size": 129,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "dd5f27a8362591be8312f691776bbe9b9fdeb673db46d613fd342f8e96475271",
+      "blank": true
+     },
+     "Seite.famd": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "75bdef4d3f3810e6c7efeea4d475d02a1734b2d39be6812783afc4c7cf52027d",
+      "size": 8870,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "f09885923ca8b23cc386a82e4780029469841a1356f49a0f96737be3d31df274",
+      "blank": false
+     },
+     "Text (Konflikt Tablet 2030-01-01 00-00).md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "blank": true
+     },
+     "Text.md": {
+      "idMatchesPath": true,
+      "revision": 1,
+      "sha256": "5399c2c4bcc797f7c52d27fc418e9950a99c4928b31ce3590061352d42606e8f",
+      "size": 6009,
+      "mtimeMs": 1893456000000,
+      "contentSha256": "5399c2c4bcc797f7c52d27fc418e9950a99c4928b31ce3590061352d42606e8f",
+      "blank": false
+     }
+    },
+    "conflicts": [
+     "Bild.png -> Bild (Konflikt Tablet 2030-01-01 00-00).png",
+     "Seite.famd -> Seite (Konflikt Tablet 2030-01-01 00-00 2).famd",
+     "Seite.famd -> Seite (Konflikt Tablet 2030-01-01 00-00).famd",
+     "Text.md -> Text (Konflikt Tablet 2030-01-01 00-00).md"
+    ],
+    "pendingDeletes": [],
+    "skipped": []
+   }
+  }
+ },
+ "server": {
+  "Bild (Konflikt Tablet 2030-01-01 00-00).png": {
+   "deleted": false,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "revisions": 1
+  },
+  "Bild.png": {
+   "deleted": false,
+   "sha256": "f2a5cc32f53c8334a3ec0b3bc41d5e4f35c9edfea5b03a359a0324041d2e3d1d",
+   "revisions": 1
+  },
+  "Leer.bin": {
+   "deleted": false,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "revisions": 1
+  },
+  "Leer.md": {
+   "deleted": false,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "revisions": 1
+  },
+  "Seite (Konflikt Tablet 2030-01-01 00-00).famd": {
+   "deleted": false,
+   "sha256": "d31ba9c6a36f41adffb73baf798a24b7b749d4314a2a51cb179729d12704fc5d",
+   "revisions": 1
+  },
+  "Seite.famd": {
+   "deleted": false,
+   "sha256": "75bdef4d3f3810e6c7efeea4d475d02a1734b2d39be6812783afc4c7cf52027d",
+   "revisions": 1
+  },
+  "Text (Konflikt Tablet 2030-01-01 00-00).md": {
+   "deleted": false,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "revisions": 1
+  },
+  "Text.md": {
+   "deleted": false,
+   "sha256": "5399c2c4bcc797f7c52d27fc418e9950a99c4928b31ce3590061352d42606e8f",
+   "revisions": 1
+  }
+ }
+}

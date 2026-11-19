@@ -4,7 +4,9 @@
 //! the page itself on top of the page's own `/Rotate`.
 //! pdf.js keeps the selectable text layer; this crate only supplies pixels.
 
+mod library;
 mod protocol;
+pub mod service;
 
 use std::sync::{Mutex, OnceLock};
 
@@ -16,6 +18,10 @@ use pdfium_bundled::pdfium_render::prelude::{
 use serde::Deserialize;
 use serde_json::Value;
 
+pub use library::{
+    add_library_dir, library_candidates, pinned_build, pinned_platform, pinned_tag, platform_key,
+    PinnedPlatform, LIBRARY_ENV,
+};
 pub use protocol::{read_frame, write_frame, Frame};
 
 /// Same caps as `pdfDocument.ts`: a page edge and the pixel budget.
@@ -39,6 +45,12 @@ pub enum Error {
     Render(String),
     #[error("Die PDF-Rasteranfrage ist unvollständig.")]
     Request,
+    #[error("Das PDF ist nicht geöffnet.")]
+    NotOpen,
+    #[error("Die PDF-Rasteranfrage wurde abgebrochen.")]
+    Cancelled,
+    #[error("Die PDF-Datei konnte nicht gelesen werden: {0}")]
+    Read(String),
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -116,6 +128,66 @@ pub fn parse_vault_request(value: &Value) -> Result<(String, RenderRequest), Err
 /// PDF is not read and parsed again on every scroll.
 pub struct OpenedPdf {
     document: PdfDocument<'static>,
+}
+
+impl OpenedPdf {
+    pub fn page_count(&self) -> i32 {
+        self.document.pages().len()
+    }
+
+    /// Page boxes in PDF points as PDFium lays them out (after `/Rotate`).
+    pub fn page_sizes(&self) -> Result<Vec<(f32, f32)>, Error> {
+        let _render = RENDER.lock().unwrap_or_else(|error| error.into_inner());
+        self.document
+            .pages()
+            .page_sizes()
+            .map(|sizes| {
+                sizes
+                    .iter()
+                    .map(|rect| (rect.width().value, rect.height().value))
+                    .collect()
+            })
+            .map_err(|error| Error::Render(error.to_string()))
+    }
+}
+
+/// Read a vault PDF without following a link, up to [`MAX_PDF_BYTES`].
+/// The caller has already confined `path` to the vault.
+pub fn read_pdf_file(path: &std::path::Path) -> Result<Vec<u8>, Error> {
+    use std::io::Read;
+    let meta = std::fs::symlink_metadata(path).map_err(|error| Error::Read(error.to_string()))?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return Err(Error::Read("keine reguläre Datei".to_owned()));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options
+        .open(path)
+        .map_err(|error| Error::Read(error.to_string()))?;
+    let length = file
+        .metadata()
+        .map_err(|error| Error::Read(error.to_string()))?
+        .len();
+    if length == 0 || length > MAX_PDF_BYTES as u64 {
+        return Err(Error::Open(
+            "Die PDF-Datei ist leer oder zu groß.".to_owned(),
+        ));
+    }
+    let mut bytes = Vec::with_capacity(length as usize);
+    file.take(MAX_PDF_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| Error::Read(error.to_string()))?;
+    if bytes.is_empty() || bytes.len() > MAX_PDF_BYTES {
+        return Err(Error::Open(
+            "Die PDF-Datei ist leer oder zu groß.".to_owned(),
+        ));
+    }
+    Ok(bytes)
 }
 
 /// Parse `bytes` once. The document keeps the buffer.
@@ -216,7 +288,7 @@ fn render_document(
         page.render_into_bitmap_with_config(&mut bitmap, &config)
             .map_err(|error| Error::Render(error.to_string()))?;
     }
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel[3] = 255;
     }
     Ok(PageBitmap {
@@ -285,8 +357,8 @@ fn library() -> Result<&'static Pdfium, Error> {
     if let Some(existing) = LIBRARY.get() {
         return Ok(existing);
     }
-    let loaded =
-        pdfium_bundled::bind_pdfium_silent().map_err(|error| Error::Bind(error.to_string()))?;
+    // A library shipped with the app first; see `library.rs`.
+    let loaded = library::bind()?;
     let _ = LIBRARY.set(loaded);
     LIBRARY
         .get()

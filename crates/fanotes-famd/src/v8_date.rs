@@ -21,10 +21,17 @@ enum Keyword {
 enum Token {
     End,
     Invalid,
-    Number { value: i32, length: i32 },
+    Number {
+        value: i32,
+        length: i32,
+    },
     Symbol(u8),
     White,
-    Keyword { kind: Keyword, value: i32, length: i32 },
+    Keyword {
+        kind: Keyword,
+        value: i32,
+        length: i32,
+    },
     Unknown,
 }
 
@@ -61,7 +68,11 @@ impl Token {
 
     fn keyword(self) -> (Keyword, i32, i32) {
         match self {
-            Token::Keyword { kind, value, length } => (kind, value, length),
+            Token::Keyword {
+                kind,
+                value,
+                length,
+            } => (kind, value, length),
             _ => (Keyword::Invalid, 0, 0),
         }
     }
@@ -102,7 +113,13 @@ impl Token {
     }
 
     fn is_time_sep(self) -> bool {
-        matches!(self, Token::Keyword { kind: Keyword::TimeSep, .. })
+        matches!(
+            self,
+            Token::Keyword {
+                kind: Keyword::TimeSep,
+                ..
+            }
+        )
     }
 }
 
@@ -115,7 +132,11 @@ struct Input {
 impl Input {
     fn new(value: &str) -> Self {
         let units: Vec<u16> = value.encode_utf16().collect();
-        let mut input = Self { units, index: 0, ch: 0 };
+        let mut input = Self {
+            units,
+            index: 0,
+            ch: 0,
+        };
         input.next();
         input
     }
@@ -214,7 +235,10 @@ struct Scanner {
 impl Scanner {
     fn new(value: &str) -> Self {
         let input = Input::new(value);
-        let mut scanner = Self { input, next: Token::End };
+        let mut scanner = Self {
+            input,
+            next: Token::End,
+        };
         scanner.next = scanner.scan();
         scanner
     }
@@ -266,7 +290,11 @@ impl Scanner {
         if self.input.ch >= u32::from(b'A') && !is_white_space(self.input.ch) {
             let (prefix, length) = self.input.read_word();
             let (kind, value) = lookup_keyword(prefix, length);
-            return Token::Keyword { kind, value, length };
+            return Token::Keyword {
+                kind,
+                value,
+                length,
+            };
         }
         if self.input.skip_white() {
             return Token::White;
@@ -287,7 +315,11 @@ struct TimeZone {
 
 impl TimeZone {
     fn new() -> Self {
-        Self { sign: NONE, hour: NONE, minute: NONE }
+        Self {
+            sign: NONE,
+            hour: NONE,
+            minute: NONE,
+        }
     }
 
     fn set(&mut self, offset_hours: i32) {
@@ -314,7 +346,9 @@ impl TimeZone {
         }
         let hour = if self.hour == NONE { 0 } else { self.hour };
         let minute = if self.minute == NONE { 0 } else { self.minute };
-        let total = (hour as u32).wrapping_mul(3600).wrapping_add((minute as u32).wrapping_mul(60));
+        let total = (hour as u32)
+            .wrapping_mul(3600)
+            .wrapping_add((minute as u32).wrapping_mul(60));
         if total > SMI_MAX {
             return None;
         }
@@ -334,7 +368,11 @@ struct Time {
 
 impl Time {
     fn new() -> Self {
-        Self { fields: [0; 4], index: 0, hour_offset: NONE }
+        Self {
+            fields: [0; 4],
+            index: 0,
+            hour_offset: NONE,
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -380,12 +418,19 @@ impl Time {
             self.fields[0] %= 12;
             self.fields[0] += self.hour_offset;
         }
-        let (hour, minute, second, millis) = (self.fields[0], self.fields[1], self.fields[2], self.fields[3]);
-        if !(0..=23).contains(&hour) || !is_minute(minute) || !is_second(second) || !(0..=999).contains(&millis)
+        let (hour, minute, second, millis) = (
+            self.fields[0],
+            self.fields[1],
+            self.fields[2],
+            self.fields[3],
+        );
+        if (!(0..=23).contains(&hour)
+            || !is_minute(minute)
+            || !is_second(second)
+            || !(0..=999).contains(&millis))
+            && (hour != 24 || minute != 0 || second != 0 || millis != 0)
         {
-            if hour != 24 || minute != 0 || second != 0 || millis != 0 {
-                return None;
-            }
+            return None;
         }
         Some((hour, minute, second, millis))
     }
@@ -400,7 +445,12 @@ struct Day {
 
 impl Day {
     fn new() -> Self {
-        Self { fields: [0; 3], index: 0, named_month: NONE, iso: false }
+        Self {
+            fields: [0; 3],
+            index: 0,
+            named_month: NONE,
+            iso: false,
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -497,13 +547,19 @@ fn parse_es5(scanner: &mut Scanner, day: &mut Day, time: &mut Time, zone: &mut T
             return Token::Invalid;
         }
         let minute = scanner.peek();
-        if !minute.is_fixed_len(2) || !is_minute(minute.number()) || (hour_is_24 && minute.number() > 0) {
+        if !minute.is_fixed_len(2)
+            || !is_minute(minute.number())
+            || (hour_is_24 && minute.number() > 0)
+        {
             return Token::Invalid;
         }
         time.add(scanner.next().number());
         if scanner.skip_symbol(b':') {
             let second = scanner.peek();
-            if !second.is_fixed_len(2) || !is_second(second.number()) || (hour_is_24 && second.number() > 0) {
+            if !second.is_fixed_len(2)
+                || !is_second(second.number())
+                || (hour_is_24 && second.number() > 0)
+            {
                 return Token::Invalid;
             }
             time.add(scanner.next().number());
@@ -557,7 +613,13 @@ fn parse_es5(scanner: &mut Scanner, day: &mut Day, time: &mut Time, zone: &mut T
     Token::End
 }
 
-fn parse_legacy(scanner: &mut Scanner, mut token: Token, day: &mut Day, time: &mut Time, zone: &mut TimeZone) -> bool {
+fn parse_legacy(
+    scanner: &mut Scanner,
+    mut token: Token,
+    day: &mut Day,
+    time: &mut Time,
+    zone: &mut TimeZone,
+) -> bool {
     let mut has_number = !day.is_empty();
     while !token.is_end() {
         if token.is_number() {
@@ -587,7 +649,11 @@ fn parse_legacy(scanner: &mut Scanner, mut token: Token, day: &mut Day, time: &m
             } else if time.is_expecting(number) {
                 time.add_final(number);
                 let peek = scanner.peek();
-                if !peek.is_end() && !peek.is_white() && !peek.is_keyword_z() && !peek.is_ascii_sign() {
+                if !peek.is_end()
+                    && !peek.is_white()
+                    && !peek.is_keyword_z()
+                    && !peek.is_ascii_sign()
+                {
                     return false;
                 }
             } else if !day.add(number) {
@@ -654,13 +720,23 @@ pub fn unix_millis(value: &str) -> Option<i64> {
     let (year, month, day_of_month) = day.write()?;
     let (hour, minute, second, millis) = time.write()?;
     let offset = zone.write()?;
-    compose(year, month, day_of_month, hour, minute, second, millis, offset)
+    compose(
+        year,
+        month,
+        day_of_month,
+        hour,
+        minute,
+        second,
+        millis,
+        offset,
+    )
 }
 
 pub fn canonical_iso(value: &str) -> Option<String> {
     format_iso(unix_millis(value)?)
 }
 
+#[allow(clippy::too_many_arguments)] // V8's MakeDate/MakeTime fields, one argument each.
 fn compose(
     year: i32,
     month0: i32,
@@ -672,7 +748,8 @@ fn compose(
     offset: Option<i32>,
 ) -> Option<i64> {
     let day_number = make_day(year, month0, day)?;
-    let time_ms = ((i64::from(hour) * 60 + i64::from(minute)) * 60 + i64::from(second)) * 1000 + i64::from(millis);
+    let time_ms = ((i64::from(hour) * 60 + i64::from(minute)) * 60 + i64::from(second)) * 1000
+        + i64::from(millis);
     let stamped = day_number.checked_mul(86_400_000)?.checked_add(time_ms)?;
     let utc = if let Some(seconds) = offset {
         stamped.checked_sub(i64::from(seconds).checked_mul(1000)?)?
@@ -680,7 +757,11 @@ fn compose(
         let (y, m, d, h, mi, s, ms) = civil_from_millis(stamped)?;
         local_millis(y, m, d, h, mi, s, ms)?
     };
-    if utc.abs() > TIME_CLIP { None } else { Some(utc) }
+    if utc.abs() > TIME_CLIP {
+        None
+    } else {
+        Some(utc)
+    }
 }
 
 fn format_iso(millis: i64) -> Option<String> {
@@ -722,7 +803,7 @@ fn read_milliseconds(token: Token) -> i32 {
 }
 
 fn lookup_keyword(prefix: [u32; 3], length: i32) -> (Keyword, i32) {
-    const TABLE: &[( [u32; 3], Keyword, i32 )] = &[
+    const TABLE: &[([u32; 3], Keyword, i32)] = &[
         ([b'j' as u32, b'a' as u32, b'n' as u32], Keyword::Month, 1),
         ([b'f' as u32, b'e' as u32, b'b' as u32], Keyword::Month, 2),
         ([b'm' as u32, b'a' as u32, b'r' as u32], Keyword::Month, 3),
@@ -782,8 +863,10 @@ fn is_date_space(ch: u32) -> bool {
 }
 
 fn is_white_space(ch: u32) -> bool {
-    matches!(ch, 0x09 | 0x0B | 0x0C | 0x20 | 0xA0 | 0x1680 | 0x202F | 0x205F | 0x3000 | 0xFEFF)
-        || (0x2000..=0x200A).contains(&ch)
+    matches!(
+        ch,
+        0x09 | 0x0B | 0x0C | 0x20 | 0xA0 | 0x1680 | 0x202F | 0x205F | 0x3000 | 0xFEFF
+    ) || (0x2000..=0x200A).contains(&ch)
 }
 
 fn make_day(year: i32, month0: i32, date: i32) -> Option<i64> {
@@ -800,7 +883,8 @@ fn days_from_civil(mut year: i32, month: u32, day: u32) -> Option<i64> {
     year -= i32::from(month <= 2);
     let era = if year >= 0 { year } else { year - 399 } / 400;
     let year_of_era = (year - era * 400) as u32;
-    let day_of_year = (153 * (month as i32 + if month > 2 { -3 } else { 9 }) as u32 + 2) / 5 + day - 1;
+    let day_of_year =
+        (153 * (month as i32 + if month > 2 { -3 } else { 9 }) as u32 + 2) / 5 + day - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     Some(i64::from(era) * 146_097 + i64::from(day_of_era) - 719_468)
 }
@@ -816,33 +900,75 @@ fn civil_from_unix(seconds: i64) -> Option<(i32, i32, i32, i32, i32, i32)> {
     let days = seconds.div_euclid(86_400);
     let day_seconds = seconds.rem_euclid(86_400) as i32;
     let (year, month, day) = civil_from_days(days)?;
-    Some((year, month, day, day_seconds / 3600, (day_seconds % 3600) / 60, day_seconds % 60))
+    Some((
+        year,
+        month,
+        day,
+        day_seconds / 3600,
+        (day_seconds % 3600) / 60,
+        day_seconds % 60,
+    ))
 }
 
 fn civil_from_days(days: i64) -> Option<(i32, i32, i32)> {
     let shifted = days.checked_add(719_468)?;
-    let era = if shifted >= 0 { shifted } else { shifted - 146_096 } / 146_097;
+    let era = if shifted >= 0 {
+        shifted
+    } else {
+        shifted - 146_096
+    } / 146_097;
     let day_of_era = (shifted - era * 146_097) as u32;
-    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365;
     let year = year_of_era as i32 + era as i32 * 400;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_part = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_part + 2) / 5 + 1;
-    let month = if month_part < 10 { month_part + 3 } else { month_part - 9 };
+    let month = if month_part < 10 {
+        month_part + 3
+    } else {
+        month_part - 9
+    };
     Some((year + i32::from(month <= 2), month as i32, day as i32))
 }
 
-fn unix_from_utc(year: i32, month: i32, day: i32, hour: i32, minute: i32, second: i32) -> Option<i64> {
+fn unix_from_utc(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+) -> Option<i64> {
     let days = days_from_civil(year, month as u32, day as u32)?;
-    days.checked_mul(86_400)?.checked_add(i64::from(hour) * 3600 + i64::from(minute) * 60 + i64::from(second))
+    days.checked_mul(86_400)?
+        .checked_add(i64::from(hour) * 3600 + i64::from(minute) * 60 + i64::from(second))
 }
 
-fn local_millis(year: i32, month: i32, day: i32, hour: i32, minute: i32, second: i32, millis: i32) -> Option<i64> {
-    let (year, month, day, hour, minute, second) = local_civil_to_utc(year, month, day, hour, minute, second)?;
-    unix_from_utc(year, month, day, hour, minute, second)?.checked_mul(1000)?.checked_add(i64::from(millis))
+fn local_millis(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+    millis: i32,
+) -> Option<i64> {
+    let (year, month, day, hour, minute, second) =
+        local_civil_to_utc(year, month, day, hour, minute, second)?;
+    unix_from_utc(year, month, day, hour, minute, second)?
+        .checked_mul(1000)?
+        .checked_add(i64::from(millis))
 }
 
-fn local_civil_to_utc(year: i32, month: i32, day: i32, hour: i32, minute: i32, second: i32) -> Option<(i32, i32, i32, i32, i32, i32)> {
+fn local_civil_to_utc(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+) -> Option<(i32, i32, i32, i32, i32, i32)> {
     let mut earliest = None;
     for isdst in [0, 1] {
         let Some(utc) = mktime_local(year, month, day, hour, minute, second, isdst) else {
@@ -860,8 +986,16 @@ fn local_civil_to_utc(year: i32, month: i32, day: i32, hour: i32, minute: i32, s
     civil_from_unix(utc)
 }
 
-fn mktime_local(year: i32, month: i32, day: i32, hour: i32, minute: i32, second: i32, isdst: i32) -> Option<i64> {
-    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
+fn mktime_local(
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+    isdst: i32,
+) -> Option<i64> {
+    let mut tm = unsafe { std::mem::zeroed::<local_time::tm>() };
     tm.tm_year = year - 1900;
     tm.tm_mon = month - 1;
     tm.tm_mday = day;
@@ -870,18 +1004,29 @@ fn mktime_local(year: i32, month: i32, day: i32, hour: i32, minute: i32, second:
     tm.tm_sec = second;
     tm.tm_isdst = isdst;
     let previous = std::io::Error::last_os_error();
-    unsafe { *libc::__errno_location() = 0 };
-    let result = unsafe { libc::mktime(&mut tm) };
-    let failed = result == -1 && std::io::Error::last_os_error().raw_os_error().unwrap_or(0) != 0;
-    unsafe { *libc::__errno_location() = previous.raw_os_error().unwrap_or(0) };
-    if failed { None } else { Some(result as i64) }
+    unsafe { *local_time::errno() = 0 };
+    let result = unsafe { local_time::mktime(&mut tm) };
+    let failed = result == -1 && unsafe { *local_time::errno() } != 0;
+    unsafe { *local_time::errno() = previous.raw_os_error().unwrap_or(0) };
+    if failed {
+        None
+    } else {
+        Some(result as i64)
+    }
 }
 
-fn local_civil_is(utc: i64, year: i32, month: i32, day: i32, hour: i32, minute: i32, second: i32) -> bool {
-    let mut tm = unsafe { std::mem::zeroed::<libc::tm>() };
-    let seconds = utc as libc::time_t;
+fn local_civil_is(
+    utc: i64,
+    year: i32,
+    month: i32,
+    day: i32,
+    hour: i32,
+    minute: i32,
+    second: i32,
+) -> bool {
+    let mut tm = unsafe { std::mem::zeroed::<local_time::tm>() };
     unsafe {
-        if libc::localtime_r(&seconds, &mut tm).is_null() {
+        if !local_time::localtime(utc, &mut tm) {
             return false;
         }
     }
@@ -891,4 +1036,59 @@ fn local_civil_is(utc: i64, year: i32, month: i32, day: i32, hour: i32, minute: 
         && tm.tm_hour == hour
         && tm.tm_min == minute
         && tm.tm_sec == second
+}
+
+/// The C library's local time zone: glibc on Linux, the UCRT on Windows.
+#[cfg(unix)]
+mod local_time {
+    pub use libc::tm;
+
+    pub unsafe fn errno() -> *mut i32 {
+        unsafe { libc::__errno_location() }
+    }
+
+    pub unsafe fn mktime(tm: &mut tm) -> i64 {
+        unsafe { libc::mktime(tm) as i64 }
+    }
+
+    pub unsafe fn localtime(utc: i64, tm: &mut tm) -> bool {
+        let seconds = utc as libc::time_t;
+        unsafe { !libc::localtime_r(&seconds, tm).is_null() }
+    }
+}
+
+#[cfg(windows)]
+mod local_time {
+    /// `struct tm` of the UCRT: nine `int` fields in the C order.
+    #[allow(non_camel_case_types)]
+    #[repr(C)]
+    pub struct tm {
+        pub tm_sec: i32,
+        pub tm_min: i32,
+        pub tm_hour: i32,
+        pub tm_mday: i32,
+        pub tm_mon: i32,
+        pub tm_year: i32,
+        pub tm_wday: i32,
+        pub tm_yday: i32,
+        pub tm_isdst: i32,
+    }
+
+    unsafe extern "C" {
+        fn _errno() -> *mut i32;
+        fn _mktime64(tm: *mut tm) -> i64;
+        fn _localtime64_s(tm: *mut tm, time: *const i64) -> i32;
+    }
+
+    pub unsafe fn errno() -> *mut i32 {
+        unsafe { _errno() }
+    }
+
+    pub unsafe fn mktime(tm: &mut tm) -> i64 {
+        unsafe { _mktime64(tm) }
+    }
+
+    pub unsafe fn localtime(utc: i64, tm: &mut tm) -> bool {
+        unsafe { _localtime64_s(tm, &utc) == 0 }
+    }
 }

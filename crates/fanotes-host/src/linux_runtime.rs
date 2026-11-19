@@ -18,7 +18,16 @@ const SCALE_FALLBACK: f64 = 2.0;
 
 pub fn bootstrap_linux() -> Value {
     let env = std::env::vars().collect();
-    report(std::env::consts::OS, &env, run_hyprctl)
+    report(node_platform(std::env::consts::OS), &env, run_hyprctl)
+}
+
+/// Node's `process.platform` name, which Electron reports here.
+pub fn node_platform(os: &str) -> &str {
+    match os {
+        "windows" => "win32",
+        "macos" => "darwin",
+        other => other,
+    }
 }
 
 pub fn report(
@@ -1028,6 +1037,13 @@ fn run_hyprctl() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_platform_uses_the_node_name() {
+        assert_eq!(super::node_platform("windows"), "win32");
+        assert_eq!(super::node_platform("linux"), "linux");
+        assert_eq!(super::node_platform("macos"), "darwin");
+    }
+
     use super::*;
     use std::fs;
 

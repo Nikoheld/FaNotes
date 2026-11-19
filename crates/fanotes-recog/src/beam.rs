@@ -1856,8 +1856,8 @@ fn reconcile_sentence_marks(best: &[u8], greedy: &[u8], words: &Words<'_>) -> Ve
             j -= 1;
         } else if i > 0 && distance[i][j] == distance[i - 1][j] + 1 {
             i -= 1;
-        } else if j > 0 {
-            j -= 1;
+        } else {
+            j = j.saturating_sub(1);
         }
     }
     result
@@ -2754,12 +2754,18 @@ mod tests {
     #[test]
     fn a_traced_completion_prefers_dauern_when_the_model_agrees() {
         let lm = CharLm::parse(
-            &std::fs::read("/workspace/fanotes/public/ocr/fanotes-ink/de.fnlm")
-                .expect("language model"),
+            &std::fs::read(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../fanotes/public/ocr/fanotes-ink/de.fnlm"
+            ))
+            .expect("language model"),
         )
         .expect("language model");
-        let words_file =
-            std::fs::read_to_string("/workspace/fanotes/public/spell/de.words").expect("words");
+        let words_file = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fanotes/public/spell/de.words"
+        ))
+        .expect("words");
         let known: std::collections::HashSet<String> = words_file
             .lines()
             .filter(|word| !word.is_empty())
@@ -2807,12 +2813,18 @@ mod tests {
             .collect();
         assert_eq!(kept_text, "Das wird nie enden.");
         let english_lm = CharLm::parse(
-            &std::fs::read("/workspace/fanotes/public/ocr/fanotes-ink/en.fnlm")
-                .expect("english model"),
+            &std::fs::read(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../fanotes/public/ocr/fanotes-ink/en.fnlm"
+            ))
+            .expect("english model"),
         )
         .expect("english model");
-        let english_words = std::fs::read_to_string("/workspace/fanotes/public/spell/en.words")
-            .expect("english words");
+        let english_words = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fanotes/public/spell/en.words"
+        ))
+        .expect("english words");
         let english_known: std::collections::HashSet<String> = english_words
             .lines()
             .filter(|word| !word.is_empty())

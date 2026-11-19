@@ -1,0 +1,31 @@
+[package]
+name = "fanotes-sync"
+version = "0.1.0"
+description = "FaNotes sync engine: a port of src/lib/sync/engine.ts with the same protocol, crypto, state and guards"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+fanotes-famd = { path = "../fanotes-famd" }
+# Story scene merge in sync (`src/writing/syncMerge.ts`).
+fanotes-story = { path = "../fanotes-story", default-features = false, features = ["os-random"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+base64 = "0.22"
+ring = "0.17"
+unicode-normalization = "0.1"
+ureq = { version = "3", default-features = false, features = ["rustls", "json"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+icu_collator = "2.3"
+icu_locale_core = "2.3"
+
+[dev-dependencies]
+
+[[bin]]
+name = "fanotes-sync-harness"
+path = "src/bin/fanotes-sync-harness.rs"
+
+[[bin]]
+name = "fanotes-sync-bench"
+path = "src/bin/fanotes-sync-bench.rs"
