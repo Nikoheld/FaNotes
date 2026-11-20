@@ -18,11 +18,24 @@
 /* A picked-up item (long press, then move) must not select text under the finger. */
 html.is-touch-dragging, html.is-touch-dragging * { user-select: none; -webkit-user-select: none; }
 
-:where(html.has-touch-screen, html.is-touch-input) :where(button, [role="button"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"], summary, a[href], .touch-hit) {
+:where(html.has-touch-screen, html.is-touch-input) :where(.tab-close, .tabs-menu, .note-nav-back, .note-nav-forward, .mode-switch button, .icon-button,
+  .formatting-toolbar button, .editor-toolbar .toolbar-button, .paper-picker__trigger,
+  .file-tree__entry-button, .file-tree__fold-button, .file-tree__mini-action, .file-tree__action,
+  .lw-draw-toolbar button, .lw-colors > button, .lw-color-custom, .lw-view-reset,
+  .toggle, .color-swatches button, .cm-touch-menu button, .touch-hit) {
   position: relative;
 }
-/* Grows the tappable area to 40 px without moving or resizing anything. */
-:where(html.has-touch-screen, html.is-touch-input) :where(button:not([data-tooltip]), [role="button"], [role="tab"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="option"], summary, a[href], .touch-hit)::after {
+/*
+ * Grows the tappable area to 40 px without moving or resizing anything. Only
+ * the controls listed here, none of which has its own ::after (the ribbon uses
+ * ::before because its tooltips own ::after). Do not widen this to all buttons:
+ * existing ::after visuals (summary chevrons, tab underline) would stretch.
+ */
+:where(html.has-touch-screen, html.is-touch-input) :where(.tab-close, .tabs-menu, .note-nav-back, .note-nav-forward, .mode-switch button, .icon-button,
+  .formatting-toolbar button, .editor-toolbar .toolbar-button, .paper-picker__trigger,
+  .file-tree__entry-button, .file-tree__fold-button, .file-tree__mini-action, .file-tree__action,
+  .lw-draw-toolbar button, .lw-colors > button, .lw-color-custom, .lw-view-reset,
+  .toggle, .color-swatches button, .cm-touch-menu button, .touch-hit)::after {
   content: '';
   position: absolute;
   top: min(0px, calc((100% - 40px) / 2));
@@ -30,6 +43,15 @@ html.is-touch-dragging, html.is-touch-dragging * { user-select: none; -webkit-us
   left: min(0px, calc((100% - 40px) / 2));
   right: min(0px, calc((100% - 40px) / 2));
 }
+:where(html.has-touch-screen, html.is-touch-input) :where(.ribbon button)::before {
+  content: '';
+  position: absolute;
+  top: min(0px, calc((100% - 40px) / 2));
+  bottom: min(0px, calc((100% - 40px) / 2));
+  left: min(0px, calc((100% - 40px) / 2));
+  right: min(0px, calc((100% - 40px) / 2));
+}
+:where(html.has-touch-screen, html.is-touch-input) .ribbon button.active::before { content: ''; }
 /* Calendar event resize grip: 6 px strip, 28 px touch area. */
 :where(html.has-touch-screen, html.is-touch-input) .cal-resize::after { content: ''; position: absolute; inset: -10px 0; }
 /* Ink selection scale handle: 22 px dot, 50 px touch area. */
@@ -38,27 +60,6 @@ html.is-touch-dragging, html.is-touch-dragging * { user-select: none; -webkit-us
 :where(html.has-touch-screen, html.is-touch-input) input[type="range"] { box-sizing: content-box; padding-block: 12px; margin-block: -12px; touch-action: none; }
 /* Row actions that only show on hover must not catch a tap while they are invisible. */
 :where(html.has-touch-screen, html.is-touch-input) .file-tree__row:not(:hover):not(:focus-within) .file-tree__inline-actions { pointer-events: none; }
-
-/*
- * While a finger is the active input (`html.is-touch-input`, set by
- * lib/touchInput.ts) the dense bars get roomier controls. Mouse or pen use
- * switches back to the compact desktop layout.
- */
-html.is-touch-input .ribbon button { height: 34px; padding-inline: 10px; }
-html.is-touch-input .tabs-bar .note-tab { height: 34px; }
-html.is-touch-input .tabs-bar :is(.tab-close, .tabs-menu, .note-nav-back, .note-nav-forward) { min-width: 32px; min-height: 32px; }
-html.is-touch-input .editor-toolbar:not(.is-vertical) { height: 44px; min-height: 44px; }
-html.is-touch-input .editor-toolbar .formatting-toolbar button { width: 34px; height: 34px; }
-html.is-touch-input .editor-toolbar .mode-switch button { min-width: 34px; min-height: 34px; }
-html.is-touch-input .editor-toolbar .paper-picker__trigger { min-width: 34px; min-height: 34px; }
-html.is-touch-input .editor-toolbar:not(.is-vertical) .toolbar-button { height: 34px; min-width: 34px; }
-html.is-touch-input .lw-draw-toolbar :is(.lw-segmented button, .lw-draw-icon, .lw-draw-subtle) { min-height: 34px; min-width: 34px; }
-html.is-touch-input .lw-colors { gap: 6px; }
-html.is-touch-input .lw-colors > button, html.is-touch-input .lw-color-custom { width: 26px; height: 26px; }
-html.is-touch-input :is(.file-tree__mini-action, .file-tree__action) { width: 32px; height: 32px; }
-html.is-touch-input .file-tree__entry-button { min-height: 36px; }
-html.is-touch-input .icon-button { min-width: 36px; min-height: 36px; }
-html.is-touch-input .split-divider { min-width: 14px; }
 
 /* Finger text selection in the Markdown editor (lib/cmTouchSelection.ts). */
 .cm-touch-handle { position: fixed; z-index: 1300; width: 44px; height: 44px; display: grid; place-items: start center; touch-action: none; user-select: none; -webkit-user-select: none; }

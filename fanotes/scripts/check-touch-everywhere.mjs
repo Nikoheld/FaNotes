@@ -127,10 +127,41 @@ try {
   assert.deepEqual((await tabNames()).sort(), ['Analysis', 'Literature', 'Welcome'])
 
   // Hit areas: the small controls are at least 32 px in the touch layout.
-  for (const selector of ['.tab-close', '.tabs-menu', '.mode-switch button', '.icon-button']) {
-    const size = await hitSize(selector)
-    assert.ok(size.h >= 32 && size.w >= 30, `${selector} touch area ${size.w}x${size.h}`)
+  for (const selector of ['.tab-close', '.tabs-menu', '.mode-switch button', '.icon-button', '.formatting-toolbar button']) {
+    const pseudo = await page.evaluate((target) => {
+      const element = document.querySelector(target)
+      const after = getComputedStyle(element, '::after')
+      return { content: after.content, position: after.position, w: element.offsetWidth, h: element.offsetHeight, aw: after.width, ah: after.height }
+    }, selector)
+    assert.ok(pseudo.content !== 'none' && pseudo.position === 'absolute', `${selector} has an invisible hit area`)
+    assert.ok(Number.parseFloat(pseudo.aw) >= 40 && Number.parseFloat(pseudo.ah) >= 40, `${selector} hit area is ${pseudo.aw} x ${pseudo.ah}`)
   }
+
+  // The hit areas must not disturb existing ::before/::after visuals (tab underline, summary chevrons, tooltips).
+  const pseudoState = (withTouchClasses) => page.evaluate((on) => {
+    const html = document.documentElement
+    html.classList.toggle('has-touch-screen', on)
+    html.classList.toggle('is-touch-input', false)
+    const out = {}
+    let index = 0
+    for (const element of document.querySelectorAll('body *')) {
+      element.__touchIndex ??= ++index
+      for (const pseudo of ['::before', '::after']) {
+        const style = getComputedStyle(element, pseudo)
+        if (style.content === 'none') continue
+        out[`${element.__touchIndex}${pseudo}`] = ['content', 'position', 'top', 'right', 'bottom', 'left', 'width', 'height', 'transform'].map((key) => style[key]).join('|')
+      }
+    }
+    return out
+  }, withTouchClasses)
+  const pseudoOff = await pseudoState(false)
+  const pseudoOn = await pseudoState(true)
+  let preserved = 0
+  for (const [key, value] of Object.entries(pseudoOff)) {
+    preserved += 1
+    assert.equal(pseudoOn[key], value, `existing pseudo-element ${key} must not change with has-touch-screen`)
+  }
+  assert.ok(preserved > 3, `found ${preserved} existing pseudo-elements to compare`)
 
   // Long press on a tree row opens its menu and does not open or toggle it.
   const tabsBefore = await tabNames()
@@ -253,7 +284,7 @@ try {
   assert.ok(copy, 'settings has static text to select')
   await T.press(copy.x, copy.y); await settle()
   assert.ok((await page.evaluate(() => String(getSelection()).trim())).length > 1, 'a long press selects a word of static text')
-  const section = await page.locator('.settings-modal').getByText('Accessibility', { exact: true }).first().boundingBox()
+  const section = await page.locator('.settings-modal button:has-text("Accessibility")').first().boundingBox()
   await T.tap(section.x + section.width / 2, section.y + section.height / 2); await settle(500)
   const slider = page.locator('.settings-modal input[type=range]').first()
   const sliderBox = await slider.boundingBox()
