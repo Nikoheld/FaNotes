@@ -6100,29 +6100,17 @@ export default function App({ startupBootstrap }: AppProps) {
         done = true
       }
     }
-    // The pane's editor is lazy-loaded, so its scroller can appear well after this effect (slow disk, cold cache):
-    // poll until it exists, then observe its size. Never fires after the user touched the pane.
-    let scroller: HTMLElement | null = null
-    let observer: ResizeObserver | null = null
+    fit()
+    // Fallback only: if the pane was not measurable yet. It never fires after the user touched the pane.
+    const scroller = scrollerOf()
     const markInteracted = () => { interacted = true }
     const events = ['pointerdown', 'wheel', 'keydown', 'touchstart'] as const
-    const attach = () => {
-      const found = scrollerOf()
-      if (!found || found === scroller) return
-      events.forEach((name) => scroller?.removeEventListener(name, markInteracted, { capture: true }))
-      observer?.disconnect()
-      scroller = found
-      events.forEach((name) => found.addEventListener(name, markInteracted, { capture: true, passive: true }))
-      observer = typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null
-      observer?.observe(found)
-    }
-    const tick = () => { attach(); fit() }
-    tick()
-    const poll = window.setInterval(tick, 100)
-    const stop = window.setTimeout(() => { done = true; window.clearInterval(poll) }, 6000)
+    events.forEach((name) => scroller?.addEventListener(name, markInteracted, { capture: true, passive: true }))
+    const observer = scroller && typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null
+    if (scroller) observer?.observe(scroller)
+    const stop = window.setTimeout(() => { done = true }, 1500)
     return () => {
       done = true
-      window.clearInterval(poll)
       window.clearTimeout(stop)
       observer?.disconnect()
       events.forEach((name) => scroller?.removeEventListener(name, markInteracted, { capture: true }))
