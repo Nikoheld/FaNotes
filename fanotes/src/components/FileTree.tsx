@@ -70,7 +70,8 @@ export type FileTreeProps = {
   onSetFileColor?: (relativePath: string, color: string | null) => MaybePromise
   onEditFolderPath?: (relativePath: string) => MaybePromise
   onRename: (relativePath: string, nextName: string) => MaybePromise
-  onMove: (relativePath: string, destFolder: string) => MaybePromise
+  /** Resolves to the entry's new path when it moved (it can be renamed to stay unique). */
+  onMove: (relativePath: string, destFolder: string) => MaybePromise<string | void>
   onTrash: (relativePath: string) => MaybePromise
   onDuplicate?: (relativePath: string) => MaybePromise
   onCopyWikiLink?: (relativePath: string) => MaybePromise
@@ -161,6 +162,9 @@ function parentPath(relativePath: string) {
 function isSelfOrDescendant(candidate: string, ancestor: string) {
   return candidate === ancestor || candidate.startsWith(`${ancestor}/`)
 }
+
+/** A dragged item hovering a closed folder opens it after this long. */
+const DROP_EXPAND_DELAY_MS = 600
 
 function dropFolderFor(targetKind: 'file' | 'folder' | 'root', targetPath = '') {
   if (targetKind === 'root') return ''
@@ -258,6 +262,8 @@ export const FileTree = memo(function FileTree({
   const treeRef = useRef<HTMLElement>(null)
   const treeScrollTop = useRef<number | null>(null)
   const dragSourceRef = useRef<{ path: string; kind: VaultEntry['kind'] } | null>(null)
+  const expandedRef = useRef(expanded)
+  expandedRef.current = expanded
   const orderedEntries = useMemo(() => sortedEntries(entries), [entries])
   const folderList = useMemo(() => folderPathsIn(entries), [entries])
   const foldersOpen = folderList.some((path) => expanded.has(path))
@@ -442,7 +448,7 @@ export const FileTree = memo(function FileTree({
 
   useEffect(() => {
     if (dropFolder === null || dropFolder === '') return
-    const timer = window.setTimeout(() => toggleFolder(dropFolder, true), 420)
+    const timer = window.setTimeout(() => toggleFolder(dropFolder, true), DROP_EXPAND_DELAY_MS)
     return () => window.clearTimeout(timer)
   }, [dropFolder])
 
@@ -466,11 +472,18 @@ export const FileTree = memo(function FileTree({
     setDropFolder(null)
   }
 
-  const destForTarget = (targetKind: 'file' | 'folder' | 'root', targetPath = '') => {
-    const source = dragSourceRef.current
-    if (!source) return null
+  const destForSource = (
+    source: { path: string; kind: VaultEntry['kind'] },
+    targetKind: 'file' | 'folder' | 'root',
+    targetPath = '',
+  ) => {
     const dest = dropFolderFor(targetKind, targetPath)
     return canMoveTo(source.path, source.kind, dest) ? dest : null
+  }
+
+  const destForTarget = (targetKind: 'file' | 'folder' | 'root', targetPath = '') => {
+    const source = dragSourceRef.current
+    return source ? destForSource(source, targetKind, targetPath) : null
   }
 
   const handleDragOver = (
@@ -503,11 +516,28 @@ export const FileTree = memo(function FileTree({
         : null)
       : null
     endDrag()
-    if (!source || dest === null || moveBusy) return
+    if (!source || dest === null) return
+    await performMove(source, dest)
+  }
+
+  /** Moves the entry and keeps the folders that were open (they get new paths). */
+  const performMove = async (source: { path: string; kind: VaultEntry['kind'] }, dest: string) => {
+    if (moveBusy) return
     setMoveBusy(true)
     try {
       if (dest) toggleFolder(dest, true)
-      await onMove(source.path, dest)
+      const openBefore = [...expandedRef.current].filter((open) => open === source.path || open.startsWith(`${source.path}/`))
+      const nextPath = await onMove(source.path, dest)
+      if (typeof nextPath === 'string' && nextPath && nextPath !== source.path && openBefore.length) {
+        setExpanded((current) => {
+          const next = new Set(current)
+          openBefore.forEach((open) => {
+            next.delete(open)
+            next.add(`${nextPath}${open.slice(source.path.length)}`)
+          })
+          return next
+        })
+      }
     } finally {
       setMoveBusy(false)
     }
@@ -823,7 +853,7 @@ export const FileTree = memo(function FileTree({
         </div>
 
         {isFolder && isExpanded && (
-          <ul className="file-tree__group" role="group">
+          <ul className="file-tree__group" role="group" style={depthStyle}>
             {children.length > 0 ? (
               children.map((child) => renderEntry(child, depth + 1))
             ) : (
