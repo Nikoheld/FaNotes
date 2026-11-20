@@ -5073,5 +5073,10 @@
   "Leere Seiten gibt es nur neben PDF-Notizen.": "Blank pages are only available next to PDF notes.",
   "Ungültiger Pfad für leere PDF-Seiten.": "Invalid path for blank PDF pages.",
   "Der Ordner für leere PDF-Seiten ist unsicher.": "The folder for blank PDF pages is unsafe.",
-  "Der Ordner für leere PDF-Seiten verlässt den Vault.": "The folder for blank PDF pages is outside the vault."
+  "Der Ordner für leere PDF-Seiten verlässt den Vault.": "The folder for blank PDF pages is outside the vault.",
+  "Linienradierer": "Stroke eraser",
+  "Bereichsradierer": "Area eraser",
+  "Radierermodus": "Eraser mode",
+  "Ein Strich verschwindet komplett, sobald der Radierer ihn berührt": "A stroke disappears entirely as soon as the eraser touches it",
+  "Entfernt nur den Teil unter dem Radierer": "Removes only the part under the eraser"
 }
