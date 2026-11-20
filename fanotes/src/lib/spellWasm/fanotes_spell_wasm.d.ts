@@ -16,6 +16,14 @@ export function contextNearest(language_code: string, source: string, maximum_di
 
 export function contextSequenceScore(language_code: string, word: string): number;
 
+/**
+ * The built index as one JSON object for a synchronous reader on another thread:
+ * `{buckets: {"<length>": "w1\\nw2..."}, bigrams: [gram, count, ...], trigrams: [...],
+ * prefixes: [gram, ...], suffixes: [gram, ...]}`. Words stay newline joined so the receiver
+ * splits a bucket only when it needs it.
+ */
+export function contextSnapshot(language_code: string): string;
+
 export function contextSubwordScore(language_code: string, word: string): number;
 
 export function contextWordsOfLength(language_code: string, length: number): string;
@@ -56,6 +64,7 @@ export interface InitOutput {
     readonly contextIsExtendedWord: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly contextNearest: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly contextSequenceScore: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly contextSnapshot: (a: number, b: number) => [number, number, number, number];
     readonly contextSubwordScore: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly contextWordsOfLength: (a: number, b: number, c: number) => [number, number, number, number];
     readonly decideAutocorrect: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number];

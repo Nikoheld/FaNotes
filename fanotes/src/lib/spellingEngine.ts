@@ -1,5 +1,6 @@
 import type { SpellingLanguage } from '../types'
 import type { SpellingSuggestion } from './spellingSuggest'
+import type { NeuralWordContextSnapshot } from './neuralWordContext'
 import type { SpellingWorkerRequest, SpellingWorkerResponse } from './spellingWorker'
 
 /**
@@ -28,6 +29,10 @@ export type SpellingEngine = {
     languages: SpellingLanguage[] | null,
     options?: { limit?: number; maxDistance?: 1 | 2 },
   ) => Promise<SpellingSuggestion[]>
+  /** The OCR word context index of one language, built by the Rust core in the worker. Only the
+   * worker engine has it; the TypeScript engine leaves it out and recognition builds the index
+   * itself. */
+  contextSnapshot?: (language: SpellingLanguage) => Promise<NeuralWordContextSnapshot>
   /** The one correction safe to apply while typing, or null. */
   planAutocorrect: (
     word: string,
@@ -128,6 +133,7 @@ const createWorkerEngine = async (
         }),
         (engine) => engine.suggest(word, among, options),
       ),
+      contextSnapshot: async (language) => JSON.parse(await call<string>({ op: 'context', call: 'snapshot', args: [language] })) as NeuralWordContextSnapshot,
       planAutocorrect: (word, among, context) => guarded(
         () => call<SpellingSuggestion | null>({ op: 'autocorrect', typed: word, languages: among ?? languages, ...context }),
         (engine) => engine.planAutocorrect(word, among, context),

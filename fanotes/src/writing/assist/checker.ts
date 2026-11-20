@@ -11,6 +11,8 @@ import { checkStyle, type StyleOptions } from './style'
 export type SpellingSource = {
   isMisspelled: (word: string) => boolean
   suggest: (word: string, language: SpellingLanguage) => string[]
+  /** Preferred when present (the spelling worker): the answer arrives later, see `onSuggestions`. */
+  suggestAsync?: (word: string, language: SpellingLanguage) => Promise<string[]>
 }
 
 export type AssistSettings = {
@@ -81,6 +83,7 @@ export class Assistant {
     this.spelling = spelling
     this.misspelled.clear()
     this.suggestions.clear()
+    this.suggestionsAsked.clear()
     this.dictionaryVersion += 1
   }
 
@@ -100,11 +103,29 @@ export class Assistant {
     let value = this.suggestions.get(key)
     if (value === undefined) {
       if (this.suggestions.size > 2_000) this.suggestions.clear()
-      value = this.spelling ? this.spelling.suggest(word, language).slice(0, 5) : []
+      const spelling = this.spelling
+      if (spelling?.suggestAsync) {
+        // Not cached until the worker answered, so an empty list here is "not yet", not "none".
+        if (!this.suggestionsAsked.has(key)) {
+          this.suggestionsAsked.add(key)
+          spelling.suggestAsync(word, language).then((words) => {
+            this.suggestionsAsked.delete(key)
+            if (this.spelling !== spelling) return
+            this.suggestions.set(key, words.slice(0, 5))
+            this.onSuggestions?.()
+          }, () => { this.suggestionsAsked.delete(key) })
+        }
+        return []
+      }
+      value = spelling ? spelling.suggest(word, language).slice(0, 5) : []
       this.suggestions.set(key, value)
     }
     return value
   }
+
+  private suggestionsAsked = new Set<string>()
+  /** Called when suggestions asked from the worker arrived; the UI renders again and reads them. */
+  onSuggestions: (() => void) | null = null
 
   /** The story's own words (names, invented words) and the ignored findings. */
   setProjectLists(dictionary: string[], ignored: string[]) {

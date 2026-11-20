@@ -17,7 +17,7 @@ import { L, formatNumber, styleName } from './i18n'
 import { caretBox, hitTestCaret, move, type Motion } from './navigation'
 import { Assistant, defaultAssistSettings, issueSignature, paragraphLanguage, type AssistSettings } from '../assist/checker'
 import type { Issue } from '../assist/rules'
-import { autocorrectAfterInput, startsSentence } from '../assist/typography'
+import { autocorrectAfterInput, spellingFix, startsSentence } from '../assist/typography'
 import { AssistPopover, type PopoverTarget } from './AssistPopover'
 import { defaultAutocorrectSettings, type AutocorrectSettings } from './CheckPanel'
 import { Inspector, type InspectorTab } from './Inspector'
@@ -87,8 +87,9 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   })
   const [popover, setPopover] = useState<PopoverTarget | null>(null)
   const [lexiconReady, setLexiconReady] = useState(false)
-  const lexicon = useRef<import('../../lib/spelling').SpellingLexicon | null>(null)
-  const suggestRef = useRef<typeof import('../../lib/spellingSuggest') | null>(null)
+  /** The spelling worker engine (Rust wasm off the main thread); null until it is ready. */
+  const spellingEngine = useRef<import('../../lib/spellingEngine').SpellingEngine | null>(null)
+  const [, setSuggestionTick] = useState(0)
   /** controller.version right after an autocorrect: Backspace then undoes just the correction. */
   const lastAutocorrect = useRef(-1)
   const assistant = useMemo(() => new Assistant(null), [])
@@ -270,18 +271,19 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
   // ── Writing assistance ────────────────────────────────────────────────
   useEffect(() => {
     let alive = true
-    void Promise.all([import('../../lib/spelling'), import('../../lib/spellingSuggest')]).then(async ([spelling, suggest]) => {
-      const loadedLexicon = await spelling.loadSpellingLexicon()
+    assistant.onSuggestions = () => setSuggestionTick((tick) => tick + 1)
+    void import('../../lib/spellingEngine').then(async ({ loadSpellingEngine }) => {
+      const engine = await loadSpellingEngine()
       if (!alive) return
-      lexicon.current = loadedLexicon
-      suggestRef.current = suggest
+      spellingEngine.current = engine
       assistant.setSpelling({
-        isMisspelled: (word) => loadedLexicon.isMisspelled(word),
-        suggest: (word, language) => suggest.suggestCorrections(word, [language], loadedLexicon).map((entry) => entry.word),
+        isMisspelled: (word) => engine.isMisspelled(word),
+        suggest: () => [],
+        suggestAsync: async (word, language) => (await engine.suggest(word, [language])).map((entry) => entry.word),
       })
       setLexiconReady(true)
     }).catch(() => undefined)
-    return () => { alive = false }
+    return () => { alive = false; assistant.onSuggestions = null }
   }, [assistant])
   useEffect(() => { try { localStorage.setItem('fanotes.writing.assist.v1', JSON.stringify(assistSettings)) } catch { /* ignore */ } }, [assistSettings])
   useEffect(() => { try { localStorage.setItem('fanotes.writing.autocorrect.v1', JSON.stringify(autocorrect)) } catch { /* ignore */ } }, [autocorrect])
@@ -431,18 +433,33 @@ export function WritingMode({ path, onClose, onSaved }: Props) {
     const paragraph = runsText(block.runs)
     const language = paragraphLanguage(paragraph, block.lang, st.doc.manifest.language, assistSettings.detectLanguage)
     const spellingLanguage = language.startsWith('de') ? 'de' : 'en'
+    const pending: { request: { word: string; sentenceStart: boolean; from: number; to: number } | null } = { request: null }
     const fix = autocorrectAfterInput(paragraph, head.offset, text, language, {
       ...autocorrect,
       swissSs: autocorrect.swissSs && language === 'de-CH',
       isKnown: (word) => assistant.knows(word),
-      correctWord: (word, sentenceStart) => {
-        const loaded = lexicon.current
-        const suggest = suggestRef.current
-        if (!loaded || !suggest || !loaded.isMisspelled(word)) return null
-        const decision = suggest.decideAutocorrect(word, suggest.suggestCorrections(word, [spellingLanguage], loaded), { language: spellingLanguage, sentenceStart, isProperName: () => false })
-        return decision?.word ?? null
+      // The engine answers from the spelling worker, so the decision follows asynchronously (below).
+      correctWord: (word, sentenceStart, range) => {
+        if (spellingEngine.current?.isMisspelled(word)) pending.request = { word, sentenceStart, ...range }
+        return null
       },
     })
+    const asked = pending.request
+    const engine = spellingEngine.current
+    if (asked && engine) {
+      const blockKey = block.key
+      const capitalise = autocorrect.capitalize
+      void engine.planAutocorrect(asked.word, [spellingLanguage], { language: spellingLanguage, sentenceStart: asked.sentenceStart, properName: false }).then((decision) => {
+        // The text moved on while the worker answered: drop the fix.
+        const now = controller.state
+        const current = blockAt(now.doc, blockKey)
+        if (current?.ref.kind !== 'para' || runsText(current.runs).slice(asked.from, asked.to) !== asked.word) return
+        const later = decision ? spellingFix(asked.from, asked.to, decision.word, asked.sentenceStart && capitalise, language) : fix
+        if (!later) return
+        if (controller.apply(commands.replaceInBlockRange(now, blockKey, later.from, later.to, later.text, 'keep'), 'other')) lastAutocorrect.current = controller.version
+      }, () => undefined)
+      return
+    }
     if (!fix) return
     if (controller.apply(commands.replaceInBlockRange(st, block.key, fix.from, fix.to, fix.text, 'keep'), 'other')) lastAutocorrect.current = controller.version
   }, [controller, run, autocorrect, assistSettings.detectLanguage, assistant])

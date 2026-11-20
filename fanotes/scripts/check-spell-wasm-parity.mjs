@@ -201,6 +201,46 @@ try {
       }
     }
     console.log(`context ${language}: ${count} words, index built in ${buildMs.toFixed(0)} ms, ${probes.length} probes identical`)
+
+    // The snapshot the main thread adopts (handwriting recognition asks the worker for it): every
+    // synchronous query must answer exactly as the index built by installNeuralWordContextCandidates.
+    const combos = [[1, false, Infinity], [1, true, 5], [2, true, Infinity], [1, false, 3], [3, false, 4]]
+    const reference = {
+      buckets: Array.from({ length: 70 }, (_, length) => [...context.neuralWordContextWordsOfLength(language, length + 1)]),
+      probes: probes.map((probe) => {
+        const lower = probe.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US')
+        return {
+          extended: context.isExtendedNeuralContextWord(lower, language),
+          sequence: context.neuralCharacterSequenceScore(probe, language),
+          subword: context.neuralCharacterSubwordScore(probe, language),
+        }
+      }),
+      nearest: probes.slice(0, 80).map((probe) => combos.map(([d, same, max]) => context.nearestNeuralWordContextCandidates(probe, language, d, same, max))),
+      members: lists[language].filter((_, index) => index % 7 === 0).map((word) => context.isExtendedNeuralContextWord(word, language)),
+    }
+    assert.ok(reference.members.every(Boolean), 'the TS index must hold every sampled word')
+    started = performance.now()
+    const text = wasm.context.snapshot(language)
+    const snapshotMs = performance.now() - started
+    started = performance.now()
+    context.installNeuralWordContextSnapshot(language, JSON.parse(text))
+    const adoptMs = performance.now() - started
+    for (let length = 1; length <= 70; length += 1) {
+      assert.deepEqual([...context.neuralWordContextWordsOfLength(language, length)], reference.buckets[length - 1], `snapshot bucket ${language} ${length}`)
+    }
+    probes.forEach((probe, index) => {
+      const lower = probe.toLocaleLowerCase(language === 'de' ? 'de-CH' : 'en-US')
+      const expected = reference.probes[index]
+      assert.equal(context.isExtendedNeuralContextWord(lower, language), expected.extended, `snapshot extended ${probe}`)
+      assert.equal(context.neuralCharacterSequenceScore(probe, language), expected.sequence, `snapshot sequence ${probe}`)
+      assert.equal(context.neuralCharacterSubwordScore(probe, language), expected.subword, `snapshot subword ${probe}`)
+    })
+    probes.slice(0, 80).forEach((probe, index) => combos.forEach(([d, same, max], at) => {
+      assert.deepEqual(context.nearestNeuralWordContextCandidates(probe, language, d, same, max), reference.nearest[index][at], `snapshot nearest ${language} ${probe} ${d} ${same} ${max}`)
+    }))
+    lists[language].filter((_, index) => index % 7 === 0).forEach((word) => assert.ok(context.isExtendedNeuralContextWord(word, language), `snapshot member ${word}`))
+    assert.ok(!context.isExtendedNeuralContextWord('qxzvqxzv', language))
+    console.log(`context snapshot ${language}: worker side ${snapshotMs.toFixed(0)} ms (${(text.length / 1e6).toFixed(1)} MB), main-thread adopt ${adoptMs.toFixed(1)} ms, 70 buckets + ${probes.length} probes + ${reference.nearest.length * combos.length} nearest queries + ${reference.members.length} members identical`)
   }
   console.log('spell wasm parity ok')
 } finally {
