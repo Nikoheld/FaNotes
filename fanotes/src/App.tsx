@@ -125,6 +125,7 @@ import {
 } from './lib/pageStats'
 import { clearNoteTextFieldRescue, readNoteTextFieldRescue, writeNoteTextFieldRescue } from './lib/noteTextFieldRescue'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
+import { pruneHeadingFolds, remapHeadingFolds } from './lib/headingFolds'
 import { chooseStartSurface } from './lib/dashboardLayout'
 import {
   clonedWorksheetDocument,
@@ -831,6 +832,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [editorMenuOpen, setEditorMenuOpen] = useState(false)
   const [sidebarToolsOpen, setSidebarToolsOpen] = useState(false)
+  // Search-row slot that receives the folder tree's collapse/expand-all button.
+  const [foldSlot, setFoldSlot] = useState<HTMLElement | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [lmStudioOpen, setLmStudioOpen] = useState(false)
   const [glyphenWerkOpen, setGlyphenWerkOpen] = useState(false)
@@ -1029,7 +1032,11 @@ export default function App({ startupBootstrap }: AppProps) {
   const vaultStructureRevisionRef = useRef(0)
   // Every tree result goes through this: a request issued earlier never overwrites a later one.
   const treeSyncRef = useRef<TreeSync<VaultEntry[]> | null>(null)
-  if (!treeSyncRef.current) treeSyncRef.current = createTreeSync<VaultEntry[]>((next) => { treeRef.current = next; setTree(next) })
+  if (!treeSyncRef.current) treeSyncRef.current = createTreeSync<VaultEntry[]>((next) => {
+    treeRef.current = next; setTree(next)
+    // Folded-heading memory of notes that no longer exist goes away.
+    if (next.length) pruneHeadingFolds(new Set(collectNotePaths(next)))
+  })
   const vaultSwitchInProgressRef = useRef(false)
   const searchRequestRef = useRef(0)
   const openingNotesRef = useRef(new Set<string>())
@@ -3823,6 +3830,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [createDailyNote, toast])
 
   const remapNotePaperPaths = useCallback((from: string, to: string | null) => {
+    remapHeadingFolds(from, to)
     setNotePaperByPath((current) => {
       const next = { ...current }
       Object.entries(current).forEach(([candidate, style]) => {
@@ -6478,6 +6486,7 @@ export default function App({ startupBootstrap }: AppProps) {
               <Search aria-hidden="true" size={14} />
               <input value={searchQuery} placeholder="Suchen …" aria-label="Notizen suchen" onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} />
               {searchQuery ? <button className="search-clear" type="button" aria-label="Suche leeren" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]); setSearchFailed(false) }}><X size={13} /></button> : null}
+              <span className="sidebar-fold-slot" ref={setFoldSlot} />
             </div>
             {knownTags.length > 0 && (
               <div className="tag-filter" aria-label="Nach Schlagwort filtern">
@@ -6497,6 +6506,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 expansionStorageKey={`fanotes.treeExpanded.v1:${bootstrap?.vaultPath || 'default'}`}
                 rootLabel="Notizen"
                 showHeader={false}
+                foldSlot={foldSlot}
                 onOpen={openNote}
                 onOpenInSplit={openInSplit}
                 onCreateNote={createNote}
@@ -6981,7 +6991,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} foldKey={activeTab.path} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -7147,6 +7157,7 @@ export default function App({ startupBootstrap }: AppProps) {
                           onChange={(content) => updateContentFor(splitTab.path, content)}
                           onSave={async (content) => { await saveContent(splitTab.path, content) }}
                           onEditActivity={(activity) => recordEditActivityFor(splitTab.path, activity)}
+                          foldKey={splitTab.path}
                           settings={settings}
                           paperMode
                           readOnly={(drawingOpen && focusedPane === 'split') || Boolean(tabHolds[splitTab.path])}

@@ -14,9 +14,11 @@ import {
   indentWithTab,
 } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
+import { foldKeysForLines, linesForFoldKeys, recallHeadingFolds, rememberHeadingFolds } from '../lib/headingFolds'
 import {
   bracketMatching,
   defaultHighlightStyle,
+  ensureSyntaxTree,
   foldEffect,
   foldGutter,
   foldKeymap,
@@ -169,6 +171,8 @@ export type MarkdownEditorProps = {
   onLanguageDetected?: (language: DetectedTextLanguage) => void
   /** Reports every user edit for the note's quiet statistics (typed, pasted, deleted, undone …). */
   onEditActivity?: (activity: EditActivity) => void
+  /** Note path: folded headings are remembered under it (local profile data, not in the note) and restored on open. */
+  foldKey?: string
 }
 
 export type MarkdownFormatAction =
@@ -1437,12 +1441,15 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   paperMode = false,
   onLanguageDetected,
   onEditActivity,
+  foldKey,
 }: MarkdownEditorProps, forwardedRef) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const syncingExternalContent = useRef(false)
   const onChangeRef = useRef(onChange)
   const onSaveRef = useRef(onSave)
+  const foldKeyRef = useRef(foldKey)
+  foldKeyRef.current = foldKey
   const onLanguageDetectedRef = useRef(onLanguageDetected)
   const onEditActivityRef = useRef(onEditActivity)
   const changeSchedulerRef = useRef<TrailingValueScheduler<() => string> | null>(null)
@@ -1588,6 +1595,33 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       },
     ])
 
+    // Heading folds: restored once the document has text, saved (debounced) when a fold or the text changes.
+    const foldPath = foldKeyRef.current
+    const storedFolds = foldPath ? recallHeadingFolds(foldPath) : []
+    let foldsReady = !storedFolds.length
+    let foldTimer: number | null = null
+    let foldView: EditorView | null = null
+    const persistFolds = () => {
+      foldTimer = null
+      if (!foldPath || !foldView) return
+      const { state: current } = foldView
+      const lines: number[] = []
+      foldedRanges(current).between(0, current.doc.length, (from) => { lines.push(current.doc.lineAt(from).number) })
+      rememberHeadingFolds(foldPath, foldKeysForLines(current.doc.toString(), lines))
+    }
+    const applyStoredFolds = () => {
+      if (foldsReady || !foldView || foldView.state.doc.length === 0) return
+      foldsReady = true
+      const target = foldView
+      ensureSyntaxTree(target.state, target.state.doc.length, 300)
+      const effects = linesForFoldKeys(target.state.doc.toString(), storedFolds).flatMap((line) => {
+        const info = target.state.doc.line(line)
+        const range = foldable(target.state, info.from, info.to)
+        return range ? [foldEffect.of(range)] : []
+      })
+      if (effects.length) target.dispatch({ effects })
+    }
+
     const state = EditorState.create({
       doc: content,
       extensions: [
@@ -1654,6 +1688,14 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           languageAt: spellingLanguageAt,
         }),
         EditorView.updateListener.of((update) => {
+          if (foldPath) {
+            if (!foldsReady) {
+              if (update.docChanged) window.setTimeout(applyStoredFolds, 0)
+            } else if (update.docChanged || update.transactions.some((transaction) => transaction.effects.some((effect) => effect.is(foldEffect) || effect.is(unfoldEffect)))) {
+              if (foldTimer !== null) window.clearTimeout(foldTimer)
+              foldTimer = window.setTimeout(persistFolds, 400)
+            }
+          }
           if (update.docChanged && !syncingExternalContent.current) {
             // CodeMirror paints immediately. React, word count, outline and
             // autosave receive one trailing snapshot per short typing burst.
@@ -1676,6 +1718,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
     const view = new EditorView({ state, parent: host })
     viewRef.current = view
+    foldView = view
+    applyStoredFolds()
     bindPaperNoteText(resolvePaperCaretScroller(host), state.doc.toString())
     // The paper camera remembers the text under the viewport edge, not a
     // pixel offset: CodeMirror only estimates the height of unrendered lines.
@@ -1686,6 +1730,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
     return () => {
       unregisterAnchor()
+      if (foldTimer !== null) { window.clearTimeout(foldTimer); persistFolds() }
       changeScheduler.flush()
       changeSchedulerRef.current = null
       viewRef.current = null
