@@ -1,0 +1,50 @@
+name: Side toolbar layout
+
+# Renders the vertical editor toolbar (Settings -> Werkzeugleiste = "Seite") in headless Chromium at the usual
+# window sizes and display scales and asserts that every item and popover stays inside the viewport and that no
+# two items overlap. Never builds or publishes a release.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/src/styles.css'
+      - 'fanotes/src/App.tsx'
+      - 'fanotes/src/components/DrawingBoard.tsx'
+      - 'fanotes/src/components/FormattingToolbar.tsx'
+      - 'fanotes/src/components/PaperStylePicker.tsx'
+      - 'fanotes/src/components/PdfNoteView.tsx'
+      - 'fanotes/src/touch.css'
+      - 'fanotes/scripts/check-side-toolbar.mjs'
+      - '.github/workflows/side-toolbar.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  side-toolbar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - run: npm install --no-save --no-audit --no-fund --ignore-scripts playwright-core@1.56.1
+      - run: npx playwright-core install --with-deps chromium
+      - run: node scripts/stage-main-i18n.cjs
+      - run: npm run check:side-toolbar
+        env:
+          CI: '1'
+          FANOTES_SHOT_DIR: ${{ runner.temp }}/side-toolbar-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: side-toolbar-screenshots
+          path: ${{ runner.temp }}/side-toolbar-shots
+          if-no-files-found: ignore
