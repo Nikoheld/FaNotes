@@ -54,3 +54,4 @@ jobs:
       - run: node scripts/check-writing-assist.mjs
       - run: node scripts/check-context-recognition.mjs
       - run: node scripts/check-markdown.mjs
+      - run: node scripts/check-markdown-table.mjs

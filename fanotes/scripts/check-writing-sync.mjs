@@ -41,7 +41,6 @@ globalThis.fetch = (input, init = {}) => {
 
 const dataDirectory = mkdtempSync(join(tmpdir(), 'fanotes-writing-sync-'))
 process.env.FANOTES_SYNC_DIR = dataDirectory
-process.env.FANOTES_MCP_DIR = join(dataDirectory, 'mcp')
 const PORT = 19_000 + Math.floor(Math.random() * 400)
 const ORIGIN = `http://127.0.0.1:${PORT}`
 process.env.FANOTES_PUBLIC_ORIGIN = ORIGIN

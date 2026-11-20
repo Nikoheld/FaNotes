@@ -8,6 +8,8 @@ on:
     paths:
       - 'fanotes/src/writing/**'
       - 'fanotes/src/lib/sync/**'
+      - 'fanotes/scripts/check-account-share.mjs'
+      - 'fanotes-site/user-shares.mjs'
       - 'fanotes/src/lib/docSearch/**'
       - 'fanotes/scripts/check-writing*.mjs'
       - 'fanotes/scripts/fixtures/writing-sync/**'
@@ -43,6 +45,7 @@ jobs:
       - run: node scripts/check-writing-export.mjs
       - run: node scripts/check-writing-sync.mjs
       - run: node scripts/check-sync.mjs
+      - run: node scripts/check-account-share.mjs
       - run: node scripts/check-doc-search.mjs
 
   kotlin:
