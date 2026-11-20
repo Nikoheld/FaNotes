@@ -1,11 +1,10 @@
 (() => {
   'use strict'
 
-  const FAMD_SCHEMA = 'fanotes-famd-v1'
-  const FAMD_HEADER = /(?:^|\n)<!--\s*fanotes-famd:v1\s+chars=(\d+)\s*-->\n/u
   const MAX_BYTES = 16 * 1024 * 1024
-  const SOURCE_WIDTH = 900
-  const SOURCE_HEIGHT = 1273
+  const { readFamd, collectPages } = window.FamdRead
+  const MIN_ZOOM = 0.25
+  const MAX_ZOOM = 4
 
   const fileInput = document.querySelector('#file')
   const dropScreen = document.querySelector('[data-drop]')
@@ -14,8 +13,9 @@
   const zone = document.querySelector('[data-zone]')
   const markdownRoot = document.querySelector('[data-markdown]')
   const inkWrap = document.querySelector('[data-ink-wrap]')
-  const inkSvg = document.querySelector('[data-ink]')
-  const inkPage = document.querySelector('.ink-page')
+  const inkPages = document.querySelector('[data-ink-pages]')
+  const inkScroll = document.querySelector('[data-ink-scroll]')
+  const zoomLabel = document.querySelector('[data-zoom-label]')
 
   const show = (element, visible) => {
     if (element) element.hidden = !visible
@@ -32,42 +32,6 @@
     .replace(/>/gu, '&gt;')
     .replace(/"/gu, '&quot;')
     .replace(/'/gu, '&#39;')
-
-  const stripFamdPayload = (source) => {
-    if (typeof source !== 'string' || !source) return ''
-    const match = [...source.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
-    if (!match || match.index === undefined) return source.replace(/\s+$/u, '')
-    return source.slice(0, match.index).replace(/\s+$/u, '')
-  }
-
-  const parseFamd = (source) => {
-    const markdown = stripFamdPayload(source)
-    if (typeof source !== 'string' || !source) return { markdown: '', payload: null }
-    const match = [...source.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
-    if (!match || match.index === undefined) return { markdown, payload: null }
-    const length = Number(match[1])
-    if (!Number.isSafeInteger(length) || length < 2 || length > 32 * 1024 * 1024) {
-      return { markdown, payload: null }
-    }
-    const json = source.slice(match.index + match[0].length, match.index + match[0].length + length)
-    if (json.length !== length) return { markdown, payload: null }
-    try {
-      const parsed = JSON.parse(json)
-      if (!parsed || parsed.schema !== FAMD_SCHEMA || typeof parsed !== 'object') {
-        return { markdown, payload: null }
-      }
-      const worksheets = Array.isArray(parsed.worksheets)
-        ? parsed.worksheets.filter((id) => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,96}$/u.test(id))
-        : []
-      const ink = parsed.ink && typeof parsed.ink === 'object' && !Array.isArray(parsed.ink) ? parsed.ink : null
-      const updatedAt = typeof parsed.updatedAt === 'string' && Number.isFinite(Date.parse(parsed.updatedAt))
-        ? new Date(parsed.updatedAt).toISOString()
-        : ''
-      return { markdown, payload: { schema: FAMD_SCHEMA, updatedAt, ink, worksheets } }
-    } catch {
-      return { markdown, payload: null }
-    }
-  }
 
   const safeUrl = (raw, imageOnly = false) => {
     try {
@@ -186,40 +150,93 @@
     return html.join('\n') || '<p>Diese Datei enthält keinen sichtbaren Text.</p>'
   }
 
-  const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value))
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
-  const renderInk = (ink) => {
-    const strokes = Array.isArray(ink?.strokes) ? ink.strokes : []
-    const width = Number(ink?.sourceWidth) > 0 ? Number(ink.sourceWidth) : SOURCE_WIDTH
-    let height = Number(ink?.sourceHeight) > 0 ? Number(ink.sourceHeight) : SOURCE_HEIGHT
-    let maxY = 0
-    const paths = []
-    for (const stroke of strokes) {
-      if (!stroke || !Array.isArray(stroke.points) || !stroke.points.length) continue
-      const color = typeof stroke.color === 'string' && /^#[\da-fA-F]{6}$/u.test(stroke.color) ? stroke.color : '#1b1b1b'
-      const baseWidth = clamp(Number(stroke.baseWidth) || 4, 0.5, 48)
-      const opacity = clamp(Number(stroke.opacity) || 1, 0.08, 1)
-      const d = stroke.points.map((point, index) => {
-        const x = clamp(Number(point?.x) || 0) * width
-        const y = clamp(Number(point?.y) || 0) * height
-        if (Number(point?.y) > maxY) maxY = Number(point.y)
-        return `${index ? 'L' : 'M'}${x.toFixed(2)} ${y.toFixed(2)}`
-      }).join(' ')
-      paths.push(
-        `<path d="${d}" fill="none" stroke="${color}" stroke-linecap="round" stroke-linejoin="round" stroke-width="${baseWidth.toFixed(2)}" stroke-opacity="${opacity.toFixed(2)}" />`,
-      )
-    }
-    const pageHeight = Math.max(height, Math.ceil((maxY + 0.08) * height), 400)
-    inkSvg.setAttribute('viewBox', `0 0 ${width} ${pageHeight}`)
-    inkSvg.setAttribute('aria-label', `${strokes.length} handschriftliche Striche`)
-    inkSvg.innerHTML = paths.join('')
-    const paper = typeof ink?.paperStyle === 'string' && ['blank', 'dots', 'squares', 'grid', 'lines', 'millimeter'].includes(ink.paperStyle)
-      ? ink.paperStyle
-      : 'blank'
-    inkPage.dataset.paper = paper
-    show(inkWrap, paths.length > 0)
-    return strokes.length
+  let pages = []
+  let zoom = 1
+  let fitted = true
+  let redrawTimer = 0
+
+  const pageWidthPx = (page) => {
+    const width = Number(page.doc.sourceWidth) > 0 ? Number(page.doc.sourceWidth) : 900
+    return width * zoom
   }
+
+  const fitZoom = () => {
+    const widest = Math.max(...pages.map((page) => Number(page.doc.sourceWidth) > 0 ? Number(page.doc.sourceWidth) : 900))
+    const room = Math.max(160, (inkScroll?.clientWidth || 900) - 40)
+    return clamp(room / widest, MIN_ZOOM, 1)
+  }
+
+  const paintPages = () => {
+    zoomLabel.textContent = `${Math.round(zoom * 100)} %`
+    inkPages.querySelectorAll('canvas').forEach((canvas, index) => {
+      const page = pages[index]
+      if (!page) return
+      window.FamdInk.renderPage(canvas, page.doc, {
+        cssWidth: pageWidthPx(page),
+        dpr: Math.min(window.devicePixelRatio || 1, 2),
+        paper: page.paper || null,
+      })
+    })
+  }
+
+  const schedulePaint = () => {
+    window.clearTimeout(redrawTimer)
+    redrawTimer = window.setTimeout(paintPages, 60)
+  }
+
+  const setZoom = (value, isFit = false) => {
+    zoom = clamp(value, MIN_ZOOM, MAX_ZOOM)
+    fitted = isFit
+    schedulePaint()
+  }
+
+  const renderInk = (payload) => {
+    pages = collectPages(payload).filter((page) => Array.isArray(page.doc.strokes) && page.doc.strokes.length)
+    inkPages.replaceChildren()
+    pages.forEach((page, index) => {
+      const figure = document.createElement('figure')
+      figure.className = 'ink-page'
+      figure.dataset.page = String(index + 1)
+      if (page.label || pages.length > 1) {
+        const caption = document.createElement('figcaption')
+        caption.textContent = page.label || `Seite ${index + 1}`
+        figure.append(caption)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.className = 'ink-canvas'
+      canvas.setAttribute('role', 'img')
+      canvas.setAttribute('aria-label', `Handschrift, Seite ${index + 1}`)
+      figure.append(canvas)
+      inkPages.append(figure)
+    })
+    show(inkWrap, pages.length > 0)
+    if (pages.length) {
+      // The section must be visible before measuring the scroll box for "fit".
+      show(noteScreen, true)
+      zoom = fitZoom()
+      fitted = true
+      paintPages()
+    }
+    return pages.reduce((sum, page) => sum + page.doc.strokes.length, 0)
+  }
+
+  document.querySelectorAll('[data-zoom]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const kind = button.dataset.zoom
+      if (kind === 'fit') setZoom(fitZoom(), true)
+      else setZoom(zoom * (kind === 'in' ? 1.25 : 0.8))
+    })
+  })
+  window.addEventListener('resize', () => {
+    if (fitted && pages.length) setZoom(fitZoom(), true)
+  })
+  inkScroll?.addEventListener('wheel', (event) => {
+    if (!event.ctrlKey) return
+    event.preventDefault()
+    setZoom(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1))
+  }, { passive: false })
 
   const formatDate = (iso) => {
     if (!iso) return 'unbekannt'
@@ -235,13 +252,18 @@
 
   const openSource = (name, source) => {
     show(errorBox, false)
-    const parsed = parseFamd(source)
+    const parsed = readFamd(source)
+    if (parsed.error) {
+      fail(`Die Tinte dieser .famd-Datei ist beschädigt und wird nicht angezeigt (${parsed.error}). Der Text bleibt sichtbar.`)
+    }
     const stem = name.replace(/\.(md|markdown|famd)$/iu, '') || 'Notiz'
     text('[data-title]', stem)
     text('[data-filename]', name)
     text('[data-updated]', formatDate(parsed.payload?.updatedAt))
     text('[data-md-count]', parsed.markdown.trim() ? `${parsed.markdown.trim().split(/\s+/u).length} Wörter` : 'kein Text')
-    const strokeCount = renderInk(parsed.payload?.ink || null)
+    show(noteScreen, true)
+    show(dropScreen, false)
+    const strokeCount = renderInk(parsed.payload)
     text('[data-ink-count]', strokeCount ? `${strokeCount} Striche` : 'keine Tinte')
     const sheets = parsed.payload?.worksheets || []
     text(
