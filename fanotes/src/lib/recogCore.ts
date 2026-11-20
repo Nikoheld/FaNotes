@@ -2,8 +2,7 @@
  * Shared PyLaia line tensor and CTC decoder (`fanotes-recog`).
  * Loaded with handwriting recognition, not at application startup.
  */
-import { initSync, decodeCtc, fuseRecognitionModel, lineTensor, setLexicon } from './recogWasm/fanotes_recog_wasm.js'
-import { RECOG_WASM_BASE64 } from './recogWasm/bytes'
+import init, { decodeCtc, fuseRecognitionModel, lineTensor, setLexicon } from './recogWasm/fanotes_recog_wasm.js'
 
 export type RecogCtcRun = { char: string; confidence: number; start: number; end: number }
 export type RecogCtcCore = {
@@ -15,30 +14,69 @@ export type RecogCtcCore = {
 }
 
 let ready = false
+let loading: Promise<void> | null = null
 const lexicons = new Set<string>()
 
-const wasmBytes = () => {
-  const binary = atob(RECOG_WASM_BASE64)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-  return bytes
+/**
+ * `fetch` handles http(s) and Electron's `file://`; plain Chromium refuses `file:` in `fetch`
+ * (the headless recognition checks), where an XHR still works.
+ */
+const fetchWasm = async (url: URL): Promise<Response | ArrayBuffer> => {
+  // A bundler that inlines assets (library builds of the headless recognition checks) yields a
+  // `data:` URL: decode it directly instead of going through the network stack.
+  const inline = /^data:[^,]*;base64,(.*)$/u.exec(url.href)
+  if (inline) {
+    const binary = atob(inline[1])
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+    return bytes.buffer
+  }
+  try {
+    return await fetch(url)
+  } catch (error) {
+    if (url.protocol !== 'file:' || typeof XMLHttpRequest === 'undefined') throw error
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const request = new XMLHttpRequest()
+      request.open('GET', url.href)
+      request.responseType = 'arraybuffer'
+      request.onload = () => (request.response instanceof ArrayBuffer ? resolve(request.response) : reject(error))
+      request.onerror = () => reject(error)
+      request.send()
+    })
+  }
 }
 
+/**
+ * Fetches and instantiates the recognition wasm, once. The binary is a build asset next to the
+ * glue (not base64 in the bundle); the glue streams it with `WebAssembly.instantiateStreaming` and
+ * falls back to `WebAssembly.instantiate` on an ArrayBuffer when the server (or `file://`) does
+ * not send `application/wasm`. Every entry point that reaches the wasm awaits this first.
+ */
+export const loadRecogWasm = (): Promise<void> => {
+  if (ready) return Promise.resolve()
+  loading ??= init({ module_or_path: fetchWasm(new URL('./recogWasm/fanotes_recog_wasm_bg.wasm', import.meta.url)) })
+    .then(() => { ready = true })
+    .catch((error: unknown) => {
+      loading = null
+      throw error
+    })
+  return loading
+}
+
+/** For synchronous wasm calls: throws when `loadRecogWasm` has not resolved yet. */
 export const ensureRecogWasm = () => {
-  if (ready) return
-  initSync({ module: wasmBytes() })
-  ready = true
+  if (!ready) throw new Error('Die Erkennungs-Engine ist noch nicht geladen.')
 }
 
-export const installRecogLexicon = (language: 'de' | 'en', words: readonly string[]) => {
-  ensureRecogWasm()
+export const installRecogLexicon = async (language: 'de' | 'en', words: readonly string[]) => {
+  await loadRecogWasm()
   if (lexicons.has(language)) return
   setLexicon(language, words.slice())
   lexicons.add(language)
 }
 
-export const fuseRecogModel = (entries: unknown) => {
-  ensureRecogWasm()
+export const fuseRecogModel = async (entries: unknown) => {
+  await loadRecogWasm()
   return JSON.parse(fuseRecognitionModel(JSON.stringify(entries))) as {
     trusts: Array<{ sampleId: string; trust: number }>
     weights: Record<string, number>

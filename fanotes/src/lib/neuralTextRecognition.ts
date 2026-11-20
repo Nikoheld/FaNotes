@@ -14,7 +14,7 @@ import type { Stroke } from '../../../src/types'
 import { normalizeGermanSharpS } from '../../../src/lib/orthography'
 import type { HandwritingRecognitionResources } from '../types'
 import { loadRecognitionCandidates, loadSpellingWordContext } from './spelling'
-import { decodeRecogCtc, installRecogLexicon, renderRecogLineTensor } from './recogCore'
+import { decodeRecogCtc, installRecogLexicon, loadRecogWasm, renderRecogLineTensor } from './recogCore'
 import {
   recognizeTrocrLine,
   recognizeTrocrLineCandidates,
@@ -2023,6 +2023,7 @@ const recognizeCtcLine = async (
   language: RecognitionLanguage,
   wordMembership?: WordMembership,
 ) => {
+  await loadRecogWasm()
   const rendered = renderRecogLineTensor(line, sourceWidth, sourceHeight, options)
   const input = new Float32Array(rendered.values)
   if (window.fanotes.platform !== 'web' && window.fanotes.recognizeNativeHandwritingLine) {
@@ -2232,7 +2233,7 @@ export async function recognizeNeuralText(
   const wordMembership = await loadSpellingWordContext(language).catch(() => undefined)
   if (wordMembership) {
     const candidates = await loadRecognitionCandidates(language).catch(() => null)
-    if (candidates) installRecogLexicon(language, [...candidates])
+    if (candidates) await installRecogLexicon(language, [...candidates])
   }
   const results: NeuralTextLine[] = []
   const trocrFailures: string[] = []

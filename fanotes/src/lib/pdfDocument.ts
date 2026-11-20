@@ -1,4 +1,3 @@
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, PDFWorker } from 'pdfjs-dist'
 
 export const MAX_PDF_NOTE_PAGES = 2_000
@@ -552,7 +551,12 @@ export const openPdfDocument = async (
   password?: string,
   options: { viewer?: boolean } = {},
 ): Promise<{ pdf: PDFDocumentProxy; task: PDFDocumentLoadingTask }> => {
-  const { getDocument, GlobalWorkerOptions, PDFWorker: PdfWorker } = await import('pdfjs-dist')
+  // Both loads are dynamic: a static `?url` import of the worker would pull the whole pdf.js
+  // chunk into every module that merely imports this file (document search, startup).
+  const [{ getDocument, GlobalWorkerOptions, PDFWorker: PdfWorker }, { default: pdfWorkerUrl }] = await Promise.all([
+    import('pdfjs-dist'),
+    import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+  ])
   GlobalWorkerOptions.workerSrc = pdfWorkerUrl
   const copy = bytes.buffer.byteLength === bytes.byteLength ? bytes : bytes.slice()
   const task = getDocument({
