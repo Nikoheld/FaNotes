@@ -678,6 +678,10 @@ export type FaNotesApi = {
   /** `fanotes-page-text-v1` sidecar of a PDF (document search contract). */
   readPageText?: (relativePath: string) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
   writePageText?: (record: import('./lib/docSearch/pageText').PageTextRecord) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
+  /** Desktop: reads one text line in the low-priority OCR host process (background indexing only). */
+  recognizeIndexLine?: (request: { pixels: Uint8ClampedArray; width: number; height: number }) => Promise<string>
+  /** Desktop: how many lines the OCR host reads in parallel. */
+  getOcrIndexInfo?: () => Promise<{ workers: number }>
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   convertFamdNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>

@@ -19,7 +19,12 @@ type PendingRequest = {
   timeout: ReturnType<typeof globalThis.setTimeout>
 }
 
-let worker: Worker | null = null
+const workers: Worker[] = []
+const inFlight = new Map<Worker, number>()
+/** Interactive OCR uses one worker; the background OCR host raises this (see setTrocrMaxWorkers). */
+let maxWorkers = 1
+
+export const setTrocrMaxWorkers = (count: number) => { maxWorkers = Math.max(1, Math.min(4, Math.floor(count) || 1)) }
 let idleTimer: ReturnType<typeof globalThis.setTimeout> | null = null
 let unavailableUntil = 0
 let desktopRuntimeModuleSourcePromise: Promise<string> | null = null
@@ -28,8 +33,8 @@ const pending = new Map<string, PendingRequest>()
 const stopWorker = (reason?: Error) => {
   if (idleTimer !== null) globalThis.clearTimeout(idleTimer)
   idleTimer = null
-  worker?.terminate()
-  worker = null
+  for (const entry of workers.splice(0)) entry.terminate()
+  inFlight.clear()
   pending.forEach((request) => {
     globalThis.clearTimeout(request.timeout)
     request.reject(reason ?? new Error('Die lokale TrOCR-Laufzeit wurde beendet.'))
@@ -44,8 +49,7 @@ const scheduleIdleShutdown = () => {
   idleTimer = globalThis.setTimeout(() => stopWorker(), ocrWorkerKeepAliveMilliseconds())
 }
 
-const createWorker = () => {
-  if (worker) return worker
+const spawnWorker = () => {
   // Electron cannot reliably start an ES-module worker directly from inside
   // app.asar/file://. Vite's inline worker is still loaded only with this lazy
   // OCR module, but runs from a CSP-approved blob URL on Desktop and Web.
@@ -58,6 +62,7 @@ const createWorker = () => {
     const request = pending.get(id)
     if (!request) return
     pending.delete(id)
+    inFlight.set(next, Math.max(0, (inFlight.get(next) ?? 1) - 1))
     globalThis.clearTimeout(request.timeout)
     if (typeof event.data.text === 'string') {
       const candidates = Array.isArray(event.data.candidates)
@@ -71,14 +76,23 @@ const createWorker = () => {
       })
     }
     else request.reject(new Error(event.data.error || 'Das lokale TrOCR-Modell hat kein Ergebnis geliefert.'))
-    scheduleIdleShutdown()
+    if (![...inFlight.values()].some((count) => count > 0)) scheduleIdleShutdown()
   }
   next.onerror = () => {
     unavailableUntil = Date.now() + 30_000
     stopWorker(new Error('Der lokale TrOCR-Worker konnte nicht gestartet werden.'))
   }
-  worker = next
+  workers.push(next)
+  inFlight.set(next, 0)
   return next
+}
+
+/** The least busy worker; another one is started while all are busy and the limit allows it. */
+const createWorker = () => {
+  const idle = workers.find((entry) => (inFlight.get(entry) ?? 0) === 0)
+  if (idle) return idle
+  if (workers.length < maxWorkers) return spawnWorker()
+  return workers.reduce((best, entry) => ((inFlight.get(entry) ?? 0) < (inFlight.get(best) ?? 0) ? entry : best))
 }
 
 const recognitionAssetRoot = () => window.fanotes.platform === 'web'
@@ -159,7 +173,10 @@ export const recognizeTrocrLineCandidates = async (
     }, Math.max(5_000, Math.min(120_000, timeoutMs)))
     pending.set(id, { resolve, reject, timeout })
     try {
-      createWorker().postMessage({
+      if (idleTimer !== null) { globalThis.clearTimeout(idleTimer); idleTimer = null }
+      const target = createWorker()
+      inFlight.set(target, (inFlight.get(target) ?? 0) + 1)
+      target.postMessage({
         id,
         pixels: transferable,
         width,

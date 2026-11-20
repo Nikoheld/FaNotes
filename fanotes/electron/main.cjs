@@ -287,6 +287,8 @@ const IPC = Object.freeze({
   writePdfOcr: 'fanotes:write-pdf-ocr',
   readPageText: 'fanotes:read-page-text',
   writePageText: 'fanotes:write-page-text',
+  recognizeIndexLine: 'fanotes:recognize-index-line',
+  getOcrIndexInfo: 'fanotes:get-ocr-index-info',
   createNote: 'fanotes:create-note',
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
@@ -892,6 +894,26 @@ async function recognizeInkLine(request) {
     model: request.model === 'personal' ? 'personal' : 'base',
   })
   return { logits: result.logits, dims: result.dims, engine: result.engine }
+}
+
+let ocrIndexHost = null
+function getOcrIndexHost() {
+  if (ocrIndexHost) return ocrIndexHost
+  const { createOcrHost } = require('./ocr-host.cjs')
+  ocrIndexHost = createOcrHost({
+    BrowserWindow,
+    ipcMain,
+    pagePath: () => path.join(__dirname, '..', 'dist', 'ocr-host.html'),
+    devUrl: () => trustedDevUrl(),
+    preload: path.join(__dirname, 'ocr-host-preload.cjs'),
+    configuredWorkers: () => Number(currentSettings.ocrThreadLimit),
+    onBattery: () => { try { return powerMonitor.isOnBatteryPower() } catch { return false } },
+    keepAliveMs: () => {
+      const configured = Number(currentSettings.ocrModelKeepAliveSeconds)
+      return Number.isSafeInteger(configured) && configured >= 0 && configured <= 600 ? Math.max(1, configured * 1_000) : 120_000
+    },
+  })
+  return ocrIndexHost
 }
 
 async function recognizeNativeOcrLine(request) {
@@ -5829,6 +5851,8 @@ function registerIpcHandlers() {
   handle(IPC.recognizeNativeHandwritingLine, async (_event, request) => recognizeNativeOcrLine(request))
 
   handle(IPC.recognizeInkLine, async (_event, request) => recognizeInkLine(request))
+  handle(IPC.recognizeIndexLine, async (_event, request) => getOcrIndexHost().recognize(request))
+  handle(IPC.getOcrIndexInfo, async () => ({ workers: getOcrIndexHost().workers() }))
   handle(IPC.inkPersonalModel, async (_event, request) => {
     const action = isPlainObject(request) ? request.action : null
     const service = getInkOcr()
@@ -6306,6 +6330,7 @@ async function createWindow() {
   mainWindow.on('closed', () => {
     invalidateCloseWarningState()
     closeSubjectBookPopoutWindow()
+    ocrIndexHost?.close()
     mainWindow = null
   })
 
@@ -6394,5 +6419,6 @@ app.on('before-quit', () => {
   void localMcpHostInstance?.stop()
   stopNativeOcr(new Error('FaNotes wird beendet.'))
   inkOcr?.stop()
+  ocrIndexHost?.close()
   updateManager?.stop()
 })

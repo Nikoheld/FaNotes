@@ -58,6 +58,7 @@
     "check:neural-text-recognition": "node scripts/check-neural-text-recognition.mjs",
     "check:correction-learn": "node scripts/check-correction-learn.mjs",
     "check:trocr": "node scripts/check-trocr-integration.cjs",
+    "check:ocr-index": "node scripts/check-ocr-index-cache.mjs",
     "check:native-ocr": "node scripts/check-native-ocr.cjs",
     "check:ink-recognition": "node --experimental-strip-types scripts/check-ink-recognition.mjs",
     "check:packaged-native-ocr": "node scripts/check-packaged-native-ocr.cjs && node scripts/check-packaged-native-ocr-startup.cjs",
