@@ -14,6 +14,7 @@ export const failedLabel = (count: number) => (count === 1 ? '1 Datei nicht hoch
 
 /** Short status text shared by the status bar and the settings section. */
 export const syncStatusLabel = (state: SyncPublicState) => {
+  if (state.account && state.vaultSync === false && state.status === 'idle') return 'Cloud-Sync aus'
   const held = state.heldRemote > 0 ? ` · ${heldLabel(state.heldRemote)}` : ''
   switch (state.status) {
     case 'syncing': return state.progress && state.progress.total ? `${state.progress.phase === 'pull' ? 'Holt' : state.progress.phase === 'push' ? 'Lädt hoch' : 'Prüft'} ${state.progress.done}/${state.progress.total}` : 'Synchronisiert …'

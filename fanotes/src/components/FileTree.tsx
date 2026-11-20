@@ -78,6 +78,8 @@ export type FileTreeProps = {
   onCopyPath?: (relativePath: string) => MaybePromise
   /** Upload this note, or every note in this folder, as a frozen copy, a live link, or an editable share. */
   onShare?: (relativePath: string, mode: 'copy' | 'live' | 'edit') => MaybePromise
+  /** Share this note or folder end-to-end encrypted with a FaNotes username (desktop). */
+  onShareWithUser?: (relativePath: string, kind: 'note' | 'folder') => void
   confirmTrash?: (message: string) => Promise<boolean>
   className?: string
   rootLabel?: string
@@ -240,6 +242,7 @@ export const FileTree = memo(function FileTree({
   onCopyWikiLink,
   onCopyPath,
   onShare,
+  onShareWithUser,
   confirmTrash,
   newPaths,
   className = '',
@@ -1165,6 +1168,24 @@ export const FileTree = memo(function FileTree({
           {onShare && (contextMenu.entry.kind === 'folder' || (!isPdfEntry(contextMenu.entry) && !isStoryEntry(contextMenu.entry))) && (
             <>
               <span className="file-tree__menu-label">Teilen</span>
+              {onShareWithUser && !contextMenu.entry.relativePath.startsWith('Mit mir geteilt') && (
+                <button
+                  className="file-tree__share-choice"
+                  onClick={() => {
+                    const entry = contextMenu.entry
+                    setContextMenu(null)
+                    onShareWithUser(entry.relativePath, entry.kind === 'folder' ? 'folder' : 'note')
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Share2 aria-hidden="true" size={15} />
+                  <span>
+                    <strong>Mit FaNotes-Benutzer teilen …</strong>
+                    <small>Direkt an einen Benutzernamen, Ende-zu-Ende verschlüsselt, sofort bei ihm.</small>
+                  </span>
+                </button>
+              )}
               <button
                 className="file-tree__share-choice"
                 onClick={() => {

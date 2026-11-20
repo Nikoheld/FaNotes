@@ -31,6 +31,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   addonSource: 'Nikoheld/FaNotes-Addons#main',
   addonsAutoUpdate: true,
   syncAutomatic: true,
+  syncVaultEnabled: true,
   syncDeviceName: '',
   syncExcludedFolders: '',
   mcpEnabled: false,

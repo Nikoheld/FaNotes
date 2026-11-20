@@ -17,7 +17,9 @@ guarantees and where the code lives. User-facing surfaces are listed in `USER_SU
 | Host (web) | `src/lib/sync/browserSyncHost.ts` | Maps IndexedDB stores to a virtual file tree; secrets and state live in the `meta` store. |
 | Host (Android) | `android/` | Native tablet client. Same account, crypto, and `/api/v1/sync` routes. The device platform token is `android`. |
 | UI | `src/components/SyncSettingsSection.tsx`, `src/App.tsx` | Settings → Sync, status-bar item, palette commands, remote-change application. |
+| Shares | `fanotes-site/user-shares.mjs`, `src/lib/sync/userShares.ts` | End-to-end encrypted shares to a username and the push channel (see "Accounts without e-mail" and "Shares between users"). |
 | Check | `scripts/check-sync-all-notes.mjs` (`npm run check:sync-all-notes`): a synthetic vault (nested, linked, Unicode, long names, side pages, closed-app changes, failures, reconciliation, scopes). `scripts/check-sync.mjs` (`npm run check:sync`) | Crypto unit tests, path rules, transport retry, and a three-device end-to-end run against the real server module. |
+| Check | `scripts/check-account-share.mjs` (`npm run check:account-share`) | Username-only accounts, device-key sign-in, cloud sync off by default, username shares, push and revoke. |
 
 ## Keys
 
@@ -30,7 +32,7 @@ vault secret ──HKDF-SHA256──▶ data key   AES-256-GCM for file contents
                            └─▶ id key     HMAC-SHA256 over the path = the file's server-side id
 ```
 
-- **Register** creates the KDF salt, derives both halves, generates the vault secret, wraps it
+- **Register** (password account) creates the KDF salt, derives both halves, generates the vault secret, wraps it
   and sends `{ email, authKey, kdf, vaultKeyWrap }`. The server scrypt-hashes the auth key
   again before storing it, so a database leak yields neither the auth key nor the password.
 - **Login** first calls `prelogin` for the account's KDF parameters, derives locally and sends
@@ -54,7 +56,7 @@ build keeps them in the IndexedDB `meta` store of the vault database. Per-vault 
 
 ## What the server knows
 
-Per account: e-mail address (needed to sign in), scrypt hash of the auth key, KDF salt and
+Per account: username (optional on accounts made before usernames) and e-mail address (optional; either one signs in), the published sharing public key and its vault-secret-wrapped private half, scrypt hash of the auth key, KDF salt and
 iteration count, the wrapped vault secret, device names and platforms, session token hashes
 with timestamps, and a file table of `{ id, revision, size, sha256(plaintext), encrypted meta,
 deleted, updatedAt, deviceId }`. Blobs live at `accounts/<id>/blobs/<fileId>`. File names,
@@ -71,7 +73,10 @@ and `X-FaNotes-Account: <accountId>`.
 
 | Route | Purpose |
 | --- | --- |
-| `POST /prelogin` | KDF parameters for an address (fake but stable salt for unknown ones). |
+| `POST /prelogin` | KDF parameters for a username or an address (fake but stable salt for unknown ones). |
+| `POST /username` | Claim a username (accounts that have none) and publish the sharing key. |
+| `POST /email` | Add or replace the optional e-mail; the current auth key is required. |
+| `POST /userkey` | Publish the sharing key once for an account that has a username but no key. |
 | `POST /register` | Create account + first device, returns session and revision 0. |
 | `POST /login` | Verify auth key, create a device session, return the wrapped vault secret. |
 | `GET /account` | Usage, quota, device list, session expiry. |
@@ -167,6 +172,77 @@ FANOTES_SYNC_API=http://127.0.0.1:18790 npm run dev
 through Vite SSR, and drives three fake devices through register, edit, sign-in, conflict,
 deletion, password change and revocation.
 
-The Grok connector (`docs/MCP.md`, `npm run check:mcp`) is a separate OAuth client of the
-same account. It does not receive the vault key. A device that has the connector turned on
-decrypts locally and answers tool calls; the server still stores only ciphertext.
+## Accounts without e-mail or password
+
+A new account needs a username only (3 to 32 ASCII letters, digits, `.`, `_`, `-`; unique ignoring
+case; the server keeps `usernames/<sha256(lowercase name)>` as the uniqueness index, claimed with an
+exclusive hard link like the e-mail index). E-mail and password are optional.
+
+- **Without a password** the "password" the client feeds into the normal derivation is a random 32-byte
+  *device key*. On the desktop it lives in its own `safeStorage` file (`device-keys.secret`) next to the
+  session secrets and survives sign-out, so the account can sign in again on this device. Losing the
+  device loses the account and its cloud data; the UI says so ("Ohne Passwort/E-Mail ist dein Konto weg,
+  wenn du dieses Gerät verlierst."). The web build cannot protect a device key, so it always asks for a
+  password. The server stores `credential: "device-key" | "password"` only to let clients present the
+  right UI.
+- **Adding a password later** uses the normal password change (the device key is the "current
+  password"); the account becomes a password account and the device key is deleted. **Adding an e-mail
+  later** uses `POST /email`. An e-mail never allows a password reset: only the password (or device key)
+  opens the vault secret, so the data cannot be recovered without it.
+- Existing accounts are unchanged: they keep e-mail sign-in and have `username: null` until the user
+  claims one in Settings → Sync, which also creates their sharing key.
+- **Cloud sync is off for new accounts** (`syncVaultEnabled`, default `true` only for settings that
+  already existed). The account stays signed in for sharing; the engine skips pull, scan and push until
+  the user turns the switch on. Existing users' setting is not changed.
+
+## Shares between users
+
+Sharing a note or folder with a FaNotes username keeps the end-to-end design:
+
+```
+account key pair   ECDH P-256, public half published at account creation (or when a username is claimed)
+                   private half wrapped with a key derived from the vault secret -> every device opens it
+share key K        random 32 bytes per share, made on the owner's device
+K for the recipient  ephemeral ECDH with the recipient's public key + HKDF + AES-GCM   (keyWrap)
+K for the owner      the same with the owner's own public key                          (ownerKeyWrap)
+K ──HKDF──▶ data key and id key, exactly like the vault secret: file contents, encrypted metadata
+            (path, size, mtime, hash) and the title all stay ciphertext on the server
+```
+
+The server only sees who shares with whom, the permission (`read` or `edit`), status, sizes, revisions
+and times. Routes (all under `/api/v1/sync`, same bearer session):
+
+| Route | Purpose |
+| --- | --- |
+| `POST /users/lookup` | Exact, complete username -> public key. No prefix search, no list; 30 per minute and 120 per hour per account, misses limited to 20 per hour. |
+| `GET /shares`, `POST /shares` | List incoming and outgoing shares; create one (40 per hour, 15 per hour per recipient, 200 open per owner). |
+| `POST /shares/:id/respond` | Recipient accepts or declines (optionally blocks the sender). |
+| `PATCH /shares/:id` | Owner switches `read` and `edit`. |
+| `DELETE /shares/:id` | Owner revokes (the ciphertext is deleted); recipient leaves or declines. |
+| `GET /shares/:id/changes`, `GET/PUT/DELETE /shares/:id/files/:fileId` | Per-share change feed and blobs, same `If-Match` revision rule as vault files. |
+| `POST /blocks`, `DELETE /blocks/:name` | Block or unblock a sender. |
+| `GET /events` | Server-Sent Events push channel (below). |
+
+Spam control: a recipient accepts or declines the first share from anyone. People whose share the
+recipient accepted, and people the recipient shared with, are trusted and arrive already accepted. A
+blocked sender gets a normal answer and the share is recorded as declined; the recipient sees nothing.
+A recipient with 50 pending shares from unknown senders takes no more.
+
+**Push channel.** `GET /events` is a long-lived `text/event-stream` response (nginx already runs
+`/api/v1/sync/` with `proxy_buffering off` and a 300 s read timeout; the server sends a keep-alive
+comment every 20 s and also sets `X-Accel-Buffering: no`). Events are small hints: `shares` (the list
+changed: created, accepted, permission, revoked, left) and `files` (a share has new revisions). The
+desktop app keeps it open while it runs and reacts by fetching, so a share, an acceptance, a change or a
+revocation shows up at once; a missed event is repaired by a full listing on reconnect. Up to 4 streams
+per account; a stream ends when its session is signed out. A later live-collaboration feature can use
+the same channel and the per-share `seq` change feed without a format change.
+
+**On the recipient's device** an accepted share is a folder `Mit mir geteilt/<person>/<name>` in the
+vault (shown in the sidebar, which also has a "Mit mir geteilt" panel for pending requests). That folder
+is never part of vault cloud sync. Revoking removes the local copy at once. With `edit` permission the
+recipient's saves go back through the same share; on a clash the shared version takes the path and the
+local one is kept as a "Konflikt" copy.
+
+Limits: 50 MB per shared file, 3000 files and 512 MB per share. A shared note is its `.md` / `.famd` /
+`.pdf` family; a shared folder is everything syncable below it. A share does not follow a rename of the
+shared path on the owner's side.

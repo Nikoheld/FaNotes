@@ -16,7 +16,6 @@ export const startSyncServer = async () => {
   Date.now = () => realNow() + offset
   const dataDirectory = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'fanotes-sync-local-'))
   process.env.FANOTES_SYNC_DIR = dataDirectory
-  process.env.FANOTES_MCP_DIR = join(dataDirectory, 'mcp')
   const port = 19_800 + Math.floor(Math.random() * 600)
   const origin = `http://127.0.0.1:${port}`
   process.env.FANOTES_PUBLIC_ORIGIN = origin

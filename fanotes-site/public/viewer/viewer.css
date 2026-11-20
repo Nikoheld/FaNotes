@@ -233,48 +233,71 @@
   text-transform: uppercase;
 }
 
-/* The handwriting page keeps real paper colours in both themes so ink stays legible. */
-.ink-page {
-  --page: #f6f4ee;
-  --line: #d7d2c6;
-  overflow: hidden;
+.ink-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.ink-head h2 {
+  margin: 0;
+}
+
+.ink-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.ink-zoom .btn {
+  min-width: 2.25rem;
+  padding-inline: 0.6rem;
+}
+
+.ink-zoom output {
+  min-width: 3.25rem;
+  color: var(--ink-muted);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+/* The handwriting pages keep real paper colours in both themes so ink stays legible. */
+.ink-scroll {
+  max-height: 80vh;
+  overflow: auto;
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  background: var(--page);
+  background: var(--paper-sunk);
 }
 
-.ink-svg {
+.ink-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+  width: max-content;
+  min-width: 100%;
+  padding: 0.75rem;
+}
+
+.ink-page {
+  margin: 0;
+}
+
+.ink-page figcaption {
+  margin-bottom: 0.25rem;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+}
+
+.ink-canvas {
   display: block;
-  width: 100%;
-  height: auto;
-}
-
-.ink-page[data-paper='lines'] {
-  background-image: repeating-linear-gradient(var(--page) 0 27px, var(--line) 27px 28px);
-}
-
-.ink-page[data-paper='grid'] {
-  background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
-  background-size: 28px 28px;
-}
-
-.ink-page[data-paper='squares'] {
-  background-image: linear-gradient(#c8d0de 1px, transparent 1px), linear-gradient(90deg, #c8d0de 1px, transparent 1px);
-  background-size: 21px 21px;
-}
-
-.ink-page[data-paper='millimeter'] {
-  background-image:
-    linear-gradient(#b7c2d4 1px, transparent 1px),
-    linear-gradient(90deg, #b7c2d4 1px, transparent 1px),
-    linear-gradient(#d5dbe6 1px, transparent 1px),
-    linear-gradient(90deg, #d5dbe6 1px, transparent 1px);
-  background-size: 21px 21px, 21px 21px, 4.2px 4.2px, 4.2px 4.2px;
-}
-
-.ink-page[data-paper='dots'] {
-  background-image: radial-gradient(circle, #b9b3a6 1px, transparent 1.2px);
-  background-size: 18px 18px;
+  max-width: none;
+  background: #fbfcff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
 }
 
 @media (max-width: 53.75em) {
