@@ -236,6 +236,7 @@
     "check:addons": "node scripts/check-addons.mjs",
     "check:sync": "node scripts/check-sync.mjs",
     "check:mcp": "node scripts/check-mcp.mjs",
+    "check:site-viewer": "node scripts/check-site-viewer-famd.mjs",
     "check:local-mcp": "node scripts/check-local-mcp.mjs",
     "check:spelling-suggest": "node scripts/check-spelling-suggest.mjs",
     "check:spell-wasm-parity": "node scripts/check-spell-wasm-parity.mjs",

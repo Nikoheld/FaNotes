@@ -25,7 +25,7 @@ const parseError = async (response: Response) => {
     const body = await response.json() as { error?: unknown }
     if (typeof body.error === 'string') return body.error
   } catch { /* not JSON */ }
-  return 'Der Grok-Connector hat die Anfrage abgelehnt.'
+  return 'Der MCP-Connector hat die Anfrage abgelehnt.'
 }
 
 export const mcpReaderRequest = async (session: SyncSession, path: string, init: RequestInit & { readerKey?: string } = {}) => {

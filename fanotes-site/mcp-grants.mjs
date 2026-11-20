@@ -1,6 +1,6 @@
 // OAuth grants and device-reader credentials for the MCP connector.
 // Note plaintext is never written here. A grant only names the account,
-// the Grok client, and hashes of tokens the client already holds.
+// the MCP client, and hashes of tokens the client already holds.
 import { createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { resolve, sep } from 'node:path'
@@ -312,8 +312,8 @@ export const exchangeAuthorizationCode = async ({ code, clientId, redirectUri, v
     if (!record) return { error: 'invalid_grant' }
     if (Object.keys(record.grants).length >= MAX_GRANTS) return { error: 'access_denied' }
     const grantId = randomBytes(12).toString('hex')
-    let host = 'grok'
-    try { host = new URL(entry.redirectUri).host } catch { host = 'grok' }
+    let host = 'client'
+    try { host = new URL(entry.redirectUri).host } catch { host = 'client' }
     record.grants[grantId] = {
       id: grantId,
       clientId,

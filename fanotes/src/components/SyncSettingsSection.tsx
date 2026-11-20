@@ -190,16 +190,16 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
             </div>
           </div>
 
-          <div id="settings-grok-connector" className="setting-card">
-            <div className="setting-card-title"><ShieldCheck size={16} /><span>Grok-Connector</span></div>
+          <div id="settings-mcp-remote" className="setting-card">
+            <div className="setting-card-title"><ShieldCheck size={16} /><span>MCP-Connector</span></div>
             <div className="setting-row">
               <div className="setting-copy">
-                <span>Nur ein Grok, das du selbst freigibst</span>
-                <small>In Grok Build oder auf grok.com unter Custom Connector den Namen und die Server-URL eintragen. Grok öffnet diese Seite zur Freigabe. Der Server speichert die Notizen weiter nur verschlüsselt; dieses Gerät entschlüsselt sie, solange FaNotes offen und der Connector an ist.</small>
+                <span>Nur ein MCP-Client, den du selbst freigibst</span>
+                <small>Im MCP-Client den Namen und die Server-URL eintragen. Der Client öffnet diese Seite zur Freigabe. Der Server speichert die Notizen weiter nur verschlüsselt; dieses Gerät entschlüsselt sie, solange FaNotes offen und der Connector an ist.</small>
               </div>
             </div>
             <div className="setting-row">
-              <div className="setting-copy"><span>Name</span><small>So heißt der Connector in Grok.</small></div>
+              <div className="setting-copy"><span>Name</span><small>So heißt der Connector im MCP-Client.</small></div>
               <div className="setting-control"><input data-i18n-ignore readOnly value={MCP_CONNECTOR_NAME} aria-label="Connector-Name" /></div>
             </div>
             <div className="setting-row">
@@ -215,7 +215,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
                 if (syncState.mcpReader) await engine.disableMcpConnector(connectorPassword)
                 else await engine.enableMcpConnector(connectorPassword)
                 setConnectorPassword('')
-              }, syncState.mcpReader ? 'Grok-Connector ist aus. Freigaben wurden widerrufen.' : 'Grok-Connector ist an. Als Nächstes die URL in Grok eintragen und die Freigabe bestätigen.')
+              }, syncState.mcpReader ? 'MCP-Connector ist aus. Freigaben wurden widerrufen.' : 'MCP-Connector ist an. Als Nächstes die URL im MCP-Client eintragen und die Freigabe bestätigen.')
             }}>
               <label><span>Sync-Passwort</span><input data-i18n-ignore type="password" autoComplete="current-password" required value={connectorPassword} onChange={(event) => setConnectorPassword(event.target.value)} /></label>
               <div className="sync-form-actions">
@@ -223,13 +223,13 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
                   {busy === 'connector' ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}
                   {syncState.mcpReader ? 'Connector ausschalten' : 'Connector auf diesem Gerät einschalten'}
                 </button>
-                <small>{syncState.mcpReader ? 'An. Grok darf erst lesen, nachdem du die Freigabe im Browser bestätigt hast.' : 'Aus. Niemand kann die Notizen über die Server-URL lesen.'}</small>
+                <small>{syncState.mcpReader ? 'An. Ein MCP-Client darf erst lesen, nachdem du die Freigabe im Browser bestätigt hast.' : 'Aus. Niemand kann die Notizen über die Server-URL lesen.'}</small>
               </div>
             </form>
             {syncState.mcpReader && grants.map((grant) => (
               <div key={grant.id} className="setting-row">
                 <div className="setting-copy"><span data-i18n-ignore>{grant.clientName}</span><small data-i18n-ignore>{grant.redirectHost} · {formatWhen(grant.createdAt)}</small></div>
-                <div className="setting-control"><button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run(`grant-${grant.id}`, async () => { await engine.revokeMcpGrant(grant.id); onGrants(await engine.mcpGrants()) }, 'Diese Grok-Freigabe wurde widerrufen.')}>Widerrufen</button></div>
+                <div className="setting-control"><button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run(`grant-${grant.id}`, async () => { await engine.revokeMcpGrant(grant.id); onGrants(await engine.mcpGrants()) }, 'Diese MCP-Freigabe wurde widerrufen.')}>Widerrufen</button></div>
               </div>
             ))}
           </div>

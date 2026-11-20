@@ -13,7 +13,9 @@
     <link rel="stylesheet" href="/fanotes-base.css?v=20261108.1" />
     <link rel="stylesheet" href="viewer.css?v=20261108.1" />
     <script src="/fanotes-boot.js?v=20261108.1"></script>
-    <script src="viewer.js" defer></script>
+    <script src="famd-read.js?v=20261120.1" defer></script>
+    <script src="ink-render.js?v=20261120.1" defer></script>
+    <script src="viewer.js?v=20261120.1" defer></script>
   </head>
   <body>
     <a class="skip-link" href="#stage">Zum Inhalt springen</a>
@@ -67,9 +69,17 @@
         <article class="sheet">
           <div class="markdown" data-markdown></div>
           <section class="ink-wrap" data-ink-wrap hidden>
-            <h2>Handschrift</h2>
-            <div class="ink-page" data-paper="blank">
-              <svg class="ink-svg" data-ink viewBox="0 0 900 1273" role="img" aria-label="Handschrift der Notiz"></svg>
+            <div class="ink-head">
+              <h2>Handschrift</h2>
+              <div class="ink-zoom" role="group" aria-label="Zoom">
+                <button type="button" class="btn btn-quiet" data-zoom="out" aria-label="Verkleinern">&minus;</button>
+                <output data-zoom-label aria-live="polite">100&nbsp;%</output>
+                <button type="button" class="btn btn-quiet" data-zoom="in" aria-label="Vergrössern">+</button>
+                <button type="button" class="btn btn-quiet" data-zoom="fit">Einpassen</button>
+              </div>
+            </div>
+            <div class="ink-scroll" data-ink-scroll tabindex="0" aria-label="Handschrift der Notiz">
+              <div class="ink-pages" data-ink-pages></div>
             </div>
           </section>
         </article>

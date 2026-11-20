@@ -1,6 +1,6 @@
-// Grok connector: redirect allowlist, OAuth PKCE, reader step-up, and a
+// Remote MCP connector: redirect allowlist, OAuth PKCE, reader step-up, and a
 // device-answered tool call. Note text must not be readable without both
-// an approved Grok grant and a device that holds the reader key.
+// an approved client grant and a device that holds the reader key.
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer as createHttpServer } from 'node:http'
@@ -82,7 +82,8 @@ const sessionHeaders = (session, extra = {}) => ({
 })
 
 assert.equal(classifyRedirect('https://evil.example/callback'), null)
-assert.equal(classifyRedirect('https://grok.com/connectors-oauth-exchange-code/').kind, 'grok')
+assert.equal(classifyRedirect('https://grok.com/connectors-oauth-exchange-code/'), null)
+assert.equal(classifyRedirect('http://127.0.0.1:43123/callback').kind, 'loopback')
 assert.equal(classifyRedirect('http://127.0.0.1.evil.com/callback'), null)
 assert.equal(classifyRedirect('http://user:pass@127.0.0.1:9/callback'), null)
 assert.equal(redirectsMatch('http://127.0.0.1/callback', 'http://127.0.0.1:43123/callback'), true)
@@ -104,29 +105,29 @@ assert.equal(resource.body.resource, `${origin}/mcp`)
 
 const rejectedClient = await request('/oauth/register', {
   method: 'POST',
-  body: { client_name: 'Grok', redirect_uris: ['https://evil.example/steal'], token_endpoint_auth_method: 'none' },
+  body: { client_name: 'Client', redirect_uris: ['https://evil.example/steal'], token_endpoint_auth_method: 'none' },
 })
 assert.equal(rejectedClient.status, 400)
 assert.equal(rejectedClient.body.error, 'invalid_redirect_uri')
 
 const secretClient = await request('/oauth/register', {
   method: 'POST',
-  body: { client_name: 'Grok', redirect_uris: ['https://grok.com/connectors-oauth-exchange-code/'], token_endpoint_auth_method: 'client_secret_basic' },
+  body: { client_name: 'Client', redirect_uris: ['http://127.0.0.1/callback'], token_endpoint_auth_method: 'client_secret_basic' },
 })
 assert.equal(secretClient.status, 400)
 
-const grok = await request('/oauth/register', {
+const client = await request('/oauth/register', {
   method: 'POST',
   body: {
-    client_name: 'Grok Build',
-    redirect_uris: ['https://grok.com/connectors-oauth-exchange-code/', 'http://127.0.0.1/callback'],
+    client_name: 'Test MCP client',
+    redirect_uris: ['http://127.0.0.1/callback'],
     token_endpoint_auth_method: 'none',
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],
   },
 })
-assert.equal(grok.status, 201)
-assert.equal(grok.body.token_endpoint_auth_method, 'none')
+assert.equal(client.status, 201)
+assert.equal(client.body.token_endpoint_auth_method, 'none')
 
 const owner = await registerAccount('owner@example.com')
 const stranger = await registerAccount('stranger@example.com')
@@ -152,12 +153,12 @@ assert.equal(noReader.status, 401)
 
 const verifier = randomBytes(32).toString('base64url')
 const challenge = createHash('sha256').update(verifier).digest('base64url')
-const state = 'grok-state-1'
+const state = 'client-state-1'
 const redirectUri = 'http://127.0.0.1:43123/callback'
-const authorizeUrl = `/oauth/authorize?response_type=code&client_id=${grok.body.client_id}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&code_challenge=${challenge}&code_challenge_method=S256&scope=vault:read&resource=${encodeURIComponent(`${origin}/mcp`)}`
+const authorizeUrl = `/oauth/authorize?response_type=code&client_id=${client.body.client_id}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&code_challenge=${challenge}&code_challenge_method=S256&scope=vault:read&resource=${encodeURIComponent(`${origin}/mcp`)}`
 const authorize = await request(authorizeUrl)
 assert.equal(authorize.status, 200)
-assert.match(authorize.text, /Grok darf FaNotes lesen|Allow Grok to read FaNotes/u)
+assert.match(authorize.text, /Diese App darf FaNotes lesen|Allow this app to read FaNotes/u)
 const requestId = /const requestId = "([^"]+)"/u.exec(authorize.text)?.[1]
 assert.ok(requestId)
 
@@ -189,7 +190,7 @@ const badVerifier = await request('/oauth/token', {
   body: new URLSearchParams({
     grant_type: 'authorization_code',
     code,
-    client_id: grok.body.client_id,
+    client_id: client.body.client_id,
     redirect_uri: redirectUri,
     code_verifier: randomBytes(32).toString('base64url'),
     resource: `${origin}/mcp`,
@@ -200,7 +201,7 @@ assert.equal(badVerifier.body.error, 'invalid_grant')
 
 const verifierAgain = randomBytes(32).toString('base64url')
 const challengeAgain = createHash('sha256').update(verifierAgain).digest('base64url')
-const authorizeAgain = await request(`/oauth/authorize?response_type=code&client_id=${grok.body.client_id}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&code_challenge=${challengeAgain}&code_challenge_method=S256&resource=${encodeURIComponent(`${origin}/mcp`)}`)
+const authorizeAgain = await request(`/oauth/authorize?response_type=code&client_id=${client.body.client_id}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&code_challenge=${challengeAgain}&code_challenge_method=S256&resource=${encodeURIComponent(`${origin}/mcp`)}`)
 const requestAgain = /const requestId = "([^"]+)"/u.exec(authorizeAgain.text)?.[1]
 const proofAgain = await request('/api/v1/mcp/consent', { method: 'POST', body: { requestId: requestAgain, email: 'owner@example.com', authKey: owner.key } })
 const decisionAgain = await request('/api/v1/mcp/consent/decision', {
@@ -215,7 +216,7 @@ const token = await request('/oauth/token', {
   body: new URLSearchParams({
     grant_type: 'authorization_code',
     code: codeAgain,
-    client_id: grok.body.client_id,
+    client_id: client.body.client_id,
     redirect_uri: redirectUri,
     code_verifier: verifierAgain,
     resource: `${origin}/mcp`,
@@ -230,7 +231,7 @@ const refresh = token.body.refresh_token
 const wrongResource = await request('/oauth/token', {
   method: 'POST',
   form: true,
-  body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh, client_id: grok.body.client_id, resource: 'https://evil.example/mcp' }).toString(),
+  body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh, client_id: client.body.client_id, resource: 'https://evil.example/mcp' }).toString(),
 })
 assert.equal(wrongResource.status, 400)
 assert.equal(wrongResource.body.error, 'invalid_target')
@@ -284,14 +285,14 @@ assert.ok(listed.body.result.tools.every((tool) => !/write|delete|update/iu.test
 const rotated = await request('/oauth/token', {
   method: 'POST',
   form: true,
-  body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh, client_id: grok.body.client_id, resource: `${origin}/mcp` }).toString(),
+  body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh, client_id: client.body.client_id, resource: `${origin}/mcp` }).toString(),
 })
 assert.equal(rotated.status, 200)
 assert.notEqual(rotated.body.refresh_token, refresh)
 const reused = await request('/oauth/token', {
   method: 'POST',
   form: true,
-  body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh, client_id: grok.body.client_id, resource: `${origin}/mcp` }).toString(),
+  body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refresh, client_id: client.body.client_id, resource: `${origin}/mcp` }).toString(),
 })
 assert.equal(reused.status, 400)
 const afterReuse = await request('/mcp', {
@@ -377,11 +378,11 @@ assert.match(read('../fanotes-site/deploy/fanotes-fasrv.conf'), /location = \/mc
 const service = read('../fanotes-site/deploy/fanotes-site.service')
 assert.match(service, /FANOTES_MCP_DIR=\/var\/lib\/fanotes-mcp/u)
 assert.match(service, /ReadWritePaths=\/var\/lib\/fanotes-mcp/u)
-assert.match(read('src/components/SyncSettingsSection.tsx'), /settings-grok-connector/u)
+assert.match(read('src/components/SyncSettingsSection.tsx'), /settings-mcp-remote/u)
 assert.match(read('src/App.tsx'), /startMcpBridge/u)
 assert.match(read('../fanotes-site/mcp-api.mjs'), /subarray\(32, 64\)/u)
 
 await vite.close()
 await new Promise((resolve) => httpServer.close(resolve))
 rmSync(dataDirectory, { recursive: true, force: true })
-console.log('Grok connector: OAuth, reader step-up and vault tools passed.')
+console.log('Remote MCP connector: OAuth, reader step-up and vault tools passed.')

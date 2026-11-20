@@ -1,10 +1,6 @@
-// Rules for the FaNotes MCP connector. Grok Build and grok.com may connect;
-// every other redirect is rejected before a consent screen exists.
-
-const GROK_CALLBACKS = new Set([
-  'https://grok.com/connectors-oauth-exchange-code',
-  'https://grok.com/connectors-oauth-exchange-code/',
-])
+// Rules for the FaNotes remote MCP connector. Any MCP client may connect through a
+// loopback OAuth callback (RFC 8252); every other redirect is rejected before a
+// consent screen exists.
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
 const LOOPBACK_PATH = /^\/(?:callback|redirect|oauth\/callback|oauth\/redirect)(?:\/[A-Za-z0-9_-]{1,64})?$/u
@@ -156,9 +152,8 @@ const parsedRedirect = (value) => {
   return url
 }
 
-/** Exact grok.com connector callback, or a loopback callback for Grok Build (any port, RFC 8252). */
+/** A loopback callback of a native MCP client (any port, RFC 8252). */
 export const classifyRedirect = (value) => {
-  if (GROK_CALLBACKS.has(value)) return { kind: 'grok', href: value }
   const url = parsedRedirect(value)
   if (!url || url.protocol !== 'http:') return null
   const host = url.hostname.toLowerCase()
@@ -171,10 +166,7 @@ export const classifyRedirect = (value) => {
 export const redirectsMatch = (registered, requested) => {
   const left = classifyRedirect(registered)
   const right = classifyRedirect(requested)
-  if (!left || !right || left.kind !== right.kind) return false
-  if (left.kind === 'grok') {
-    return left.href.replace(/\/$/u, '') === right.href.replace(/\/$/u, '')
-  }
+  if (!left || !right) return false
   return left.host === right.host && left.path === right.path
 }
 
@@ -195,7 +187,7 @@ export const scopeAllowed = (value) => {
 }
 
 export const clientNameAllowed = (value) => {
-  if (value === undefined || value === null || value === '') return 'Grok'
+  if (value === undefined || value === null || value === '') return 'MCP client'
   if (typeof value !== 'string') return null
   const name = value.replace(/[\u0000-\u001f<>]/gu, '').trim()
   if (!name || name.length > 80) return null

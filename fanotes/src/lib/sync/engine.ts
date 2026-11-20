@@ -51,7 +51,7 @@ export type SyncPublicState = {
   openConflicts: number
   log: SyncLogEntry[]
   info: SyncAccountInfo | null
-  /** This device holds a connector key and can answer an approved Grok. */
+  /** This device holds a connector key and can answer an approved MCP client. */
   mcpReader: boolean
 }
 
@@ -489,7 +489,7 @@ export class SyncEngine {
     const vaultKeyWrap = await wrapVaultSecret(fromBase64(this.vaultSecretBase64), next.wrappingKey)
     await this.api.changePassword(this.session, { authKey: current.authKey, newAuthKey: next.authKey, kdf, vaultKeyWrap })
     await this.rememberReader(null)
-    this.log('info', 'Passwort geändert; alle anderen Geräte müssen sich neu anmelden. Grok-Freigaben wurden widerrufen.')
+    this.log('info', 'Passwort geändert; alle anderen Geräte müssen sich neu anmelden. MCP-Freigaben wurden widerrufen.')
   }
 
   async deleteAccount(password: string) {
@@ -549,7 +549,7 @@ export class SyncEngine {
       body: JSON.stringify({ authKey, readerKey }),
     })
     await this.rememberReader(readerKey)
-    this.log('info', 'Grok-Connector ist auf diesem Gerät an. Notizen bleiben verschlüsselt, bis ein von dir erlaubtes Grok fragt.')
+    this.log('info', 'MCP-Connector ist auf diesem Gerät an. Notizen bleiben verschlüsselt, bis ein von dir erlaubter MCP-Client fragt.')
   }
 
   async disableMcpConnector(password: string) {
@@ -561,7 +561,7 @@ export class SyncEngine {
       body: JSON.stringify({ authKey, everywhere: true }),
     })
     await this.rememberReader(null)
-    this.log('info', 'Grok-Connector ist aus. Bestehende Freigaben wurden widerrufen.')
+    this.log('info', 'MCP-Connector ist aus. Bestehende Freigaben wurden widerrufen.')
   }
 
   currentMcpGrants(): McpGrantInfo[] {
@@ -580,7 +580,7 @@ export class SyncEngine {
   }
 
   async revokeMcpGrant(grantId: string) {
-    if (!this.session || !this.mcpReader) throw new Error('Der Grok-Connector ist auf diesem Gerät nicht an.')
+    if (!this.session || !this.mcpReader) throw new Error('Der MCP-Connector ist auf diesem Gerät nicht an.')
     await mcpReaderRequest(this.session, '/reader/revoke', {
       method: 'POST',
       readerKey: this.mcpReader,

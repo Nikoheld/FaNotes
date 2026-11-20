@@ -1,4 +1,4 @@
-// Remote MCP connector for Grok Build and grok.com.
+// Remote MCP connector for MCP clients that sign in through a loopback OAuth callback.
 // The server stores grants and ciphertext only. A device the user turned on
 // decrypts the vault locally and answers tool calls. Without that device,
 // and without an OAuth grant the user approved, there is nothing to read.
@@ -172,30 +172,30 @@ const protectedResource = (origin) => ({
 const consentPage = ({ request, origin, english }) => {
   const nonce = randomBytes(16).toString('base64url')
   const copy = english ? {
-    title: 'Allow Grok to read FaNotes',
-    lead: 'Grok can read notes, exam dates, homework and flashcards only after you approve it here. The server cannot decrypt them. A FaNotes device with the connector turned on answers each request.',
+    title: 'Allow this app to read FaNotes',
+    lead: 'This MCP client can read notes, exam dates, homework and flashcards only after you approve it here. The server cannot decrypt them. A FaNotes device with the connector turned on answers each request.',
     returns: 'After approval, the browser returns to',
     email: 'Email',
     password: 'Sync password',
     passwordHint: 'The password is turned into a key on this page. It is not sent to the server.',
     continue: 'Check password',
-    allow: 'Allow this Grok',
+    allow: 'Allow this client',
     deny: 'Deny',
     waiting: 'Checking the password…',
   } : {
-    title: 'Grok darf FaNotes lesen',
-    lead: 'Grok liest Notizen, Prüfungstermine, Hausaufgaben und Karteikarten erst, nachdem du es hier erlaubst. Der Server kann sie nicht entschlüsseln. Ein FaNotes-Gerät, auf dem der Connector an ist, beantwortet jede Anfrage.',
+    title: 'Diese App darf FaNotes lesen',
+    lead: 'Dieser MCP-Client liest Notizen, Prüfungstermine, Hausaufgaben und Karteikarten erst, nachdem du es hier erlaubst. Der Server kann sie nicht entschlüsseln. Ein FaNotes-Gerät, auf dem der Connector an ist, beantwortet jede Anfrage.',
     returns: 'Nach dem Erlauben kehrt der Browser zurück zu',
     email: 'E-Mail',
     password: 'Sync-Passwort',
     passwordHint: 'Das Passwort wird auf dieser Seite zum Schlüssel. Es wird nicht an den Server gesendet.',
     continue: 'Passwort prüfen',
-    allow: 'Diesem Grok erlauben',
+    allow: 'Diesem Client erlauben',
     deny: 'Ablehnen',
     waiting: 'Passwort wird geprüft…',
   }
-  let host = 'Grok'
-  try { host = new URL(request.redirectUri).host } catch { host = 'Grok' }
+  let host = 'MCP client'
+  try { host = new URL(request.redirectUri).host } catch { host = 'MCP client' }
   const html = `<!DOCTYPE html>
 <html lang="${english ? 'en' : 'de'}">
 <head>
@@ -323,7 +323,7 @@ const toolResult = (text, isError = false) => ({ content: [{ type: 'text', text 
 const offlineResult = async (accountId) => {
   const enabled = await readerEnabled(accountId)
   if (!enabled) {
-    return toolResult('The FaNotes connector is off. Open FaNotes, go to Settings → Sync, and turn on the Grok connector on a device that has the vault.', true)
+    return toolResult('The FaNotes connector is off. Open FaNotes, go to Settings → Sync, and turn on the MCP connector on a device that has the vault.', true)
   }
   return null
 }
@@ -333,7 +333,7 @@ const dispatchTool = async (access, name, args) => {
   const offline = await offlineResult(access.accountId)
   if (offline) return offline
   // A device that is mid-poll has already checked in. If it has not, wait
-  // only a short time so a closed app does not stall Grok for the full window.
+  // only a short time so a closed app does not stall the client for the full window.
   const waitMs = readerSeenRecently(access.accountId, READER_FRESH_MS) ? TOOL_WAIT_MS() : Math.min(TOOL_WAIT_MS(), 3_000)
   const job = enqueueVaultJob({ accountId: access.accountId, clientId: access.clientId, tool: name, args, waitMs })
   const timeout = new Promise((resolve) => setTimeout(() => resolve(null), waitMs))
@@ -383,7 +383,7 @@ const handleRpc = async (message, access) => {
 const acceptableOrigin = (request) => {
   const origin = request.headers.origin
   if (!origin) return true
-  return origin === PUBLIC_ORIGIN() || origin === 'https://grok.com' || origin === 'https://grok.x.ai'
+  return origin === PUBLIC_ORIGIN()
 }
 
 const handleMcp = async (request, response, url) => {
@@ -465,7 +465,7 @@ const handleRegister = async (request, response) => {
   }
   const registered = await registerOauthClient({ name: body.client_name, redirectUris: body.redirect_uris })
   if (registered.error) {
-    oauthError(response, 400, registered.error, 'The redirect URI is not an allowed Grok callback.')
+    oauthError(response, 400, registered.error, 'The redirect URI is not an allowed loopback callback.')
     return
   }
   sendJson(response, 201, {
@@ -488,7 +488,7 @@ const handleAuthorize = async (request, response, url) => {
   }
   const redirectUri = url.searchParams.get('redirect_uri') || ''
   if (!client.redirectUris.some((uri) => redirectsMatch(uri, redirectUri))) {
-    oauthError(response, 400, 'invalid_redirect_uri', 'That redirect URI is not registered for Grok.')
+    oauthError(response, 400, 'invalid_redirect_uri', 'That redirect URI is not registered for this client.')
     return
   }
   const resource = url.searchParams.get('resource') || resourceUrl(origin)
@@ -505,7 +505,7 @@ const handleAuthorize = async (request, response, url) => {
     resource: resourceUrl(origin),
   })
   if (started.error === 'invalid_redirect_uri') {
-    oauthError(response, 400, started.error, 'That redirect URI is not registered for Grok.')
+    oauthError(response, 400, started.error, 'That redirect URI is not registered for this client.')
     return
   }
   if (started.error) {
@@ -601,7 +601,7 @@ const handleConsent = async (request, response) => {
   }
   const requestRecord = await proveConsent(body.requestId, account)
   if (!requestRecord) {
-    sendJson(response, 400, { error: 'Diese Freigabe ist abgelaufen. Starte die Verbindung in Grok erneut.' })
+    sendJson(response, 400, { error: 'Diese Freigabe ist abgelaufen. Starte die Verbindung im MCP-Client erneut.' })
     return
   }
   const cookie = await consentCookie(requestRecord)

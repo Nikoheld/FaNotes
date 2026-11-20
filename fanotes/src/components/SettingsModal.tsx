@@ -214,7 +214,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'MCP-Server', detail: 'Claude, Cursor und andere KI-Programme', section: 'mcp', target: 'settings-mcp-local', keywords: 'mcp ki ai claude cursor chatgpt grok server stdio http token lokal notizen aufgaben schreibzugriff' },
   { label: 'Statistik', detail: 'Statistik', section: 'statistics', target: 'settings-stat-activity', keywords: 'statistik aktivität kalender heatmap serie streak wörter notizen größe fächer lernzeit hausaufgaben karteikarten sync' },
   { label: 'Diagnose & Verbesserung', detail: 'Statistik', section: 'statistics', target: 'settings-diagnostics', keywords: 'diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz' },
-  { label: 'Grok-Connector', detail: 'Sync', section: 'sync', target: 'settings-grok-connector', keywords: 'grok mcp connector server url notizen prüfung klausur hausaufgaben oauth' },
+  { label: 'MCP-Connector', detail: 'Sync', section: 'sync', target: 'settings-mcp-remote', keywords: 'mcp connector fernzugriff remote server url notizen prüfung klausur hausaufgaben oauth' },
   { label: 'Sync-Konto', detail: 'Sync', section: 'sync', target: 'settings-sync-account', keywords: 'sync konto anmelden registrieren account login passwort e-mail cloud server geräte' },
   { label: 'Öffentliche Aktivitätsübersicht', detail: 'Profil', section: 'profile', target: 'settings-profile', keywords: 'benutzername profil user übersicht aktivität notizen zeit beigetreten tage öffentlich' },
   { label: 'Angemeldete Geräte', detail: 'Sync', section: 'sync', target: 'settings-sync-devices', keywords: 'sync geräte devices laptop tablet abmelden' },

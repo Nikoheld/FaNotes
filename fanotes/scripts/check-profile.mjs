@@ -687,17 +687,17 @@ try {
   assert.doesNotMatch(experimentalHtml, /id="settings-note-backup"/u)
   assert.doesNotMatch(experimentalHtml, /title="Notiz-Backup"/u)
   for (const markup of [drawingHtml, advancedHtml, filesHtml, webFilesHtml, updatesHtml, experimentalHtml]) optionRows(markup)
-  const grokGrant = {
+  const mcpGrant = {
     id: 'grant-1',
-    clientName: 'Grok Testgrant',
-    redirectHost: 'grok.com',
+    clientName: 'MCP Testgrant',
+    redirectHost: '127.0.0.1',
     createdAt: '2026-01-02T03:04:05.000Z',
     lastUsedAt: null,
   }
   const signedInSyncHtml = renderSettingsPage('sync', 'linux', {
     syncEngine: {
-      currentMcpGrants: () => [grokGrant],
-      mcpGrants: async () => [grokGrant],
+      currentMcpGrants: () => [mcpGrant],
+      mcpGrants: async () => [mcpGrant],
       refreshAccount: async () => null,
       revokeMcpGrant: async () => undefined,
     },
@@ -728,8 +728,8 @@ try {
   assert.equal(syncRows, 11, `signed-in sync rendered ${syncRows} rows`)
   assert.equal(syncOptions, syncRows)
   assert.equal(syncOptions, 11)
-  assert.match(signedInSyncHtml, /Grok Testgrant/u)
-  assert.match(signedInSyncHtml, /id="settings-grok-connector"/u)
+  assert.match(signedInSyncHtml, /MCP Testgrant/u)
+  assert.match(signedInSyncHtml, /id="settings-mcp-remote"/u)
   const settingsLog = [
     `groups ${groups.join('|')}`,
     `sections ${sections}`,
@@ -739,7 +739,7 @@ try {
     `desktopSanitize ${restartedProfile.profileOwnerId} ${restartedProfile.profileUsername} ${restartedProfile.profilePublic}`,
     `syncGrantHeading Anpassung · ${syncOptions} Optionen`,
     `syncGrantRows ${syncRows}`,
-    'syncGrant Grok Testgrant',
+    'syncGrant MCP Testgrant',
   ].join('\n')
   writeScratch('profile-settings.log', `${settingsLog}\nprofile-settings ok\n`)
   console.log(settingsLog)
