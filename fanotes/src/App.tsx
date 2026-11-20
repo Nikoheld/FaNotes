@@ -18,6 +18,7 @@ import {
   BookMarked,
   ClipboardList,
   Columns2,
+  SquareSplitHorizontal,
   Command,
   Copy,
   Database,
@@ -343,6 +344,7 @@ const VaultOverview = lazy(() => import('./components/VaultOverview').then((modu
 const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
 const CalendarView = lazy(() => import('./components/CalendarView').then((module) => ({ default: module.CalendarView })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
+import { usePdfSidePages } from './components/usePdfSidePages'
 const loadPdfNoteViewModule = () => import('./components/PdfNoteView')
 const PdfNoteView = lazy(() => loadPdfNoteViewModule().then((module) => ({ default: module.PdfNoteView })))
 const StableWorksheetLayer = memo(WorksheetLayer)
@@ -5323,6 +5325,27 @@ export default function App({ startupBootstrap }: AppProps) {
     return result
   }, [activePath, editableShareOwns, pushEditableShare, recordInkSnapshotFor, saveContent, tabHoldsRef])
 
+  // "Leere Seiten daneben" on PDF notes (desktop): while on, the ink board covers the side pages too.
+  const reloadNoteInk = useCallback((path: string) => {
+    const requestId = ++drawingLoadRequestRef.current
+    void readNoteInk(path, latestNoteContent(path) ?? '').then((document) => {
+      if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
+      setDrawingSession({ ...overlaySessionAfterInkReady(drawingOpenRef.current, drawingSessionFromLoad(requestId, document)), path })
+    })
+  }, [latestNoteContent])
+  const pdfSide = usePdfSidePages({
+    activePath,
+    isPdfActive,
+    sessionKey: noteDrawingSession.key,
+    title: activeTab?.title ?? '',
+    readPdfInk: (path) => readNoteInk(path, latestNoteContent(path) ?? ''),
+    flushBoard: async () => { await drawingBoardRef.current?.flush() },
+    reloadNoteInk,
+    saveDrawing: saveDrawingAsset,
+    onError: (message) => toast(message, 'error'),
+  })
+  const inkBoard = pdfSide.board ?? noteDrawingSession
+
   const saveWorksheetDocument = useCallback(async (document: WorksheetDocument) => {
     const session = vaultSessionGenerationRef.current
     const saved = await window.fanotes.saveWorksheet(document)
@@ -5714,6 +5737,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
     ...STUDY_KINDS.filter((kind) => kind !== 'crypto').map((kind) => ({ id: `study-${kind}`, label: `Lernwerkzeug: ${STUDY_KIND_LABELS[kind]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'lernwerkzeuge auftrag tabelle schlüssel bestimmungsschlüssel sortieren board begriffsnetz concept map bildtafel definition karten', icon: <GraduationCap size={15} />, run: () => insertStudyBlock(kind) })),
     ...CRYPTO_TOOLS.map((tool) => ({ id: `study-crypto-${tool}`, label: `Lernwerkzeug: Krypto-Werkzeug, ${CRYPTO_TOOL_LABELS[tool]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'krypto kryptologie caesar vigenere häufigkeit xor ascii modulo diffie hellman verschlüsseln', icon: <GraduationCap size={15} />, run: () => insertStudyBlock('crypto', tool) })),
+    ...(pdfSide.available ? [{ id: 'pdf-side-pages', label: pdfSide.shown ? 'Leere Seiten daneben ausblenden' : 'Leere Seiten daneben', detail: 'Neben jeder PDF-Seite eine leere Schreibseite gleicher Grösse', group: 'Ansicht', keywords: 'pdf leer seite daneben rechts notizen schreiben platz side blank page', icon: <SquareSplitHorizontal size={15} />, run: () => { if (isPdfActive) void pdfSide.toggle(); else toast('Öffne zuerst ein PDF.', 'info') } }] : []),
     { id: 'study-tasks', label: 'Lernwerkzeuge: Aufträge dieses PDFs', detail: 'Aufträge erkennen, abhaken und mit Timer bearbeiten', group: 'Lernwerkzeuge', keywords: 'auftrag aufgabe task exercise pdf arbeitsblatt timer fortschritt', icon: <ClipboardList size={15} />, run: () => { if (isPdfActive) setStudyPanel('tasks'); else toast('Öffne zuerst ein PDF.', 'info') } },
     { id: 'study-marks', label: 'Lernwerkzeuge: Markierungen-Übersicht', detail: 'Alle Textmarker-Stellen des PDFs nach Seite', group: 'Lernwerkzeuge', keywords: 'markierungen textmarker highlight wesentliche punkte pdf zusammenfassung', icon: <BookMarked size={15} />, run: () => { if (isPdfActive) setStudyPanel('marks'); else toast('Öffne zuerst ein PDF.', 'info') } },
     { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => { editorRef.current?.flushChanges(); setCardsOpen(true) } },
@@ -5766,7 +5790,7 @@ export default function App({ startupBootstrap }: AppProps) {
     ...(workRequestsAllowed ? [{ id: 'work-requests', label: 'Fehler & Wünsche', detail: 'Fehler oder Funktion melden und den Fortschritt verfolgen', shortcut: 'Ctrl ⇧ B', group: 'FaNotes', keywords: 'wunsch funktion anfrage claude fehler bug request', icon: <Lightbulb size={15} />, run: () => setWorkRequestsOpen(true) }] : []),
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentLatex, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, workRequestsAllowed, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, startTextFieldPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
+  ], [pdfSide.available, pdfSide.shown, pdfSide.toggle, addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentLatex, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, workRequestsAllowed, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, startTextFieldPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
 
   // ---- Add-ons -------------------------------------------------------------
   // Everything add-ons may touch flows through this bridge. The deps object is
@@ -6978,6 +7002,10 @@ export default function App({ startupBootstrap }: AppProps) {
                             const result = content === null ? null : unmarkPdfNote(content, [hit])
                             if (result) updateContentFor(activeTab.path, result.content)
                           }}
+                          sidePages={pdfSide.shown}
+                          onToggleSidePages={pdfSide.available ? () => { void pdfSide.toggle() } : undefined}
+                          onSideLayout={pdfSide.onSideLayout}
+                          beforeSideRelayout={pdfSide.beforeSideRelayout}
                         />
                       </SafeBoundary>
                     </Suspense>
@@ -7000,24 +7028,24 @@ export default function App({ startupBootstrap }: AppProps) {
                       />
                     </SafeBoundary>
                   </Suspense>)}
-                  {noteDrawingSession.key > 0 && <Suspense fallback={drawingOpen ? <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Stiftebene wird geladen …</div> : null}>
+                  {inkBoard.key > 0 && <Suspense fallback={drawingOpen ? <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Stiftebene wird geladen …</div> : null}>
                     <SafeBoundary
-                      key={`stiftebene:${activeTab.path}:${noteDrawingSession.key}`}
+                      key={`stiftebene:${activeTab.path}:${inkBoard.key}`}
                       name="Handschrift"
                       fallbackTitle={INK_OVERLAY_CRASH_TITLE}
                     >
                       <DrawingBoard
                         ref={drawingBoardRef}
-                        key={noteDrawingSession.key}
+                        key={inkBoard.key}
                         settings={settings}
-                        drawingId={noteDrawingSession.document?.id}
-                        initialDrawingJson={noteDrawingSession.document?.drawingJson}
-                        packedInk={noteDrawingSession.document?.packedInk}
+                        drawingId={inkBoard.document?.id}
+                        initialDrawingJson={inkBoard.document?.drawingJson}
+                        packedInk={inkBoard.document?.packedInk}
                         title={`Handschrift · ${activeTab.title}`}
                         inline
                         inputActive={drawingOpen}
                         onClose={closeDrawing}
-                        onSaveDrawing={saveDrawingAsset}
+                        onSaveDrawing={pdfSide.board ? pdfSide.onSaveDrawing : saveDrawingAsset}
                         onInsertMarkdown={insertIntoNote}
                         pagePaperStyle={activePaper}
                         sectionsEnabled={!isPdfActive}
@@ -7040,7 +7068,7 @@ export default function App({ startupBootstrap }: AppProps) {
                       />
                     </SafeBoundary>
                   </Suspense>}
-                  {drawingOpen && noteDrawingSession.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
+                  {drawingOpen && inkBoard.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
                   <NoteLinkLayer
                     links={noteLinks}
                     placing={noteLinkPlacing}
