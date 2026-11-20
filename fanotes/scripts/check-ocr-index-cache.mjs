@@ -181,14 +181,19 @@ try {
 
   // ---- the OCR host: worker bound, priority, protocol, idle shutdown, no polling ----
   await test('worker count is bounded to half the cores, never all', () => {
-    assert.equal(host.workerCount(NaN, 8), 2)
-    assert.equal(host.workerCount(NaN, 4), 2)
-    assert.equal(host.workerCount(NaN, 2), 1)
-    assert.equal(host.workerCount(NaN, 1), 1)
-    assert.equal(host.workerCount(4, 16), 4)
-    assert.equal(host.workerCount(4, 4), 2)
-    assert.equal(host.workerCount(9, 64), 4)
-    for (const cores of [1, 2, 3, 4, 6, 8, 12, 16, 32]) assert.ok(host.workerCount(NaN, cores) <= Math.max(1, cores / 2))
+    const GB = 1024 ** 3
+    assert.equal(host.workerCount(NaN, 8, 16 * GB), 2)
+    assert.equal(host.workerCount(NaN, 8, 8 * GB), 1, 'under 12 GB')
+    assert.equal(host.workerCount(NaN, 8, 16 * GB, true), 1, 'on battery')
+    assert.equal(host.workerCount(4, 16, 32 * GB, true), 1)
+    assert.equal(host.workerCount(NaN, 8), host.workerCount(NaN, 8, os.totalmem()))
+    assert.equal(host.workerCount(NaN, 4, 16 * GB), 2)
+    assert.equal(host.workerCount(NaN, 2, 16 * GB), 1)
+    assert.equal(host.workerCount(NaN, 1, 16 * GB), 1)
+    assert.equal(host.workerCount(4, 16, 32 * GB), 4)
+    assert.equal(host.workerCount(4, 4, 32 * GB), 2)
+    assert.equal(host.workerCount(9, 64, 64 * GB), 4)
+    for (const cores of [1, 2, 3, 4, 6, 8, 12, 16, 32]) assert.ok(host.workerCount(NaN, cores, 32 * GB) <= Math.max(1, cores / 2))
   })
 
   await test('host: lowers its process priority, answers requests, closes when idle', async () => {

@@ -34,7 +34,7 @@ const {
 // Ozone is chosen in Chromium C++ before most JS runs. Mutate argv/env first.
 applyLinuxOzoneLaunchEnvironment()
 
-const { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, safeStorage, session, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, powerMonitor, protocol, safeStorage, session, shell } = require('electron')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
@@ -864,6 +864,7 @@ function getOcrIndexHost() {
     devUrl: () => trustedDevUrl(),
     preload: path.join(__dirname, 'ocr-host-preload.cjs'),
     configuredWorkers: () => Number(currentSettings.ocrThreadLimit),
+    onBattery: () => { try { return powerMonitor.isOnBatteryPower() } catch { return false } },
     keepAliveMs: () => {
       const configured = Number(currentSettings.ocrModelKeepAliveSeconds)
       return Number.isSafeInteger(configured) && configured >= 0 && configured <= 600 ? Math.max(1, configured * 1_000) : 120_000
