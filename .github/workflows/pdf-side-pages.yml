@@ -52,6 +52,7 @@ jobs:
         run: |
           command -v xvfb-run || (sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 xvfb)
           npm install --no-save --no-audit --no-fund playwright-core@1.65.0
+          test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
       - run: npm run check:pdf-side-pages
 
   android:
