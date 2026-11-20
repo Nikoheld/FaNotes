@@ -26,6 +26,7 @@
     "check:tauri-channels": "node scripts/check-tauri-channel-parity.mjs",
     "check:famd": "node scripts/check-famd.cjs && node scripts/check-famd-v2.cjs && node scripts/check-famd-open.cjs",
     "check:famd-v2": "node scripts/check-famd-v2.cjs",
+    "check:pdf-side-pages": "node scripts/check-pdf-side-pages.mjs",
     "check:study-annotations": "node scripts/check-study-annotations.cjs",
     "check:packaged-i18n": "node scripts/check-packaged-i18n.cjs",
     "check:markdown": "node scripts/check-markdown.mjs",
