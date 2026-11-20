@@ -37,6 +37,8 @@ export type PaperViewMemoryEntry = {
   /** Unzoomed write-page size when measured; lets a re-flowed page scale the centre. */
   pageWidth?: number
   pageHeight?: number
+  /** Width of the pane (scroller) the camera was saved in; a split pane only reuses a camera from the same width. */
+  viewWidth?: number
   /** Text under the viewport top edge (typed notes only). */
   anchor?: PaperTextAnchor
   at: number
@@ -64,6 +66,8 @@ export const normalizePaperViewMemoryEntry = (raw: unknown): PaperViewMemoryEntr
   const pageHeight = finite(record.pageHeight, 0)
   if (pageWidth > 0) entry.pageWidth = Math.round(pageWidth * 100) / 100
   if (pageHeight > 0) entry.pageHeight = Math.round(pageHeight * 100) / 100
+  const viewWidth = finite(record.viewWidth, 0)
+  if (viewWidth > 0) entry.viewWidth = Math.round(viewWidth)
   const anchor = normalizeTextAnchor(record.anchor)
   if (anchor) entry.anchor = anchor
   return entry
@@ -129,10 +133,26 @@ export const paperViewFromMemory = (entry: PaperViewMemoryEntry | null): PaperVi
     : defaultPaperView()
 )
 
-/** Split panes share the identity of the note they mirror. */
-export const paperViewMemoryKey = (viewKey: string | null | undefined) => {
-  if (typeof viewKey !== 'string' || !viewKey) return ''
-  return viewKey.startsWith('split:') ? viewKey.slice('split:'.length) : viewKey
+/**
+ * Split panes keep their own camera under `split:<note>`. They are narrower than
+ * the full-width pane, so a camera saved there (zoom 100%, scrolled sideways)
+ * would open the second pane with its text cut off at the left edge.
+ */
+export const paperViewMemoryKey = (viewKey: string | null | undefined) => (
+  typeof viewKey === 'string' && viewKey ? viewKey : ''
+)
+
+/** A split pane camera is only valid for the pane width it was saved at. */
+export const PAPER_VIEW_WIDTH_TOLERANCE = 24
+export const recallPaperViewForWidth = (
+  store: PaperViewMemoryStore,
+  key: string | null | undefined,
+  paneWidth: number,
+): PaperViewMemoryEntry | null => {
+  const entry = recallPaperView(store, key)
+  if (!entry || typeof key !== 'string' || !key.startsWith('split:')) return entry
+  if (!entry.viewWidth || !(paneWidth > 0)) return null
+  return Math.abs(entry.viewWidth - paneWidth) <= PAPER_VIEW_WIDTH_TOLERANCE ? entry : null
 }
 
 type StorageLike = {
