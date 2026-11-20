@@ -1,13 +1,19 @@
-// Opt-in diagnostics from the apps: anonymous usage counters and scrubbed error
-// logs, keyed by a random install id (never an account). One JSONL file per day.
-//   POST   /api/v1/diagnostics            store one payload
+// "Send data" from the apps: crash reports, error diagnostics, performance stats and anonymous usage
+// counters, keyed by a random install id (never an account). One JSONL file per day. No IP address, user
+// agent or other request metadata is stored; the in-memory rate limiter keys on a salted hash of the address.
+//   POST   /api/v1/diagnostics            store one payload (JSON, or gzip with Content-Encoding: gzip)
 //   DELETE /api/v1/diagnostics/<install>  delete everything stored for an install id
 import { promises as fs } from 'node:fs'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
+import { gunzip } from 'node:zlib'
+import { promisify } from 'node:util'
 import { isIP } from 'node:net'
 import { join, resolve } from 'node:path'
 
 export const DIAGNOSTICS_MAX_BODY_BYTES = 64 * 1024
+/** A gzip body may inflate to at most this much (bomb guard). */
+export const DIAGNOSTICS_MAX_INFLATED_BYTES = 192 * 1024
+const gunzipAsync = promisify(gunzip)
 export const DIAGNOSTICS_RETENTION_DAYS = 90
 export const DIAGNOSTICS_PER_INSTALL_PER_DAY = 12
 export const DIAGNOSTICS_PER_IP_PER_HOUR = 60
@@ -19,6 +25,11 @@ const ERROR_HASH = /^[0-9a-f]{12}$/u
 const ERROR_KEY = /^[A-Za-z]{2,24}\|[A-Z0-9_]{0,40}\|[0-9a-f]{12}$/u
 const BUNDLE_FILE = /^[A-Za-z0-9_]{1,40}-[A-Za-z0-9_-]{6,12}\.m?js$/u
 // Android frames: a class of the app itself (ch.fasrv.fanotes...), never a framework or library.
+const MAIN_FILE = /^[A-Za-z0-9_.-]{1,60}\.(?:c|m)?js$/u
+const FUNCTION_NAME = /^[A-Za-z_$][A-Za-z0-9_$]{0,60}(?:\.[A-Za-z_$][A-Za-z0-9_$]{0,60}){0,2}$/u
+const CRASH_TYPES = ['uncaughtException', 'unhandledRejection', 'render-process-gone', 'child-process-gone', 'renderer-error', 'renderer-rejection']
+const CRASH_PROCESSES = ['main', 'renderer', 'Utility', 'Zygote', 'Sandbox helper', 'GPU', 'Pepper Plugin', 'Pepper Plugin Broker', 'Unknown']
+const GONE_REASONS = ['', 'abnormal-exit', 'killed', 'crashed', 'oom', 'launch-failed', 'integrity-failure', 'memory-eviction']
 const APP_FRAME = /^ch\.fasrv\.fanotes(?:\.[A-Za-z_][A-Za-z0-9_]{0,60}){1,6}$/u
 const COUNTER_NAME = /^[a-z0-9][a-z0-9._-]{0,39}$/u
 const DAY_FILE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/u
@@ -73,12 +84,13 @@ const text = (value, max) => (typeof value === 'string' ? value.slice(0, max) : 
 
 export const validateDiagnosticsPayload = (body) => {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, error: 'Ungültige Nutzlast.' }
-  if (body.schemaVersion !== 1) return { ok: false, error: 'Unbekannte Schemaversion.' }
+  if (body.schemaVersion !== 1 && body.schemaVersion !== 2) return { ok: false, error: 'Unbekannte Schemaversion.' }
   if (typeof body.installId !== 'string' || !INSTALL_ID.test(body.installId)) return { ok: false, error: 'Ungültige Installations-ID.' }
-  if (body.kind !== 'daily' && body.kind !== 'report') return { ok: false, error: 'Ungültige Art.' }
+  if (body.kind !== 'daily' && body.kind !== 'report' && body.kind !== 'batch') return { ok: false, error: 'Ungültige Art.' }
+  if ((body.kind === 'batch') !== (body.schemaVersion === 2)) return { ok: false, error: 'Ungültige Art.' }
   const app = body.app && typeof body.app === 'object' ? body.app : {}
   const record = {
-    schemaVersion: 1,
+    schemaVersion: body.schemaVersion,
     kind: body.kind,
     installId: body.installId,
     receivedAt: Date.now(),
@@ -115,8 +127,34 @@ export const validateDiagnosticsPayload = (body) => {
       }]
     })
   }
+  if (body.crashes !== undefined) {
+    if (!Array.isArray(body.crashes)) return { ok: false, error: 'Ungültige Absturzberichte.' }
+    record.crashes = body.crashes.slice(0, 40).flatMap((entry) => {
+      if (!CRASH_TYPES.includes(entry?.type) || !CRASH_PROCESSES.includes(entry?.process) || !ERROR_CLASSES.includes(entry?.class) || !ERROR_HASH.test(entry?.hash ?? '')) return []
+      return [{
+        type: entry.type,
+        process: entry.process,
+        class: entry.class,
+        code: typeof entry.code === 'string' && ERROR_CODE.test(entry.code) ? entry.code : '',
+        reason: GONE_REASONS.includes(entry.reason) ? entry.reason : '',
+        exitCode: int(entry.exitCode, 0xffffffff),
+        frames: (Array.isArray(entry.frames) ? entry.frames : []).filter((frame) => (MAIN_FILE.test(frame?.file ?? '') || BUNDLE_FILE.test(frame?.file ?? '')) && Number.isInteger(frame.line) && frame.line >= 0 && frame.line < 10_000_000).slice(0, 4).map((frame) => ({ file: frame.file, line: frame.line, ...(typeof frame.fn === 'string' && FUNCTION_NAME.test(frame.fn) ? { fn: frame.fn } : {}) })),
+        hash: entry.hash,
+        count: Math.max(1, int(entry.count, 1_000_000)),
+        lastAt: int(entry.lastAt, 4e12),
+      }]
+    })
+  }
+  if (body.perf !== undefined) {
+    const perf = body.perf
+    if (!perf || typeof perf !== 'object' || Array.isArray(perf)) return { ok: false, error: 'Ungültige Leistungsdaten.' }
+    record.perf = {}
+    if (perf.startup && typeof perf.startup === 'object') record.perf.startup = { sessions: int(perf.startup.sessions, 1000), medianMs: int(perf.startup.medianMs, 600_000), maxMs: int(perf.startup.maxMs, 600_000) }
+    if (perf.penLatency && typeof perf.penLatency === 'object') record.perf.penLatency = { samples: int(perf.penLatency.samples, 100_000), p50: int(perf.penLatency.p50 * 10, 1_000_000) / 10, p90: int(perf.penLatency.p90 * 10, 1_000_000) / 10, p99: int(perf.penLatency.p99 * 10, 1_000_000) / 10, max: int(perf.penLatency.max * 10, 1_000_000) / 10 }
+    if (perf.memory && typeof perf.memory === 'object') record.perf.memory = { processes: int(perf.memory.processes, 1000), totalMb: int(perf.memory.totalMb, 1_000_000), mainRssMb: int(perf.memory.mainRssMb, 1_000_000) }
+  }
   if (typeof body.comment === 'string' && body.comment.trim()) record.comment = scrubText(body.comment, {}, 1000)
-  if (!record.usage && !record.logs) return { ok: false, error: 'Leere Nutzlast.' }
+  if (!record.usage && !record.logs && !record.crashes && !record.perf) return { ok: false, error: 'Leere Nutzlast.' }
   return { ok: true, record }
 }
 
@@ -127,6 +165,9 @@ export const createDiagnosticsStore = (directory, options = {}) => {
   const now = options.now ?? (() => Date.now())
   const installWindows = new Map()
   const ipWindows = new Map()
+  // Never keep an address, not even in memory: limits key on a hash with a salt that dies with the process.
+  const salt = randomBytes(16)
+  const hashed = (ip) => createHash('sha256').update(salt).update(String(ip)).digest('hex').slice(0, 24)
   const limit = (map, key, maximum, windowMs) => {
     const at = now()
     const current = map.get(key)
@@ -165,7 +206,7 @@ export const createDiagnosticsStore = (directory, options = {}) => {
   return {
     root,
     async accept(body, ip = 'unknown') {
-      if (!limit(ipWindows, ip, DIAGNOSTICS_PER_IP_PER_HOUR, 3_600_000)) return { status: 429, body: { error: 'Zu viele Anfragen.' } }
+      if (!limit(ipWindows, hashed(ip), DIAGNOSTICS_PER_IP_PER_HOUR, 3_600_000)) return { status: 429, body: { error: 'Zu viele Anfragen.' } }
       const result = validateDiagnosticsPayload(body)
       if (!result.ok) return { status: 400, body: { error: result.error } }
       result.record.receivedAt = now()
@@ -213,7 +254,7 @@ export const createDiagnosticsStore = (directory, options = {}) => {
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Headers': 'Content-Type, Content-Encoding',
   'Access-Control-Allow-Methods': 'POST, DELETE, OPTIONS',
 }
 const writeJson = (response, status, value) => {
@@ -230,8 +271,14 @@ const readJson = async (request) => {
     chunks.push(chunk)
   }
   try {
-    return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
-  } catch {
+    let raw = Buffer.concat(chunks)
+    const encoding = String(request.headers?.['content-encoding'] ?? '').toLowerCase()
+    if (encoding === 'gzip') raw = await gunzipAsync(raw, { maxOutputLength: DIAGNOSTICS_MAX_INFLATED_BYTES })
+    else if (encoding && encoding !== 'identity') throw Object.assign(new Error('Nicht unterstützte Kodierung.'), { status: 415 })
+    return raw.length ? JSON.parse(raw.toString('utf8')) : {}
+  } catch (error) {
+    if (error?.status) throw error
+    if (error?.code === 'ERR_BUFFER_TOO_LARGE') throw Object.assign(new Error('Die Anfrage ist zu groß.'), { status: 413 })
     throw Object.assign(new Error('Ungültiges JSON.'), { status: 400 })
   }
 }

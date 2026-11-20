@@ -3,6 +3,11 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 const CHANNELS = Object.freeze({
+  diagnosticsRecord: 'fanotes:diagnostics-record',
+  diagnosticsStatus: 'fanotes:diagnostics-status',
+  diagnosticsPreview: 'fanotes:diagnostics-preview',
+  diagnosticsResetId: 'fanotes:diagnostics-reset-id',
+  diagnosticsDeleteRemote: 'fanotes:diagnostics-delete-remote',
   handwritingLearning: 'fanotes:handwriting-learning',
   bootstrap: 'fanotes:bootstrap',
   rendererReady: 'fanotes:renderer-ready',
@@ -135,6 +140,13 @@ const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args)
 const api = Object.freeze({
   bootstrap: () => invoke(CHANNELS.bootstrap),
   reportRendererReady: () => ipcRenderer.send(CHANNELS.rendererReady),
+  diagnostics: Object.freeze({
+    record: (event) => ipcRenderer.send(CHANNELS.diagnosticsRecord, event),
+    status: () => invoke(CHANNELS.diagnosticsStatus),
+    preview: () => invoke(CHANNELS.diagnosticsPreview),
+    resetInstallId: () => invoke(CHANNELS.diagnosticsResetId),
+    deleteRemote: () => invoke(CHANNELS.diagnosticsDeleteRemote),
+  }),
   completeOnboarding: (subjects) => invoke(CHANNELS.completeOnboarding, subjects),
   selectVault: () => invoke(CHANNELS.selectVault),
   getCachedTree: () => invoke(CHANNELS.getCachedTree),
