@@ -6042,19 +6042,23 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => {
     if (!splitPath || !splitTab || splitTab.kind === 'pdf' || isPdfNotePath(splitPath)) return
     const path = splitPath
+    const timers: number[] = []
     const fit = () => {
       const scroller = splitContainerRef.current?.querySelector<HTMLElement>('.split-pane .unified-note-view')
       if (!scroller || recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(`split:${path}`))) return
       const view = splitPaperViewStore.read()
       const zoom = splitFitZoom(scroller.clientWidth)
-      if (zoom < 1 && view.zoom === 1) splitPaperViewStore.write({ ...view, zoom })
+      if (zoom < 1 && view.zoom === 1) {
+        splitPaperViewStore.write({ ...view, zoom })
+        timers.forEach((timer) => window.clearTimeout(timer))
+      }
     }
-    // Once after layout, once more for a slow machine whose pane was not measured yet.
+    // The pane's own view setup runs at its own pace on a slow machine, so the fit is retried a few times.
     let frame = window.requestAnimationFrame(() => { frame = window.requestAnimationFrame(fit) })
-    const retry = window.setTimeout(fit, 400)
+    for (const delay of [300, 900, 2000]) timers.push(window.setTimeout(fit, delay))
     return () => {
       window.cancelAnimationFrame(frame)
-      window.clearTimeout(retry)
+      timers.forEach((timer) => window.clearTimeout(timer))
     }
   }, [splitPath, splitPaperViewStore])
 
