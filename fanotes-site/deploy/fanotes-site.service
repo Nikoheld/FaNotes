@@ -24,7 +24,6 @@ Environment=FANOTES_BUG_REPORT_DIR=/var/lib/fanotes-bug-reports
 Environment=FANOTES_SEND_DATA_DIR=/var/lib/fanotes-send-data
 Environment=FANOTES_DIAGNOSTICS_DIR=/var/lib/fanotes-diagnostics
 Environment=FANOTES_SYNC_DIR=/var/lib/fanotes-sync
-Environment=FANOTES_MCP_DIR=/var/lib/fanotes-mcp
 Environment=FANOTES_SHARE_DIR=/var/lib/fanotes-shares
 Environment=FANOTES_PROFILE_DIR=/var/lib/fanotes-profiles
 Environment=FANOTES_SCHULNETZ_DIR=/var/lib/fanotes-schulnetz
@@ -72,7 +71,6 @@ ReadWritePaths=/var/lib/fanotes-bug-reports
 ReadWritePaths=/var/lib/fanotes-send-data
 ReadWritePaths=/var/lib/fanotes-diagnostics
 ReadWritePaths=/var/lib/fanotes-sync
-ReadWritePaths=/var/lib/fanotes-mcp
 ReadWritePaths=/var/lib/fanotes-shares
 ReadWritePaths=/var/lib/fanotes-profiles
 ReadWritePaths=/var/lib/fanotes-schulnetz

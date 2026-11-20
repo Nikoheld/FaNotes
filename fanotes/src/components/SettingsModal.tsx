@@ -61,7 +61,6 @@ import {
   type TabletButtonAction,
 } from '../lib/tabletButtons'
 import type { AppSettings, BackgroundUpdateInfo, EnhancedMathRecognitionState, QwenVisionState, ServerBackupState, UpdateState } from '../types'
-import type { McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
 import { McpSettingsSection } from './McpSettingsSection'
@@ -176,7 +175,6 @@ const settingsOptionCount = (
     syncDeviceRows: number
     syncConflictRows: number
     syncOpenConflicts: number
-    syncGrantRows: number
   },
 ) => {
   switch (id) {
@@ -187,7 +185,7 @@ const settingsOptionCount = (
     case 'sync':
       if (!input.hasSync || input.syncUnavailable) return 1
       if (!input.syncSignedIn) return 0
-      return 5 + 3 + input.syncGrantRows + input.syncDeviceRows + input.syncConflictRows + 1
+      return 5 + input.syncDeviceRows + input.syncConflictRows + 1
     case 'conflicts': return input.syncOpenConflicts
     case 'mcp': return input.isWeb ? 0 : 6
     case 'statistics': return 2
@@ -214,7 +212,6 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'MCP-Server', detail: 'Claude, Cursor und andere KI-Programme', section: 'mcp', target: 'settings-mcp-local', keywords: 'mcp ki ai claude cursor chatgpt grok server stdio http token lokal notizen aufgaben schreibzugriff' },
   { label: 'Statistik', detail: 'Statistik', section: 'statistics', target: 'settings-stat-activity', keywords: 'statistik aktivität kalender heatmap serie streak wörter notizen größe fächer lernzeit hausaufgaben karteikarten sync' },
   { label: 'Diagnose & Verbesserung', detail: 'Statistik', section: 'statistics', target: 'settings-diagnostics', keywords: 'diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz' },
-  { label: 'Grok-Connector', detail: 'Sync', section: 'sync', target: 'settings-grok-connector', keywords: 'grok mcp connector server url notizen prüfung klausur hausaufgaben oauth' },
   { label: 'Sync-Konto', detail: 'Sync', section: 'sync', target: 'settings-sync-account', keywords: 'sync konto anmelden registrieren account login passwort e-mail cloud server geräte' },
   { label: 'Öffentliche Aktivitätsübersicht', detail: 'Profil', section: 'profile', target: 'settings-profile', keywords: 'benutzername profil user übersicht aktivität notizen zeit beigetreten tage öffentlich' },
   { label: 'Angemeldete Geräte', detail: 'Sync', section: 'sync', target: 'settings-sync-devices', keywords: 'sync geräte devices laptop tablet abmelden' },
@@ -498,15 +495,6 @@ export function SettingsModal({
   const profileOrigin = useMemo(() => resolveProfileOrigin(), [])
   const trainingInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLElement>(null)
-  const [mcpGrants, setMcpGrants] = useState<McpGrantInfo[]>(() => (
-    syncState?.mcpReader && syncEngine && typeof syncEngine.currentMcpGrants === 'function'
-      ? syncEngine.currentMcpGrants()
-      : []
-  ))
-  const replaceMcpGrants = useCallback((grants: McpGrantInfo[]) => {
-    setMcpGrants(Array.isArray(grants) ? grants : [])
-  }, [])
-  const visibleMcpGrants = syncState?.account && syncState.mcpReader ? mcpGrants : []
   const section = useMemo(() => {
     const found = SECTIONS.find((candidate) => candidate.id === active)!
     return {
@@ -519,10 +507,9 @@ export function SettingsModal({
         syncDeviceRows: syncState?.info ? syncState.info.devices.length : 1,
         syncConflictRows: syncState?.openConflicts ? 1 : 0,
         syncOpenConflicts: syncState?.openConflicts ?? 0,
-        syncGrantRows: visibleMcpGrants.length,
       }),
     }
-  }, [active, isWeb, syncEngine, syncState, visibleMcpGrants.length])
+  }, [active, isWeb, syncEngine, syncState])
   const ActiveSectionIcon = section.icon
   const searchResults = useMemo(() => {
     const terms = normalizeSearch(searchQuery).split(/\s+/u).filter(Boolean)
@@ -1302,7 +1289,7 @@ export function SettingsModal({
 
             {active === 'sync' && (
               syncEngine && syncState
-                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} grants={visibleMcpGrants} onGrants={replaceMcpGrants} onOpenConflicts={() => setActive('conflicts')} />
+                ? <SyncSettingsSection engine={syncEngine} syncState={syncState} settings={settings} update={update} platform={platform} onOpenConflicts={() => setActive('conflicts')} />
                 : <div className="setting-card"><div className="setting-card-title"><Cloud size={16} /><span>Sync</span></div><div className="setting-row"><div className="setting-copy"><span>Sync steht in dieser Umgebung nicht zur Verfügung.</span></div></div></div>
             )}
 

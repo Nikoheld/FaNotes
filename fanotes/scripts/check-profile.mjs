@@ -687,19 +687,9 @@ try {
   assert.doesNotMatch(experimentalHtml, /id="settings-note-backup"/u)
   assert.doesNotMatch(experimentalHtml, /title="Notiz-Backup"/u)
   for (const markup of [drawingHtml, advancedHtml, filesHtml, webFilesHtml, updatesHtml, experimentalHtml]) optionRows(markup)
-  const grokGrant = {
-    id: 'grant-1',
-    clientName: 'Grok Testgrant',
-    redirectHost: 'grok.com',
-    createdAt: '2026-01-02T03:04:05.000Z',
-    lastUsedAt: null,
-  }
   const signedInSyncHtml = renderSettingsPage('sync', 'linux', {
     syncEngine: {
-      currentMcpGrants: () => [grokGrant],
-      mcpGrants: async () => [grokGrant],
       refreshAccount: async () => null,
-      revokeMcpGrant: async () => undefined,
     },
     syncState: {
       status: 'idle',
@@ -712,7 +702,6 @@ try {
       trackedFiles: 1,
       conflicts: [],
       log: [],
-      mcpReader: true,
       info: {
         accountId: 'a'.repeat(32),
         email: 'ada@example.com',
@@ -725,11 +714,10 @@ try {
   })
   const syncOptions = Number(signedInSyncHtml.match(/Anpassung · (\d+) Optionen/u)?.[1])
   const syncRows = signedInSyncHtml.match(/class="setting-row(?: [^"]*)?"/gu)?.length ?? 0
-  assert.equal(syncRows, 11, `signed-in sync rendered ${syncRows} rows`)
+  assert.equal(syncRows, 7, `signed-in sync rendered ${syncRows} rows`)
   assert.equal(syncOptions, syncRows)
-  assert.equal(syncOptions, 11)
-  assert.match(signedInSyncHtml, /Grok Testgrant/u)
-  assert.match(signedInSyncHtml, /id="settings-grok-connector"/u)
+  assert.equal(syncOptions, 7)
+  assert.doesNotMatch(signedInSyncHtml, /settings-mcp-remote/u)
   const settingsLog = [
     `groups ${groups.join('|')}`,
     `sections ${sections}`,
@@ -739,7 +727,6 @@ try {
     `desktopSanitize ${restartedProfile.profileOwnerId} ${restartedProfile.profileUsername} ${restartedProfile.profilePublic}`,
     `syncGrantHeading Anpassung · ${syncOptions} Optionen`,
     `syncGrantRows ${syncRows}`,
-    'syncGrant Grok Testgrant',
   ].join('\n')
   writeScratch('profile-settings.log', `${settingsLog}\nprofile-settings ok\n`)
   console.log(settingsLog)

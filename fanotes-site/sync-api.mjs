@@ -8,7 +8,9 @@
 // can fetch "everything since revision N" and detect concurrent edits.
 //
 // Layout under FANOTES_SYNC_DIR:
-//   emails/<sha256(email)>            -> accountId
+//   emails/<sha256(email)>            -> accountId (optional: an account may have no e-mail)
+//   usernames/<sha256(lowercase username)> -> accountId (optional on legacy accounts)
+//   user-shares/<shareId>/...         -> end-to-end encrypted shares between accounts (user-shares.mjs)
 //   accounts/<id>/account.json        -> credentials, kdf, wrapped key, devices, sessions
 //   accounts/<id>/index.json          -> snapshot of the file table { revision, entries }
 //   accounts/<id>/changes.jsonl       -> appended mutations since the snapshot
@@ -23,6 +25,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import { languageForRequest, localizeText } from './i18n.mjs'
 import { hashFile, inspectSyncAccount } from './sync-integrity.mjs'
+import { handleUserShareRoute, removeAccountShares } from './user-shares.mjs'
 
 const syncRoot = () => resolve(process.env.FANOTES_SYNC_DIR || '/var/lib/fanotes-sync')
 let onAccountDeleted = async () => {}
@@ -155,6 +158,33 @@ const normalizeEmail = (raw) => {
   const email = String(raw ?? '').trim().toLowerCase()
   if (!EMAIL_PATTERN.test(email) || email.length > 254) fail(400, 'Bitte eine gültige E-Mail-Adresse angeben.')
   return email
+}
+
+const USERNAME_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{1,30})[A-Za-z0-9]$/u
+const RESERVED_USERNAMES = new Set(['admin', 'administrator', 'root', 'fanotes', 'support', 'system', 'staff', 'team', 'help', 'null', 'undefined', 'api', 'www', 'security', 'abuse', 'postmaster', 'webmaster', 'kanti', 'moderator', 'owner'])
+
+/** A FaNotes username: 3 to 32 ASCII letters, digits and . _ - (no doubled separators). Unique ignoring case; `key` is the lowercase form. */
+export const parseUsername = (raw) => {
+  const display = String(raw ?? '').trim().normalize('NFKC')
+  if (!USERNAME_PATTERN.test(display) || /[._-]{2}/u.test(display)) fail(400, 'Der Benutzername braucht 3 bis 32 Zeichen: Buchstaben, Ziffern, Punkt, Unterstrich oder Bindestrich.')
+  const key = display.toLowerCase()
+  if (RESERVED_USERNAMES.has(key)) fail(400, 'Dieser Benutzername ist nicht verfügbar.')
+  return { display, key }
+}
+
+const parseUserKey = (publicKey, wrap) => {
+  if (!isBase64(publicKey, 65, 65)) fail(400, 'Der öffentliche Schlüssel ist ungültig.')
+  if (!wrap || typeof wrap !== 'object' || !isBase64(wrap.iv, 12, 16) || !isBase64(wrap.data, 32, 512)) fail(400, 'Der verpackte Konto-Schlüssel ist ungültig.')
+  return { publicKey, wrap: { iv: wrap.iv, data: wrap.data } }
+}
+
+/** `username` or `email` in a request body (or `identifier`: an `@` means e-mail). */
+const parseIdentifier = (body) => {
+  const identifier = typeof body.identifier === 'string' ? body.identifier.trim() : ''
+  const email = typeof body.email === 'string' && body.email.trim() ? body.email : identifier.includes('@') ? identifier : ''
+  if (email) return { kind: 'email', value: normalizeEmail(email) }
+  const username = typeof body.username === 'string' && body.username.trim() ? body.username : identifier
+  return { kind: 'username', value: parseUsername(username).key }
 }
 
 const parseAuthKey = (raw) => {
@@ -393,6 +423,7 @@ const withAccountLock = async (accountId, task) => {
 
 const accountDirectory = (accountId) => safeJoin(syncRoot(), 'accounts', accountId)
 const emailIndexPath = (email) => safeJoin(syncRoot(), 'emails', sha256(email))
+const usernameIndexPath = (key) => safeJoin(syncRoot(), 'usernames', sha256(key))
 
 let serverSecretPromise = null
 /** Random per-installation secret used to answer pre-login requests for unknown e-mails with a stable, fake salt. */
@@ -421,6 +452,13 @@ const loadAccountByEmail = async (email) => {
   const accountId = (await fs.readFile(emailIndexPath(email), 'utf8').catch(() => '')).trim()
   return accountId ? loadAccountById(accountId) : null
 }
+
+const loadAccountByUsername = async (key) => {
+  const accountId = (await fs.readFile(usernameIndexPath(key), 'utf8').catch(() => '')).trim()
+  return accountId ? loadAccountById(accountId) : null
+}
+
+const loadAccountByIdentifier = (identifier) => (identifier.kind === 'email' ? loadAccountByEmail(identifier.value) : loadAccountByUsername(identifier.value))
 
 const saveAccount = async (account) => {
   await atomicWrite(safeJoin(accountDirectory(account.id), 'account.json'), `${JSON.stringify(account, null, 2)}\n`)
@@ -777,34 +815,87 @@ const sendEmpty = (request, response, status, extra = {}) => {
 const handlePrelogin = async (request, response) => {
   rateLimit(`sync:prelogin:${clientAddress(request)}`, 60, 15 * 60 * 1000)
   const body = await readJsonBody(request)
-  sendJson(request, response, 200, { kdf: await preloginKdf(normalizeEmail(body.email)) })
+  sendJson(request, response, 200, { kdf: await preloginKdf(parseIdentifier(body)) })
 }
 
-const preloginKdf = async (email) => {
-  const account = await loadAccountByEmail(email)
+const preloginKdf = async (identifier) => {
+  const account = await loadAccountByIdentifier(identifier)
   if (account) return account.kdf
-  // Unknown addresses get a deterministic salt so the response does not reveal whether an account exists.
-  const fakeSalt = createHmac('sha256', await serverSecret()).update(`salt:${email}`).digest().subarray(0, 16).toString('base64')
+  // Unknown addresses and usernames get a deterministic salt so the response does not reveal whether an account exists.
+  // The e-mail form keeps its original HMAC input so fake salts stay stable across this upgrade.
+  const label = identifier.kind === 'email' ? `salt:${identifier.value}` : `salt:user:${identifier.value}`
+  const fakeSalt = createHmac('sha256', await serverSecret()).update(label).digest().subarray(0, 16).toString('base64')
   return { algorithm: 'pbkdf2-sha256', iterations: 600_000, salt: fakeSalt }
 }
 
+const wrongCredentials = (kind) => (kind === 'email' ? 'E-Mail-Adresse oder Passwort stimmen nicht.' : 'Benutzername oder Passwort stimmen nicht.')
+
+/** The identity fields every sign-in and /account answer carries. */
+const identityFields = (account) => ({
+  username: account.username ?? null,
+  email: account.email ?? null,
+  credential: account.credential === 'device-key' ? 'device-key' : 'password',
+  userKey: account.userKey ? { publicKey: account.userKey.publicKey, wrap: account.userKey.wrap } : null,
+})
+
+/** Atomically publish `id` under an index path; false when the name is taken. Written so a crash never leaves an empty index file. */
+const claimIndex = async (path, id) => {
+  await fs.mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  const temporary = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
+  const handle = await fs.open(temporary, 'wx', 0o600)
+  try {
+    await handle.writeFile(id)
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+  try {
+    // A hard link fails with EEXIST when the name is taken, so the index is the uniqueness check.
+    await fs.link(temporary, path)
+  } catch (error) {
+    if (error?.code === 'EEXIST') return false
+    throw error
+  } finally {
+    await fs.rm(temporary, { force: true })
+  }
+  await syncDirectory(dirname(path))
+  return true
+}
+
+const releaseIndex = async (path) => {
+  await fs.rm(path, { force: true })
+  await syncDirectory(dirname(path)).catch(() => {})
+}
+
 const handleRegister = async (request, response) => {
-  rateLimit(`sync:register:${clientAddress(request)}`, 10, 60 * 60 * 1000)
+  rateLimit(`sync:register:${clientAddress(request)}`, Number(process.env.FANOTES_SYNC_REGISTER_PER_HOUR || 10), 60 * 60 * 1000)
   const body = await readJsonBody(request)
-  const email = normalizeEmail(body.email)
-  rateLimit(`sync:register-email:${sha256(email)}`, 8, 60 * 60 * 1000)
+  const hasEmail = typeof body.email === 'string' && body.email.trim() !== ''
+  const hasUsername = typeof body.username === 'string' && body.username.trim() !== ''
+  if (!hasEmail && !hasUsername) fail(400, 'Bitte einen Benutzernamen angeben.')
+  const email = hasEmail ? normalizeEmail(body.email) : null
+  const username = hasUsername ? parseUsername(body.username) : null
+  if (email) rateLimit(`sync:register-email:${sha256(email)}`, 8, 60 * 60 * 1000)
+  if (username) rateLimit(`sync:register-username:${sha256(username.key)}`, 8, 60 * 60 * 1000)
   const authKey = parseAuthKey(body.authKey)
   const kdf = parseKdf(body.kdf)
   const vaultKeyWrap = parseKeyWrap(body.vaultKeyWrap)
   const device = parseDevice(body.device)
+  // A device-key account has no password: the client derives its keys from a random key held in the OS keychain.
+  const credential = body.credential === 'device-key' ? 'device-key' : 'password'
+  const userKey = body.publicKey || body.userKeyWrap ? parseUserKey(body.publicKey, body.userKeyWrap) : null
+  if (username && !userKey) fail(400, 'Der öffentliche Schlüssel fehlt.')
   await serverSecret()
-  await fs.mkdir(safeJoin(syncRoot(), 'emails'), { recursive: true, mode: 0o700 })
   const id = randomBytes(16).toString('hex')
   const salt = randomBytes(16)
   const account = {
-    version: 1,
+    version: 2,
     id,
     email,
+    username: username?.display ?? null,
+    usernameKey: username?.key ?? null,
+    credential,
+    ...(userKey ? { userKey } : {}),
     createdAt: nowIso(),
     auth: { salt: salt.toString('base64'), hash: (await scryptHash(authKey, salt)).toString('base64') },
     kdf,
@@ -815,90 +906,86 @@ const handleRegister = async (request, response) => {
   const deviceId = registerDevice(account, device)
   const session = issueSession(account, deviceId)
   await fs.mkdir(safeJoin(accountDirectory(id), 'blobs'), { recursive: true, mode: 0o700 })
-  // Link the new account before the e-mail index points at it. A crash must
-  // not reserve the address with no account behind it.
+  // Link the new account before an index points at it. A crash must not reserve
+  // a name with no account behind it.
   await syncDirectory(syncRoot())
   await syncDirectory(dirname(accountDirectory(id)))
   await syncDirectory(accountDirectory(id))
-  const emailPath = emailIndexPath(email)
-  const temporary = `${emailPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
-  let emailCreated = false
-  try {
-    // 'wx' makes the e-mail index the uniqueness check; two racing registrations cannot both win.
-    // The account record is saved first. A failed attempt removes the index
-    // entry this attempt created, then its own account directory.
-    await saveAccount(account)
-    const emailHandle = await fs.open(temporary, 'wx', 0o600)
-    try {
-      await emailHandle.writeFile(id)
-      await emailHandle.sync()
-    } finally {
-      await emailHandle.close()
-    }
-    // Publish the finished file under the address. A crash must not leave an
-    // empty index name, or this address can no longer open the account.
-    await fs.link(temporary, emailPath)
-    emailCreated = true
-    await fs.rm(temporary, { force: true })
-    await syncDirectory(dirname(emailPath))
-  } catch (error) {
-    await fs.rm(temporary, { force: true }).catch(() => {})
-    if (emailCreated) {
-      await fs.rm(emailPath, { force: true })
-      await syncDirectory(dirname(emailPath))
-    }
+  const claimed = []
+  const rollback = async () => {
+    for (const path of claimed) await releaseIndex(path).catch(() => {})
     await fs.rm(accountDirectory(id), { recursive: true, force: true })
     await syncDirectory(dirname(accountDirectory(id)))
-    if (error?.code === 'EEXIST') {
-      const existing = await loadAccountByEmail(email)
-      if (existing?.auth?.hash && existing?.auth?.salt) {
-        const expected = Buffer.from(existing.auth.hash, 'base64')
-        const actual = await scryptHash(authKey, Buffer.from(existing.auth.salt, 'base64'))
-        if (expected.length === actual.length) safeEqual(expected, actual)
-      } else {
+  }
+  try {
+    await saveAccount(account)
+    if (username) {
+      const path = usernameIndexPath(username.key)
+      if (!await claimIndex(path, id)) {
+        await rollback()
         await scryptHash(authKey, randomBytes(16))
+        fail(409, 'Dieser Benutzername ist bereits vergeben.')
       }
-      fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
+      claimed.push(path)
     }
+    if (email) {
+      const path = emailIndexPath(email)
+      if (!await claimIndex(path, id)) {
+        await rollback()
+        const existing = await loadAccountByEmail(email)
+        if (existing?.auth?.hash && existing?.auth?.salt) {
+          const expected = Buffer.from(existing.auth.hash, 'base64')
+          const actual = await scryptHash(authKey, Buffer.from(existing.auth.salt, 'base64'))
+          if (expected.length === actual.length) safeEqual(expected, actual)
+        } else {
+          await scryptHash(authKey, randomBytes(16))
+        }
+        fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
+      }
+      claimed.push(path)
+    }
+  } catch (error) {
+    if (!(error instanceof SyncApiError)) await rollback().catch(() => {})
     throw error
   }
   await scryptHash(authKey, randomBytes(16))
-  sendJson(request, response, 201, { accountId: id, deviceId, token: session.token, expiresAt: session.expiresAt, revision: 0 })
+  sendJson(request, response, 201, { accountId: id, deviceId, token: session.token, expiresAt: session.expiresAt, revision: 0, ...identityFields(account) })
 }
 
 const handleLogin = async (request, response) => {
   const address = clientAddress(request)
   rateLimit(`sync:login:${address}`, 30, 15 * 60 * 1000)
   const body = await readJsonBody(request)
-  const email = normalizeEmail(body.email)
-  rateLimit(`sync:login:${sha256(email)}`, 12, 15 * 60 * 1000)
+  const identifier = parseIdentifier(body)
+  rateLimit(`sync:login:${sha256(identifier.value)}`, 12, 15 * 60 * 1000)
   const authKey = parseAuthKey(body.authKey)
   const device = parseDevice(body.device)
-  const account = await loadAccountByEmail(email)
+  const account = await loadAccountByIdentifier(identifier)
   const verify = async (record) => {
     const expected = Buffer.from(record.auth.hash, 'base64')
     const actual = await scryptHash(authKey, Buffer.from(record.auth.salt, 'base64'))
     return safeEqual(expected, actual)
   }
+  const wrong = wrongCredentials(identifier.kind)
   if (!account) {
-    // Burn the same time as a real check so timing does not reveal unknown e-mails.
+    // Burn the same time as a real check so timing does not reveal unknown names.
     await scryptHash(authKey, randomBytes(16))
-    fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
+    fail(401, wrong)
   }
-  if (!await verify(account)) fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
+  if (!await verify(account)) fail(401, wrong)
   await withAccountLock(account.id, async () => {
     const fresh = await loadAccountById(account.id)
     // The key was checked on the account from before this lock. A password
     // change can save a new hash in between. Signing that stale check in
     // would open a session for the old key.
-    if (!fresh?.auth?.hash || !fresh?.auth?.salt) fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
+    if (!fresh?.auth?.hash || !fresh?.auth?.salt) fail(401, wrong)
     const unchanged = fresh.auth.salt === account.auth.salt && fresh.auth.hash === account.auth.hash
-    if (!unchanged && !await verify(fresh)) fail(401, 'E-Mail-Adresse oder Passwort stimmen nicht.')
+    if (!unchanged && !await verify(fresh)) fail(401, wrong)
     const deviceId = registerDevice(fresh, device)
     const session = issueSession(fresh, deviceId)
     await saveAccount(fresh)
     const table = await loadTable(fresh.id)
-    sendJson(request, response, 200, { accountId: fresh.id, deviceId, token: session.token, expiresAt: session.expiresAt, kdf: fresh.kdf, vaultKeyWrap: fresh.vaultKeyWrap, revision: table.revision })
+    sendJson(request, response, 200, { accountId: fresh.id, deviceId, token: session.token, expiresAt: session.expiresAt, kdf: fresh.kdf, vaultKeyWrap: fresh.vaultKeyWrap, revision: table.revision, ...identityFields(fresh) })
   })
 }
 
@@ -907,11 +994,81 @@ const handleAccount = async (request, response, auth) => {
   const files = [...table.entries.values()].filter((entry) => !entry.deleted).length
   sendJson(request, response, 200, {
     accountId: auth.account.id,
-    email: auth.account.email,
+    ...identityFields(auth.account),
     createdAt: auth.account.createdAt,
     revision: table.revision,
     usage: { files, bytes: table.bytes + (table.historyBytes || 0), quotaBytes: QUOTA_BYTES, maxFiles: MAX_FILES, maxFileBytes: MAX_BLOB_BYTES },
     devices: Object.values(auth.account.devices).map((device) => ({ ...device, current: device.id === auth.deviceId })),
+  })
+}
+
+/** Claim a username for an account that has none (accounts made before usernames). It cannot be changed afterwards. */
+const handleSetUsername = async (request, response, auth) => {
+  rateLimit(`sync:username:${auth.account.id}`, 10, 60 * 60 * 1000)
+  const body = await readJsonBody(request)
+  const username = parseUsername(body.username)
+  const userKey = parseUserKey(body.publicKey, body.userKeyWrap)
+  await withAccountLock(auth.account.id, async () => {
+    const account = await loadAccountById(auth.account.id)
+    if (account.username) fail(409, 'Dieses Konto hat schon einen Benutzernamen.')
+    if (account.userKey) fail(409, 'Dieses Konto hat schon einen Freigabe-Schlüssel.')
+    const path = usernameIndexPath(username.key)
+    if (!await claimIndex(path, account.id)) fail(409, 'Dieser Benutzername ist bereits vergeben.')
+    try {
+      account.username = username.display
+      account.usernameKey = username.key
+      account.userKey = userKey
+      account.version = 2
+      await saveAccount(account)
+    } catch (error) {
+      await releaseIndex(path).catch(() => {})
+      throw error
+    }
+    sendJson(request, response, 200, identityFields(account))
+  })
+}
+
+/** Publish the per-user sharing key pair once (accounts that already have a username but no key). The private half stays wrapped by the vault secret. */
+const handleSetUserKey = async (request, response, auth) => {
+  rateLimit(`sync:userkey:${auth.account.id}`, 10, 60 * 60 * 1000)
+  const body = await readJsonBody(request)
+  const userKey = parseUserKey(body.publicKey, body.userKeyWrap)
+  await withAccountLock(auth.account.id, async () => {
+    const account = await loadAccountById(auth.account.id)
+    if (account.userKey) fail(409, 'Dieses Konto hat schon einen Freigabe-Schlüssel.')
+    account.userKey = userKey
+    account.version = 2
+    await saveAccount(account)
+    sendJson(request, response, 200, identityFields(account))
+  })
+}
+
+/** Add or replace the optional recovery e-mail. The current auth key must be sent again. */
+const handleSetEmail = async (request, response, auth) => {
+  rateLimit(`sync:email:${auth.account.id}`, 10, 60 * 60 * 1000)
+  const body = await readJsonBody(request)
+  const email = normalizeEmail(body.email)
+  const authKey = parseAuthKey(body.authKey)
+  await withAccountLock(auth.account.id, async () => {
+    const account = await loadAccountById(auth.account.id)
+    const expected = Buffer.from(account.auth.hash, 'base64')
+    if (!safeEqual(expected, await scryptHash(authKey, Buffer.from(account.auth.salt, 'base64')))) fail(403, 'Das aktuelle Passwort stimmt nicht.')
+    if (account.email === email) {
+      sendJson(request, response, 200, identityFields(account))
+      return
+    }
+    if (!await claimIndex(emailIndexPath(email), account.id)) fail(409, 'Diese E-Mail-Adresse ist bereits einem Konto zugeordnet.')
+    const previous = account.email
+    try {
+      account.email = email
+      account.version = 2
+      await saveAccount(account)
+    } catch (error) {
+      await releaseIndex(emailIndexPath(email)).catch(() => {})
+      throw error
+    }
+    if (previous) await releaseIndex(emailIndexPath(previous)).catch(() => {})
+    sendJson(request, response, 200, identityFields(account))
   })
 }
 
@@ -953,11 +1110,11 @@ const handlePassword = async (request, response, auth) => {
     account.auth = { salt: salt.toString('base64'), hash: (await scryptHash(nextKey, salt)).toString('base64') }
     account.kdf = kdf
     account.vaultKeyWrap = vaultKeyWrap
+    // Setting a password turns a device-key account into a normal one: the password now opens it on any device.
+    account.credential = 'password'
     account.sessions = { [auth.tokenHash]: account.sessions[auth.tokenHash] }
     for (const id of Object.keys(account.devices)) if (id !== auth.deviceId) delete account.devices[id]
     await saveAccount(account)
-    const { revokeAccountAccess } = await import('./mcp-grants.mjs')
-    await revokeAccountAccess(account.id)
   })
   sendEmpty(request, response, 204)
 }
@@ -970,12 +1127,12 @@ const handleDeleteAccount = async (request, response, auth) => {
     const account = await loadAccountById(auth.account.id)
     const expected = Buffer.from(account.auth.hash, 'base64')
     if (!safeEqual(expected, await scryptHash(authKey, Buffer.from(account.auth.salt, 'base64')))) fail(403, 'Das Passwort stimmt nicht.')
-    await fs.rm(emailIndexPath(account.email), { force: true })
+    if (account.email) await fs.rm(emailIndexPath(account.email), { force: true })
+    if (account.usernameKey) await fs.rm(usernameIndexPath(account.usernameKey), { force: true })
+    await removeAccountShares(account.id)
     await fs.rm(accountDirectory(account.id), { recursive: true, force: true })
     tables.delete(account.id)
     await notifyAccountDeleted(account.id)
-    const { revokeAccountAccess } = await import('./mcp-grants.mjs')
-    await revokeAccountAccess(account.id)
   })
   sendEmpty(request, response, 204)
 }
@@ -2186,7 +2343,7 @@ export const withVerifiedSyncAuth = async (accountId, authKey, task) => withAcco
 export const syncPreloginKdf = async (email) => {
   let normalized
   try { normalized = normalizeEmail(email) } catch { return null }
-  return preloginKdf(normalized)
+  return preloginKdf({ kind: 'email', value: normalized })
 }
 
 /**
@@ -2222,6 +2379,8 @@ const SAFE_METHOD = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'O
 export const syncRouteTemplate = (route) => {
   const path = String(route || '/').split('?')[0].split('#')[0]
   const templated = path
+    .replace(/^\/shares\/[a-f0-9]{32}/iu, '/shares/:shareId')
+    .replace(/^\/blocks\/.*$/u, '/blocks/:name')
     .replace(/[a-f0-9]{64}/giu, ':id')
     .replace(/[a-f0-9]{32}/giu, ':uploadId')
     .replace(/[a-f0-9]{24}/giu, ':deviceId')
@@ -2294,6 +2453,27 @@ export const handleSyncRequest = async (request, response, url) => {
     await touchSession(auth.account, auth.tokenHash)
 
     if (route === '/account' && method === 'GET') { await handleAccount(request, response, auth); return true }
+    if (route === '/username' && method === 'POST') { await handleSetUsername(request, response, auth); return true }
+    if (route === '/email' && method === 'POST') { await handleSetEmail(request, response, auth); return true }
+    if (route === '/userkey' && method === 'POST') { await handleSetUserKey(request, response, auth); return true }
+    if (route === '/events' || route.startsWith('/shares') || route.startsWith('/users/') || route.startsWith('/blocks')) {
+      await handleUserShareRoute({
+        request, response, route, method, url, auth,
+        deps: {
+          fail,
+          rateLimit,
+          readJsonBody,
+          sendJson: (status, body, extra) => sendJson(request, response, status, body, extra),
+          baseHeaders: () => baseHeaders(request),
+          loadAccountById,
+          loadAccountByUsername: async (name) => { try { return await loadAccountByUsername(parseUsername(name).key) } catch { return null } },
+          syncRoot,
+          safeJoin,
+          atomicWrite,
+        },
+      })
+      return true
+    }
     if (route === '/account' && method === 'DELETE') { await handleDeleteAccount(request, response, auth); return true }
     if (route === '/logout' && method === 'POST') { await handleLogout(request, response, auth); return true }
     if (route === '/password' && method === 'POST') { await handlePassword(request, response, auth); return true }

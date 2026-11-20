@@ -21,7 +21,6 @@ const here = path.dirname(new URL(import.meta.url).pathname)
 const serverModule = path.resolve(here, '..', '..', '..', '..', 'fanotes-site', 'sync-api.mjs')
 
 process.env.FANOTES_SYNC_DIR = data
-process.env.FANOTES_MCP_DIR = path.join(data, 'mcp')
 process.env.FANOTES_PUBLIC_ORIGIN = `http://127.0.0.1:${port}`
 
 if (accountLimit > 0) {
