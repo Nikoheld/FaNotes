@@ -2,8 +2,8 @@ use fanotes_host::Host;
 use serde_json::json;
 use std::fs;
 
-fn host() -> (std::path::PathBuf, Host) {
-    let dir = std::env::temp_dir().join(format!(
+fn host() -> (fanotes_host::test_support::Scratch, Host) {
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-worksheets-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -15,7 +15,7 @@ fn host() -> (std::path::PathBuf, Host) {
     let vault = dir.join("vault");
     fs::create_dir_all(vault.join(".fanotes/worksheets")).unwrap();
     fs::write(vault.join(".fanotes/worksheets/blatt-1.pdf"), b"%PDF-1.4\n").unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault).unwrap();
     (dir, host)
 }

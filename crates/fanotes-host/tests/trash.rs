@@ -4,14 +4,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use fanotes_host::Host;
 use serde_json::json;
 
-fn host() -> (std::path::PathBuf, std::path::PathBuf, Host) {
+fn host() -> (
+    fanotes_host::test_support::Scratch,
+    std::path::PathBuf,
+    Host,
+) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-trash-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-trash-{}-{id}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(&vault).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault.clone()).unwrap();
     (dir, vault, host)

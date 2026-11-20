@@ -541,7 +541,7 @@ mod tests {
         let _ = fs::remove_dir_all(&base);
         fs::create_dir_all(base.join("vault")).unwrap();
         let vault = fs::canonicalize(base.join("vault")).unwrap();
-        let mut host = Host::open(base.join("app"));
+        let mut host = Host::open_hermetic(base.join("app"));
         host.vault = Some(vault.clone());
         Fixture { base, vault, host }
     }
@@ -1143,7 +1143,7 @@ mod tests {
     fn a_vault_is_required_first() {
         let base =
             std::env::temp_dir().join(format!("fanotes-story-novault-{}", std::process::id()));
-        let mut host = Host::open(base.join("app"));
+        let mut host = Host::open_hermetic(base.join("app"));
         host.vault = None;
         host.configured_vault = None;
         for channel in [

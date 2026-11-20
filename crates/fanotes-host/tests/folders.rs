@@ -4,22 +4,30 @@ use fanotes_host::Host;
 use serde_json::json;
 use std::fs;
 
-fn host() -> (Host, std::path::PathBuf, std::path::PathBuf) {
+fn host() -> (
+    Host,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    fanotes_host::test_support::Scratch,
+) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-folders-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-folders-{}-{id}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(vault.join("Mathe")).unwrap();
     let app = dir.join("app");
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.set_vault(vault.clone()).unwrap();
-    (host, vault, app)
+    (host, vault, app, dir)
 }
 
 #[test]
 fn a_markdown_note_keeps_a_kelvin_sign_in_its_extension() {
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     let name = "Notiz.mar\u{212A}down";
     fs::write(vault.join("Notiz.mar\u{017F}down"), "langes s\n").unwrap();
     let created = host
@@ -69,7 +77,7 @@ fn a_markdown_note_keeps_a_kelvin_sign_in_its_extension() {
 
 #[test]
 fn a_kelvin_sign_cannot_name_the_legacy_internal_folder() {
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     let kelvin = ".lernwer\u{212A}";
     assert_eq!(
         host.dispatch("fanotes:create-folder", &[json!(""), json!(kelvin)])
@@ -89,7 +97,7 @@ fn a_kelvin_sign_cannot_name_the_legacy_internal_folder() {
 
 #[test]
 fn an_invalid_folder_color_is_reported_before_the_folder_check() {
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
     assert_eq!(
         host.dispatch("fanotes:set-folder-color", &[json!("Seite.md"), json!(1)])
@@ -168,7 +176,7 @@ fn an_invalid_folder_color_is_reported_before_the_folder_check() {
 
 #[test]
 fn folder_color_survives_a_rename_and_the_vault_is_remembered() {
-    let (mut host, vault, app) = host();
+    let (mut host, vault, app, _scratch) = host();
     let painted = host
         .dispatch(
             "fanotes:set-folder-color",
@@ -225,7 +233,7 @@ fn folder_color_survives_a_rename_and_the_vault_is_remembered() {
         .unwrap();
     assert_eq!(switched["vaultPath"], other.to_string_lossy().as_ref());
 
-    let mut restored = Host::open(app);
+    let mut restored = Host::open_hermetic(app);
     assert_eq!(
         restored.dispatch("fanotes:bootstrap", &[]).unwrap()["vaultPath"],
         other.to_string_lossy().as_ref()
@@ -234,7 +242,7 @@ fn folder_color_survives_a_rename_and_the_vault_is_remembered() {
 
 #[test]
 fn the_tree_shows_pdf_notes_and_hides_their_famd_companion() {
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     fs::write(vault.join("Mathe/Seite.famd"), b"companion").unwrap();
     fs::write(vault.join("Mathe/Skript.pdf"), b"%PDF-1.4\n").unwrap();
@@ -263,7 +271,10 @@ fn the_tree_shows_pdf_notes_and_hides_their_famd_companion() {
 #[cfg(unix)]
 #[test]
 fn a_legacy_lernwerk_directory_becomes_fanotes() {
-    let dir = std::env::temp_dir().join(format!("fanotes-legacy-internal-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-legacy-internal-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(vault.join("Mathe")).unwrap();
@@ -273,7 +284,7 @@ fn a_legacy_lernwerk_directory_becomes_fanotes() {
         r##"{"version":1,"colors":{"Mathe":"#112233"}}"##,
     )
     .unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault.clone()).unwrap();
     assert!(!vault.join(".lernwerk").exists());
     assert!(vault.join(".fanotes/folder-colors.json").is_file());
@@ -329,7 +340,7 @@ fn a_legacy_lernwerk_directory_becomes_fanotes() {
 
 #[test]
 fn the_tree_sorts_umlauts_with_their_base_letters() {
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     for name in [
         "Zen.md",
         "Äpfel.md",
@@ -362,7 +373,7 @@ fn the_tree_sorts_umlauts_with_their_base_letters() {
 
 #[test]
 fn an_unreadable_name_does_not_hide_the_rest_of_the_tree() {
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     let mut directory = vault.clone();
     while directory.to_string_lossy().len() + 80 < 3950 {
         let used = directory.to_string_lossy().len();
@@ -403,7 +414,7 @@ fn an_unreadable_name_does_not_hide_the_rest_of_the_tree() {
 
 #[test]
 fn a_fast_tree_skips_a_folder_that_cannot_be_listed() {
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     let hidden = vault.join("Geheim");
     fs::create_dir(&hidden).unwrap();
     fs::write(hidden.join("versteckt.md"), "x\n").unwrap();
@@ -445,7 +456,7 @@ fn a_fast_tree_skips_a_folder_that_cannot_be_listed() {
 #[test]
 fn an_unreadable_folder_color_file_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     fs::create_dir_all(vault.join(".fanotes")).unwrap();
     let path = vault.join(".fanotes/folder-colors.json");
     fs::write(&path, br##"{"version":1,"colors":{"Mathe":"#A1B2C3"}}"##).unwrap();
@@ -472,7 +483,7 @@ fn an_unreadable_folder_color_file_uses_the_desktop_open_error() {
 #[test]
 fn an_unlistable_vault_metadata_folder_uses_the_desktop_lstat_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     let internal = vault.join(".fanotes");
     fs::create_dir_all(&internal).unwrap();
     let colors = internal.join("folder-colors.json");
@@ -515,7 +526,7 @@ fn an_unlistable_vault_metadata_folder_uses_the_desktop_lstat_error() {
 #[test]
 fn an_unsearchable_vault_reports_the_desktop_lstat_for_its_internal_folder() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     let vault = fs::canonicalize(&vault).unwrap();
     let internal = vault.join(".fanotes");
     fs::create_dir_all(&internal).unwrap();
@@ -542,7 +553,7 @@ fn an_unsearchable_vault_reports_the_desktop_lstat_for_its_internal_folder() {
 
 #[test]
 fn a_folder_color_with_a_bad_byte_still_paints_the_folder() {
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     fs::create_dir_all(vault.join(".fanotes")).unwrap();
     let mut bytes = br##"{"version":1,"note":"X","colors":{"Mathe":"#A1B2C3"}}"##.to_vec();
     let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
@@ -562,7 +573,7 @@ fn a_folder_color_with_a_bad_byte_still_paints_the_folder() {
 #[test]
 fn an_unwritable_internal_folder_reports_the_desktop_color_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault, _) = host();
+    let (mut host, vault, _, _scratch) = host();
     let vault = fs::canonicalize(&vault).unwrap();
     let internal = vault.join(".fanotes");
     fs::create_dir_all(&internal).unwrap();

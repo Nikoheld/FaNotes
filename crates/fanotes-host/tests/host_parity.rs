@@ -30,7 +30,7 @@ fn fixture() -> Fixture {
     fs::create_dir_all(vault.join("Mathe")).unwrap();
     fs::write(vault.join("Mathe/Notiz.md"), "# Notiz\n").unwrap();
     fs::write(vault.join("Mathe/Buch.pdf"), b"%PDF-").unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault.clone()).unwrap();
     let vault = fs::canonicalize(vault).unwrap();

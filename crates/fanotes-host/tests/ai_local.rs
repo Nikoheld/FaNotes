@@ -6,15 +6,16 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
-fn host() -> Host {
+fn host() -> (Host, fanotes_host::test_support::Scratch) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-ai-{}-{id}", std::process::id()));
+    let dir =
+        fanotes_host::test_support::Scratch::new(format!("fanotes-ai-{}-{id}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("vault")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(dir.join("vault")).unwrap();
-    host
+    (host, dir)
 }
 
 fn serve_ollama() -> String {
@@ -56,7 +57,7 @@ fn an_advertised_ai_response_above_the_desktop_limit_is_refused() {
         let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 9000000\r\nConnection: close\r\n\r\n{}";
         let _ = stream.write_all(response.as_bytes());
     });
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let error = host
         .dispatch(
             "fanotes:ai-list-models",
@@ -88,7 +89,7 @@ fn an_empty_ollama_reply_uses_the_desktop_message() {
         );
         let _ = stream.write_all(response.as_bytes());
     });
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let error = host
         .dispatch(
             "fanotes:ai-transform",
@@ -114,7 +115,7 @@ fn an_empty_ollama_reply_uses_the_desktop_message() {
 #[test]
 fn ollama_lists_a_model_and_returns_markdown() {
     let origin = serve_ollama();
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let models = host
         .dispatch(
             "fanotes:ai-list-models",
@@ -174,7 +175,7 @@ fn opencode_lists_models_from_its_local_provider_api() {
             let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
         }
     });
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let models = host
         .dispatch(
             "fanotes:ai-list-models",

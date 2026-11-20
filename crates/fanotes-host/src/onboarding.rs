@@ -501,7 +501,7 @@ mod tests {
     #[test]
     fn an_unwritable_starter_folder_reports_the_desktop_mkdir_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-starter-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()

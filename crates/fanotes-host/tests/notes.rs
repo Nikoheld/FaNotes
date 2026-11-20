@@ -4,24 +4,31 @@ use fanotes_famd::parse_famd;
 use fanotes_host::Host;
 use serde_json::json;
 
-fn host() -> (Host, std::path::PathBuf) {
+fn host() -> (
+    Host,
+    std::path::PathBuf,
+    fanotes_host::test_support::Scratch,
+) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-notes-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-notes-{}-{id}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(vault.join("Mathe")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault.clone()).unwrap();
-    (host, vault)
+    (host, vault, dir)
 }
 
 #[cfg(unix)]
 #[test]
 fn an_unreadable_note_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let note = vault.join("Mathe/Seite.md");
     std::fs::write(&note, b"Hallo\n").unwrap();
     let canonical = std::fs::canonicalize(&note).unwrap();
@@ -46,7 +53,7 @@ fn an_unreadable_note_uses_the_desktop_open_error() {
 #[test]
 fn an_unreadable_oversized_note_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let note = vault.join("Mathe/Seite.md");
     let file = std::fs::OpenOptions::new()
         .write(true)
@@ -80,7 +87,7 @@ fn an_unreadable_oversized_note_uses_the_desktop_open_error() {
 
 #[test]
 fn an_oversized_companion_fails_the_note_save() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let note = vault.join("Mathe/Seite.md");
     std::fs::write(&note, b"Hallo\n").unwrap();
     let famd = vault.join("Mathe/Seite.famd");
@@ -106,7 +113,7 @@ fn an_oversized_companion_fails_the_note_save() {
 #[test]
 fn an_unreadable_handwriting_file_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let famd = vault.join("Mathe/Seite.famd");
     std::fs::write(&famd, b"<!-- fanotes-famd:v1 chars=0 -->\n").unwrap();
     let canonical = std::fs::canonicalize(&famd).unwrap();
@@ -131,7 +138,7 @@ fn an_unreadable_handwriting_file_uses_the_desktop_open_error() {
 #[test]
 fn an_unlistable_companion_uses_the_desktop_lstat_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let folder = vault.join("Mathe");
     let famd = folder.join("Seite.famd");
     std::fs::write(&famd, b"INK-BLEIBT").unwrap();
@@ -184,7 +191,7 @@ fn an_unlistable_companion_uses_the_desktop_lstat_error() {
 #[test]
 fn an_unreadable_companion_does_not_look_missing() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let note = vault.join("Mathe/Seite.md");
     let famd = vault.join("Mathe/Seite.famd");
     std::fs::write(&note, b"alt\n").unwrap();
@@ -220,7 +227,7 @@ fn an_unreadable_companion_does_not_look_missing() {
 #[test]
 fn an_unreadable_history_index_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
@@ -263,7 +270,7 @@ fn an_unreadable_history_index_uses_the_desktop_open_error() {
 #[test]
 fn an_unreadable_history_snapshot_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
@@ -326,7 +333,7 @@ fn an_unreadable_history_snapshot_uses_the_desktop_open_error() {
 #[test]
 fn an_unsearchable_vault_reports_the_desktop_history_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, _) = host();
+    let (mut host, _, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     host.dispatch(
@@ -373,7 +380,7 @@ fn an_unsearchable_vault_reports_the_desktop_history_open_error() {
 #[cfg(unix)]
 #[test]
 fn a_file_in_the_history_path_reports_the_desktop_open_error() {
-    let (mut host, _) = host();
+    let (mut host, _, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     let index = vault.join(".fanotes/history/5798959f2b2256a0bff452f5e895b16e3a8401da/index.json");
@@ -398,7 +405,7 @@ fn a_file_in_the_history_path_reports_the_desktop_open_error() {
 #[cfg(unix)]
 #[test]
 fn a_file_named_history_reports_the_desktop_open_error() {
-    let (mut host, _) = host();
+    let (mut host, _, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     std::fs::write(vault.join(".fanotes/history"), b"datei").unwrap();
@@ -413,7 +420,7 @@ fn a_file_named_history_reports_the_desktop_open_error() {
 #[cfg(unix)]
 #[test]
 fn a_linked_history_folder_still_lists_its_snapshots() {
-    let (mut host, _) = host();
+    let (mut host, _, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     host.dispatch(
@@ -434,7 +441,7 @@ fn a_linked_history_folder_still_lists_its_snapshots() {
 
 #[test]
 fn a_tree_modification_time_rounds_to_the_nearest_millisecond() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let path = vault.join("Mathe/Seite.md");
     std::fs::write(&path, b"Hallo\n").unwrap();
     let when = std::time::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 600_000);
@@ -467,7 +474,7 @@ fn a_tree_modification_time_rounds_to_the_nearest_millisecond() {
 
 #[test]
 fn a_file_is_not_a_folder_target() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
     std::fs::write(vault.join("Andere.md"), b"Welt\n").unwrap();
     assert_eq!(
@@ -511,7 +518,7 @@ fn a_file_is_not_a_folder_target() {
 
 #[test]
 fn a_read_checks_the_markdown_extension_before_the_path_shape() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
     assert_eq!(
         host.dispatch("fanotes:read-file", &[json!("../secret.txt")])
@@ -560,7 +567,7 @@ fn a_read_checks_the_markdown_extension_before_the_path_shape() {
 
 #[test]
 fn a_note_link_reads_page_and_position_with_javascript_number() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     let links = host
         .dispatch(
@@ -610,7 +617,7 @@ fn a_note_link_reads_page_and_position_with_javascript_number() {
 
 #[test]
 fn a_saved_note_adopts_links_and_backups_from_the_trailer() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     host.dispatch(
         "fanotes:write-note-links",
@@ -652,7 +659,7 @@ fn a_saved_note_adopts_links_and_backups_from_the_trailer() {
 #[test]
 fn an_unreadable_subject_book_list_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::create_dir_all(vault.join(".fanotes")).unwrap();
     let path = vault.join(".fanotes/subject-books.json");
     std::fs::write(&path, b"{\"version\":1,\"books\":[]}\n").unwrap();
@@ -679,7 +686,7 @@ fn an_unreadable_subject_book_list_uses_the_desktop_open_error() {
 
 #[test]
 fn a_subject_book_page_follows_javascript_number() {
-    let (mut host, _) = host();
+    let (mut host, _, _scratch) = host();
     let books = host
         .dispatch(
             "fanotes:write-subject-books",
@@ -703,7 +710,7 @@ fn a_subject_book_page_follows_javascript_number() {
 
 #[test]
 fn a_note_with_an_invalid_byte_still_opens_and_can_be_found() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let mut bytes = b"Die Photosynthese braucht Licht.\n".to_vec();
     bytes.insert(4, 0xff);
     std::fs::write(vault.join("Mathe/Blatt.md"), &bytes).unwrap();
@@ -742,7 +749,7 @@ fn a_note_with_an_invalid_byte_still_opens_and_can_be_found() {
 
 #[test]
 fn paper_links_books_and_history_round_trip() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
@@ -867,7 +874,7 @@ fn paper_links_books_and_history_round_trip() {
 
 #[test]
 fn saving_markdown_keeps_the_handwriting_sidecar() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Seite.md"), b"\n").unwrap();
     let saved = host
         .dispatch(
@@ -911,7 +918,7 @@ fn saving_markdown_keeps_the_handwriting_sidecar() {
 
 #[test]
 fn renaming_and_deleting_a_note_moves_its_companion() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
@@ -954,7 +961,7 @@ fn renaming_and_deleting_a_note_moves_its_companion() {
 
 #[test]
 fn a_new_note_adopts_an_existing_handwriting_companion() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let mut payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
     payload.ink = Some(json!({
         "schemaVersion": 1,
@@ -1000,7 +1007,7 @@ fn a_new_note_adopts_an_existing_handwriting_companion() {
 
 #[test]
 fn a_companion_read_follows_the_desktop_file_check() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::create_dir(vault.join("Mathe/Ordner.md")).unwrap();
     let mut payload = fanotes_famd::empty_famd_payload("2026-01-02T03:04:05.000Z");
     // A directory named like the note must not hide the companion. Stats
@@ -1069,7 +1076,7 @@ fn a_companion_read_follows_the_desktop_file_check() {
 
 #[test]
 fn a_directory_named_like_a_note_cannot_be_read() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::create_dir(vault.join("Mathe/Seite.md")).unwrap();
     assert_eq!(
         host.dispatch("fanotes:read-file", &[json!("Mathe/Seite.md")])
@@ -1088,7 +1095,7 @@ fn a_directory_named_like_a_note_cannot_be_read() {
 
 #[test]
 fn a_missing_markdown_note_is_not_created_by_writing() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let missing = std::fs::canonicalize(vault.join("Mathe"))
         .unwrap()
         .join("Neu.md");
@@ -1128,7 +1135,7 @@ fn a_missing_markdown_note_is_not_created_by_writing() {
 
 #[test]
 fn a_kelvin_markdown_note_stores_handwriting_beside_the_same_stem() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let name = "Notiz.mar\u{212A}down";
     let created = host
         .dispatch("fanotes:create-note", &[json!(""), json!(name)])
@@ -1144,7 +1151,7 @@ fn a_kelvin_markdown_note_stores_handwriting_beside_the_same_stem() {
 
 #[test]
 fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let first = host
         .dispatch("fanotes:create-note", &[json!("Mathe"), json!("Seite")])
         .unwrap();
@@ -1241,7 +1248,10 @@ fn a_second_note_is_numbered_and_reads_without_the_sidecar() {
 #[cfg(unix)]
 #[test]
 fn a_symlinked_note_cannot_leave_the_vault() {
-    let dir = std::env::temp_dir().join(format!("fanotes-notes-link-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-notes-link-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     let outside = dir.join("outside");
@@ -1250,7 +1260,7 @@ fn a_symlinked_note_cannot_leave_the_vault() {
     std::fs::write(outside.join("secret.md"), b"geheim\n").unwrap();
     std::os::unix::fs::symlink(outside.join("secret.md"), vault.join("Notiz.md")).unwrap();
     std::os::unix::fs::symlink(&outside, vault.join("weg")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault).unwrap();
     assert_eq!(
@@ -1281,11 +1291,14 @@ fn a_symlinked_note_cannot_leave_the_vault() {
 
 #[test]
 fn a_saved_note_is_private_and_leaves_no_temporary_file() {
-    let dir = std::env::temp_dir().join(format!("fanotes-notes-atomic-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-notes-atomic-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(&vault).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     std::fs::write(vault.join("Seite.md"), b"\n").unwrap();
     host.set_vault(vault.clone()).unwrap();
@@ -1320,12 +1333,15 @@ fn a_saved_note_is_private_and_leaves_no_temporary_file() {
 
 #[test]
 fn page_stats_keep_the_fields_the_editor_stores() {
-    let dir = std::env::temp_dir().join(format!("fanotes-notes-stats-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-notes-stats-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(&vault).unwrap();
     std::fs::write(vault.join("Seite.md"), b"\n").unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault).unwrap();
     let stats = json!({
@@ -1370,12 +1386,14 @@ fn page_stats_keep_the_fields_the_editor_stores() {
 
 #[test]
 fn a_pdf_note_keeps_history_of_its_famd_file() {
-    let dir =
-        std::env::temp_dir().join(format!("fanotes-notes-pdf-history-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-notes-pdf-history-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(&vault).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault).unwrap();
     host.dispatch(
@@ -1413,7 +1431,7 @@ fn a_pdf_note_keeps_history_of_its_famd_file() {
 
 #[test]
 fn a_newer_capital_does_not_take_the_lowercase_note_name() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let capital = "\u{A7CE}.md";
     std::fs::write(vault.join(capital), b"bleibt\n").unwrap();
     let created = host
@@ -1426,7 +1444,7 @@ fn a_newer_capital_does_not_take_the_lowercase_note_name() {
 
 #[test]
 fn a_decomposed_umlaut_is_the_same_note_name() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let nfd_note = "Mu\u{0308}he.md";
     let nfd_ink = "Mu\u{0308}he.famd";
     std::fs::write(vault.join(nfd_note), b"bleibt\n").unwrap();
@@ -1450,7 +1468,7 @@ fn a_decomposed_umlaut_is_the_same_note_name() {
 
 #[test]
 fn a_new_entry_checks_the_parent_before_the_name() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
     assert_eq!(
         host.dispatch("fanotes:create-note", &[json!("Seite.md"), json!("CON")])
@@ -1501,7 +1519,7 @@ fn a_new_entry_checks_the_parent_before_the_name() {
 
 #[test]
 fn a_missing_folder_is_not_created_for_a_new_note() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let missing = std::fs::canonicalize(&vault).unwrap().join("Fehlt");
     let created = host
         .dispatch("fanotes:create-note", &[json!("Fehlt"), json!("Seite")])
@@ -1543,7 +1561,7 @@ fn a_missing_folder_is_not_created_for_a_new_note() {
 
 #[test]
 fn a_long_german_title_uses_character_length() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let title = "Ä".repeat(91);
     let created = host
         .dispatch("fanotes:create-note", &[json!(""), json!(title)])
@@ -1572,7 +1590,7 @@ fn a_long_german_title_uses_character_length() {
 
 #[test]
 fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
@@ -1616,7 +1634,7 @@ fn a_history_index_with_an_invalid_byte_still_lists_its_snapshots() {
 
 #[test]
 fn history_uses_the_desktop_trim_for_a_blank_note() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     std::fs::write(vault.join("Mathe/Neben.md"), b"\n").unwrap();
     host.dispatch(
@@ -1666,7 +1684,7 @@ fn history_uses_the_desktop_trim_for_a_blank_note() {
 
 #[test]
 fn listing_history_does_not_create_the_internal_folder() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
     let history = host
@@ -1687,7 +1705,7 @@ fn listing_history_does_not_create_the_internal_folder() {
 
 #[test]
 fn recording_history_keeps_a_legacy_internal_folder() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
     std::fs::create_dir_all(vault.join(".lernwerk")).unwrap();
@@ -1708,7 +1726,7 @@ fn recording_history_keeps_a_legacy_internal_folder() {
 
 #[test]
 fn a_history_index_uses_the_desktop_indentation() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
@@ -1743,7 +1761,7 @@ fn a_history_index_uses_the_desktop_indentation() {
 #[test]
 fn an_unreadable_recognition_model_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let path = vault.join(".fanotes/recognition-model.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, b"{\"version\":1}\n").unwrap();
@@ -1769,7 +1787,7 @@ fn an_unreadable_recognition_model_uses_the_desktop_open_error() {
 #[test]
 fn an_unlistable_recognition_model_uses_the_desktop_lstat_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let directory = vault.join(".fanotes");
     std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join("recognition-model.json");
@@ -1794,7 +1812,7 @@ fn an_unlistable_recognition_model_uses_the_desktop_lstat_error() {
 
 #[test]
 fn a_recognition_model_with_a_bad_byte_still_loads() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::create_dir_all(vault.join(".fanotes")).unwrap();
     let mut bytes = br#"{"version":1,"name":"X"}"#.to_vec();
     let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
@@ -1809,7 +1827,7 @@ fn a_recognition_model_with_a_bad_byte_still_loads() {
 
 #[test]
 fn a_recognition_model_file_uses_the_desktop_checks() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let directory = vault.join(".fanotes");
     std::fs::create_dir_all(&directory).unwrap();
     let path = directory.join("recognition-model.json");
@@ -1853,7 +1871,7 @@ fn a_recognition_model_file_uses_the_desktop_checks() {
 
 #[test]
 fn reading_a_recognition_model_leaves_a_legacy_internal_folder() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();
     std::fs::create_dir_all(vault.join(".lernwerk")).unwrap();
     std::fs::write(vault.join(".lernwerk/keep.txt"), b"alt").unwrap();
@@ -1919,7 +1937,7 @@ fn reading_a_recognition_model_leaves_a_legacy_internal_folder() {
 
 #[test]
 fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::create_dir_all(vault.join(".fanotes")).unwrap();
     let mut bytes = br#"{"version":1,"books":[{"subjectPath":"MaXthe","bookPath":"Mathe/Buch.pdf","lastPage":4}]}"#.to_vec();
     let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
@@ -1939,7 +1957,7 @@ fn a_subject_book_with_a_bad_byte_stays_in_the_list() {
 
 #[test]
 fn a_note_link_trims_a_byte_order_mark_and_keeps_a_next_line() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     host.dispatch(
         "fanotes:write-file",
@@ -1994,7 +2012,7 @@ fn a_note_link_trims_a_byte_order_mark_and_keeps_a_next_line() {
 
 #[test]
 fn a_rewritten_link_source_is_returned_before_the_file_check() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     let links = host
         .dispatch(
@@ -2044,7 +2062,7 @@ fn a_rewritten_link_source_is_returned_before_the_file_check() {
 
 #[test]
 fn a_dotfile_with_one_dot_is_not_a_note() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let error = host
         .dispatch(
             "fanotes:write-file",
@@ -2074,7 +2092,7 @@ fn a_dotfile_with_one_dot_is_not_a_note() {
 
 #[test]
 fn a_famd_save_does_not_create_a_missing_folder() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let missing = std::fs::canonicalize(&vault).unwrap().join("Neu");
     let error = host
         .dispatch(
@@ -2117,7 +2135,7 @@ fn a_famd_save_does_not_create_a_missing_folder() {
 
 #[test]
 fn a_companion_save_does_not_create_a_missing_folder() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let link = json!([{
         "id": "link-a",
         "targetPath": "Physik/Kraft.md",
@@ -2170,7 +2188,7 @@ fn a_companion_save_does_not_create_a_missing_folder() {
 #[test]
 fn an_unwritable_note_folder_uses_a_twenty_hex_temporary_name() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, _) = host();
+    let (mut host, _, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     let folder = vault.join("Mathe");
     let note = folder.join("Seite.md");
@@ -2212,7 +2230,7 @@ fn an_unwritable_note_folder_uses_a_twenty_hex_temporary_name() {
 #[test]
 fn an_unwritable_folder_reports_the_desktop_create_errors() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, _) = host();
+    let (mut host, _, _scratch) = host();
     let folder = host.vault.clone().unwrap().join("Mathe");
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
     struct Restore(std::path::PathBuf);

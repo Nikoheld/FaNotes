@@ -3,8 +3,8 @@ use fanotes_host::Host;
 use serde_json::json;
 use std::fs;
 
-fn host() -> (std::path::PathBuf, Host) {
-    let dir = std::env::temp_dir().join(format!(
+fn host() -> (fanotes_host::test_support::Scratch, Host) {
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-drawings-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -14,7 +14,7 @@ fn host() -> (std::path::PathBuf, Host) {
     ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("vault")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(dir.join("vault")).unwrap();
     (dir, host)
 }

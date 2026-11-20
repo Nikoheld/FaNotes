@@ -4,10 +4,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use fanotes_host::Host;
 use serde_json::{json, Value};
 
-fn host() -> (Host, std::path::PathBuf) {
+fn host() -> (
+    Host,
+    std::path::PathBuf,
+    fanotes_host::test_support::Scratch,
+) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!(
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-folder-locations-{}-{id}",
         std::process::id()
     ));
@@ -16,10 +20,10 @@ fn host() -> (Host, std::path::PathBuf) {
     fs::create_dir_all(vault.join("amat")).unwrap();
     fs::write(vault.join("amat/Alt.md"), "alt\n").unwrap();
     fs::write(vault.join("amat/Gleich.md"), "im vault\n").unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.file_dialogs = false;
     host.set_vault(vault.clone()).unwrap();
-    (host, vault)
+    (host, vault, dir)
 }
 
 fn child<'a>(tree: &'a Value, name: &str) -> &'a Value {
@@ -32,7 +36,7 @@ fn child<'a>(tree: &'a Value, name: &str) -> &'a Value {
 
 #[test]
 fn several_directories_appear_in_one_folder_and_can_move() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let outside = vault.parent().unwrap().join("extern");
     let extra = vault.parent().unwrap().join("extra");
     fs::create_dir_all(&outside).unwrap();

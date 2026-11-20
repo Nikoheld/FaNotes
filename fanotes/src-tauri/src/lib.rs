@@ -698,7 +698,7 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("fanotes-close-warning-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut host = fanotes_host::Host::open(dir.join("app"));
+        let mut host = fanotes_host::Host::open_hermetic(dir.join("app"));
         host.settings
             .insert("uiLanguage".to_owned(), serde_json::json!("en"));
         assert_eq!(

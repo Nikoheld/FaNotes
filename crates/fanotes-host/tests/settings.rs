@@ -83,22 +83,29 @@ fn civil_date(days_since_epoch: i64) -> (i32, u32, u32) {
     (year as i32, month as u32, day as u32)
 }
 
-fn host() -> (std::path::PathBuf, Host) {
+fn host() -> (
+    std::path::PathBuf,
+    Host,
+    fanotes_host::test_support::Scratch,
+) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-settings-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-settings-{}-{id}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(&vault).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.secret_store = SecretStore::Memory;
     host.set_vault(vault).unwrap();
-    (dir.join("app"), host)
+    (dir.join("app"), host, dir)
 }
 
 #[test]
 fn a_whole_setting_is_stored_like_javascript() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch(
         "fanotes:save-settings",
         &[json!({ "editorFontSize": 18, "smoothing": 0 })],
@@ -120,7 +127,7 @@ fn a_whole_setting_is_stored_like_javascript() {
 
 #[test]
 fn invalid_settings_stay_on_the_previous_value() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     let saved = host
         .dispatch(
             "fanotes:save-settings",
@@ -150,7 +157,7 @@ fn invalid_settings_stay_on_the_previous_value() {
     let secrets = host.dispatch("fanotes:load-secure-settings", &[]).unwrap();
     assert_eq!(secrets["openAiApiKey"], "sk-live-secret");
 
-    let mut reopened = Host::open(app.clone());
+    let mut reopened = Host::open_hermetic(app.clone());
     reopened.secret_store = SecretStore::Memory;
     reopened
         .set_vault(app.parent().unwrap().join("vault"))
@@ -181,7 +188,7 @@ fn invalid_settings_stay_on_the_previous_value() {
 
 #[test]
 fn a_non_object_settings_save_keeps_the_current_settings() {
-    let (_app, mut host) = host();
+    let (_app, mut host, _scratch) = host();
     host.dispatch(
         "fanotes:save-settings",
         &[json!({ "theme": "midnight", "openAiApiKey": "sk-keep" })],
@@ -208,7 +215,7 @@ fn a_non_object_settings_save_keeps_the_current_settings() {
 
 #[test]
 fn a_long_umlaut_secret_is_kept() {
-    let (_app, mut host) = host();
+    let (_app, mut host, _scratch) = host();
     let secret = "Ä".repeat(2100);
     assert!(secret.len() > 4096);
     host.dispatch(
@@ -243,7 +250,7 @@ fn a_long_umlaut_secret_is_kept() {
 
 #[test]
 fn a_german_device_name_keeps_its_umlauts() {
-    let (_app, mut host) = host();
+    let (_app, mut host, _scratch) = host();
     let name = "Ä".repeat(50);
     let saved = host
         .dispatch(
@@ -263,7 +270,7 @@ fn a_german_device_name_keeps_its_umlauts() {
 
 #[test]
 fn api_keys_from_a_plaintext_file_move_into_the_secret_store() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     fs::write(
         app.join("secrets.json"),
         r#"{"openAiApiKey":"sk-from-disk"}"#,
@@ -274,7 +281,7 @@ fn api_keys_from_a_plaintext_file_move_into_the_secret_store() {
         "sk-from-disk"
     );
     assert!(!app.join("secrets.json").exists());
-    let mut reopened = Host::open(app.clone());
+    let mut reopened = Host::open_hermetic(app.clone());
     reopened.secret_store = SecretStore::Memory;
     assert_eq!(
         reopened
@@ -286,7 +293,7 @@ fn api_keys_from_a_plaintext_file_move_into_the_secret_store() {
 
 #[test]
 fn an_api_key_follows_the_resolved_profile_path() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch(
         "fanotes:save-settings",
         &[json!({ "openAiApiKey": "sk-same-profile" })],
@@ -297,7 +304,7 @@ fn an_api_key_follows_the_resolved_profile_path() {
         "{}/",
         parent.join("other").join("..").join("app").display()
     ));
-    let mut reopened = Host::open(spelled);
+    let mut reopened = Host::open_hermetic(spelled);
     reopened.secret_store = SecretStore::Memory;
     assert_eq!(
         reopened
@@ -309,12 +316,15 @@ fn an_api_key_follows_the_resolved_profile_path() {
 
 #[test]
 fn a_missing_keyring_does_not_store_api_keys_in_the_profile() {
-    let dir = std::env::temp_dir().join(format!("fanotes-settings-locked-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-settings-locked-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(&vault).unwrap();
     let app = dir.join("app");
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.secret_store = SecretStore::Unavailable;
     host.set_vault(vault).unwrap();
     let saved = host
@@ -338,7 +348,7 @@ fn a_missing_keyring_does_not_store_api_keys_in_the_profile() {
 
 #[test]
 fn resetting_app_data_waits_for_the_next_launch_and_keeps_the_vault() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     let vault = app.parent().unwrap().join("vault");
     fs::write(vault.join("Seite.md"), b"bleibt\n").unwrap();
     fs::write(app.join("sync-state-extra.txt"), b"weg").unwrap();
@@ -370,7 +380,7 @@ fn resetting_app_data_waits_for_the_next_launch_and_keeps_the_vault() {
         true
     );
 
-    let mut reopened = Host::open(app.clone());
+    let mut reopened = Host::open_hermetic(app.clone());
     reopened.secret_store = SecretStore::Memory;
     assert!(!app.join("settings.json").exists());
     assert!(!app.join("sync-state-extra.txt").exists());
@@ -392,7 +402,7 @@ fn resetting_app_data_waits_for_the_next_launch_and_keeps_the_vault() {
 
 #[test]
 fn a_stale_reset_marker_does_not_wipe_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -405,7 +415,7 @@ fn a_stale_reset_marker_does_not_wipe_the_profile() {
         ),
     )
     .unwrap();
-    let mut reopened = Host::open(app.clone());
+    let mut reopened = Host::open_hermetic(app.clone());
     reopened.secret_store = SecretStore::Memory;
     assert!(app.join("settings.json").is_file());
     assert!(!marker.exists());
@@ -417,7 +427,7 @@ fn a_stale_reset_marker_does_not_wipe_the_profile() {
 
 #[test]
 fn a_reset_marker_resolves_parent_segments_and_a_trailing_slash() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let parent = app.parent().unwrap();
@@ -432,7 +442,7 @@ fn a_reset_marker_resolves_parent_segments_and_a_trailing_slash() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists());
     assert!(!marker.exists());
     assert!(app.join(".fanotes-legacy-migration-v1-complete").is_file());
@@ -440,7 +450,7 @@ fn a_reset_marker_resolves_parent_segments_and_a_trailing_slash() {
 
 #[test]
 fn a_reset_marker_version_of_one_point_zero_still_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -454,14 +464,14 @@ fn a_reset_marker_version_of_one_point_zero_still_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists());
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_date_only_reset_marker_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -475,14 +485,14 @@ fn a_date_only_reset_marker_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists());
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_numeric_offset_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -496,14 +506,14 @@ fn a_reset_marker_with_a_numeric_offset_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists());
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_without_seconds_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -522,14 +532,14 @@ fn a_reset_marker_without_seconds_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists());
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_extra_fraction_digits_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -543,14 +553,14 @@ fn a_reset_marker_with_extra_fraction_digits_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists());
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_space_instead_of_t_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -564,14 +574,14 @@ fn a_reset_marker_with_a_space_instead_of_t_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists());
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_tab_instead_of_t_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -585,14 +595,14 @@ fn a_reset_marker_with_a_tab_instead_of_t_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_date_only_reset_marker_with_trailing_space_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -606,14 +616,14 @@ fn a_date_only_reset_marker_with_trailing_space_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_trailing_space_after_t_keeps_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -627,14 +637,14 @@ fn a_reset_marker_with_a_trailing_space_after_t_keeps_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_without_a_zone_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -648,14 +658,14 @@ fn a_reset_marker_without_a_zone_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_year_and_month_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -670,14 +680,14 @@ fn a_reset_marker_with_a_year_and_month_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_year_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -692,14 +702,14 @@ fn a_reset_marker_with_a_year_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_year_and_month_before_the_clock_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -714,14 +724,14 @@ fn a_reset_marker_with_a_year_and_month_before_the_clock_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_one_digit_month_before_the_clock_keeps_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -735,14 +745,14 @@ fn a_reset_marker_with_a_one_digit_month_before_the_clock_keeps_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_slashes_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -757,14 +767,14 @@ fn a_reset_marker_with_slashes_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_month_name_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -779,14 +789,14 @@ fn a_reset_marker_with_a_month_name_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_at_four_pm_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -801,14 +811,14 @@ fn a_reset_marker_at_four_pm_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_named_zone_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -822,14 +832,14 @@ fn a_reset_marker_with_a_named_zone_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_second_sixty_keeps_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -846,14 +856,14 @@ fn a_reset_marker_with_second_sixty_keeps_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_day_thirty_two_keeps_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -867,14 +877,14 @@ fn a_reset_marker_with_day_thirty_two_keeps_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_at_hour_twenty_four_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -888,14 +898,14 @@ fn a_reset_marker_at_hour_twenty_four_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_at_hour_twenty_four_with_a_later_fraction_digit_keeps_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -909,14 +919,14 @@ fn a_reset_marker_at_hour_twenty_four_with_a_later_fraction_digit_keeps_the_prof
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_three_digit_hour_keeps_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -930,14 +940,14 @@ fn a_reset_marker_with_a_three_digit_hour_keeps_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_three_digit_month_keeps_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -951,14 +961,14 @@ fn a_reset_marker_with_a_three_digit_month_keeps_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_a_five_digit_year_keeps_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -972,14 +982,14 @@ fn a_reset_marker_with_a_five_digit_year_keeps_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file(), "{created}");
     assert!(!marker.exists());
 }
 
 #[test]
 fn a_reset_marker_with_an_expanded_year_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -993,7 +1003,7 @@ fn a_reset_marker_with_an_expanded_year_wipes_the_profile() {
         ),
     )
     .unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists(), "{created}");
     assert!(!marker.exists());
 }
@@ -1001,27 +1011,27 @@ fn a_reset_marker_with_an_expanded_year_wipes_the_profile() {
 #[cfg(unix)]
 #[test]
 fn a_symlinked_reset_marker_is_discarded() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
     std::os::unix::fs::symlink(app.parent().unwrap().join("missing-target"), &marker).unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file());
     assert!(fs::symlink_metadata(&marker).is_err());
 }
 
 #[test]
 fn a_broken_reset_marker_stays_until_it_can_be_read() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let marker = app.parent().unwrap().join(".fanotes-reset-pending.json");
     fs::write(&marker, b"{").unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(app.join("settings.json").is_file());
     assert_eq!(fs::read(&marker).unwrap(), b"{");
-    let mut reopened = Host::open(app.clone());
+    let mut reopened = Host::open_hermetic(app.clone());
     assert_eq!(
         reopened.dispatch("fanotes:bootstrap", &[]).unwrap()["settings"]["theme"],
         "midnight"
@@ -1030,7 +1040,7 @@ fn a_broken_reset_marker_stays_until_it_can_be_read() {
 
 #[test]
 fn a_reset_marker_with_a_bad_byte_still_wipes_the_profile() {
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let user_data = std::path::absolute(&app).unwrap();
@@ -1048,14 +1058,17 @@ fn a_reset_marker_with_a_bad_byte_still_wipes_the_profile() {
         .unwrap();
     bytes[index] = 0xff;
     fs::write(&marker, bytes).unwrap();
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     assert!(!app.join("settings.json").exists());
     assert!(!marker.exists());
 }
 
 #[test]
 fn an_upgrade_turns_experimental_handwriting_off_once() {
-    let dir = std::env::temp_dir().join(format!("fanotes-settings-gate-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-settings-gate-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let app = dir.join("app");
     let vault = dir.join("vault");
@@ -1066,7 +1079,7 @@ fn an_upgrade_turns_experimental_handwriting_off_once() {
         r#"{"theme":"midnight","experimentalHandwritingToText":true,"experimentalHandwritingToTextSeenVersion":"2020.1.0"}"#,
     )
     .unwrap();
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.secret_store = SecretStore::Memory;
     host.set_vault(vault).unwrap();
     let version = host.dispatch("fanotes:update-get-state", &[]).unwrap()["currentVersion"]
@@ -1105,7 +1118,7 @@ fn an_upgrade_turns_experimental_handwriting_off_once() {
         })],
     )
     .unwrap();
-    let mut reopened = Host::open(app);
+    let mut reopened = Host::open_hermetic(app);
     reopened.secret_store = SecretStore::Memory;
     assert_eq!(
         reopened.dispatch("fanotes:bootstrap", &[]).unwrap()["settings"]
@@ -1117,11 +1130,14 @@ fn an_upgrade_turns_experimental_handwriting_off_once() {
 
 #[test]
 fn os_keyring_stores_an_api_key_when_the_session_bus_is_up() {
-    let dir = std::env::temp_dir().join(format!("fanotes-settings-os-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-settings-os-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("vault")).unwrap();
     let app = dir.join("app");
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.set_vault(dir.join("vault")).unwrap();
     host.dispatch(
         "fanotes:save-settings",
@@ -1139,7 +1155,7 @@ fn os_keyring_stores_an_api_key_when_the_session_bus_is_up() {
         return;
     }
     assert_eq!(loaded["openAiApiKey"], "sk-os-keyring");
-    let mut reopened = Host::open(app.clone());
+    let mut reopened = Host::open_hermetic(app.clone());
     assert_eq!(
         reopened
             .dispatch("fanotes:load-secure-settings", &[])
@@ -1160,7 +1176,7 @@ fn os_keyring_stores_an_api_key_when_the_session_bus_is_up() {
 
 #[test]
 fn a_folder_setting_trims_a_byte_order_mark_and_keeps_a_next_line() {
-    let (_app, mut host) = host();
+    let (_app, mut host, _scratch) = host();
     let saved = host
         .dispatch(
             "fanotes:save-settings",
@@ -1188,7 +1204,7 @@ fn a_folder_setting_trims_a_byte_order_mark_and_keeps_a_next_line() {
 
 #[test]
 fn a_settings_file_with_a_bad_byte_still_loads() {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-settings-byte-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -1203,7 +1219,7 @@ fn a_settings_file_with_a_bad_byte_still_loads() {
     let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
     bytes[index] = 0xff;
     fs::write(app.join("settings.json"), &bytes).unwrap();
-    let mut host = Host::open(app);
+    let mut host = Host::open_hermetic(app);
     host.secret_store = SecretStore::Memory;
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(boot["settings"]["syncDeviceName"], "La\u{FFFD}ptop");
@@ -1211,7 +1227,7 @@ fn a_settings_file_with_a_bad_byte_still_loads() {
 
 #[test]
 fn custom_css_rejects_an_expression_after_a_byte_order_mark() {
-    let (_app, mut host) = host();
+    let (_app, mut host, _scratch) = host();
     let saved = host
         .dispatch(
             "fanotes:save-settings",
@@ -1232,7 +1248,7 @@ fn custom_css_rejects_an_expression_after_a_byte_order_mark() {
 #[test]
 fn an_unwritable_profile_keeps_the_saved_theme_and_reports_the_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (app, mut host) = host();
+    let (app, mut host, _scratch) = host();
     host.dispatch("fanotes:save-settings", &[json!({ "theme": "midnight" })])
         .unwrap();
     let saved = fs::read_to_string(app.join("settings.json")).unwrap();

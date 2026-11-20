@@ -3,17 +3,24 @@ use fanotes_famd::parse_famd;
 use fanotes_host::Host;
 use serde_json::json;
 
-fn host() -> (Host, std::path::PathBuf) {
+fn host() -> (
+    Host,
+    std::path::PathBuf,
+    fanotes_host::test_support::Scratch,
+) {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-imports-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-imports-{}-{id}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(vault.join("Mathe")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault.clone()).unwrap();
-    (host, vault)
+    (host, vault, dir)
 }
 
 fn b64(bytes: &[u8]) -> String {
@@ -24,7 +31,7 @@ fn b64(bytes: &[u8]) -> String {
 #[test]
 fn an_unreadable_folder_does_not_receive_the_next_pdf_name() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let folder = vault.join("Mathe");
     std::fs::write(folder.join("Skript.pdf"), b"%PDF-1.4\n").unwrap();
     let canonical = std::fs::canonicalize(&folder).unwrap();
@@ -62,7 +69,7 @@ fn an_unreadable_folder_does_not_receive_the_next_pdf_name() {
 
 #[test]
 fn an_empty_worksheet_name_uses_the_image_id() {
-    let (mut host, _) = host();
+    let (mut host, _, _scratch) = host();
     let png = json!([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     let document = host
         .dispatch(
@@ -87,7 +94,7 @@ fn an_empty_worksheet_name_uses_the_image_id() {
 
 #[test]
 fn a_worksheet_byte_list_follows_buffer_from() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let document = host
         .dispatch(
             "fanotes:import-worksheet-from-data",
@@ -112,7 +119,7 @@ fn a_worksheet_byte_list_follows_buffer_from() {
 
 #[test]
 fn a_worksheet_name_with_a_slash_is_not_a_title() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
     let error = host
         .dispatch(
@@ -163,7 +170,7 @@ fn a_worksheet_name_with_a_slash_is_not_a_title() {
 
 #[test]
 fn a_pdf_import_checks_the_file_before_the_folder() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     std::fs::write(vault.join("Seite.md"), b"Hallo\n").unwrap();
     let pdf = b"%PDF-1.4\n";
     assert_eq!(
@@ -255,7 +262,7 @@ fn a_pdf_import_checks_the_file_before_the_folder() {
 
 #[test]
 fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
     let document = host
         .dispatch(
@@ -327,7 +334,7 @@ fn a_dropped_image_and_a_pdf_note_land_in_the_vault() {
 
 #[test]
 fn a_device_name_cannot_be_imported_as_a_note_or_worksheet() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let pdf = b"%PDF-1.4\n";
     let note_error = host
         .dispatch(
@@ -386,7 +393,7 @@ fn a_device_name_cannot_be_imported_as_a_note_or_worksheet() {
 
 #[test]
 fn a_one_dot_worksheet_name_uses_the_image_fallback() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0];
     let dropped = host
         .dispatch(
@@ -449,7 +456,7 @@ fn a_one_dot_worksheet_name_uses_the_image_fallback() {
 
 #[test]
 fn a_blank_pdf_stem_uses_the_interface_language() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let pdf = b"%PDF-1.4\n";
     host.settings.insert("uiLanguage".to_owned(), json!("en"));
     let note = host
@@ -521,7 +528,7 @@ fn a_blank_pdf_stem_uses_the_interface_language() {
 
 #[test]
 fn a_next_line_import_folder_is_not_the_vault_root() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let error = host
         .dispatch(
             "fanotes:import-pdf-note",
@@ -538,7 +545,7 @@ fn a_next_line_import_folder_is_not_the_vault_root() {
 
 #[test]
 fn a_one_dot_pdf_name_is_not_a_pdf_import() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let payload = json!({ "name": ".pdf", "bytesBase64": b64(b"%PDF-1.4\n") });
     let note = host
         .dispatch(
@@ -557,7 +564,7 @@ fn a_one_dot_pdf_name_is_not_a_pdf_import() {
 
 #[test]
 fn a_subject_book_uses_the_desktop_trim_only_to_reject_a_blank_subject() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     let pdf = json!({ "name": "Skript.pdf", "bytesBase64": b64(b"%PDF-1.4\n") });
     let blank = host
         .dispatch(
@@ -595,7 +602,7 @@ fn a_subject_book_uses_the_desktop_trim_only_to_reject_a_blank_subject() {
 #[test]
 fn an_unwritable_pdf_folder_reports_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (mut host, _) = host();
+    let (mut host, _, _scratch) = host();
     let folder = host.vault.clone().unwrap().join("Mathe");
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
     struct Restore(std::path::PathBuf);

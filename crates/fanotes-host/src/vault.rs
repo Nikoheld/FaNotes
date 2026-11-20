@@ -698,7 +698,7 @@ mod tests {
     #[test]
     fn an_unwritable_vault_reports_the_desktop_internal_mkdir_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-internal-mkdir-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
