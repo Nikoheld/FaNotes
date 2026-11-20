@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 import { assertCurrentMonth, checkAgainstTags, parseCalendarVersion } from './release-policy-core.mjs'
 
@@ -29,6 +30,9 @@ if (!response.ok) throw new Error(`GitHub release policy check failed with HTTP 
 const releases = await response.json()
 assert.ok(Array.isArray(releases), 'GitHub returned an invalid release list.')
 
-const kind = checkAgainstTags(parsed, releases.map((release) => release.tag_name))
+// Unpublished beta tags still reserve their version after a failed build.
+const reservedBetas = execFileSync('git', ['tag', '--list', 'v*-beta.*'], { encoding: 'utf8' }).trim().split('\n')
+
+const kind = checkAgainstTags(parsed, [...releases.map((release) => release.tag_name), ...(parsed.betaNumber === null ? [] : reservedBetas)])
 
 console.log(`${version} satisfies the FaNotes ${kind === 'stable' ? 'Stable' : 'Beta'} calendar-version check.`)

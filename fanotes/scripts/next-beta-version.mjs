@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 // Print the next FaNotes beta for the current Europe/Zurich month.
 // The rules match scripts/check-release-policy.mjs. Stdout is only the version.
 
@@ -21,12 +22,15 @@ if (!response.ok) throw new Error(`GitHub release policy check failed with HTTP 
 const releases = await response.json()
 if (!Array.isArray(releases)) throw new Error('GitHub returned an invalid release list.')
 
+// Unpublished beta tags still reserve their version after a failed build.
+const reservedBetas = execFileSync('git', ['tag', '--list', 'v*-beta.*'], { encoding: 'utf8' }).trim().split('\n')
+
 const prefix = `v${year}.${month}.`
 const monthly = releases.filter((release) => typeof release.tag_name === 'string' && release.tag_name.startsWith(prefix))
 const stable = monthly.filter((release) => /^v\d{4}\.\d{1,2}\.[1-9]\d*$/u.test(release.tag_name))
 const stableNumber = stable.length + 1
-const matchingBetas = monthly
-  .map((release) => new RegExp(`^v${year}\\.${month}\\.${stableNumber}-beta\\.(\\d+)$`, 'u').exec(release.tag_name))
+const matchingBetas = [...monthly.map(release => release.tag_name), ...reservedBetas]
+  .map((tag) => new RegExp(`^v${year}\\.${month}\\.${stableNumber}-beta\\.(\\d+)$`, 'u').exec(tag))
   .filter(Boolean)
   .map((candidate) => Number(candidate[1]))
 const betaNumber = matchingBetas.length ? Math.max(...matchingBetas) + 1 : 1

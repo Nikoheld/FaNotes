@@ -9,6 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { packages } from './beta-platform-assets.mjs'
 
 const require = createRequire(import.meta.url)
 const { githubReleaseAssetUrl, stableStringify } = require('../electron/updater.cjs')
@@ -81,7 +82,16 @@ const main = () => {
   const channel = channelForRelease(version)
 
   const sums = []
-  const linux = {
+  const reused = JSON.parse(process.env.REUSED_PLATFORMS || '{}')
+  if (channel !== 'beta' && Object.values(reused).some(Boolean)) throw new Error('Only beta packages may be reused.')
+  for (const [platform, tag] of Object.entries(reused)) {
+    if (!tag) continue
+    if (!Object.hasOwn(packages, platform) || !/^v\d{4}\.\d{1,2}\.\d+-beta\.\d+$/u.test(tag)) throw new Error('Invalid beta asset selection')
+    for (const name of packages[platform](tag.slice(1))) requireEntry(directory, tag.slice(1), name, sums, platform)
+  }
+  // Skipped desktop platforms keep the manifest on their original release.
+  // A newer release tag with an older manifest is rejected by existing clients.
+  const linux = reused.linux ? null : {
     schemaVersion: 1,
     product: 'FaNotes',
     channel,
@@ -98,7 +108,7 @@ const main = () => {
     delta: null,
     websiteUrl,
   }
-  const windows = {
+  const windows = reused.windows ? null : {
     schemaVersion: 1,
     product: 'FaNotes',
     channel,
@@ -106,8 +116,8 @@ const main = () => {
     arch: 'x64',
     latestVersion: version,
     mandatory: false,
-    publishedAt: linux.publishedAt,
-    releaseNotes: linux.releaseNotes,
+    publishedAt: new Date().toISOString(),
+    releaseNotes: releaseNotes(version),
     packages: {
       installer: requireEntry(directory, version, `FaNotes-Setup-${version}-x64.exe`, sums, 'Windows-Setup'),
       portable: requireEntry(directory, version, `FaNotes-Portable-${version}-x64.exe`, sums, 'Windows-Portable'),
@@ -121,8 +131,8 @@ const main = () => {
   entry(directory, version, `Kanti-Plus-${version}-native-debug-symbols.zip`, sums)
 
   fs.writeFileSync(path.join(directory, 'SHA256SUMS'), `${sums.sort().join('\n')}\n`)
-  fs.writeFileSync(path.join(directory, updateManifestFileName('linux', channel)), `${JSON.stringify(sign(linux, privateKeyPem))}\n`)
-  fs.writeFileSync(path.join(directory, updateManifestFileName('windows', channel)), `${JSON.stringify(sign(windows, privateKeyPem))}\n`)
+  if (linux) fs.writeFileSync(path.join(directory, updateManifestFileName('linux', channel)), `${JSON.stringify(sign(linux, privateKeyPem))}\n`)
+  if (windows) fs.writeFileSync(path.join(directory, updateManifestFileName('windows', channel)), `${JSON.stringify(sign(windows, privateKeyPem))}\n`)
   console.log(`Update-Manifeste für ${version} geschrieben.`)
 }
 

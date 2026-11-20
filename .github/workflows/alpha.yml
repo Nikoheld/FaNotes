@@ -29,12 +29,16 @@ jobs:
       - name: Commit and tag the next beta
         id: tag
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version="$(node fanotes/scripts/next-beta-version.mjs)"
           node fanotes/scripts/check-release-policy.mjs --version "$version"
           previous="$(git describe --tags --abbrev=0 HEAD)"
+          # An unpublished tag is not a release baseline. Include its changes in the next beta.
+          while ! gh release view "$previous" --json tagName >/dev/null 2>&1; do
+            previous="$(git describe --tags --abbrev=0 "${previous}^")"
+          done
           notes="$(git log --no-merges --invert-grep --grep='^Set the version to ' --format='%s' "${previous}..HEAD")"
           if [ -z "$notes" ]; then
             echo "No merged changes since ${previous}." >&2
@@ -68,4 +72,5 @@ jobs:
     with:
       version: ${{ needs.prepare.outputs.version }}
       sha: ${{ needs.prepare.outputs.sha }}
+      reuse_unchanged: true
     secrets: inherit

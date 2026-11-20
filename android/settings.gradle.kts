@@ -11,6 +11,13 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Keep the large Android inference artifact off Maven Central's rate-limited CI endpoint.
+        exclusiveContent {
+            forRepository {
+                maven("https://maven-central.storage-download.googleapis.com/maven2/")
+            }
+            filter { includeModule("com.microsoft.onnxruntime", "onnxruntime-android") }
+        }
         // Only the offline Tesseract OCR build for Kanti+ comes from JitPack; nothing else may.
         exclusiveContent {
             forRepository { maven("https://jitpack.io") }

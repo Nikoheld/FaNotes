@@ -17,6 +17,10 @@ on:
         description: Commit that contains this version
         required: true
         type: string
+      reuse_unchanged:
+        description: Reuse unchanged platform assets from published betas
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,7 +30,35 @@ env:
   CI: 'true'
 
 jobs:
+  platform-plan:
+    name: Select platform builds
+    runs-on: ubuntu-24.04
+    outputs:
+      linux: ${{ steps.plan.outputs.linux }}
+      windows: ${{ steps.plan.outputs.windows }}
+      android: ${{ steps.plan.outputs.android }}
+      companion: ${{ steps.plan.outputs.companion }}
+    steps:
+      - uses: actions/checkout@v5
+        if: inputs.reuse_unchanged
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        if: inputs.reuse_unchanged
+        with:
+          node-version: 22
+      - name: Compare with published beta sources
+        id: plan
+        if: inputs.reuse_unchanged
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: node fanotes/scripts/beta-platform-assets.mjs --plan "$RELEASE_SHA"
+
   linux:
+    needs: platform-plan
+    if: needs.platform-plan.outputs.linux == ''
     name: Linux
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -104,6 +136,8 @@ jobs:
             fanotes/release/FaNotes-*-x86_64.tar.gz
 
   windows:
+    needs: platform-plan
+    if: needs.platform-plan.outputs.windows == ''
     name: Windows
     runs-on: windows-2022
     timeout-minutes: 120
@@ -169,6 +203,8 @@ jobs:
             fanotes/release/FaNotes-Portable-*-x64.exe
 
   android:
+    needs: platform-plan
+    if: needs.platform-plan.outputs.android == ''
     name: Android
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -279,6 +315,8 @@ jobs:
           path: android/FaNotes-*-android.apk
 
   android-companion:
+    needs: platform-plan
+    if: needs.platform-plan.outputs.companion == ''
     name: Android Companion
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -420,11 +458,18 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    needs: [linux, windows, android, android-companion]
+    needs: [platform-plan, linux, windows, android, android-companion]
+    if: >-
+      ${{ !cancelled() && needs.platform-plan.result == 'success' &&
+        (needs.linux.result == 'success' || needs.platform-plan.outputs.linux != '') &&
+        (needs.windows.result == 'success' || needs.platform-plan.outputs.windows != '') &&
+        (needs.android.result == 'success' || needs.platform-plan.outputs.android != '') &&
+        (needs.android-companion.result == 'success' || needs.platform-plan.outputs.companion != '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       RELEASE_VERSION: ${{ inputs.version || github.ref_name }}
+      REUSED_PLATFORMS: ${{ toJSON(needs.platform-plan.outputs) }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -433,9 +478,17 @@ jobs:
         with:
           node-version: 22
       - uses: actions/download-artifact@v7
+        if: needs.linux.result == 'success' || needs.windows.result == 'success' || needs.android.result == 'success' || needs.android-companion.result == 'success'
         with:
           path: dist-artifacts
           merge-multiple: true
+      - name: Download and verify unchanged platform assets
+        if: inputs.reuse_unchanged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist-artifacts
+          node fanotes/scripts/beta-platform-assets.mjs --download dist-artifacts "$REUSED_PLATFORMS"
       - name: Sign update manifests
         working-directory: fanotes
         env:
@@ -455,6 +508,10 @@ jobs:
             keep { print }
           ' fanotes/CHANGELOG.md > "$notes"
           if [ ! -s "$notes" ]; then echo "FaNotes ${version}" > "$notes"; fi
+          node --input-type=module -e '
+            const reused = Object.entries(JSON.parse(process.env.REUSED_PLATFORMS)).filter(([,tag]) => tag)
+            if (reused.length) console.log("\nUnchanged platform downloads:\n" + reused.map(([platform, tag]) => `- ${platform}: ${tag}`).join("\n"))
+          ' >> "$notes"
           if [[ "$version" == *-beta.* ]]; then
             release_flags=(--prerelease=true --latest=false)
           else
