@@ -46,6 +46,10 @@ jobs:
       - run: npm ci --no-audit --no-fund --ignore-scripts
       - name: Electron binary for the headless background run
         run: node node_modules/electron/install.js
+      - name: Allow the Chromium sandbox on the runner
+        # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor;
+        # the Electron dev binary keeps its sandbox instead of --no-sandbox.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: npx tsc -p tsconfig.app.json --noEmit
       - run: node scripts/check-updater.cjs
       - run: node scripts/check-updater-vectors.mjs

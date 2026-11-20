@@ -924,8 +924,10 @@ async function measureElectron(temporary, github, origin, key) {
         FANOTES_UPDATER_TEST_PUBLIC_KEY: key.publicPem,
         ELECTRON_ENABLE_LOGGING: '0',
       },
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
     })
+    let stderr = ''
+    child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-4000) })
     let peak = { rss: 0, pss: 0, processes: 0, types: [] }
     const sampler = setInterval(() => {
       const sample = treeRss(child.pid)
@@ -935,6 +937,7 @@ async function measureElectron(temporary, github, origin, key) {
     clearInterval(sampler)
     const ms = Number(process.hrtime.bigint() - started) / 1e6
     const status = await readStatus(profile.updaterRoot)
+    if (code !== 0) console.error(`Electron endete mit ${code}:\n${stderr}`)
     console.log(`Messung ${label}: ${Math.round(ms)} ms, Spitze ${Math.round(peak.pss / 1024)} MiB PSS (${Math.round(peak.rss / 1024)} MiB RSS-Summe) in ${peak.processes} Prozessen [${peak.types.join(', ')}], Ergebnis ${status.result} (exit ${code}).`)
     return { ms, peakMiB: peak.pss / 1024, status }
   }
