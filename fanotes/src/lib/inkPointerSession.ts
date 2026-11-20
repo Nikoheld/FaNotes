@@ -1,3 +1,5 @@
+import { isPressurelessContact } from './penDevice'
+
 /** Longer than shape-dwell (~700ms) so a still tip does not look like a missed lift. */
 export const INK_POINTER_IDLE_MS = 1600
 
@@ -7,6 +9,8 @@ export type InkPointerSessionSnapshot = {
   lastButtons: number
   lastPressure: number
   lastContactAt: number
+  /** Pen reported pressure 0 on contact and never a real value since: pressure 0 is not hover. */
+  pressureless?: boolean
 }
 
 export type InkPointerSample = {
@@ -17,11 +21,11 @@ export type InkPointerSample = {
 }
 
 /** Tip or eraser still in contact. Hover (including Linux Wacom hover with a stuck button bit) is not. */
-export const isInkTipDown = (sample: { pointerType?: string; buttons: number; pressure?: number }) => {
+export const isInkTipDown = (sample: { pointerType?: string; buttons: number; pressure?: number }, pressureless = false) => {
   const buttons = Number(sample.buttons) || 0
   if ((buttons & 32) !== 0) return true
   if ((buttons & 1) === 0) return false
-  if ((sample.pointerType ?? '') === 'pen') {
+  if ((sample.pointerType ?? '') === 'pen' && !pressureless) {
     const pressure = sample.pressure
     if (typeof pressure === 'number' && pressure <= 0) return false
   }
@@ -37,6 +41,7 @@ export const inkPointerSessionFromSample = (
   lastButtons: Number(sample.buttons) || 0,
   lastPressure: typeof sample.pressure === 'number' ? sample.pressure : 0.5,
   lastContactAt: at,
+  pressureless: isPressurelessContact(sample),
 })
 
 export const touchInkPointerSession = (
@@ -50,11 +55,12 @@ export const touchInkPointerSession = (
       ...session,
       lastButtons: Number(sample.buttons) || 0,
       lastPressure: typeof sample.pressure === 'number' ? sample.pressure : session.lastPressure,
+      pressureless: session.pressureless && !(Number(sample.pressure) > 0),
       lastContactAt: isInkTipDown({
         pointerType: sample.pointerType ?? session.pointerType,
         buttons: sample.buttons,
         pressure: sample.pressure,
-      })
+      }, session.pressureless)
         ? at
         : session.lastContactAt,
     }
@@ -88,7 +94,7 @@ export const shouldHardEndInkPointerSession = (
       pointerType: incoming.pointerType ?? session.pointerType,
       buttons: incoming.buttons,
       pressure: incoming.pressure,
-    })) return false
+    }, session.pressureless)) return false
     return now - session.lastContactAt >= INK_POINTER_IDLE_MS
   }
   return now - session.lastContactAt >= INK_POINTER_IDLE_MS
