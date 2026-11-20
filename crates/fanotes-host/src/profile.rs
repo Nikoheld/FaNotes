@@ -19,18 +19,36 @@ const MAX_CONFIG_BYTES: u64 = 2 * 1024 * 1024;
 /// `identifier` in `tauri.conf.json`: the last segment of Tauri's app data directory.
 const TAURI_PROFILE_NAME: &str = "de.fanotes.app";
 
-pub(crate) fn import_electron_profile(app_data: &Path, secret_store: SecretStore) {
-    crate::migrate::run_at_startup(app_data, secret_store);
+/// Where the Electron profile lookup may look outside the Tauri profile.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ProfileHome {
+    /// Never look outside the profile directory and its sibling folders.
+    #[default]
+    None,
+    /// The user's config home (`$XDG_CONFIG_HOME` or `~/.config`). Only the real
+    /// Tauri profile (`de.fanotes.app`) uses it, and a test run panics before it
+    /// resolves a real path.
+    Real,
+    /// A fixed directory that stands in for the config home.
+    Dir(PathBuf),
+}
+
+pub(crate) fn import_electron_profile(
+    app_data: &Path,
+    secret_store: SecretStore,
+    home: &ProfileHome,
+) {
+    crate::migrate::run_at_startup(app_data, secret_store, home);
 }
 
 /// Electron profile directories to look at, best first. Tests never look at the home directory.
-pub(crate) fn electron_profile_dirs(app_data: &Path) -> Vec<PathBuf> {
+pub(crate) fn electron_profile_dirs(app_data: &Path, home: &ProfileHome) -> Vec<PathBuf> {
     if let Some(explicit) =
         std::env::var_os("FANOTES_ELECTRON_PROFILE").filter(|value| !value.is_empty())
     {
         return vec![PathBuf::from(explicit)];
     }
-    config_candidates(app_data)
+    config_candidates(app_data, home)
         .into_iter()
         .filter_map(|path| path.parent().map(Path::to_path_buf))
         .filter(|directory| real_directory(directory))
@@ -38,8 +56,8 @@ pub(crate) fn electron_profile_dirs(app_data: &Path) -> Vec<PathBuf> {
 }
 
 /// The first profile directory with a readable `config.json` or web storage.
-pub(crate) fn find_electron_profile(app_data: &Path) -> Option<PathBuf> {
-    electron_profile_dirs(app_data)
+pub(crate) fn find_electron_profile(app_data: &Path, home: &ProfileHome) -> Option<PathBuf> {
+    electron_profile_dirs(app_data, home)
         .into_iter()
         .find(|directory| {
             read_config(&directory.join("config.json")).is_some()
@@ -48,20 +66,24 @@ pub(crate) fn find_electron_profile(app_data: &Path) -> Option<PathBuf> {
         })
 }
 
-fn config_candidates(app_data: &Path) -> Vec<PathBuf> {
+fn config_candidates(app_data: &Path, home: &ProfileHome) -> Vec<PathBuf> {
     let mut paths = vec![app_data.join("config.json")];
     let mut roots = Vec::new();
     if let Some(parent) = app_data.parent() {
         roots.push(parent.to_path_buf());
     }
     // Only the real Tauri profile (`<data dir>/de.fanotes.app`) looks in the user's home.
-    // Unit and integration tests open hosts in temp directories and must never read a real profile.
-    if !cfg!(test)
-        && app_data
-            .file_name()
-            .is_some_and(|name| name == TAURI_PROFILE_NAME)
-    {
-        roots.push(electron_config_home());
+    let is_tauri_profile = app_data
+        .file_name()
+        .is_some_and(|name| name == TAURI_PROFILE_NAME);
+    match home {
+        ProfileHome::None => {}
+        ProfileHome::Dir(directory) => roots.push(directory.clone()),
+        ProfileHome::Real if is_tauri_profile => {
+            crate::hermetic::forbid_real("the user's Electron config home");
+            roots.push(electron_config_home());
+        }
+        ProfileHome::Real => {}
     }
     for root in roots {
         for name in ["FaNotes", "Lernwerk Notes", "lernwerk-notes"] {
@@ -183,7 +205,7 @@ mod tests {
     use std::fs;
 
     fn imported_modes(config: &str) -> (String, String) {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-profile-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()

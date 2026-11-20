@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn a_character_manifest_keeps_a_whole_size() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-ocr-whole-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()

@@ -35,6 +35,7 @@ mod addons;
 mod channels;
 mod dialogs;
 mod drawings;
+mod hermetic;
 mod history;
 mod imports;
 mod ink_guard;
@@ -51,6 +52,8 @@ mod profile;
 mod resources;
 mod secrets;
 mod settings;
+#[doc(hidden)]
+pub mod test_support;
 // Registered once the writing mode merges (see story.rs).
 #[allow(dead_code)]
 mod story;
@@ -74,6 +77,7 @@ use serde_json::{json, Map, Value};
 pub use channels::{find_channel, ChannelKind, CHANNELS};
 pub use dialogs::{pdf_export_dialog, subject_book_window_title};
 pub use policy::{addon_request_allowed, local_ai_origin};
+pub use profile::ProfileHome;
 pub use secrets::SecretStore;
 
 pub(crate) const SECRET_KEYS: &[&str] = &[
@@ -90,6 +94,31 @@ pub(crate) const SECRET_KEYS: &[&str] = &[
 ];
 
 const APP_VERSION: &str = "2026.10.2";
+
+/// Everything `Host::open` would otherwise take from the machine.
+#[derive(Clone, Debug)]
+pub struct HostOptions {
+    pub secret_store: SecretStore,
+    pub profile_home: ProfileHome,
+}
+
+impl HostOptions {
+    /// The shipping app: OS keyring and the user's Electron profile.
+    pub fn production() -> Self {
+        Self {
+            secret_store: SecretStore::Keyring,
+            profile_home: ProfileHome::Real,
+        }
+    }
+
+    /// Tests: secrets in memory, no profile lookup outside the profile folder.
+    pub fn hermetic() -> Self {
+        Self {
+            secret_store: SecretStore::Memory,
+            profile_home: ProfileHome::None,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Host {
@@ -118,16 +147,37 @@ pub struct Host {
     pub secret_store: SecretStore,
     /// True after this session has shown the stored API keys to the page.
     secrets_loaded: bool,
+    /// Where the Electron profile lookup may leave `app_data`.
+    profile_home: ProfileHome,
     /// A `fanotes://share/<id>` launch the page has not been told about yet.
     pending_share_open: String,
 }
 
 impl Host {
+    /// Opens the real profile: OS keyring and the user's Electron profile.
+    /// A test run panics here; tests use [`Host::open_hermetic`].
     pub fn open(app_data: PathBuf) -> Self {
+        Self::open_with(app_data, HostOptions::production())
+    }
+
+    /// Opens a profile that never reads the user's home or the OS keyring:
+    /// in-memory secrets and no Electron profile lookup outside `app_data`.
+    pub fn open_hermetic(app_data: PathBuf) -> Self {
+        Self::open_with(app_data, HostOptions::hermetic())
+    }
+
+    pub fn open_with(app_data: PathBuf, options: HostOptions) -> Self {
+        let HostOptions {
+            secret_store,
+            profile_home,
+        } = options;
+        if secret_store == SecretStore::Keyring || profile_home == ProfileHome::Real {
+            hermetic::forbid_real("the real profile or keyring (use Host::open_hermetic)");
+        }
         // `path.resolve` drops `..` before the profile directory is created.
         // A missing middle segment must not be created on the way there.
         let app_data = node_resolve(&app_data);
-        complete_pending_app_data_reset(&app_data);
+        complete_pending_app_data_reset(&app_data, secret_store);
         // Desktop creates the profile with mode `0o700`.
         let _ = ensure_private_profile_dir(&app_data);
         let mut host = Self {
@@ -143,7 +193,8 @@ impl Host {
             documents_dir: None,
             open_log: None,
             trash_dir: None,
-            secret_store: SecretStore::Keyring,
+            secret_store,
+            profile_home,
             secrets_loaded: false,
             pending_share_open: String::new(),
         };
@@ -1881,7 +1932,7 @@ impl Host {
     }
 
     fn load_persisted(&mut self) {
-        profile::import_electron_profile(&self.app_data, self.secret_store);
+        profile::import_electron_profile(&self.app_data, self.secret_store, &self.profile_home);
         if let Ok(bytes) = fs::read(self.app_data.join("settings.json")) {
             let text = String::from_utf8_lossy(&bytes);
             if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
@@ -1997,7 +2048,7 @@ fn pending_reset_marker(app_data: &Path) -> Option<PathBuf> {
     Some(app_data.parent()?.join(APP_DATA_RESET_MARKER))
 }
 
-fn complete_pending_app_data_reset(app_data: &Path) {
+fn complete_pending_app_data_reset(app_data: &Path, secret_store: SecretStore) {
     let Some(marker_path) = pending_reset_marker(app_data) else {
         return;
     };
@@ -2015,7 +2066,7 @@ fn complete_pending_app_data_reset(app_data: &Path) {
     }
     let mut names = SECRET_KEYS.to_vec();
     names.push(SYNC_SECRET_ACCOUNT);
-    secrets::forget_profile(app_data, &names);
+    secrets::forget_profile(secret_store, app_data, &names);
     match fs::remove_dir_all(app_data) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -3340,6 +3391,7 @@ fn make_trash_private(directory: &Path) -> Result<(), String> {
 }
 
 fn xdg_trash_dir() -> Option<PathBuf> {
+    hermetic::forbid_real("the desktop trash (set Host::trash_dir)");
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| {
@@ -3567,6 +3619,7 @@ fn note_byte_limit(relative: &str) -> u64 {
 /// A missing or unquoted documents entry is the home directory. `$HOME/Documents`
 /// is used only when the config file says so. The last matching line wins.
 fn default_documents_dir() -> PathBuf {
+    hermetic::forbid_real("the documents folder (set Host::documents_dir)");
     #[cfg(windows)]
     if let Some(documents) = windows_desktop::documents_dir() {
         return documents;
@@ -5172,7 +5225,7 @@ mod documents_dir_tests {
 
     #[test]
     fn the_documents_folder_follows_xdg_user_dir_lookup() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-docs-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -5242,7 +5295,7 @@ mod folder_color_order_tests {
 
     #[test]
     fn folder_colors_keep_the_first_entries_in_file_order() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-colors-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -5268,7 +5321,7 @@ mod folder_color_order_tests {
 
     #[test]
     fn a_flat_color_file_can_name_a_folder_colors() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-colors-flat-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -5327,7 +5380,7 @@ mod recognition_model_write_tests {
     #[test]
     fn an_unwritable_recognition_folder_reports_the_desktop_mkdir_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-recognition-mkdir-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -5349,7 +5402,7 @@ mod recognition_model_write_tests {
             }
         }
         let _restore = Restore(locked.clone());
-        let mut host = Host::open(root.join("app"));
+        let mut host = Host::open_hermetic(root.join("app"));
         host.vault = Some(locked.clone());
         assert_eq!(
             host.write_recognition_model("{}").unwrap_err(),

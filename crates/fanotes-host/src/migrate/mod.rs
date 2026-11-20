@@ -47,6 +47,8 @@ pub struct Options {
     pub fail_after: Option<&'static str>,
     /// Run again from the newest verified backup even when the marker exists.
     pub rerun: bool,
+    /// Where to look for an Electron profile outside the Tauri profile.
+    pub profile_home: profile::ProfileHome,
 }
 
 impl Options {
@@ -57,13 +59,20 @@ impl Options {
             decryptor: Box::new(|state| os_crypt::Decryptor::native(state, APP_NAME)),
             fail_after: None,
             rerun: false,
+            profile_home: profile::ProfileHome::Real,
         }
     }
 }
 
 /// Called from `Host::open`. Never panics and never blocks on a missing keyring.
-pub(crate) fn run_at_startup(app_data: &Path, secret_store: SecretStore) {
-    let _ = run(app_data, &Options::native(secret_store));
+pub(crate) fn run_at_startup(
+    app_data: &Path,
+    secret_store: SecretStore,
+    profile_home: &profile::ProfileHome,
+) {
+    let mut options = Options::native(secret_store);
+    options.profile_home = profile_home.clone();
+    let _ = run(app_data, &options);
 }
 
 fn work(app_data: &Path) -> PathBuf {
@@ -201,7 +210,7 @@ fn run_phases(run: &mut Run<'_>) -> Result<(), String> {
             .options
             .source
             .clone()
-            .or_else(|| profile::find_electron_profile(app_data))
+            .or_else(|| profile::find_electron_profile(app_data, &run.options.profile_home))
         {
             Some(source) => source,
             None => {
@@ -949,6 +958,7 @@ pub(crate) mod tests {
             }),
             fail_after: None,
             rerun: false,
+            profile_home: profile::ProfileHome::None,
         }
     }
 
@@ -1336,6 +1346,7 @@ pub(crate) mod tests {
         fs::create_dir_all(&app_data).unwrap();
         let mut options = Options::native(SecretStore::Memory);
         options.source = None;
+        options.profile_home = profile::ProfileHome::None;
         assert_eq!(run(&app_data, &options)["status"], "nothing");
         assert!(app_data.join(COMPLETE_MARKER).is_file());
         let _ = fs::remove_dir_all(&root);

@@ -3,7 +3,9 @@ use fanotes_host::Host;
 use serde_json::json;
 
 fn host() -> Host {
-    Host::open(std::env::temp_dir().join(format!("fanotes-resources-{}", std::process::id())))
+    Host::open_hermetic(
+        std::env::temp_dir().join(format!("fanotes-resources-{}", std::process::id())),
+    )
 }
 
 fn decode(value: &serde_json::Value) -> Vec<u8> {

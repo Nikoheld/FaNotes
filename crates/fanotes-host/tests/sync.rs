@@ -4,24 +4,32 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use fanotes_host::{Host, SecretStore};
 use serde_json::json;
 
-fn host() -> (std::path::PathBuf, std::path::PathBuf, Host) {
+fn host() -> (
+    std::path::PathBuf,
+    std::path::PathBuf,
+    Host,
+    fanotes_host::test_support::Scratch,
+) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-sync-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-sync-{}-{id}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     let app = dir.join("app");
     fs::create_dir_all(&vault).unwrap();
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.secret_store = SecretStore::Memory;
     host.set_vault(vault.clone()).unwrap();
-    (vault, app, host)
+    (vault, app, host, dir)
 }
 
 #[cfg(unix)]
 #[test]
 fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
-    let (vault, app, mut host) = host();
+    let (vault, app, mut host, _scratch) = host();
     fs::write(vault.join("Notiz.md"), b"Hallo\n").unwrap();
     fs::create_dir_all(vault.join(".fanotes/history")).unwrap();
     fs::write(vault.join(".fanotes/history/alt.md"), b"x").unwrap();
@@ -130,7 +138,7 @@ fn sync_lists_files_and_keeps_account_state_outside_the_vault() {
 
 #[test]
 fn a_blank_sync_secret_file_has_no_login() {
-    let (_vault, app, mut host) = host();
+    let (_vault, app, mut host, _scratch) = host();
     fs::create_dir_all(app.join("sync")).unwrap();
     fs::write(app.join("sync/account.secret"), "").unwrap();
     assert!(host
@@ -155,7 +163,7 @@ fn a_blank_sync_secret_file_has_no_login() {
 
 #[test]
 fn a_sync_secret_file_with_a_bad_byte_still_opens() {
-    let (_vault, app, mut host) = host();
+    let (_vault, app, mut host, _scratch) = host();
     fs::create_dir_all(app.join("sync")).unwrap();
     let path = app.join("sync/account.secret");
 
@@ -200,7 +208,7 @@ fn a_sync_secret_file_with_a_bad_byte_still_opens() {
 
 #[test]
 fn a_missing_sync_payload_does_not_clear_the_saved_login() {
-    let (_vault, app, mut host) = host();
+    let (_vault, app, mut host, _scratch) = host();
     let id = host
         .dispatch("fanotes:sync-vault-id", &[])
         .unwrap()
@@ -255,7 +263,7 @@ fn a_missing_sync_payload_does_not_clear_the_saved_login() {
 
 #[test]
 fn sync_credentials_keep_a_long_unicode_secret() {
-    let (_vault, _app, mut host) = host();
+    let (_vault, _app, mut host, _scratch) = host();
     let kept = "Ä".repeat(40_000);
     assert!(kept.len() > 64 * 1024);
     assert!(kept.encode_utf16().count() <= 64 * 1024);
@@ -278,12 +286,15 @@ fn sync_credentials_keep_a_long_unicode_secret() {
 
 #[test]
 fn sync_secrets_stay_out_of_the_profile_without_a_keyring() {
-    let dir = std::env::temp_dir().join(format!("fanotes-sync-locked-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-sync-locked-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(&vault).unwrap();
     let app = dir.join("app");
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.secret_store = SecretStore::Unavailable;
     host.set_vault(vault).unwrap();
     let error = host
@@ -303,7 +314,7 @@ fn sync_secrets_stay_out_of_the_profile_without_a_keyring() {
 
 #[test]
 fn a_sync_time_follows_javascript_number() {
-    let (vault, _app, mut host) = host();
+    let (vault, _app, mut host, _scratch) = host();
     let written = host
         .dispatch(
             "fanotes:sync-write",
@@ -398,7 +409,7 @@ fn a_sync_time_follows_javascript_number() {
 
 #[test]
 fn a_sync_write_accepts_a_byte_list_like_the_desktop() {
-    let (vault, _app, mut host) = host();
+    let (vault, _app, mut host, _scratch) = host();
     let written = host
         .dispatch(
             "fanotes:sync-write",
@@ -425,7 +436,7 @@ fn a_sync_write_accepts_a_byte_list_like_the_desktop() {
 
 #[test]
 fn a_sync_state_directory_is_private() {
-    let (_vault, app, mut host) = host();
+    let (_vault, app, mut host, _scratch) = host();
     let id = host
         .dispatch("fanotes:sync-vault-id", &[])
         .unwrap()
@@ -452,7 +463,7 @@ fn a_sync_state_directory_is_private() {
 
 #[test]
 fn sync_write_keeps_the_requested_time_and_a_private_folder() {
-    let (vault, _app, mut host) = host();
+    let (vault, _app, mut host, _scratch) = host();
     let written = host
         .dispatch(
             "fanotes:sync-write",
@@ -491,7 +502,7 @@ fn sync_write_keeps_the_requested_time_and_a_private_folder() {
 
 #[test]
 fn a_sync_state_with_a_bad_byte_still_loads() {
-    let (_vault, app, mut host) = host();
+    let (_vault, app, mut host, _scratch) = host();
     let id = host
         .dispatch("fanotes:sync-vault-id", &[])
         .unwrap()
@@ -518,7 +529,7 @@ fn a_sync_state_with_a_bad_byte_still_loads() {
 #[test]
 fn a_missing_sync_file_uses_the_desktop_lstat_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (vault, _app, mut host) = host();
+    let (vault, _app, mut host, _scratch) = host();
     let root = fs::canonicalize(&vault).unwrap();
     let missing = root.join("fehlt.md");
     assert_eq!(
@@ -570,7 +581,7 @@ fn a_missing_sync_file_uses_the_desktop_lstat_error() {
 #[test]
 fn an_unreadable_sync_state_uses_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (_vault, app, mut host) = host();
+    let (_vault, app, mut host, _scratch) = host();
     let id = host
         .dispatch("fanotes:sync-vault-id", &[])
         .unwrap()
@@ -620,7 +631,7 @@ fn an_unreadable_sync_state_uses_the_desktop_open_error() {
 #[test]
 fn an_undeletable_sync_state_uses_the_desktop_rm_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (_vault, app, mut host) = host();
+    let (_vault, app, mut host, _scratch) = host();
     let id = host
         .dispatch("fanotes:sync-vault-id", &[])
         .unwrap()
@@ -682,7 +693,7 @@ fn an_undeletable_sync_state_uses_the_desktop_rm_error() {
 #[test]
 fn an_unwritable_sync_folder_uses_a_sixteen_hex_temporary_name() {
     use std::os::unix::fs::PermissionsExt;
-    let (vault, _app, mut host) = host();
+    let (vault, _app, mut host, _scratch) = host();
     let vault = fs::canonicalize(&vault).unwrap();
     fs::write(vault.join("Seite.md"), b"alt\n").unwrap();
     fs::set_permissions(&vault, fs::Permissions::from_mode(0o555)).unwrap();
@@ -720,7 +731,7 @@ fn an_unwritable_sync_folder_uses_a_sixteen_hex_temporary_name() {
 
 #[test]
 fn a_sync_write_onto_a_directory_reports_the_desktop_rename_error() {
-    let (vault, _app, mut host) = host();
+    let (vault, _app, mut host, _scratch) = host();
     let vault = fs::canonicalize(&vault).unwrap();
     let target = vault.join("Seite.md");
     fs::create_dir(&target).unwrap();
@@ -760,7 +771,7 @@ fn a_sync_write_onto_a_directory_reports_the_desktop_rename_error() {
 #[test]
 fn an_unwritable_sync_folder_reports_the_desktop_unlink_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (vault, app, mut host) = host();
+    let (vault, app, mut host, _scratch) = host();
     let vault = fs::canonicalize(&vault).unwrap();
     host.trash_dir = Some(app.join("trash"));
     let folder = vault.join("Mathe");
@@ -788,7 +799,7 @@ fn an_unwritable_sync_folder_reports_the_desktop_unlink_error() {
 #[test]
 fn an_unwritable_sync_parent_reports_the_desktop_mkdir_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (vault, _app, mut host) = host();
+    let (vault, _app, mut host, _scratch) = host();
     let vault = fs::canonicalize(&vault).unwrap();
     let folder = vault.join("Mathe");
     fs::create_dir(&folder).unwrap();
@@ -818,7 +829,7 @@ fn an_unwritable_sync_parent_reports_the_desktop_mkdir_error() {
 #[test]
 fn a_nested_sync_folder_reports_the_full_desktop_mkdir_path() {
     use std::os::unix::fs::PermissionsExt;
-    let (vault, _app, mut host) = host();
+    let (vault, _app, mut host, _scratch) = host();
     let vault = fs::canonicalize(&vault).unwrap();
     let folder = vault.join("Mathe");
     fs::create_dir(&folder).unwrap();
@@ -847,7 +858,7 @@ fn a_nested_sync_folder_reports_the_full_desktop_mkdir_path() {
 #[test]
 fn an_unwritable_sync_profile_reports_the_desktop_mkdir_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (_vault, app, mut host) = host();
+    let (_vault, app, mut host, _scratch) = host();
     let id = host
         .dispatch("fanotes:sync-vault-id", &[])
         .unwrap()

@@ -4,22 +4,29 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use fanotes_host::Host;
 use serde_json::json;
 
-fn host() -> (std::path::PathBuf, Host) {
+fn host() -> (
+    std::path::PathBuf,
+    Host,
+    fanotes_host::test_support::Scratch,
+) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-rename-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-rename-{}-{id}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(vault.join("Mathe")).unwrap();
     fs::create_dir_all(vault.join("Physik")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault).unwrap();
-    (dir.join("vault"), host)
+    (dir.join("vault"), host, dir)
 }
 
 #[test]
 fn rename_keeps_the_extension_and_move_numbers_a_collision() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     fs::write(vault.join("Physik/Blatt.md"), b"\n").unwrap();
     host.dispatch(
@@ -90,7 +97,7 @@ fn rename_keeps_the_extension_and_move_numbers_a_collision() {
 
 #[test]
 fn a_missing_child_is_reported_before_a_move_into_itself() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     fs::create_dir_all(vault.join("Ordner/Innen")).unwrap();
     fs::write(vault.join("Ordner/Seite.md"), b"Hallo\n").unwrap();
     let missing = fs::canonicalize(vault.join("Ordner"))
@@ -135,7 +142,10 @@ fn a_missing_child_is_reported_before_a_move_into_itself() {
 #[cfg(unix)]
 #[test]
 fn a_symlinked_folder_cannot_rename_move_or_receive_a_note() {
-    let dir = std::env::temp_dir().join(format!("fanotes-rename-link-{}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-rename-link-{}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     let outside = dir.join("outside");
@@ -143,7 +153,7 @@ fn a_symlinked_folder_cannot_rename_move_or_receive_a_note() {
     fs::write(outside.join("Seite.md"), b"bleibt\n").unwrap();
     fs::create_dir_all(&vault).unwrap();
     std::os::unix::fs::symlink(&outside, vault.join("weg")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault).unwrap();
     let message = "Symbolische Links sind innerhalb des Vaults nicht erlaubt.";
@@ -177,7 +187,7 @@ fn a_symlinked_folder_cannot_rename_move_or_receive_a_note() {
 
 #[test]
 fn a_blank_rename_keeps_a_valid_name_and_rejects_a_device_name() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     fs::write(vault.join("Mathe/Seite.md"), "Hallo\n").unwrap();
     let kept = host
         .dispatch(
@@ -222,7 +232,7 @@ fn a_blank_rename_keeps_a_valid_name_and_rejects_a_device_name() {
 
 #[test]
 fn an_unchanged_rename_returns_the_path_the_caller_sent() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     fs::write(vault.join("Mathe/Seite.md"), "Hallo\n").unwrap();
     let slash = host
         .dispatch(
@@ -251,7 +261,7 @@ fn an_unchanged_rename_returns_the_path_the_caller_sent() {
 
 #[test]
 fn a_blank_move_target_returns_the_note_to_the_vault_root() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     fs::write(vault.join("Mathe/Seite.md"), b"\n").unwrap();
     fs::write(vault.join("Mathe/Andere.md"), b"\n").unwrap();
     host.dispatch(
@@ -288,7 +298,7 @@ fn a_blank_move_target_returns_the_note_to_the_vault_root() {
 
 #[test]
 fn renaming_a_note_adopts_a_legacy_internal_folder_and_its_color() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     fs::remove_dir_all(vault.join(".fanotes")).unwrap();
     fs::create_dir_all(vault.join(".lernwerk")).unwrap();
@@ -316,7 +326,7 @@ fn renaming_a_note_adopts_a_legacy_internal_folder_and_its_color() {
 
 #[test]
 fn a_rename_replaces_an_existing_companion_and_a_move_avoids_it() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     fs::write(vault.join("Mathe/Seite.famd"), b"alt\n").unwrap();
     fs::write(vault.join("Mathe/Ziel.famd"), b"fremd\n").unwrap();
@@ -354,7 +364,7 @@ fn a_rename_replaces_an_existing_companion_and_a_move_avoids_it() {
 
 #[test]
 fn a_dot_slash_move_target_is_not_the_vault_root() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     fs::write(vault.join("Mathe/Seite.md"), b"Hallo\n").unwrap();
     // Desktop `moveEntry` treats a blank destination as the vault root.
     // `./` and `.//` still go through `normalizeRelativePath` without
@@ -400,7 +410,7 @@ fn a_dot_slash_move_target_is_not_the_vault_root() {
 #[test]
 fn an_unreadable_folder_does_not_replace_a_hidden_file() {
     use std::os::unix::fs::PermissionsExt;
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     let folder = vault.join("Geheim");
     fs::create_dir_all(&folder).unwrap();
     fs::write(folder.join("Seite.md"), b"seite\n").unwrap();
@@ -455,7 +465,7 @@ fn an_unreadable_folder_does_not_replace_a_hidden_file() {
 #[test]
 fn an_unwritable_folder_reports_the_desktop_rename_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (_dir, mut host) = host();
+    let (_dir, mut host, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     let folder = vault.join("Mathe");
     let note = folder.join("Seite.md");
@@ -490,7 +500,7 @@ fn an_unwritable_folder_reports_the_desktop_rename_error() {
 #[test]
 fn an_unwritable_destination_reports_the_desktop_move_error() {
     use std::os::unix::fs::PermissionsExt;
-    let (_dir, mut host) = host();
+    let (_dir, mut host, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     let note = vault.join("Mathe/Seite.md");
     let destination_dir = vault.join("Physik");

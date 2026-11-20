@@ -1,11 +1,14 @@
 use fanotes_host::Host;
 use serde_json::json;
 
-fn scratch(name: &str) -> (std::path::PathBuf, Host) {
-    let dir = std::env::temp_dir().join(format!("fanotes-addons-{name}-{}", std::process::id()));
+fn scratch(name: &str) -> (fanotes_host::test_support::Scratch, Host) {
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-addons-{name}-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("vault")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(dir.join("vault")).unwrap();
     (dir, host)
 }

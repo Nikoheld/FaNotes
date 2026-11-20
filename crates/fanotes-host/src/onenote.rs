@@ -2193,7 +2193,7 @@ mod tests {
     #[test]
     fn an_unwritable_onenote_batch_uses_the_desktop_temporary_name() {
         use std::os::unix::fs::PermissionsExt;
-        let directory = std::env::temp_dir().join(format!(
+        let directory = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-atomic-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2257,7 +2257,7 @@ mod tests {
 
     #[test]
     fn a_blocked_import_folder_is_not_treated_as_a_taken_name() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-mkdir-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2314,7 +2314,7 @@ mod tests {
     #[test]
     fn an_unwritable_onenote_page_folder_reports_the_desktop_mkdir_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-page-folder-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2358,7 +2358,7 @@ mod tests {
     #[test]
     fn an_unwritable_onenote_temp_dir_reports_the_desktop_mkdtemp_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-mkdtemp-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2430,7 +2430,7 @@ mod tests {
     #[test]
     fn an_unwritable_onenote_render_folder_reports_the_desktop_mkdir_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-render-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2516,7 +2516,7 @@ mod tests {
     #[test]
     fn an_unwritable_onenote_tool_cache_reports_the_desktop_mkdir_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-tools-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2577,7 +2577,7 @@ mod tests {
     #[test]
     fn an_unwritable_onenote_tool_cache_reports_the_desktop_write_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-tool-write-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2625,7 +2625,7 @@ mod tests {
     #[test]
     fn an_unwritable_onenote_source_folder_reports_the_desktop_mkdir_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-source-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2684,7 +2684,7 @@ mod tests {
     #[test]
     fn a_failed_onenote_page_removes_the_worksheet_files() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-rollback-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -2780,7 +2780,7 @@ mod tests {
     #[test]
     fn a_page_with_an_invalid_byte_still_keeps_its_title() {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let directory = std::env::temp_dir().join(format!(
+        let directory = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-lossy-{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
@@ -2960,7 +2960,7 @@ mod tests {
 
     #[test]
     fn a_long_s_in_onenote_text_is_not_rewritten_by_the_tag_scan() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-word-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -3053,7 +3053,7 @@ mod tests {
 
     #[test]
     fn onenote_images_keep_their_attributes_and_stay_inside_the_import() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-img-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -3099,7 +3099,7 @@ mod tests {
 
     #[test]
     fn onenote_outline_levels_stay_between_one_and_nine() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-nav-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -3199,7 +3199,7 @@ mod tests {
         assert!(validate_listing("Path = note/\u{017F}:/secret.txt\nSize = 1\n").is_ok());
         assert!(validate_listing("Path = note.one\nSize = 1\n").is_ok());
 
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-walk-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -3229,7 +3229,7 @@ mod tests {
     #[test]
     fn an_unlistable_onenote_export_uses_the_desktop_scandir_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-scandir-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -3288,7 +3288,7 @@ mod tests {
     #[test]
     fn an_unreadable_onenote_outline_uses_the_desktop_open_error() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-outline-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -3354,7 +3354,7 @@ mod tests {
 
     #[test]
     fn a_failed_notebook_keeps_the_tool_error_when_no_section_remains() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-render-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -3383,7 +3383,7 @@ mod tests {
     #[test]
     fn an_unreadable_onenote_file_uses_the_desktop_open_error() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-hash-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -3416,7 +3416,7 @@ mod tests {
     #[test]
     fn an_unreadable_onenote_page_uses_the_desktop_read_error() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-onenote-page-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()

@@ -1056,7 +1056,7 @@ mod tests {
 
     #[test]
     fn force_zero_scaling_follows_source_files_and_ignores_comments() {
-        let dir = std::env::temp_dir().join(format!("fanotes-hypr-{}", std::process::id()));
+        let dir = crate::test_support::Scratch::new(format!("fanotes-hypr-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join(".config/hypr")).unwrap();
         fs::write(
@@ -1155,7 +1155,8 @@ mod tests {
         assert_eq!(focused_monitor_scale(r#"{"scale":2}"#), None);
         assert_eq!(focused_monitor_scale("[]"), None);
 
-        let dir = std::env::temp_dir().join(format!("fanotes-hypr-scale-{}", std::process::id()));
+        let dir =
+            crate::test_support::Scratch::new(format!("fanotes-hypr-scale-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let config = dir.join("hyprland.conf");
@@ -1249,7 +1250,8 @@ mod tests {
 
     #[test]
     fn a_byte_order_mark_still_enables_zero_scaling() {
-        let dir = std::env::temp_dir().join(format!("fanotes-hypr-ws-{}", std::process::id()));
+        let dir =
+            crate::test_support::Scratch::new(format!("fanotes-hypr-ws-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join(".config/hypr")).unwrap();
         let bom = dir.join("bom.conf");
@@ -1387,7 +1389,10 @@ mod tests {
 
     #[test]
     fn a_device_scale_uses_parse_float() {
-        let dir = std::env::temp_dir().join(format!("fanotes-scale-parse-{}", std::process::id()));
+        let dir = crate::test_support::Scratch::new(format!(
+            "fanotes-scale-parse-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let config = dir.join("hyprland.conf");
@@ -1416,7 +1421,7 @@ mod tests {
 
     #[test]
     fn a_hyprland_source_keeps_umlauts_in_the_path() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-hypr-umlaut-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1448,7 +1453,7 @@ mod tests {
 
     #[test]
     fn a_hyprland_source_glob_matches_the_desktop() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-hypr-glob-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1532,7 +1537,7 @@ mod tests {
         assert_eq!(brace_expand("\\\\{a,b}"), ["\\a", "\\b"]);
         assert_eq!(brace_expand("{a\\,b}"), ["{a,b}"]);
 
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-hypr-brace-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1592,7 +1597,7 @@ mod tests {
 
     #[test]
     fn a_hyprland_source_drops_parent_segments_before_opening() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-hypr-dotdot-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1634,7 +1639,7 @@ mod tests {
 
     #[test]
     fn a_hyprland_config_path_drops_parent_segments() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-hypr-resolve-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1661,7 +1666,7 @@ mod tests {
 
     #[test]
     fn a_bad_byte_in_a_hyprland_config_still_enables_zero_scaling() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-hypr-lossy-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()

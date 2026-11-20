@@ -14,7 +14,7 @@ fn host() -> (TempDir, Host) {
     let vault = dir.join("vault");
     let app_data = dir.join("app");
     fs::create_dir_all(&vault).unwrap();
-    let mut host = Host::open(app_data);
+    let mut host = Host::open_hermetic(app_data);
     host.set_vault(vault).unwrap();
     (TempDir(dir), host)
 }

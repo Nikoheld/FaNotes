@@ -1316,7 +1316,7 @@ mod publish_tests {
 
     #[test]
     fn a_new_file_stays_private_and_an_existing_name_is_left_alone() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-publish-{}-{}",
             std::process::id(),
             super::random_suffix().unwrap()
@@ -1416,7 +1416,7 @@ mod publish_tests {
 
     #[test]
     fn a_saved_note_reports_the_file_modification_time() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-mtime-{}-{}",
             std::process::id(),
             super::random_suffix().unwrap()
@@ -1436,7 +1436,7 @@ mod publish_tests {
     #[test]
     fn an_unwritable_history_folder_reports_the_desktop_mkdir_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-history-mkdir-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1478,7 +1478,7 @@ mod publish_tests {
     #[cfg(unix)]
     #[test]
     fn a_taken_history_snapshot_folder_reports_the_desktop_mkdir_error() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-history-taken-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1518,7 +1518,7 @@ mod publish_tests {
     #[test]
     fn an_unwritable_history_snapshot_reports_the_desktop_open_error() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-history-write-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1555,7 +1555,7 @@ mod publish_tests {
 
     #[test]
     fn a_history_index_directory_reports_the_desktop_open_error() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-history-index-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -1587,7 +1587,7 @@ mod publish_tests {
 
     #[test]
     fn an_atomic_write_does_not_create_a_missing_parent() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_support::Scratch::new(format!(
             "fanotes-atomic-parent-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
