@@ -43,6 +43,9 @@ jobs:
       # check-famd.cjs is left out: it fails on main too (an `await` assertion on App.tsx's revealOpenedNote).
       - run: node scripts/check-famd-v2.cjs
       - run: node scripts/check-famd-open.cjs
+      - name: Root packages the renderer imports (hershey)
+        working-directory: .
+        run: npm ci --no-audit --no-fund
       - name: Renderer for the desktop part
         run: npx vite build
       - name: Xvfb and playwright-core
