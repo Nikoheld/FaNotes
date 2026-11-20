@@ -19,6 +19,8 @@ guarantees and where the code lives. User-facing surfaces are listed in `USER_SU
 | UI | `src/components/SyncSettingsSection.tsx`, `src/App.tsx` | Settings → Sync, status-bar item, palette commands, remote-change application. |
 | Shares | `fanotes-site/user-shares.mjs`, `src/lib/sync/userShares.ts` | End-to-end encrypted shares to a username and the push channel (see "Accounts without e-mail" and "Shares between users"). |
 | Check | `scripts/check-sync.mjs` (`npm run check:sync`) | Crypto unit tests, path rules, transport retry, and a three-device end-to-end run against the real server module. |
+| Live co-editing | `fanotes-site/live-relay.mjs`, `src/lib/collab/` | Real-time text (Yjs), ink and presence for shared notes (see "Live co-editing"). |
+| Check | `scripts/check-live-collab.mjs` (`npm run check:live-collab`), `fanotes-site/live-relay.test.mjs` | Two and three simulated devices against the real server: concurrent text and ink, presence, latency, idle silence, offline, permissions, ciphertext only. |
 | Check | `scripts/check-account-share.mjs` (`npm run check:account-share`) | Username-only accounts, device-key sign-in, cloud sync off by default, username shares, push and revoke. |
 
 ## Keys
@@ -226,3 +228,21 @@ local one is kept as a "Konflikt" copy.
 Limits: 50 MB per shared file, 3000 files and 512 MB per share. A shared note is its `.md` / `.famd` /
 `.pdf` family; a shared folder is everything syncable below it. A share does not follow a rename of the
 shared path on the owner's side.
+
+## Live co-editing
+
+An open shared note (accepted share; the owner always, a recipient read or edit) is edited live, desktop app only. Everything below is built on the share key of "Shares between users"; the server never sees plaintext.
+
+**Documents.** One Yjs document per note and share: `text` (Y.Text, bound to CodeMirror with y-codemirror.next, undo per user through Y.UndoManager) and `strokes`/`dead` (ink). Ink strokes are a `Y.Map` keyed by stroke id; each entry is its own small map (`j` JSON, `o` order). Add = new entry, erase = delete entry and remember the id in `dead`, move = rewrite `j`. A move writes into the entry's own map, so an erase that races with it wins and nothing comes back half-alive. A stroke that is still being drawn is not part of the document until the pen lifts. Famd files keep their format; stroke ids derive from the stroke content when a file is loaded, random for new strokes, and never reach the file. Yjs and y-codemirror.next are loaded on demand (`import()`), only when a shared note opens.
+
+**Transport.** `POST /shares/:id/live/:channel` sends, `GET /shares/:id/live/:channel?since=N` catches up, and the existing `GET /events` stream pushes a `live` event. The channel is an opaque 32-hex name (an HMAC of the note path under the share's id key). Message kinds: `u` update (buffered, ordered by one sequence per share), `p` presence (relayed, never stored), `i` init (first writer wins, 409 otherwise), `s` snapshot (replaces buffered updates up to `upTo`; the sender applies everything the server holds first). The payload is `base64(iv || AES-256-GCM)` with the share's data key and `live:<channel>:u|p` as associated data. Auth is the sync session; `authorize` runs inside the per-share lock, so a revoke or a downgrade to read wins over a queued message. A read-only user can fetch and receive but every `POST` (also presence) is 403.
+
+**Limits.** 256 KiB per update, 8 KiB per presence message, 8 MiB per snapshot, 900 updates and 300 presence messages per account and 10 s, 32 notes per share, 4000 updates / 16 MiB buffered per note (then 413 with `compact`, the sender must send a snapshot; nothing is dropped silently). Updates above 48 KiB are not inlined in the push event; the client fetches them. The buffer is persisted per share (`live.json`, mode 0600) and removed with the share.
+
+**Latency and idleness.** Local edits are batched per animation frame (fallback 32 ms) and sent as one merged update; while a request is in flight further edits coalesce. Presence goes out at most every 80 ms, only the newest state. Nothing is sent while idle: presence refreshes every 30 s while the note is visible and expires after 75 s, the SSE stream's keep-alive comment is every 30 s.
+
+**Offline.** Unsent updates stay in an outbox (also persisted in the per-device cache) and go out on reconnect with backoff 1 s to 30 s. The push stream's reconnect triggers `resync()`: fetch since the last seen sequence number, apply (Yjs updates are idempotent), send the outbox. A device caches the document (`readState`), so edits made to the file while away are merged as a 3-way change on the cached lineage instead of overwriting.
+
+**Persisting and the file sync.** The editor reports every change as usual, so autosave writes the merged text and ink to the normal shared file and the existing share path uploads it; people who are not online at the same time get it from there. While a note is live the file sync leaves that file alone for that share: pulls of it are deferred (no conflict copies), and an upload that finds a newer base takes the server's revision (nothing is uploaded when the server already holds the same text). When the session ends the normal sync runs again. A file that was edited outside a session and cannot be taken over by the live state is kept as a "(Konflikt …)" copy.
+
+**Limits of the design.** A share has one owner and one recipient, so live state is per share. If the owner shares one note with several people, the owner's editor joins the first accepted share; the others keep the normal file sync. Edits made by the web or Android apps (no live support) reach a live session only through the shared file. Pen indicators show the other person's position as a fraction of the sheet.

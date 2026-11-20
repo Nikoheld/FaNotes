@@ -7,9 +7,10 @@
 //   - pushes the owner's files (and the recipient's edits when the share
 //     allows editing) and pulls the other side's changes;
 //   - removes the local copy the moment a share is revoked.
-// It is independent of vault cloud sync: it works with that switched off. The
-// per-share change feed and the event stream are the base a later live
-// collaboration can build on.
+// It is independent of vault cloud sync: it works with that switched off.
+// Live co-editing of an open shared note (collab/liveNotes.ts) rides on the same
+// push stream; this manager hands it the share key, the session and the "live"
+// events, and keeps the file sync out of the way of a note that is being edited live.
 import type { SyncHostApi, SyncScanEntry } from '../../types'
 import { SyncApi, SyncApiError, type SharePermission, type ShareStatus, type SyncSession, type UserShareIncoming, type UserShareOutgoing } from './api'
 import {
@@ -18,6 +19,8 @@ import {
 } from './crypto'
 import { isSyncablePath, type SyncEngine } from './engine'
 import { SHARED_INBOX_FOLDER } from './sharedInbox'
+import type { LiveChannel, LivePort, LiveStore } from '../collab/liveChannel'
+import type { LiveNote } from '../collab/liveNotes'
 
 export type UserShareView = {
   id: string
@@ -49,7 +52,8 @@ export type UserSharesState = {
   error: string | null
 }
 
-type FileBase = { rel: string; revision: number; sha256: string; size: number; mtimeMs: number }
+/** `own`: this device uploaded that version (so a later live session must treat it as its user's text, not as the other side's). */
+type FileBase = { rel: string; revision: number; sha256: string; size: number; mtimeMs: number; own?: boolean }
 type ShareLocal = { cursor: number; files: Record<string, FileBase>; localRoot?: string }
 type PersistedShares = { v: 1; accountId: string; shares: Record<string, ShareLocal> }
 
@@ -88,6 +92,10 @@ const noteFamily = (notePath: string) => {
   return new Set([notePath, `${stem}.md`, `${stem}.famd`, `${stem}.pdf`])
 }
 
+/** What the editor needs to know to join a shared note live. */
+export type LiveNoteInfo = { shareId: string; rel: string; canWrite: boolean; role: 'owner' | 'recipient'; peer: string; username: string; deviceId: string }
+export type LiveOpenOutcome = { note: LiveNote } | { note: null; reason: 'unavailable' | 'offline' | 'denied' | 'idle' }
+
 type Opened = { view: UserShareView; keys: SyncKeys; title: ShareTitle | null; raw: UserShareIncoming | UserShareOutgoing }
 
 export class UserShareManager {
@@ -116,6 +124,11 @@ export class UserShareManager {
   private firstRefresh = true
   private generation = 0
   private disposed = false
+  /** Open live notes by share id: they receive the "live" push events. */
+  private readonly liveChannels = new Map<string, Set<LiveChannel>>()
+  /** Notes being edited live, keyed by share id and vault path. Their files are not pulled over or conflict-copied. */
+  private readonly livePaths = new Map<string, number>()
+  private readonly liveWaiters = new Map<string, Set<() => void>>()
 
   constructor(private readonly engine: SyncEngine, private readonly api: SyncApi = new SyncApi()) {}
 
@@ -218,6 +231,8 @@ export class UserShareManager {
     this.identity = null
     this.opened.clear()
     this.knownIncoming.clear()
+    for (const channels of this.liveChannels.values()) for (const channel of [...channels]) void channel.close()
+    this.liveChannels.clear()
     this.set({ live: false, ...(clear ? { ...emptyState() } : {}) })
   }
 
@@ -257,6 +272,8 @@ export class UserShareManager {
         this.set({ live: true })
         // Anything that happened while the channel was down is picked up now.
         void this.refresh()
+        for (const channels of this.liveChannels.values()) for (const channel of channels) void channel.resync()
+        for (const waiters of this.liveWaiters.values()) for (const wake of [...waiters]) wake()
         const reader = response.body!.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
@@ -289,6 +306,14 @@ export class UserShareManager {
     try { data = dataText ? JSON.parse(dataText) as { id?: string } : null } catch { data = null }
     if (type === 'shares') void this.refresh()
     else if (type === 'files' && data?.id) void this.syncShare(data.id)
+    else if (type === 'live' && data?.id) this.routeLive(data as { id: string; c: string; k: string; q?: number; f?: string; d?: string; big?: boolean })
+  }
+
+  private routeLive(event: { id: string; c: string; k: string; q?: number; f?: string; d?: string; big?: boolean }) {
+    const channels = this.liveChannels.get(event.id)
+    if (channels?.size) for (const channel of [...channels]) void channel.handlePush(event)
+    // A note that was waiting for somebody to start the session wakes up when the first message arrives.
+    if (event.k !== 'p') for (const wake of [...(this.liveWaiters.get(event.id) ?? [])]) wake()
   }
 
   private armSafetyTimer() {
@@ -556,6 +581,7 @@ export class UserShareManager {
         }
         continue
       }
+      if (base && this.livePaths.has(`${entry.view.id}\n${this.pathFor(dir, base.rel)}`)) { deferred = true; continue }
       const download = await this.api.shareDownload(session, entry.view.id, remote.id)
       if ('deleted' in download) continue
       const meta = await decryptMeta(entry.keys, remote.id, download.meta)
@@ -564,6 +590,9 @@ export class UserShareManager {
       if (await sha256Hex(plain) !== meta.sha256) throw new Error('Eine geteilte Datei ist beschädigt angekommen.')
       const path = this.pathFor(dir, meta.path)
       if (this.hooks.isPathBusy?.(path)) { deferred = true; continue }
+      // A note that is open for live editing is the live state's to write: the shared file will
+      // match it once the session ends, and a pull now would only produce a conflict copy.
+      if (this.livePaths.has(`${entry.view.id}\n${path}`)) { deferred = true; continue }
       const existing = byPath.get(path)
       if (existing) {
         const unchanged = base && existing.size === base.size && existing.mtimeMs === base.mtimeMs
@@ -628,9 +657,14 @@ export class UserShareManager {
       const meta = await encryptMeta(entry.keys, fileId, { path: rel, mtimeMs: file.mtimeMs, size: bytes.length, sha256: sha })
       try {
         const revision = await this.api.shareUpload(session, entry.view.id, fileId, base?.revision ?? 0, meta, sha, blob)
-        local.files[fileId] = { rel, revision, sha256: sha, size: file.size, mtimeMs: file.mtimeMs }
+        local.files[fileId] = { rel, revision, sha256: sha, size: file.size, mtimeMs: file.mtimeMs, own: true }
       } catch (error) {
-        if (error instanceof SyncApiError && error.conflict) { conflicted = true; continue }
+        if (error instanceof SyncApiError && error.conflict) {
+          // Both people write the same merged text while a note is live; the second upload only needs the newer base.
+          if (this.livePaths.has(`${entry.view.id}\n${path}`) && await this.rebaseLive(session, entry, fileId, sha, rel, file, local, blob, meta)) continue
+          conflicted = true
+          continue
+        }
         throw error
       }
     }
@@ -651,6 +685,142 @@ export class UserShareManager {
       }
     }
     return conflicted
+  }
+
+  /**
+   * A live note's upload was behind: take the server's revision as the base. If the server already holds the same
+   * text nothing is uploaded; otherwise the live state (which is newer or equal) is written over it.
+   */
+  private async rebaseLive(session: SyncSession, entry: Opened, fileId: string, sha: string, rel: string, file: SyncScanEntry, local: ShareLocal, blob: Uint8Array, meta: string) {
+    const page = await this.api.shareChanges(session, entry.view.id, 0)
+    const remote = page.entries.find((candidate) => candidate.id === fileId)
+    if (!remote) return false
+    if (remote.sha256 === sha) {
+      local.files[fileId] = { rel, revision: remote.revision, sha256: sha, size: file.size, mtimeMs: file.mtimeMs, own: true }
+      return true
+    }
+    try {
+      const revision = await this.api.shareUpload(session, entry.view.id, fileId, remote.revision, meta, sha, blob)
+      local.files[fileId] = { rel, revision, sha256: sha, size: file.size, mtimeMs: file.mtimeMs, own: true }
+      return true
+    } catch (error) {
+      if (error instanceof SyncApiError && error.conflict) return false
+      throw error
+    }
+  }
+
+  // ── Live co-editing ─────────────────────────────────────────────────────
+
+  private noteRootFor(entry: Opened, path: string): string | null {
+    const root = this.rootFor(entry)
+    if (!root) return null
+    const prefix = root.dir ? `${root.dir}/` : ''
+    if (prefix && !path.startsWith(prefix)) return null
+    if (root.family && !root.family.has(path)) return null
+    const rel = path.slice(prefix.length)
+    return relIsSafe(rel) ? rel : null
+  }
+
+  /** The share a vault path belongs to, when the note can be edited live (accepted; either side may read, edit permission may write). */
+  liveInfoFor(path: string): LiveNoteInfo | null {
+    if (!this.session || !this.identity || !/\.(md|markdown|famd)$/iu.test(path)) return null
+    for (const entry of this.opened.values()) {
+      const view = entry.view
+      if (view.problem || view.status !== 'accepted') continue
+      const rel = this.noteRootFor(entry, path)
+      if (!rel) continue
+      const canWrite = view.role === 'owner' || view.permission === 'edit'
+      return { shareId: view.id, rel, canWrite, role: view.role, peer: view.peer, username: this.identity.username, deviceId: this.session.deviceId }
+    }
+    return null
+  }
+
+  /** True when the file changed on this device since it was last synced with the share. */
+  async isLocallyModified(path: string, info: LiveNoteInfo) {
+    const local = this.persisted?.shares[info.shareId]
+    const entry = this.opened.get(info.shareId)
+    if (!local || !entry || !this.host) return true
+    const fileId = await fileIdFor(entry.keys, info.rel)
+    const base = local.files[fileId]
+    if (!base) return true
+    try {
+      return base.own === true || await this.hashOf(path) !== base.sha256
+    } catch {
+      return true
+    }
+  }
+
+  /** Calls `wake` when the note's share has live traffic or the push channel comes back. Returns the unsubscribe. */
+  waitForLive(shareId: string, wake: () => void) {
+    const set = this.liveWaiters.get(shareId) ?? new Set<() => void>()
+    set.add(wake)
+    this.liveWaiters.set(shareId, set)
+    return () => { set.delete(wake) }
+  }
+
+  /**
+   * Joins a shared note for live editing. `localText` is the note's text as the editor has it. Resolves with the live
+   * note (text, ink, presence) or the reason it is not available, in which case the note stays a plain synced file.
+   */
+  async openLive(path: string, localText: string): Promise<LiveOpenOutcome> {
+    const info = this.liveInfoFor(path)
+    const session = this.session
+    const entry = info ? this.opened.get(info.shareId) : null
+    if (!info || !session || !entry || !this.host) return { note: null, reason: 'unavailable' }
+    const host = this.host
+    const channelId = (await fileIdFor(entry.keys, `live:${info.rel}`)).slice(0, 32)
+    const vaultId = await host.vaultId()
+    const storeId = await sha256Hex(new TextEncoder().encode(`live:${vaultId}:${info.shareId}:${channelId}`))
+    const store: LiveStore = {
+      load: async () => {
+        const raw = await host.readState(storeId)
+        if (!raw) return null
+        const { fromBase64 } = await import('./crypto')
+        try {
+          const parsed = JSON.parse(raw) as { s: string; p: string | null; q: number }
+          return { state: fromBase64(parsed.s), pending: parsed.p ? fromBase64(parsed.p) : null, seq: parsed.q }
+        } catch { return null }
+      },
+      save: async (record) => {
+        const { toBase64 } = await import('./crypto')
+        await host.writeState(storeId, JSON.stringify({ s: toBase64(record.state), p: record.pending ? toBase64(record.pending) : null, q: record.seq }))
+      },
+    }
+    const port: LivePort = {
+      send: (body) => this.api.liveSend(this.requireSession(), info.shareId, channelId, body),
+      fetch: (since) => this.api.liveFetch(this.requireSession(), info.shareId, channelId, since),
+    }
+    const { openLiveNote } = await import('../collab/liveNotes')
+    const modified = await this.isLocallyModified(path, info)
+    const outcome = await openLiveNote({ info, port, keys: entry.keys, channelId, store }, localText, modified)
+    if (!outcome.note) return outcome
+    const { note } = outcome
+    const channels = this.liveChannels.get(info.shareId) ?? new Set<LiveChannel>()
+    channels.add(note.channel)
+    this.liveChannels.set(info.shareId, channels)
+    const guarded = [...noteFamily(path)].map((member) => `${info.shareId}\n${member}`)
+    for (const guard of guarded) this.livePaths.set(guard, (this.livePaths.get(guard) ?? 0) + 1)
+    note.onClosed(() => {
+      channels.delete(note.channel)
+      for (const guard of guarded) {
+        const count = (this.livePaths.get(guard) ?? 1) - 1
+        if (count <= 0) this.livePaths.delete(guard)
+        else this.livePaths.set(guard, count)
+      }
+      // The shared file takes over again: whatever the session wrote is uploaded now.
+      this.notifyLocalChange()
+      void this.syncShare(info.shareId)
+    })
+    return outcome
+  }
+
+  /** A shared copy of the local text that the live state could not take over (kept next to the note). */
+  async keepDivergedCopy(path: string, text: string) {
+    if (!this.host) return null
+    const scan = await this.host.scan()
+    const copy = this.conflictPath(path, new Map(scan.map((file) => [file.path, file])))
+    await this.host.write(copy, new TextEncoder().encode(text), this.hooks.now?.() ?? Date.now())
+    return copy
   }
 
   // ── User actions ────────────────────────────────────────────────────────

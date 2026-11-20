@@ -238,6 +238,7 @@
     "check:addons": "node scripts/check-addons.mjs",
     "check:sync": "node scripts/check-sync.mjs",
     "check:account-share": "node scripts/check-account-share.mjs",
+    "check:live-collab": "node scripts/check-live-collab.mjs && node scripts/check-live-collab-editor.mjs",
     "check:mcp": "node scripts/check-mcp.mjs",
     "check:site-viewer": "node scripts/check-site-viewer-famd.mjs",
     "check:local-mcp": "node scripts/check-local-mcp.mjs",
@@ -453,5 +454,9 @@
         "--ozone-platform-hint=x11"
       ]
     }
+  },
+  "dependencies": {
+    "y-codemirror.next": "^0.3.6",
+    "yjs": "^13.6.33"
   }
 }

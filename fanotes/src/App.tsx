@@ -95,6 +95,8 @@ import { userShares } from './lib/sync/userShares'
 import { SHARED_INBOX_FOLDER } from './lib/sync/sharedInbox'
 import { SharedWithMePanel } from './components/SharedWithMePanel'
 import { ShareWithUserDialog, type ShareWithUserTarget } from './components/ShareWithUserDialog'
+import { LivePeople } from './components/LivePeople'
+import { useLiveNote } from './components/useLiveNote'
 import { externalArrivals, loadArrivals, saveArrivals } from './lib/newArrivals.mjs'
 import { useExternalTabChanges, useTabHolds } from './lib/useExternalTabChanges'
 import { WorkRequestsClient } from './lib/workRequests'
@@ -1577,6 +1579,10 @@ export default function App({ startupBootstrap }: AppProps) {
     setToasts((current) => [...current.slice(-3), { id, kind, message }])
     window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), kind === 'error' ? 6500 : 4000)
   }, [])
+
+  // Shared notes (desktop): live co-editing with the other person. Unshared notes cost nothing.
+  const liveEnabled = window.fanotes.platform !== 'web' && window.fanotes.platform !== 'browser-preview'
+  const live = useLiveNote(liveEnabled && activeTab ? activeTab.path : null, activeTab?.content ?? '', (copy) => toast(`Deine Änderungen aus der Zeit ohne Verbindung konnten nicht zusammengeführt werden. Sie liegen als Kopie unter „${fileName(copy)}“.`, 'info'))
 
   const dismissToast = useCallback((id: number) => {
     setToasts((current) => current.filter((item) => item.id !== id))
@@ -6672,6 +6678,7 @@ export default function App({ startupBootstrap }: AppProps) {
               })()}
             </div>
             <div className="toolbar-group toolbar-end">
+              {liveEnabled && activeTab && <LivePeople people={live.people} status={live.status} />}
               {activeTab && dailyNoteStem(activeTab.path, normalizePath(settings.dailyNotesFolder || translateUiText('Tagesnotizen')), settings.dateFormat || 'YYYY-MM-DD') && (
                 <div className="daily-nav" role="group" aria-label="Benachbarte Tagesnotizen">
                   <button type="button" title="Vorherige Tagesnotiz" aria-label="Vorherige Tagesnotiz" onClick={() => void openAdjacentDaily(-1)}><ArrowLeft size={13} /></button>
@@ -6994,7 +7001,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main') || live.connecting || (live.note !== null && !live.note.canWrite)} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} liveNote={live.note} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -7041,6 +7048,7 @@ export default function App({ startupBootstrap }: AppProps) {
                         onInkActivity={handleInkActivity}
                         onTrainingChanged={handleTrainingChanged}
                         foreignErase={isPdfActive ? pdfMarkEraseHost : undefined}
+                        liveNote={live.note}
                         onOpenGlyphenWerk={openGlyphenWerk}
                         onSectionFold={(index, collapsed) => {
                           const line = headingLineForSection(activeTab.content, index)

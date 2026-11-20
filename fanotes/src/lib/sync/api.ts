@@ -226,6 +226,16 @@ export class SyncApi {
     return result.revision
   }
 
+  /** Live co-editing: one end-to-end encrypted message (`d` is base64 ciphertext) for a shared note's channel. */
+  liveSend(session: SyncSession, id: string, channel: string, body: { k: 'u' | 'p' | 'i' | 's'; d: string; upTo?: number }) {
+    return this.json<{ ok: true; q?: number; seq?: number; stale?: boolean; delivered?: number }>(`/shares/${id}/live/${channel}`, this.post(`/shares/${id}/live/${channel}`, body, session))
+  }
+
+  /** Buffered live messages after `since` (and the compacted snapshot when the caller may have missed it). */
+  liveFetch(session: SyncSession, id: string, channel: string, since: number) {
+    return this.json<{ seq: number; snapshot: { q: number; d: string } | null; updates: Array<{ q: number; d: string }> }>(`/shares/${id}/live/${channel}?since=${since}`, { session })
+  }
+
   /** Opens the Server-Sent Events stream the app keeps open while it runs. The caller reads `response.body`. */
   async openEvents(session: SyncSession, signal: AbortSignal): Promise<Response> {
     const response = await this.fetchImpl(this.url('/events'), {
