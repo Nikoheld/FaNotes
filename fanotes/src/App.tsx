@@ -2387,6 +2387,8 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => {
     let ticks = 0
     const id = window.setInterval(() => {
+      // Hidden window: the visibilitychange handler below already closed the visible span.
+      if (typeof document !== 'undefined' && document.hidden) return
       const path = activePathRef.current
       if (!path) return
       flushPageStats(path, Date.now(), true)

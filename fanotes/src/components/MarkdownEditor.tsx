@@ -1293,6 +1293,34 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
   }
 })
 
+/**
+ * A blinking caret keeps the compositor and GPU process awake for as long as the editor
+ * is focused. After a few seconds without typing or caret movement the caret stays solid
+ * (like the Windows caret blink timeout); the next edit or selection change blinks again.
+ */
+const CARET_REST_MS = 8000
+const caretRest = ViewPlugin.fromClass(class {
+  private timer: number | undefined
+
+  constructor(readonly view: EditorView) {
+    this.arm()
+  }
+
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.selectionSet || update.focusChanged) this.arm()
+  }
+
+  private arm() {
+    this.view.dom.classList.remove('fn-caret-rest')
+    window.clearTimeout(this.timer)
+    this.timer = window.setTimeout(() => this.view.dom.classList.add('fn-caret-rest'), CARET_REST_MS)
+  }
+
+  destroy() {
+    window.clearTimeout(this.timer)
+  }
+})
+
 const paperCaretLock = ViewPlugin.fromClass(class {
   private flingFrames = 0
   private flingId = 0
@@ -1578,6 +1606,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         gutters({ fixed: false }),
         foldGutter(),
         drawSelection(),
+        caretRest,
         selectionDragAutoScroll,
         touchSelection,
         paperCaretLock,

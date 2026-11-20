@@ -5277,7 +5277,7 @@ function registerIpcHandlers() {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
-        backgroundThrottling: false,
+        backgroundThrottling: true,
         spellcheck: false,
       },
     })

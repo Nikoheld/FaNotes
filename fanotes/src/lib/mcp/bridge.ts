@@ -18,7 +18,8 @@ export const startMcpBridge = (deps: {
       const session = deps.session()
       const readerKey = deps.readerKey()
       if (!session || !readerKey) {
-        await sleep(2_000)
+        // Not signed in / no reader key: nothing to serve, so wake rarely (battery).
+        await sleep(10_000)
         continue
       }
       try {

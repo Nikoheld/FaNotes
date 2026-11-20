@@ -2605,6 +2605,8 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .markdown-editor .cm-scroller { overflow: auto; padding: 0; font-family: inherit; }
 .markdown-editor .cm-content { min-width: 0; caret-color: var(--accent); }
 .markdown-editor .cm-line { padding: 0 2px; }
+/* Solid caret after a few idle seconds: no endless compositor frames (see caretRest). */
+.markdown-editor .cm-editor.fn-caret-rest > .cm-scroller > .cm-cursorLayer { animation: none !important; }
 .markdown-editor .cm-cursor { border-left-color: var(--accent); border-left-width: 2px; }
 .markdown-editor .cm-selectionBackground, .markdown-editor .cm-content ::selection { background: rgba(var(--accent-rgb), .28) !important; }
 .markdown-editor .cm-gutters { background: transparent; color: var(--text-muted); border: 0; padding-right: 8px; }
