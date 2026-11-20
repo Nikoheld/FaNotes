@@ -1,6 +1,7 @@
 import {
   buildContext,
   contextIsExtendedWord,
+  contextSnapshot,
   contextNearest,
   contextSequenceScore,
   contextSubwordScore,
@@ -92,6 +93,8 @@ export const createSpellWasm = () => {
     /** n-gram index of `neuralWordContext.ts`; built on first use per language. */
     context: {
       build: (language: SpellingLanguage) => buildContext(language),
+      /** The built index as one JSON string (`NeuralWordContextSnapshot`), for a synchronous reader. */
+      snapshot: (language: SpellingLanguage) => contextSnapshot(language),
       isExtendedWord: (language: SpellingLanguage, word: string) => contextIsExtendedWord(language, word),
       sequenceScore: (language: SpellingLanguage, word: string) => contextSequenceScore(language, word),
       subwordScore: (language: SpellingLanguage, word: string) => contextSubwordScore(language, word),

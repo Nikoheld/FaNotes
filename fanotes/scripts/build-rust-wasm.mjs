@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = join(appRoot, '..')
 
-const modules = [
+const allModules = [
   {
     crate: 'fanotes-wasm',
     artifact: 'fanotes_wasm',
@@ -44,6 +44,11 @@ const modules = [
     bindgenFlags: ['--remove-name-section', '--remove-producers-section'],
   },
 ]
+
+// Optional crate names on the command line limit the rebuild (e.g. `fanotes-spell-wasm`).
+const only = process.argv.slice(2)
+const modules = only.length ? allModules.filter((module) => only.includes(module.crate)) : allModules
+if (only.length && modules.length !== only.length) throw new Error(`unknown crate in: ${only.join(' ')}`)
 
 const lockedBindgen = () => {
   const lock = readFileSync(join(repoRoot, 'Cargo.lock'), 'utf8')

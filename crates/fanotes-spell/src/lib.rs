@@ -18,7 +18,7 @@ pub mod text;
 pub mod wordlist;
 
 pub use bloom::Bloom;
-pub use context::NgramIndex;
+pub use context::{ContextSnapshot, NgramIndex};
 pub use lexicon::SpellLexicon;
 pub use suggest::{
     decide_autocorrect, restore_word_case, suggest_all, Suggestion, SuggestionLexicon,
@@ -192,5 +192,28 @@ mod tests {
         let near = index.nearest_all("hous", 1, false);
         assert_eq!(near[0], ("haus".to_string(), 1));
         assert!(index.character_subword_score("baumhaus") > 0.0);
+    }
+
+    #[test]
+    fn snapshot_carries_buckets_and_grams() {
+        let words: Vec<String> = ["zug", "ast", "haus", "baum", "\u{e4}ste", "baumhaus"]
+            .iter()
+            .map(|word| word.to_string())
+            .collect();
+        let snapshot = NgramIndex::build(&words).snapshot().unwrap();
+        assert_eq!(
+            snapshot.buckets,
+            vec![
+                (3, "ast\nzug".to_string()),
+                (4, "baum\nhaus\n\u{e4}ste".to_string()),
+                (8, "baumhaus".to_string()),
+            ]
+        );
+        assert!(snapshot.bigrams.contains(&("^z".to_string(), 1)));
+        assert!(snapshot.bigrams.contains(&("au".to_string(), 4)));
+        assert!(snapshot.trigrams.contains(&("aus".to_string(), 2)));
+        assert!(snapshot.prefixes.contains(&"baumh".to_string()));
+        assert!(snapshot.prefixes.contains(&"haus".to_string()));
+        assert!(snapshot.suffixes.contains(&"mhaus".to_string()));
     }
 }

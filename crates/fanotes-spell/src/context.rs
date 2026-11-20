@@ -15,6 +15,15 @@ pub struct NgramIndex {
     suffix5: HashSet<[u16; 5]>,
 }
 
+/// Plain-data copy of an [`NgramIndex`] (see [`NgramIndex::snapshot`]).
+pub struct ContextSnapshot {
+    pub buckets: Vec<(usize, String)>,
+    pub bigrams: Vec<(String, u32)>,
+    pub trigrams: Vec<(String, u32)>,
+    pub prefixes: Vec<String>,
+    pub suffixes: Vec<String>,
+}
+
 const START: u16 = b'^' as u16;
 const END: u16 = b'$' as u16;
 
@@ -74,6 +83,55 @@ impl NgramIndex {
             bucket.sort_by(|first, second| cmp_utf16(first, second));
         }
         index
+    }
+
+    /// Everything a synchronous reader needs, as plain data: the per-length buckets (code point
+    /// length, each already in UTF-16 order), the gram counts and the prefix/suffix gram sets.
+    /// Grams come back as strings; `Err` when a gram splits a surrogate pair, so the caller can
+    /// fall back to building the index itself.
+    pub fn snapshot(&self) -> Result<ContextSnapshot, &'static str> {
+        fn text<const N: usize>(gram: &[u16; N]) -> Result<String, &'static str> {
+            String::from_utf16(gram).map_err(|_| "gram splits a surrogate pair")
+        }
+        fn sorted<T: Ord>(mut items: Vec<T>) -> Vec<T> {
+            items.sort();
+            items
+        }
+        let mut buckets: Vec<(usize, String)> = self
+            .by_length
+            .iter()
+            .map(|(length, words)| (*length, words.join("\n")))
+            .collect();
+        buckets.sort_by_key(|(length, _)| *length);
+        let mut bigrams = Vec::with_capacity(self.bigrams.len());
+        for (gram, count) in &self.bigrams {
+            bigrams.push((text(gram)?, *count));
+        }
+        let mut trigrams = Vec::with_capacity(self.trigrams.len());
+        for (gram, count) in &self.trigrams {
+            trigrams.push((text(gram)?, *count));
+        }
+        let mut prefixes = Vec::new();
+        let mut suffixes = Vec::new();
+        for gram in &self.prefix4 {
+            prefixes.push(text(gram)?);
+        }
+        for gram in &self.prefix5 {
+            prefixes.push(text(gram)?);
+        }
+        for gram in &self.suffix4 {
+            suffixes.push(text(gram)?);
+        }
+        for gram in &self.suffix5 {
+            suffixes.push(text(gram)?);
+        }
+        Ok(ContextSnapshot {
+            buckets,
+            bigrams: sorted(bigrams),
+            trigrams: sorted(trigrams),
+            prefixes: sorted(prefixes),
+            suffixes: sorted(suffixes),
+        })
     }
 
     /// `isExtendedNeuralContextWord`
