@@ -4953,6 +4953,33 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .split-drop-overlay.is-bottom > span { left: 50%; top: 75%; transform: translate(-50%, -50%); }
 .editor-split > .split-drop-overlay { background: none; }
 
+/* Folder tree: faint structure (indent guides, rhythm, a hairline between top-level folders). */
+.file-tree__row { margin: 1px 0; }
+.file-tree__group { position: relative; }
+.file-tree__group::before {
+  content: '';
+  position: absolute;
+  top: 1px;
+  bottom: 3px;
+  left: calc(var(--tree-depth, 0) * 13px + 7px);
+  width: 1px;
+  background: color-mix(in srgb, var(--border) 62%, transparent);
+  pointer-events: none;
+  transition: background-color .14s ease;
+}
+.file-tree__item:hover > .file-tree__group::before { background: color-mix(in srgb, var(--border) 100%, transparent); }
+.file-tree__root > .file-tree__item:has(> .file-tree__row[data-kind="folder"]) + .file-tree__item:has(> .file-tree__row[data-kind="folder"]) { margin-top: 5px; }
+.file-tree__root > .file-tree__item:has(> .file-tree__row[data-kind="folder"]) + .file-tree__item:has(> .file-tree__row[data-kind="folder"])::before {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 9px;
+  right: 9px;
+  height: 1px;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+  pointer-events: none;
+}
+
 /* Eraser mode choice (stroke vs area) in the drawing toolbar. */
 .lw-eraser-modes { display: flex; flex: none; gap: 3px; padding: 2px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
 .lw-eraser-modes button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 0; border-radius: 8px; color: var(--text-muted); background: transparent; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }

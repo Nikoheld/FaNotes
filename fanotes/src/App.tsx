@@ -3984,7 +3984,7 @@ export default function App({ startupBootstrap }: AppProps) {
   parkHeldTabRef.current = externalTabs.parkHeldTab
   checkTabPathRef.current = externalTabs.checkPath
 
-  const moveEntry = useCallback(async (path: string, destFolder = '') => {
+  const moveEntry = useCallback(async (path: string, destFolder = ''): Promise<string | undefined> => {
     const session = vaultSessionGenerationRef.current
     const active = activePathRef.current
     const split = splitPathRef.current
@@ -4039,6 +4039,7 @@ export default function App({ startupBootstrap }: AppProps) {
           : `„${label}“ in die oberste Ebene verschoben.`,
         'success',
       )
+      return nextPath
     } catch (error) {
       if (session === vaultSessionGenerationRef.current) {
         toast(error instanceof Error ? error.message : 'Verschieben fehlgeschlagen.', 'error')
