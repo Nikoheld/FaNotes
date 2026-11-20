@@ -7,14 +7,22 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createServer as createNetServer } from 'node:net'
 import { createServer } from 'vite'
 
+// Vite treats port 0 as its default 5173, which another dev server may own.
+const port = await new Promise((resolve) => {
+  const probe = createNetServer().listen(0, '127.0.0.1', () => {
+    const { port: free } = probe.address()
+    probe.close(() => resolve(free))
+  })
+})
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const server = await createServer({
   root,
   appType: 'spa',
   logLevel: 'error',
-  server: { host: '127.0.0.1', port: 0, fs: { strict: false } },
+  server: { host: '127.0.0.1', port, strictPort: true, fs: { strict: false } },
 })
 await server.listen()
 
