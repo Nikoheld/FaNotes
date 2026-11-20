@@ -1,7 +1,6 @@
 import { Check, Clock, Cloud, CloudOff, Copy, KeyRound, Laptop, LoaderCircle, LogOut, RefreshCw, ShieldCheck, Smartphone, Trash2, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { getUiLocale } from '../i18n'
-import { MCP_CONNECTOR_NAME, mcpServerUrl, type McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { syncStatusLabel } from '../lib/sync/status'
 import type { AppSettings } from '../types'
@@ -12,8 +11,6 @@ type Props = {
   settings: AppSettings
   update: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void
   platform?: string
-  grants: McpGrantInfo[]
-  onGrants: (grants: McpGrantInfo[]) => void
   /** Opens Settings → Konflikte. */
   onOpenConflicts?: () => void
 }
@@ -29,7 +26,7 @@ const formatWhen = (iso: string | null) => {
   return date.toLocaleString(getUiLocale(), { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-export function SyncSettingsSection({ engine, syncState, settings, update, platform, grants, onGrants, onOpenConflicts }: Props) {
+export function SyncSettingsSection({ engine, syncState, settings, update, platform, onOpenConflicts }: Props) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -42,8 +39,6 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [deletePassword, setDeletePassword] = useState('')
   const [logOpen, setLogOpen] = useState(false)
-  const [connectorPassword, setConnectorPassword] = useState('')
-  const connectorUrl = mcpServerUrl()
   const signedIn = Boolean(syncState.account)
   const unavailable = syncState.status === 'unavailable'
 
@@ -51,20 +46,6 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
     if (!signedIn) return
     void engine.refreshAccount().catch(() => undefined)
   }, [engine, signedIn, syncState.lastSyncAt])
-
-  useEffect(() => {
-    if (!signedIn || !syncState.mcpReader) {
-      onGrants([])
-      return
-    }
-    let cancelled = false
-    void engine.mcpGrants().then((next) => {
-      if (!cancelled) onGrants(Array.isArray(next) ? next : [])
-    }).catch(() => {
-      if (!cancelled) onGrants([])
-    })
-    return () => { cancelled = true }
-  }, [engine, signedIn, syncState.mcpReader, syncState.lastSyncAt, onGrants])
 
   const run = async (label: string, task: () => Promise<void>, success?: string) => {
     setBusy(label)
@@ -188,50 +169,6 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
               <div className="setting-copy"><span>Name dieses Geräts</span><small>Erscheint in der Geräteliste und im Namen von Konfliktkopien.</small></div>
               <div className="setting-control"><input data-i18n-ignore type="text" maxLength={80} value={settings.syncDeviceName} placeholder={isWeb ? 'Browser' : 'z. B. Laptop'} onChange={(event) => update('syncDeviceName', event.target.value)} /></div>
             </div>
-          </div>
-
-          <div id="settings-grok-connector" className="setting-card">
-            <div className="setting-card-title"><ShieldCheck size={16} /><span>Grok-Connector</span></div>
-            <div className="setting-row">
-              <div className="setting-copy">
-                <span>Nur ein Grok, das du selbst freigibst</span>
-                <small>In Grok Build oder auf grok.com unter Custom Connector den Namen und die Server-URL eintragen. Grok öffnet diese Seite zur Freigabe. Der Server speichert die Notizen weiter nur verschlüsselt; dieses Gerät entschlüsselt sie, solange FaNotes offen und der Connector an ist.</small>
-              </div>
-            </div>
-            <div className="setting-row">
-              <div className="setting-copy"><span>Name</span><small>So heißt der Connector in Grok.</small></div>
-              <div className="setting-control"><input data-i18n-ignore readOnly value={MCP_CONNECTOR_NAME} aria-label="Connector-Name" /></div>
-            </div>
-            <div className="setting-row">
-              <div className="setting-copy"><span>Server-URL</span><small>Diese Adresse in das Feld Server URL einfügen.</small></div>
-              <div className="setting-control">
-                <input data-i18n-ignore readOnly value={connectorUrl} aria-label="Server-URL" />
-                <button type="button" className="secondary-button" onClick={() => void navigator.clipboard?.writeText(connectorUrl).catch(() => undefined)}><Copy size={14} /> Kopieren</button>
-              </div>
-            </div>
-            <form className="sync-form" onSubmit={(event) => {
-              event.preventDefault()
-              void run('connector', async () => {
-                if (syncState.mcpReader) await engine.disableMcpConnector(connectorPassword)
-                else await engine.enableMcpConnector(connectorPassword)
-                setConnectorPassword('')
-              }, syncState.mcpReader ? 'Grok-Connector ist aus. Freigaben wurden widerrufen.' : 'Grok-Connector ist an. Als Nächstes die URL in Grok eintragen und die Freigabe bestätigen.')
-            }}>
-              <label><span>Sync-Passwort</span><input data-i18n-ignore type="password" autoComplete="current-password" required value={connectorPassword} onChange={(event) => setConnectorPassword(event.target.value)} /></label>
-              <div className="sync-form-actions">
-                <button type="submit" className={syncState.mcpReader ? 'secondary-button' : 'primary-button'} disabled={busy !== null || !connectorPassword}>
-                  {busy === 'connector' ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}
-                  {syncState.mcpReader ? 'Connector ausschalten' : 'Connector auf diesem Gerät einschalten'}
-                </button>
-                <small>{syncState.mcpReader ? 'An. Grok darf erst lesen, nachdem du die Freigabe im Browser bestätigt hast.' : 'Aus. Niemand kann die Notizen über die Server-URL lesen.'}</small>
-              </div>
-            </form>
-            {syncState.mcpReader && grants.map((grant) => (
-              <div key={grant.id} className="setting-row">
-                <div className="setting-copy"><span data-i18n-ignore>{grant.clientName}</span><small data-i18n-ignore>{grant.redirectHost} · {formatWhen(grant.createdAt)}</small></div>
-                <div className="setting-control"><button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run(`grant-${grant.id}`, async () => { await engine.revokeMcpGrant(grant.id); onGrants(await engine.mcpGrants()) }, 'Diese Grok-Freigabe wurde widerrufen.')}>Widerrufen</button></div>
-              </div>
-            ))}
           </div>
 
           <div id="settings-sync-devices" className="setting-card">

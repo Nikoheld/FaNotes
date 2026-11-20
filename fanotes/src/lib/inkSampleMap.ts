@@ -1,4 +1,5 @@
 import { SCROLL_ROOM } from './noteCanvas'
+import { effectivePressure } from './penDevice'
 
 /** Legacy name kept for drawing-mode needles. Jump is now 0–1 page space. */
 export const INK_LEAP_PAGE_RATIO = 0.42
@@ -151,9 +152,7 @@ export const mapClientToPaperPoint = (
     y = (uy / zoom + paperH / 2) / paperH
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null
-  const rawPressure = (event.pressure ?? 0) > 0
-    ? event.pressure!
-    : event.pointerType === 'mouse' ? 0.55 : 0.35
+  const rawPressure = effectivePressure(event)
   return {
     x,
     y,
