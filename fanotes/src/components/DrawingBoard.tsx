@@ -67,6 +67,7 @@ import { rasterizePaperLayers, scrollPaperTo, waitForPaperPaint } from '../lib/c
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
 import { TextToHandwritingDialog } from './TextToHandwritingDialog'
 import { PenQuickMenu } from './PenQuickMenu'
+import { effectivePointerType, effectivePressure, isPenNearPalmWindow } from '../lib/penDevice'
 import {
   PEN_TIP_MASK,
   quickMenuChordOnDown,
@@ -1582,6 +1583,17 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   onSectionFoldRef.current = onSectionFold
   const boardRef = useRef<HTMLElement | null>(null)
   useEffect(() => mountPenPointer(() => boardRef.current), [])
+  useEffect(() => {
+    const seen = (event: PointerEvent) => {
+      if (event.pointerType === 'pen') lastPenNearRef.current = performance.now()
+    }
+    window.addEventListener('pointermove', seen, { capture: true, passive: true })
+    window.addEventListener('pointerdown', seen, { capture: true, passive: true })
+    return () => {
+      window.removeEventListener('pointermove', seen, true)
+      window.removeEventListener('pointerdown', seen, true)
+    }
+  }, [])
   const penContactTimerRef = useRef(0)
   const sawPenRef = useRef(false)
   const markPenContact = useCallback((active: boolean) => {
@@ -1757,6 +1769,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // visible layer is not stroked from the first point again.
   const liveTranslucentRef = useRef<LiveTranslucentSession | null>(null)
   const lastPenContactRef = useRef(0)
+  /** Last time any pen event (hover included) was seen: a touch right after it is a palm. */
+  const lastPenNearRef = useRef(0)
   const tabletPanRef = useRef<{
     pointerId: number
     x: number
@@ -3519,7 +3533,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         x: fallback.x,
         y: fallback.y,
         t: Math.round((event.timeStamp ?? 0) * 100) / 100,
-        pressure: (event.pressure ?? 0) > 0 ? event.pressure : event.pointerType === 'mouse' ? 0.55 : 0.35,
+        pressure: effectivePressure(event),
         tiltX: event.tiltX ?? 0,
         tiltY: event.tiltY ?? 0,
         pointerType: event.pointerType || 'mouse',
@@ -5616,6 +5630,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (!inkReadyRef.current || inkLoadFailedRef.current) return
     if (overlayInert(inline, inputActive) || !overlayHitEnabled(inputActive)) return
     if (hitTestChrome(event.clientX, event.clientY)) return
+    // Palm rejection while the pen hovers in range: the hand lands before the tip does.
+    if (event.pointerType === 'touch' && isPenNearPalmWindow(lastPenNearRef.current, performance.now())) {
+      if (event.cancelable) event.preventDefault()
+      return
+    }
     setArtPanelOpen(false)
     // A new contact stops a coasting finger pan. The mouse event a touch lift
     // synthesizes must not, or the coast would die in the same gesture.
@@ -5657,7 +5676,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // Pen-only (Windows palm / resting hand): finger, mouse and trackpad do not ink.
     // A finger pans the sheet. A palm during the pen, or just after it, does not.
     // Mapped stylus/pad buttons still run even if Chromium labelled them `mouse`.
-    if (!buttonIdentity && shouldRejectNonPenInk(event.pointerType, settings.penOnly)) {
+    if (!buttonIdentity && shouldRejectNonPenInk(effectivePointerType(event.nativeEvent), settings.penOnly)) {
       // A mouse laser still aims when pen-only is on. A finger keeps panning.
       if (!(tool === 'laser' && event.pointerType === 'mouse')) {
         if (shouldFingerPanInPenOnly({
@@ -5989,7 +6008,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     if (shouldRejectNonPenInkMove(
-      event.pointerType,
+      effectivePointerType(event.nativeEvent),
       settings.penOnly,
       activePointerRef.current === event.pointerId,
     )) return

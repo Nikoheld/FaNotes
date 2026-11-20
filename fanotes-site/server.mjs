@@ -15,7 +15,6 @@ import { handleDiagnosticsRequest } from './diagnostics-api.mjs'
 import { handleWorkRequestsRequest } from './work-requests-api.mjs'
 import { handleSyncRequest, setAccountDeletedHook } from './sync-api.mjs'
 import { credentialOr } from './credentials.mjs'
-import { handleMcpRequest } from './mcp-api.mjs'
 import { handleAiProxyRequest } from './ai-proxy.mjs'
 import { createSchulnetzRuntime } from './schulnetz-api.mjs'
 import { createMensa } from './mensa.mjs'
@@ -645,7 +644,6 @@ const server = createServer(async (request, response) => {
     if (await mensa.handle(request, response, url)) return
     if (await schulnetz.handle(request, response, url)) return
     if (await kantiWeb.handle(request, response, url)) return
-    if (await handleMcpRequest(request, response, url)) return
     if (await handleHomeworkRequest(request, response, url)) return
     if (await handleShareRequest(request, response, url)) return
     if (await handleProfileRequest(request, response, url)) return

@@ -92,3 +92,34 @@ export const clampQuickMenuCenter = (
   )
   return { x: clamp(x, viewportWidth), y: clamp(y, viewportHeight) }
 }
+
+/** Distance from the menu origin below which no option is chosen (movement there cancels). */
+export const QUICK_MENU_DEAD_ZONE = 22
+/** Beyond this distance the direction picks from the colour ring instead of the tool ring. */
+export const QUICK_MENU_RING_SPLIT = (QUICK_MENU_TOOL_RADIUS + QUICK_MENU_COLOR_RADIUS) / 2
+
+/**
+ * Marking-menu selection: the option is chosen by the direction of the move
+ * from the menu origin, so the pen never has to reach the option itself.
+ * Past the dead zone the nearest sector wins; the inner distance band picks a
+ * tool, the outer band a colour. Returns `tool:<index>` / `color:<index>` or null.
+ */
+export const quickMenuSelectByDirection = (
+  dx: number,
+  dy: number,
+  toolCount: number,
+  colorCount: number,
+  deadZone = QUICK_MENU_DEAD_ZONE,
+): { ring: 'tool' | 'color'; index: number } | null => {
+  const dist = Math.hypot(dx, dy)
+  if (!(dist > deadZone)) return null
+  const useColor = colorCount > 0 && (toolCount === 0 || dist > QUICK_MENU_RING_SPLIT)
+  const count = useColor ? colorCount : toolCount
+  if (count <= 0) return null
+  const offset = useColor ? 0.5 : 0
+  // Angle clockwise from 12 o'clock, matching ringPositions.
+  let turn = Math.atan2(dy, dx) + Math.PI / 2
+  turn = ((turn % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)
+  const index = Math.round(turn / (Math.PI * 2) * count - offset)
+  return { ring: useColor ? 'color' : 'tool', index: ((index % count) + count) % count }
+}
