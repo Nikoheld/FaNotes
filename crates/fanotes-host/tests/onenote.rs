@@ -3,19 +3,24 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::fs;
 
-fn host() -> (Host, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("fanotes-onenote-{}", std::process::id()));
+fn host() -> (
+    Host,
+    std::path::PathBuf,
+    fanotes_host::test_support::Scratch,
+) {
+    let dir =
+        fanotes_host::test_support::Scratch::new(format!("fanotes-onenote-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(&vault).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault.clone()).unwrap();
-    (host, vault)
+    (host, vault, dir)
 }
 
 #[test]
 fn the_sample_notebook_becomes_a_searchable_note() {
-    let (mut host, vault) = host();
+    let (mut host, vault, _scratch) = host();
     fs::remove_dir_all(vault.join(".fanotes")).unwrap();
     fs::create_dir_all(vault.join(".lernwerk")).unwrap();
     fs::write(vault.join(".lernwerk/keep.txt"), b"alt").unwrap();
@@ -159,7 +164,7 @@ fn the_sample_notebook_becomes_a_searchable_note() {
 #[test]
 fn a_missing_onenote_source_uses_the_desktop_lstat_error() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!(
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-onenote-lstat-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -170,7 +175,7 @@ fn a_missing_onenote_source_uses_the_desktop_lstat_error() {
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(&vault).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault).unwrap();
     let missing = dir.join("fehlt.one");
     assert_eq!(
@@ -220,7 +225,7 @@ fn a_missing_onenote_source_uses_the_desktop_lstat_error() {
 #[test]
 fn an_unwritable_onenote_internal_folder_reports_the_desktop_mkdir_error() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!(
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-onenote-internal-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -232,7 +237,7 @@ fn an_unwritable_onenote_internal_folder_reports_the_desktop_mkdir_error() {
     let vault = dir.join("vault");
     let internal = vault.join(".fanotes");
     fs::create_dir_all(&internal).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault).unwrap();
     fs::set_permissions(&internal, fs::Permissions::from_mode(0o555)).unwrap();
     struct Restore(std::path::PathBuf);
@@ -265,7 +270,7 @@ fn an_unwritable_onenote_internal_folder_reports_the_desktop_mkdir_error() {
 #[test]
 fn an_unwritable_onenote_worksheet_folder_reports_the_desktop_open_error() {
     use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir().join(format!(
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-onenote-page-write-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -277,7 +282,7 @@ fn an_unwritable_onenote_worksheet_folder_reports_the_desktop_open_error() {
     let vault = dir.join("vault");
     let worksheets = vault.join(".fanotes/worksheets");
     fs::create_dir_all(&worksheets).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault).unwrap();
     fs::set_permissions(&worksheets, fs::Permissions::from_mode(0o555)).unwrap();
     struct Restore(std::path::PathBuf);

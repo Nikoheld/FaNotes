@@ -81,7 +81,7 @@ const runLogic = () => {
   const stop = installChromeTextSelect(owner)
   owner.listeners.pointerdown({ button: 0, target: closest({}) })
   assert.equal(classes.has(CHROME_SELECT_SUPPRESS_CLASS), true)
-  assert.ok(flushed >= 1)
+  assert.equal(flushed, 0, 'pointerdown must not force layout')
   owner.listeners.pointerdown({ button: 0, target: label })
   assert.equal(classes.has(CHROME_SELECT_SUPPRESS_CLASS), false)
   owner.listeners.pointerdown({ button: 0, target: closest({}) })

@@ -4,10 +4,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use fanotes_host::Host;
 use serde_json::json;
 
-fn host() -> (std::path::PathBuf, Host) {
+fn host() -> (
+    std::path::PathBuf,
+    Host,
+    fanotes_host::test_support::Scratch,
+) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-onboarding-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-onboarding-{}-{id}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     fs::create_dir_all(vault.join(".fanotes")).unwrap();
@@ -16,17 +23,17 @@ fn host() -> (std::path::PathBuf, Host) {
         "{\"version\":1,\"status\":\"pending\"}\n",
     )
     .unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.settings.insert("uiLanguage".to_owned(), json!("de"));
     host.set_vault(vault.clone()).unwrap();
-    (vault, host)
+    (vault, host, dir)
 }
 
 #[cfg(unix)]
 #[test]
 fn a_failed_setup_save_keeps_setup_open() {
     use std::os::unix::fs::PermissionsExt;
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     host.settings.insert("uiLanguage".to_owned(), json!("en"));
     let app = host.app_data.clone();
     fs::set_permissions(&app, fs::Permissions::from_mode(0o555)).unwrap();
@@ -71,7 +78,7 @@ fn a_failed_setup_save_keeps_setup_open() {
 
 #[test]
 fn an_english_setup_leaves_a_german_subject_name_uncreated() {
-    let (vault, mut english) = host();
+    let (vault, mut english, _scratch) = host();
     english
         .settings
         .insert("uiLanguage".to_owned(), json!("en"));
@@ -105,7 +112,7 @@ fn an_english_setup_leaves_a_german_subject_name_uncreated() {
         .unwrap();
     assert_eq!(amat["color"], "#9065b0");
 
-    let (german_vault, mut german) = host();
+    let (german_vault, mut german, _scratch) = host();
     german
         .dispatch("fanotes:complete-onboarding", &[json!(["Physics"])])
         .unwrap();
@@ -116,7 +123,7 @@ fn an_english_setup_leaves_a_german_subject_name_uncreated() {
 
 #[test]
 fn setup_still_answers_the_channels_the_desktop_leaves_open() {
-    let (_vault, mut host) = host();
+    let (_vault, mut host, _scratch) = host();
     assert_eq!(
         host.dispatch("fanotes:get-tree", &[]).unwrap_err(),
         "Bitte schließe zuerst die FaNotes-Ersteinrichtung ab."
@@ -176,7 +183,7 @@ fn setup_still_answers_the_channels_the_desktop_leaves_open() {
 
 #[test]
 fn a_finished_setup_still_checks_the_subject_selection() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
         .unwrap();
     assert_eq!(
@@ -199,7 +206,7 @@ fn a_finished_setup_still_checks_the_subject_selection() {
 
 #[test]
 fn first_run_creates_the_chosen_subjects_and_stamps_the_tree() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     let bootstrap = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(bootstrap["onboardingRequired"], true);
     assert!(bootstrap["starterSubjects"]
@@ -293,7 +300,7 @@ fn first_run_creates_the_chosen_subjects_and_stamps_the_tree() {
 #[test]
 fn an_unreadable_tree_cache_is_removed() {
     use std::os::unix::fs::PermissionsExt;
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
         .unwrap();
     host.dispatch("fanotes:get-tree", &[]).unwrap();
@@ -321,7 +328,7 @@ fn an_unreadable_tree_cache_is_removed() {
 
 #[test]
 fn a_cached_tree_keeps_a_long_unicode_name() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
         .unwrap();
     host.dispatch("fanotes:get-tree", &[]).unwrap();
@@ -449,7 +456,7 @@ fn a_cached_tree_keeps_a_long_unicode_name() {
 
 #[test]
 fn onboarding_stays_pending_when_its_file_contains_a_bad_byte() {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-onboarding-byte-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -464,7 +471,7 @@ fn onboarding_stays_pending_when_its_file_contains_a_bad_byte() {
     let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
     bytes[index] = 0xff;
     fs::write(vault.join(".fanotes/onboarding.json"), &bytes).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault).unwrap();
     let bootstrap = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(bootstrap["onboardingRequired"], true);
@@ -472,7 +479,7 @@ fn onboarding_stays_pending_when_its_file_contains_a_bad_byte() {
 
 #[test]
 fn a_cached_tree_with_a_bad_byte_still_opens() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
         .unwrap();
     host.dispatch("fanotes:get-tree", &[]).unwrap();
@@ -517,7 +524,7 @@ fn a_cached_tree_with_a_bad_byte_still_opens() {
 
 #[test]
 fn a_version_of_one_point_zero_still_counts_as_version_one() {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-version-one-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -533,7 +540,7 @@ fn a_version_of_one_point_zero_still_counts_as_version_one() {
         "{\"version\":1.0,\"status\":\"pending\"}\n",
     )
     .unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault.clone()).unwrap();
     assert_eq!(
         host.dispatch("fanotes:bootstrap", &[]).unwrap()["onboardingRequired"],
@@ -586,7 +593,7 @@ fn a_version_of_one_point_zero_still_counts_as_version_one() {
 
 #[test]
 fn a_cached_tree_without_entries_is_removed() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!([])])
         .unwrap();
     host.dispatch("fanotes:get-tree", &[]).unwrap();
@@ -610,7 +617,7 @@ fn a_cached_tree_without_entries_is_removed() {
 
 #[test]
 fn a_cached_file_size_of_twelve_point_zero_still_counts() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
         .unwrap();
     fs::write(vault.join("Mathematik/Notiz.md"), b"Hallo").unwrap();
@@ -655,7 +662,7 @@ fn a_cached_file_size_of_twelve_point_zero_still_counts() {
 
 #[test]
 fn a_null_folder_color_discards_the_tree_cache() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!(["Mathematik"])])
         .unwrap();
     host.dispatch("fanotes:get-tree", &[]).unwrap();
@@ -725,7 +732,7 @@ fn a_null_folder_color_discards_the_tree_cache() {
 
 #[test]
 fn a_cached_tree_sorts_each_level_like_the_desktop() {
-    let (vault, mut host) = host();
+    let (vault, mut host, _scratch) = host();
     host.dispatch("fanotes:complete-onboarding", &[json!([])])
         .unwrap();
     fs::create_dir(vault.join("Zoo")).unwrap();
@@ -795,7 +802,7 @@ fn a_cached_tree_sorts_each_level_like_the_desktop() {
 
 #[test]
 fn an_oversized_onboarding_file_does_not_keep_setup_open() {
-    let dir = std::env::temp_dir().join(format!(
+    let dir = fanotes_host::test_support::Scratch::new(format!(
         "fanotes-onboarding-size-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
@@ -820,7 +827,7 @@ fn an_oversized_onboarding_file_does_not_keep_setup_open() {
             .len()
             > 4096
     );
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault).unwrap();
     assert_eq!(
         host.dispatch("fanotes:bootstrap", &[]).unwrap()["onboardingRequired"],

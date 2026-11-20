@@ -63,11 +63,11 @@ pub fn set(store: SecretStore, account: &str, secret: &str) -> Result<(), String
     }
 }
 
-pub fn forget_profile(app_data: &Path, names: &[&str]) {
+pub fn forget_profile(store: SecretStore, app_data: &Path, names: &[&str]) {
     for name in names {
         let account = account(app_data, name);
         let _ = delete(SecretStore::Memory, &account);
-        let _ = delete(SecretStore::Keyring, &account);
+        let _ = delete(store, &account);
     }
 }
 
@@ -92,6 +92,7 @@ fn memory() -> &'static Mutex<BTreeMap<String, String>> {
 }
 
 fn keyring_get(account: &str) -> Result<Option<String>, String> {
+    crate::hermetic::forbid_real("the OS keyring");
     if !session_bus_configured() {
         return Err(KEYRING_UNAVAILABLE.to_owned());
     }
@@ -105,6 +106,7 @@ fn keyring_get(account: &str) -> Result<Option<String>, String> {
 }
 
 fn keyring_set(account: &str, secret: &str) -> Result<(), String> {
+    crate::hermetic::forbid_real("the OS keyring");
     if !session_bus_configured() {
         return Err(KEYRING_REQUIRED.to_owned());
     }
@@ -115,6 +117,7 @@ fn keyring_set(account: &str, secret: &str) -> Result<(), String> {
 }
 
 fn keyring_delete(account: &str) -> Result<(), String> {
+    crate::hermetic::forbid_real("the OS keyring");
     if !session_bus_configured() {
         return Err(KEYRING_UNAVAILABLE.to_owned());
     }

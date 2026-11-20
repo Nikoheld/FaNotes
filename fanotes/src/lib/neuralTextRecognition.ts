@@ -13,7 +13,7 @@ import { ENGLISH_CANONICAL_PROPER_NAMES } from '../../../src/data/englishProperN
 import type { Stroke } from '../../../src/types'
 import { normalizeGermanSharpS } from '../../../src/lib/orthography'
 import type { HandwritingRecognitionResources } from '../types'
-import { loadRecognitionCandidates, loadSpellingWordContext } from './spelling'
+import { loadRecognitionWordList, loadSpellingWordContext } from './spelling'
 import { decodeRecogCtc, installRecogLexicon, loadRecogWasm, renderRecogLineTensor } from './recogCore'
 import {
   recognizeTrocrLine,
@@ -2232,8 +2232,8 @@ export async function recognizeNeuralText(
   }
   const wordMembership = await loadSpellingWordContext(language).catch(() => undefined)
   if (wordMembership) {
-    const candidates = await loadRecognitionCandidates(language).catch(() => null)
-    if (candidates) await installRecogLexicon(language, [...candidates])
+    const candidates = await loadRecognitionWordList(language).catch(() => null)
+    if (candidates) await installRecogLexicon(language, candidates)
   }
   const results: NeuralTextLine[] = []
   const trocrFailures: string[] = []

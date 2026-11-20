@@ -15,7 +15,7 @@ export type AutocorrectOptions = {
   /** Swiss German: ß becomes ss. On for de-CH by default. */
   swissSs: boolean
   /** Spelling: the replacement the dictionary is sure of, or null. */
-  correctWord?: (word: string, sentenceStart: boolean) => string | null
+  correctWord?: (word: string, sentenceStart: boolean, range: { from: number; to: number }) => string | null
   /** Words the writer added (names): never changed. */
   isKnown?: (word: string) => boolean
   /** The writer's own replacements, e.g. "zb" → "z. B.". */
@@ -64,6 +64,15 @@ export const startsSentence = (text: string, start: number) => {
 }
 
 const typography = (language: StoryLanguage) => LANGUAGE_TYPOGRAPHY[language]
+
+/** The spelling fix for a word, capitalised when it opens a sentence. Also used when the
+ * correction comes from the spelling worker a moment after the keystroke. */
+export const spellingFix = (from: number, to: number, corrected: string, capitalise: boolean, language: StoryLanguage): AutoFix => ({
+  from,
+  to,
+  text: capitalise ? corrected[0].toLocaleUpperCase(language) + corrected.slice(1) : corrected,
+  kind: 'spelling',
+})
 
 /**
  * The fix for what was just typed, or null. `text` is the paragraph text after
@@ -126,11 +135,8 @@ export const autocorrectAfterInput = (text: string, caret: number, inserted: str
 
   const sentenceStart = startsSentence(text, start)
   if (options.spelling && options.correctWord) {
-    const corrected = options.correctWord(word, sentenceStart)
-    if (corrected && corrected !== word) {
-      const capitalised = sentenceStart && options.capitalize ? corrected[0].toLocaleUpperCase(language) + corrected.slice(1) : corrected
-      return { from: start, to: end, text: capitalised, kind: 'spelling' }
-    }
+    const corrected = options.correctWord(word, sentenceStart, { from: start, to: end })
+    if (corrected && corrected !== word) return spellingFix(start, end, corrected, sentenceStart && options.capitalize, language)
   }
   if (options.capitalize && sentenceStart && /^\p{Ll}/u.test(word)) {
     return { from: start, to: start + 1, text: word[0].toLocaleUpperCase(language), kind: 'capital' }

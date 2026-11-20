@@ -363,7 +363,7 @@ mod tests {
 
     #[test]
     fn a_spelling_manifest_keeps_a_whole_number_of_hashes() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-spell-whole-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -418,7 +418,7 @@ mod tests {
 
     #[test]
     fn a_negative_spelling_bit_count_is_a_bad_filter() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-spell-bits-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn a_negative_web_model_size_still_loads_handwriting() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-ocr-web-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()

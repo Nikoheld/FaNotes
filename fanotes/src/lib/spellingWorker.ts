@@ -21,7 +21,7 @@ export type SpellingWorkerRequest =
     sentenceStart: boolean
     properName: boolean
   }
-  | { id: number; op: 'context'; call: 'build' | 'isExtendedWord' | 'sequenceScore' | 'subwordScore' | 'wordsOfLength' | 'nearest'; args: unknown[] }
+  | { id: number; op: 'context'; call: 'build' | 'snapshot' | 'isExtendedWord' | 'sequenceScore' | 'subwordScore' | 'wordsOfLength' | 'nearest'; args: unknown[] }
 
 export type SpellingWorkerResponse = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string }
 

@@ -157,6 +157,41 @@ fn with_context<T>(
     })
 }
 
+/// The built index as one JSON object for a synchronous reader on another thread:
+/// `{buckets: {"<length>": "w1\\nw2..."}, bigrams: [gram, count, ...], trigrams: [...],
+/// prefixes: [gram, ...], suffixes: [gram, ...]}`. Words stay newline joined so the receiver
+/// splits a bucket only when it needs it.
+#[wasm_bindgen(js_name = contextSnapshot)]
+pub fn context_snapshot(language_code: &str) -> Result<String, JsError> {
+    let language = language(language_code)?;
+    LEXICON.with(|lexicon| {
+        let mut lexicon = lexicon.borrow_mut();
+        let index = lexicon
+            .context(language)
+            .ok_or_else(|| JsError::new("Die Wortliste ist nicht geladen."))?;
+        let snapshot = index.snapshot().map_err(JsError::new)?;
+        let flat = |grams: &[(String, u32)]| -> Vec<serde_json::Value> {
+            grams
+                .iter()
+                .flat_map(|(gram, count)| [gram.clone().into(), (*count).into()])
+                .collect()
+        };
+        let buckets: serde_json::Map<String, serde_json::Value> = snapshot
+            .buckets
+            .iter()
+            .map(|(length, words)| (length.to_string(), words.clone().into()))
+            .collect();
+        let value = serde_json::json!({
+            "buckets": buckets,
+            "bigrams": flat(&snapshot.bigrams),
+            "trigrams": flat(&snapshot.trigrams),
+            "prefixes": snapshot.prefixes,
+            "suffixes": snapshot.suffixes,
+        });
+        serde_json::to_string(&value).map_err(|error| JsError::new(&error.to_string()))
+    })
+}
+
 #[wasm_bindgen(js_name = contextIsExtendedWord)]
 pub fn context_is_extended_word(language_code: &str, word: &str) -> Result<bool, JsError> {
     with_context(language_code, false, |index| index.is_extended_word(word))

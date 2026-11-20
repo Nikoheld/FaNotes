@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn an_unreadable_folder_does_not_receive_a_pdf_note() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-pdf-unlist-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -357,7 +357,7 @@ mod tests {
             }
         }
         let _restore = Restore(folder.clone());
-        let mut host = Host::open(dir.join("app"));
+        let mut host = Host::open_hermetic(dir.join("app"));
         host.set_vault(vault).unwrap();
         let error = import_pdf_payload(
             &host,
@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn an_imported_pdf_reports_the_file_modification_time() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-pdf-mtime-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -393,7 +393,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let vault = dir.join("vault");
         std::fs::create_dir_all(vault.join("Mathe")).unwrap();
-        let mut host = Host::open(dir.join("app"));
+        let mut host = Host::open_hermetic(dir.join("app"));
         host.set_vault(vault.clone()).unwrap();
         let result = import_pdf_payload(
             &host,
@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn a_backslash_in_a_pdf_name_stays_in_the_linux_file_name() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-pdf-backslash-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -423,7 +423,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let vault = dir.join("vault");
         std::fs::create_dir_all(vault.join("Mathe")).unwrap();
-        let mut host = Host::open(dir.join("app"));
+        let mut host = Host::open_hermetic(dir.join("app"));
         host.set_vault(vault.clone()).unwrap();
         let bytes = json!(b"%PDF-1.4\n".to_vec());
         let slash = import_pdf_payload(
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn a_picked_worksheet_uses_the_desktop_file_messages() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-worksheet-pick-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -460,7 +460,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let vault = dir.join("vault");
         std::fs::create_dir_all(&vault).unwrap();
-        let mut host = Host::open(dir.join("app"));
+        let mut host = Host::open_hermetic(dir.join("app"));
         host.set_vault(vault.clone()).unwrap();
         let empty = dir.join("Leer.PDF");
         std::fs::write(&empty, b"").unwrap();
@@ -536,7 +536,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_pdf_dialog_checks_the_extension_before_the_file() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-pdf-dialog-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn a_subject_book_dialog_rejects_the_folder_shape_before_opening_a_file() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_support::Scratch::new(format!(
             "fanotes-book-shape-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -640,7 +640,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let vault = dir.join("vault");
         std::fs::create_dir_all(&vault).unwrap();
-        let mut host = Host::open(dir.join("app"));
+        let mut host = Host::open_hermetic(dir.join("app"));
         host.file_dialogs = false;
         host.set_vault(vault).unwrap();
         assert_eq!(

@@ -7,10 +7,13 @@ use serde_json::json;
 fn host() -> Host {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-ocr-host-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-ocr-host-{}-{id}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("vault")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(dir.join("vault")).unwrap();
     host
 }

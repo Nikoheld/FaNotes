@@ -97,13 +97,13 @@ fn companion_of(ink: &Value) -> String {
 }
 
 struct Vault {
-    dir: PathBuf,
+    dir: fanotes_host::test_support::Scratch,
     host: Host,
 }
 
 impl Vault {
     fn new() -> Self {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = fanotes_host::test_support::Scratch::new(format!(
             "fanotes-empty-ink-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
@@ -113,7 +113,7 @@ impl Vault {
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("vault/.fanotes/assets")).unwrap();
-        let mut host = Host::open(dir.join("app"));
+        let mut host = Host::open_hermetic(dir.join("app"));
         host.set_vault(dir.join("vault")).unwrap();
         fs::write(dir.join("vault/Physik.md"), format!("{}\n", body())).unwrap();
         Vault { dir, host }

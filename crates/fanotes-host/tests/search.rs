@@ -7,21 +7,24 @@ fn touch(host: &Host, relative: &str) {
     std::fs::write(host.vault.as_ref().unwrap().join(relative), b"\n").unwrap();
 }
 
-fn host() -> Host {
+fn host() -> (Host, fanotes_host::test_support::Scratch) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-search-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-search-{}-{id}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(vault.join("Bio")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault).unwrap();
-    host
+    (host, dir)
 }
 
 #[test]
 fn search_returns_title_excerpt_and_handwriting_anchor() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     touch(&host, "Bio/Blatt.md");
     host.dispatch(
         "fanotes:write-file",
@@ -137,7 +140,7 @@ fn search_returns_title_excerpt_and_handwriting_anchor() {
 
 #[test]
 fn search_uses_the_companion_transcript_and_both_drawing_ids() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     let old = ink_note("Sichtbarer Text", Some("Veraltet"));
     std::fs::write(vault.join("Bio/Alt.md"), old).unwrap();
@@ -257,7 +260,7 @@ fn drawing_hit(host: &mut Host, query: &str) -> serde_json::Value {
 
 #[test]
 fn drawing_search_uses_the_library_title_and_skips_invalid_files() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let assets = host.vault.as_ref().unwrap().join(".fanotes/assets");
     std::fs::create_dir_all(&assets).unwrap();
     std::fs::write(
@@ -297,7 +300,7 @@ fn drawing_search_uses_the_library_title_and_skips_invalid_files() {
 #[cfg(unix)]
 #[test]
 fn search_skips_companions_links_and_notes_buried_too_deep() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     std::fs::write(vault.join("Bio/Formel.md"), "Apfel\n").unwrap();
     std::fs::write(vault.join("Bio/Formel.FAMD"), "Birne\n").unwrap();
@@ -343,7 +346,7 @@ fn search_skips_companions_links_and_notes_buried_too_deep() {
 
 #[test]
 fn search_keeps_a_case_pair_the_desktop_does_not_fold() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     touch(&host, "Bio/Zeichen.md");
     let upper = "\u{A7CE}";
     let lower = "\u{A7CF}";
@@ -365,7 +368,7 @@ fn search_keeps_a_case_pair_the_desktop_does_not_fold() {
 
 #[test]
 fn search_excerpt_follows_a_case_fold_that_grows() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     touch(&host, "Bio/Istanbul.md");
     let body = format!("{}Zielwort am Ende.\n", "İ".repeat(120));
     host.dispatch(
@@ -383,7 +386,7 @@ fn search_excerpt_follows_a_case_fold_that_grows() {
 
 #[test]
 fn a_search_excerpt_keeps_95_characters_before_the_match() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     touch(&host, "Bio/Umlaut.md");
     let body = format!("{}Zielwort am Ende.\n", "Ä".repeat(100));
     host.dispatch("fanotes:write-file", &[json!("Bio/Umlaut.md"), json!(body)])
@@ -405,7 +408,7 @@ fn a_search_excerpt_keeps_95_characters_before_the_match() {
 
 #[test]
 fn equal_search_hits_follow_german_dictionary_order() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     for name in ["Seite 2", "Seite 10", "Apfel", "Äpfel", "Strasse", "Straße"] {
         touch(&host, &format!("Bio/{name}.md"));
         host.dispatch(
@@ -429,7 +432,7 @@ fn equal_search_hits_follow_german_dictionary_order() {
 
 #[test]
 fn a_search_query_stops_at_500_utf16_units() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     touch(&host, "Bio/Emoji.md");
     host.dispatch(
         "fanotes:write-file",
@@ -443,7 +446,7 @@ fn a_search_query_stops_at_500_utf16_units() {
 
 #[test]
 fn search_ignores_a_companion_above_the_desktop_limit() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     std::fs::write(vault.join("Bio/Seite.md"), "Hallo Welt\n").unwrap();
     let companion = vault.join("Bio/Seite.famd");
@@ -470,7 +473,7 @@ fn search_ignores_a_companion_above_the_desktop_limit() {
 
 #[test]
 fn search_skips_a_note_that_cannot_be_read() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     let note = vault.join("Bio/Geheim.md");
     std::fs::write(&note, "Inhalt\n").unwrap();
@@ -500,7 +503,7 @@ fn search_skips_a_note_that_cannot_be_read() {
 
 #[test]
 fn search_trims_a_byte_order_mark_and_keeps_a_next_line() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     touch(&host, "Bio/Blatt.md");
     host.dispatch(
         "fanotes:write-file",
@@ -522,7 +525,7 @@ fn search_trims_a_byte_order_mark_and_keeps_a_next_line() {
 
 #[test]
 fn a_markdown_note_does_not_hide_its_handwriting_file() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     let payload = fanotes_famd::empty_famd_payload("2026-10-11T00:00:00.000Z");
     std::fs::write(vault.join("Bio/Kapitel.markdown"), b"Nur die Notiz\n").unwrap();
@@ -557,7 +560,7 @@ fn a_markdown_note_does_not_hide_its_handwriting_file() {
 #[cfg(unix)]
 #[test]
 fn a_linux_note_name_keeps_its_backslash() {
-    let mut host = host();
+    let (mut host, _scratch) = host();
     let vault = host.vault.clone().unwrap();
     std::fs::create_dir_all(vault.join("Ordner")).unwrap();
     std::fs::write(vault.join("My\\Notes.md"), b"Backslashwort\n").unwrap();
@@ -614,7 +617,7 @@ fn a_linux_note_name_keeps_its_backslash() {
 
 #[test]
 fn search_uses_the_desktop_asset_folder_checks() {
-    let mut ready = host();
+    let (mut ready, _scratch) = host();
     let vault = ready.vault.clone().unwrap();
     std::fs::write(vault.join("Bio/Blatt.md"), "Licht\n").unwrap();
     assert!(ready
@@ -648,7 +651,7 @@ fn search_uses_the_desktop_asset_folder_checks() {
         "Der interne Asset-Ordner ist unsicher."
     );
 
-    let mut blocked = host();
+    let (mut blocked, _scratch) = host();
     let vault = blocked.vault.clone().unwrap();
     std::fs::write(vault.join("Bio/Blatt.md"), "Licht\n").unwrap();
     std::fs::remove_dir_all(vault.join(".fanotes")).unwrap();

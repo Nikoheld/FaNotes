@@ -8,6 +8,8 @@ import {
 } from '../../../src/lib/recognition'
 import {
   installNeuralWordContextCandidates,
+  installNeuralWordContextSnapshot,
+  isExtendedNeuralContextWord,
   neuralWordContextWordsOfLength,
 } from './neuralWordContext'
 import { isUserAcceptedWord, personalWords, type SuggestionLexicon } from './spellingSuggest'
@@ -305,13 +307,56 @@ export const loadRecognitionCandidates = async (language: SpellingLanguage) => {
   return pending
 }
 
+type RecognitionContext = { has: (normalized: string) => boolean; words: () => string[] }
+const contextPromises = new Map<SpellingLanguage, Promise<RecognitionContext | null>>()
+
+/** The OCR word context index from the spelling worker (Rust validates the exact list and builds
+ * the n-gram index there). The main thread only adopts the result, so the first handwriting
+ * recognition does not freeze it. Null when the worker engine is unavailable; the caller then
+ * builds the index itself (`loadRecognitionCandidates`). */
+const loadWorkerRecognitionContext = (language: SpellingLanguage) => {
+  let pending = contextPromises.get(language)
+  if (!pending) {
+    pending = (async () => {
+      if (candidatePromises.has(language)) return null // already built on this thread
+      const { loadSpellingEngine } = await import('./spellingEngine')
+      const engine = await loadSpellingEngine()
+      if (!engine.contextSnapshot) return null
+      const snapshot = await engine.contextSnapshot(language)
+      installNeuralWordContextSnapshot(language, snapshot)
+      installRecognitionWordCandidateProvider(language, (length) => neuralWordContextWordsOfLength(language, length))
+      const has = (word: string) => isExtendedNeuralContextWord(word, language)
+      installRecognitionWordMembership(language, has)
+      return {
+        has,
+        words: () => Object.values(snapshot.buckets).flatMap((bucket) => bucket.split('\n')),
+      }
+    })().catch((error) => {
+      console.warn('OCR-Wortkontext aus dem Worker nicht verfügbar, er wird im Hauptthread aufgebaut:', error)
+      return null
+    })
+    contextPromises.set(language, pending)
+  }
+  return pending
+}
+
+const loadRecognitionContext = async (language: SpellingLanguage): Promise<RecognitionContext> => {
+  const fromWorker = await loadWorkerRecognitionContext(language)
+  if (fromWorker) return fromWorker
+  const candidates = await loadRecognitionCandidates(language)
+  return { has: (word) => candidates.has(word), words: () => [...candidates] }
+}
+
+/** Every word of the exhaustive OCR list (any order), for the recognition decoder. */
+export const loadRecognitionWordList = async (language: SpellingLanguage) => (await loadRecognitionContext(language)).words()
+
 /** Loads the exhaustive candidate vocabulary only for handwriting OCR. The
  * editor spellchecker keeps using the compact Bloom filter and therefore does
  * not pay the parsing or memory cost during normal application startup. */
 export const loadSpellingWordContext = async (language: SpellingLanguage) => {
-  const [membership, candidates] = await Promise.all([
+  const [membership, context] = await Promise.all([
     loadSpellingWordMembership(language),
-    loadRecognitionCandidates(language),
+    loadRecognitionContext(language),
   ])
   return (word: string) => {
     const normalized = normalizeWord(word, language)
@@ -319,7 +364,7 @@ export const loadSpellingWordContext = async (language: SpellingLanguage) => {
     // filter: valid but corpus-unsupported supplementary entries remain
     // accepted in typed notes without becoming a reason to override the visual
     // handwriting winner. Short words and compounds keep the Bloom path.
-    if (/^\p{L}{3,32}$/u.test(normalized)) return candidates.has(normalized)
+    if (/^\p{L}{3,32}$/u.test(normalized)) return context.has(normalized)
     return membership(word)
   }
 }

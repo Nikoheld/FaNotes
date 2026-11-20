@@ -8,14 +8,17 @@ use fanotes_host::Host;
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 
-fn host() -> (Host, PathBuf, PathBuf) {
+fn host() -> (Host, PathBuf, fanotes_host::test_support::Scratch) {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-history-it-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-history-it-{}-{id}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     let vault = dir.join("vault");
     std::fs::create_dir_all(vault.join("Mathe")).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.trash_dir = Some(dir.join("trash"));
     host.set_vault(vault.clone()).unwrap();
     let vault = host.vault.clone().unwrap();
@@ -196,7 +199,7 @@ fn opening_a_vault_prunes_expired_snapshots() {
         ),
     )
     .unwrap();
-    let mut reopened = Host::open(dir.join("app"));
+    let mut reopened = Host::open_hermetic(dir.join("app"));
     reopened.set_vault(vault.clone()).unwrap();
     let stored = index(&vault, "Alt.md");
     let kept = stored["snapshots"].as_array().unwrap();

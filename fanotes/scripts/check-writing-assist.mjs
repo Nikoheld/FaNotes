@@ -182,6 +182,28 @@ try {
     assert.ok(!assistant.check(runs, undefined, 'de').issues.some((issue) => issue.rule === 'de-comma-subordinate'), 'ignored stays ignored')
   })
 
+  await test('checker: suggestions from the spelling worker arrive later and are announced', async () => {
+    const asked = []
+    const spelling = {
+      isMisspelled: (word) => word === 'Hasue',
+      suggest: () => { throw new Error('the synchronous lexicon must not be used when the worker answers') },
+      suggestAsync: async (word) => { asked.push(word); return ['Hause', 'Hase'] },
+    }
+    const assistant = new checker.Assistant(spelling)
+    let announced = 0
+    assistant.onSuggestions = () => { announced += 1 }
+    const runs = [{ text: 'Er ging nach Hasue.' }]
+    const issue = assistant.check(runs, undefined, 'de').issues.find((entry) => entry.category === 'spelling')
+    assert.deepEqual(issue.replacements, [], 'nothing yet')
+    assert.deepEqual(issue.replacements, [], 'still one request only')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.deepEqual(asked, ['Hasue'])
+    assert.equal(announced, 1)
+    assert.deepEqual(issue.replacements, ['Hause', 'Hase'])
+    assert.equal(typo.spellingFix(3, 6, 'dass', true, 'de').text, 'Dass')
+    assert.equal(typo.spellingFix(3, 6, 'dass', false, 'de').text, 'dass')
+  })
+
   await test('thesaurus: German and English synonyms from the bundled files, inflected forms too', () => {
     const de = thesaurus.parseThesaurus(readFileSync(new URL('../public/writing/thesaurus/de.txt', import.meta.url), 'utf8'), 'de')
     const en = thesaurus.parseThesaurus(readFileSync(new URL('../public/writing/thesaurus/en.txt', import.meta.url), 'utf8'), 'en')

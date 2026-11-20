@@ -17,7 +17,7 @@ const LANGUAGE_WORD_RANKS = {
   en: new Map(LANGUAGE_WORD_LISTS.en.map((word, index) => [word, index])),
 }
 
-type ExtendedWordIndex = Map<number, readonly string[]>
+type ExtendedWordIndex = { get: (length: number) => readonly string[] | undefined }
 const EXTENDED_WORDS: Partial<Record<RecognitionLanguage, ExtendedWordIndex>> = {}
 const EXTENDED_CHARACTER_NGRAMS: Partial<Record<RecognitionLanguage, {
   bigrams: Map<string, number>
@@ -46,7 +46,7 @@ export const installNeuralWordContextCandidates = (
   for (const key of NEAREST_CONTEXT_CACHE.keys()) {
     if (key.startsWith(`${language}:`)) NEAREST_CONTEXT_CACHE.delete(key)
   }
-  const byLength: ExtendedWordIndex = new Map()
+  const byLength = new Map<number, readonly string[]>()
   const bigrams = new Map<string, number>()
   const trigrams = new Map<string, number>()
   const prefixgrams = new Set<string>()
@@ -80,6 +80,54 @@ export const installNeuralWordContextCandidates = (
   })
   EXTENDED_WORDS[language] = byLength
   EXTENDED_CHARACTER_NGRAMS[language] = { bigrams, trigrams, prefixgrams, suffixgrams }
+}
+
+/** The word context index as the Rust spelling core (running in the spelling worker) built it:
+ * see `contextSnapshot` in `crates/fanotes-spell-wasm`. */
+export type NeuralWordContextSnapshot = {
+  /** Words of one code point length, in code unit order, joined with newlines. */
+  buckets: Record<string, string>
+  /** Flat `[gram, count, gram, count, ...]`. */
+  bigrams: Array<string | number>
+  trigrams: Array<string | number>
+  prefixes: string[]
+  suffixes: string[]
+}
+
+/** Adopts an index built off the main thread. The result answers exactly like
+ * `installNeuralWordContextCandidates` on the same list; a bucket is only split into words when a
+ * query first reaches its length, so this call itself costs a few milliseconds. */
+export const installNeuralWordContextSnapshot = (
+  language: RecognitionLanguage,
+  snapshot: NeuralWordContextSnapshot,
+) => {
+  for (const key of NEAREST_CONTEXT_CACHE.keys()) {
+    if (key.startsWith(`${language}:`)) NEAREST_CONTEXT_CACHE.delete(key)
+  }
+  const split = new Map<number, readonly string[]>()
+  EXTENDED_WORDS[language] = {
+    get: (length) => {
+      let bucket = split.get(length)
+      if (!bucket) {
+        const text = snapshot.buckets[String(length)]
+        if (text === undefined) return undefined
+        bucket = text.split('\n')
+        split.set(length, bucket)
+      }
+      return bucket
+    },
+  }
+  const counts = (flat: Array<string | number>) => {
+    const map = new Map<string, number>()
+    for (let index = 0; index < flat.length; index += 2) map.set(flat[index] as string, flat[index + 1] as number)
+    return map
+  }
+  EXTENDED_CHARACTER_NGRAMS[language] = {
+    bigrams: counts(snapshot.bigrams),
+    trigrams: counts(snapshot.trigrams),
+    prefixgrams: new Set(snapshot.prefixes),
+    suffixgrams: new Set(snapshot.suffixes),
+  }
 }
 
 const sortedIncludes = (words: readonly string[], source: string) => {

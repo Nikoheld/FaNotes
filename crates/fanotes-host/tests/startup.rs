@@ -4,10 +4,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use fanotes_host::Host;
 use serde_json::json;
 
-fn scratch() -> std::path::PathBuf {
+fn scratch() -> fanotes_host::test_support::Scratch {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("fanotes-startup-{}-{id}", std::process::id()));
+    let dir = fanotes_host::test_support::Scratch::new(format!(
+        "fanotes-startup-{}-{id}",
+        std::process::id()
+    ));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     dir
@@ -17,7 +20,7 @@ fn scratch() -> std::path::PathBuf {
 fn a_new_profile_and_its_tree_cache_are_private_directories() {
     let dir = scratch();
     let app = dir.join("app");
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -48,7 +51,7 @@ fn a_new_profile_and_its_tree_cache_are_private_directories() {
 #[test]
 fn a_missing_vault_starts_in_documents_with_a_welcome_note() {
     let dir = scratch();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.documents_dir = Some(dir.join("docs"));
     host.settings.insert("uiLanguage".to_owned(), json!("de"));
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
@@ -66,7 +69,7 @@ fn a_missing_vault_starts_in_documents_with_a_welcome_note() {
     let again = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(again["vaultPath"], boot["vaultPath"]);
 
-    let mut restored = Host::open(dir.join("app"));
+    let mut restored = Host::open_hermetic(dir.join("app"));
     restored.documents_dir = Some(dir.join("elsewhere"));
     let restored_boot = restored.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(restored_boot["vaultPath"], boot["vaultPath"]);
@@ -88,7 +91,7 @@ fn an_unwritable_documents_folder_reports_the_desktop_vault_error() {
         }
     }
     let _restore = Restore(docs.clone());
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.documents_dir = Some(docs.clone());
     let vault = docs.join("FaNotes");
     assert_eq!(
@@ -98,7 +101,7 @@ fn an_unwritable_documents_folder_reports_the_desktop_vault_error() {
     assert!(!vault.exists());
 
     fs::set_permissions(&docs, fs::Permissions::from_mode(0o000)).unwrap();
-    let mut hidden = Host::open(dir.join("hidden-app"));
+    let mut hidden = Host::open_hermetic(dir.join("hidden-app"));
     hidden.documents_dir = Some(docs.clone());
     assert_eq!(
         hidden.dispatch("fanotes:bootstrap", &[]).unwrap_err(),
@@ -108,7 +111,7 @@ fn an_unwritable_documents_folder_reports_the_desktop_vault_error() {
     fs::set_permissions(&docs, fs::Permissions::from_mode(0o700)).unwrap();
     fs::remove_dir(&docs).unwrap();
     fs::write(&docs, b"datei").unwrap();
-    let mut file_host = Host::open(dir.join("file-app"));
+    let mut file_host = Host::open_hermetic(dir.join("file-app"));
     file_host.documents_dir = Some(docs.clone());
     assert_eq!(
         file_host.dispatch("fanotes:bootstrap", &[]).unwrap_err(),
@@ -133,7 +136,7 @@ fn a_read_only_vault_is_refused_like_the_desktop() {
         }
     }
     let _restore = Restore(vault.clone());
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     let canonical = fs::canonicalize(&vault).unwrap();
     let error = host
         .dispatch(
@@ -169,7 +172,7 @@ fn a_remembered_read_only_vault_refuses_the_note_tree() {
     }
     let _restore = Restore(vault.clone());
     let canonical = fs::canonicalize(&vault).unwrap();
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.dispatch(
         "fanotes:select-vault",
         &[json!(canonical.to_string_lossy())],
@@ -177,7 +180,7 @@ fn a_remembered_read_only_vault_refuses_the_note_tree() {
     .unwrap();
     fs::set_permissions(&vault, fs::Permissions::from_mode(0o555)).unwrap();
 
-    let mut reopened = Host::open(app);
+    let mut reopened = Host::open_hermetic(app);
     let boot = reopened.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(boot["vaultPath"], canonical.to_string_lossy().as_ref());
     assert!(reopened.vault.is_some());
@@ -232,7 +235,7 @@ fn a_missing_configured_vault_is_not_replaced() {
     fs::create_dir_all(&app).unwrap();
     let missing = dir.join("nas").join("Notizen");
     fs::write(app.join("vault-path"), format!("{}\n", missing.display())).unwrap();
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.documents_dir = Some(dir.join("docs"));
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(boot["vaultPath"], missing.to_string_lossy().as_ref());
@@ -278,7 +281,7 @@ fn a_vault_path_keeps_a_trailing_space_in_the_folder_name() {
     fs::write(plain.join("Falsch.md"), b"# Falsch\n").unwrap();
     fs::write(spaced.join("Seite.md"), b"# Seite\n").unwrap();
     fs::write(app.join("vault-path"), format!("{}\n", spaced.display())).unwrap();
-    let mut host = Host::open(app);
+    let mut host = Host::open_hermetic(app);
     host.documents_dir = Some(dir.join("docs"));
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     let canonical = fs::canonicalize(&spaced).unwrap();
@@ -303,14 +306,14 @@ fn a_missing_vault_path_resolves_before_the_cache_lookup() {
     let vault = dir.join("notes");
     fs::create_dir_all(&vault).unwrap();
     fs::write(vault.join("Seite.md"), b"# Seite\n").unwrap();
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.set_vault(vault.clone()).unwrap();
     host.dispatch("fanotes:get-tree", &[]).unwrap();
     drop(host);
     fs::remove_dir_all(&vault).unwrap();
     let spelled = dir.join("other").join("..").join("notes");
     fs::write(app.join("vault-path"), format!("{}/\n", spelled.display())).unwrap();
-    let mut host = Host::open(app);
+    let mut host = Host::open_hermetic(app);
     host.documents_dir = Some(dir.join("docs"));
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(boot["vaultPath"], vault.to_string_lossy().as_ref());
@@ -330,7 +333,7 @@ fn an_existing_documents_folder_is_reused() {
     let vault = dir.join("docs").join("FaNotes");
     fs::create_dir_all(&vault).unwrap();
     fs::write(vault.join("Notiz.md"), b"Hallo\n").unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.documents_dir = Some(dir.join("docs"));
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(boot["onboardingRequired"], false);
@@ -347,7 +350,7 @@ fn an_oversized_note_is_rejected() {
     let dir = scratch();
     let vault = dir.join("vault");
     fs::create_dir_all(&vault).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault.clone()).unwrap();
     let huge = vault.join("gross.md");
     let file = File::create(&huge).unwrap();
@@ -393,7 +396,7 @@ Viel Freude beim Lernen!
     )
     .unwrap();
     fs::write(vault.join("Eigene.md"), "Nicht anfassen.\n").unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault.clone()).unwrap();
     let welcome = fs::read_to_string(vault.join("Willkommen.md")).unwrap();
     assert!(welcome.contains("## Kleine Handschrift-Übung"));
@@ -427,7 +430,7 @@ fn a_welcome_note_with_a_bad_byte_still_receives_the_shortcut_fix() {
     let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
     bytes[index] = 0xff;
     fs::write(vault.join("Willkommen.md"), &bytes).unwrap();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     host.set_vault(vault.clone()).unwrap();
     let welcome = fs::read_to_string(vault.join("Willkommen.md")).unwrap();
     assert!(welcome.contains("**Strg+Z**"));
@@ -454,7 +457,7 @@ fn a_profile_path_drops_a_missing_parent_segment_before_creating_folders() {
     )
     .unwrap();
     let spelled = config_home.join("missing").join("..").join("FaNotes");
-    let mut host = Host::open(spelled);
+    let mut host = Host::open_hermetic(spelled);
     assert!(!config_home.join("missing").exists());
     assert!(config_home.join("FaNotes").is_dir());
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
@@ -485,7 +488,7 @@ fn an_electron_profile_supplies_the_vault_and_settings() {
     )
     .unwrap();
     let app = dir.join("app");
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(boot["vaultPath"], vault.to_string_lossy().as_ref());
     assert_eq!(boot["settings"]["theme"], "midnight");
@@ -500,7 +503,7 @@ fn an_electron_profile_supplies_the_vault_and_settings() {
         r#"{"version":3,"settings":{"theme":"forest"}}"#,
     )
     .unwrap();
-    let mut again = Host::open(app);
+    let mut again = Host::open_hermetic(app);
     assert_eq!(
         again.dispatch("fanotes:bootstrap", &[]).unwrap()["settings"]["theme"],
         "midnight"
@@ -522,7 +525,7 @@ fn an_electron_config_with_a_bad_byte_still_imports() {
     let index = bytes.iter().position(|byte| *byte == b'X').unwrap();
     bytes[index] = 0xff;
     fs::write(app.join("config.json"), &bytes).unwrap();
-    let mut host = Host::open(app);
+    let mut host = Host::open_hermetic(app);
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(boot["vaultPath"], vault.to_string_lossy().as_ref());
     assert_eq!(boot["settings"]["syncDeviceName"], "La\u{FFFD}ptop");
@@ -542,7 +545,7 @@ fn a_long_unicode_vault_path_is_remembered() {
     )
     .unwrap();
     let app = dir.join("app");
-    let _host = Host::open(app.clone());
+    let _host = Host::open_hermetic(app.clone());
     let stored = fs::read_to_string(app.join("vault-path")).unwrap();
     assert_eq!(stored.trim(), vault);
 
@@ -553,7 +556,7 @@ fn a_long_unicode_vault_path_is_remembered() {
         json!({ "version": 3, "vaultPath": too_long }).to_string(),
     )
     .unwrap();
-    let _again = Host::open(other.clone());
+    let _again = Host::open_hermetic(other.clone());
     assert!(!other.join("vault-path").exists());
 }
 
@@ -561,7 +564,7 @@ fn a_long_unicode_vault_path_is_remembered() {
 fn a_reset_profile_does_not_import_the_electron_config_again() {
     let dir = scratch();
     let app = dir.join("app");
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.dispatch("fanotes:reset-app-data", &[]).unwrap();
     let trap = dir.join("should-not-open");
     fs::create_dir_all(&trap).unwrap();
@@ -576,7 +579,7 @@ fn a_reset_profile_does_not_import_the_electron_config_again() {
     )
     .unwrap();
     drop(host);
-    let _ = Host::open(app.clone());
+    let _ = Host::open_hermetic(app.clone());
     let settings = fs::read_to_string(app.join("settings.json")).unwrap_or_default();
     assert!(!settings.contains("midnight"));
     assert!(!app.join("vault-path").exists());
@@ -605,7 +608,7 @@ fn an_imported_vault_symlink_opens_the_real_folder() {
         .to_string(),
     )
     .unwrap();
-    let mut host = Host::open(app);
+    let mut host = Host::open_hermetic(app);
     let boot = host.dispatch("fanotes:bootstrap", &[]).unwrap();
     assert_eq!(
         boot["vaultPath"],
@@ -637,7 +640,7 @@ fn reopening_a_linked_vault_uses_the_real_folder_and_refreshes_the_welcome_note(
     let app = dir.join("app");
     fs::create_dir_all(&app).unwrap();
     fs::write(app.join("vault-path"), format!("{}\n", link.display())).unwrap();
-    let mut host = Host::open(app);
+    let mut host = Host::open_hermetic(app);
     assert_eq!(
         host.vault.as_deref(),
         Some(fs::canonicalize(&real).unwrap().as_path())
@@ -656,7 +659,7 @@ fn reopening_a_linked_vault_uses_the_real_folder_and_refreshes_the_welcome_note(
 #[test]
 fn optional_recognition_models_stay_uninstalled_with_the_renderer_shape() {
     let dir = scratch();
-    let mut host = Host::open(dir.join("app"));
+    let mut host = Host::open_hermetic(dir.join("app"));
     let math = host
         .dispatch("fanotes:enhanced-math-get-state", &[])
         .unwrap();
@@ -745,7 +748,7 @@ fn a_failed_vault_switch_reports_the_desktop_open_error_and_keeps_the_vault() {
     fs::write(current.join("Seite.md"), b"# Alt\n").unwrap();
     let current = fs::canonicalize(&current).unwrap();
     let next = fs::canonicalize(&next).unwrap();
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.set_vault(current.clone()).unwrap();
     fs::write(app.join("vault-path"), format!("{}", current.display())).unwrap();
     fs::set_permissions(&app, fs::Permissions::from_mode(0o555)).unwrap();
@@ -789,7 +792,7 @@ fn an_unwritable_profile_reports_the_desktop_vault_path_error() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scratch();
     let app = dir.join("app");
-    let mut host = Host::open(app.clone());
+    let mut host = Host::open_hermetic(app.clone());
     host.documents_dir = Some(dir.join("docs"));
     host.settings.insert("uiLanguage".to_owned(), json!("de"));
     fs::set_permissions(&app, fs::Permissions::from_mode(0o555)).unwrap();
