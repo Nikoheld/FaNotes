@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - 'fanotes/src/**'
+      - 'src/**'
       - 'src/lib/handGestures.ts'
       - 'fanotes/electron/main.cjs'
       - 'fanotes/electron/startup-preflight.cjs'
@@ -32,6 +33,9 @@ jobs:
           cache: npm
           cache-dependency-path: fanotes/package-lock.json
       - run: npm ci --no-audit --no-fund
+      - name: Install the shared sources' dependencies (repository root)
+        working-directory: .
+        run: npm ci --no-audit --no-fund
       - name: Install the browser driver
         run: |
           mkdir -p "$RUNNER_TEMP/pw"
