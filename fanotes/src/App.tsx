@@ -7015,6 +7015,8 @@ export default function App({ startupBootstrap }: AppProps) {
                           onToggleSidePages={pdfSide.available ? () => { void pdfSide.toggle() } : undefined}
                           onSideLayout={pdfSide.onSideLayout}
                           beforeSideRelayout={pdfSide.beforeSideRelayout}
+                          sidePaper={activePaper}
+                          sidePaperMm={clampPaperSquareMm(settings.paperSquareMm)}
                         />
                       </SafeBoundary>
                     </Suspense>

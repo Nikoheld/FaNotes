@@ -5076,5 +5076,10 @@
   "Der Ordner für leere PDF-Seiten verlässt den Vault.": "The folder for blank PDF pages is outside the vault.",
   "MCP-Server": "MCP Server",
   "MCP-Server aktivieren": "Enable MCP server",
-  "Reines Schwarz, spart Akku": "Pure black, saves battery"
+  "Reines Schwarz, spart Akku": "Pure black, saves battery",
+  "Linienradierer": "Stroke eraser",
+  "Bereichsradierer": "Area eraser",
+  "Radierermodus": "Eraser mode",
+  "Ein Strich verschwindet komplett, sobald der Radierer ihn berührt": "A stroke disappears entirely as soon as the eraser touches it",
+  "Entfernt nur den Teil unter dem Radierer": "Removes only the part under the eraser"
 }
