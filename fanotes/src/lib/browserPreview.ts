@@ -136,6 +136,7 @@ export const BROWSER_STARTER_SUBJECTS = [
   { name: 'Chemie', color: '#d9730d' },
   { name: 'Biologie', color: '#448361' },
   { name: 'Geschichte', color: '#ba9b4a' },
+  { name: 'Geografie', color: '#b5588a' },
   { name: 'Informatik', color: '#337ea9' },
   { name: 'Wirtschaft', color: '#c47d4e' },
 ]
@@ -149,6 +150,7 @@ export const BROWSER_STARTER_SUBJECTS_EN = [
   { name: 'Chemistry', color: '#d9730d' },
   { name: 'Biology', color: '#448361' },
   { name: 'History', color: '#ba9b4a' },
+  { name: 'Geography', color: '#b5588a' },
   { name: 'Computer Science', color: '#337ea9' },
   { name: 'Economics', color: '#c47d4e' },
 ]

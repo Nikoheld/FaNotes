@@ -1,6 +1,5 @@
 import {
   Archive,
-  BarChart3,
   ArrowLeft,
   ArrowLeftRight,
   ArrowRight,
@@ -310,7 +309,6 @@ const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspac
 const WritingMode = lazy(() => import('./writing/ui/WritingMode').then((module) => ({ default: module.WritingMode })))
 const StoryImportDialog = lazy(() => import('./writing/import/ImportDialog').then((module) => ({ default: module.ImportDialog })))
 const CommandPalette = lazy(() => import('./components/CommandPalette').then((module) => ({ default: module.CommandPalette })))
-const StudyOverview = lazy(() => import('./components/StudyOverview').then((module) => ({ default: module.StudyOverview })))
 const StudyPanel = lazy(() => import('./components/study/StudyPanel').then((module) => ({ default: module.StudyPanel })))
 const FlashcardReview = lazy(() => import('./components/FlashcardReview').then((module) => ({ default: module.FlashcardReview })))
 const AiPanel = lazy(() => import('./components/AiPanel').then((module) => ({ default: module.AiPanel })))
@@ -845,7 +843,6 @@ export default function App({ startupBootstrap }: AppProps) {
   const [searchHits, setSearchHits] = useState<SearchHit[]>([])
   const [searchFailed, setSearchFailed] = useState(false)
   const [inkReveal, setInkReveal] = useState<{ path: string; y: number; token: number } | null>(null)
-  const [studyOpen, setStudyOpen] = useState(false)
   const [cardsOpen, setCardsOpen] = useState(false)
   const [studyPanel, setStudyPanel] = useState<null | 'tasks' | 'marks'>(null)
   const [searchLoading, setSearchLoading] = useState(false)
@@ -5737,7 +5734,6 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'ai-assistant', label: 'AI-Assistent', detail: 'LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok oder OpenCode nutzen', shortcut: 'Ctrl ⇧ A', group: 'Werkzeuge', keywords: 'ki ai lm studio ollama openai gemini anthropic grok opencode rechtschreibung fakten', icon: <Bot size={15} />, run: openLmStudio },
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht', detail: 'Ordner und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
-    { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
     ...STUDY_KINDS.filter((kind) => kind !== 'crypto').map((kind) => ({ id: `study-${kind}`, label: `Lernwerkzeug: ${STUDY_KIND_LABELS[kind]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'lernwerkzeuge auftrag tabelle schlüssel bestimmungsschlüssel sortieren board begriffsnetz concept map bildtafel definition karten', icon: <GraduationCap size={15} />, run: () => insertStudyBlock(kind) })),
     ...CRYPTO_TOOLS.map((tool) => ({ id: `study-crypto-${tool}`, label: `Lernwerkzeug: Krypto-Werkzeug, ${CRYPTO_TOOL_LABELS[tool]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'krypto kryptologie caesar vigenere häufigkeit xor ascii modulo diffie hellman verschlüsseln', icon: <GraduationCap size={15} />, run: () => insertStudyBlock('crypto', tool) })),
     ...(pdfSide.available ? [{ id: 'pdf-side-pages', label: pdfSide.shown ? 'Leere Seiten daneben ausblenden' : 'Leere Seiten daneben', detail: 'Neben jeder PDF-Seite eine leere Schreibseite gleicher Grösse', group: 'Ansicht', keywords: 'pdf leer seite daneben rechts notizen schreiben platz side blank page', icon: <SquareSplitHorizontal size={15} />, run: () => { if (isPdfActive) void pdfSide.toggle(); else toast('Öffne zuerst ein PDF.', 'info') } }] : []),
@@ -6897,7 +6893,7 @@ export default function App({ startupBootstrap }: AppProps) {
               )
             )}
             <div className="editor-stage-main">
-            {!(glyphenWerkOpen || calendarOpen || homeworkOpen || studyOpen || overviewOpen) && [activeTab, splitTab].map((tab, position) => {
+            {!(glyphenWerkOpen || calendarOpen || homeworkOpen || overviewOpen) && [activeTab, splitTab].map((tab, position) => {
               const hold = tab ? tabHolds[tab.path] : undefined
               if (!tab || !hold || (position === 1 && tab.path === activeTab?.path)) return null
               return (
@@ -6937,10 +6933,6 @@ export default function App({ startupBootstrap }: AppProps) {
                   onOpenNote={(path) => { setHomeworkOpen(false); return openNote(path) }}
                   onDocumentPersisted={(document) => { void syncPublishedHomework(settingsRef.current, document) }}
                 />
-              </SafeBoundary>
-            ) : studyOpen ? (
-              <SafeBoundary name="Lernzeit" fallbackTitle="Die Lernzeit ist abgestürzt">
-                <StudyOverview entries={tree} onClose={() => setStudyOpen(false)} />
               </SafeBoundary>
             ) : overviewOpen ? (
               <VaultOverview entries={tree} openTabs={tabs} onOpen={(path) => { setOverviewOpen(false); return openNote(path) }} onCreateNote={() => createNote()} onClose={() => setOverviewOpen(false)} />
@@ -7233,7 +7225,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !(inspectorTab && (inspectorTab.kind === 'pdf' || isPdfNotePath(inspectorTab.path))) && <Suspense fallback={null}><RightInspector content={inspectorTab?.content ?? ''} path={inspectorTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { commandEditor()?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !(inspectorTab && (inspectorTab.kind === 'pdf' || isPdfNotePath(inspectorTab.path))) && <Suspense fallback={null}><RightInspector content={inspectorTab?.content ?? ''} path={inspectorTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { commandEditor()?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
         {studyPanel && isPdfActive && activeTab && <Suspense fallback={null}><SafeBoundary name="Lernwerkzeuge"><StudyPanel key={activeTab.path} path={activeTab.path} title={activeTab.title} content={activeTab.content} initialTab={studyPanel} onContentChange={(content) => updateContentFor(activeTab.path, content)} onSaveNote={(title, markdown) => { void saveStudyNote(title, markdown) }} onNotice={(message) => toast(message, 'info')} onClose={() => setStudyPanel(null)} /></SafeBoundary></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} failed={searchFailed} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
