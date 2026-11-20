@@ -113,6 +113,77 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   --shadow: 0 16px 48px rgba(0, 0, 0, .32);
 }
 
+.app-shell.theme-oled, body.app-theme-oled {
+  /* Pure black for every surface so OLED pixels switch off; elevation is a grey border, not a shadow. */
+  --bg: #000000;
+  --bg-elevated: #000000;
+  --panel: #000000;
+  --panel-strong: #000000;
+  --panel-hover: #141414;
+  --panel-active: #1f1f1f;
+  --border: #262626;
+  --border-strong: #3a3a3a;
+  --text: #e8e8e8;
+  --text-soft: #c4c4c4;
+  --text-muted: #a8a8a8;
+  --shadow: none;
+  --shadow-lg: none;
+  color: var(--text);
+  color-scheme: dark;
+}
+.app-shell.theme-oled *, body.app-theme-oled *, .app-shell.theme-oled *::before, .app-shell.theme-oled *::after {
+  box-shadow: none !important;
+  text-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+/* Notes: black sheet with light ink, like the other dark themes keep text light. */
+.theme-oled .unified-paper {
+  --text: #e8e8e8;
+  --text-primary: #e8e8e8;
+  --text-soft: #c4c4c4;
+  --text-muted: #a8a8a8;
+  --text-faint: #a8a8a8;
+  --bg: #000;
+  --bg-elevated: #000;
+  --panel: #000;
+  --panel-strong: #000;
+  --panel-hover: #141414;
+  --background: #000;
+  --background-secondary: #000;
+  --surface-elevated: #000;
+  --surface-input: #000;
+  --border: #262626;
+  --border-strong: #3a3a3a;
+  --accent-readable: var(--accent);
+  --accent-secondary-readable: var(--accent-secondary);
+  --danger: #ff8d90;
+  --success: #5dcc78;
+  --warning: #e7b34a;
+  color-scheme: dark;
+}
+.theme-oled .paper-blank .unified-paper,
+.theme-oled .unified-paper.is-pdf-note { background-color: #000; }
+.theme-oled .paper-sheet-plane, .theme-oled .unified-note-view { background: #000 !important; }
+.app-shell.theme-oled, .app-shell.theme-oled.background-gradient, .app-shell.theme-oled.background-mesh, .app-shell.theme-oled.background-paper,
+.app-shell.theme-oled.dashboard-shell.background-gradient, .app-shell.theme-oled.dashboard-shell.background-mesh, .app-shell.theme-oled.dashboard-shell.background-paper { background: #000; background-image: none; }
+/* Stored ink is dark. Invert lightness (hue kept) on the sheet's ink canvases so strokes read light on black.
+   One static filter on two canvases; nothing blurs or animates. */
+.theme-oled .unified-paper .lw-tablet-canvas { filter: invert(1) hue-rotate(180deg); }
+.theme-oled .paper-dots .paper-sheet-plane > .paper-ruling {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='14' cy='14' r='0.8' fill='rgba(255,255,255,0.28)'/%3E%3C/svg%3E");
+}
+.theme-oled .paper-squares .paper-sheet-plane > .paper-ruling,
+.theme-oled .paper-grid .paper-sheet-plane > .paper-ruling {
+  background-image: linear-gradient(to right, rgba(255,255,255,0.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.14) 1px, transparent 1px);
+}
+.theme-oled .paper-lines .paper-sheet-plane > .paper-ruling {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M0 27.5H28' stroke='rgba(255,255,255,0.2)' stroke-width='1'/%3E%3C/svg%3E");
+}
+.theme-oled .paper-millimeter .paper-sheet-plane > .paper-ruling {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M4 0V20M8 0V20M12 0V20M16 0V20M0 4H20M0 8H20M0 12H20M0 16H20' stroke='rgba(255,255,255,0.07)' stroke-width='1'/%3E%3Cpath d='M20 0H0V20' fill='none' stroke='rgba(255,255,255,0.2)' stroke-width='1'/%3E%3C/svg%3E");
+}
+
 .app-shell.theme-forest, body.app-theme-forest {
   --bg: #171a18;
   --bg-elevated: #1e221f;
@@ -4928,3 +4999,113 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .split-drop-overlay.is-top > span { left: 50%; top: 25%; transform: translate(-50%, -50%); }
 .split-drop-overlay.is-bottom > span { left: 50%; top: 75%; transform: translate(-50%, -50%); }
 .editor-split > .split-drop-overlay { background: none; }
+
+/* ===== Settings modal layout (final layer) =====
+   Spacing scale 4 / 8 / 12 / 16 / 24, 13px body, one control column, 40px+ hit targets.
+   Only layout, spacing and weight live here; colours come from the theme tokens. */
+.settings-modal {
+  --set-1: 4px; --set-2: 8px; --set-3: 12px; --set-4: 16px; --set-5: 24px;
+  --set-control: 280px;
+  --set-hit: 40px;
+  width: min(1080px, calc(100vw - 32px));
+  height: min(760px, calc(100dvh - 32px));
+  grid-template-columns: 232px minmax(0, 1fr);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .2);
+}
+.settings-backdrop { padding: var(--set-4, 16px); backdrop-filter: none; background: rgba(0, 0, 0, .5); }
+
+/* Navigation */
+.settings-nav { padding: var(--set-4) var(--set-3) var(--set-3); gap: 0; }
+.settings-brand { gap: var(--set-3); padding: 0 var(--set-2) var(--set-3); }
+.settings-brand strong { font-size: 15px; line-height: 1.2; }
+.settings-brand small { font-size: 12px; margin-top: 2px; }
+.settings-search { height: var(--set-hit); margin: 0 0 var(--set-3); padding: 0 var(--set-3); gap: var(--set-2); border-radius: 8px; }
+.settings-search input { font-size: 13px; height: 100%; }
+.settings-search > button { width: 28px; height: 28px; }
+.settings-nav nav { gap: var(--set-3); padding: 0 var(--set-1) var(--set-2) 0; scrollbar-gutter: stable; }
+.settings-nav-group { gap: 2px; }
+.settings-nav-group > small, .settings-search-results > small { padding: var(--set-2) var(--set-3) var(--set-1); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.settings-nav nav button { overflow: hidden; min-height: var(--set-hit); gap: var(--set-3); padding: 0 var(--set-3); border-radius: 8px; }
+.settings-nav nav button > svg:first-child { width: 16px; height: 16px; flex: none; }
+.settings-nav nav b { font-size: 13px; font-weight: 600; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.settings-search-results { gap: 2px; }
+.settings-search-results button { align-items: center; padding-block: var(--set-2); }
+.settings-search-results button small { font-size: 12px; white-space: normal; }
+.reset-settings { justify-content: flex-start; text-align: left; min-height: var(--set-hit); margin: var(--set-2) 0 0; padding: 0 var(--set-3); border-radius: 8px; font-size: 13px; flex: none; }
+
+/* Content header, scroll area, footer */
+.settings-content { grid-template-rows: auto minmax(0, 1fr) auto; }
+.settings-content > header { gap: var(--set-4); padding: var(--set-4) var(--set-5); min-height: 72px; }
+.settings-heading { gap: var(--set-3); }
+.settings-heading-icon { width: 40px; height: 40px; border-radius: 10px; }
+.settings-content h2 { font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
+.settings-content .eyebrow { margin-bottom: 2px; font-size: 11px; letter-spacing: .1em; }
+.settings-content > header .icon-button { width: var(--set-hit); height: var(--set-hit); flex: none; }
+.settings-content > footer { min-height: 44px; padding: 0 var(--set-5); gap: var(--set-3); }
+.settings-scroll { display: grid; grid-auto-rows: max-content; align-content: start; gap: var(--set-4); padding: var(--set-5); scrollbar-gutter: stable; }
+.settings-scroll > * { min-width: 0; margin-top: 0; margin-bottom: 0; }
+
+/* Cards */
+.setting-card { border-radius: 12px; background: var(--panel); }
+.setting-card-title { height: 44px; gap: var(--set-2); padding: 0 var(--set-4); color: var(--text); font-size: 13px; font-weight: 650; letter-spacing: 0; text-transform: none; }
+.setting-card-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setting-card-title svg { flex: none; }
+.setting-row { min-height: 56px; gap: var(--set-5); padding: var(--set-3) var(--set-4); }
+.setting-copy { min-width: 0; flex: 1 1 0; }
+.setting-copy > span { font-size: 13px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.setting-copy small { margin-top: 2px; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+/* One aligned control column: fields share a width, toggles and buttons sit on the right edge. */
+.setting-control { min-width: 0; max-width: 100%; flex: 0 1 auto; flex-wrap: wrap; gap: var(--set-2); align-items: center; justify-content: flex-end; }
+.setting-control:has(> select, > input:not([type="checkbox"]):not([type="range"]):not([type="color"])) { flex: 0 0 var(--set-control); }
+.setting-control select, .setting-control input:not([type="range"]):not([type="color"]):not([type="checkbox"]) { min-width: 0; height: 36px; padding: 0 var(--set-3); border-radius: 8px; font-size: 13px; }
+.setting-control .segmented { max-width: 100%; flex-wrap: wrap; }
+.segmented button { min-height: 32px; height: auto; padding: 4px var(--set-3); font-size: 13px; }
+.settings-inline-button { min-height: 36px; padding: 0 var(--set-3); font-size: 13px; }
+.setting-row:has(> .setting-control > .theme-grid) { flex-direction: column; align-items: stretch; gap: var(--set-3); }
+.setting-row:has(> .setting-control > .theme-grid) > .setting-control { flex: 0 0 auto; width: 100%; justify-content: stretch; }
+.setting-row:has(> .setting-control > .theme-grid) .theme-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .setting-row:has(> .setting-control > .theme-grid) .theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.theme-grid { gap: var(--set-2); }
+.theme-choice { min-height: 52px; padding: var(--set-2) var(--set-3); gap: var(--set-3); }
+.theme-choice strong { font-size: 13px; }
+.theme-choice small { white-space: normal; }
+
+/* Narrow windows: tighter nav, controls drop under their label */
+@media (max-width: 900px) {
+  .settings-modal { grid-template-columns: 212px minmax(0, 1fr); --set-control: 240px; }
+  .settings-scroll { padding: var(--set-4); }
+  .settings-content > header { padding-inline: var(--set-4); }
+  .setting-row { gap: var(--set-4); }
+}
+@media (max-width: 820px) {
+  .setting-row { flex-direction: column; align-items: stretch; gap: var(--set-2); }
+  .setting-row:has(> .setting-control > .toggle:only-child) { flex-direction: row; align-items: center; }
+  .setting-control, .setting-control:has(> select, > input:not([type="checkbox"]):not([type="range"]):not([type="color"])) { flex: 0 0 auto; width: 100%; max-width: none; justify-content: flex-start; }
+  .setting-row:has(> .setting-control > .toggle:only-child) > .setting-control { width: auto; flex: none; }
+}
+@media (max-width: 760px) {
+  .settings-backdrop { padding: 0; }
+  .settings-modal { width: 100vw; height: 100dvh; grid-template-columns: 64px minmax(0, 1fr); }
+  .settings-nav { padding: var(--set-3) var(--set-2); }
+  .settings-nav nav button { min-height: 44px; }
+}
+@media (max-height: 640px) {
+  .settings-modal { height: calc(100dvh - 16px); }
+  .settings-backdrop { padding: var(--set-2); }
+  .settings-brand small, .settings-content > header .eyebrow { display: none; }
+  .settings-content > header { min-height: 56px; padding-block: var(--set-2); }
+  .settings-nav nav button { min-height: 36px; }
+  .settings-scroll { padding-block: var(--set-4); }
+}
+@media (pointer: coarse) {
+  .settings-nav nav button, .settings-search, .reset-settings { min-height: 44px; }
+  .setting-control select, .setting-control input:not([type="range"]):not([type="color"]):not([type="checkbox"]), .settings-inline-button { height: 44px; min-height: 44px; }
+  .segmented button { min-height: 40px; }
+  .setting-row { min-height: 64px; }
+}
+
+/* OLED: solid black dialog, no scrim blur, borders carry the structure. */
+.theme-oled .settings-backdrop, body.app-theme-oled .settings-backdrop { background: #000; }
+.theme-oled .settings-modal, body.app-theme-oled .settings-modal { background: #000; border-color: var(--border-strong); }
+.theme-oled .setting-card, body.app-theme-oled .setting-card, .theme-oled .settings-nav, body.app-theme-oled .settings-nav { background: #000; }

@@ -5073,5 +5073,8 @@
   "Leere Seiten gibt es nur neben PDF-Notizen.": "Blank pages are only available next to PDF notes.",
   "Ungültiger Pfad für leere PDF-Seiten.": "Invalid path for blank PDF pages.",
   "Der Ordner für leere PDF-Seiten ist unsicher.": "The folder for blank PDF pages is unsafe.",
-  "Der Ordner für leere PDF-Seiten verlässt den Vault.": "The folder for blank PDF pages is outside the vault."
+  "Der Ordner für leere PDF-Seiten verlässt den Vault.": "The folder for blank PDF pages is outside the vault.",
+  "MCP-Server": "MCP Server",
+  "MCP-Server aktivieren": "Enable MCP server",
+  "Reines Schwarz, spart Akku": "Pure black, saves battery"
 }

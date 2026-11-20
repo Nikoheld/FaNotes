@@ -766,6 +766,7 @@ const THEME_CONTRAST_SURFACES: Record<string, string[]> = {
   aurora: ['#18181c', '#1f1f24', '#1f1f24', '#2c2c33'],
   sepia: ['#fbfaf7', '#f4f1ea', '#f4f1ea', '#fffdf8'],
   snow: ['#eef5fc', '#dfecf8', '#e1edf8', '#fafdff'],
+  oled: ['#000000', '#000000', '#000000', '#000000'],
 }
 
 const saveExportFile = (filename: string, blob: Blob) => {
@@ -6365,6 +6366,11 @@ export default function App({ startupBootstrap }: AppProps) {
         : {}),
     } as React.CSSProperties
   }, [settings, sidebarVisible, theme])
+
+  // Remembered for public/boot-theme.js so the next start paints the right background before React mounts.
+  useEffect(() => {
+    try { localStorage.setItem('fanotes.theme', settings.theme) } catch { /* private mode */ }
+  }, [settings.theme])
 
   // Portaled popovers, menus and dialogs render under document.body, outside .app-shell,
   // so mirror the theme class and tokens there to keep them themed.

@@ -34,7 +34,7 @@ const {
 // Ozone is chosen in Chromium C++ before most JS runs. Mutate argv/env first.
 applyLinuxOzoneLaunchEnvironment()
 
-const { app, BrowserWindow, dialog, ipcMain, net, protocol, safeStorage, session, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, safeStorage, session, shell } = require('electron')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
@@ -1411,6 +1411,7 @@ function readConfig() {
             : { ...decodedSettings, recognitionMode: 'auto', lastRecognitionMode: previousMode }
           const sanitized = sanitizeSettings(settingsCandidate)
           currentSettings = applyExperimentalHandwritingGate(sanitized)
+          applyThemeToShell(currentSettings.theme)
           if (plaintextSecretsNeedScrub) {
             plaintextSecretsNeedScrub = false
             void persistConfig()
@@ -5861,6 +5862,7 @@ function registerIpcHandlers() {
           preserveProtectedSecrets: !clearProtectedSecrets,
         })
         currentSettings = nextSettings
+        applyThemeToShell(currentSettings.theme)
         void localMcpHost().apply(currentSettings).catch(() => {})
         if (clearProtectedSecrets) {
           protectedSettingsOnDisk.clear()
@@ -6091,7 +6093,40 @@ function forwardLockedSheetZoom(webContents) {
   })
 }
 
+// Window background and native chrome follow the app theme. The theme is also kept in a tiny
+// hint file because the window is created before the settings file has been read.
+const THEME_WINDOW_BACKGROUNDS = {
+  oled: '#000000', dark: '#191919', midnight: '#17181b', forest: '#171a18', aurora: '#18181c',
+  light: '#f7f6f3', sepia: '#fbfaf7', snow: '#eef5fc',
+}
+const themeHintPath = () => path.join(app.getPath('userData'), 'theme-hint.json')
+function themeWindowBackground(theme) {
+  return THEME_WINDOW_BACKGROUNDS[theme] ?? '#f7f6f3'
+}
+function readThemeHint() {
+  try {
+    const theme = JSON.parse(fs.readFileSync(themeHintPath(), 'utf8'))?.theme
+    return typeof theme === 'string' && (theme === 'system' || theme in THEME_WINDOW_BACKGROUNDS) ? theme : 'light'
+  } catch { return 'light' }
+}
+function windowBackgroundForTheme(theme) {
+  if (theme !== 'system') return themeWindowBackground(theme)
+  return nativeTheme.shouldUseDarkColors ? themeWindowBackground('dark') : themeWindowBackground('light')
+}
+function applyThemeToShell(theme) {
+  const known = theme === 'system' || theme in THEME_WINDOW_BACKGROUNDS ? theme : 'light'
+  const dark = ['oled', 'dark', 'midnight', 'forest', 'aurora'].includes(known)
+  nativeTheme.themeSource = known === 'system' ? 'system' : dark ? 'dark' : 'light'
+  const background = windowBackgroundForTheme(known)
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.setBackgroundColor(background)
+  }
+  try { fs.writeFileSync(themeHintPath(), JSON.stringify({ theme: known })) } catch { /* the hint is optional */ }
+}
+
 async function createWindow() {
+  const themeHint = readThemeHint()
+  applyThemeToShell(themeHint)
   allowWindowClose = false
   invalidateCloseWarningState()
   mainWindow = new BrowserWindow({
@@ -6100,7 +6135,7 @@ async function createWindow() {
     minWidth: 940,
     minHeight: 640,
     show: false,
-    backgroundColor: '#f7f6f3',
+    backgroundColor: windowBackgroundForTheme(themeHint),
     title: 'FaNotes',
     ...linuxWindowFrameOptions(),
     ...(process.platform === 'win32' ? {} : {

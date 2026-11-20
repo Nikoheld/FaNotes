@@ -139,7 +139,7 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'drawing', label: 'Stift & Erkennung', description: 'Tablet, Papier und Handschrift', icon: Brush, count: 18 },
   { id: 'files', label: 'Dateien & Vault', description: 'Import, Ordner und Speichern', icon: FolderOpen, count: 5 },
   { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 1 },
-  { id: 'mcp', label: 'KI-Zugriff (MCP)', description: 'Claude, Cursor und andere KI-Programme', icon: Bot, count: 3 },
+  { id: 'mcp', label: 'MCP-Server', description: 'Claude, Cursor und andere KI-Programme', icon: Bot, count: 3 },
   { id: 'conflicts', label: 'Konflikte', description: 'Zwei Fassungen vergleichen und eine behalten', icon: GitCompareArrows, count: 0 },
   { id: 'statistics', label: 'Statistik', description: 'Vault, Aktivität, Schule und Diagnose', icon: BarChart3, count: 0 },
   { id: 'profile', label: 'Profil', description: 'Öffentliche Aktivitätsübersicht', icon: User, count: 3 },
@@ -156,7 +156,7 @@ const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Stift & Arbeitsbereich', sections: ['drawing'] },
   { label: 'Dateien & Vault', sections: ['files'] },
   { label: 'Sync', sections: ['sync', 'conflicts'] },
-  { label: 'KI-Zugriff', sections: ['mcp'] },
+  { label: 'MCP-Server', sections: ['mcp'] },
   { label: 'Statistik', sections: ['statistics'] },
   { label: 'Profil', sections: ['profile'] },
   { label: 'Teilen', sections: ['share'] },
@@ -211,7 +211,7 @@ type SettingsSearchItem = {
 }
 
 const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
-  { label: 'KI-Zugriff (MCP)', detail: 'KI-Zugriff', section: 'mcp', target: 'settings-mcp-local', keywords: 'mcp ki ai claude cursor chatgpt grok server stdio http token lokal notizen aufgaben schreibzugriff' },
+  { label: 'MCP-Server', detail: 'Claude, Cursor und andere KI-Programme', section: 'mcp', target: 'settings-mcp-local', keywords: 'mcp ki ai claude cursor chatgpt grok server stdio http token lokal notizen aufgaben schreibzugriff' },
   { label: 'Statistik', detail: 'Statistik', section: 'statistics', target: 'settings-stat-activity', keywords: 'statistik aktivität kalender heatmap serie streak wörter notizen größe fächer lernzeit hausaufgaben karteikarten sync' },
   { label: 'Diagnose & Verbesserung', detail: 'Statistik', section: 'statistics', target: 'settings-diagnostics', keywords: 'diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz' },
   { label: 'Grok-Connector', detail: 'Sync', section: 'sync', target: 'settings-grok-connector', keywords: 'grok mcp connector server url notizen prüfung klausur hausaufgaben oauth' },
@@ -292,6 +292,7 @@ const THEMES: Array<{
   { id: 'aurora', label: 'Aurora', detail: 'Nebel', background: '#18181c', surface: '#1f1f24', accent: '#2a6f97', secondary: '#6b7280' },
   { id: 'sepia', label: 'Studierzimmer', detail: 'Warm', background: '#fbfaf7', surface: '#f4f1ea', accent: '#2a6f97', secondary: '#6b7280' },
   { id: 'snow', label: 'Schnee', detail: 'Schnee mit Physik zum Spielen', background: '#eef5fc', surface: '#dfecf8', accent: '#2a6f97', secondary: '#6b7280' },
+  { id: 'oled', label: 'OLED', detail: 'Reines Schwarz, spart Akku', background: '#000000', surface: '#000000', accent: '#2a6f97', secondary: '#6b7280' },
 ]
 
 const BACKGROUNDS: Array<{ id: AppSettings['workspaceBackground']; label: string }> = [

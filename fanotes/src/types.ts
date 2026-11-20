@@ -21,7 +21,7 @@ export type VaultEntry = {
   children?: VaultEntry[]
 }
 
-export type ThemeMode = 'dark' | 'light' | 'system' | 'midnight' | 'forest' | 'aurora' | 'sepia' | 'snow'
+export type ThemeMode = 'dark' | 'light' | 'system' | 'midnight' | 'forest' | 'aurora' | 'sepia' | 'snow' | 'oled'
 export type WorkspaceBackground = 'clean' | 'gradient' | 'mesh' | 'paper'
 export type PaperStyle = 'blank' | 'dots' | 'squares' | 'grid' | 'lines' | 'millimeter'
 export type UiLanguagePreference = 'system' | 'de' | 'en'
@@ -766,7 +766,7 @@ export type FaNotesApi = {
     expiresAt?: number
     rotated?: boolean
   } | null>
-  /** Local MCP server (Electron only): connection info for Settings → KI-Zugriff (MCP). */
+  /** Local MCP server (Electron only): connection info for Settings → MCP-Server. */
   mcpLocal?: {
     (request: { action: 'info' | 'regenerate' }): Promise<LocalMcpInfo>
     (request: { action: 'reveal' }): Promise<{ token: string }>
