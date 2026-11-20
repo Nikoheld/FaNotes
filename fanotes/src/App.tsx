@@ -18,6 +18,7 @@ import {
   BookMarked,
   ClipboardList,
   Columns2,
+  SquareSplitHorizontal,
   Command,
   Copy,
   Database,
@@ -164,6 +165,10 @@ import {
   saveSplitLayout,
   saveWorkspaceMemory,
   snapToDevicePixels,
+  splitDropZone,
+  splitFitZoom,
+  splitPlacementForZone,
+  type SplitDropZone,
   splitFirstPaneSize,
   splitRatioFromPointer,
   stepNoteHistory,
@@ -244,7 +249,7 @@ import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSquare'
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
-import { flushPaperViewMemory } from './lib/paperViewMemory'
+import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
 import { configureDiagnostics, markStartupReady, recordFeature, sendDailyIfDue, setDiagnosticsVault } from './lib/diagnosticsClient'
 import {
@@ -339,6 +344,7 @@ const VaultOverview = lazy(() => import('./components/VaultOverview').then((modu
 const HomeworkBoard = lazy(() => import('./components/HomeworkBoard').then((module) => ({ default: module.HomeworkBoard })))
 const CalendarView = lazy(() => import('./components/CalendarView').then((module) => ({ default: module.CalendarView })))
 const WorksheetLayer = lazy(() => import('./components/WorksheetLayer').then((module) => ({ default: module.WorksheetLayer })))
+import { usePdfSidePages } from './components/usePdfSidePages'
 const loadPdfNoteViewModule = () => import('./components/PdfNoteView')
 const PdfNoteView = lazy(() => loadPdfNoteViewModule().then((module) => ({ default: module.PdfNoteView })))
 const StableWorksheetLayer = memo(WorksheetLayer)
@@ -913,6 +919,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [splitPath, setSplitPath] = useState<string | null>(null)
   const [splitLayout, setSplitLayout] = useState<SplitLayout>(() => loadSplitLayout())
   const [splitDragging, setSplitDragging] = useState(false)
+  const [splitDrop, setSplitDrop] = useState<SplitDropZone | null>(null)
   const [focusedPane, setFocusedPane] = useState<'main' | 'split'>('main')
   const focusedPaneRef = useRef(focusedPane)
   focusedPaneRef.current = focusedPane
@@ -1055,7 +1062,7 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => { if (!splitPath) setFocusedPane('main') }, [splitPath])
   // The first pane's track is a whole number of device pixels, so the second
   // pane's scroller never sits on a half pixel (that composites its text soft).
-  const [splitTracks, setSplitTracks] = useState<{ first: number; divider: number } | null>(null)
+  const [splitTracks, setSplitTracks] = useState<{ first: number; divider: number; size: number } | null>(null)
   useEffect(() => {
     const container = splitContainerRef.current
     if (!splitPath || !container || typeof ResizeObserver !== 'function') {
@@ -1067,7 +1074,7 @@ export default function App({ startupBootstrap }: AppProps) {
       const size = orientation === 'columns' ? container.clientWidth : container.clientHeight
       const dpr = window.devicePixelRatio || 1
       const divider = snapToDevicePixels(SPLIT_DIVIDER_PX, dpr)
-      setSplitTracks(size > 0 ? { first: splitFirstPaneSize(size, divider, ratio, dpr), divider } : null)
+      setSplitTracks(size > 0 ? { first: splitFirstPaneSize(size, divider, ratio, dpr), divider, size } : null)
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -1319,6 +1326,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const knownTags = useMemo(() => collectVaultTags(Object.values(tagIndex).map((tags) => ({ content: tags.map((tag) => `#${tag}`).join(' ') }))), [tagIndex])
   const activeTags = activeTab ? parseNoteTags(activeTab.content) : []
   const splitTab = splitPath ? tabs.find((tab) => tab.path === splitPath) ?? null : null
+  // The outline and backlinks follow the pane that has focus.
+  const inspectorTab = focusedPane === 'split' && splitTab ? splitTab : activeTab
   const vaultNoteReferences = useMemo(() => lmStudioOpen ? [...filePaths(tree)]
     .filter((path) => path !== activePath)
     .map((path) => ({ title: stripExtension(fileName(path)), relativePath: path })) : [], [activePath, lmStudioOpen, tree])
@@ -4917,6 +4926,12 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Diese Notiz ist pausiert, bis du den Hinweis über dem Text beantwortet hast.', 'info')
       return
     }
+    const splitNote = splitPathRef.current
+    if (focusedPaneRef.current === 'split' && splitNote && (isPdfNotePath(splitNote) || tabsRef.current.find((tab) => tab.path === splitNote)?.kind === 'pdf')) {
+      // The pen layer of a PDF lives in the main pane only; say so instead of doing nothing.
+      toast('Handschrift auf einem PDF gibt es in der Hauptspalte. Öffne es dort über „Als einzige Notiz öffnen“.', 'info')
+      return
+    }
     drawingOpenRef.current = true
     setOverviewOpen(false)
     setHomeworkOpen(false)
@@ -5303,6 +5318,27 @@ export default function App({ startupBootstrap }: AppProps) {
     setDrawingSession((current) => current.path === notePath ? { ...current, document } : current)
     return result
   }, [activePath, editableShareOwns, pushEditableShare, recordInkSnapshotFor, saveContent, tabHoldsRef])
+
+  // "Leere Seiten daneben" on PDF notes (desktop): while on, the ink board covers the side pages too.
+  const reloadNoteInk = useCallback((path: string) => {
+    const requestId = ++drawingLoadRequestRef.current
+    void readNoteInk(path, latestNoteContent(path) ?? '').then((document) => {
+      if (requestId !== drawingLoadRequestRef.current || activePathRef.current !== path) return
+      setDrawingSession({ ...overlaySessionAfterInkReady(drawingOpenRef.current, drawingSessionFromLoad(requestId, document)), path })
+    })
+  }, [latestNoteContent])
+  const pdfSide = usePdfSidePages({
+    activePath,
+    isPdfActive,
+    sessionKey: noteDrawingSession.key,
+    title: activeTab?.title ?? '',
+    readPdfInk: (path) => readNoteInk(path, latestNoteContent(path) ?? ''),
+    flushBoard: async () => { await drawingBoardRef.current?.flush() },
+    reloadNoteInk,
+    saveDrawing: saveDrawingAsset,
+    onError: (message) => toast(message, 'error'),
+  })
+  const inkBoard = pdfSide.board ?? noteDrawingSession
 
   const saveWorksheetDocument = useCallback(async (document: WorksheetDocument) => {
     const session = vaultSessionGenerationRef.current
@@ -5695,6 +5731,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
     ...STUDY_KINDS.filter((kind) => kind !== 'crypto').map((kind) => ({ id: `study-${kind}`, label: `Lernwerkzeug: ${STUDY_KIND_LABELS[kind]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'lernwerkzeuge auftrag tabelle schlüssel bestimmungsschlüssel sortieren board begriffsnetz concept map bildtafel definition karten', icon: <GraduationCap size={15} />, run: () => insertStudyBlock(kind) })),
     ...CRYPTO_TOOLS.map((tool) => ({ id: `study-crypto-${tool}`, label: `Lernwerkzeug: Krypto-Werkzeug, ${CRYPTO_TOOL_LABELS[tool]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'krypto kryptologie caesar vigenere häufigkeit xor ascii modulo diffie hellman verschlüsseln', icon: <GraduationCap size={15} />, run: () => insertStudyBlock('crypto', tool) })),
+    ...(pdfSide.available ? [{ id: 'pdf-side-pages', label: pdfSide.shown ? 'Leere Seiten daneben ausblenden' : 'Leere Seiten daneben', detail: 'Neben jeder PDF-Seite eine leere Schreibseite gleicher Grösse', group: 'Ansicht', keywords: 'pdf leer seite daneben rechts notizen schreiben platz side blank page', icon: <SquareSplitHorizontal size={15} />, run: () => { if (isPdfActive) void pdfSide.toggle(); else toast('Öffne zuerst ein PDF.', 'info') } }] : []),
     { id: 'study-tasks', label: 'Lernwerkzeuge: Aufträge dieses PDFs', detail: 'Aufträge erkennen, abhaken und mit Timer bearbeiten', group: 'Lernwerkzeuge', keywords: 'auftrag aufgabe task exercise pdf arbeitsblatt timer fortschritt', icon: <ClipboardList size={15} />, run: () => { if (isPdfActive) setStudyPanel('tasks'); else toast('Öffne zuerst ein PDF.', 'info') } },
     { id: 'study-marks', label: 'Lernwerkzeuge: Markierungen-Übersicht', detail: 'Alle Textmarker-Stellen des PDFs nach Seite', group: 'Lernwerkzeuge', keywords: 'markierungen textmarker highlight wesentliche punkte pdf zusammenfassung', icon: <BookMarked size={15} />, run: () => { if (isPdfActive) setStudyPanel('marks'); else toast('Öffne zuerst ein PDF.', 'info') } },
     { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => { editorRef.current?.flushChanges(); setCardsOpen(true) } },
@@ -5747,7 +5784,7 @@ export default function App({ startupBootstrap }: AppProps) {
     ...(workRequestsAllowed ? [{ id: 'work-requests', label: 'Fehler & Wünsche', detail: 'Fehler oder Funktion melden und den Fortschritt verfolgen', shortcut: 'Ctrl ⇧ B', group: 'FaNotes', keywords: 'wunsch funktion anfrage claude fehler bug request', icon: <Lightbulb size={15} />, run: () => setWorkRequestsOpen(true) }] : []),
     { id: 'bug-report', label: 'Fehler melden', detail: 'Kurz beschreiben; die letzten fünf Minuten werden angehängt', group: 'FaNotes', keywords: 'bug report fehler logs support', icon: <Bug size={15} />, run: () => setBugReportOpen(true) },
     { id: 'quit', label: isWeb ? 'Zur FaNotes-Website' : 'FaNotes beenden', shortcut: 'Ctrl Q', group: 'FaNotes', icon: <X size={15} />, run: () => window.fanotes.requestClose() },
-  ], [addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentLatex, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, workRequestsAllowed, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, startTextFieldPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
+  ], [pdfSide.available, pdfSide.shown, pdfSide.toggle, addonPaletteActions, activePath, activeTab, syncApi, syncState, attachBookToSubject, bookOpen, copyWikiLink, createDailyNote, createFolder, createNote, currentBook, drawingOpen, duplicateNote, exportCurrentLatex, exportCurrentPdf, focusMode, importOneNote, importPdfNote, insertStamp, isWeb, navigateHistory, openAdjacentDaily, openCalendar, openGlyphenWerk, openHistory, workRequestsAllowed, openHomework, openLmStudio, openOverview, openSettings, openWorksheetImport, reopenClosedTab, saveCurrentWork, settings.dailyNotesFolder, splitLayout.orientation, splitPath, startNoteLinkPlacement, startTextFieldPlacement, swapSplitPanes, toast, toggleBookView, toggleDrawing, toggleFocusMode, toggleSplit, toggleTask, toggleSplitOrientation])
 
   // ---- Add-ons -------------------------------------------------------------
   // Everything add-ons may touch flows through this bridge. The deps object is
@@ -6001,29 +6038,121 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const closeTabMenu = useCallback(() => setTabMenu(null), [])
 
+  // A note dragged from a tab or the tree onto an edge of the editor opens beside the current one.
+  const dropNoteIntoSplit = useCallback(async (path: string, zone: SplitDropZone) => {
+    const { orientation, first } = splitPlacementForZone(zone)
+    const active = activePathRef.current
+    const split = splitPathRef.current
+    if (!active || /\.story$/iu.test(path)) return
+    if (path === active && !split) {
+      toast('Ziehe eine andere Notiz an den Rand, um die Ansicht zu teilen.', 'info')
+      return
+    }
+    setSplitLayout((current) => current.orientation === orientation ? current : { ...current, orientation })
+    if (path === active || path === split) {
+      // A note that is already open moves to the side it was dropped on.
+      if ((path === active) !== first) await swapSplitPanes()
+      return
+    }
+    if (!first) {
+      await openInSplit(path)
+      return
+    }
+    // Dropped on the left or top edge: the note takes the main pane, the former main pane moves over.
+    if (await openNote(path)) setSplitPath(active)
+  }, [openInSplit, openNote, swapSplitPanes, toast])
+
+  const noteDragPath = useCallback((transfer: DataTransfer): string | null => {
+    const tabPath = transfer.getData(NOTE_TAB_DRAG_TYPE)
+    if (tabPath) return tabPath
+    const entry = transfer.getData('application/x-fanotes-entry')
+    if (!entry) return null
+    try {
+      const parsed = JSON.parse(entry) as { path?: unknown; kind?: unknown }
+      return typeof parsed.path === 'string' && parsed.kind === 'file' ? parsed.path : null
+    } catch {
+      return null
+    }
+  }, [])
+
+  const dragIsNote = (transfer: DataTransfer) => transfer.types.includes(NOTE_TAB_DRAG_TYPE) || transfer.types.includes('application/x-fanotes-entry')
+
+  // A sheet wider than its pane would open with its text cut off at the left edge:
+  // the second pane starts at a zoom that shows the whole column (unless the note has its own remembered view).
+  // A layout effect runs after the pane's own view setup and before the first paint, so the zoom never visibly jumps.
+  useLayoutEffect(() => {
+    if (!splitPath || !splitTab || splitTab.kind === 'pdf' || isPdfNotePath(splitPath)) return
+    const path = splitPath
+    const scrollerOf = () => splitContainerRef.current?.querySelector<HTMLElement>('.split-pane .unified-note-view') ?? null
+    let interacted = false
+    let done = false
+    const fit = () => {
+      const scroller = scrollerOf()
+      if (done || interacted || !scroller || recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(`split:${path}`))) return
+      const view = splitPaperViewStore.read()
+      if (view.zoom !== 1) { done = true; return }
+      const zoom = splitFitZoom(scroller.clientWidth)
+      if (zoom < 1) {
+        splitPaperViewStore.write({ ...view, zoom })
+        done = true
+      }
+    }
+    fit()
+    // Fallback only: if the pane was not measurable yet. It never fires after the user touched the pane.
+    const scroller = scrollerOf()
+    const markInteracted = () => { interacted = true }
+    const events = ['pointerdown', 'wheel', 'keydown', 'touchstart'] as const
+    events.forEach((name) => scroller?.addEventListener(name, markInteracted, { capture: true, passive: true }))
+    const observer = scroller && typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null
+    if (scroller) observer?.observe(scroller)
+    const stop = window.setTimeout(() => { done = true }, 1500)
+    return () => {
+      done = true
+      window.clearTimeout(stop)
+      observer?.disconnect()
+      events.forEach((name) => scroller?.removeEventListener(name, markInteracted, { capture: true }))
+    }
+  }, [splitPath, splitPaperViewStore])
+
   // Divider drag of the split view; pointer capture keeps it smooth over iframes and canvases.
   const beginSplitDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const container = splitContainerRef.current
     if (!container || event.button !== 0) return
     event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
+    const divider = event.currentTarget
+    divider.setPointerCapture(event.pointerId)
     setSplitDragging(true)
     const orientation = splitLayout.orientation
+    // The drag moves the grid track directly, once per frame. React state (and so a
+    // re-render of both panes, the tab bar and a storage write) follows once on release.
+    let latest = splitLayout.ratio
+    let frame = 0
+    const apply = () => {
+      frame = 0
+      const size = orientation === 'columns' ? container.clientWidth : container.clientHeight
+      const dpr = window.devicePixelRatio || 1
+      const track = snapToDevicePixels(SPLIT_DIVIDER_PX, dpr)
+      container.style.setProperty('--split-first', `${splitFirstPaneSize(size, track, latest, dpr)}px`)
+      divider.setAttribute('aria-valuenow', String(Math.round(latest * 100)))
+    }
     const move = (moveEvent: PointerEvent) => {
       const rect = container.getBoundingClientRect()
-      const ratio = splitRatioFromPointer(rect, { x: moveEvent.clientX, y: moveEvent.clientY }, orientation)
-      setSplitLayout((current) => current.ratio === ratio ? current : { ...current, ratio })
+      latest = splitRatioFromPointer(rect, { x: moveEvent.clientX, y: moveEvent.clientY }, orientation)
+      if (!frame) frame = window.requestAnimationFrame(apply)
     }
     const finish = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
+      if (frame) window.cancelAnimationFrame(frame)
+      apply()
+      setSplitLayout((current) => current.ratio === latest ? current : { ...current, ratio: latest })
       setSplitDragging(false)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', finish)
     window.addEventListener('pointercancel', finish)
-  }, [splitLayout.orientation])
+  }, [splitLayout.orientation, splitLayout.ratio])
 
   const splitDividerKey = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
     const horizontal = splitLayout.orientation === 'columns'
@@ -6811,8 +6940,35 @@ export default function App({ startupBootstrap }: AppProps) {
               <div
                 ref={splitContainerRef}
                 className={`editor-split ${splitTab ? 'is-split' : ''} ${splitTab ? `is-${splitLayout.orientation}` : ''} ${splitDragging ? 'is-resizing' : ''} ${splitTab ? `focus-${focusedPane}` : ''}`}
+                onDragOverCapture={(event) => {
+                  if (!dragIsNote(event.dataTransfer)) return
+                  const zone = splitDropZone(event.currentTarget.getBoundingClientRect(), { x: event.clientX, y: event.clientY })
+                  setSplitDrop((current) => current === zone ? current : zone)
+                  if (!zone) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  event.dataTransfer.dropEffect = 'move'
+                }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSplitDrop(null)
+                }}
+                onDropCapture={(event) => {
+                  if (!dragIsNote(event.dataTransfer)) return
+                  const zone = splitDropZone(event.currentTarget.getBoundingClientRect(), { x: event.clientX, y: event.clientY })
+                  setSplitDrop(null)
+                  if (!zone) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  const path = noteDragPath(event.dataTransfer)
+                  if (path) void dropNoteIntoSplit(path, zone)
+                }}
                 style={splitTab ? { '--split-ratio': splitLayout.ratio, ...(splitTracks ? { '--split-first': `${splitTracks.first}px`, '--split-divider': `${splitTracks.divider}px` } : {}) } as React.CSSProperties : undefined}
               >
+              {splitDrop && (
+                <div className={`split-drop-overlay is-${splitDrop}`} aria-hidden="true">
+                  <span>{splitDrop === 'left' ? 'Links öffnen' : splitDrop === 'right' ? 'Rechts öffnen' : splitDrop === 'top' ? 'Oben öffnen' : 'Unten öffnen'}</span>
+                </div>
+              )}
               <PaperView
                 className={`unified-note-view ${splitTab ? 'is-main-pane' : ''} paper-${isPdfActive ? 'blank' : activePaper} ${drawingOpen ? 'is-inking' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`}
                 viewKey={activeTab.path}
@@ -6840,6 +6996,10 @@ export default function App({ startupBootstrap }: AppProps) {
                             const result = content === null ? null : unmarkPdfNote(content, [hit])
                             if (result) updateContentFor(activeTab.path, result.content)
                           }}
+                          sidePages={pdfSide.shown}
+                          onToggleSidePages={pdfSide.available ? () => { void pdfSide.toggle() } : undefined}
+                          onSideLayout={pdfSide.onSideLayout}
+                          beforeSideRelayout={pdfSide.beforeSideRelayout}
                         />
                       </SafeBoundary>
                     </Suspense>
@@ -6862,24 +7022,24 @@ export default function App({ startupBootstrap }: AppProps) {
                       />
                     </SafeBoundary>
                   </Suspense>)}
-                  {noteDrawingSession.key > 0 && <Suspense fallback={drawingOpen ? <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Stiftebene wird geladen …</div> : null}>
+                  {inkBoard.key > 0 && <Suspense fallback={drawingOpen ? <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Stiftebene wird geladen …</div> : null}>
                     <SafeBoundary
-                      key={`stiftebene:${activeTab.path}:${noteDrawingSession.key}`}
+                      key={`stiftebene:${activeTab.path}:${inkBoard.key}`}
                       name="Handschrift"
                       fallbackTitle={INK_OVERLAY_CRASH_TITLE}
                     >
                       <DrawingBoard
                         ref={drawingBoardRef}
-                        key={noteDrawingSession.key}
+                        key={inkBoard.key}
                         settings={settings}
-                        drawingId={noteDrawingSession.document?.id}
-                        initialDrawingJson={noteDrawingSession.document?.drawingJson}
-                        packedInk={noteDrawingSession.document?.packedInk}
+                        drawingId={inkBoard.document?.id}
+                        initialDrawingJson={inkBoard.document?.drawingJson}
+                        packedInk={inkBoard.document?.packedInk}
                         title={`Handschrift · ${activeTab.title}`}
                         inline
                         inputActive={drawingOpen}
                         onClose={closeDrawing}
-                        onSaveDrawing={saveDrawingAsset}
+                        onSaveDrawing={pdfSide.board ? pdfSide.onSaveDrawing : saveDrawingAsset}
                         onInsertMarkdown={insertIntoNote}
                         pagePaperStyle={activePaper}
                         sectionsEnabled={!isPdfActive}
@@ -6902,7 +7062,7 @@ export default function App({ startupBootstrap }: AppProps) {
                       />
                     </SafeBoundary>
                   </Suspense>}
-                  {drawingOpen && noteDrawingSession.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
+                  {drawingOpen && inkBoard.key === 0 && <div className="inline-ink-loading"><LoaderCircle className="spin" size={18} /> Gespeicherte Stiftebene wird geladen …</div>}
                   <NoteLinkLayer
                     links={noteLinks}
                     placing={noteLinkPlacing}
@@ -6984,7 +7144,22 @@ export default function App({ startupBootstrap }: AppProps) {
                     {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? (
                       <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={18} /> PDF wird geladen …</div>}>
                         <SafeBoundary name="Zweite PDF-Notiz" fallbackTitle="Der PDF-Viewer ist abgestürzt">
-                          <PdfNoteView path={splitTab.path} title={splitTab.title} inputDisabled autoFit={false} />
+                          <PdfNoteView
+                            path={splitTab.path}
+                            title={splitTab.title}
+                            inputDisabled={Boolean(tabHolds[splitTab.path])}
+                            autoFit={false}
+                            quotes={readPdfMarks(splitTab.content)}
+                            onMarkSelection={(quote, page) => {
+                              const marks = addPdfMark(readPdfMarks(splitTab.content), { page, quote, kind: 'highlight' })
+                              updateContentFor(splitTab.path, writePdfMarks(splitTab.content, marks))
+                            }}
+                            onUnmarkSpans={(hit) => {
+                              const content = latestNoteContent(splitTab.path)
+                              const result = content === null ? null : unmarkPdfNote(content, [hit])
+                              if (result) updateContentFor(splitTab.path, result.content)
+                            }}
+                          />
                         </SafeBoundary>
                       </Suspense>
                     ) : (
@@ -7006,7 +7181,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     )}
                     {drawingOpen && focusedPane === 'split' && loadSplitInk ? (
                       <SafeBoundary name="Handschrift (zweite Spalte)" fallbackTitle="Die zweite Stiftebene ist abgestürzt">
-                        <SplitInkEditor path={splitTab.path} title={splitTab.title} load={loadSplitInk} settings={settings} onSaveDrawing={saveDrawingAsset} />
+                        <SplitInkEditor path={splitTab.path} title={splitTab.title} load={loadSplitInk} settings={settings} paper={normalizePaperStyle(notePaperByPath[splitTab.path] ?? settings.paperStyle)} onSaveDrawing={saveDrawingAsset} />
                       </SafeBoundary>
                     ) : loadSplitInk && (
                       <SafeBoundary name="Handschrift (zweite Spalte)" fallbackTitle="Die Handschrift-Vorschau ist abgestürzt">
@@ -7049,7 +7224,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !(inspectorTab && (inspectorTab.kind === 'pdf' || isPdfNotePath(inspectorTab.path))) && <Suspense fallback={null}><RightInspector content={inspectorTab?.content ?? ''} path={inspectorTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { commandEditor()?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
         {studyPanel && isPdfActive && activeTab && <Suspense fallback={null}><SafeBoundary name="Lernwerkzeuge"><StudyPanel key={activeTab.path} path={activeTab.path} title={activeTab.title} content={activeTab.content} initialTab={studyPanel} onContentChange={(content) => updateContentFor(activeTab.path, content)} onSaveNote={(title, markdown) => { void saveStudyNote(title, markdown) }} onNotice={(message) => toast(message, 'info')} onClose={() => setStudyPanel(null)} /></SafeBoundary></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} failed={searchFailed} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}

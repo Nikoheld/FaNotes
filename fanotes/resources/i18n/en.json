@@ -5028,5 +5028,21 @@
   "Add-on-Store": "Add-on store",
   "Der Schreibmodus wurde vom System beendet. Gespeichertes bleibt erhalten; öffne ihn erneut.": "Android closed Writing mode. Everything saved is kept; open it again.",
   "Schriftfarbe": "Text colour",
-  "Ausschneiden": "Cut"
+  "Links öffnen": "Open on the left",
+  "Oben öffnen": "Open at the top",
+  "Unten öffnen": "Open at the bottom",
+  "Ziehe eine andere Notiz an den Rand, um die Ansicht zu teilen.": "Drag another note to an edge to split the view.",
+  "Handschrift auf einem PDF gibt es in der Hauptspalte. Öffne es dort über „Als einzige Notiz öffnen“.": "Handwriting on a PDF is available in the main pane. Open it there with “Open as the only note”.",
+  "Ausschneiden": "Cut",
+  "Leere Seiten daneben": "Blank pages alongside",
+  "Leere Seiten daneben ausblenden": "Hide blank pages alongside",
+  "Neben jeder PDF-Seite eine leere Schreibseite gleicher Grösse": "A blank writing page the same size next to every PDF page",
+  "Die leeren Seiten konnten nicht geladen werden.": "The blank pages could not be loaded.",
+  "Die leeren PDF-Seiten konnten nicht gelesen werden.": "The blank PDF pages could not be read.",
+  "Die leeren PDF-Seiten sind ungültig oder zu groß.": "The blank PDF pages are invalid or too large.",
+  "Die leeren PDF-Seiten sind ungültig.": "The blank PDF pages are invalid.",
+  "Leere Seiten gibt es nur neben PDF-Notizen.": "Blank pages are only available next to PDF notes.",
+  "Ungültiger Pfad für leere PDF-Seiten.": "Invalid path for blank PDF pages.",
+  "Der Ordner für leere PDF-Seiten ist unsicher.": "The folder for blank PDF pages is unsafe.",
+  "Der Ordner für leere PDF-Seiten verlässt den Vault.": "The folder for blank PDF pages is outside the vault."
 }

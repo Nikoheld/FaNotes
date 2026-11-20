@@ -21,6 +21,7 @@ import {
   PanelLeft,
   RotateCw,
   Search,
+  SquareSplitHorizontal,
   X,
   ZoomIn,
   ZoomOut,
@@ -71,6 +72,8 @@ import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
 import { loadPdfReadingSpot, pdfScrollDeltaForSpot, pdfSpotFromBoxes, savePdfReadingSpot } from '../lib/pdfReadingSpot'
 import { bindHandGestures, pinchFactorFromWheel, shouldTakeSheetZoom } from '../../../src/lib/handGestures'
 import { usePaperView } from './PaperView'
+import { pdfSidePageRatio, type PaperBox, type PdfSideLayout, type PdfSidePageSize } from '../lib/pdfSidePages'
+import type { PdfSideLayoutHandle } from './usePdfSidePages'
 
 type PdfNoteViewProps = {
   path: string
@@ -86,6 +89,27 @@ type PdfNoteViewProps = {
   onMarkSelection?: (quote: string, page: number) => void
   /** "Markieren" on text that is already highlighted takes the highlight off. */
   onUnmarkSpans?: (hit: ErasedPdfMarkSpans) => void
+  /** Blank writing pages beside every PDF page ("Leere Seiten daneben"). */
+  sidePages?: boolean
+  /** Shows the toolbar toggle; desktop only. */
+  onToggleSidePages?: () => void
+  /** The laid-out pairs, for the ink board's frame; null while they are not on screen. */
+  onSideLayout?: (handle: PdfSideLayoutHandle | null) => void
+  /** Called before a re-layout of the pairs (rotation), so the ink can be saved first. */
+  beforeSideRelayout?: () => Promise<void>
+}
+
+const SIDE_PAGES_PAPER_CLASS = 'has-pdf-side-pages'
+
+/** Box of `node` in the paper's layout pixels (camera zoom divided out). */
+const paperBoxOf = (node: Element, paperRect: DOMRect, scale: number): PaperBox => {
+  const rect = node.getBoundingClientRect()
+  return {
+    left: (rect.left - paperRect.left) * scale,
+    top: (rect.top - paperRect.top) * scale,
+    width: rect.width * scale,
+    height: rect.height * scale,
+  }
 }
 
 type OutlineItem = {
@@ -355,6 +379,7 @@ function PdfPage({
   highlight,
   quotes = [],
   defaultRatio,
+  knownRatio,
   active,
   sourcePath,
   password,
@@ -369,6 +394,8 @@ function PdfPage({
   highlight?: string
   quotes?: PdfQuoteRef[]
   defaultRatio: number
+  /** Exact page ratio known up front (side pages load every page size). */
+  knownRatio?: number
   active: boolean
   sourcePath: string
   password?: string
@@ -380,7 +407,10 @@ function PdfPage({
   const hideTimerRef = useRef<number | null>(null)
   // The start page paints without waiting a frame for its first intersection.
   const [mounted, setMounted] = useState(active)
-  const [ratio, setRatio] = useState(defaultRatio)
+  const [ratio, setRatio] = useState(knownRatio ?? defaultRatio)
+  useEffect(() => {
+    if (knownRatio && Number.isFinite(knownRatio) && knownRatio > 0) setRatio(knownRatio)
+  }, [knownRatio])
 
   const handleRatio = useCallback((next: number) => {
     if (!Number.isFinite(next) || next <= 0) return
@@ -622,6 +652,10 @@ export function PdfNoteView({
   quotes = [],
   onMarkSelection,
   onUnmarkSpans,
+  sidePages = false,
+  onToggleSidePages,
+  onSideLayout,
+  beforeSideRelayout,
 }: PdfNoteViewProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1331,6 +1365,76 @@ export function PdfNoteView({
     }
     setZoomMode('fit-page')
   }
+  // Side pages: every page's box in points, read once per document, so each
+  // pair has its exact height before the ink board measures it.
+  const [sideSizes, setSideSizes] = useState<{ pdf: PDFDocumentProxy; sizes: PdfSidePageSize[] } | null>(null)
+  const pageSizes = sideSizes && sideSizes.pdf === pdf ? sideSizes.sizes : null
+  useEffect(() => {
+    if (!sidePages || !pdf || pageSizes) return undefined
+    let alive = true
+    void (async () => {
+      const sizes: PdfSidePageSize[] = []
+      for (let number = 1; number <= pdf.numPages; number += 1) {
+        const page = await pdf.getPage(number)
+        if (!alive) return
+        const viewport = page.getViewport({ scale: 1, rotation: 0 })
+        sizes.push({ width: viewport.width, height: viewport.height })
+      }
+      if (alive) setSideSizes({ pdf, sizes })
+    })().catch((reason: unknown) => {
+      if (alive) console.error('Seitengrößen für die leeren Seiten konnten nicht gelesen werden.', reason)
+    })
+    return () => { alive = false }
+  }, [pageSizes, pdf, sidePages])
+  const sideActive = Boolean(sidePages && pdf && pageSizes && pageSizes.length === pdf.numPages)
+
+  useLayoutEffect(() => {
+    const paper = viewRef.current?.closest<HTMLElement>('.unified-paper')
+    if (!sideActive || !paper) return undefined
+    paper.classList.add(SIDE_PAGES_PAPER_CLASS)
+    return () => paper.classList.remove(SIDE_PAGES_PAPER_CLASS)
+  }, [sideActive])
+
+  useLayoutEffect(() => {
+    if (!onSideLayout) return undefined
+    if (!sideActive || !pdf || !pageSizes) {
+      onSideLayout(null)
+      return undefined
+    }
+    const measure = (): PdfSideLayout | null => {
+      const paper = viewRef.current?.closest<HTMLElement>('.unified-paper')
+      const pages = pagesRef.current
+      if (!paper || !pages || !(paper.offsetWidth > 0)) return null
+      const paperRect = paper.getBoundingClientRect()
+      if (!(paperRect.width > 0)) return null
+      const scale = paper.offsetWidth / paperRect.width
+      const firstPdf = pages.querySelector('[data-pdf-page]')
+      const sideNodes = [...pages.querySelectorAll('[data-pdf-side-page]')]
+      if (!firstPdf || sideNodes.length !== pageSizes.length) return null
+      const column = paperBoxOf(firstPdf, paperRect, scale)
+      return {
+        paperWidth: paper.offsetWidth,
+        paperHeight: paper.offsetHeight,
+        scrollerWidth: resolvePaperZoomScroller(paper)?.clientWidth ?? paper.offsetWidth,
+        pdfColumnLeft: column.left,
+        pdfColumnWidth: column.width,
+        rotation,
+        pages: sideNodes.map((node) => paperBoxOf(node, paperRect, scale)),
+        sizes: pageSizes,
+      }
+    }
+    onSideLayout({ path, epoch: `${path}:${rotation}:${pageSizes.length}`, measure })
+    return () => onSideLayout(null)
+  }, [onSideLayout, pageSizes, path, pdf, rotation, sideActive])
+
+  const rotatePages = async () => {
+    if (sideActive && beforeSideRelayout) {
+      onSideLayout?.(null)
+      await beforeSideRelayout()
+    }
+    setRotation((value) => (value + 90) % 360)
+  }
+
   // Every page has a thumbnail. Only the first 80 used to, so pages 81 and on
   // of a longer PDF could not be reached from the rail.
   const thumbs = useMemo(() => (pdf ? Array.from({ length: pdf.numPages }, (_, index) => index + 1) : []), [pdf])
@@ -1392,7 +1496,10 @@ export function PdfNoteView({
           <button type="button" className={searchOpen ? 'is-active' : ''} title="Im PDF suchen (Strg+F)" aria-label="Im PDF suchen" onClick={() => setSearchOpen((value) => !value)}><Search size={14} /></button>
           <button type="button" className={sidebar === 'thumbs' ? 'is-active' : ''} title="Miniaturen" aria-label="Miniaturen" onClick={() => setSidebar((value) => value === 'thumbs' ? 'none' : 'thumbs')}><PanelLeft size={14} /></button>
           <button type="button" className={sidebar === 'outline' ? 'is-active' : ''} title="Gliederung" aria-label="PDF-Gliederung" disabled={!outline.length} onClick={() => setSidebar((value) => value === 'outline' ? 'none' : 'outline')}><ListTree size={14} /></button>
-          <button type="button" title="Drehen" aria-label="Seite drehen" onClick={() => setRotation((value) => (value + 90) % 360)}><RotateCw size={14} /></button>
+          <button type="button" title="Drehen" aria-label="Seite drehen" onClick={() => { void rotatePages() }}><RotateCw size={14} /></button>
+          {onToggleSidePages ? (
+            <button type="button" className={sidePages ? 'is-active' : ''} aria-pressed={sidePages} title="Leere Seiten daneben" aria-label="Leere Seiten daneben" disabled={!pdf} onClick={onToggleSidePages}><SquareSplitHorizontal size={14} /></button>
+          ) : null}
         </span>
       </header>
 
@@ -1425,7 +1532,7 @@ export function PdfNoteView({
   return (
     <section
       ref={viewRef}
-      className={`pdf-note-view ${inputDisabled ? PDF_INKING_CLASS : ''} ${sidebar !== 'none' ? 'has-sidebar' : ''}`}
+      className={`pdf-note-view ${inputDisabled ? PDF_INKING_CLASS : ''} ${sidebar !== 'none' ? 'has-sidebar' : ''} ${sideActive ? 'has-side-pages' : ''}`}
       aria-label={`PDF ${title}`}
       tabIndex={inputDisabled ? -1 : 0}
       onKeyDown={handleChromeKey}
@@ -1481,7 +1588,9 @@ export function PdfNoteView({
           >
             {Array.from({ length: pdf.numPages }, (_, index) => {
               const page = index + 1
-              return (
+              const size = sideActive ? pageSizes?.[index] : undefined
+              const knownRatio = size ? pdfSidePageRatio(size, rotation) : undefined
+              const pdfPage = (
                 <PdfPage
                   key={`${page}-${rotation}`}
                   pdf={pdf}
@@ -1491,6 +1600,7 @@ export function PdfNoteView({
                   highlight={searchHits.some((hit) => hit.page === page) ? searchQuery.trim() : activeHighlight}
                   quotes={quotes.filter((mark) => mark.page === page).map((mark) => ({ quote: mark.quote, nth: mark.nth }))}
                   defaultRatio={pageRatio}
+                  knownRatio={knownRatio}
                   active={page === currentPage}
                   sourcePath={path}
                   password={password}
@@ -1498,6 +1608,20 @@ export function PdfNoteView({
                   onReady={handlePageReady}
                   onVisible={handleVisible}
                 />
+              )
+              if (!sideActive || !knownRatio) return pdfPage
+              // A blank page with the PDF page's box; the ink board paints on it.
+              return (
+                <div className="pdf-note-pair" key={`pair-${page}-${rotation}`}>
+                  {pdfPage}
+                  <div
+                    className="pdf-side-page"
+                    data-pdf-side-page={page}
+                    role="img"
+                    aria-label="Leere Seite"
+                    style={{ aspectRatio: `1 / ${knownRatio}` }}
+                  />
+                </div>
               )
             })}
           </div>

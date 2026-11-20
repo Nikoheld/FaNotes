@@ -95,10 +95,13 @@ assert.match(app, /drawingOpen && noteDrawingSession\.key === 0 && <div classNam
 for (const write of app.matchAll(/setDrawingSession\(([^\n]*)\n?/g)) {
   const line = write[0]
   assert.ok(
-    /path[,:} ]/.test(line) || /EMPTY_DRAWING_SESSION/.test(line) || /current\.path === notePath/.test(line) || /\{\n$/.test(line),
+    /path[,:} ]/.test(line) || /EMPTY_DRAWING_SESSION/.test(line) || /current\.path === notePath/.test(line) || /\{\n$/.test(line) || /^setDrawingSession\(nextSession\)/.test(line.trim()),
     `every session write names its note: ${line.trim()}`,
   )
 }
+// The live-share ink refresh keeps the open session's path: it spreads the
+// session it checked against the note it is painting.
+assert.match(app, /openDrawing\.path === tab\.path && openDrawing\.document\)[\s\S]{0,400}const nextSession = \{ \.\.\.openDrawing, document: painted \}\s*drawingSessionRef\.current = nextSession\s*setDrawingSession\(nextSession\)/, 'the share refresh writes only the note it checked')
 assert.match(app, /setDrawingSession\(\(current\) => current\.path === notePath \? \{ \.\.\.current, document \} : current\)/, 'a finished save updates only its own note\'s session')
 // The unmount save is what carried the ink over; it stays (a closed board must
 // not lose unsaved strokes), so the mismatched mount is what has to go.
@@ -135,7 +138,9 @@ assert.match(absorb, /for \(let pass = 0; pass < 3; pass \+= 1\)/, 'bounded pass
 assert.doesNotMatch(absorb, /setSourceWidth\(|setSourceHeight\(/, 'no raw source assignment without a remap')
 assert.doesNotMatch(board, /absorbOneCanvasRef/, 'no one-shot flag that a churning effect can re-arm')
 assert.match(board, /useEffect\(\(\) => \{\s*fitLoadedPageRef\.current\(\)\s*\}, \[drawingId, initialDrawingJson\]\)/, 'fit-to-ink runs once per loaded document')
-const load = section(board, 'const document: unknown = JSON.parse(initialDrawingJson)', 'loadedDrawingIdRef.current = sourceId', 'document load')
+// Both the JSON and the packed (chunked) open go through applyLoaded.
+const load = section(board, 'const applyLoaded = (', 'loadedDrawingIdRef.current = sourceId', 'document load')
+assert.ok((board.match(/applyLoaded\(raw, /g) ?? []).length >= 2, 'JSON and packed opens share applyLoaded')
 assert.match(load, /paintedLayoutRef\.current = \{ w: sourceWidthRef\.current, h: sourceHeightRef\.current \}/, 'loaded 0–1 ink is relative to the saved page')
 assert.match(load, /applyInkExtentStylesRef\.current\(sourceHeightRef\.current, sourceWidthRef\.current\)/, 'the sheet takes the saved page before the first redraw')
 assert.match(board, /applyInkExtentStyles\(sourceHeightRef\.current, sourceWidthRef\.current\)\s*\}, \[applyInkExtentStyles, sourceHeight, sourceWidth\]\)/)

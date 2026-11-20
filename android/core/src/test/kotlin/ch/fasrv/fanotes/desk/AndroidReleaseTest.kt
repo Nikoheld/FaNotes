@@ -145,7 +145,8 @@ class AndroidReleaseTest {
             .findAll(source)
             .map { it.groupValues[1] }
             .distinct()
-            .filterNot { it == "quit" || it.startsWith("addon:") }
+            // "pdf-side-pages": blank pages beside PDF pages, scoped to the desktop app by the owner.
+            .filterNot { it == "quit" || it.startsWith("addon:") || it == "pdf-side-pages" }
             .toList()
         assertTrue(ids.size >= 40, "parsed ${ids.size} command ids")
         val palette = paletteCommands().map { it.id }.toSet()
