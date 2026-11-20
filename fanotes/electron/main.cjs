@@ -2415,7 +2415,8 @@ function compareEntries(left, right) {
   return left.name.localeCompare(right.name, 'de', { numeric: true, sensitivity: 'base' })
 }
 
-async function readTreeDirectory(root, directory, depth = 0, folderColors = new Map(), logicalDir = '') {
+// containRoot: the real directory subfolders must stay inside (the vault, or the linked location the walk is in).
+async function readTreeDirectory(root, directory, depth = 0, folderColors = new Map(), logicalDir = '', containRoot = root) {
   if (depth > MAX_TREE_DEPTH) return []
   const locationMap = folderLocationMap(root)
   const mapped = folderLocations.exactPaths(locationMap, logicalDir)
@@ -2430,7 +2431,7 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
       if (!mapped) throw error
       continue
     }
-    const scanReal = mapped ? await withTreeIoSlot(() => fsp.realpath(scan)).catch(() => null) : root
+    const scanReal = mapped ? await withTreeIoSlot(() => fsp.realpath(scan)).catch(() => null) : containRoot
     if (mapped && !scanReal) continue
     for (const directoryEntry of directoryEntries) {
       if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink()) continue
@@ -2457,7 +2458,7 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
       if (info.isDirectory()) {
         const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
         if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
-        const children = await readTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild)
+        const children = await readTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild, scanReal)
         if (duplicate) {
           // Same folder name in another linked location: one logical folder with the children of both.
           const first = result.find((item) => item.kind === 'folder' && item.name === directoryEntry.name)
@@ -2485,7 +2486,7 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
   return omitFamdCompanions(result).sort(compareEntries)
 }
 
-async function readFastTreeDirectory(root, directory, depth = 0, folderColors = new Map(), logicalDir = '') {
+async function readFastTreeDirectory(root, directory, depth = 0, folderColors = new Map(), logicalDir = '', containRoot = root) {
   if (depth > MAX_TREE_DEPTH) return []
   const locationMap = folderLocationMap(root)
   const mapped = folderLocations.exactPaths(locationMap, logicalDir)
@@ -2500,7 +2501,7 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
       if (!mapped) throw error
       continue
     }
-    const scanReal = mapped ? await withTreeIoSlot(() => fsp.realpath(scan)).catch(() => null) : root
+    const scanReal = mapped ? await withTreeIoSlot(() => fsp.realpath(scan)).catch(() => null) : containRoot
     if (mapped && !scanReal) continue
     for (const directoryEntry of directoryEntries) {
       if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink()) continue
@@ -2518,7 +2519,7 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
       if (directoryEntry.isDirectory()) {
         const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
         if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
-        const children = await readFastTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild).catch(() => null)
+        const children = await readFastTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild, scanReal).catch(() => null)
         if (!children) continue
         if (duplicate) {
           const first = result.find((item) => item.kind === 'folder' && item.name === directoryEntry.name)
@@ -2556,7 +2557,7 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
         if (info.isDirectory()) {
           const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
           if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
-          const children = await readFastTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild).catch(() => null)
+          const children = await readFastTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild, scanReal).catch(() => null)
           if (!children) continue
           const entry = entryFromStat(root, absolutePath, info, children, folderColors.get(logicalChild))
           entry.name = directoryEntry.name
@@ -2678,7 +2679,7 @@ function writeTreeCache(root, entries) {
   return next
 }
 
-async function collectMarkdownFiles(root, directory, output, depth = 0, logicalDir = '') {
+async function collectMarkdownFiles(root, directory, output, depth = 0, logicalDir = '', containRoot = root) {
   if (depth > MAX_TREE_DEPTH) return
   const locationMap = folderLocationMap(root)
   const mapped = folderLocations.exactPaths(locationMap, logicalDir)
@@ -2692,7 +2693,7 @@ async function collectMarkdownFiles(root, directory, output, depth = 0, logicalD
       if (!mapped) throw error
       continue
     }
-    const scanReal = mapped ? await fsp.realpath(scan).catch(() => null) : root
+    const scanReal = mapped ? await fsp.realpath(scan).catch(() => null) : containRoot
     if (mapped && !scanReal) continue
     for (const entry of entries) {
       if (entry.name.startsWith('.') || seen.has(entry.name)) continue
@@ -2704,7 +2705,7 @@ async function collectMarkdownFiles(root, directory, output, depth = 0, logicalD
         const realDirectory = await fsp.realpath(absolutePath).catch(() => null)
         if (realDirectory && isInsideRoot(scanReal, realDirectory)) {
           seen.add(entry.name)
-          await collectMarkdownFiles(root, absolutePath, output, depth + 1, logicalChild)
+          await collectMarkdownFiles(root, absolutePath, output, depth + 1, logicalChild, scanReal)
         }
       } else if (info.isFile()) {
         const extension = path.extname(entry.name).toLocaleLowerCase('en-US')
@@ -4498,7 +4499,7 @@ function registerIpcHandlers() {
         ? normalizeRelativePath(destFolder).split(path.sep).join('/')
         : ''
       const destResolved = destRelative
-        ? await resolveVaultPath(destRelative, { expected: 'directory', asContent: info.isFile() })
+        ? await resolveVaultPath(destRelative, { expected: 'directory', asContent: true })
         : await resolveVaultPath('', { allowRoot: true, expected: 'directory' })
       if (destResolved.root !== root) throw new Error('Das Ziel liegt außerhalb des Vaults.')
 
@@ -4511,7 +4512,7 @@ function registerIpcHandlers() {
 
       const currentName = path.basename(target)
       const destContent = folderLocations.contentRoots(folderLocationMap(root), root, destRelative)
-      const occupied = await siblingNames(info.isFile() && destContent.mapped ? destContent.roots : destDir)
+      const occupied = await siblingNames(destContent.mapped ? destContent.roots : destDir)
       const noteExtension = info.isFile() ? path.extname(currentName).toLocaleLowerCase('en-US') : ''
       const guardCompanions = info.isFile() && isNoteExtension(noteExtension)
       let uniqueName = ''
