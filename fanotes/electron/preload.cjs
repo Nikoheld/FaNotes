@@ -125,6 +125,8 @@ const CHANNELS = Object.freeze({
   requestClose: 'fanotes:request-close',
   sheetZoom: 'fanotes:sheet-zoom',
   captureWindow: 'fanotes:capture-window',
+  setFullscreen: 'fanotes:set-fullscreen',
+  fullscreenChanged: 'fanotes:fullscreen-changed',
   renderPdfPage: 'fanotes:render-pdf-page',
 })
 
@@ -265,6 +267,13 @@ const api = Object.freeze({
     return () => ipcRenderer.removeListener(CHANNELS.sheetZoom, listener)
   },
   captureWindow: () => invoke(CHANNELS.captureWindow),
+  setFullscreen: (on) => invoke(CHANNELS.setFullscreen, Boolean(on)),
+  onFullscreenChange: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, on) => callback(Boolean(on))
+    ipcRenderer.on(CHANNELS.fullscreenChanged, listener)
+    return () => ipcRenderer.removeListener(CHANNELS.fullscreenChanged, listener)
+  },
   renderPdfPage: (request) => invoke(CHANNELS.renderPdfPage, request),
   addons: {
     fetchText: (url) => invoke(CHANNELS.addonsFetch, url),

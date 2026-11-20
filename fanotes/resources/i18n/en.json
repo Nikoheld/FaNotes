@@ -5073,5 +5073,17 @@
   "Leere Seiten gibt es nur neben PDF-Notizen.": "Blank pages are only available next to PDF notes.",
   "Ungültiger Pfad für leere PDF-Seiten.": "Invalid path for blank PDF pages.",
   "Der Ordner für leere PDF-Seiten ist unsicher.": "The folder for blank PDF pages is unsafe.",
-  "Der Ordner für leere PDF-Seiten verlässt den Vault.": "The folder for blank PDF pages is outside the vault."
+  "Der Ordner für leere PDF-Seiten verlässt den Vault.": "The folder for blank PDF pages is outside the vault.",
+  "Überschrift 3": "Heading 3",
+  "Text tiefgestellt": "Subscript text",
+  "Text hochgestellt": "Superscript text",
+  "Lernblöcke": "Study blocks",
+  "Formel": "Formula",
+  "Schriftgröße und Farbe": "Font size and colour",
+  "Vollbild": "Fullscreen",
+  "Vollbild beenden": "Exit fullscreen",
+  "Vollbild beenden (Esc)": "Exit fullscreen (Esc)",
+  "Vollbild: nur Werkzeugleiste und Dokument": "Fullscreen: only the toolbar and the document",
+  "Markdown-Tasten ausblenden": "Hide Markdown buttons",
+  "Blendet in der Werkzeugleiste alle Schaltflächen aus, die du auch einfach tippen kannst: Fett, Kursiv, Überschriften, Listen, Zitat, Code und Link.": "Hides every toolbar button for something you can simply type: bold, italic, headings, lists, quote, code and link."
 }

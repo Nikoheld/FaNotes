@@ -328,6 +328,8 @@ const IPC = Object.freeze({
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
   captureWindow: 'fanotes:capture-window',
+  setFullscreen: 'fanotes:set-fullscreen',
+  fullscreenChanged: 'fanotes:fullscreen-changed',
   renderPdfPage: 'fanotes:render-pdf-page',
 })
 
@@ -372,6 +374,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   profilePublic: false,
   marginTranscript: true,
   showWordCount: true,
+  hideMarkdownKeyButtons: false,
   showOutline: true,
   defaultFolder: 'Eingang',
   dailyNotesFolder: 'Tagesnotizen',
@@ -3309,7 +3312,7 @@ function isTrustedRendererNavigation(navigationUrl) {
 // Channels that only read. Every other channel may change the vault structure
 // (create/rename/move/trash, imports, writes that create files, vault or location
 // changes), so it invalidates the watcher's cached tree walk before and after it runs.
-const READ_ONLY_IPC = /^fanotes:(get-|read-|list-|load-|recognize-|search$|render-|capture-window$|enhanced-math-(get-state|recognize)$|qwen-vision-(get-state|recognize)$|lm-studio-|ai-|update-(get-state|check)$|open-external$|reveal-in-folder$|before-close$|renderer-ready$|story-(read|list)$|export-note-pdf$|vault-changed$)/
+const READ_ONLY_IPC = /^fanotes:(get-|read-|list-|load-|recognize-|search$|render-|capture-window$|set-fullscreen$|enhanced-math-(get-state|recognize)$|qwen-vision-(get-state|recognize)$|lm-studio-|ai-|update-(get-state|check)$|open-external$|reveal-in-folder$|before-close$|renderer-ready$|story-(read|list)$|export-note-pdf$|vault-changed$)/
 function mutatesVaultStructure(channel) {
   return !READ_ONLY_IPC.test(channel)
 }
@@ -5974,6 +5977,12 @@ function registerIpcHandlers() {
     safeStorage,
     trashItem: (target) => shell.trashItem(target),
   }))
+  handle(IPC.setFullscreen, (event, on) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return false
+    win.setFullScreen(Boolean(on))
+    return win.isFullScreen()
+  })
   handle(IPC.captureWindow, async (event) => encodeWindowCapture(await event.sender.capturePage()))
   handle(IPC.renderPdfPage, async (_event, request) => {
     await ensureBootstrap()
@@ -6188,6 +6197,12 @@ async function createWindow() {
     mainWindow.webContents.send(IPC.beforeClose)
     scheduleCloseWarning()
   })
+  // Keeps the toolbar-only fullscreen layout in step when the OS leaves fullscreen (F11, Alt+Enter).
+  for (const [eventName, state] of [['enter-full-screen', true], ['leave-full-screen', false]]) {
+    mainWindow.on(eventName, () => {
+      if (mainWindow && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send(IPC.fullscreenChanged, state)
+    })
+  }
   mainWindow.on('closed', () => {
     invalidateCloseWarningState()
     closeSubjectBookPopoutWindow()

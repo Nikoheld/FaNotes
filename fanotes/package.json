@@ -102,6 +102,7 @@
     "check:shape-snap": "node scripts/check-shape-snap-hold.mjs",
     "check:menus": "node scripts/check-menu-ux.cjs",
     "check:keyboard-toolbar": "node scripts/check-keyboard-toolbar.mjs",
+    "check:toolbar-unified": "node scripts/check-toolbar-unified.mjs",
     "check:ai": "node scripts/check-ai-providers.cjs",
     "check:welcome": "node scripts/check-welcome-note.cjs",
     "check:onboarding": "node scripts/check-first-run-onboarding.cjs",

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { Trash2 } from 'lucide-react'
+import { Baseline, Trash2 } from 'lucide-react'
+import { ToolbarMenu } from './ToolbarMenu'
 import { FormattingToolbar } from './FormattingToolbar'
 import type { MarkdownFormatAction } from './MarkdownEditor'
 import { formatTextFieldText } from '../lib/noteTextFieldFormat'
@@ -58,8 +59,9 @@ const fitTextArea = (node: HTMLTextAreaElement) => {
 }
 
 /** Same toolbar as the note editor (markdown actions) plus size, colour and remove for the selected text box. */
-export function NoteTextFieldToolbar({ field, onStyle, onText, onRemove }: {
+export function NoteTextFieldToolbar({ field, hideTypeable = false, onStyle, onText, onRemove }: {
   field: NoteTextField
+  hideTypeable?: boolean
   onStyle: (id: string, patch: StylePatch) => void
   onText: (id: string, text: string) => void
   onRemove: (id: string) => void
@@ -78,54 +80,62 @@ export function NoteTextFieldToolbar({ field, onStyle, onText, onRemove }: {
     })
   }
   const custom = field.color ?? '#20222b'
+  // Controls that need their own press (slider, colour picker) keep the native behaviour.
+  const needsOwnPress = (target: EventTarget) => target instanceof Element && Boolean(target.closest('.lw-color-custom, .note-text-field-range'))
   return (
     <div
       className="note-text-field-toolbar"
-      role="toolbar"
-      aria-label="Textfeld-Werkzeuge"
       onPointerDown={(event) => {
-        // The colour input needs its own press to open the picker.
-        if (event.target instanceof Element && event.target.closest('.lw-color-custom')) { event.stopPropagation(); return }
+        if (needsOwnPress(event.target)) { event.stopPropagation(); return }
         event.preventDefault(); event.stopPropagation()
       }}
-      onMouseDown={(event) => { if (!(event.target instanceof Element && event.target.closest('.lw-color-custom'))) event.preventDefault() }}
+      onMouseDown={(event) => { if (!needsOwnPress(event.target)) event.preventDefault() }}
     >
-      <FormattingToolbar hideLatex onFormat={format} onInsertLatex={() => undefined} />
-      <i className="note-text-field-sep" aria-hidden="true" />
-      <label className="note-text-field-range" title="Schriftgröße">
-        <span>Größe</span>
-        <input
-          type="range"
-          aria-label="Schriftgröße"
-          min={10}
-          max={48}
-          step={1}
-          value={field.fontSize}
-          onChange={(event) => onStyle(field.id, { fontSize: Number(event.target.value) })}
-        />
-        <output>{field.fontSize} px</output>
-      </label>
-      <i className="note-text-field-sep" aria-hidden="true" />
-      <div className="note-text-field-colors" role="group" aria-label="Schriftfarbe">
-        {NOTE_TEXT_FIELD_COLORS.map((color) => (
-          <button
-            key={color.label}
-            type="button"
-            className={`note-text-field-swatch ${(field.color ?? undefined) === color.value ? 'is-on' : ''}`}
-            style={{ '--swatch': color.css } as CSSProperties}
-            aria-label={color.label}
-            title={color.label}
-            aria-pressed={(field.color ?? undefined) === color.value}
-            onClick={() => onStyle(field.id, { color: color.value })}
-          />
-        ))}
-        <label className="lw-color-custom" title="Eigene Farbe">
-          <input type="color" aria-label="Eigene Farbe" value={custom} onChange={(event) => onStyle(field.id, { color: event.target.value })} />
-          <span style={{ background: custom }} />
-        </label>
-      </div>
-      <i className="note-text-field-sep" aria-hidden="true" />
-      <button type="button" className="is-danger" aria-label="Textfeld entfernen" title="Textfeld entfernen" onClick={() => onRemove(field.id)}><Trash2 size={13} aria-hidden="true" /></button>
+      <FormattingToolbar
+        hideLatex
+        hideTypeable={hideTypeable}
+        onFormat={format}
+        onInsertLatex={() => undefined}
+        trailingSlots={2}
+        trailing={(
+          <>
+            <ToolbarMenu label="Schriftgröße und Farbe" icon={<Baseline aria-hidden="true" size={14} strokeWidth={2} />}>
+              <label className="note-text-field-range" title="Schriftgröße">
+                <span>Größe</span>
+                <input
+                  type="range"
+                  aria-label="Schriftgröße"
+                  min={10}
+                  max={48}
+                  step={1}
+                  value={field.fontSize}
+                  onChange={(event) => onStyle(field.id, { fontSize: Number(event.target.value) })}
+                />
+                <output>{field.fontSize} px</output>
+              </label>
+              <div className="note-text-field-colors" role="group" aria-label="Schriftfarbe">
+                {NOTE_TEXT_FIELD_COLORS.map((color) => (
+                  <button
+                    key={color.label}
+                    type="button"
+                    className={`note-text-field-swatch ${(field.color ?? undefined) === color.value ? 'is-on' : ''}`}
+                    style={{ '--swatch': color.css } as CSSProperties}
+                    aria-label={color.label}
+                    title={color.label}
+                    aria-pressed={(field.color ?? undefined) === color.value}
+                    onClick={() => onStyle(field.id, { color: color.value })}
+                  />
+                ))}
+                <label className="lw-color-custom" title="Eigene Farbe">
+                  <input type="color" aria-label="Eigene Farbe" value={custom} onChange={(event) => onStyle(field.id, { color: event.target.value })} />
+                  <span style={{ background: custom }} />
+                </label>
+              </div>
+            </ToolbarMenu>
+            <button type="button" className="is-danger" aria-label="Textfeld entfernen" title="Textfeld entfernen" onClick={() => onRemove(field.id)}><Trash2 size={14} aria-hidden="true" /></button>
+          </>
+        )}
+      />
     </div>
   )
 }

@@ -17,7 +17,10 @@ import {
   FileText,
   ListTree,
   LoaderCircle,
+  Highlighter,
   Maximize2,
+  MoveHorizontal,
+  RotateCcw,
   PanelLeft,
   RotateCw,
   Search,
@@ -666,9 +669,12 @@ export function PdfNoteView({
   const [pageCount, setPageCount] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [toolbarHost, setToolbarHost] = useState<HTMLElement | null>(null)
+  // Re-resolve on every commit: the slot can be re-created (note switch, pen mode), and a host that is no longer
+  // in the document would swallow the whole bar.
   useLayoutEffect(() => {
-    setToolbarHost(document.getElementById(toolbarSlotId))
-  }, [toolbarSlotId])
+    const live = document.getElementById(toolbarSlotId)
+    setToolbarHost((current) => (current === live ? current : live))
+  })
   const [pageDraft, setPageDraft] = useState('1')
   const [rotation, setRotation] = useState(0)
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit-width')
@@ -1481,15 +1487,15 @@ export function PdfNoteView({
             const quote = window.getSelection()?.toString().replace(/\s+/gu, ' ').trim() ?? ''
             if (quote.length < 2) return
             onMarkSelection?.(quote, currentPage)
-          }}>Markieren</button>
+          }}><Highlighter size={14} /></button>
           <span>/ {pageCount || '…'}</span>
           <button type="button" aria-label="Nächste Seite" disabled={!pdf || currentPage >= pageCount} onClick={() => scrollToPage(currentPage + 1)}><ChevronDown size={14} /></button>
         </span>
         <span className="pdf-note-zoom">
           <button type="button" aria-label="Verkleinern" disabled={!pdf || zoomOutDisabled} onClick={zoomOut}><ZoomOut size={14} /></button>
-          <button type="button" className={shownMode === 'custom' ? 'is-active' : ''} title="Zoom zurücksetzen" disabled={!pdf} onClick={fitWidth}>{zoomLabel}</button>
+          <button type="button" className={shownMode === 'custom' ? 'is-active' : ''} title="Zoom zurücksetzen" aria-label="Zoom zurücksetzen" disabled={!pdf} onClick={fitWidth}><RotateCcw size={14} /></button>
           <button type="button" aria-label="Vergrößern" disabled={!pdf || zoomInDisabled} onClick={zoomIn}><ZoomIn size={14} /></button>
-          <button type="button" className={shownMode === 'fit-width' ? 'is-active' : ''} title="An Breite anpassen" disabled={!pdf} onClick={fitWidth}>Breite</button>
+          <button type="button" className={shownMode === 'fit-width' ? 'is-active' : ''} title="An Breite anpassen" aria-label="An Breite anpassen" disabled={!pdf} onClick={fitWidth}><MoveHorizontal size={14} /></button>
           <button type="button" className={shownMode === 'fit-page' ? 'is-active' : ''} title="Ganze Seite" aria-label="Ganze Seite" disabled={!pdf} onClick={fitPage}><Maximize2 size={14} /></button>
         </span>
         <span className="pdf-note-tools">

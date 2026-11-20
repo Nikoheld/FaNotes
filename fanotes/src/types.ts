@@ -142,6 +142,8 @@ export type AppSettings = {
   /** Show the invisible handwriting transcript in the margin. */
   marginTranscript: boolean
   showWordCount: boolean
+  /** Hides the toolbar buttons for Markdown that can simply be typed (bold, headings, lists …). */
+  hideMarkdownKeyButtons: boolean
   /** Editor toolbar placement: horizontal bar on top or vertical bar at the left edge. */
   toolbarPosition: 'top' | 'side'
   showOutline: boolean
@@ -793,6 +795,9 @@ export type FaNotesApi = {
   requestClose: () => void
   onSheetZoom?: (callback: (direction: 'in' | 'out') => void) => () => void
   captureWindow?: () => Promise<string>
+  /** Desktop only: puts the window in (or out of) fullscreen and resolves to the new state. */
+  setFullscreen?: (on: boolean) => Promise<boolean>
+  onFullscreenChange?: (callback: (on: boolean) => void) => () => void
   /** PDFium bitmap for one camera window. Absent in the browser; pdf.js paints instead. */
   renderPdfPage?: (request: PdfiumRasterRequest) => Promise<PdfiumRasterResult>
   addons?: AddonsHostApi

@@ -932,6 +932,7 @@ export function SettingsModal({
                       <option value="side">Seitlich (vertikal)</option>
                     </select>
                   </SettingRow>
+                  <SettingRow title="Markdown-Tasten ausblenden" description="Blendet in der Werkzeugleiste alle Schaltflächen aus, die du auch einfach tippen kannst: Fett, Kursiv, Überschriften, Listen, Zitat, Code und Link."><Toggle label="Markdown-Tasten ausblenden" checked={Boolean(settings.hideMarkdownKeyButtons)} onChange={(value) => update('hideMarkdownKeyButtons', value)} /></SettingRow>
                   <SettingRow title="Gliederung anzeigen"><Toggle label="Gliederung" checked={settings.showOutline} onChange={(value) => update('showOutline', value)} /></SettingRow>
                 </div>
               </>
