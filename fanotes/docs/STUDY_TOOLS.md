@@ -1,5 +1,8 @@
 # Study tools (Lernwerkzeuge)
 
+> **Status:** the desktop app no longer offers the study tools UI (insert menu, palette commands, block editors, the PDF assignments and highlights panel). Blocks already saved in notes keep rendering read-only and are never rewritten; the text below describes the stored format.
+
+
 Structured helpers for worksheet work. They never solve a task; they hold the data a task needs.
 Everything is stored as plain text inside the note, so it syncs like any other text and stays readable without FaNotes.
 

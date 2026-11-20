@@ -1,190 +1,75 @@
 <div align="center">
   <img src="fanotes-site/public/assets/fanotes.svg" width="92" height="92" alt="FaNotes logo">
   <h1>FaNotes</h1>
-  <p><strong>One calm workspace for typed notes, handwriting, worksheets and mathematics.</strong></p>
-  <p>Eine ruhige Arbeitsfläche für getippte Notizen, Handschrift, Arbeitsblätter und Mathematik.</p>
+  <p><strong>A local-first notebook that puts Markdown, pen handwriting and annotated PDFs on the same page.</strong></p>
 
   [![Stable](https://img.shields.io/github/v/release/Nikoheld/FaNotes?display_name=tag&label=stable&color=6f8cff)](https://github.com/Nikoheld/FaNotes/releases/latest)
   [![Beta](https://img.shields.io/github/v/release/Nikoheld/FaNotes?include_prereleases&display_name=tag&label=beta&color=b878eb)](https://github.com/Nikoheld/FaNotes/releases)
-  [![Linux](https://img.shields.io/badge/Linux-x86__64-45c9b7?logo=linux&logoColor=white)](https://fanotes.fasrv.ch/)
-  [![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-45c9b7?logo=windows&logoColor=white)](https://fanotes.fasrv.ch/)
   [![License](https://img.shields.io/badge/license-MIT-d4b54c)](fanotes/packaging/LICENSE)
 
-  [Website](https://fanotes.fasrv.ch/) · [Web app](https://fanotes.fasrv.ch/notes/) · [Downloads](https://github.com/Nikoheld/FaNotes/releases) · [English](#english)
+  [Website](https://fanotes.fasrv.ch/) · [Downloads](https://github.com/Nikoheld/FaNotes/releases) · [Build from source](#build-from-source)
 </div>
 
 ![FaNotes desktop overview](fanotes-site/public/assets/hero-desk.webp)
 
-## Deutsch
+FaNotes is a desktop app (Electron, Windows and Linux) for school, university and personal notes. Your notes are ordinary files in a folder you choose, so they work offline and stay yours.
 
-FaNotes verbindet eine echte Markdown-Wissensbasis mit einer papierartigen Schreibfläche. Tastatur, Grafiktablett, Bilder, PDFs und Formeln leben in derselben Notizansicht. Deine Notizen bleiben offene Dateien in einem frei wählbaren Vault; die Handschrifterkennung arbeitet lokal und kann mit deinen eigenen GlyphenWerk-Beispielen personalisiert werden.
+## Features
 
-### Was FaNotes besonders macht
-
-- **Eine gemeinsame Seite:** Tippen, zeichnen und handschriftlich schreiben, ohne zwischen Editor und Vorschau zu wechseln.
-- **Offene Markdown-Dateien:** Ordner, Wikilinks, Aufgabenlisten, Tabellen, Code, Mathematik und einklappbare Bereiche.
-- **Handschrift und Mathematik:** Lokale Zeilen- und Glyphenerkennung für Text, Gleichungen, Brüche, Wurzeln, Indizes, Summen und Integrale.
-- **GlyphenWerk integriert:** Eigene Zeichen erfassen, ZIP-Trainingsdaten importieren, Erkennung testen und Korrekturen direkt weiterlernen.
-- **Arbeitsblätter:** PDF- und Bildseiten in neue oder bestehende Notizen importieren und mit Tastatur oder Stift ausfüllen.
-- **AI nach Wahl:** LM Studio, Ollama, OpenAI, Gemini, Anthropic und OpenCode mit kombinierbaren Aktionen.
-- **Für jeden Lebensbereich:** Profile und Vorlagen für Schule, Universität, Privatleben und Arbeit.
-- **Desktop, Web und Tablet:** Linux, Windows, eine installierbare Web-App und ein nativer Android-Tablet-Client mit gemeinsamer Vault-Struktur und Sync.
-- **Anpassbar:** Themes, Schriften, Papier, Pinsel, Farben, Abstände, Ressourcenlimits und eigenes CSS.
-- **Privat by design:** Vault und persönliches Handschrifttraining bleiben lokal; ein abgesichertes Server-Backup ist optional.
+- **Handwriting and pen ink.** Write with a pen or drawing tablet on a paper-like page. Pressure-sensitive brushes, an eraser, and local handwriting and math recognition that you can train with your own samples (GlyphenWerk).
+- **Markdown notes.** Folders, wiki links, task lists, tables, code, math and collapsible sections, with typed text and ink on one continuous page.
+- **PDFs with annotations and side pages.** Mark up worksheets and papers, and add blank pages beside a PDF page for extra writing.
+- **Split view.** Open two notes side by side.
+- **Sync.** Optional end-to-end encrypted sync between devices through a FaNotes account; the server only stores ciphertext (see [`fanotes/docs/SYNC.md`](fanotes/docs/SYNC.md)).
+- **MCP Server.** Let AI tools such as Claude or Cursor read (and, if you allow it, write) your vault through a local Model Context Protocol server, configured under Settings. The remote connector is described in [`fanotes/docs/MCP.md`](fanotes/docs/MCP.md).
+- **Offline, local-first vault.** No account is needed for local notes. Cloud AI is used only if you configure a provider yourself.
+- **Customizable.** Themes, fonts, paper, brushes and German or English UI.
 
 ![Handwriting conversion in FaNotes](fanotes-site/public/assets/handwriting-conversion.webp)
 
-### Downloads und Update-Kanäle
+## Downloads
 
-| Kanal | Zweck | Veröffentlichungen |
-| --- | --- | --- |
-| **Stable** | Gebündelte, vollständig geprüfte Alltagsversion | 2 bis höchstens 4 pro Monat |
-| **Beta** | Früher Zugriff auf einzelne neue Funktionen und Korrekturen | nach Bedarf, als GitHub-Prerelease markiert |
+Get the latest installer from [GitHub Releases](https://github.com/Nikoheld/FaNotes/releases).
 
-Der Kanal lässt sich unter **Einstellungen → Updates → Update-Kanal** ändern. Stable-Nutzer erhalten keine Vorabversionen. Beta-Nutzer erhalten neue Betas und wechseln automatisch auf einen neueren Stable-Stand, sobald dieser verfügbar ist. Ein Wechsel zurück zu Stable führt niemals zu einem erzwungenen Downgrade.
+| Platform | Package |
+| --- | --- |
+| Windows 10 / 11 (x64) | Installer and portable `.exe` ([install notes](fanotes/packaging/INSTALL_WINDOWS.md)) |
+| Linux (x86_64) | AppImage ([install notes](fanotes/packaging/INSTALL_ARCH.md)) |
 
-Ab der Kalender-Versionierung tragen Releases Namen wie `2026.7.1` und Betas Namen wie `2026.7.2-beta.1`. Alle Update-Manifeste sind Ed25519-signiert; Pakete und differentielle Updates werden zusätzlich per SHA-256 geprüft.
+Releases ship in two channels, **Stable** and **Beta** (marked as prerelease). Switch under Settings, Updates. Update manifests are signed and packages are verified with SHA-256 before installation. See [`fanotes/RELEASE_POLICY.md`](fanotes/RELEASE_POLICY.md).
 
-Die aktuelle Version findest du unter [GitHub Releases](https://github.com/Nikoheld/FaNotes/releases). Die Produktseite bietet zusätzlich direkte Downloads und Installationshinweise für [Linux und Windows](https://fanotes.fasrv.ch/).
+## Build from source
 
-### Lokal entwickeln
-
-Voraussetzungen: Node.js 22+, npm, Linux oder Windows. Für Desktop-Pakete werden die plattformspezifischen Electron-Abhängigkeiten benötigt.
-
-```bash
-# GlyphenWerk
-npm install
-npm run dev
-
-# FaNotes Desktop/Web
-cd fanotes
-npm install
-npm run dev          # Electron + Vite
-npm run dev:web      # Browser-Ausgabe
-```
-
-Wichtige Prüfungen:
+Requirements: Node.js 22 and npm.
 
 ```bash
 cd fanotes
+npm install
+npm run dev          # Electron + Vite dev server
+npm run dev:web      # browser build only
 npm run typecheck
-npm run check:updater
-npm run check:i18n
-npm run check:connected-recognition
+npm run dist:linux   # AppImage, output in fanotes/release
 ```
 
-### Repository-Aufbau
+`npm run dist:windows` builds the Windows installer and portable package. Many checks live in `fanotes/scripts` and run as `npm run check:<name>`, for example `check:sync`, `check:updater` and `check:i18n`.
+
+## Project structure
 
 ```text
-src/                  GlyphenWerk-Oberfläche und gemeinsame Erkennungsengine
-fanotes/       FaNotes React-/Electron-/Web-App, Tests und Packaging
-fanotes-site/         Produktwebsite, Update-API, AI-Proxy und Backup-Dienst
-android/              Nativer Android-Tablet-Client (Kotlin, Jetpack Compose)
-deliverables/         kleine, veröffentlichbare Begleitdateien
+fanotes/        Desktop app: React UI (src/), Electron main process (electron/), scripts, packaging, docs
+fanotes-site/   Website, update API, sync and backup server
+crates/         Rust crates (ink, recognition, spelling, .famd codec, sync), partly compiled to WebAssembly
+android/        Native Android tablet client (Kotlin, Jetpack Compose), see android/README.md
+src/            GlyphenWerk, the handwriting training tool, and the shared recognition engine
 ```
 
-### Android-Tablet
+## File format
 
-Der Client unter [`android/`](android/README.md) ist eine native Schreibfläche für Tablets (S-Pen: Druck, Neigung, Radierer; die Hand blättert). Notizen bleiben `.md` plus `.famd` und synchronisieren mit dem bestehenden Konto. Bauen und der Formatvertrag stehen in [`android/README.md`](android/README.md) und [`android/ARCHITECTURE.md`](android/ARCHITECTURE.md).
+Notes are plain `.md` files. Handwritten and PDF notes use a `.famd` companion file that holds the Markdown text plus the ink and page data (schema `fanotes-famd-v1`). The codec is in [`fanotes/src/lib/famd.ts`](fanotes/src/lib/famd.ts) and the format contract is described in [`android/ARCHITECTURE.md`](android/ARCHITECTURE.md).
 
-```bash
-cd android
-./gradlew :core:test
-./gradlew :app:assembleDebug
-```
+## Contributing
 
-Erzeugte Builds, `node_modules`, private Schlüssel, lokale Vaults, Analytics und Server-Backups gehören nicht in Git. Release-Binärdateien werden vollständig und mit Prüfsummen an den jeweiligen GitHub-Release angehängt.
-
-### Datenschutz und Sicherheit
-
-- Keine Anmeldung ist für lokale Notizen erforderlich.
-- Markdown-Vault, Zeichnungen und persönliches Training werden standardmäßig nur auf dem Gerät gespeichert.
-- Cloud-AI wird ausschließlich verwendet, wenn du einen Anbieter selbst konfigurierst.
-- API-Schlüssel werden in der Desktop-App über den geschützten Systemspeicher abgelegt.
-- Update-Manifeste, Paketgrößen, Dateinamen, Herkunft, Signatur und SHA-256 werden vor der Installation geprüft.
-- Das optionale Server-Backup akzeptiert nur begrenzte FaNotes-Daten und neu validierte Medien; aktive PDF-Inhalte und unbekannte Dateitypen werden blockiert.
-
-## English
-
-FaNotes combines an open Markdown knowledge base with a paper-like writing surface. Keyboard input, pen strokes, images, PDFs and formulas live on the same note page. Notes remain ordinary files inside a vault you control, while local handwriting recognition can be personalized with your own GlyphenWerk samples.
-
-### Highlights
-
-- **One continuous page** for typing, drawing and handwriting—without separate edit and preview modes.
-- **Open Markdown files** with folders, wiki links, tasks, tables, code, mathematics and collapsible sections.
-- **Local handwriting and math recognition** for text, equations, fractions, roots, indices, sums and integrals.
-- **Integrated GlyphenWerk** for capture, ZIP import, recognition tests and correction-driven personal learning.
-- **PDF and image worksheets** that can be completed with the keyboard or a drawing tablet.
-- **Provider-neutral AI** through LM Studio, Ollama, OpenAI, Gemini, Anthropic or OpenCode.
-- **Profiles for school, university, personal use and work.**
-- **Linux, Windows, an installable web app, and a native Android tablet client** with the same vault files and sync.
-- **Deep customization** for themes, fonts, paper, brushes, colors, spacing, resource limits and custom CSS.
-- **Private by design:** local vault and local personal training, with an optional hardened server backup.
-
-### Stable and Beta
-
-Stable builds bundle thoroughly tested changes into two to at most four releases per month. Beta builds deliver focused changes earlier and are marked as prereleases on GitHub. Choose the channel under **Settings → Updates → Update channel**. Returning from Beta to Stable never forces a downgrade.
-
-Calendar versions use names such as `2026.7.1`; previews use names such as `2026.7.2-beta.1`. Update manifests are signed with Ed25519, and all full or differential packages are verified with SHA-256 before installation.
-
-Download the latest build from [GitHub Releases](https://github.com/Nikoheld/FaNotes/releases), open the [web app](https://fanotes.fasrv.ch/notes/), or visit the [product website](https://fanotes.fasrv.ch/) for platform-specific installation help.
-
-### Develop locally
-
-Requirements: Node.js 22+, npm, and Linux or Windows. Desktop packages also need the platform-specific Electron dependencies.
-
-```bash
-# GlyphenWerk
-npm install
-npm run dev
-
-# FaNotes desktop and web
-cd fanotes
-npm install
-npm run dev          # Electron + Vite
-npm run dev:web      # browser build
-```
-
-Useful checks:
-
-```bash
-cd fanotes
-npm run typecheck
-npm run check:updater
-npm run check:i18n
-npm run check:connected-recognition
-```
-
-### Repository layout
-
-```text
-src/                  GlyphenWerk interface and the shared recognition engine
-fanotes/              FaNotes React, Electron, and web app, tests, and packaging
-fanotes-site/         Product website, update API, AI proxy, and backup service
-android/              Native Android tablet client (Kotlin, Jetpack Compose)
-deliverables/         Small publishable companion files
-```
-
-### Android tablet
-
-The client in [`android/`](android/README.md) is a native writing surface for tablets (S-Pen pressure, tilt, and eraser; the hand navigates). Notes stay `.md` plus `.famd` and sync with an existing account. Build steps and the format contract are in [`android/README.md`](android/README.md) and [`android/ARCHITECTURE.md`](android/ARCHITECTURE.md).
-
-```bash
-cd android
-./gradlew :core:test
-./gradlew :app:assembleDebug
-```
-
-Generated builds, `node_modules`, private keys, local vaults, analytics, and server backups do not belong in Git. Release binaries are attached in full, with checksums, to the matching GitHub release.
-
-### Privacy and security
-
-- Local notes do not require an account.
-- The Markdown vault, drawings, and personal handwriting training stay on the device unless you opt in.
-- Cloud AI is used only when you configure a provider yourself.
-- The desktop app stores API keys in the protected system store.
-- Update manifests, package sizes, file names, origin, signature, and SHA-256 are checked before installation.
-- The optional server backup accepts only bounded FaNotes data and revalidated media. Active PDF content and unknown file types are blocked.
+Issues and pull requests are welcome. Keep changes focused, run `npm run typecheck` and the checks that touch your change, and do not commit build output, `node_modules`, keys or personal vaults.
 
 ## License
 

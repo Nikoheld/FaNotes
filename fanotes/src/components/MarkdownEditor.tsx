@@ -85,10 +85,9 @@ import { minimalReplacement } from '../lib/textReplacement'
 import { primeSpellingCorrections, rerunSpellingCheck, spellingCorrections } from '../lib/spellingCorrections'
 import type { SpellingLanguage } from '../types'
 import { findStudyBlocks, hashText, STUDY_KIND_LABELS, type StudyBlockRef, type StudyKind } from '../lib/study/blocks'
-import { hydrateVaultImages, STUDY_EVENT } from '../lib/study/imageTools'
+import { hydrateVaultImages } from '../lib/study/imageTools'
 import { readStudyBlock, renderStudyBlockHtml } from '../lib/study/registry'
 
-const LazyStudyHost = lazy(() => import('./study/StudyHost'))
 const LazyMarkdownPreview = lazy(() => import('./MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
 })))
@@ -583,17 +582,7 @@ class StudyBlockWidget extends WidgetType {
     const content = document.createElement('div')
     content.className = 'lw-block-content'
     try { content.innerHTML = renderStudyBlockHtml(this.kind, this.body); hydrateVaultImages(content) } catch { content.textContent = 'Lernblock konnte nicht dargestellt werden.' }
-    const edit = document.createElement('button')
-    edit.type = 'button'
-    edit.className = 'cm-lw-edit'
-    edit.textContent = 'Bearbeiten'
-    edit.ariaLabel = `${STUDY_KIND_LABELS[this.kind]} bearbeiten`
-    edit.addEventListener('click', (event) => {
-      event.preventDefault()
-      event.stopPropagation()
-      window.dispatchEvent(new CustomEvent(STUDY_EVENT.edit, { detail: { view, kind: this.kind, from: this.from, hash: hashText(this.body) } }))
-    })
-    shell.append(content, edit)
+    shell.append(content)
     return shell
   }
   ignoreEvent() { return true }
@@ -1786,7 +1775,6 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         data-theme={dark ? 'dark' : 'light'}
         ref={hostRef}
       />
-      {!readOnly && <Suspense fallback={null}><LazyStudyHost getView={() => viewRef.current} /></Suspense>}
     </>
   )
 })

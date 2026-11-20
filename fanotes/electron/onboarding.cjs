@@ -18,6 +18,7 @@ const STARTER_SUBJECTS = Object.freeze([
   Object.freeze({ name: 'Chemie', color: '#d9730d' }),
   Object.freeze({ name: 'Biologie', color: '#448361' }),
   Object.freeze({ name: 'Geschichte', color: '#ba9b4a' }),
+  Object.freeze({ name: 'Geografie', color: '#b5588a' }),
   Object.freeze({ name: 'Informatik', color: '#337ea9' }),
   Object.freeze({ name: 'Wirtschaft', color: '#c47d4e' }),
 ])
@@ -32,6 +33,7 @@ const STARTER_SUBJECTS_EN = Object.freeze([
   Object.freeze({ name: 'Chemistry', color: '#d9730d' }),
   Object.freeze({ name: 'Biology', color: '#448361' }),
   Object.freeze({ name: 'History', color: '#ba9b4a' }),
+  Object.freeze({ name: 'Geography', color: '#b5588a' }),
   Object.freeze({ name: 'Computer Science', color: '#337ea9' }),
   Object.freeze({ name: 'Economics', color: '#c47d4e' }),
 ])
