@@ -164,6 +164,10 @@ import {
   saveSplitLayout,
   saveWorkspaceMemory,
   snapToDevicePixels,
+  splitDropZone,
+  splitFitZoom,
+  splitPlacementForZone,
+  type SplitDropZone,
   splitFirstPaneSize,
   splitRatioFromPointer,
   stepNoteHistory,
@@ -244,7 +248,7 @@ import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSquare'
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
-import { flushPaperViewMemory } from './lib/paperViewMemory'
+import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
 import { configureDiagnostics, markStartupReady, recordFeature, sendDailyIfDue, setDiagnosticsVault } from './lib/diagnosticsClient'
 import {
@@ -289,6 +293,7 @@ import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
 import { createPdfMarkEraseHost, unmarkPdfNote } from './lib/pdfMarkEraseHost'
 import { getHandwritingSamples, getMathLayoutExamples, getImportedLabels, putHandwritingSamples, putMathLayoutExamples, putHandwritingLabels } from './lib/handwritingDb'
 import { SafeBoundary } from './components/SafeBoundary'
+import { createTreeSync, type TreeSync } from './lib/treeSync.mjs'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText } from './i18n'
@@ -915,6 +920,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [splitPath, setSplitPath] = useState<string | null>(null)
   const [splitLayout, setSplitLayout] = useState<SplitLayout>(() => loadSplitLayout())
   const [splitDragging, setSplitDragging] = useState(false)
+  const [splitDrop, setSplitDrop] = useState<SplitDropZone | null>(null)
   const [focusedPane, setFocusedPane] = useState<'main' | 'split'>('main')
   const focusedPaneRef = useRef(focusedPane)
   focusedPaneRef.current = focusedPane
@@ -1022,6 +1028,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const mutatingEntryPathsRef = useRef(new Set<string>())
   const vaultSessionGenerationRef = useRef(0)
   const vaultStructureRevisionRef = useRef(0)
+  // Every tree result goes through this: a request issued earlier never overwrites a later one.
+  const treeSyncRef = useRef<TreeSync<VaultEntry[]> | null>(null)
+  if (!treeSyncRef.current) treeSyncRef.current = createTreeSync<VaultEntry[]>((next) => { treeRef.current = next; setTree(next) })
   const vaultSwitchInProgressRef = useRef(false)
   const searchRequestRef = useRef(0)
   const openingNotesRef = useRef(new Set<string>())
@@ -1054,7 +1063,7 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => { if (!splitPath) setFocusedPane('main') }, [splitPath])
   // The first pane's track is a whole number of device pixels, so the second
   // pane's scroller never sits on a half pixel (that composites its text soft).
-  const [splitTracks, setSplitTracks] = useState<{ first: number; divider: number } | null>(null)
+  const [splitTracks, setSplitTracks] = useState<{ first: number; divider: number; size: number } | null>(null)
   useEffect(() => {
     const container = splitContainerRef.current
     if (!splitPath || !container || typeof ResizeObserver !== 'function') {
@@ -1066,7 +1075,7 @@ export default function App({ startupBootstrap }: AppProps) {
       const size = orientation === 'columns' ? container.clientWidth : container.clientHeight
       const dpr = window.devicePixelRatio || 1
       const divider = snapToDevicePixels(SPLIT_DIVIDER_PX, dpr)
-      setSplitTracks(size > 0 ? { first: splitFirstPaneSize(size, divider, ratio, dpr), divider } : null)
+      setSplitTracks(size > 0 ? { first: splitFirstPaneSize(size, divider, ratio, dpr), divider, size } : null)
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -1318,6 +1327,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const knownTags = useMemo(() => collectVaultTags(Object.values(tagIndex).map((tags) => ({ content: tags.map((tag) => `#${tag}`).join(' ') }))), [tagIndex])
   const activeTags = activeTab ? parseNoteTags(activeTab.content) : []
   const splitTab = splitPath ? tabs.find((tab) => tab.path === splitPath) ?? null : null
+  // The outline and backlinks follow the pane that has focus.
+  const inspectorTab = focusedPane === 'split' && splitTab ? splitTab : activeTab
   const vaultNoteReferences = useMemo(() => lmStudioOpen ? [...filePaths(tree)]
     .filter((path) => path !== activePath)
     .map((path) => ({ title: stripExtension(fileName(path)), relativePath: path })) : [], [activePath, lmStudioOpen, tree])
@@ -1741,13 +1752,15 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const refreshTree = useCallback(async () => {
     const session = vaultSessionGenerationRef.current
+    const sync = treeSyncRef.current!
+    const ticket = sync.begin()
     const nextTree = await window.fanotes.getTree()
     if (session !== vaultSessionGenerationRef.current) return treeRef.current
-    treeRef.current = nextTree
-    setTree(nextTree)
+    // A request issued after this one may already have been applied: keep that one.
+    const applied = sync.accept(ticket, nextTree)
     syncEngine.notifyLocalChange()
     lastOwnTreeRefreshRef.current = Date.now()
-    return nextTree
+    return applied ? nextTree : treeRef.current
   }, [])
 
   // Files that arrived from outside FaNotes; the mark goes away when the note is opened.
@@ -1762,12 +1775,15 @@ export default function App({ startupBootstrap }: AppProps) {
         change.changed.every((entryPath) => entryPath === active)
       // The open note's own autosave also shows up as a change: nothing to do then.
       if (onlyActiveChanged) return
-      void window.fanotes.getTree({ fromWatcher: true }).then((nextTree) => {
+      const sync = treeSyncRef.current!
+      const ticket = sync.begin()
+      void window.fanotes.getTree({ fromWatcher: true }).then((fetchedTree) => {
         // Only the tree is swapped. Open tabs, unsaved edits, selection, expanded
         // folders and scroll position live elsewhere and stay untouched.
         if (session !== vaultSessionGenerationRef.current) return
-        treeRef.current = nextTree
-        setTree(nextTree)
+        // This walk may be older than our own refresh (for example a folder created
+        // meanwhile): then the newer tree stays and only the arrival handling runs.
+        const nextTree = sync.accept(ticket, fetchedTree) ? fetchedTree : treeRef.current
         syncEngine.notifyLocalChange()
         const present = new Set(collectTreePaths(nextTree))
         // A truncated change list must not silently drop entries: derive arrivals from the full tree.
@@ -2098,7 +2114,9 @@ export default function App({ startupBootstrap }: AppProps) {
           window.requestIdleCallback(() => { void import('./components/DrawingBoard') }, { timeout: 4_000 })
         })
         try {
+          const sync = treeSyncRef.current!
           const loadFreshTree = async () => {
+            const freshTicket = sync.begin()
             let nextTree = await window.fanotes.getTree()
             if (!alive) return
             let nextNote = chooseRestoredNote(
@@ -2111,22 +2129,23 @@ export default function App({ startupBootstrap }: AppProps) {
               // A stale empty cache must never create a surprise note.
               const created = await window.fanotes.createNote(undefined, translateUiText('Erste Notiz'))
               if (!alive) return
+              const createdTicket = sync.begin()
               nextTree = await window.fanotes.getTree()
+              sync.accept(createdTicket, nextTree)
               nextNote = created.relativePath
             }
-            treeRef.current = nextTree
-            setTree(nextTree)
+            if (!sync.accept(freshTicket, nextTree)) nextTree = treeRef.current
             if (nextNote && !activePathRef.current) await openNote(nextNote)
             if (alive) await restoreWorkspace(data.vaultPath, nextTree)
           }
 
+          const startupTicket = sync.begin()
           const cachedTree = await window.fanotes.getCachedTree().catch(() => null)
           if (!alive) return
           const startupTree = cachedTree ?? await window.fanotes.getFastTree()
           if (!alive) return
           if (startupTree.length) {
-            treeRef.current = startupTree
-            setTree(startupTree)
+            sync.accept(startupTicket, startupTree)
             const startupNote = chooseRestoredNote(
               launchedSettings.lastOpenNotePath,
               collectNotePaths(startupTree),
@@ -2194,15 +2213,17 @@ export default function App({ startupBootstrap }: AppProps) {
       /* templates are also available from the command palette */
     }
     setSettings({ ...defaultSettingsForPlatform(window.fanotes.platform), ...data.settings })
+    const onboardingSync = treeSyncRef.current!
+    let onboardingTicket = onboardingSync.begin()
     let initialTree = await window.fanotes.getTree()
     let initialNote = firstNote(initialTree)
     if (!initialNote) {
       const created = await window.fanotes.createNote(undefined, translateUiText('Erste Notiz'))
+      onboardingTicket = onboardingSync.begin()
       initialTree = await window.fanotes.getTree()
       initialNote = created.relativePath
     }
-    treeRef.current = initialTree
-    setTree(initialTree)
+    onboardingSync.accept(onboardingTicket, initialTree)
     if (initialNote) await openNote(initialNote)
     // A fresh vault has no workspace to restore, but from here on it remembers one.
     await restoreWorkspace(data.vaultPath, initialTree)
@@ -3677,6 +3698,8 @@ export default function App({ startupBootstrap }: AppProps) {
       const created = await window.fanotes.createFolder(parent)
       if (session !== vaultSessionGenerationRef.current) return
       vaultStructureRevisionRef.current += 1
+      // An active tag filter hides folders without matching notes: the new folder must stay visible.
+      setTagFilter(null)
       setRevealPath(created.relativePath)
       await refreshTree()
       toast(parent ? `Unterordner in „${parent.split('/').pop()}“ erstellt.` : 'Neuer Ordner erstellt.', 'success')
@@ -4904,6 +4927,12 @@ export default function App({ startupBootstrap }: AppProps) {
       toast('Diese Notiz ist pausiert, bis du den Hinweis über dem Text beantwortet hast.', 'info')
       return
     }
+    const splitNote = splitPathRef.current
+    if (focusedPaneRef.current === 'split' && splitNote && (isPdfNotePath(splitNote) || tabsRef.current.find((tab) => tab.path === splitNote)?.kind === 'pdf')) {
+      // The pen layer of a PDF lives in the main pane only; say so instead of doing nothing.
+      toast('Handschrift auf einem PDF gibt es in der Hauptspalte. Öffne es dort über „Als einzige Notiz öffnen“.', 'info')
+      return
+    }
     drawingOpenRef.current = true
     setOverviewOpen(false)
     setHomeworkOpen(false)
@@ -5988,29 +6017,121 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const closeTabMenu = useCallback(() => setTabMenu(null), [])
 
+  // A note dragged from a tab or the tree onto an edge of the editor opens beside the current one.
+  const dropNoteIntoSplit = useCallback(async (path: string, zone: SplitDropZone) => {
+    const { orientation, first } = splitPlacementForZone(zone)
+    const active = activePathRef.current
+    const split = splitPathRef.current
+    if (!active || /\.story$/iu.test(path)) return
+    if (path === active && !split) {
+      toast('Ziehe eine andere Notiz an den Rand, um die Ansicht zu teilen.', 'info')
+      return
+    }
+    setSplitLayout((current) => current.orientation === orientation ? current : { ...current, orientation })
+    if (path === active || path === split) {
+      // A note that is already open moves to the side it was dropped on.
+      if ((path === active) !== first) await swapSplitPanes()
+      return
+    }
+    if (!first) {
+      await openInSplit(path)
+      return
+    }
+    // Dropped on the left or top edge: the note takes the main pane, the former main pane moves over.
+    if (await openNote(path)) setSplitPath(active)
+  }, [openInSplit, openNote, swapSplitPanes, toast])
+
+  const noteDragPath = useCallback((transfer: DataTransfer): string | null => {
+    const tabPath = transfer.getData(NOTE_TAB_DRAG_TYPE)
+    if (tabPath) return tabPath
+    const entry = transfer.getData('application/x-fanotes-entry')
+    if (!entry) return null
+    try {
+      const parsed = JSON.parse(entry) as { path?: unknown; kind?: unknown }
+      return typeof parsed.path === 'string' && parsed.kind === 'file' ? parsed.path : null
+    } catch {
+      return null
+    }
+  }, [])
+
+  const dragIsNote = (transfer: DataTransfer) => transfer.types.includes(NOTE_TAB_DRAG_TYPE) || transfer.types.includes('application/x-fanotes-entry')
+
+  // A sheet wider than its pane would open with its text cut off at the left edge:
+  // the second pane starts at a zoom that shows the whole column (unless the note has its own remembered view).
+  // A layout effect runs after the pane's own view setup and before the first paint, so the zoom never visibly jumps.
+  useLayoutEffect(() => {
+    if (!splitPath || !splitTab || splitTab.kind === 'pdf' || isPdfNotePath(splitPath)) return
+    const path = splitPath
+    const scrollerOf = () => splitContainerRef.current?.querySelector<HTMLElement>('.split-pane .unified-note-view') ?? null
+    let interacted = false
+    let done = false
+    const fit = () => {
+      const scroller = scrollerOf()
+      if (done || interacted || !scroller || recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(`split:${path}`))) return
+      const view = splitPaperViewStore.read()
+      if (view.zoom !== 1) { done = true; return }
+      const zoom = splitFitZoom(scroller.clientWidth)
+      if (zoom < 1) {
+        splitPaperViewStore.write({ ...view, zoom })
+        done = true
+      }
+    }
+    fit()
+    // Fallback only: if the pane was not measurable yet. It never fires after the user touched the pane.
+    const scroller = scrollerOf()
+    const markInteracted = () => { interacted = true }
+    const events = ['pointerdown', 'wheel', 'keydown', 'touchstart'] as const
+    events.forEach((name) => scroller?.addEventListener(name, markInteracted, { capture: true, passive: true }))
+    const observer = scroller && typeof ResizeObserver === 'function' ? new ResizeObserver(fit) : null
+    if (scroller) observer?.observe(scroller)
+    const stop = window.setTimeout(() => { done = true }, 1500)
+    return () => {
+      done = true
+      window.clearTimeout(stop)
+      observer?.disconnect()
+      events.forEach((name) => scroller?.removeEventListener(name, markInteracted, { capture: true }))
+    }
+  }, [splitPath, splitPaperViewStore])
+
   // Divider drag of the split view; pointer capture keeps it smooth over iframes and canvases.
   const beginSplitDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     const container = splitContainerRef.current
     if (!container || event.button !== 0) return
     event.preventDefault()
-    event.currentTarget.setPointerCapture(event.pointerId)
+    const divider = event.currentTarget
+    divider.setPointerCapture(event.pointerId)
     setSplitDragging(true)
     const orientation = splitLayout.orientation
+    // The drag moves the grid track directly, once per frame. React state (and so a
+    // re-render of both panes, the tab bar and a storage write) follows once on release.
+    let latest = splitLayout.ratio
+    let frame = 0
+    const apply = () => {
+      frame = 0
+      const size = orientation === 'columns' ? container.clientWidth : container.clientHeight
+      const dpr = window.devicePixelRatio || 1
+      const track = snapToDevicePixels(SPLIT_DIVIDER_PX, dpr)
+      container.style.setProperty('--split-first', `${splitFirstPaneSize(size, track, latest, dpr)}px`)
+      divider.setAttribute('aria-valuenow', String(Math.round(latest * 100)))
+    }
     const move = (moveEvent: PointerEvent) => {
       const rect = container.getBoundingClientRect()
-      const ratio = splitRatioFromPointer(rect, { x: moveEvent.clientX, y: moveEvent.clientY }, orientation)
-      setSplitLayout((current) => current.ratio === ratio ? current : { ...current, ratio })
+      latest = splitRatioFromPointer(rect, { x: moveEvent.clientX, y: moveEvent.clientY }, orientation)
+      if (!frame) frame = window.requestAnimationFrame(apply)
     }
     const finish = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
+      if (frame) window.cancelAnimationFrame(frame)
+      apply()
+      setSplitLayout((current) => current.ratio === latest ? current : { ...current, ratio: latest })
       setSplitDragging(false)
     }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', finish)
     window.addEventListener('pointercancel', finish)
-  }, [splitLayout.orientation])
+  }, [splitLayout.orientation, splitLayout.ratio])
 
   const splitDividerKey = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
     const horizontal = splitLayout.orientation === 'columns'
@@ -6798,8 +6919,35 @@ export default function App({ startupBootstrap }: AppProps) {
               <div
                 ref={splitContainerRef}
                 className={`editor-split ${splitTab ? 'is-split' : ''} ${splitTab ? `is-${splitLayout.orientation}` : ''} ${splitDragging ? 'is-resizing' : ''} ${splitTab ? `focus-${focusedPane}` : ''}`}
+                onDragOverCapture={(event) => {
+                  if (!dragIsNote(event.dataTransfer)) return
+                  const zone = splitDropZone(event.currentTarget.getBoundingClientRect(), { x: event.clientX, y: event.clientY })
+                  setSplitDrop((current) => current === zone ? current : zone)
+                  if (!zone) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  event.dataTransfer.dropEffect = 'move'
+                }}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setSplitDrop(null)
+                }}
+                onDropCapture={(event) => {
+                  if (!dragIsNote(event.dataTransfer)) return
+                  const zone = splitDropZone(event.currentTarget.getBoundingClientRect(), { x: event.clientX, y: event.clientY })
+                  setSplitDrop(null)
+                  if (!zone) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  const path = noteDragPath(event.dataTransfer)
+                  if (path) void dropNoteIntoSplit(path, zone)
+                }}
                 style={splitTab ? { '--split-ratio': splitLayout.ratio, ...(splitTracks ? { '--split-first': `${splitTracks.first}px`, '--split-divider': `${splitTracks.divider}px` } : {}) } as React.CSSProperties : undefined}
               >
+              {splitDrop && (
+                <div className={`split-drop-overlay is-${splitDrop}`} aria-hidden="true">
+                  <span>{splitDrop === 'left' ? 'Links öffnen' : splitDrop === 'right' ? 'Rechts öffnen' : splitDrop === 'top' ? 'Oben öffnen' : 'Unten öffnen'}</span>
+                </div>
+              )}
               <PaperView
                 className={`unified-note-view ${splitTab ? 'is-main-pane' : ''} paper-${isPdfActive ? 'blank' : activePaper} ${drawingOpen ? 'is-inking' : ''} ${isPdfActive ? 'is-pdf-note' : ''}`}
                 viewKey={activeTab.path}
@@ -6971,7 +7119,22 @@ export default function App({ startupBootstrap }: AppProps) {
                     {splitTab.kind === 'pdf' || isPdfNotePath(splitTab.path) ? (
                       <Suspense fallback={<div className="pdf-note-status"><LoaderCircle className="spin" size={18} /> PDF wird geladen …</div>}>
                         <SafeBoundary name="Zweite PDF-Notiz" fallbackTitle="Der PDF-Viewer ist abgestürzt">
-                          <PdfNoteView path={splitTab.path} title={splitTab.title} inputDisabled autoFit={false} />
+                          <PdfNoteView
+                            path={splitTab.path}
+                            title={splitTab.title}
+                            inputDisabled={Boolean(tabHolds[splitTab.path])}
+                            autoFit={false}
+                            quotes={readPdfMarks(splitTab.content)}
+                            onMarkSelection={(quote, page) => {
+                              const marks = addPdfMark(readPdfMarks(splitTab.content), { page, quote, kind: 'highlight' })
+                              updateContentFor(splitTab.path, writePdfMarks(splitTab.content, marks))
+                            }}
+                            onUnmarkSpans={(hit) => {
+                              const content = latestNoteContent(splitTab.path)
+                              const result = content === null ? null : unmarkPdfNote(content, [hit])
+                              if (result) updateContentFor(splitTab.path, result.content)
+                            }}
+                          />
                         </SafeBoundary>
                       </Suspense>
                     ) : (
@@ -6993,7 +7156,7 @@ export default function App({ startupBootstrap }: AppProps) {
                     )}
                     {drawingOpen && focusedPane === 'split' && loadSplitInk ? (
                       <SafeBoundary name="Handschrift (zweite Spalte)" fallbackTitle="Die zweite Stiftebene ist abgestürzt">
-                        <SplitInkEditor path={splitTab.path} title={splitTab.title} load={loadSplitInk} settings={settings} onSaveDrawing={saveDrawingAsset} />
+                        <SplitInkEditor path={splitTab.path} title={splitTab.title} load={loadSplitInk} settings={settings} paper={normalizePaperStyle(notePaperByPath[splitTab.path] ?? settings.paperStyle)} onSaveDrawing={saveDrawingAsset} />
                       </SafeBoundary>
                     ) : loadSplitInk && (
                       <SafeBoundary name="Handschrift (zweite Spalte)" fallbackTitle="Die Handschrift-Vorschau ist abgestürzt">
@@ -7036,7 +7199,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !isPdfActive && <Suspense fallback={null}><RightInspector content={activeTab?.content ?? ''} path={activeTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { editorRef.current?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !(inspectorTab && (inspectorTab.kind === 'pdf' || isPdfNotePath(inspectorTab.path))) && <Suspense fallback={null}><RightInspector content={inspectorTab?.content ?? ''} path={inspectorTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { commandEditor()?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
         {studyPanel && isPdfActive && activeTab && <Suspense fallback={null}><SafeBoundary name="Lernwerkzeuge"><StudyPanel key={activeTab.path} path={activeTab.path} title={activeTab.title} content={activeTab.content} initialTab={studyPanel} onContentChange={(content) => updateContentFor(activeTab.path, content)} onSaveNote={(title, markdown) => { void saveStudyNote(title, markdown) }} onNotice={(message) => toast(message, 'info')} onClose={() => setStudyPanel(null)} /></SafeBoundary></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} failed={searchFailed} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}

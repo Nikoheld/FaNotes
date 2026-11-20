@@ -4621,3 +4621,18 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .note-text-field-toolbar .lw-color-custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .note-text-field-toolbar .lw-color-custom span { position: absolute; inset: 4px; border-radius: 50%; }
 @media (max-width: 900px) { .note-text-field-range span { display: none; } }
+
+/* Dropping a note on an editor edge opens it beside the current one. */
+.editor-split { position: relative; }
+.split-drop-overlay { position: absolute; inset: 0; z-index: 60; pointer-events: none; }
+.split-drop-overlay::before { content: ''; position: absolute; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 8px; transition: all var(--motion-fast) ease; }
+.split-drop-overlay.is-left::before { inset: 6px 50% 6px 6px; }
+.split-drop-overlay.is-right::before { inset: 6px 6px 6px 50%; }
+.split-drop-overlay.is-top::before { inset: 6px 6px 50% 6px; }
+.split-drop-overlay.is-bottom::before { inset: 50% 6px 6px 6px; }
+.split-drop-overlay > span { position: absolute; padding: 5px 11px; border-radius: 999px; background: var(--accent); color: var(--on-accent, #fff); font-size: 12px; font-weight: 600; box-shadow: var(--shadow); }
+.split-drop-overlay.is-left > span { left: 25%; top: 50%; transform: translate(-50%, -50%); }
+.split-drop-overlay.is-right > span { left: 75%; top: 50%; transform: translate(-50%, -50%); }
+.split-drop-overlay.is-top > span { left: 50%; top: 25%; transform: translate(-50%, -50%); }
+.split-drop-overlay.is-bottom > span { left: 50%; top: 75%; transform: translate(-50%, -50%); }
+.editor-split > .split-drop-overlay { background: none; }

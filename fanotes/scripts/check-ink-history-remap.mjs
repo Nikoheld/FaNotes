@@ -43,7 +43,9 @@ for (const holder of [
 
 // Both remap paths go through the visitor — the grow remap and the painted-layout rescale.
 const grow = section(board, 'const setPageExtent = useCallback(', 'const afterBox = scroller', 'setPageExtent remap')
-assert.match(grow, /forEachTrackedPoint\(\(point\) => \{\s*point\.x = keepMarkOnPage\(point\.x, prevPaintW, nextPaintW, addX\)\s*point\.y = keepMarkOnPage\(point\.y, prevPaintH, nextPaintH, addY\)\s*\}\)/u)
+// The per-point remap is keepMarkOnPage inline (bit-identical, check-heavy-ink compares it with the wasm).
+assert.match(grow, /const remapX = moveX \? keepMarkOnPageAxis\(prevPaintW, nextPaintW, addX\) : null\s*const remapY = moveY \? keepMarkOnPageAxis\(prevPaintH, nextPaintH, addY\) : null/u)
+assert.match(grow, /forEachTrackedPoint\(\(point\) => \{\s*const \{ x, y \} = point\s*if \(doX && Number\.isFinite\(x\)\) point\.x = \(x \* xPrev \+ xPad\) \/ xNext\s*if \(doY && Number\.isFinite\(y\)\) point\.y = \(y \* yPrev \+ yPad\) \/ yNext\s*\}\)/u)
 assert.doesNotMatch(grow, /for \(const stroke of strokesRef\.current\)/u, 'the grow remap must not walk the live array alone')
 const scale = section(board, 'const scaleNormalizedSpace = useCallback(', 'const catchUpPaintedLayout = useCallback(', 'scaleNormalizedSpace')
 assert.match(scale, /forEachTrackedPoint\(\(point\) => \{\s*point\.x \*= scaleX\s*point\.y \*= scaleY\s*\}\)/u)

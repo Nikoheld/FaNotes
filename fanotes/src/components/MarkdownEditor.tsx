@@ -57,6 +57,7 @@ import {
 } from '@codemirror/view'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { createEditorFindPanel } from '../lib/editorFindBar'
+import { touchSelection } from '../lib/cmTouchSelection'
 import type { AppSettings, DetectedTextLanguage } from '../types'
 import type { EditActivity } from '../lib/pageStats'
 import { createTrailingValueScheduler, type TrailingValueScheduler } from '../lib/trailingValueScheduler'
@@ -1563,6 +1564,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         foldGutter(),
         drawSelection(),
         selectionDragAutoScroll,
+        touchSelection,
         paperCaretLock,
         paperScrollHandler,
         dropCursor(),
