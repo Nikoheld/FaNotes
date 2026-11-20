@@ -128,7 +128,7 @@ try {
       const clipInfo = clipped ? await page.evaluate(() => {
         const scroller = document.querySelector('.split-pane .unified-note-view')
         const rect = (node) => node ? [Math.round(node.getBoundingClientRect().left), Math.round(node.getBoundingClientRect().width)] : null
-        return JSON.stringify({ scroller: rect(scroller), paper: rect(scroller?.querySelector('.unified-paper')), cm: rect(scroller?.querySelector('.cm-content')), scrollLeft: scroller?.scrollLeft, dpr: devicePixelRatio })
+        return JSON.stringify({ scroller: rect(scroller), paper: rect(scroller?.querySelector('.unified-paper')), cm: rect(scroller?.querySelector('.cm-content')), scrollLeft: scroller?.scrollLeft, memory: (() => { try { return Object.entries(JSON.parse(localStorage.getItem('fanotes.paperView.v1') || '{}')).map(([k, v]) => `${k}:${v.zoom}`) } catch { return 'unreadable' } })(), paperStyle: scroller?.querySelector('.unified-paper')?.getAttribute('style'), dpr: devicePixelRatio })
       }) : ''
       assert.equal(clipped, false, `the second pane does not start with its text cut off at the left edge ${clipInfo}`)
 
