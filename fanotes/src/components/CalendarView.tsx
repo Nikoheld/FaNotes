@@ -216,6 +216,10 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
     start: Date
     end: Date
     moved: boolean
+    /** A finger picks an event up after a short hold; before that it scrolls the day. */
+    touch?: boolean
+    armed?: boolean
+    armTimer?: number
   } | null>(null)
   const suppressClick = useRef(false)
   const [draftSpan, setDraftSpan] = useState<{ day: Date, start: Date, end: Date } | null>(null)
@@ -364,6 +368,7 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
     const move = (event: PointerEvent) => {
       const drag = dragRef.current
       if (!drag || drag.pointerId !== event.pointerId) return
+      if (drag.touch && !drag.armed) return
       const hit = columnAt(event.clientX, event.clientY)
       const column = hit?.column ?? null
       const day = hit?.day ?? drag.day
@@ -397,8 +402,10 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
     const up = (event: PointerEvent) => {
       const drag = dragRef.current
       if (!drag || drag.pointerId !== event.pointerId) return
+      window.clearTimeout(drag.armTimer)
       dragRef.current = null
       setDraftSpan(null)
+      if (drag.touch && !drag.armed && drag.kind !== 'create') return
       if (drag.moved) suppressClick.current = true
       if (drag.kind === 'create') {
         const end = drag.end.getTime() <= drag.start.getTime() ? addMinutes(drag.start, 30) : drag.end
@@ -409,11 +416,26 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
       if (drag.kind === 'move') void persist(moveOccurrence(document, drag.key, drag.start))
       if (drag.kind === 'resize') void persist(resizeOccurrence(document, drag.key, drag.end))
     }
+    const cancel = (event: PointerEvent) => {
+      const drag = dragRef.current
+      if (!drag || drag.pointerId !== event.pointerId) return
+      window.clearTimeout(drag.armTimer)
+      dragRef.current = null
+      setDraftSpan(null)
+    }
+    // Once an event is picked up by a finger the day must not scroll under it.
+    const holdScroll = (event: TouchEvent) => {
+      if (dragRef.current?.touch && dragRef.current.armed && event.cancelable) event.preventDefault()
+    }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
+    window.addEventListener('touchmove', holdScroll, { passive: false })
     return () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('touchmove', holdScroll)
     }
   }, [document, openComposer, persist])
 
@@ -438,6 +460,13 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
     setDraftSpan({ day, start, end: addMinutes(start, 30) })
   }
 
+  const armTouch = (event: React.PointerEvent) => {
+    const drag = dragRef.current
+    if (!drag || event.pointerType !== 'touch') return
+    drag.touch = true
+    drag.armTimer = window.setTimeout(() => { drag.armed = true }, 300)
+  }
+
   const onEventPointerDown = (occurrence: CalendarOccurrence, day: Date, event: React.PointerEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     dragRef.current = {
@@ -450,6 +479,7 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
       end: occurrence.end,
       moved: false,
     }
+    armTouch(event)
   }
 
   const onResizePointerDown = (occurrence: CalendarOccurrence, day: Date, event: React.PointerEvent<HTMLSpanElement>) => {
@@ -465,6 +495,7 @@ export function CalendarView({ reloadToken = 0, onClose, onOpenNote, onOpenDaily
       end: occurrence.end,
       moved: false,
     }
+    armTouch(event)
   }
 
   const saveEditor = () => {

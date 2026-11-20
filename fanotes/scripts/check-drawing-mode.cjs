@@ -22,7 +22,9 @@ const settingsModal = fs.readFileSync(path.join(root, 'src', 'components', 'Sett
 const pdfInk = fs.readFileSync(path.join(root, 'src', 'lib', 'pdfInkHit.ts'), 'utf8')
 const overlayInteract = fs.readFileSync(path.join(root, 'src', 'lib', 'overlayInteract.ts'), 'utf8')
 const penPointer = fs.readFileSync(path.join(root, 'src', 'lib', 'penPointer.ts'), 'utf8')
-const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, paperCanvas, defaults, appSource, drafting, bugReport, settingsModal, pdfInk, overlayInteract, penPointer].join('\n')
+// The saved-ink open parser moved out of DrawingBoard into inkDocument.ts (f0cd2d63).
+const inkDocument = fs.readFileSync(path.join(root, 'src', 'lib', 'inkDocument.ts'), 'utf8')
+const lockSource = [source, markdownEditor, paperCaret, inkMap, toolErase, inkPolicy, paperGrow, inkPaint, paperCanvas, defaults, appSource, drafting, bugReport, settingsModal, pdfInk, overlayInteract, penPointer, inkDocument].join('\n')
 
 const requiredBrushes = ['fineliner', 'pencil', 'marker', 'paintbrush', 'calligraphy', 'highlighter', 'watercolor', 'spray']
 const requiredEffects = ['solid', 'rainbow', 'aurora', 'sunset', 'ocean', 'gold', 'silver', 'neon']
@@ -41,12 +43,15 @@ for (const symbol of requiredSymbols) {
 const safeguards = [
   ['purpose?: \'handwriting\' | \'art\'', 'rückwärtskompatible Trennung von Handschrift und Kunst'],
   ["const isHandwritingStroke = (stroke: InkStroke) => stroke.purpose !== 'art'", 'Abschirmung der Erkennung'],
-  ["purpose: raw.purpose === 'art' ? 'art' : 'handwriting'", 'sichere Dokumentmigration'],
-  ["brush: raw.brush && artBrushIds.has(raw.brush) ? raw.brush : undefined", 'Pinsel-Validierung beim Laden'],
-  ["colorEffect: raw.colorEffect && inkEffectIds.has(raw.colorEffect) ? raw.colorEffect : 'solid'", 'Farb-Validierung beim Laden'],
-  ["textureSeed: Math.round(clamp", 'stabile Textur beim erneuten Öffnen'],
+  ["purpose: raw.purpose === 'art' ? 'art' as const : 'handwriting' as const", 'sichere Dokumentmigration'],
+  ["const brush = typeof raw.brush === 'string' && catalogs.brushIds.has(raw.brush) ? raw.brush : undefined", 'Pinsel-Validierung beim Laden'],
+  ["const colorEffect = typeof raw.colorEffect === 'string' && catalogs.effectIds.has(raw.colorEffect) ? raw.colorEffect : 'solid'", 'Farb-Validierung beim Laden'],
+  ['brushIds: artBrushIds as ReadonlySet<string>', 'Pinselkatalog geht an den Lade-Parser'],
+  ['effectIds: inkEffectIds as ReadonlySet<string>', 'Farbkatalog geht an den Lade-Parser'],
+  ["textureSeed: Math.round(clamp(Math.abs(Number(raw.textureSeed)", 'stabile Textur beim erneuten Öffnen'],
   ['symbolId?: ArtSymbolId', 'rückwärtskompatibles Piktogrammformat'],
-  ['raw.symbolId && artSymbolIds.has(raw.symbolId)', 'Piktogramm-Validierung beim Laden'],
+  ["typeof raw.symbolId === 'string' && catalogs.symbolIds.has(raw.symbolId)", 'Piktogramm-Validierung beim Laden'],
+  ['symbolIds: artSymbolIds as ReadonlySet<string>', 'Piktogrammkatalog geht an den Lade-Parser'],
   ['context.stroke(new Path2D(path))', 'auflösungsunabhängige Vektordarstellung'],
   ["purpose: 'art',\n        brush: 'fineliner'", 'direkte Piktogramm-Platzierung'],
   ["updateTranscript: gestureToolRef.current !== 'pen' || activeStroke?.purpose !== 'art'", 'kein unnötiger Erkennungsdurchlauf für Zeichnungen'],
@@ -98,7 +103,8 @@ const safeguards = [
   ['inkWindowLayoutStyle', 'Tintenfenster sitzt auf dem Overlay, nicht im Kamerapolster'],
   ['inkWindowCanvasBox', 'gemaltes Tintenfenster ist das Blatt, Board minus Kamerapolster'],
   ['pdfOverlayShiftedBy', 'Pan verschiebt Overlay und Seiten gemeinsam'],
-  ['pdfOverlayPointFromClient(event.clientX, event.clientY, surface, pages)', 'PDF-Stift mappt über den gelieferten Overlay-Helper'],
+  // Page boxes are no longer measured per pen sample (3689c641); x/y come from the overlay box alone.
+  ['pdfOverlayPointFromClient(event.clientX, event.clientY, surface)', 'PDF-Stift mappt über den gelieferten Overlay-Helper'],
   ['const measureInkWindow', 'Tinten-Bitmap nur für den sichtbaren Blattausschnitt'],
   ['const applyInkWindowToCanvases', 'sichtbares Tintenfenster auf den Canvases'],
   ['planInkWindowNow(true)', 'Tintenfenster wird nach dem Zoom um das sichtbare Blatt geplant'],

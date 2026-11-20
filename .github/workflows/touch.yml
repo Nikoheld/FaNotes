@@ -1,0 +1,46 @@
+name: Touch checks
+
+# Real finger input (CDP touch events in headless Chromium) on the notes UI:
+# taps, long presses, drags, finger text selection, pen and palm rejection.
+# Runs on pull requests that touch the UI input code; never builds a release.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/src/**'
+      - 'src/**'
+      - 'src/lib/handGestures.ts'
+      - 'fanotes/electron/main.cjs'
+      - 'fanotes/electron/startup-preflight.cjs'
+      - 'fanotes/scripts/check-touch-everywhere.mjs'
+      - '.github/workflows/touch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  touch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Install the shared sources' dependencies (repository root)
+        working-directory: .
+        run: npm ci --no-audit --no-fund
+      - name: Install the browser driver
+        run: |
+          mkdir -p "$RUNNER_TEMP/pw"
+          npm install --prefix "$RUNNER_TEMP/pw" --no-audit --no-fund playwright-core@1.65.0
+          echo "PLAYWRIGHT_CORE=$RUNNER_TEMP/pw/node_modules/playwright-core/index.mjs" >> "$GITHUB_ENV"
+          echo "FANOTES_CHROMIUM=$(command -v google-chrome || command -v chromium)" >> "$GITHUB_ENV"
+      - run: npx tsc -b
+      - run: node scripts/check-touch-everywhere.mjs
