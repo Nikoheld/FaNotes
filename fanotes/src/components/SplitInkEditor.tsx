@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { DrawingBoard } from './DrawingBoard'
 import type { DrawingSavePayload, DrawingSaveResult } from './DrawingBoard'
-import type { AppSettings, DrawingLibraryDocument } from '../types'
+import type { AppSettings, DrawingLibraryDocument, PaperStyle } from '../types'
 
 /** Pen editor for the focused split pane. It keeps its own undo stack and autosave. */
 export function SplitInkEditor({
@@ -9,12 +9,14 @@ export function SplitInkEditor({
   title,
   load,
   settings,
+  paper,
   onSaveDrawing,
 }: {
   path: string
   title: string
   load: () => Promise<DrawingLibraryDocument | null>
   settings: AppSettings
+  paper?: PaperStyle
   onSaveDrawing: (payload: DrawingSavePayload, notePath: string) => Promise<DrawingSaveResult>
 }) {
   const [document, setDocument] = useState<DrawingLibraryDocument | null>(null)
@@ -32,6 +34,7 @@ export function SplitInkEditor({
       title={`Handschrift · ${title}`}
       inline
       inputActive
+      pagePaperStyle={paper}
       sectionsEnabled
       onSaveDrawing={(payload) => onSaveDrawing(payload, path)}
       onClose={() => undefined}

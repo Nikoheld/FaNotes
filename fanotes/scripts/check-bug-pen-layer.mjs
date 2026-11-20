@@ -162,10 +162,14 @@ try {
   assert.match(appSource, /key=\{`stiftebene:\$\{activeTab\.path\}:\$\{noteDrawingSession\.key\}`\}/)
   assert.match(boardSource, /portalInkToolbar\(createPortal/)
   assert.match(boardSource, /liveInkToolbarHost/)
-  assert.match(css, new RegExp(inkOverlayHitSelector.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\\\', '\\')))
-  const hitBlockStart = css.indexOf('.lw-drawing-board.is-inline.is-input-active')
-  assert.ok(hitBlockStart >= 0)
-  assert.match(css.slice(hitBlockStart, hitBlockStart + 280), /pointer-events:\s*auto/)
+  // The hit rule lives in the board's inline stylesheet. styles.css only holds the
+  // placing-mode rules that turn the same surface *off* (note links, text fields,
+  // study tools); the old 280-character window from the first styles.css match only
+  // passed by reaching the unrelated `.note-text-layer.is-placing` rule.
+  assert.ok(boardSource.includes(`${inkOverlayHitSelector}{pointer-events:auto}`), 'the active inline board takes pen hits')
+  for (const mode of ['note-link', 'text-field', 'study']) {
+    assert.ok(css.includes(`.unified-paper.is-placing-${mode} ${inkOverlayHitSelector}`), `placing ${mode} lets the pen reach its layer`)
+  }
 
   console.log(JSON.stringify({
     report: REPORT_1788690730379.id,
