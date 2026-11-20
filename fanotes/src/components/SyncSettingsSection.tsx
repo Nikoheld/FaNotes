@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { getUiLocale } from '../i18n'
 import { MCP_CONNECTOR_NAME, mcpServerUrl, type McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
-import { syncStatusLabel } from '../lib/sync/status'
+import { failedLabel, syncStatusLabel } from '../lib/sync/status'
 import type { AppSettings } from '../types'
 
 type Props = {
@@ -173,6 +173,10 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
               <div className="setting-control"><button type="button" className={`toggle ${settings.syncAutomatic ? 'is-on' : ''}`} role="switch" aria-checked={settings.syncAutomatic} aria-label="Automatisch synchronisieren" onClick={() => update('syncAutomatic', !settings.syncAutomatic)}><span /></button></div>
             </div>
             <div className="setting-row">
+              <div className="setting-copy"><span>Anhänge synchronisieren</span><small>Bilder und andere Dateien neben den Notizen mitnehmen. Aus: nur Notizen (Markdown, .famd, PDFs, leere PDF-Seiten und die Metadaten unter .fanotes).</small></div>
+              <div className="setting-control"><button type="button" className={`toggle ${settings.syncAttachments !== false ? 'is-on' : ''}`} role="switch" aria-checked={settings.syncAttachments !== false} aria-label="Anhänge synchronisieren" onClick={() => update('syncAttachments', settings.syncAttachments === false)}><span /></button></div>
+            </div>
+            <div className="setting-row">
               <div className="setting-copy"><span>Handschriftmodell synchronisieren</span><small>Persönliche GlyphenWerk-Beispiele als eigene verschlüsselte Datei. Aus: das Modell bleibt auf diesem Gerät.</small></div>
               <div className="setting-control"><button type="button" className={`toggle ${settings.syncHandwritingModel ? 'is-on' : ''}`} role="switch" aria-checked={settings.syncHandwritingModel} aria-label="Handschriftmodell synchronisieren" onClick={() => update('syncHandwritingModel', !settings.syncHandwritingModel)}><span /></button></div>
             </div>
@@ -249,6 +253,27 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
               </div>
             ))}
           </div>
+
+          {syncState.failed.length > 0 && (
+            <div id="settings-sync-failed" className="setting-card">
+              <div className="setting-card-title"><TriangleAlert size={16} /><span data-i18n-ignore>{failedLabel(syncState.failed.length)}</span></div>
+              <div className="setting-row">
+                <div className="setting-copy">
+                  <span>Diese Dateien sind nur auf diesem Gerät</span>
+                  <small>Der Sync versucht es bei jedem Durchlauf erneut. Behebe den Grund oder versuche es jetzt noch einmal.</small>
+                </div>
+                <div className="setting-control">
+                  <button type="button" className="secondary-button" disabled={busy !== null || syncState.status === 'syncing'} onClick={() => void run('retry', () => engine.retryFailed())}><RefreshCw className={syncState.status === 'syncing' ? 'spin' : ''} size={14} /> Erneut versuchen</button>
+                </div>
+              </div>
+              <ul className="sync-failed-list" data-i18n-ignore>
+                {syncState.failed.slice(0, 50).map((item) => (
+                  <li key={item.path}><strong>{item.path}</strong><small>{item.reason}</small></li>
+                ))}
+                {syncState.failed.length > 50 && <li><small>… und {syncState.failed.length - 50} weitere</small></li>}
+              </ul>
+            </div>
+          )}
 
           {syncState.openConflicts > 0 && (
             <div id="settings-sync-conflicts" className="setting-card">

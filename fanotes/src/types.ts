@@ -129,6 +129,8 @@ export type AppSettings = {
   syncHandwritingModel: boolean
   /** Also synchronise the local note-history folder. */
   syncNoteHistory: boolean
+  /** Also upload attachments (images and other files). Off: notes only (md, famd, PDFs, side pages). */
+  syncAttachments: boolean
   /** Public share links. `copy` freezes the upload; `live` follows later edits; `edit` is a shared document. */
   shareMode: 'copy' | 'live' | 'edit'
   /** JSON list of recent public shares. Empty until the first link is created. */
@@ -815,7 +817,7 @@ export type FaNotesApi = {
  * Records are opaque JSON here; src/lib/addons/runtime.ts owns their shape.
  */
 /** One file as the sync engine sees the vault: path relative to the vault root with forward slashes, size and modification time (0 when unknown). */
-export type SyncScanEntry = { path: string; size: number; mtimeMs: number }
+export type SyncScanEntry = { path: string; size: number; mtimeMs: number; /** Status-change time: moves even when an external tool restores the modification time. Optional (web build). */ ctimeMs?: number }
 
 /**
  * What the host (Electron main or the browser vault) gives the sync engine:

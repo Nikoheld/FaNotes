@@ -31,6 +31,8 @@ import {
 export type SyncStatus = 'unavailable' | 'signed-out' | 'idle' | 'syncing' | 'offline' | 'error' | 'paused'
 
 export type SyncConflict = { path: string; copyPath: string; at: string }
+/** A file that is on this device but did not reach the server, with the reason shown in the sync status. */
+export type SyncFailure = { path: string; reason: string }
 export type SyncLogEntry = { at: string; level: 'info' | 'warn' | 'error'; text: string }
 
 export type SyncPublicState = {
@@ -49,6 +51,8 @@ export type SyncPublicState = {
   conflicts: SyncConflict[]
   /** Documents with a conflict copy in this vault, from any device. */
   openConflicts: number
+  /** Files that were not uploaded in the last cycle. Empty when everything that should be on the server is. */
+  failed: SyncFailure[]
   log: SyncLogEntry[]
   info: SyncAccountInfo | null
   /** This device holds a connector key and can answer an approved Grok. */
@@ -58,7 +62,7 @@ export type SyncPublicState = {
 type LocalBase = { id: string; revision: number; sha256: string; size: number; mtimeMs: number; contentSha256?: string; blank?: boolean }
 /** A remote entry that is tried again on every pull. `held`: it was put off because the note is open or unreadable here (not because its folder stays on another device). */
 type SkippedEntry = SyncRemoteEntry & { held?: true }
-type PersistedState = { version: 1; accountId: string; cursor: number; lastSyncAt: string | null; files: Record<string, LocalBase>; conflicts: SyncConflict[]; pendingDeletes: string[]; skipped: SkippedEntry[] }
+type PersistedState = { version: 1; accountId: string; cursor: number; lastSyncAt: string | null; files: Record<string, LocalBase>; /** Status-change time of each tracked file at its last check: an external edit that restores the mtime still moves it. */ ctimes?: Record<string, number>; conflicts: SyncConflict[]; pendingDeletes: string[]; skipped: SkippedEntry[] }
 /** What `applyRemote` did with one entry. `unreadable`: it was put off because the local file exists but cannot be read. */
 type RemoteOutcome = { result: 'written' | 'removed' | 'conflict' | 'skipped' | 'deferred' | 'noop'; path: string | null; unreadable?: true }
 type Secrets = { v: 1; accountId: string; deviceId: string; token: string; expiresAt: string; email: string; vaultSecret: string; mcpReader?: string }
@@ -75,6 +79,8 @@ export type SyncEngineOptions = {
   includeRecognitionModel?: () => boolean
   /** Local note history is skipped unless the user opts in. */
   includeHistory?: () => boolean
+  /** Attachments (images, other files) take part. Off: notes only (md, famd, PDFs, side pages, `.fanotes/` metadata). Default on. */
+  includeAttachments?: () => boolean
   /** Files the engine wrote or removed on behalf of another device – the app refreshes its tree and open tabs. */
   onApplied?: (change: { written: string[]; removed: string[] }) => void
   onConflict?: (conflict: SyncConflict) => void
@@ -101,7 +107,13 @@ export type SyncPathOptions = {
   excludedPrefixes?: readonly string[]
   includeRecognitionModel?: boolean
   includeHistory?: boolean
+  includeAttachments?: boolean
 }
+
+/** A note, PDF note or shared metadata file. Everything else is an attachment. */
+export const isNoteSyncPath = (path: string) => (
+  /\.(?:md|markdown|famd|pdf)$/iu.test(path) || path.startsWith('.fanotes/') || path.split('/').some((segment) => /\.story$/iu.test(segment))
+)
 
 /** Which vault paths take part in sync: notes, assets and the shared `.fanotes/` metadata, but no local caches or temp files. */
 export const isSyncablePath = (path: string, options: SyncPathOptions = {}) => {
@@ -112,6 +124,7 @@ export const isSyncablePath = (path: string, options: SyncPathOptions = {}) => {
   if (SKIPPED_NAMES.has(name) || /\.tmp$/iu.test(name) || /^\.~lock\./u.test(name) || /^~\$/u.test(name)) return false
   if (path === RECOGNITION_MODEL_SYNC_PATH && !options.includeRecognitionModel) return false
   if (pathIsSyncExcluded(path, options.excludedPrefixes ?? [])) return false
+  if (options.includeAttachments === false && !isNoteSyncPath(path)) return false
   if (segments[0] === INTERNAL_DIRECTORY) {
     if (segments.length < 2) return false
     if (SKIPPED_INTERNAL.has(segments[1]) && !(options.includeHistory && segments[1] === 'history')) return false
@@ -143,7 +156,7 @@ const defaultDeviceName = (platform: string) => {
 const emptyState = (accountId: string): PersistedState => ({ version: 1, accountId, cursor: 0, lastSyncAt: null, files: {}, conflicts: [], pendingDeletes: [], skipped: [] })
 
 /** Bases for optional paths stay saved while that setting is off, and when a folder is excluded. Trash and caches still drop. */
-const PERSISTED_SYNC_PATHS: SyncPathOptions = { includeRecognitionModel: true, includeHistory: true }
+const PERSISTED_SYNC_PATHS: SyncPathOptions = { includeRecognitionModel: true, includeHistory: true, includeAttachments: true }
 
 export const loadPersistedSyncState = (raw: string | null, accountId: string): PersistedState => {
   if (!raw) return emptyState(accountId)
@@ -165,9 +178,12 @@ export const loadPersistedSyncState = (raw: string | null, accountId: string): P
         ...(candidate.blank === true ? { blank: true } : {}),
       }
     }
+    const ctimes: Record<string, number> = {}
+    for (const [path, value] of Object.entries(parsed.ctimes ?? {})) if (files[path] && Number.isFinite(value) && value > 0) ctimes[path] = value
     return {
       version: 1,
       accountId,
+      ctimes,
       cursor: Number.isInteger(parsed.cursor) && (parsed.cursor as number) >= 0 ? (parsed.cursor as number) : 0,
       lastSyncAt: typeof parsed.lastSyncAt === 'string' ? parsed.lastSyncAt : null,
       files,
@@ -238,6 +254,9 @@ export class SyncEngine {
   private snapshot: SyncPublicState
   private inFlight: Promise<void> | null = null
   private queued = false
+  /** Compare the local manifest with the server's in the next cycle: after sign-in or start, and after the connection came back. */
+  private needsReconcile = true
+  private failures = new Map<string, string>()
   private timer: number | null = null
   /** While the server throttles, nothing starts a request: only the scheduled resume runs, at this time (epoch ms). A manual sync waits for it too. */
   private throttledUntil = 0
@@ -258,7 +277,7 @@ export class SyncEngine {
 
   constructor(api?: SyncApi) {
     this.api = api ?? new SyncApi()
-    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false }
+    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, failed: [], log: [], info: null, mcpReader: false }
   }
 
   // ── External store API ──────────────────────────────────────────────────
@@ -282,6 +301,7 @@ export class SyncEngine {
       excludedPrefixes: this.options?.excludedPrefixes?.() ?? [],
       includeRecognitionModel: this.options?.includeRecognitionModel?.() ?? false,
       includeHistory: this.options?.includeHistory?.() ?? false,
+      includeAttachments: this.options?.includeAttachments?.() ?? true,
     }
   }
 
@@ -306,7 +326,7 @@ export class SyncEngine {
     if (!this.host || !this.options) return
     this.disposed = false
     if (typeof window !== 'undefined') {
-      const kick = () => { if (this.session && this.options?.automatic()) void this.syncNow('online') }
+      const kick = () => { if (this.session && this.options?.automatic()) { this.needsReconcile = true; void this.syncNow('online') } }
       const focus = () => { if (this.session && this.options?.automatic()) void this.syncNow('focus') }
       window.addEventListener('online', kick)
       window.addEventListener('focus', focus)
@@ -361,8 +381,11 @@ export class SyncEngine {
     this.state = parseState(await this.host.readState(this.vaultId), secrets.accountId)
     // A new session starts without the previous one's pause and without its unreadable-file reports.
     this.throttledUntil = 0
+    this.needsReconcile = true
+    this.failures.clear()
     this.unreadableLogged.clear()
     this.setState({
+      failed: [],
       status: 'idle',
       account: { email: secrets.email, accountId: secrets.accountId, deviceId: secrets.deviceId },
       mcpReader: Boolean(secrets.mcpReader),
@@ -700,6 +723,10 @@ export class SyncEngine {
     this.setState({ status: 'syncing', error: null, progress: null, pausedUntil: null })
     try {
       let conflicts = await this.pull()
+      if (this.needsReconcile) {
+        await this.reconcileWithServer()
+        this.needsReconcile = false
+      }
       const pushed = await this.push()
       if (pushed.conflicts > 0) conflicts += await this.pull()
       this.state.lastSyncAt = new Date(this.options?.now?.() ?? Date.now()).toISOString()
@@ -725,6 +752,7 @@ export class SyncEngine {
       }
       const offline = error instanceof SyncApiError && error.offline
       const message = error instanceof Error ? error.message : 'Sync fehlgeschlagen.'
+      if (offline) this.needsReconcile = true
       this.setState({ status: offline ? 'offline' : 'error', error: message, progress: null })
       this.log(offline ? 'warn' : 'error', message)
       this.schedule(offline ? OFFLINE_RETRY_MS : AUTO_INTERVAL_MS)
@@ -1060,11 +1088,21 @@ export class SyncEngine {
     // Deletes the user asked for before this scan. One marked while the push runs waits for the next cycle.
     const consideredDeletes = new Set(this.state.pendingDeletes)
     const changed: SyncScanEntry[] = []
+    this.failures.clear()
+    const ctimes = (this.state.ctimes ??= {})
     for (const entry of entries) {
-      if (entry.size > MAX_FILE_BYTES) continue
+      if (entry.size > MAX_FILE_BYTES) {
+        this.failures.set(entry.path, `Größer als ${MAX_FILE_BYTES / 1024 / 1024} MB, das Limit des Syncs.`)
+        continue
+      }
       const base = this.state.files[entry.path]
-      if (!base || base.size !== entry.size || base.mtimeMs !== entry.mtimeMs || !entry.mtimeMs || !base.sha256) changed.push(entry)
+      // An external tool can restore the modification time after it changed a file (cp -p, restore tools).
+      // The status-change time still moves; the file is then read and compared by content.
+      const touched = Boolean(base && entry.ctimeMs && ctimes[entry.path] && ctimes[entry.path] !== entry.ctimeMs)
+      if (!base || base.size !== entry.size || base.mtimeMs !== entry.mtimeMs || !entry.mtimeMs || !base.sha256 || touched) changed.push(entry)
+      else if (entry.ctimeMs) ctimes[entry.path] ??= entry.ctimeMs
     }
+    for (const path of Object.keys(ctimes)) if (!present.has(path)) delete ctimes[path]
     const missing = Object.keys(this.state.files).filter((path) => this.acceptsPath(path) && !present.has(path) && !this.options?.isPathBusy?.(path))
     const deleted = missing.filter((path) => this.isPendingDelete(path))
     const vanished = missing.filter((path) => !this.isPendingDelete(path))
@@ -1082,6 +1120,14 @@ export class SyncEngine {
         const outcome = await this.uploadPath(entry)
         if (outcome === 'uploaded') uploads += 1
         if (outcome === 'conflict') conflicts += 1
+        if ((outcome === 'uploaded' || outcome === 'unchanged') && entry.ctimeMs) ctimes[entry.path] = entry.ctimeMs
+      } catch (error) {
+        // Sign-in, network and server-wide errors end the cycle. A refusal of this one file must not keep the
+        // files after it from uploading: it is reported with its reason and the rest goes on.
+        if (cycleWide(error)) throw error
+        const reason = error instanceof Error && error.message ? error.message : 'Der Server hat die Datei abgelehnt.'
+        this.failures.set(entry.path, reason)
+        this.log('error', `„${entry.path}“ wurde nicht hochgeladen: ${reason}`)
       } finally {
         tick()
       }
@@ -1091,29 +1137,42 @@ export class SyncEngine {
         const outcome = await this.deletePath(path)
         if (outcome === 'deleted') deletes += 1
         if (outcome === 'conflict') conflicts += 1
+      } catch (error) {
+        if (cycleWide(error)) throw error
+        this.log('error', `„${path}“ konnte nicht auf dem Server gelöscht werden: ${error instanceof Error ? error.message : 'unbekannt'}`)
       } finally {
         tick()
       }
     }
     await this.settlePendingDeletes(consideredDeletes)
     this.scanCache = null
+    this.publishFailures()
     await this.persistState()
     return { uploads, deletes, conflicts }
   }
 
   private async uploadPath(entry: SyncScanEntry, depth = 0): Promise<'uploaded' | 'unchanged' | 'conflict' | 'skipped'> {
     if (!this.session || !this.host || !this.state || !this.keys) return 'skipped'
-    const raw = await this.host.read(entry.path).catch(() => null)
-    if (!raw) return 'skipped'
+    let readError = ''
+    const raw = await this.host.read(entry.path).catch((error: unknown) => {
+      readError = error instanceof Error ? error.message : ''
+      return null
+    })
+    if (!raw) {
+      this.failures.set(entry.path, `Die Datei konnte nicht gelesen werden${readError ? ` (${readError})` : ''}.`)
+      return 'skipped'
+    }
     const kind = noteSyncKind(entry.path, raw)
     const baseEarly = this.state.files[entry.path]
     if (kind === 'unreadable') {
       this.log('warn', `„${entry.path}“ konnte nicht gelesen werden und wird nicht hochgeladen.`)
+      this.failures.set(entry.path, 'Die Notiz ist beschädigt oder unvollständig und wird nicht hochgeladen.')
       if (baseEarly && !baseEarly.blank) return this.restoreInstead(entry, baseEarly, raw)
       return 'skipped'
     }
     const identityBytes = identitySyncBytes(entry.path, raw)
     if (!identityBytes) {
+      this.failures.set(entry.path, 'Die Notiz ist beschädigt oder unvollständig und wird nicht hochgeladen.')
       if (baseEarly && !baseEarly.blank) return this.restoreInstead(entry, baseEarly, raw)
       return 'skipped'
     }
@@ -1189,6 +1248,7 @@ export class SyncEngine {
         if (!(error instanceof SyncApiError && error.conflict)) {
           if (error instanceof SyncApiError && error.status === 507) {
             this.log('error', `„${entry.path}“ passt nicht mehr in den Speicher des Kontos: ${error.message}`)
+            this.failures.set(entry.path, `Der Speicher des Kontos ist voll: ${error.message}`)
             return 'skipped'
           }
           throw error
@@ -1356,6 +1416,49 @@ export class SyncEngine {
    * under it is missing any more: its files were deleted, or a newer version
    * came back and is present again.
    */
+  /** Publishes the files that did not upload in this cycle; one log line when the set changes. */
+  private publishFailures() {
+    const failed = [...this.failures].map(([path, reason]) => ({ path, reason })).sort((a, b) => a.path.localeCompare(b.path, 'de'))
+    const changed = failed.length !== this.snapshot.failed.length || failed.some((item, index) => item.path !== this.snapshot.failed[index].path)
+    this.setState({ failed })
+    if (changed && failed.length) this.log('warn', `${failed.length} ${failed.length === 1 ? 'Datei wurde' : 'Dateien wurden'} nicht hochgeladen.`)
+  }
+
+  /** The user asks for another attempt at the files that did not upload (also runs a full cycle). */
+  retryFailed(): Promise<void> {
+    this.needsReconcile = true
+    return this.syncNow('manual')
+  }
+
+  /**
+   * Compares the local manifest with the server's file table and forgets what the server no longer has: a
+   * server restored from a backup, an account that was cleaned, an upload that never landed. The files are then
+   * "new" and the push sends them. Entries that wait on the skip list (a remote delete put off while the note is
+   * open) are left alone.
+   */
+  private async reconcileWithServer() {
+    if (!this.session || !this.state) return
+    const server = new Map<string, { revision: number; deleted: boolean }>()
+    let since = 0
+    for (let page = 0; page < 500; page += 1) {
+      const changes = await this.api.changes(this.session, since)
+      for (const entry of changes.entries) server.set(entry.id, { revision: entry.revision, deleted: entry.deleted })
+      since = changes.nextSince
+      if (!changes.more) break
+    }
+    const waiting = new Set(this.state.skipped.map((entry) => entry.id))
+    let reset = 0
+    for (const [path, base] of Object.entries(this.state.files)) {
+      if (!this.acceptsPath(path) || waiting.has(base.id)) continue
+      const remote = server.get(base.id)
+      if (remote && !remote.deleted && remote.revision >= base.revision) continue
+      if (this.isPendingDelete(path)) continue
+      delete this.state.files[path]
+      reset += 1
+    }
+    if (reset) this.log('info', `Abgleich mit dem Server: ${reset} ${reset === 1 ? 'Datei fehlt' : 'Dateien fehlen'} dort und ${reset === 1 ? 'wird' : 'werden'} erneut hochgeladen.`)
+  }
+
   private async settlePendingDeletes(considered: ReadonlySet<string>) {
     if (!this.host || !this.state || !this.state.pendingDeletes.length) return
     const tracked = Object.keys(this.state.files)

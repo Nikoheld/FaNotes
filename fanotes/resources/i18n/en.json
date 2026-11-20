@@ -5094,5 +5094,9 @@
   "Vollbild beenden (Esc)": "Exit fullscreen (Esc)",
   "Vollbild: nur Werkzeugleiste und Dokument": "Fullscreen: only the toolbar and the document",
   "Markdown-Tasten ausblenden": "Hide Markdown buttons",
-  "Blendet in der Werkzeugleiste alle Schaltflächen aus, die du auch einfach tippen kannst: Fett, Kursiv, Überschriften, Listen, Zitat, Code und Link.": "Hides every toolbar button for something you can simply type: bold, italic, headings, lists, quote, code and link."
+  "Blendet in der Werkzeugleiste alle Schaltflächen aus, die du auch einfach tippen kannst: Fett, Kursiv, Überschriften, Listen, Zitat, Code und Link.": "Hides every toolbar button for something you can simply type: bold, italic, headings, lists, quote, code and link.",
+  "Anhänge synchronisieren": "Sync attachments",
+  "Bilder und andere Dateien neben den Notizen mitnehmen. Aus: nur Notizen (Markdown, .famd, PDFs, leere PDF-Seiten und die Metadaten unter .fanotes).": "Include images and other files next to your notes. Off: notes only (Markdown, .famd, PDFs, blank PDF pages and the metadata under .fanotes).",
+  "Diese Dateien sind nur auf diesem Gerät": "These files are only on this device",
+  "Der Sync versucht es bei jedem Durchlauf erneut. Behebe den Grund oder versuche es jetzt noch einmal.": "Sync tries again on every run. Fix the cause or try again now."
 }

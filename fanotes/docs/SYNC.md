@@ -17,7 +17,7 @@ guarantees and where the code lives. User-facing surfaces are listed in `USER_SU
 | Host (web) | `src/lib/sync/browserSyncHost.ts` | Maps IndexedDB stores to a virtual file tree; secrets and state live in the `meta` store. |
 | Host (Android) | `android/` | Native tablet client. Same account, crypto, and `/api/v1/sync` routes. The device platform token is `android`. |
 | UI | `src/components/SyncSettingsSection.tsx`, `src/App.tsx` | Settings → Sync, status-bar item, palette commands, remote-change application. |
-| Check | `scripts/check-sync.mjs` (`npm run check:sync`) | Crypto unit tests, path rules, transport retry, and a three-device end-to-end run against the real server module. |
+| Check | `scripts/check-sync-all-notes.mjs` (`npm run check:sync-all-notes`): a synthetic vault (nested, linked, Unicode, long names, side pages, closed-app changes, failures, reconciliation, scopes). `scripts/check-sync.mjs` (`npm run check:sync`) | Crypto unit tests, path rules, transport retry, and a three-device end-to-end run against the real server module. |
 
 ## Keys
 
@@ -110,6 +110,26 @@ sync is on, when the window regains focus or comes back online, and on demand
    delete remotely what disappeared locally. A 409 means someone else changed the same file
    in the meantime: the server's version wins the original path, the local bytes are kept
    as a conflict copy, and both end up on every device.
+
+**Scope.** Settings → Sync → "Anhänge synchronisieren" (default on). Off, only notes travel: `.md`,
+`.markdown`, `.famd`, PDFs, writing projects (`*.story`) and everything under `.fanotes/` (companions,
+`pdf-side` pages, metadata). Images and other files are attachments. Linked folders (folder locations)
+take part: the desktop host walks their real folders and maps files back to the logical path; a file that
+is new on this device is written to the folder's first location. Local-only: other dot folders, history,
+trash, caches, temp and lock files.
+
+**Failures are never silent.** A file that cannot upload (above 100 MB, unreadable or damaged, refused by
+the server, account storage full) is listed in `failed` with its reason: the status line reads "3 Dateien
+nicht hochgeladen", Settings → Sync lists each file with a retry button. One refused file does not stop the
+files after it; sign-in, network and server-wide errors still end the cycle.
+
+**Reconciliation.** On start, after sign-in and after a connection came back (offline error or the `online`
+event) the cycle first compares the local manifest with the server's file table (`/changes?since=0`,
+metadata only). Anything the local manifest calls synced that the server lacks (restored backup, lost
+upload) is forgotten and uploaded again. There is no timer for this; idle devices do nothing extra.
+
+**Change detection** uses size and mtime, plus the status-change time (ctime) so an external edit that
+restores the mtime is still found and compared by content.
 
 Skipped: the local history (`.fanotes/history`), the tablet trash (`.fanotes/trash`), tree cache, onboarding state, hidden files
 other than `.fanotes/`, editor lock files (`.~lock.*`, `~$*`, `*.tmp`), `.DS_Store`,

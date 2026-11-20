@@ -1036,13 +1036,14 @@ try {
     const savedState = (host, vault) => JSON.parse(host.store.state.get(vault))
 
     // The status label.
-    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 0 }), 'Synchron')
-    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 1 }), 'Synchron · 1 Änderung von einem anderen Gerät wartet')
-    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 3 }), 'Synchron · 3 Änderungen von anderen Geräten warten')
-    assert.equal(syncStatusLabel({ status: 'paused', pausedUntil: new Date(2026, 10, 16, 9, 5, 30).getTime(), heldRemote: 0 }), 'Sync pausiert – geht um 09:05 weiter')
-    assert.equal(syncStatusLabel({ status: 'paused', pausedUntil: new Date(2026, 10, 16, 14, 32, 0).getTime(), heldRemote: 2 }), 'Sync pausiert – geht um 14:32 weiter · 2 Änderungen von anderen Geräten warten')
-    assert.equal(syncStatusLabel({ status: 'paused', pausedUntil: null, heldRemote: 0 }), 'Sync pausiert')
-    assert.equal(syncStatusLabel({ status: 'offline', heldRemote: 2 }), 'Offline – wartet auf Verbindung')
+    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 0, failed: [] }), 'Synchron')
+    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 0, failed: [{ path: 'a.md', reason: 'x' }, { path: 'b.md', reason: 'y' }, { path: 'c.md', reason: 'z' }] }), '3 Dateien nicht hochgeladen')
+    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 1, failed: [] }), 'Synchron · 1 Änderung von einem anderen Gerät wartet')
+    assert.equal(syncStatusLabel({ status: 'idle', heldRemote: 3, failed: [] }), 'Synchron · 3 Änderungen von anderen Geräten warten')
+    assert.equal(syncStatusLabel({ status: 'paused', pausedUntil: new Date(2026, 10, 16, 9, 5, 30).getTime(), heldRemote: 0, failed: [] }), 'Sync pausiert – geht um 09:05 weiter')
+    assert.equal(syncStatusLabel({ status: 'paused', pausedUntil: new Date(2026, 10, 16, 14, 32, 0).getTime(), heldRemote: 2, failed: [] }), 'Sync pausiert – geht um 14:32 weiter · 2 Änderungen von anderen Geräten warten')
+    assert.equal(syncStatusLabel({ status: 'paused', pausedUntil: null, heldRemote: 0, failed: [] }), 'Sync pausiert')
+    assert.equal(syncStatusLabel({ status: 'offline', heldRemote: 2, failed: [] }), 'Offline – wartet auf Verbindung')
     // The settings card shows the pause (icon, colour class, label with the end time) and the waiting changes.
     {
       const { createElement } = await import('react')
@@ -1051,13 +1052,14 @@ try {
       const { defaultSettingsForPlatform } = await vite.ssrLoadModule('/src/defaults.ts')
       const render = (patch) => renderToStaticMarkup(createElement(SyncSettingsSection, {
         engine: {},
-        syncState: { status: 'idle', account: { email: 'ada@example.com', accountId: 'a'.repeat(32), deviceId: 'd' }, vaultId: 'v', lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false, ...patch },
+        syncState: { status: 'idle', account: { email: 'ada@example.com', accountId: 'a'.repeat(32), deviceId: 'd' }, vaultId: 'v', lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, failed: [], conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false, ...patch },
         settings: defaultSettingsForPlatform('linux'),
         update: () => undefined,
         platform: 'linux',
         grants: [],
         onGrants: () => undefined,
       }))
+      assert.match(render({ failed: [{ path: 'A/b.md', reason: 'Zu groß' }, { path: 'c.md', reason: 'x' }, { path: 'd.md', reason: 'y' }] }), /3 Dateien nicht hochgeladen[\s\S]*Erneut versuchen[\s\S]*A\/b.md/u, 'failed files are listed with a retry')
       const pausedHtml = render({ status: 'paused', pausedUntil: new Date(2026, 10, 16, 14, 32, 0).getTime(), heldRemote: 1 })
       assert.match(pausedHtml, /sync-status-card is-paused/u)
       assert.match(pausedHtml, /sync-status-icon"><svg[^>]*lucide-clock/u, 'the pause has its own icon')

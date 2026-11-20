@@ -80,50 +80,119 @@ const coerceSyncBytes = (bytes) => {
   throw new Error('Der Sync-Inhalt muss binär sein.')
 }
 
-async function scanDirectory(root, directory, depth, out) {
-  if (depth > MAX_DEPTH || out.length >= MAX_ENTRIES) {
-    const error = new Error('Der Vault wurde unvollständig gelesen.')
-    error.code = 'EINCOMPLETE'
-    throw error
-  }
-  let entries
-  try {
-    entries = await fsp.readdir(directory, { withFileTypes: true })
-  } catch (error) {
-    if (error?.code === 'ENOENT' && depth > 0) return
-    const wrapped = new Error('Der Vault wurde unvollständig gelesen.')
-    wrapped.code = 'EINCOMPLETE'
-    throw wrapped
-  }
-  for (const entry of entries) {
-    if (out.length >= MAX_ENTRIES) {
-      const error = new Error('Der Vault wurde unvollständig gelesen.')
-      error.code = 'EINCOMPLETE'
-      throw error
+const incomplete = () => {
+  const error = new Error('Der Vault wurde unvollständig gelesen.')
+  error.code = 'EINCOMPLETE'
+  return error
+}
+
+/**
+ * Walks one logical folder. `directories` are the real folders behind it: the vault folder itself, or, for a
+ * linked folder (folder-locations.cjs), the linked locations, which are merged like the tree does. A file that
+ * exists in several locations is taken from the first one.
+ */
+async function scanDirectory(root, directories, logical, depth, out, linkedFolders) {
+  if (depth > MAX_DEPTH || out.length >= MAX_ENTRIES) throw incomplete()
+  const merged = linkedFolders[logical]
+  const sources = merged && merged.length ? merged : directories
+  const children = new Map()
+  for (const directory of sources) {
+    let entries
+    try {
+      entries = await fsp.readdir(directory, { withFileTypes: true })
+    } catch (error) {
+      if (error?.code === 'ENOENT' && (depth > 0 || merged)) continue
+      throw incomplete()
     }
-    if (entry.isSymbolicLink()) continue
-    const absolute = path.join(directory, entry.name)
-    const relative = toPosix(root, absolute)
-    if (entry.name.startsWith('.')) {
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue
+      const slot = children.get(entry.name) ?? { directories: [], file: null }
+      const absolute = path.join(directory, entry.name)
+      if (entry.isDirectory()) slot.directories.push(absolute)
+      else if (entry.isFile() && !slot.file) slot.file = absolute
+      children.set(entry.name, slot)
+    }
+  }
+  for (const [name, slot] of children) {
+    if (out.length >= MAX_ENTRIES) throw incomplete()
+    const relative = logical ? `${logical}/${name}` : name
+    if (name.startsWith('.')) {
       // Only the shared FaNotes metadata folder at the vault root takes part; every other dotfile is local.
-      if (!(depth === 0 && entry.name === INTERNAL_DIRECTORY)) continue
+      if (!(depth === 0 && name === INTERNAL_DIRECTORY)) continue
     }
-    if (depth === 1 && relative.startsWith(`${INTERNAL_DIRECTORY}/`) && SKIPPED_INTERNAL.has(entry.name)) continue
-    if (entry.isDirectory()) {
-      await scanDirectory(root, absolute, depth + 1, out)
+    if (depth === 1 && relative.startsWith(`${INTERNAL_DIRECTORY}/`) && SKIPPED_INTERNAL.has(name)) continue
+    if (slot.directories.length) {
+      await scanDirectory(root, slot.directories, relative, depth + 1, out, linkedFolders)
       continue
     }
-    if (!entry.isFile()) continue
-    if (/\.tmp$/iu.test(entry.name)) continue
+    if (!slot.file) continue
+    if (/\.tmp$/iu.test(name)) continue
     let info
     try {
-      info = await fsp.lstat(absolute)
+      info = await fsp.lstat(slot.file)
     } catch {
       continue
     }
     if (!info.isFile()) continue
-    out.push({ path: relative, size: info.size, mtimeMs: Math.round(info.mtimeMs) })
+    out.push({ path: relative, size: info.size, mtimeMs: Math.round(info.mtimeMs), ctimeMs: Math.round(info.ctimeMs) })
   }
+}
+
+/** Linked folders of this vault: `{ 'Logical/Folder': [real directories] }`, validated as real directories. */
+async function linkedFolderMap(raw) {
+  const result = {}
+  for (const [folder, locations] of Object.entries(raw || {})) {
+    if (!Array.isArray(locations)) continue
+    const good = []
+    for (const location of locations) {
+      try {
+        const info = await fsp.lstat(location)
+        if (info.isDirectory() && !info.isSymbolicLink()) good.push(location)
+      } catch { /* a linked location that is gone is skipped */ }
+    }
+    if (good.length) result[folder] = good
+  }
+  return result
+}
+
+/**
+ * Resolves a logical path inside a linked folder to the real file: the first location that has it, or the
+ * first location for a file that does not exist yet. Returns null when the path is not in a linked folder.
+ */
+async function resolveLinked(linkedFolders, raw, { allowMissing = false } = {}) {
+  const segments = normalizeRelative(raw)
+  let best = null
+  for (const folder of Object.keys(linkedFolders)) {
+    const parts = folder.split('/')
+    if (parts.length < segments.length && parts.every((part, index) => part === segments[index]) && (!best || parts.length > best.length)) best = parts
+  }
+  if (!best) return null
+  const remainder = segments.slice(best.length)
+  const bases = linkedFolders[best.join('/')]
+  for (const [index, base] of bases.entries()) {
+    let cursor = base
+    let ok = true
+    for (const [position, segment] of remainder.entries()) {
+      cursor = path.join(cursor, segment)
+      let info
+      try {
+        info = await fsp.lstat(cursor)
+      } catch (error) {
+        if (error?.code === 'ENOENT') { ok = false; break }
+        throw error
+      }
+      if (info.isSymbolicLink()) throw new Error('Symbolische Links sind im Vault nicht erlaubt.')
+      if (position < remainder.length - 1 && !info.isDirectory()) throw new Error('Ein Pfadbestandteil ist kein Ordner.')
+    }
+    if (ok) return { target: cursor, relativePath: segments.join('/'), exists: true }
+    if (index === bases.length - 1 && allowMissing) return { target: path.join(bases[0], ...remainder), relativePath: segments.join('/'), exists: false }
+  }
+  if (!allowMissing) {
+    const error = new Error('ENOENT: no such file in the linked folder')
+    error.code = 'ENOENT'
+    throw error
+  }
+  return null
 }
 
 async function atomicWriteBytes(target, bytes, mtimeMs) {
@@ -155,8 +224,9 @@ async function atomicWriteBytes(target, bytes, mtimeMs) {
  * @param {string} deps.userDataDirectory
  * @param {import('electron').SafeStorage} deps.safeStorage
  * @param {(absolutePath: string) => Promise<void>} [deps.trashItem]
+ * @param {() => Record<string, string[]>} [deps.folderLocations]  linked folders of the active vault (logical folder -> real folders)
  */
-function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }) {
+function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem, folderLocations = () => ({}) }) {
   const stateDirectory = path.join(userDataDirectory, 'sync')
   const statePath = (vaultId) => {
     if (typeof vaultId !== 'string' || !/^[a-f0-9]{16,64}$/u.test(vaultId)) throw new Error('Ungültige Vault-ID.')
@@ -207,6 +277,12 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
     }
   }
 
+  /** Vault path or linked-folder path to the real file. */
+  const locate = async (root, relativePath, options) => {
+    const linked = await resolveLinked(await linkedFolderMap(folderLocations(root)), relativePath, options)
+    return linked ?? resolveInside(root, relativePath, options)
+  }
+
   const encryptionAvailable = () => {
     try { return safeStorage.isEncryptionAvailable() } catch { return false }
   }
@@ -219,12 +295,12 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
     async scan() {
       const root = await vaultRoot()
       const out = []
-      await scanDirectory(root, root, 0, out)
+      await scanDirectory(root, [root], '', 0, out, await linkedFolderMap(folderLocations(root)))
       return out
     },
     async read(relativePath) {
       const root = await vaultRoot()
-      const { target } = await resolveInside(root, relativePath)
+      const { target } = await locate(root, relativePath)
       const info = await fsp.lstat(target)
       if (!info.isFile()) throw new Error('Die Datei ist keine reguläre Datei.')
       if (info.size > MAX_FILE_BYTES) throw new Error('Die Datei ist zu groß für den Sync.')
@@ -239,14 +315,14 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
       if (!(bytes instanceof Uint8Array)) throw new Error('Der Sync-Inhalt muss binär sein.')
       if (bytes.byteLength > MAX_FILE_BYTES) throw new Error('Die Datei ist zu groß für den Sync.')
       const root = await vaultRoot()
-      const { target, relativePath: normalized } = await resolveInside(root, relativePath, { allowMissing: true })
+      const { target, relativePath: normalized } = await locate(root, relativePath, { allowMissing: true })
       await atomicWriteBytes(target, bytes, Number(mtimeMs))
       const info = await fsp.lstat(target)
-      return { path: normalized, size: info.size, mtimeMs: Math.round(info.mtimeMs) }
+      return { path: normalized, size: info.size, mtimeMs: Math.round(info.mtimeMs), ctimeMs: Math.round(info.ctimeMs) }
     },
     async remove(relativePath) {
       const root = await vaultRoot()
-      const { target, exists } = await resolveInside(root, relativePath, { allowMissing: true })
+      const { target, exists } = await locate(root, relativePath, { allowMissing: true })
       if (!exists) return
       const info = await fsp.lstat(target)
       if (!info.isFile()) throw new Error('Nur Dateien können über den Sync entfernt werden.')

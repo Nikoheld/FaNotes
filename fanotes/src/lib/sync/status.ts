@@ -9,12 +9,15 @@ const clockTime = (ms: number) => {
 /** Changes from other devices that wait for a note to be saved or readable. They are not "in sync" yet. */
 const heldLabel = (count: number) => (count === 1 ? '1 Änderung von einem anderen Gerät wartet' : `${count} Änderungen von anderen Geräten warten`)
 
+/** Files that stayed on this device although they should be on the server. */
+export const failedLabel = (count: number) => (count === 1 ? '1 Datei nicht hochgeladen' : `${count} Dateien nicht hochgeladen`)
+
 /** Short status text shared by the status bar and the settings section. */
 export const syncStatusLabel = (state: SyncPublicState) => {
   const held = state.heldRemote > 0 ? ` · ${heldLabel(state.heldRemote)}` : ''
   switch (state.status) {
     case 'syncing': return state.progress && state.progress.total ? `${state.progress.phase === 'pull' ? 'Holt' : state.progress.phase === 'push' ? 'Lädt hoch' : 'Prüft'} ${state.progress.done}/${state.progress.total}` : 'Synchronisiert …'
-    case 'idle': return `Synchron${held}`
+    case 'idle': return state.failed.length ? `${failedLabel(state.failed.length)}${held}` : `Synchron${held}`
     case 'offline': return 'Offline – wartet auf Verbindung'
     case 'error': return 'Sync-Fehler'
     case 'paused': return `${state.pausedUntil ? `Sync pausiert – geht um ${clockTime(state.pausedUntil)} weiter` : 'Sync pausiert'}${held}`

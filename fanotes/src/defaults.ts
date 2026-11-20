@@ -39,6 +39,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   mcpExcludedFolders: '',
   syncHandwritingModel: false,
   syncNoteHistory: false,
+  syncAttachments: true,
   shareMode: 'copy',
   shareRecent: '',
   profileOwnerId: '',
