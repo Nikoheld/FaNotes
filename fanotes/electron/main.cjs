@@ -250,6 +250,8 @@ const IPC = Object.freeze({
   listDrawings: 'fanotes:list-drawings',
   readDrawing: 'fanotes:read-drawing',
   readFamdInk: 'fanotes:read-famd-ink',
+  readPdfSidePages: 'fanotes:read-pdf-side-pages',
+  writePdfSidePages: 'fanotes:write-pdf-side-pages',
   readNotePageStats: 'fanotes:read-note-page-stats',
   readNotePaperStyle: 'fanotes:read-note-paper-style',
   setNotePaperStyle: 'fanotes:set-note-paper-style',
@@ -2813,6 +2815,94 @@ async function rewritePdfOcrSidecars(root, fromPath, toPath) {
   }
 }
 
+/**
+ * `.fanotes/pdf-side/<pdf path>.famd`: the blank side pages beside a PDF
+ * note's pages (see src/lib/pdfSidePages.ts). The tree mirrors the vault so a
+ * renamed or moved folder takes its side pages along in one rename.
+ */
+const PDF_SIDE_DIRECTORY = 'pdf-side'
+const PDF_SIDE_PAGES_KIND = 'fanotes-pdf-side-pages'
+
+function pdfSideSegments(logicalPath) {
+  const segments = String(logicalPath || '').split('/').filter(Boolean)
+  if (segments.some((segment) => segment === '.' || segment === '..' || segment.startsWith('.') || segment.includes('\\') || segment.includes('\0'))) {
+    throw new Error('Ungültiger Pfad für leere PDF-Seiten.')
+  }
+  return segments
+}
+
+function pdfSideTarget(root, logicalPath, isFile) {
+  const segments = pdfSideSegments(logicalPath)
+  if (!segments.length) throw new Error('Ungültiger Pfad für leere PDF-Seiten.')
+  const base = path.join(root, INTERNAL_VAULT_DIRECTORY, PDF_SIDE_DIRECTORY, ...segments)
+  return isFile ? `${base}.famd` : base
+}
+
+async function ensurePdfSideDirectory(root, logicalDirectory) {
+  let cursor = await ensureInternalVaultDirectory(root)
+  for (const segment of [PDF_SIDE_DIRECTORY, ...pdfSideSegments(logicalDirectory)]) {
+    cursor = path.join(cursor, segment)
+    try {
+      const info = await fsp.lstat(cursor)
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Der Ordner für leere PDF-Seiten ist unsicher.')
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+      await fsp.mkdir(cursor, { mode: 0o700 }).catch((mkdirError) => {
+        if (mkdirError?.code !== 'EEXIST') throw mkdirError
+      })
+      const created = await fsp.lstat(cursor)
+      if (!created.isDirectory() || created.isSymbolicLink()) throw new Error('Der Ordner für leere PDF-Seiten ist unsicher.')
+    }
+  }
+  const realCursor = await fsp.realpath(cursor)
+  if (!isInsideRoot(root, realCursor)) throw new Error('Der Ordner für leere PDF-Seiten verlässt den Vault.')
+  return cursor
+}
+
+function assertPdfSideNotePath(relativePath) {
+  if (typeof relativePath !== 'string') throw new Error('Ungültiger Notizpfad.')
+  const normalized = normalizeRelativePath(relativePath).split(path.sep).join('/')
+  if (!isPdfNoteExtension(path.extname(normalized).toLocaleLowerCase('en-US'))) throw new Error('Leere Seiten gibt es nur neben PDF-Notizen.')
+  pdfSideSegments(normalized)
+  return normalized
+}
+
+/** Side pages follow a renamed or moved PDF note or folder. A missing source is nothing to move. */
+async function relocatePdfSidePages(root, fromPath, toPath, isDirectory) {
+  if (!isDirectory && !isPdfNoteExtension(path.extname(fromPath).toLocaleLowerCase('en-US'))) return
+  try {
+    const source = pdfSideTarget(root, fromPath, !isDirectory)
+    const info = await fsp.lstat(source).catch((error) => {
+      if (error?.code === 'ENOENT') return null
+      throw error
+    })
+    if (!info || info.isSymbolicLink()) return
+    const segments = pdfSideSegments(toPath)
+    await ensurePdfSideDirectory(root, segments.slice(0, -1).join('/'))
+    const destination = pdfSideTarget(root, toPath, !isDirectory)
+    if (path.resolve(source) === path.resolve(destination)) return
+    if (await fsp.lstat(destination).then(() => true, () => false)) {
+      console.warn('FaNotes: Leere PDF-Seiten am Ziel existieren schon und wurden nicht überschrieben.')
+      return
+    }
+    await relocatePath(source, destination)
+  } catch (error) {
+    console.warn('FaNotes: Leere PDF-Seiten konnten nicht mitgezogen werden:', error?.message ?? error)
+  }
+}
+
+async function trashPdfSidePages(root, relativePath, isDirectory) {
+  if (!isDirectory && !isPdfNoteExtension(path.extname(relativePath).toLocaleLowerCase('en-US'))) return
+  try {
+    const target = pdfSideTarget(root, relativePath, !isDirectory)
+    const info = await fsp.lstat(target).catch(() => null)
+    if (!info || info.isSymbolicLink()) return
+    await shell.trashItem(target)
+  } catch (error) {
+    console.warn('FaNotes: Leere PDF-Seiten konnten nicht mit gelöscht werden:', error?.message ?? error)
+  }
+}
+
 /** `.fanotes/page-text/`: shared per-page text (document search contract). */
 async function ensurePageTextDirectory(root) {
   let cursor = await ensureInternalVaultDirectory(root)
@@ -4202,6 +4292,7 @@ function registerIpcHandlers() {
       const oldRelativePath = logicalIdentity(root, target)
       const nextRelativePath = logicalIdentity(root, destination)
       await relocateNoteCompanions(root, oldRelativePath, nextRelativePath, path.dirname(destination))
+      await relocatePdfSidePages(root, oldRelativePath, nextRelativePath, info.isDirectory())
       if (info.isDirectory()) {
         const map = folderLocationMap(root)
         const renamed = folderLocations.retargetMap(map, oldRelativePath, nextRelativePath)
@@ -4291,6 +4382,7 @@ function registerIpcHandlers() {
       const nextRelativePath = logicalIdentity(root, destination)
 
       await relocateNoteCompanions(root, oldRelativePath, nextRelativePath, destDir)
+      await relocatePdfSidePages(root, oldRelativePath, nextRelativePath, info.isDirectory())
       if (info.isDirectory()) {
         const map = folderLocationMap(root)
         const moved = folderLocations.retargetMap(map, oldRelativePath, nextRelativePath)
@@ -4350,6 +4442,7 @@ function registerIpcHandlers() {
       }
       mutationBarrier.invalidateQueuedWrites()
       if (trashedInfo.isFile()) await trashNoteCompanions(trashedRelativePath)
+      await trashPdfSidePages(root, trashedRelativePath, trashedInfo.isDirectory())
       try {
         await mutateFolderColors(root, requestedVaultGeneration, (colors) => {
           let changed = false
@@ -4739,6 +4832,39 @@ function registerIpcHandlers() {
       if (error?.code === 'ENOENT') throw new Error('Die gespeicherte Zeichnung wurde nicht gefunden.')
       throw new Error('Die gespeicherte Zeichnung ist beschädigt oder kann nicht sicher gelesen werden.')
     }
+  })
+
+  handle(IPC.readPdfSidePages, async (_event, relativePath) => {
+    await ensureBootstrap()
+    const notePath = assertPdfSideNotePath(relativePath)
+    const root = await assertCurrentVaultRoot()
+    const target = pdfSideTarget(root, notePath, true)
+    try {
+      if (!isInsideRoot(root, await fsp.realpath(path.dirname(target)))) throw new Error('outside')
+      return (await readRegularFileNoFollow(target, MAX_FAMD_BYTES)).toString('utf8')
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null
+      throw new Error('Die leeren PDF-Seiten konnten nicht gelesen werden.')
+    }
+  })
+
+  handle(IPC.writePdfSidePages, async (_event, relativePath, source) => {
+    await ensureBootstrap()
+    const notePath = assertPdfSideNotePath(relativePath)
+    if (typeof source !== 'string' || Buffer.byteLength(source, 'utf8') > MAX_FAMD_BYTES) {
+      throw new Error('Die leeren PDF-Seiten sind ungültig oder zu groß.')
+    }
+    const parsed = parseFamd(source)
+    if (!parsed.payload || parsed.payload.ink?.kind !== PDF_SIDE_PAGES_KIND || !Array.isArray(parsed.payload.ink.ink)) {
+      throw new Error('Die leeren PDF-Seiten sind ungültig.')
+    }
+    const root = await assertCurrentVaultRoot()
+    await resolveVaultPath(notePath, { expected: 'file' })
+    const segments = pdfSideSegments(notePath)
+    await ensurePdfSideDirectory(root, segments.slice(0, -1).join('/'))
+    const target = pdfSideTarget(root, notePath, true)
+    await queueFileWrite(target, async () => atomicWrite(target, source, { encoding: 'utf8', mode: 0o600 }))
+    return true
   })
 
   handle(IPC.readFamdInk, async (_event, relativePath) => {
