@@ -62,6 +62,15 @@ try {
   const parsed = bundle.parseRecognitionBundle(packed)
   assert.equal(bundle.correctionFor(parsed, 'tost'), 'Test')
 
+  const study = await load('/src/lib/studyOverview.ts')
+  const overview = study.aggregateStudy([
+    { path: 'Mathe/a.md', stats: { dwellMs: 120000, focusMs: 0, dwellByWeekday: [0, 120000, 0, 0, 0, 0, 0], typing: { ms: 30000 }, ink: { ms: 90000, lengthMm: 40 } } },
+    { path: 'Deutsch/b.md', stats: { dwellMs: 60000, focusMs: 0, dwellByWeekday: [0, 0, 60000, 0, 0, 0, 0], typing: { ms: 60000 }, ink: { ms: 0, lengthMm: 0 } } },
+  ])
+  assert.equal(overview.subjects[0].subject, 'Mathe')
+  assert.equal(overview.dwellByWeekday[1], 120000)
+  assert.match(study.formatStudyDuration(120000), /2 min/)
+
   const homework = await load('/src/lib/homeworkCalendar.ts')
   const calendar = await load('/src/lib/calendarModel.ts')
   const synced = homework.applyHomeworkToCalendar(calendar.emptyCalendarDocument(), {
@@ -178,7 +187,9 @@ try {
   assert.match(app, /onSectionFold/)
   assert.match(app, /includeRecognitionModel/)
   assert.match(app, /syncExcludedFolders/)
+  assert.match(app, /StudyOverview/)
   assert.match(app, /FlashcardReview/)
+  assert.match(app, /id: 'study'/)
   assert.match(app, /readPdfMarks/)
   assert.match(board, /Nächster Schritt/)
   assert.match(board, /commitLasso/)

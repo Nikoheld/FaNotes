@@ -14,16 +14,13 @@ const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h 
 try {
   const load = (path) => server.ssrLoadModule(path)
   const blocks = await load('/src/lib/study/blocks.ts')
-  const tasks = await load('/src/lib/study/tasks.ts')
   const key = await load('/src/lib/study/keyTree.ts')
   const sort = await load('/src/lib/study/sortBoard.ts')
   const map = await load('/src/lib/study/conceptMap.ts')
   const cards = await load('/src/lib/study/cardsModels.ts')
   const render = await load('/src/lib/study/render.ts')
   const registry = await load('/src/lib/study/registry.ts')
-  const marks = await load('/src/lib/study/marks.ts')
   const flash = await load('/src/lib/flashcards.ts')
-  const lines = await load('/src/lib/study/pdfLines.ts')
 
   // -- fenced blocks ------------------------------------------------------------
   const note = [
@@ -47,89 +44,6 @@ try {
   assert.equal(blocks.findStudyBlocks(appended)[0].kind, 'map')
   assert.deepEqual(blocks.parseJsonObject('[1]'), {})
   assert.deepEqual(blocks.parseJsonObject('{broken'), {})
-
-  // -- task detection -----------------------------------------------------------
-  const page = (n, text) => ({ page: n, lines: text.split('\n') })
-  const detected = tasks.detectTasks([
-    page(3, [
-      'Rechercheauftrag (erweitertes Lernziel): Der Stamm der Gliederfüsser',
-      'Auftrag 1: Zeichnen Sie ein Insekt oder Ausschnitte davon ab und achten Sie auf die im',
-      'Grundbauplan beschriebenen Details! Schreiben Sie diese Details an! (ca. 1 Lektion)',
-      '',
-      'Auftrag 2: Zeichnen Sie die einzelnen Teile der Mundwerkzeuge einer Biene so genau wie',
-      'möglich unter dem Binokular ab. Vergleichen Sie dann Ihre Skizze mit der Abbildung (Ca. 20',
-      'Minuten)',
-      'Aufgabe der Hormone ist die Steuerung der Häutung.',
-    ].join('\n')),
-    page(4, [
-      'Auftrag 4: Lesen Sie die folgenden Texte durch und markieren Sie die wesentlichen Punkte!',
-      '(Ca. 20 Minuten)',
-      '   Auftrag 5 (ca. 60 Minuten): In der Powerpoint-Präsentation zu den Gliederfüssern finden Sie',
-      'auf der letzten Folie eine Zusammenstellung mit 15 Insektenordnungen.',
-      'Auftrag 7: Recherchieren Sie im Internet, was man unter Mimikry versteht. (10 Minuten)',
-      'Auftrag 10: Studieren Sie zur Hemi- und Holometablie die Seiten 48 und 49 in Ihrem Biolo-',
-      'giebuch',
-      'Auftrag 12: Erklären Sie den Zusam-',
-      'menhang zwischen den beiden Hor-',
-      'monen und den Häutungen. Task 3 ist ein Hinweis.',
-    ].join('\n')),
-    page(6, 'Auftrag 4 beantwortet die Frage nicht.\nAuftrag: Nennen Sie die Nützlinge aus dem Film. Weshalb ist es von Vorteil? (ca. 1,5 h)\nExercise 9: Übung für Fortgeschrittene (15 min)'),
-    page(7, 'Hier steht alles in einer Zeile. Auftrag 14: Beobachten Sie die Grillen (ca. 15 Minuten) und schreiben Sie auf. Auftrag 15: Fassen Sie die Bienensprache zusammen (ca. 15 Minuten). Das war es.'),
-  ])
-  const byId = Object.fromEntries(detected.map((task) => [task.id, task]))
-  assert.deepEqual(detected.filter((task) => task.number).map((task) => task.number), ['1', '2', '4', '5', '7', '10', '12', '9', '14', '15'])
-  assert.equal(byId['auftrag-1'].minutes, 45, '1 Lektion = 45 min')
-  assert.equal(byId['auftrag-2'].minutes, 20, 'hint split across lines')
-  assert.equal(byId['auftrag-2'].page, 3)
-  assert.equal(byId['auftrag-4'].page, 4, 'first heading per number wins')
-  assert.equal(byId['auftrag-4'].minutes, 20)
-  assert.equal(byId['auftrag-5'].minutes, 60)
-  assert.ok(byId['auftrag-5'].title.startsWith('In der Powerpoint-Präsentation'), 'time hint is not part of the title')
-  assert.equal(byId['auftrag-7'].minutes, 10)
-  assert.ok(byId['auftrag-10'].title.includes('Biologiebuch'), 'line-end hyphen joined')
-  assert.ok(byId['auftrag-10'].title.includes('Hemi- und'), 'hyphen before "und" kept')
-  assert.ok(byId['auftrag-12'].title.startsWith('Erklären Sie den Zusammenhang zwischen den beiden Hormonen'))
-  assert.equal(byId['auftrag-9'].minutes, 15)
-  assert.equal(byId['auftrag-14'].minutes, 15, 'collapsed one-line pages are split')
-  assert.equal(byId['auftrag-15'].page, 7)
-  assert.ok(!detected.some((task) => /Hormone ist/u.test(task.title)), '"Aufgabe der Hormone" is prose')
-  const unnumbered = detected.find((task) => !task.number)
-  assert.ok(unnumbered && unnumbered.minutes === 90 && unnumbered.page === 6, '"Auftrag:" without number and 1,5 h')
-  assert.equal(tasks.parseTimeHint('siehe Abb. 9 h'), 0, 'loose hours need "ca."')
-  assert.equal(tasks.parseTimeHint('(10-20 Min.)'), 15)
-  assert.equal(tasks.parseTimeHint('Doppellektion'), 0)
-  assert.equal(tasks.parseTimeHint('(2 Doppellektionen)'), 180)
-  assert.deepEqual(tasks.dehyphenate(['Beob-', 'achte', 'Ein-', 'Zahl']), ['Beobachte', 'Ein-', 'Zahl'])
-
-  // stored list round trip, edits survive a re-scan, JSON containing "-->" stays intact
-  let pdfNote = 'Notiz\n<!-- fanotes-pdf-marks-v1\n{"marks":[]}\n-->\n'
-  let list = tasks.mergeDetected(null, detected)
-  list.tasks[0] = { ...list.tasks[0], done: true, spentSec: 125, title: 'Mit --> im Titel' }
-  pdfNote = tasks.writeTaskList(pdfNote, list)
-  const read = tasks.readTaskList(pdfNote)
-  assert.equal(read.tasks.length, list.tasks.length)
-  assert.equal(read.tasks[0].title, 'Mit --> im Titel')
-  assert.ok(pdfNote.includes('fanotes-pdf-marks-v1'), 'other embedded data is kept')
-  const again = tasks.mergeDetected({ tasks: read.tasks.map((task) => (task.id === 'auftrag-2' ? { ...task, manual: true, title: 'Mein Text', minutes: 30 } : task)), removed: ['auftrag-7'] }, detected)
-  assert.equal(again.tasks.find((task) => task.id === 'auftrag-2').title, 'Mein Text')
-  assert.equal(again.tasks.find((task) => task.id === 'auftrag-2').minutes, 30)
-  assert.ok(!again.tasks.some((task) => task.id === 'auftrag-7'), 'removed tasks stay removed')
-  assert.equal(again.tasks.find((task) => task.id === read.tasks[0].id).done, true, 'progress survives re-detection')
-  assert.equal(tasks.writeTaskList(pdfNote, { tasks: [], removed: [] }).includes('fanotes-tasks'), false)
-  assert.equal(tasks.readTaskList('plain'), null)
-  const progress = tasks.taskProgress([{ ...list.tasks[0], done: true, minutes: 10 }, { ...list.tasks[1], done: false, minutes: 20, spentSec: 600 }])
-  assert.equal(progress.done, 1)
-  assert.equal(progress.ratio, 0.5)
-  assert.equal(progress.remainingMinutes, 10)
-  assert.equal(tasks.formatClock(3725), '1:02:05')
-  assert.equal(tasks.formatClock(65), '01:05')
-  assert.equal(tasks.newManualTask([{ ...list.tasks[0], number: '4' }], 2).number, '5')
-
-  // pdf.js items -> lines
-  assert.deepEqual(lines.itemsToLines([
-    { str: 'Auftrag 3:', transform: [1, 0, 0, 1, 0, 700] }, { str: ' Skizzieren', transform: [1, 0, 0, 1, 50, 700], hasEOL: false },
-    { str: 'zweite Zeile', transform: [1, 0, 0, 1, 0, 686] }, { str: ' dritte', hasEOL: true }, { str: 'vierte' },
-  ]), ['Auftrag 3: Skizzieren', 'zweite Zeile dritte', 'vierte'])
 
   // -- table and key ---------------------------------------------------------------
   const table = {
@@ -407,51 +321,8 @@ try {
     assert.deepEqual([1.5, '4;x', 9, 0, 3].map(cards.plateColumns), [4, 4, 4, 4, 3], 'the reader and the renderer share one rule')
   }
 
-  // -- highlights overview -------------------------------------------------------------
-  const sample = [
-    { id: 'm2', page: 5, quote: 'Zweite Stelle', kind: 'highlight' },
-    { id: 'm1', page: 2, quote: 'Erste Stelle', kind: 'underline' },
-    { id: 'm3', page: 5, quote: 'Dritte Stelle', kind: 'highlight' },
-  ]
-  const grouped = marks.groupMarksByPage(sample)
-  assert.deepEqual(grouped.map((group) => [group.page, group.marks.length]), [[2, 1], [5, 2]])
-  const noteMd = marks.marksToMarkdown('Gliederfüsser.pdf', sample)
-  assert.ok(noteMd.startsWith('# Markierungen: Gliederfüsser.pdf\n\n## Seite 2\n\n- __Erste Stelle__ (S. 2)'))
-  assert.ok(noteMd.includes('## Seite 5\n\n- ==Zweite Stelle== (S. 5)\n- ==Dritte Stelle== (S. 5)'))
-
   // -- integrity regressions ----------------------------------------------------------
   {
-    const fresh = { tasks: [{ id: 'auftrag-1', number: '1', title: 'Neu', minutes: 5, page: 1, done: true, spentSec: 0, manual: false }], removed: [] }
-    const count = (text, marker) => text.split(marker).length - 1
-
-    // (1) a broken or unterminated tasks comment must not be duplicated or lose data silently
-    const brokenClosed = 'Text\n<!-- fanotes-tasks-v1\n{ "tasks": [ oops\n-->\nMehr Text\n'
-    assert.equal(tasks.readTaskList(brokenClosed), null)
-    const repaired = tasks.writeTaskList(brokenClosed, fresh)
-    assert.equal(count(repaired, '<!-- fanotes-tasks-v1\n'), 1, 'exactly one live comment')
-    assert.ok(repaired.includes('<!-- fanotes-tasks-v1-broken\n{ "tasks": [ oops'), 'the broken text is kept, renamed')
-    assert.equal(tasks.readTaskList(repaired).tasks[0].title, 'Neu', 'the new list reads back')
-    assert.equal(tasks.writeTaskList(repaired, { ...fresh, tasks: [{ ...fresh.tasks[0], title: 'Zwei' }] }).split('fanotes-tasks-v1-broken').length, 2, 'a second write does not rename again or duplicate')
-    const twice = '<!-- fanotes-tasks-v1\n{bad\n-->\nx\n<!-- fanotes-tasks-v1\n' + JSON.stringify(fresh) + '\n-->\n'
-    assert.equal(tasks.readTaskList(twice).tasks[0].title, 'Neu', 'a valid later comment is used when the first is broken')
-    const dupValid = `<!-- fanotes-tasks-v1\n${JSON.stringify(fresh)}\n-->\nmid\n<!-- fanotes-tasks-v1\n${JSON.stringify(fresh)}\n-->\n`
-    const merged1 = tasks.writeTaskList(dupValid, fresh)
-    assert.equal(count(merged1, '<!-- fanotes-tasks-v1\n'), 1, 'older duplicates are collapsed into one')
-    assert.ok(merged1.includes('mid'))
-    const open = 'Vor\n<!-- fanotes-tasks-v1\n{ "tasks": [\nNach dem Kommentar steht Text.'
-    assert.equal(tasks.writeTaskList(open, fresh), null, 'an unterminated comment is not written around')
-    assert.equal(tasks.writeTaskList(open, { tasks: [], removed: [] }), null)
-    const swallow = 'Vor\n<!-- fanotes-tasks-v1 {bad\ntext\n<!-- fanotes-tasks-v1\n' + JSON.stringify(fresh) + '\n-->\n'
-    assert.equal(tasks.writeTaskList(swallow, fresh), null, 'a broken comment that runs into the next marker is refused')
-
-    // (2) clearing the list touches only the comment, not blank lines elsewhere
-    const user = 'Zeile\n\n\n\nDrei Leerzeilen davor\n```\ncode\n\n\n\nmehr code\n```\n'
-    const withList = tasks.writeTaskList(user, fresh)
-    assert.equal(tasks.writeTaskList(withList, { tasks: [], removed: [] }), user, 'add then clear gives the note back byte for byte')
-    const middle = 'A\n\n\n\nB\n<!-- fanotes-tasks-v1\n' + JSON.stringify(fresh) + '\n-->\nC\n\n\n\nD\n'
-    assert.equal(tasks.writeTaskList(middle, { tasks: [], removed: [] }), 'A\n\n\n\nB\nC\n\n\n\nD\n', 'blank lines in the user text survive')
-    assert.equal(tasks.writeTaskList(user, { tasks: [], removed: [] }), user, 'clearing with nothing stored changes nothing')
-
     // (3) a block that cannot be read, or would be cut, is reported and never rewritten
     assert.equal(registry.readStudyBlock('sort', '{ "cards": [ broken').ok, false)
     assert.equal(registry.readStudyBlock('sort', '[1,2]').ok, false)
@@ -604,18 +475,6 @@ try {
     assert.equal(sort.restoreCard(arranged, taken.removed), arranged, 'a card that is already there is not duplicated')
     assert.equal(sort.takeCard(arranged, 'nope'), null)
 
-    // The numbers named in the editors' texts follow the caps.
-    const source = (name) => readFileSync(new URL(`../src/components/study/${name}.tsx`, import.meta.url), 'utf8')
-    const numberIn = (text, pattern) => Number(pattern.exec(text)?.[1])
-    assert.equal(numberIn(source('KeyEditor'), /höchstens (\d+) Arten/u), key.KEY_LIMITS.items)
-    assert.equal(numberIn(source('KeyEditor'), /höchstens (\d+) Merkmale/u), key.KEY_LIMITS.features)
-    assert.equal(numberIn(source('KeyEditor'), /mehr als (\d+) verschiedene Werte/u), key.MAX_SPLIT)
-    assert.equal(numberIn(source('MapEditor'), /höchstens (\d+) Boxen/u), map.MAP_LIMITS.nodes)
-    assert.equal(numberIn(source('MapEditor'), /höchstens (\d+) Pfeile/u), map.MAP_LIMITS.edges)
-    assert.equal(numberIn(source('SortEditor'), /höchstens (\d+) Karten/u), sort.SORT_LIMITS.cards)
-    assert.equal(numberIn(source('SortEditor'), /höchstens (\d+) Gruppen/u), sort.SORT_LIMITS.groups)
-    assert.equal(numberIn(source('PlateEditor'), /höchstens (\d+) Bilder/u), cards.PLATE_LIMITS.items)
-    assert.equal(numberIn(source('TermEditor'), /höchstens (\d+) Begriffe/u), cards.TERM_LIMITS.terms)
   }
 
   // -- key layout: descriptive branch labels never collide ----------------------------------------------------------

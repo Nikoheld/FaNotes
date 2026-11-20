@@ -37,6 +37,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Spelling suggestion menu (click / right-click / Strg+.) with Ignore and Add to dictionary | `src/lib/spellingCorrections.ts` | `cm-spelling-menu__learn` |
 | Correction candidates, ranking and the autocorrect decision | `src/lib/spellingSuggest.ts` | `export const decideAutocorrect` |
 | Autokorrektur setting | `src/components/SettingsModal.tsx` | `title="Autokorrektur"` |
+| Lernzeit | `src/App.tsx` | `id: 'study'` |
 | Karteikarten | `src/App.tsx` | `id: 'flashcards'` |
 | Duplicate a note (text, ink, links, worksheets) | `src/App.tsx` | `id: 'duplicate-note'` |
 | Duplicate name, wiki link, date stamp, recent notes | `src/lib/noteQoL.ts` | `export const duplicatePreferredStem` |
@@ -184,6 +185,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Calendar | `src/components/CalendarView.tsx` | `export function CalendarView` |
 | Calendar model | `src/lib/calendarModel.ts` | `export const CALENDAR_NOTE_PATH` |
 | Calendar command | `src/App.tsx` | `id: 'calendar'` |
+| Study time | `src/components/StudyOverview.tsx` | `export function StudyOverview` |
 | Flashcards | `src/components/FlashcardReview.tsx` | `export function FlashcardReview` |
 
 ## Homework

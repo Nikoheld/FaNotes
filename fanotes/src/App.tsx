@@ -1,5 +1,7 @@
 import {
   Archive,
+  ClipboardList,
+  BarChart3,
   ArrowLeft,
   ArrowLeftRight,
   ArrowRight,
@@ -9,13 +11,10 @@ import {
   BookOpen,
   CalendarDays,
   CheckCircle2,
-  GraduationCap,
   CircleAlert,
   Clock,
   Cloud,
   CloudOff,
-  BookMarked,
-  ClipboardList,
   Columns2,
   SquareSplitHorizontal,
   Command,
@@ -82,9 +81,6 @@ import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/Ma
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { hasConnectedAiProvider } from './lib/aiProviderConnection'
 import { clipboardImageFile } from './lib/clipboardImage'
-import { STUDY_EVENT, studyModalOpen } from './lib/study/imageTools'
-import { STUDY_KINDS, STUDY_KIND_LABELS, type StudyKind } from './lib/study/blocks'
-import { CRYPTO_TOOLS, CRYPTO_TOOL_LABELS, type CryptoTool } from './lib/study/crypto/model'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, inkHasMarks, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { inkJsonForRewrite } from './lib/packedInk'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
@@ -309,7 +305,7 @@ const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspac
 const WritingMode = lazy(() => import('./writing/ui/WritingMode').then((module) => ({ default: module.WritingMode })))
 const StoryImportDialog = lazy(() => import('./writing/import/ImportDialog').then((module) => ({ default: module.ImportDialog })))
 const CommandPalette = lazy(() => import('./components/CommandPalette').then((module) => ({ default: module.CommandPalette })))
-const StudyPanel = lazy(() => import('./components/study/StudyPanel').then((module) => ({ default: module.StudyPanel })))
+const StudyOverview = lazy(() => import('./components/StudyOverview').then((module) => ({ default: module.StudyOverview })))
 const FlashcardReview = lazy(() => import('./components/FlashcardReview').then((module) => ({ default: module.FlashcardReview })))
 const AiPanel = lazy(() => import('./components/AiPanel').then((module) => ({ default: module.AiPanel })))
 type MarkdownEditorComponent = typeof import('./components/MarkdownEditor')['MarkdownEditor']
@@ -843,8 +839,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [searchHits, setSearchHits] = useState<SearchHit[]>([])
   const [searchFailed, setSearchFailed] = useState(false)
   const [inkReveal, setInkReveal] = useState<{ path: string; y: number; token: number } | null>(null)
+  const [studyOpen, setStudyOpen] = useState(false)
   const [cardsOpen, setCardsOpen] = useState(false)
-  const [studyPanel, setStudyPanel] = useState<null | 'tasks' | 'marks'>(null)
   const [searchLoading, setSearchLoading] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
   const [fatalError, setFatalError] = useState<string | null>(null)
@@ -895,7 +891,6 @@ export default function App({ startupBootstrap }: AppProps) {
   const [textFieldPlacing, setTextFieldPlacing] = useState(false)
   const unifiedPaperRef = useRef<HTMLElement | null>(null)
   const [selectedTextFieldId, setSelectedTextFieldId] = useState<string | null>(null)
-  const [studyToolsOpen, setStudyToolsOpen] = useState(false)
   const [textFieldFocusId, setTextFieldFocusId] = useState<string | null>(null)
   const [noteLinkStyle, setNoteLinkStyle] = useState<NoteLinkStyleId>('symbol')
   const [selectedNoteLinkId, setSelectedNoteLinkId] = useState<string | null>(null)
@@ -3020,19 +3015,6 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [openNote, refreshTree, settings.defaultFolder, toast, tree])
 
-  const saveStudyNote = useCallback(async (title: string, markdown: string) => {
-    try {
-      const parent = activePathRef.current ? parentPath(activePathRef.current) : ''
-      const result = await window.fanotes.createNote(parent || undefined, title)
-      await saveContent(result.relativePath, markdown)
-      await refreshTree().catch(() => undefined)
-      await openNote(result.relativePath)
-      toast('Notiz mit den Markierungen erstellt.', 'success')
-    } catch (error) {
-      toast(error instanceof Error ? error.message : 'Notiz konnte nicht erstellt werden.', 'error')
-    }
-  }, [openNote, refreshTree, saveContent, toast])
-
   const copyPlainText = useCallback(async (value: string, success: string) => {
     try {
       if (navigator.clipboard?.writeText && window.isSecureContext) {
@@ -4818,15 +4800,6 @@ export default function App({ startupBootstrap }: AppProps) {
     if (!commandEditor()?.format(action)) toast('Die Formatierung konnte nicht angewandt werden.', 'error')
   }, [drawingOpen, homeworkOpen, overviewOpen, toast])
 
-  const insertStudyBlock = useCallback((kind: StudyKind, tool?: CryptoTool) => {
-    const path = activePathRef.current
-    if (!path || drawingOpen || overviewOpen || homeworkOpen || isPdfNotePath(path)) {
-      toast('Öffne eine Markdown-Notiz im Editor, um ein Lernwerkzeug einzufügen.', 'info')
-      return
-    }
-    window.dispatchEvent(new CustomEvent(STUDY_EVENT.insert, { detail: { kind, tool } }))
-  }, [drawingOpen, homeworkOpen, overviewOpen, toast])
-
   const handleDrawingDirtyChange = useMemo(() => {
     const session = noteDrawingSession.key
     return (dirty: boolean) => {
@@ -5734,11 +5707,8 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'ai-assistant', label: 'AI-Assistent', detail: 'LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok oder OpenCode nutzen', shortcut: 'Ctrl ⇧ A', group: 'Werkzeuge', keywords: 'ki ai lm studio ollama openai gemini anthropic grok opencode rechtschreibung fakten', icon: <Bot size={15} />, run: openLmStudio },
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht', detail: 'Ordner und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
-    ...STUDY_KINDS.filter((kind) => kind !== 'crypto').map((kind) => ({ id: `study-${kind}`, label: `Lernwerkzeug: ${STUDY_KIND_LABELS[kind]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'lernwerkzeuge auftrag tabelle schlüssel bestimmungsschlüssel sortieren board begriffsnetz concept map bildtafel definition karten', icon: <GraduationCap size={15} />, run: () => insertStudyBlock(kind) })),
-    ...CRYPTO_TOOLS.map((tool) => ({ id: `study-crypto-${tool}`, label: `Lernwerkzeug: Krypto-Werkzeug, ${CRYPTO_TOOL_LABELS[tool]}`, detail: 'Als Block in die Notiz einfügen, bleibt reiner Text', group: 'Lernwerkzeuge', keywords: 'krypto kryptologie caesar vigenere häufigkeit xor ascii modulo diffie hellman verschlüsseln', icon: <GraduationCap size={15} />, run: () => insertStudyBlock('crypto', tool) })),
+    { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
     ...(pdfSide.available ? [{ id: 'pdf-side-pages', label: pdfSide.shown ? 'Leere Seiten daneben ausblenden' : 'Leere Seiten daneben', detail: 'Neben jeder PDF-Seite eine leere Schreibseite gleicher Grösse', group: 'Ansicht', keywords: 'pdf leer seite daneben rechts notizen schreiben platz side blank page', icon: <SquareSplitHorizontal size={15} />, run: () => { if (isPdfActive) void pdfSide.toggle(); else toast('Öffne zuerst ein PDF.', 'info') } }] : []),
-    { id: 'study-tasks', label: 'Lernwerkzeuge: Aufträge dieses PDFs', detail: 'Aufträge erkennen, abhaken und mit Timer bearbeiten', group: 'Lernwerkzeuge', keywords: 'auftrag aufgabe task exercise pdf arbeitsblatt timer fortschritt', icon: <ClipboardList size={15} />, run: () => { if (isPdfActive) setStudyPanel('tasks'); else toast('Öffne zuerst ein PDF.', 'info') } },
-    { id: 'study-marks', label: 'Lernwerkzeuge: Markierungen-Übersicht', detail: 'Alle Textmarker-Stellen des PDFs nach Seite', group: 'Lernwerkzeuge', keywords: 'markierungen textmarker highlight wesentliche punkte pdf zusammenfassung', icon: <BookMarked size={15} />, run: () => { if (isPdfActive) setStudyPanel('marks'); else toast('Öffne zuerst ein PDF.', 'info') } },
     { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => { editorRef.current?.flushChanges(); setCardsOpen(true) } },
     ...NOTE_TEMPLATES.map((template) => ({
       id: `template-${template.id}`,
@@ -6299,8 +6269,6 @@ export default function App({ startupBootstrap }: AppProps) {
 
   useEffect(() => {
     const placeImage = (data: DataTransfer | null, event: Event, failure: string) => {
-      // The study editors take pictures for their own sheets.
-      if (studyModalOpen()) return
       const file = clipboardImageFile(data)
       if (!file) return
       event.preventDefault()
@@ -6319,20 +6287,6 @@ export default function App({ startupBootstrap }: AppProps) {
       window.removeEventListener('paste', onPaste, true)
       window.removeEventListener('drop', onDrop, true)
       window.removeEventListener('dragover', onDragOver)
-    }
-  }, [importImageBytes, toast])
-
-  useEffect(() => {
-    const onPlace = (event: Event) => {
-      const file = (event as CustomEvent<{ file?: File }>).detail?.file
-      if (file) void importImageBytes(file).catch((error) => toast(error instanceof Error ? error.message : 'Bild konnte nicht eingefügt werden.', 'error'))
-    }
-    const onCards = () => { editorRef.current?.flushChanges(); splitEditorRef.current?.flushChanges(); window.setTimeout(() => setCardsOpen(true), 60) }
-    window.addEventListener(STUDY_EVENT.placeImage, onPlace)
-    window.addEventListener(STUDY_EVENT.openCards, onCards)
-    return () => {
-      window.removeEventListener(STUDY_EVENT.placeImage, onPlace)
-      window.removeEventListener(STUDY_EVENT.openCards, onCards)
     }
   }, [importImageBytes, toast])
 
@@ -6676,7 +6630,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
                 if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
                 if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
-                return <FormattingToolbar onInsertStudy={insertStudyBlock} disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating || activeHeld} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} />
+                return <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating || activeHeld} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} />
               })()}
             </div>
             <div className="toolbar-group toolbar-end">
@@ -6709,11 +6663,6 @@ export default function App({ startupBootstrap }: AppProps) {
                     </div>
                   )}
                 </div>
-              )}
-              {activeTab && isPdfActive && (
-                <button type="button" className={`toolbar-button ${studyPanel ? 'active' : ''}`} title="Aufträge und Markierungen dieses PDFs" aria-label="Aufträge dieses PDFs" aria-pressed={Boolean(studyPanel)} onClick={() => setStudyPanel((value) => (value ? null : 'tasks'))}>
-                  <ClipboardList size={14} /><span>Aufträge</span>
-                </button>
               )}
               {bookPolicy.controlVisible && (
                 <div className="subject-book-control">
@@ -6839,17 +6788,6 @@ export default function App({ startupBootstrap }: AppProps) {
               >
                 <Type size={14} /><span>Textfeld</span>
               </button>
-              <button
-                type="button"
-                className={`toolbar-button ${studyToolsOpen ? 'active' : ''}`}
-                title="Lernwerkzeuge: Beschriften, Zeichen, Bilder, Messen"
-                aria-label="Lernwerkzeuge"
-                aria-pressed={studyToolsOpen}
-                disabled={!activeTab}
-                onClick={() => setStudyToolsOpen((open) => !open)}
-              >
-                <GraduationCap size={14} /><span>Lernen</span>
-              </button>
               {!isPdfActive && <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>}
               {hasConnectedAiProvider(settings) && (
                 <button type="button" className={`toolbar-button ai ${lmStudioOpen ? 'active' : ''}`} title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /><span>AI</span></button>
@@ -6893,7 +6831,7 @@ export default function App({ startupBootstrap }: AppProps) {
               )
             )}
             <div className="editor-stage-main">
-            {!(glyphenWerkOpen || calendarOpen || homeworkOpen || overviewOpen) && [activeTab, splitTab].map((tab, position) => {
+            {!(glyphenWerkOpen || calendarOpen || homeworkOpen || studyOpen || overviewOpen) && [activeTab, splitTab].map((tab, position) => {
               const hold = tab ? tabHolds[tab.path] : undefined
               if (!tab || !hold || (position === 1 && tab.path === activeTab?.path)) return null
               return (
@@ -6933,6 +6871,10 @@ export default function App({ startupBootstrap }: AppProps) {
                   onOpenNote={(path) => { setHomeworkOpen(false); return openNote(path) }}
                   onDocumentPersisted={(document) => { void syncPublishedHomework(settingsRef.current, document) }}
                 />
+              </SafeBoundary>
+            ) : studyOpen ? (
+              <SafeBoundary name="Lernzeit" fallbackTitle="Die Lernzeit ist abgestürzt">
+                <StudyOverview entries={tree} onClose={() => setStudyOpen(false)} />
               </SafeBoundary>
             ) : overviewOpen ? (
               <VaultOverview entries={tree} openTabs={tabs} onOpen={(path) => { setOverviewOpen(false); return openNote(path) }} onCreateNote={() => createNote()} onClose={() => setOverviewOpen(false)} />
@@ -7094,8 +7036,8 @@ export default function App({ startupBootstrap }: AppProps) {
                   <StudyAnnotationLayer
                     path={activeTab.path}
                     pdf={isPdfActive}
-                    open={studyToolsOpen}
-                    onClose={() => setStudyToolsOpen(false)}
+                    open={false}
+                    onClose={() => undefined}
                   />
                 </article>
               </PaperView>
@@ -7225,8 +7167,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !(inspectorTab && (inspectorTab.kind === 'pdf' || isPdfNotePath(inspectorTab.path))) && <Suspense fallback={null}><RightInspector content={inspectorTab?.content ?? ''} path={inspectorTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { commandEditor()?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
-        {studyPanel && isPdfActive && activeTab && <Suspense fallback={null}><SafeBoundary name="Lernwerkzeuge"><StudyPanel key={activeTab.path} path={activeTab.path} title={activeTab.title} content={activeTab.content} initialTab={studyPanel} onContentChange={(content) => updateContentFor(activeTab.path, content)} onSaveNote={(title, markdown) => { void saveStudyNote(title, markdown) }} onNotice={(message) => toast(message, 'info')} onClose={() => setStudyPanel(null)} /></SafeBoundary></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !(inspectorTab && (inspectorTab.kind === 'pdf' || isPdfNotePath(inspectorTab.path))) && <Suspense fallback={null}><RightInspector content={inspectorTab?.content ?? ''} path={inspectorTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { commandEditor()?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} failed={searchFailed} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>

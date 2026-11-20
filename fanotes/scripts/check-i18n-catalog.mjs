@@ -36,6 +36,7 @@ const CHROME_FILES = [
   'src/components/CalendarView.tsx',
   'src/components/FlashcardReview.tsx',
   'src/components/RightInspector.tsx',
+  'src/components/StudyOverview.tsx',
   'src/components/SafeBoundary.tsx',
   'src/components/HomeworkBoard.tsx',
   'src/components/FormattingToolbar.tsx',
