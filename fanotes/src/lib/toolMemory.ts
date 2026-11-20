@@ -32,6 +32,7 @@ export type HandwritingToolMemory = {
 
 export type ToolMemory = {
   eraserSize: number
+  eraserMode: 'area' | 'stroke'
   tool: ToolMemoryTool
   inkMode: ToolMemoryInkMode
   symbolId: string | null
@@ -67,6 +68,7 @@ export const defaultHandwritingToolMemory = (): HandwritingToolMemory => ({
 
 export const defaultToolMemory = (): ToolMemory => ({
   eraserSize: 24,
+  eraserMode: 'area',
   tool: 'pen',
   inkMode: 'writing',
   symbolId: null,
@@ -109,6 +111,7 @@ export const normalizeToolMemory = (raw: unknown): ToolMemory => {
     : defaults.mathPlacement
   return {
     eraserSize: Math.round(clampNumber(source.eraserSize, 1, 72, defaults.eraserSize)),
+    eraserMode: source.eraserMode === 'stroke' ? 'stroke' : 'area',
     tool: source.tool === 'eraser' ? 'eraser' : 'pen',
     inkMode: source.inkMode === 'drawing' ? 'drawing' : 'writing',
     symbolId: readSymbolId(source.symbolId),

@@ -84,6 +84,7 @@ const SUBJECT_DETAILS: Record<string, { mark: string; description: string }> = {
   Chemie: { mark: 'H₂', description: 'Stoffe, Reaktionen & Formeln' },
   Biologie: { mark: 'DNA', description: 'Leben, Umwelt & Genetik' },
   Geschichte: { mark: 'Ⅰ', description: 'Epochen, Quellen & Zusammenhänge' },
+  Geografie: { mark: 'Geo', description: 'Karten, Räume & Klima' },
   Informatik: { mark: '</>', description: 'Code, Systeme & Algorithmen' },
   Wirtschaft: { mark: '%', description: 'Betriebe, Märkte & Finanzen' },
   Mathematics: { mark: '∑', description: 'Algebra, geometry & analysis' },
@@ -94,6 +95,7 @@ const SUBJECT_DETAILS: Record<string, { mark: string; description: string }> = {
   Chemistry: { mark: 'H₂', description: 'Materials, reactions & formulas' },
   Biology: { mark: 'DNA', description: 'Life, environment & genetics' },
   History: { mark: 'Ⅰ', description: 'Periods, sources & connections' },
+  Geography: { mark: 'Geo', description: 'Maps, regions & climate' },
   'Computer Science': { mark: '</>', description: 'Code, systems & algorithms' },
   Economics: { mark: '%', description: 'Business, markets & finance' },
 }

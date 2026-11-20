@@ -1,5 +1,5 @@
 import type { PaperStyle } from '../types'
-import { paperSquareStyleMm } from './paperSquare'
+import { paperSquarePx, paperSquareStyleMm } from './paperSquare'
 
 export type PaperStyleOption = {
   id: PaperStyle
@@ -131,4 +131,21 @@ export const drawPaperBackground = (
     context.stroke()
   }
   context.restore()
+}
+
+/** Width the normal sheet's ruling steps are tuned for (see paperSheetPx). */
+const RULING_REFERENCE_WIDTH = 900
+
+/**
+ * Ruling step of a PDF side page as a percentage of its width, so the pattern
+ * keeps the proportions of a normal sheet at any page size. Null: no ruling.
+ */
+export const sidePagePaperStepPercent = (style: PaperStyle, squareMm = 0): number | null => {
+  if (style === 'blank') return null
+  const px = style === 'millimeter'
+    ? 20
+    : style === 'squares' || style === 'grid'
+      ? paperSquarePx(RULING_REFERENCE_WIDTH, paperSquareStyleMm(style, squareMm) ?? 5)
+      : 28
+  return (px / RULING_REFERENCE_WIDTH) * 100
 }
