@@ -4,6 +4,7 @@
  */
 import type { PdfOcrLine } from '../pdfOcr'
 import { preparePageLocal, type PreparePage, type Rotation } from './ocrOrientation'
+import PrepWorker from './ocrPrepWorker?worker&inline'
 
 let worker: Worker | null = null
 let broken = false
@@ -13,7 +14,9 @@ const pending = new Map<string, { resolve: (value: any) => void; reject: (error:
 const ensureWorker = () => {
   if (worker || broken) return worker
   try {
-    worker = new Worker(new URL('./ocrPrepWorker.ts', import.meta.url), { type: 'module' })
+    // Inline (blob) worker: Electron cannot start a module worker from file:// inside app.asar, which
+    // used to leave this on the main thread (and, after a failed hand-over, with an empty first page).
+    worker = new PrepWorker({ name: 'fanotes-ocr-prep' })
     worker.onmessage = (event: MessageEvent<{ id: number; rotation?: Rotation; error?: string }>) => {
       const key = event.data.rotation === undefined ? `${event.data.id}` : `${event.data.id}:${event.data.rotation}`
       const waiter = pending.get(key) ?? pending.get(`${event.data.id}`)
@@ -46,8 +49,9 @@ const ask = <T,>(key: string, message: unknown, transfer: Transferable[] = []) =
 export const preparePageInWorker: PreparePage = async (input, maxLines) => {
   if (!ensureWorker()) return preparePageLocal(input, maxLines)
   const id = ++sequence
-  // The bitmap moves to the worker; the caller does not use it afterwards.
-  const pixels = input.pixels.byteOffset === 0 && input.pixels.byteLength === input.pixels.buffer.byteLength ? input.pixels : input.pixels.slice()
+  // The worker gets its own copy (a memcpy of the page): if it fails, the inline fallback below still
+  // has the page. Handing the buffer over would leave the fallback with an empty bitmap.
+  const pixels = input.pixels.slice()
   let ranked: Array<[Rotation, number]>
   try {
     ranked = (await ask<{ ranked: Array<[Rotation, number]> }>(`${id}`, { id, op: 'prepare', pixels: pixels.buffer, width: input.width, height: input.height, maxLines }, [pixels.buffer])).ranked

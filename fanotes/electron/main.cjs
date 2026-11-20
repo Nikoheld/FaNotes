@@ -34,7 +34,7 @@ const {
 // Ozone is chosen in Chromium C++ before most JS runs. Mutate argv/env first.
 applyLinuxOzoneLaunchEnvironment()
 
-const { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, protocol, safeStorage, session, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, powerMonitor, protocol, safeStorage, session, shell } = require('electron')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
@@ -51,6 +51,7 @@ const { safeEntryName } = require('./entry-names.cjs')
 const { defaultPenOnlyForPlatform } = require('./ink-defaults.cjs')
 const { DEFAULT_TABLET_BUTTON_ACTIONS } = require('./tablet-buttons.cjs')
 const { sanitizeSettings: sanitizeStoredSettings } = require('./settings-sanitize.cjs')
+const diagnostics = require('./diagnostics.cjs')
 const { channelForPackagedVersion } = require('./releaseVersion.cjs')
 const { localizeDialogOptions, localizeText, resolveLanguage } = require('./i18n.cjs')
 const { installSecurityHeaders } = require('./content-security-policy.cjs')
@@ -217,16 +218,59 @@ if (singletonCleanup.removed.length) {
 
 process.on('unhandledRejection', (reason) => {
   console.error('FaNotes: unbehandelte Promise:', reason instanceof Error ? reason.stack ?? reason.message : reason)
+  diagnosticsService()?.recordMainException('unhandledRejection', reason)
 })
 process.on('uncaughtException', (error) => {
   console.error('FaNotes: unbehandelte Ausnahme:', error?.stack ?? error)
+  diagnosticsService()?.recordMainException('uncaughtException', error)
 })
 app.on('child-process-gone', (_event, details) => {
+  diagnosticsService()?.recordProcessGone('child-process-gone', details)
   if (!details || details.type === 'Utility') return
   console.warn(`FaNotes: Hilfsprozess beendet (${details.type}, ${details.reason}).`)
 })
 
+// Send data: created lazily so a crash during early startup can still be recorded (once settings load).
+let diagnosticsServiceInstance = null
+let startupMeasured = false
+function diagnosticsService() {
+  if (diagnosticsServiceInstance) return diagnosticsServiceInstance
+  try {
+    diagnosticsServiceInstance = diagnostics.createDiagnosticsService({
+      dir: app.getPath('userData'),
+      getSettings: () => currentSettings,
+      appInfo: () => ({ version: app.getVersion(), platform: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch, language: String(currentSettings.uiLanguage === 'system' ? app.getLocale() : currentSettings.uiLanguage).slice(0, 2) }),
+      appRoots: [app.getAppPath(), __dirname],
+      isOnline: () => net.isOnline(),
+      isIdle: () => {
+        try {
+          if (powerMonitor.getSystemIdleTime() >= diagnostics.IDLE_SECONDS) return true
+        } catch { /* not available before ready */ }
+        return !BrowserWindow.getAllWindows().some((window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized() && window.isFocused())
+      },
+      memory: () => {
+        const metrics = app.getAppMetrics()
+        const mb = (kb) => Math.round(kb / 1024 / 10) * 10
+        return {
+          processes: metrics.length,
+          totalMb: mb(metrics.reduce((sum, item) => sum + (item.memory?.workingSetSize ?? 0), 0)),
+          mainRssMb: mb(process.memoryUsage().rss / 1024),
+        }
+      },
+      post: (url, body, headers, signal) => net.fetch(url, { method: 'POST', headers, body, signal, redirect: 'error', cache: 'no-store', credentials: 'omit' }),
+    })
+  } catch (error) {
+    console.warn('FaNotes: Diagnose konnte nicht gestartet werden:', error?.message ?? error)
+  }
+  return diagnosticsServiceInstance
+}
+
 const IPC = Object.freeze({
+  diagnosticsRecord: 'fanotes:diagnostics-record',
+  diagnosticsStatus: 'fanotes:diagnostics-status',
+  diagnosticsPreview: 'fanotes:diagnostics-preview',
+  diagnosticsResetId: 'fanotes:diagnostics-reset-id',
+  diagnosticsDeleteRemote: 'fanotes:diagnostics-delete-remote',
   handwritingLearning: 'fanotes:handwriting-learning',
   bootstrap: 'fanotes:bootstrap',
   rendererReady: 'fanotes:renderer-ready',
@@ -243,6 +287,8 @@ const IPC = Object.freeze({
   writePdfOcr: 'fanotes:write-pdf-ocr',
   readPageText: 'fanotes:read-page-text',
   writePageText: 'fanotes:write-page-text',
+  recognizeIndexLine: 'fanotes:recognize-index-line',
+  getOcrIndexInfo: 'fanotes:get-ocr-index-info',
   createNote: 'fanotes:create-note',
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
@@ -412,8 +458,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   experimentalRemoteSupport: false,
   experimentalNoteBackup: false,
   experimentalSendData: false,
-  diagnosticsUsage: false,
-  diagnosticsLogs: false,
+  ...diagnostics.DIAGNOSTICS_SETTING_DEFAULTS,
   lastOpenNotePath: '',
   dashboardLayout: '',
   homeworkApiChannelId: '',
@@ -849,6 +894,26 @@ async function recognizeInkLine(request) {
     model: request.model === 'personal' ? 'personal' : 'base',
   })
   return { logits: result.logits, dims: result.dims, engine: result.engine }
+}
+
+let ocrIndexHost = null
+function getOcrIndexHost() {
+  if (ocrIndexHost) return ocrIndexHost
+  const { createOcrHost } = require('./ocr-host.cjs')
+  ocrIndexHost = createOcrHost({
+    BrowserWindow,
+    ipcMain,
+    pagePath: () => path.join(__dirname, '..', 'dist', 'ocr-host.html'),
+    devUrl: () => trustedDevUrl(),
+    preload: path.join(__dirname, 'ocr-host-preload.cjs'),
+    configuredWorkers: () => Number(currentSettings.ocrThreadLimit),
+    onBattery: () => { try { return powerMonitor.isOnBatteryPower() } catch { return false } },
+    keepAliveMs: () => {
+      const configured = Number(currentSettings.ocrModelKeepAliveSeconds)
+      return Number.isSafeInteger(configured) && configured >= 0 && configured <= 600 ? Math.max(1, configured * 1_000) : 120_000
+    },
+  })
+  return ocrIndexHost
 }
 
 async function recognizeNativeOcrLine(request) {
@@ -1413,7 +1478,7 @@ function readConfig() {
             ? decodedSettings
             : { ...decodedSettings, recognitionMode: 'auto', lastRecognitionMode: previousMode }
           const sanitized = sanitizeSettings(settingsCandidate)
-          currentSettings = applyExperimentalHandwritingGate(sanitized)
+          currentSettings = diagnostics.migrateDiagnosticsSettings(applyExperimentalHandwritingGate(sanitized))
           applyThemeToShell(currentSettings.theme)
           if (plaintextSecretsNeedScrub) {
             plaintextSecretsNeedScrub = false
@@ -1422,6 +1487,7 @@ function readConfig() {
           if (
             currentSettings.experimentalHandwritingToTextSeenVersion
             !== sanitized.experimentalHandwritingToTextSeenVersion
+            || currentSettings.diagnosticsSettingsVersion !== sanitized.diagnosticsSettingsVersion
           ) {
             void persistConfig()
           }
@@ -1444,6 +1510,9 @@ function readConfig() {
           console.warn('FaNotes-Konfiguration konnte nicht gelesen werden:', error?.message ?? error)
         }
       }
+      // A fresh install has no config yet: the same one-time migration gives it the "on" default.
+      currentSettings = diagnostics.migrateDiagnosticsSettings(currentSettings)
+      diagnosticsService()?.applySettings(currentSettings)
     })()
   }
   return configLoadPromise
@@ -3827,6 +3896,8 @@ async function coordinateWithBackgroundUpdater() {
 
 async function reportAnonymousDesktopAppOpen() {
   if (!app.isPackaged || !['linux', 'win32'].includes(process.platform)) return
+  // The anonymous launch counter is a usage statistic: it follows the "Daten senden" switches.
+  if (!diagnostics.policyFromSettings(currentSettings).usage) return
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 8000)
   timeout.unref?.()
@@ -3914,8 +3985,21 @@ function registerIpcHandlers() {
     return data
   })
 
+  ipcMain.on(IPC.diagnosticsRecord, (event, payload) => {
+    if (!isTrustedIpcSender(event)) return
+    diagnosticsService()?.recordRenderer(payload)
+  })
+  handle(IPC.diagnosticsStatus, async () => { await ensureBootstrap(); return diagnosticsService()?.status() ?? null })
+  handle(IPC.diagnosticsPreview, async () => { await ensureBootstrap(); return diagnosticsService()?.preview() ?? null })
+  handle(IPC.diagnosticsResetId, async () => diagnosticsService()?.resetInstallId() ?? '')
+  handle(IPC.diagnosticsDeleteRemote, async () => diagnosticsService()?.deleteRemote((url) => net.fetch(url, { method: 'DELETE', redirect: 'error', cache: 'no-store', credentials: 'omit' })) ?? false)
+
   ipcMain.on(IPC.rendererReady, (event) => {
     if (!isTrustedIpcSender(event)) return
+    if (!startupMeasured) {
+      startupMeasured = true
+      diagnosticsService()?.recordStartup(process.uptime() * 1000)
+    }
     schedulePostStartupWork()
     deliverShareOpen()
   })
@@ -5767,6 +5851,8 @@ function registerIpcHandlers() {
   handle(IPC.recognizeNativeHandwritingLine, async (_event, request) => recognizeNativeOcrLine(request))
 
   handle(IPC.recognizeInkLine, async (_event, request) => recognizeInkLine(request))
+  handle(IPC.recognizeIndexLine, async (_event, request) => getOcrIndexHost().recognize(request))
+  handle(IPC.getOcrIndexInfo, async () => ({ workers: getOcrIndexHost().workers() }))
   handle(IPC.inkPersonalModel, async (_event, request) => {
     const action = isPlainObject(request) ? request.action : null
     const service = getInkOcr()
@@ -5857,7 +5943,7 @@ function registerIpcHandlers() {
     await ensureBootstrap()
     return queueConfigMutation(async () => {
       const previousSettings = { ...currentSettings }
-      const nextSettings = sanitizeSettings(settings, previousSettings)
+      const nextSettings = diagnostics.keepDiagnosticsVersion(sanitizeSettings(settings, previousSettings), previousSettings)
       const clearProtectedSecrets = options?.clearProtectedSecrets === true
       try {
         await persistConfig({
@@ -5866,6 +5952,7 @@ function registerIpcHandlers() {
           preserveProtectedSecrets: !clearProtectedSecrets,
         })
         currentSettings = nextSettings
+        diagnosticsService()?.applySettings(currentSettings)
         applyThemeToShell(currentSettings.theme)
         void localMcpHost().apply(currentSettings).catch(() => {})
         if (clearProtectedSecrets) {
@@ -6202,6 +6289,7 @@ async function createWindow() {
   let lastRendererCrashAt = 0
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     if (!details || details.reason === 'clean-exit') return
+    diagnosticsService()?.recordProcessGone('render-process-gone', details)
     console.error(`FaNotes: Renderer beendet (${details.reason}, exit=${details.exitCode ?? '?'}).`)
     if (!mainWindow || mainWindow.isDestroyed()) return
     const now = Date.now()
@@ -6242,6 +6330,7 @@ async function createWindow() {
   mainWindow.on('closed', () => {
     invalidateCloseWarningState()
     closeSubjectBookPopoutWindow()
+    ocrIndexHost?.close()
     mainWindow = null
   })
 
@@ -6326,8 +6415,10 @@ app.on('will-quit', () => {
 })
 
 app.on('before-quit', () => {
+  try { diagnosticsServiceInstance?.flush() } catch { /* best effort */ }
   void localMcpHostInstance?.stop()
   stopNativeOcr(new Error('FaNotes wird beendet.'))
   inkOcr?.stop()
+  ocrIndexHost?.close()
   updateManager?.stop()
 })

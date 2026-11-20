@@ -4,9 +4,11 @@
  * not typing or writing, and a small event bus for progress and page reveals.
  */
 import type { DocIndex, SearchResult } from './docIndex'
-import { createBrowserExtractor, listSearchDocuments, type DocSearchHostApi } from './extract'
+import { createBrowserExtractor, listSearchDocuments, OCR_ENGINE_ID, type DocSearchHostApi } from './extract'
+import { useExtendedDesktopOcrModel } from '../resourceLimits'
 import { DocIndexer, type IndexerProgress } from './indexer'
 import { openDocSearchStore, vaultKeyFor } from './store'
+import { openOcrCache, type OcrCacheStore } from './ocrCache'
 
 /** Input this recent means "the user is working"; indexing waits. */
 const QUIET_MS = 1500
@@ -28,17 +30,36 @@ const installActivityTracking = () => {
 const sleep = (ms: number) => new Promise<void>((resolve) => { window.setTimeout(resolve, ms) })
 
 const LOW_BATTERY_LEVEL = 0.2
-const LOW_BATTERY_RECHECK_MS = 60_000
-type BatteryLike = { charging: boolean; level: number }
-const onLowBattery = async () => {
+type BatteryLike = EventTarget & { charging: boolean; level: number }
+const powerWaiters = new Set<() => void>()
+const getBattery = async () => {
   try {
-    const getBattery = (navigator as Navigator & { getBattery?: () => Promise<BatteryLike> }).getBattery
-    if (typeof getBattery !== 'function') return false
-    const battery = await getBattery.call(navigator)
-    return !battery.charging && battery.level < LOW_BATTERY_LEVEL
+    const read = (navigator as Navigator & { getBattery?: () => Promise<BatteryLike> }).getBattery
+    return typeof read === 'function' ? await read.call(navigator) : null
   } catch {
-    return false
+    return null
   }
+}
+/**
+ * On a low battery, background OCR waits until the device is charging or the level recovers. The wait
+ * is driven by the battery's own change events; nothing polls.
+ */
+const waitForPower = async () => {
+  const battery = await getBattery()
+  const low = () => Boolean(battery && !battery.charging && battery.level < LOW_BATTERY_LEVEL)
+  if (!battery || !low()) return
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      battery.removeEventListener('chargingchange', check)
+      battery.removeEventListener('levelchange', check)
+      powerWaiters.delete(done)
+      resolve()
+    }
+    const check = () => { if (!low()) done() }
+    battery.addEventListener('chargingchange', check)
+    battery.addEventListener('levelchange', check)
+    powerWaiters.add(done)
+  })
 }
 
 const idle = () => new Promise<void>((resolve) => {
@@ -48,6 +69,31 @@ const idle = () => new Promise<void>((resolve) => {
 
 /** Changes on every app start, so each story is read once per session even if it changed while the app was closed. */
 const SESSION = Math.random().toString(36).slice(2, 10)
+
+/** Lines read in parallel by the OCR host (1 until the host reports its worker count). */
+let hostWorkers = 1
+let hostBrokenUntil = 0
+let cachePromise: Promise<OcrCacheStore | null> | null = null
+const ocrCache = () => (cachePromise ??= openOcrCache().catch(() => null))
+
+/** Part of every cache key: the model that reads the page changes the text. */
+const ocrEngineKey = (platform: string) => `${OCR_ENGINE_ID}/${platform === 'web' ? 'web' : useExtendedDesktopOcrModel() ? 'desktop-extended' : 'desktop-compact'}`
+
+/**
+ * Background OCR reads lines in the desktop OCR host (own low-priority process). If the host cannot run,
+ * this window's own worker does it, as before.
+ */
+const recognizeLine = async (pixels: Uint8ClampedArray, width: number, height: number) => {
+  const host = window.fanotes?.recognizeIndexLine
+  if (host && Date.now() >= hostBrokenUntil) {
+    try {
+      return await host({ pixels, width, height })
+    } catch {
+      hostBrokenUntil = Date.now() + 60_000
+    }
+  }
+  return (await import('../trocrClient')).recognizeTrocrLine(pixels, width, height)
+}
 
 class DocSearchService {
   private indexer: DocIndexer | null = null
@@ -69,6 +115,7 @@ class DocSearchService {
     const key = await vaultKeyFor(input.platform, input.vaultPath)
     if (key === this.vaultKey && this.indexer) { this.scheduleSoon(0); return }
     this.stop()
+    void input.api.getOcrIndexInfo?.().then((info) => { hostWorkers = Math.max(1, Math.min(4, info.workers)) }).catch(() => undefined)
     const generation = ++this.generation
     const store = await openDocSearchStore(key)
     if (generation !== this.generation) { store.close(); return }
@@ -81,7 +128,10 @@ class DocSearchService {
       extractor: createBrowserExtractor({
         api,
         // The TrOCR client (ONNX runtime glue) loads on the first scanned page, not at startup.
-        recognize: async (pixels, width, height) => (await import('../trocrClient')).recognizeTrocrLine(pixels, width, height),
+        recognize: recognizeLine,
+        cache: () => ocrCache(),
+        engine: ocrEngineKey(input.platform),
+        concurrency: () => hostWorkers,
         producer: `fanotes-${input.platform}/${input.version ?? 'dev'} doc-search/1`,
       }),
       gate: async () => {
@@ -93,8 +143,7 @@ class DocSearchService {
           await sleep(QUIET_MS - quietFor + 50)
         }
         await idle()
-        // On a low battery, background OCR waits until the device is charging (or the level recovers).
-        while (generation === this.generation && await onLowBattery()) await sleep(LOW_BATTERY_RECHECK_MS)
+        if (generation === this.generation) await waitForPower()
       },
       onProgress: (progress) => {
         if (generation !== this.generation) return
@@ -109,6 +158,7 @@ class DocSearchService {
   /** Closes the current vault's index (vault switch, reset, sign-out of the app). */
   stop() {
     this.generation += 1
+    for (const release of [...powerWaiters]) release()
     this.indexer?.cancel()
     this.indexer = null
     this.closeStore?.()
