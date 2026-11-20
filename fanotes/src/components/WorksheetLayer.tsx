@@ -6,7 +6,7 @@ import type { WorksheetDocument, WorksheetHighlight, WorksheetTextBox } from '..
 import { pdfJsDocumentOptions } from '../lib/pdfDocument'
 import { WORKSHEET_INKING_CLASS } from '../lib/pdfInkHit'
 import { createPdfPagePainter, type PdfPagePainter } from '../lib/pdfPagePainter'
-import { resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
+import { resolvePaperZoomScroller, SHEET_ZOOM_REPAINT_DEBOUNCE_MS, watchSheetZoom } from '../lib/paperView'
 import { HAND_GESTURE_CLAIM } from '../../../src/lib/handGestures'
 
 export type WorksheetLayerHandle = {
@@ -175,7 +175,14 @@ function PdfPageCanvas({
     }
     const observer = new ResizeObserver(scheduleLayout)
     observer.observe(host)
-    const stopZoom = watchSheetZoom(host, scheduleLayout)
+    const scheduleZoom = () => {
+      if (layoutTimer) window.clearTimeout(layoutTimer)
+      layoutTimer = window.setTimeout(() => {
+        layoutTimer = 0
+        paint()
+      }, SHEET_ZOOM_REPAINT_DEBOUNCE_MS)
+    }
+    const stopZoom = watchSheetZoom(host, scheduleZoom)
     const scroller = resolvePaperZoomScroller(host)
     scroller?.addEventListener('scroll', scheduleScroll, { passive: true })
     return () => {

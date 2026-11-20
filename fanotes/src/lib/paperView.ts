@@ -61,6 +61,31 @@ export const zoomFactorFromWheel = (deltaY: number, deltaMode: number, speed: nu
   return Math.exp(-clamped * 0.00095 * zoomSensitivityFromSpeed(speed))
 }
 
+/**
+ * A trackpad pinch reaches the page as many small ctrl+wheel events with
+ * fractional pixel deltas. Chromium builds them as `deltaY = -100 * ln(scale)`,
+ * so `exp(-deltaY / 100)` is the finger scale itself. Mouse notches are whole
+ * multiples of a line (100, 120, 53 px …) and keep the notch curve above;
+ * feeding a pinch through that curve zoomed about a tenth of the finger spread.
+ */
+export const isPinchZoomWheel = (event: { deltaY: number; deltaMode: number }) => (
+  event.deltaMode === 0 && Math.abs(event.deltaY) < 50 && !Number.isInteger(event.deltaY)
+)
+
+export const zoomFactorFromPinchWheel = (deltaY: number) => (
+  Math.exp(-Math.max(-50, Math.min(50, deltaY)) / 100)
+)
+
+/** Notch or pinch: the zoom factor one ctrl+wheel event asks for. */
+export const zoomFactorFromWheelEvent = (
+  event: { deltaY: number; deltaMode: number },
+  speed: number,
+) => (
+  isPinchZoomWheel(event)
+    ? zoomFactorFromPinchWheel(event.deltaY)
+    : zoomFactorFromWheel(event.deltaY, event.deltaMode, speed)
+)
+
 /** Ctrl/Meta+wheel and Chromium's trackpad pinch (also reported as ctrl+wheel). */
 export const isSheetZoomWheel = (event: { ctrlKey?: boolean; metaKey?: boolean }) => (
   Boolean(event.ctrlKey || event.metaKey)
@@ -212,6 +237,14 @@ export const readUsedSheetZoom = (element: HTMLElement | null): number => {
   }
   return 1
 }
+
+/**
+ * Re-raster delay after the camera zoom changed. The sheet writes its zoom
+ * once per gesture (the preview before it is a compositor scale), so this only
+ * folds a burst of programmatic steps; the 180 ms resize debounce it used made
+ * the PDF stay soft for that long after every zoom.
+ */
+export const SHEET_ZOOM_REPAINT_DEBOUNCE_MS = 32
 
 /** CSS `zoom` does not resize layout boxes — re-raster PDF/ink when the camera moves. */
 export const watchSheetZoom = (element: HTMLElement, onChange: () => void) => {
@@ -377,6 +410,116 @@ export const restorePaperAnchor = (scroller: HTMLElement, paper: HTMLElement | n
 }
 
 /**
+ * Keeps the text under the zoom origin in place while the camera zooms.
+ *
+ * CodeMirror lays out only the lines near the viewport and estimates the
+ * rest. A zoom (the compositor preview, then the CSS zoom commit) makes it
+ * re-measure, and the estimate above the origin can change by hundreds of px:
+ * the line under the cursor jumped about 500 px when a wheel zoom on a long
+ * note settled. The note scroller is the paper view, not CodeMirror's own, so
+ * CodeMirror cannot anchor its scroll, and the paper view turns Chromium's
+ * scroll anchoring off (`overflow-anchor: none`).
+ *
+ * The guard records the line's layout offset inside the sheet plane. That
+ * offset is in unzoomed px and does not change when anything scrolls, only
+ * when the text above it re-lays out, so a pan or the stay-put scroll is never
+ * mistaken for a shift. The owner moves the camera by the shift (see
+ * `scrollPaperByContentShift`; a live preview also moves its scale origin).
+ * A ResizeObserver on the text checks again after CodeMirror's own measure,
+ * before the frame is painted. Shifts under a pixel are CodeMirror measuring
+ * a scaled line slightly differently each frame; following them only made
+ * the camera shimmer.
+ */
+export type PaperContentGuard = {
+  readonly element: HTMLElement
+  /** Correct a layout shift of the anchored line. */
+  check: () => void
+  /** Keep checking for `frames` more animation frames, then stop. */
+  release: (frames?: number) => void
+}
+
+const CONTENT_ANCHOR_SELECTOR = '.cm-line'
+
+/** Frames after a commit in which CodeMirror may still re-measure. */
+export const PAPER_CONTENT_GUARD_FRAMES = 8
+/** Layout px a line must move before the camera follows it. */
+export const PAPER_CONTENT_GUARD_MIN_SHIFT = 1.5
+
+/** Settled camera: a layout shift of `shift` px is `shift × zoom` px on screen. */
+export const scrollPaperByContentShift = (scroller: HTMLElement, shift: number, zoom: number) => {
+  scroller.scrollTop += shift * Math.max(0.01, zoom)
+}
+
+const offsetWithin = (node: HTMLElement, stop: HTMLElement | null) => {
+  let top = 0
+  let current: HTMLElement | null = node
+  while (current && current !== stop) {
+    top += current.offsetTop
+    const parent = current.offsetParent as HTMLElement | null
+    if (!parent || (stop && !stop.contains(parent))) break
+    current = parent
+  }
+  return top
+}
+
+export const startPaperContentGuard = (
+  scroller: HTMLElement | null,
+  origin: { x: number; y: number } | undefined,
+  /** Move the camera so the line is back where it was; `shift` is layout px. */
+  onShift: (shift: number) => void,
+): PaperContentGuard | null => {
+  if (!scroller || !origin || typeof document === 'undefined' || typeof document.elementsFromPoint !== 'function') return null
+  // Through the ink canvas: in pen mode the text under it is still what moves.
+  let element: HTMLElement | null = null
+  for (const hit of document.elementsFromPoint(origin.x, origin.y)) {
+    element = hit.closest<HTMLElement>(CONTENT_ANCHOR_SELECTOR)
+    if (element) break
+  }
+  if (!element || !scroller.contains(element)) return null
+  const line = element
+  const plane = line.closest<HTMLElement>('.paper-sheet-plane')
+  let top = offsetWithin(line, plane)
+  let stopped = false
+  let frame = 0
+  const check = () => {
+    if (stopped || !line.isConnected) return
+    const next = offsetWithin(line, plane)
+    const shift = next - top
+    if (Math.abs(shift) < PAPER_CONTENT_GUARD_MIN_SHIFT) return
+    top = next
+    onShift(shift)
+  }
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(check) : null
+  if (line.parentElement) observer?.observe(line.parentElement)
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    if (frame) window.cancelAnimationFrame(frame)
+    frame = 0
+    observer?.disconnect()
+  }
+  const release = (frames = PAPER_CONTENT_GUARD_FRAMES) => {
+    if (stopped) return
+    if (frame) window.cancelAnimationFrame(frame)
+    frame = 0
+    if (frames <= 0) {
+      stop()
+      return
+    }
+    let left = frames
+    const tick = () => {
+      frame = 0
+      check()
+      left -= 1
+      if (left > 0 && !stopped) frame = window.requestAnimationFrame(tick)
+      else stop()
+    }
+    frame = window.requestAnimationFrame(tick)
+  }
+  return { element: line, check, release }
+}
+
+/**
  * Do not clamp away a just-restored camera. CSS zoom can leave scrollWidth
  * stale while the visual sheet is already larger; shrinking then jumps writing.
  */
@@ -456,16 +599,55 @@ const pageBoxToCentre = (scroller: HTMLElement, sheet: HTMLElement | null) => (
   ?? resolveWritePage(sheet)
 )
 
-export const centrePageInViewportIfFits = (scroller: HTMLElement | null, sheet: HTMLElement | null) => {
-  if (!scroller) return false
+const centredScrollLeftInViewport = (scroller: HTMLElement, sheet: HTMLElement | null) => {
   const page = pageBoxToCentre(scroller, sheet)
-  if (!page) return false
-  const pageRect = page.getBoundingClientRect()
-  const scrollerRect = scroller.getBoundingClientRect()
-  const next = centredScrollLeftForPage(scroller, scrollerRect.left, pageRect)
-  if (Math.abs(next - scroller.scrollLeft) < 0.5) return false
+  if (!page) return null
+  const next = centredScrollLeftForPage(scroller, scroller.getBoundingClientRect().left, page.getBoundingClientRect())
+  return Math.abs(next - scroller.scrollLeft) < 0.5 ? null : next
+}
+
+/** Scrollers easing to the centre; a per-scroll re-centre must not snap them. */
+const centreGliding = new WeakSet<HTMLElement>()
+
+export const centrePageInViewportIfFits = (scroller: HTMLElement | null, sheet: HTMLElement | null) => {
+  if (!scroller || centreGliding.has(scroller)) return false
+  const next = centredScrollLeftInViewport(scroller, sheet)
+  if (next === null) return false
   scroller.scrollLeft = next
   return true
+}
+
+/** Length of the glide that centres a page after a zoom gesture. */
+export const PAPER_CENTRE_GLIDE_MS = 180
+
+/**
+ * Ease the camera to `target` instead of snapping. A zoom-out that leaves the
+ * page narrower than the view centres it; snapping there after the gesture
+ * moved the page 35–100 px in one frame. Any scroll that is not ours ends it.
+ */
+export const glideScrollLeft = (scroller: HTMLElement, target: number, ms = PAPER_CENTRE_GLIDE_MS) => {
+  const start = scroller.scrollLeft
+  const delta = target - start
+  if (Math.abs(delta) < 0.5 || typeof window === 'undefined') return
+  // The clock starts on the first frame: the commit frame itself is long
+  // (reflow and re-raster), and counting it skipped most of the glide.
+  let t0 = -1
+  let expected = start
+  centreGliding.add(scroller)
+  const step = (now: number) => {
+    if (Math.abs(scroller.scrollLeft - expected) > 1) {
+      centreGliding.delete(scroller)
+      return
+    }
+    if (t0 < 0) t0 = now
+    const k = Math.min(1, Math.max(0, (now - t0 + 16) / ms))
+    const eased = 1 - (1 - k) ** 3
+    scroller.scrollLeft = start + delta * eased
+    expected = scroller.scrollLeft
+    if (k < 1) window.requestAnimationFrame(step)
+    else centreGliding.delete(scroller)
+  }
+  window.requestAnimationFrame(step)
 }
 
 /**
@@ -479,6 +661,13 @@ export const centrePageInViewportIfFits = (scroller: HTMLElement | null, sheet: 
  * long, then one sharp camera is committed.
  */
 export const PAPER_ZOOM_GESTURE_SETTLE_MS = 240
+/** A trackpad pinch streams a wheel event every frame, so a short pause ends it. */
+export const PAPER_ZOOM_PINCH_SETTLE_MS = 150
+/**
+ * A touch pinch commits when the fingers lift. Resting fingers mid-pinch must
+ * not commit (a reflow and re-raster while the hand is still on the glass).
+ */
+export const PAPER_ZOOM_TOUCH_SETTLE_MS = 900
 
 /**
  * A wheel or pinch burst. `zoom` is the camera the gesture has reached;
@@ -509,6 +698,28 @@ export const beginPaperZoomGesture = (
     origin,
     anchorLocalX: anchor.localX,
     anchorLocalY: anchor.localY,
+  }
+}
+
+/**
+ * Where the preview anchor is on screen now. A two-finger pan scrolls the
+ * scaled plane, so this is not the origin the gesture started at. The commit
+ * must zoom around this point: around the start origin it jumped by
+ * pan × (scale − 1). Read before the preview transform is cleared.
+ */
+export const paperZoomGestureScreenAnchor = (
+  plane: HTMLElement | null,
+  gesture: Pick<PaperZoomGesture, 'zoom' | 'anchorLocalX' | 'anchorLocalY' | 'origin'>,
+) => {
+  if (!plane) return gesture.origin
+  const rect = plane.getBoundingClientRect()
+  if (!(rect.width > 0) || !(rect.height > 0)) return gesture.origin
+  // With transform-origin O (unzoomed px) and scale s on CSS zoom b, local
+  // point P is at layoutLeft + O·b + (P − O)·b·s, so O itself is at
+  // rect.left + O·b·s = rect.left + O·zoom.
+  return {
+    x: rect.left + gesture.anchorLocalX * gesture.zoom,
+    y: rect.top + gesture.anchorLocalY * gesture.zoom,
   }
 }
 
@@ -620,15 +831,26 @@ export const applyPaperZoomStayPut = (
   nextZoom: number,
   origin?: { x: number; y: number },
   applyView?: (next: PaperViewSnapshot) => void,
+  options: {
+    /** A zoom gesture hands over the guard it started with its preview. */
+    guard?: PaperContentGuard | null
+    /** Ease a page that now fits to the middle instead of snapping it there. */
+    glideCentre?: boolean
+  } = {},
 ) => {
   const zoom = clampViewZoom(nextZoom)
   const next = zoomAroundPoint(view, zoom)
+  const { guard } = options
   if (!scroller || next === view) {
+    guard?.release(0)
     return { view, anchor: null as PaperAnchor | null, zoom }
   }
   const sheet = resolvePaperViewTarget(paper, scroller)
   lockPaperViewportScrollStayPut(scroller)
   const anchor = capturePaperAnchor(scroller, sheet, origin)
+  const content = guard === undefined
+    ? startPaperContentGuard(scroller, origin, (shift) => scrollPaperByContentShift(scroller, shift, readUsedSheetZoom(sheet)))
+    : guard
   if (applyView) applyView(next)
   else applyPaperViewToElements(paper, scroller, next)
   if (sheet) void sheet.offsetWidth
@@ -637,7 +859,14 @@ export const applyPaperZoomStayPut = (
   restorePaperAnchor(scroller, sheet, anchor)
   clampPaperScrollerToZoomedSheet(scroller, sheet)
   restorePaperAnchor(scroller, sheet, anchor)
-  centrePageInViewportIfFits(scroller, sheet)
+  if (options.glideCentre) {
+    const centred = centredScrollLeftInViewport(scroller, sheet)
+    if (centred !== null) glideScrollLeft(scroller, centred)
+  } else {
+    centrePageInViewportIfFits(scroller, sheet)
+  }
+  content?.check()
+  content?.release()
   return { view: next, anchor, zoom }
 }
 

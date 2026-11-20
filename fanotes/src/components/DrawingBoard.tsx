@@ -456,11 +456,13 @@ type InkWindow = { y0: number; y1: number }
 /** Final slice check after the last scroll event, in case scrollend never fires. */
 const INK_WINDOW_IDLE_MS = 320
 /**
- * A wheel zoom arrives as a burst of steps ~16–50 ms apart. The ink bitmap is
- * only re-sliced and re-rasterised once no step came for this long; in between,
- * the sheet's CSS zoom scales the existing bitmap.
+ * The ink bitmap is re-sliced and re-rasterised once no camera zoom came for
+ * this long; in between, the sheet's CSS zoom scales the existing bitmap. The
+ * paper view writes the zoom once per gesture (its preview is a compositor
+ * scale), so this only folds programmatic bursts; a longer wait just kept the
+ * ink soft after every zoom.
  */
-const ZOOM_SETTLE_MS = 160
+const ZOOM_SETTLE_MS = 48
 
 /**
  * Visible sheet range in paper layout px. Client rects carry the plane's CSS

@@ -53,11 +53,16 @@ export type HandGestureHandlers = {
   onRotate?: (degrees: number, origin: { x: number; y: number }) => void
   onSwipe?: (direction: SwipeDirection, origin: { x: number; y: number; target: EventTarget | null }) => void
   /**
-   * The note sheet owns two-finger motion because the ink canvas sets
-   * `touch-action: none`. GlyphenWerk leaves one- and two-finger pans to the
+   * The note sheet owns two-finger motion: on the ink canvas because it sets
+   * `touch-action: none`, and over text or a PDF page because the sheet
+   * cancels the browser's touch moves while two fingers are down. Otherwise
+   * Chromium starts its own pan or pinch, cancels the pointers and the sheet
+   * zoom stops part-way. GlyphenWerk leaves one- and two-finger pans to the
    * browser and only applies a pinch.
    */
   captureNavigation?: boolean
+  /** The last finger of a two-finger gesture lifted (captureNavigation only). */
+  onGestureEnd?: () => void
 }
 
 const TEXT_FIELD = 'input, textarea, select, [contenteditable="true"]'
@@ -107,6 +112,28 @@ export const handGestureSample = (state: HandGestureState, sample: HandGestureSa
   const points = new Map(state.points)
   if (sample.phase === 'up' || sample.phase === 'cancel') points.delete(sample.id)
   else points.set(sample.id, { x: sample.x, y: sample.y })
+  return evaluateHandGesture(state, points)
+}
+
+/**
+ * Every finger's latest position from one frame, sampled together. Each
+ * pointermove alone moves one finger while the others wait for their own
+ * event, so a straight two-finger pan read as a pinch and its reverse on
+ * every frame (and a pan never looked clean enough to coast).
+ */
+export const handGestureMoveBatch = (
+  state: HandGestureState,
+  moves: ReadonlyMap<number, { x: number; y: number }>,
+): HandGestureUpdate => {
+  const points = new Map(state.points)
+  for (const [id, point] of moves) if (points.has(id)) points.set(id, point)
+  return evaluateHandGesture(state, points)
+}
+
+const evaluateHandGesture = (
+  state: HandGestureState,
+  points: Map<number, { x: number; y: number }>,
+): HandGestureUpdate => {
   const live = points.size === 0 ? false : points.size >= 2 || state.live
   const justClaimed = live && !state.live
   const geom = geometry(points)
@@ -216,9 +243,50 @@ export const bindHandGestures = (element: HTMLElement, handlers: HandGestureHand
   let swipeStart: { id: number; x: number; y: number; target: EventTarget | null } | null = null
   let suppressClick = false
   let suppressTimer = 0
+  /** This touch sequence has had two fingers down on a navigating sheet. */
+  let multiTouch = false
+  // A navigating sheet samples a live gesture once per frame (see
+  // handGestureMoveBatch). Chromium already delivers touch moves aligned to
+  // animation frames, so this adds no latency.
+  const pendingMoves = new Map<number, { x: number; y: number }>()
+  let pendingTarget: EventTarget | null = null
+  let moveFrame = 0
+  const emitFrame = (frame: HandGestureFrame | null, ownsTouch: boolean) => {
+    // Pinch before pan: the camera marks the zoom preview before the pan
+    // writes scroll, so that scroll does not measure the sheet.
+    if (frame && frame.pinch !== 1) handlers.onPinch?.(frame.pinch, { x: frame.originX, y: frame.originY })
+    if (frame && ownsTouch && (frame.panX || frame.panY)) handlers.onPan?.(frame.panX, frame.panY)
+    if (frame && frame.rotateDeg) handlers.onRotate?.(frame.rotateDeg, { x: frame.originX, y: frame.originY })
+  }
+  const flushMoves = () => {
+    if (moveFrame) window.cancelAnimationFrame(moveFrame)
+    moveFrame = 0
+    if (!pendingMoves.size) return
+    const update = handGestureMoveBatch(state, pendingMoves)
+    pendingMoves.clear()
+    state = update.state
+    if (penContactHot(element)) return
+    emitFrame(update.frame, multiTouch || touchActionNone(pendingTarget))
+  }
   const onPointer = (event: PointerEvent) => {
     lastPoint = { x: event.clientX, y: event.clientY }
     if (event.pointerType !== 'touch') return
+    if (
+      handlers.captureNavigation
+      && event.type === 'pointermove'
+      && state.live
+      && state.points.size >= 2
+      && state.points.has(event.pointerId)
+    ) {
+      pendingMoves.set(event.pointerId, { x: event.clientX, y: event.clientY })
+      pendingTarget = event.target
+      if (event.cancelable) event.preventDefault()
+      event.stopPropagation()
+      if (!moveFrame) moveFrame = window.requestAnimationFrame(flushMoves)
+      return
+    }
+    // A finger down or up changes the set: apply this frame's moves first.
+    flushMoves()
     const phase: HandGesturePhase = event.type === 'pointerdown'
       ? 'down'
       : event.type === 'pointermove'
@@ -251,18 +319,17 @@ export const bindHandGestures = (element: HTMLElement, handlers: HandGestureHand
       element.dispatchEvent(new CustomEvent(HAND_GESTURE_CLAIM, { bubbles: true, detail: { root: element } }))
     }
     if (handlers.captureNavigation && update.swallow) {
-      const ownsTouch = touchActionNone(event.target)
+      // `multiTouch` is set by the touch listener below when it cancels the
+      // browser's gesture, so the pan is ours wherever the fingers are.
+      const ownsTouch = multiTouch || touchActionNone(event.target)
       const frame = update.frame
       const manipulating = Boolean(frame && (frame.pinch !== 1 || frame.rotateDeg))
       if (ownsTouch || manipulating || update.justClaimed) {
         if (event.cancelable) event.preventDefault()
         event.stopPropagation()
       }
-      // Pinch before pan: the camera marks the zoom preview before the pan
-      // writes scroll, so that scroll does not measure the sheet.
-      if (frame && frame.pinch !== 1) handlers.onPinch?.(frame.pinch, { x: frame.originX, y: frame.originY })
-      if (frame && ownsTouch && (frame.panX || frame.panY)) handlers.onPan?.(frame.panX, frame.panY)
-      if (frame && frame.rotateDeg) handlers.onRotate?.(frame.rotateDeg, { x: frame.originX, y: frame.originY })
+      emitFrame(frame, ownsTouch)
+      if (!update.state.live) handlers.onGestureEnd?.()
       return
     }
     if (!handlers.captureNavigation && update.frame && update.frame.pinch !== 1 && handlers.onPinch) {
@@ -291,6 +358,17 @@ export const bindHandGestures = (element: HTMLElement, handlers: HandGestureHand
     }
     if ((phase === 'up' || phase === 'cancel') && swipeStart?.id === event.pointerId) swipeStart = null
   }
+  // Two or more fingers on a navigating sheet: keep Chromium from starting a
+  // pan or pinch of its own. One finger is left alone (text scroll stays
+  // native), and a palm next to a pen keeps its old handling.
+  const onTouch = (event: TouchEvent) => {
+    if (event.touches.length === 0) {
+      multiTouch = false
+      return
+    }
+    if (event.touches.length >= 2 && !penContactHot(element)) multiTouch = true
+    if (multiTouch && event.type === 'touchmove' && event.cancelable) event.preventDefault()
+  }
   const onClick = (event: MouseEvent) => {
     if (!suppressClick) return
     suppressClick = false
@@ -304,7 +382,21 @@ export const bindHandGestures = (element: HTMLElement, handlers: HandGestureHand
   element.addEventListener('pointerup', onPointer, listen)
   element.addEventListener('pointercancel', onPointer, listen)
   element.addEventListener('click', onClick, true)
+  const touchListen = { capture: true, passive: false } as const
+  if (handlers.captureNavigation) {
+    element.addEventListener('touchstart', onTouch, { capture: true, passive: true })
+    element.addEventListener('touchmove', onTouch, touchListen)
+    element.addEventListener('touchend', onTouch, { capture: true, passive: true })
+    element.addEventListener('touchcancel', onTouch, { capture: true, passive: true })
+  }
   return () => {
+    if (moveFrame) window.cancelAnimationFrame(moveFrame)
+    if (handlers.captureNavigation) {
+      element.removeEventListener('touchstart', onTouch, { capture: true })
+      element.removeEventListener('touchmove', onTouch, touchListen)
+      element.removeEventListener('touchend', onTouch, { capture: true })
+      element.removeEventListener('touchcancel', onTouch, { capture: true })
+    }
     if (suppressTimer) window.clearTimeout(suppressTimer)
     element.removeEventListener('pointerdown', onPointer, listen)
     element.removeEventListener('pointermove', onPointer, listen)

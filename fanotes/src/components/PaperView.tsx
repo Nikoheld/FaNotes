@@ -15,6 +15,8 @@ import {
   VIEW_ZOOM_MIN,
   PDF_PAGE_COLUMN_SELECTOR,
   PAPER_ZOOM_GESTURE_SETTLE_MS,
+  PAPER_ZOOM_PINCH_SETTLE_MS,
+  PAPER_ZOOM_TOUCH_SETTLE_MS,
   applyPaperViewToElements,
   applyPaperZoomGestureFrame,
   applyPaperZoomStayPut,
@@ -31,9 +33,15 @@ import {
   readSharedZoomMax,
   readSharedZoomSpeed,
   sharedPaperViewStore,
-  zoomFactorFromWheel,
+  isPinchZoomWheel,
+  paperZoomGestureScreenAnchor,
+  zoomFactorFromWheelEvent,
   zoomStepFromSpeed,
   isSheetZoomWheel,
+  paperZoomPreviewStyle,
+  scrollPaperByContentShift,
+  startPaperContentGuard,
+  type PaperContentGuard,
   resolvePaperViewTarget,
   sheetZoomStepFromDirection,
   stepPaperZoomGesture,
@@ -42,6 +50,12 @@ import {
   type PaperZoomGesture,
 } from '../lib/paperView'
 import { bindHandGestures, shouldTakeSheetZoom } from '../../../src/lib/handGestures'
+import {
+  fingerPanReleaseVelocity,
+  pushFingerPanSample,
+  stepFingerPanFling,
+  type FingerPanSample,
+} from '../lib/fingerPanFling'
 import { SCROLL_ROOM } from '../lib/noteCanvas'
 import {
   PAPER_VIEW_RESTORE_SETTLE_MS,
@@ -158,9 +172,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   const zoomGestureRef = useRef<PaperZoomGesture | null>(null)
   const zoomGestureTimerRef = useRef(0)
   const zoomGestureCommitFrameRef = useRef(0)
+  /** Quiet time before the preview commits: shorter for a trackpad pinch. */
+  const zoomGestureSettleMsRef = useRef(PAPER_ZOOM_GESTURE_SETTLE_MS)
   /** While set, scroll listeners must not measure the sheet. Stay-put already does. */
   const zoomGestureActiveRef = useRef(false)
   const zoomPlaneRef = useRef<HTMLElement | null>(null)
+  /** Keeps the text under the origin in place from the first preview frame to after the commit. */
+  const zoomContentGuardRef = useRef<PaperContentGuard | null>(null)
   const noteTextRef = useRef<HTMLElement | null>(null)
   const noteTextMissRef = useRef(false)
   const commitZoomGestureRef = useRef(() => {})
@@ -759,6 +777,8 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
 
   cancelZoomGestureRef.current = () => {
     clearZoomGestureClock()
+    zoomContentGuardRef.current?.release(0)
+    zoomContentGuardRef.current = null
     const plane = zoomPlaneRef.current
     zoomGestureRef.current = null
     zoomGestureActiveRef.current = false
@@ -770,9 +790,12 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     clearZoomGestureClock()
     const gesture = zoomGestureRef.current
     const plane = zoomPlaneRef.current
+    const guard = zoomContentGuardRef.current
     zoomGestureRef.current = null
     zoomPlaneRef.current = null
+    zoomContentGuardRef.current = null
     if (!gesture) {
+      guard?.release(0)
       zoomGestureActiveRef.current = false
       return
     }
@@ -781,14 +804,19 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       ?? scroller?.querySelector<HTMLElement>('.paper-sheet-plane')
       ?? scroller?.querySelector<HTMLElement>('.unified-paper')
       ?? null
+    // Zoom around the point the preview shows under the fingers or cursor now.
+    const origin = plane && plane.classList.contains('is-zoom-gesture')
+      ? paperZoomGestureScreenAnchor(plane, gesture)
+      : gesture.origin
     clearPaperZoomGestureFrame(plane ?? resolvePaperViewTarget(sheet, scroller), gesture.rotation)
     if (Math.abs(gesture.zoom - gesture.baseZoom) < 0.0005) {
+      guard?.release(0)
       zoomGestureActiveRef.current = false
       return
     }
     userAdjustedRef.current = true
     lastWheelZoomAtRef.current = performance.now()
-    lastZoomOriginRef.current = gesture.origin
+    lastZoomOriginRef.current = origin
     // Stay-put scrolls. Keep the scroll listener from measuring on each write.
     zoomGestureActiveRef.current = true
     applyPaperZoomStayPut(
@@ -796,8 +824,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       sheet,
       { zoom: gesture.baseZoom, rotation: gesture.rotation, pan: { x: 0, y: 0 } },
       gesture.zoom,
-      gesture.origin,
+      origin,
       apply,
+      { guard, glideCentre: true },
     )
     zoomGestureActiveRef.current = false
   }
@@ -826,6 +855,22 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       zoomPlaneRef.current = resolvePaperViewTarget(sheet, scroller)
       zoomGestureActiveRef.current = true
       zoomGestureRef.current = beginPaperZoomGesture(scroller, sheet, viewRef.current, origin)
+      zoomContentGuardRef.current?.release(0)
+      zoomContentGuardRef.current = startPaperContentGuard(scroller, origin, (shift) => {
+        const live = zoomGestureRef.current
+        const livePlane = zoomPlaneRef.current
+        if (live && livePlane?.classList.contains('is-zoom-gesture')) {
+          // The text moved inside the scaled plane. Move the scale origin with
+          // it, so the line stays the centre of the pinch, and scroll by the
+          // shift at the zoom the plane is laid out in.
+          const moved = { ...live, anchorLocalY: live.anchorLocalY + shift }
+          zoomGestureRef.current = moved
+          livePlane.style.transformOrigin = paperZoomPreviewStyle(moved).transformOrigin
+          scrollPaperByContentShift(scroller, shift, moved.baseZoom)
+          return
+        }
+        scrollPaperByContentShift(scroller, shift, viewRef.current.zoom)
+      })
     }
     const gesture = stepPaperZoomGesture(zoomGestureRef.current!, factor)
     zoomGestureRef.current = gesture
@@ -837,6 +882,8 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     if (noteText) noteTextRef.current = noteText
     else if (!cachedText && !scroller.querySelector('.markdown-editor')) noteTextMissRef.current = true
     if (!applyPaperZoomGestureFrame(plane, gesture, noteText)) {
+      zoomContentGuardRef.current?.release(0)
+      zoomContentGuardRef.current = null
       zoomGestureRef.current = null
       zoomPlaneRef.current = null
       clearPaperZoomGestureFrame(plane, gesture.rotation)
@@ -845,14 +892,19 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       zoomGestureActiveRef.current = false
       return
     }
+    // No guard check here: reading the line's offset each preview frame
+    // forces a layout. CodeMirror's re-measure resizes the text, and the
+    // guard's ResizeObserver catches that before paint.
     clearZoomGestureClock()
+    const settleMs = zoomGestureSettleMsRef.current
+    zoomGestureSettleMsRef.current = PAPER_ZOOM_GESTURE_SETTLE_MS
     zoomGestureTimerRef.current = window.setTimeout(() => {
       zoomGestureTimerRef.current = 0
       zoomGestureCommitFrameRef.current = window.requestAnimationFrame(() => {
         zoomGestureCommitFrameRef.current = 0
         commitZoomGestureRef.current()
       })
-    }, PAPER_ZOOM_GESTURE_SETTLE_MS)
+    }, settleMs)
   }
 
   const rotateBy = useCallback((delta: number) => {
@@ -916,6 +968,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     // subpixel frame — the text looks stretched/warped. Keep the scroller
     // compositor-owned and only intercept Ctrl/Alt (zoom/rotate).
     let pendingFactor = 1
+    let pendingPinch = false
     let pendingOrigin: { x: number; y: number } | null = null
     let zoomFrame = 0
     const flushZoom = () => {
@@ -931,6 +984,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         }
         return
       }
+      if (pendingPinch) zoomGestureSettleMsRef.current = PAPER_ZOOM_PINCH_SETTLE_MS
       // Scale on the compositor for this frame. CSS zoom, which reflows the
       // sheet and resizes the ink bitmap, runs once the burst has paused.
       pushZoomGestureRef.current(factor, origin)
@@ -942,7 +996,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         // Before the coalesced frame, so a scroll in this same turn does not
         // measure the sheet or re-slice the ink.
         root.querySelector<HTMLElement>('.paper-sheet-plane')?.classList.add('is-zoom-gesture')
-        pendingFactor *= zoomFactorFromWheel(event.deltaY, event.deltaMode, readSharedZoomSpeed())
+        pendingFactor *= zoomFactorFromWheelEvent(event, readSharedZoomSpeed())
+        // A pinch streams events every frame; its pause is the end sooner.
+        pendingPinch = isPinchZoomWheel(event)
         pendingOrigin = { x: event.clientX, y: event.clientY }
         lastZoomOriginRef.current = pendingOrigin
         lastWheelZoomAtRef.current = performance.now()
@@ -1002,6 +1058,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     }
 
     const onPointer = (event: PointerEvent) => {
+      // The HUD is not a point on the sheet: zooming around it pushed the
+      // page towards the bottom-right corner.
+      if (event.target instanceof Element && event.target.closest('.paper-view-hud')) return
       lastZoomOriginRef.current = { x: event.clientX, y: event.clientY }
     }
     root.addEventListener('wheel', onProbe, { capture: true, passive: true })
@@ -1041,37 +1100,83 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   useEffect(() => {
     const root = noteViewRef.current
     if (!root) return undefined
-    let pendingFactor = 1
-    let pendingOrigin: { x: number; y: number } | null = null
-    let zoomFrame = 0
-    const flushZoom = () => {
-      zoomFrame = 0
-      const factor = pendingFactor
-      const origin = pendingOrigin
-      pendingFactor = 1
-      pendingOrigin = null
-      if (factor === 1 || !origin) {
-        if (!zoomGestureRef.current) {
-          const idlePlane = root.querySelector<HTMLElement>('.paper-sheet-plane')
-          if (idlePlane && !idlePlane.style.transform) idlePlane.classList.remove('is-zoom-gesture')
-        }
-        return
-      }
-      pushZoomGestureRef.current(factor, origin)
+    // Two-finger frames come once per animation frame (handGestures samples
+    // all fingers together), so they are applied as they arrive.
+    // Release speed of a two-finger pan: the same coast a one-finger pan in
+    // pen mode and a native text scroll already have.
+    let panSamples: FingerPanSample[] = []
+    let panX = 0
+    let panY = 0
+    let lastPinchAt = 0
+    let flingId = 0
+    const stopFling = () => {
+      if (flingId) window.cancelAnimationFrame(flingId)
+      flingId = 0
     }
+    const startFling = () => {
+      const now = performance.now()
+      // Speed at the last move. On a busy main thread the lift is handled a
+      // frame or two after it, which must not read as a finger that stopped;
+      // a lift long after the last move still does.
+      const lastMove = panSamples.at(-1)?.t ?? 0
+      const velocity = now - lastPinchAt < 120 || now - lastMove > 120
+        ? { vx: 0, vy: 0 }
+        : fingerPanReleaseVelocity(panSamples, lastMove)
+      panSamples = []
+      if (!velocity.vx && !velocity.vy) return
+      let { vx, vy } = velocity
+      let last = now
+      const tick = (time: number) => {
+        const step = stepFingerPanFling({ vx, vy }, time - last)
+        last = time
+        vx = step.vx
+        vy = step.vy
+        const left = root.scrollLeft
+        const top = root.scrollTop
+        root.scrollLeft = left - step.dx
+        root.scrollTop = top - step.dy
+        // The first frame can carry no time yet; only a step that should have
+        // moved and did not is the edge of the sheet.
+        const wanted = Math.abs(step.dx) + Math.abs(step.dy) > 0.5
+        const moved = Math.abs(root.scrollLeft - left) + Math.abs(root.scrollTop - top) > 0.01
+        flingId = step.done || (wanted && !moved) ? 0 : window.requestAnimationFrame(tick)
+      }
+      flingId = window.requestAnimationFrame(tick)
+    }
+    // Any new touch, click or wheel holds the coast, like a native scroll.
+    const holdFling = () => { stopFling() }
+    root.addEventListener('pointerdown', holdFling, { capture: true, passive: true })
+    root.addEventListener('wheel', holdFling, { capture: true, passive: true })
     const unbind = bindHandGestures(root, {
       captureNavigation: true,
       onPan: (dx, dy) => {
         if (performance.now() - lastPanWheelAtRef.current < 48) return
         userAdjustedRef.current = true
+        stopFling()
         root.scrollLeft -= dx
         root.scrollTop -= dy
+        panX += dx
+        panY += dy
+        const now = performance.now()
+        panSamples = pushFingerPanSample(panSamples, { t: now, x: panX, y: panY }, now)
       },
       onPinch: (factor, origin) => {
         root.querySelector<HTMLElement>('.paper-sheet-plane')?.classList.add('is-zoom-gesture')
-        pendingFactor *= factor
-        pendingOrigin = origin
-        if (!zoomFrame) zoomFrame = window.requestAnimationFrame(flushZoom)
+        lastPinchAt = performance.now()
+        zoomGestureSettleMsRef.current = PAPER_ZOOM_TOUCH_SETTLE_MS
+        pushZoomGestureRef.current(factor, origin)
+      },
+      onGestureEnd: () => {
+        // Fingers up: the pinch is over, so commit the sharp camera on the
+        // next frame instead of waiting out the wheel settle time.
+        if (zoomGestureRef.current) {
+          clearZoomGestureClock()
+          zoomGestureCommitFrameRef.current = window.requestAnimationFrame(() => {
+            zoomGestureCommitFrameRef.current = 0
+            commitZoomGestureRef.current()
+          })
+        }
+        startFling()
       },
       onSwipe: (direction, origin) => {
         if (origin.target instanceof Element && getComputedStyle(origin.target).touchAction.split(/\s+/u).includes('none')) return
@@ -1082,7 +1187,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       },
     })
     return () => {
-      if (zoomFrame) window.cancelAnimationFrame(zoomFrame)
+      stopFling()
+      root.removeEventListener('pointerdown', holdFling, { capture: true })
+      root.removeEventListener('wheel', holdFling, { capture: true })
       unbind()
       commitZoomGestureRef.current()
     }
@@ -1124,6 +1231,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
   }, [globalShortcuts, resetView, showHud, zoomBy])
 
   const active = isPaperViewActive(view)
+  /** HUD buttons zoom around the middle of the view, like every viewer. */
+  const viewCentre = () => {
+    const root = noteViewRef.current
+    if (!root) return undefined
+    const box = root.getBoundingClientRect()
+    return { x: box.left + root.clientWidth / 2, y: box.top + root.clientHeight / 2 }
+  }
 
   return (
     <PaperViewContext.Provider value={api}>
@@ -1142,10 +1256,10 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         </div>
         {showHud && (
           <div className={`paper-view-hud ${active ? 'is-active' : ''}`} aria-label="Blattansicht">
-            <button type="button" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()), lastZoomOriginRef.current ?? undefined)} disabled={view.zoom <= VIEW_ZOOM_MIN}>
+            <button type="button" aria-label="Herauszoomen" title="Herauszoomen (Strg+- · Strg+Mausrad)" onClick={() => zoomBy(-zoomStepFromSpeed(readSharedZoomSpeed()), viewCentre())} disabled={view.zoom <= VIEW_ZOOM_MIN}>
               <ZoomOut size={15} />
             </button>
-            <button type="button" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()), lastZoomOriginRef.current ?? undefined)} disabled={view.zoom >= readSharedZoomMax()}>
+            <button type="button" aria-label="Hineinzoomen" title="Hineinzoomen (Strg++ · Strg+Mausrad)" onClick={() => zoomBy(zoomStepFromSpeed(readSharedZoomSpeed()), viewCentre())} disabled={view.zoom >= readSharedZoomMax()}>
               <ZoomIn size={15} />
             </button>
             <button type="button" aria-label="Blatt gegen den Uhrzeigersinn drehen" title="Drehen (Alt+Mausrad)" onClick={() => rotateBy(-VIEW_ROTATE_STEP)}>
