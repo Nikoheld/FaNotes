@@ -155,7 +155,7 @@ const runOnce = () => {
   assert.match(board, /import type \{ ViewportRaster \} from '\.\.\/lib\/viewportRaster'/)
   assert.doesNotMatch(board, /import \{[^}]*\} from '\.\.\/lib\/viewportRaster'/, 'the wasm module stays out of the main bundle')
   assert.doesNotMatch(paint, /viewportRaster/, 'the canvas painter does not pull in the raster')
-  assert.match(board, /if \(inline && viewportRasterRef\.current\) \{\n      redrawViewportRaster\(layoutWidth, layoutHeight, measureLayout\)\n      return\n    \}/)
+  assert.match(board, /if \(inline && viewportRasterRef\.current\) \{\n      (?:committedPatchRef\.current = null\n      )?redrawViewportRaster\(layoutWidth, layoutHeight, measureLayout\)\n      return\n    \}/)
   assert.match(board, /createViewportRaster\(ART_SYMBOLS\)/)
   assert.match(board, /if \(viewportRasterRef\.current\) \{\n      \/\/ Viewport raster: no vertical slice, one box for both layers\./)
   assert.match(board, /shiftCanvasBitmap\(canvas, shift\.dx, shift\.dy\)/)
