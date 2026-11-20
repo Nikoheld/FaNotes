@@ -114,7 +114,7 @@ export function McpSettingsSection({ settings, update }: Props) {
   if (!available) {
     return (
       <div className="setting-card">
-        <div className="setting-card-title"><Bot size={16} /><span>KI-Zugriff (MCP)</span></div>
+        <div className="setting-card-title"><Bot size={16} /><span>MCP-Server</span></div>
         <div className="setting-row"><div className="setting-copy"><span>Der lokale MCP-Server gehört zur Desktop-App.</span><small>Im Browser und auf dem Handy ist er nicht verfügbar.</small></div></div>
       </div>
     )
@@ -127,10 +127,10 @@ export function McpSettingsSection({ settings, update }: Props) {
   return (
     <>
       <div id="settings-mcp-local" className="setting-card">
-        <div className="setting-card-title"><Bot size={16} /><span>KI-Zugriff (MCP)</span></div>
+        <div className="setting-card-title"><Bot size={16} /><span>MCP-Server</span></div>
         <div className="setting-row">
-          <div className="setting-copy"><span>KI-Zugriff erlauben</span><small>Ein lokaler MCP-Server liest deinen Vault direkt von dieser Festplatte. KI-Programme wie Claude, Cursor oder ChatGPT können dann Notizen, Aufgaben, Kalender, Karteikarten und Geschichten ansehen. Nichts wird hochgeladen, bis dein KI-Programm es abruft.</small></div>
-          <div className="setting-control">{toggle('mcpEnabled', 'KI-Zugriff erlauben')}</div>
+          <div className="setting-copy"><span>MCP-Server aktivieren</span><small>Ein lokaler MCP-Server liest deinen Vault direkt von dieser Festplatte. KI-Programme wie Claude, Cursor oder ChatGPT können dann Notizen, Aufgaben, Kalender, Karteikarten und Geschichten ansehen. Nichts wird hochgeladen, bis dein KI-Programm es abruft.</small></div>
+          <div className="setting-control">{toggle('mcpEnabled', 'MCP-Server aktivieren')}</div>
         </div>
         <div className="setting-row">
           <div className="setting-copy"><span>Schreibzugriff</span><small>Aus: die KI darf nur lesen. An: sie darf Notizen anlegen, Text an Notizen anhängen sowie Aufgaben hinzufügen und abhaken. Bestehende Notizen werden nie überschrieben.</small></div>
