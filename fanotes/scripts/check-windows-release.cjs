@@ -79,9 +79,9 @@ assert.equal(verified.packages.portable.url, payload.packages.portable.url)
 assert.equal(verified.delta.target.fileName, 'app.asar')
 // The helper starts FaNotes itself after the self-test, so NSIS must not (--force-run).
 assert.deepEqual(WINDOWS_INSTALLER_ARGS, ['/S', '--updated'])
-assert.match(WINDOWS_DELTA_HELPER, /Get-FileHash[\s\S]+fanotes-backup[\s\S]+Invoke-SelfTest[\s\S]+rolling back/u)
+assert.match(WINDOWS_DELTA_HELPER, /SHA256[\s\S]+fanotes-backup[\s\S]+Invoke-SelfTest[\s\S]+rolling back/u)
 assert.equal(WINDOWS_SWAP_HELPER, WINDOWS_DELTA_HELPER)
-assert.match(WINDOWS_INSTALLER_HELPER, /Get-FileHash[\s\S]+'\/S','--updated'[\s\S]+Invoke-SelfTest/u)
+assert.match(WINDOWS_INSTALLER_HELPER, /SHA256[\s\S]+'\/S','--updated'[\s\S]+Invoke-SelfTest/u)
 for (const helper of [WINDOWS_SWAP_HELPER, WINDOWS_INSTALLER_HELPER]) {
   assert.match(helper, /install\.lock/u, 'Every Windows helper releases the install lock.')
   assert.match(helper, /\$Mode -eq 'relaunch'/u)

@@ -126,8 +126,16 @@ function Write-Log([string]$Message) {
   Add-Content -LiteralPath $LogFile -Value "$(Get-Date -Format o) $Message" -Encoding UTF8
 }
 
+# .NET instead of Get-FileHash: the cmdlet is missing when a PowerShell 7
+# module path leaks into Windows PowerShell 5.1.
 function File-Sha256([string]$Path) {
-  return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+  $stream = [System.IO.File]::OpenRead($Path)
+  try {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+      return ([System.BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '').ToLowerInvariant()
+    } finally { $sha.Dispose() }
+  } finally { $stream.Dispose() }
 }
 
 function Write-Result([bool]$Ok, [string]$Reason) {
@@ -1921,8 +1929,12 @@ function createUpdateManager({
     if (!locks.acquireInstall({ version: plan.version })) {
       throw new Error('Ein anderes FaNotes-Update wird gerade installiert.')
     }
+    // Windows PowerShell 5.1 must load its own modules, not those of a
+    // PowerShell 7 that put its PSModulePath into the environment.
+    const env = { ...process.env }
+    for (const name of Object.keys(env)) if (name.toLowerCase() === 'psmodulepath') delete env[name]
     try {
-      const child = spawnImpl(command, args, { detached: true, stdio: 'ignore', windowsHide: true })
+      const child = spawnImpl(command, args, { detached: true, stdio: 'ignore', windowsHide: true, env })
       await waitForChildSpawn(child)
       child.unref()
       // The helper releases install.lock when it has swapped or rolled back.

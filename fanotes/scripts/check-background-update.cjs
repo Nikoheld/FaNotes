@@ -727,6 +727,7 @@ async function checkWindowsLogic(temporary, github, fetchImpl, key) {
     const [{ command, args, options }] = spawned
     assert.equal(command, 'powershell.exe')
     assert.equal(options.windowsHide, true)
+    assert.equal(Object.keys(options.env).some((name) => name.toLowerCase() === 'psmodulepath'), false)
     assert.equal(options.detached, true)
     assert.equal(argument(args, 'Mode'), 'quiet')
     assert.equal(argument(args, 'Installer'), path.join(profile.updaterRoot, '2.17.0', 'FaNotes-Setup-2.17.0-x64.exe'))
@@ -784,7 +785,9 @@ async function checkWindowsHelpers(temporary) {
     fs.writeFileSync(helperPath, script)
     const args = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath,
       ...Object.entries(parameters).flatMap(([name, value]) => [`-${name}`, String(value)])]
-    return spawnSync('powershell.exe', args, { encoding: 'utf8', timeout: 240_000 })
+    // Like the updater: PowerShell 7's module path must not leak into 5.1.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toLowerCase() !== 'psmodulepath'))
+    return spawnSync('powershell.exe', args, { encoding: 'utf8', timeout: 240_000, env })
   }
   const program = (name, version, healthy = true) => {
     const file = path.join(root, name)
