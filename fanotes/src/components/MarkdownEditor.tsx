@@ -1296,6 +1296,7 @@ const selectionDragAutoScroll = ViewPlugin.fromClass(class {
 const paperCaretLock = ViewPlugin.fromClass(class {
   private flingFrames = 0
   private flingId = 0
+  private measureQueued = false
   private paper: HTMLElement | null = null
 
   constructor(readonly view: EditorView) {
@@ -1361,6 +1362,20 @@ const paperCaretLock = ViewPlugin.fromClass(class {
       this.stayPut(paper)
     } else if (!paperEditorScrollSealed(paper)) {
       this.stayPut(paper)
+    }
+    if (update.docChanged && !this.measureQueued && update.transactions.some((tr) => !tr.annotation(Transaction.userEvent))) {
+      // A line the editor has not measured yet counts as one full text line
+      // until its measure pass (next frame); the hidden fanotes-ink marker
+      // line is 0 px high, so for one frame the text column, the sheet below
+      // it and the ink page (which only ever grows) were 28 px too tall.
+      // Programmatic edits (marker attach, sync pulls) settle before paint.
+      this.measureQueued = true
+      queueMicrotask(() => {
+        this.measureQueued = false
+        // `measure` is public at runtime but not in the typings.
+        const view = this.view as EditorView & { measure?: () => void }
+        if (view.dom.isConnected && typeof view.measure === 'function') view.measure()
+      })
     }
     if (!update.docChanged && !update.selectionSet) return
     const followCaret = update.transactions.some((tr) => {
