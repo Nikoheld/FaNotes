@@ -11,6 +11,8 @@ import {
   ChevronRight,
   CircleAlert,
   Eraser,
+  Circle,
+  Spline,
   FileInput,
   Highlighter,
   GripVertical,
@@ -153,7 +155,7 @@ import { BUG_REPORT_PEN_SAMPLE_MS, buildPenDiagnosticEvent, diagnosticLog } from
 import { boundsOfInkIndexes, copyInkSelection, inkEditUndoSnapshot, moveInkSelection, scaleInkSelection } from '../lib/inkSelect'
 import { bumpInkGeometryEpoch, strokePointBounds } from '../lib/strokeBounds'
 import { drawingDocumentJson, warmStrokeJsonWhenIdle } from '../lib/drawingJson'
-import { applyToolErase } from '../lib/toolErase'
+import { applyStrokeErase, applyToolErase, type EraserMode } from '../lib/toolErase'
 import {
   inkPointerSessionFromSample,
   resolveInkFinishSample,
@@ -1853,6 +1855,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const [viewRotation, setViewRotation] = useState(0)
   const [viewPan, setViewPan] = useState({ x: 0, y: 0 })
   const [eraserSize, setEraserSize] = useState(initialToolMemory.eraserSize)
+  const [eraserMode, setEraserMode] = useState<EraserMode>(initialToolMemory.eraserMode)
 
   viewZoomRef.current = viewZoom
   viewRotationRef.current = viewRotation
@@ -2138,6 +2141,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useEffect(() => {
     saveToolMemory({
       eraserSize,
+      eraserMode,
       ...(tool === 'pen' || tool === 'eraser' ? { tool } : {}),
       inkMode,
       symbolId: artSymbolId,
@@ -2148,7 +2152,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       figureLineWidth,
       mathPlacement: mathSolverPlacement,
     })
-  }, [artSymbolId, eraserSize, figureId, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, mathSolverPlacement, tool])
+  }, [artSymbolId, eraserMode, eraserSize, figureId, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, mathSolverPlacement, tool])
 
   useEffect(() => {
     if (drawingId) drawingIdRef.current = drawingId
@@ -4611,7 +4615,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const anchor = eraserAnchorRef.current
     const samples = anchor ? [anchor, ...points] : points
     const before = strokesRef.current
-    const next = applyToolErase(
+    const next = (eraserMode === 'stroke' ? applyStrokeErase : applyToolErase)(
       strokesRef.current,
       samples,
       eraserSize,
@@ -4636,7 +4640,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     gestureChangedRef.current = true
     committedCanvasDirtyRef.current = true
     scheduleRedraw()
-  }, [eraserSize, scheduleRedraw])
+  }, [eraserMode, eraserSize, scheduleRedraw])
 
   const clearShapeDwellTimer = useCallback(() => {
     if (shapeDwellTimerRef.current !== null) {
@@ -9398,11 +9402,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
             <input type="range" min={activeArtSymbol ? 20 : .75} max={activeArtSymbol ? 180 : 42} step={activeArtSymbol ? 2 : .25} value={activeArtSymbol ? artSymbolSize : artWidth} onChange={(event) => activeArtSymbol ? setArtSymbolSize(Number(event.target.value)) : setArtWidth(Number(event.target.value))} />
             <output>{activeArtSymbol ? artSymbolSize : artWidth.toFixed(artWidth % 1 ? 1 : 0)} px</output>
           </label>
-        </> : tool === 'eraser' ? <label className="lw-draw-range">
-          <span>Größe</span>
-          <input type="range" min="1" max="72" value={eraserSize} onChange={(event) => setEraserSize(Number(event.target.value))} />
-          <output>{eraserSize} px</output>
-        </label> : null}
+        </> : tool === 'eraser' ? <>
+          <div className="lw-eraser-modes" role="radiogroup" aria-label="Radierermodus">
+            <button type="button" role="radio" aria-checked={eraserMode === 'stroke'} className={eraserMode === 'stroke' ? 'is-active' : ''} title="Ein Strich verschwindet komplett, sobald der Radierer ihn berührt" onClick={() => setEraserMode('stroke')}>
+              <Spline size={15} /> <span>Linienradierer</span>
+            </button>
+            <button type="button" role="radio" aria-checked={eraserMode === 'area'} className={eraserMode === 'area' ? 'is-active' : ''} title="Entfernt nur den Teil unter dem Radierer" onClick={() => setEraserMode('area')}>
+              <Circle size={15} /> <span>Bereichsradierer</span>
+            </button>
+          </div>
+          <label className="lw-draw-range">
+            <span>Größe</span>
+            <input type="range" min="1" max="72" value={eraserSize} onChange={(event) => setEraserSize(Number(event.target.value))} />
+            <output>{eraserSize} px</output>
+          </label>
+        </> : null}
 
         <label className="lw-paper-select">
           <span className="sr-only">Papierart</span>
