@@ -38,6 +38,8 @@ import {
   zoomFactorFromWheelEvent,
   zoomStepFromSpeed,
   isSheetZoomWheel,
+  paperZoomPreviewStyle,
+  scrollPaperByContentShift,
   startPaperContentGuard,
   type PaperContentGuard,
   resolvePaperViewTarget,
@@ -854,11 +856,21 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       zoomGestureActiveRef.current = true
       zoomGestureRef.current = beginPaperZoomGesture(scroller, sheet, viewRef.current, origin)
       zoomContentGuardRef.current?.release(0)
-      zoomContentGuardRef.current = startPaperContentGuard(
-        scroller,
-        origin,
-        () => zoomGestureRef.current?.zoom ?? viewRef.current.zoom,
-      )
+      zoomContentGuardRef.current = startPaperContentGuard(scroller, origin, (shift) => {
+        const live = zoomGestureRef.current
+        const livePlane = zoomPlaneRef.current
+        if (live && livePlane?.classList.contains('is-zoom-gesture')) {
+          // The text moved inside the scaled plane. Move the scale origin with
+          // it, so the line stays the centre of the pinch, and scroll by the
+          // shift at the zoom the plane is laid out in.
+          const moved = { ...live, anchorLocalY: live.anchorLocalY + shift }
+          zoomGestureRef.current = moved
+          livePlane.style.transformOrigin = paperZoomPreviewStyle(moved).transformOrigin
+          scrollPaperByContentShift(scroller, shift, moved.baseZoom)
+          return
+        }
+        scrollPaperByContentShift(scroller, shift, viewRef.current.zoom)
+      })
     }
     const gesture = stepPaperZoomGesture(zoomGestureRef.current!, factor)
     zoomGestureRef.current = gesture

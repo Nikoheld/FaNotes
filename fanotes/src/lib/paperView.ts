@@ -423,9 +423,12 @@ export const restorePaperAnchor = (scroller: HTMLElement, paper: HTMLElement | n
  * The guard records the line's layout offset inside the sheet plane. That
  * offset is in unzoomed px and does not change when anything scrolls, only
  * when the text above it re-lays out, so a pan or the stay-put scroll is never
- * mistaken for a shift. A shift is scrolled away at the camera's visual zoom.
+ * mistaken for a shift. The owner moves the camera by the shift (see
+ * `scrollPaperByContentShift`; a live preview also moves its scale origin).
  * A ResizeObserver on the text checks again after CodeMirror's own measure,
- * before the frame is painted.
+ * before the frame is painted. Shifts under a pixel are CodeMirror measuring
+ * a scaled line slightly differently each frame; following them only made
+ * the camera shimmer.
  */
 export type PaperContentGuard = {
   readonly element: HTMLElement
@@ -439,6 +442,13 @@ const CONTENT_ANCHOR_SELECTOR = '.cm-line'
 
 /** Frames after a commit in which CodeMirror may still re-measure. */
 export const PAPER_CONTENT_GUARD_FRAMES = 8
+/** Layout px a line must move before the camera follows it. */
+export const PAPER_CONTENT_GUARD_MIN_SHIFT = 1.5
+
+/** Settled camera: a layout shift of `shift` px is `shift × zoom` px on screen. */
+export const scrollPaperByContentShift = (scroller: HTMLElement, shift: number, zoom: number) => {
+  scroller.scrollTop += shift * Math.max(0.01, zoom)
+}
 
 const offsetWithin = (node: HTMLElement, stop: HTMLElement | null) => {
   let top = 0
@@ -455,7 +465,8 @@ const offsetWithin = (node: HTMLElement, stop: HTMLElement | null) => {
 export const startPaperContentGuard = (
   scroller: HTMLElement | null,
   origin: { x: number; y: number } | undefined,
-  readZoom: () => number,
+  /** Move the camera so the line is back where it was; `shift` is layout px. */
+  onShift: (shift: number) => void,
 ): PaperContentGuard | null => {
   if (!scroller || !origin || typeof document === 'undefined' || typeof document.elementsFromPoint !== 'function') return null
   // Through the ink canvas: in pen mode the text under it is still what moves.
@@ -474,9 +485,9 @@ export const startPaperContentGuard = (
     if (stopped || !line.isConnected) return
     const next = offsetWithin(line, plane)
     const shift = next - top
+    if (Math.abs(shift) < PAPER_CONTENT_GUARD_MIN_SHIFT) return
     top = next
-    if (Math.abs(shift) < 0.25) return
-    scroller.scrollTop += shift * Math.max(0.01, readZoom())
+    onShift(shift)
   }
   const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(check) : null
   if (line.parentElement) observer?.observe(line.parentElement)
@@ -838,7 +849,7 @@ export const applyPaperZoomStayPut = (
   lockPaperViewportScrollStayPut(scroller)
   const anchor = capturePaperAnchor(scroller, sheet, origin)
   const content = guard === undefined
-    ? startPaperContentGuard(scroller, origin, () => readUsedSheetZoom(sheet))
+    ? startPaperContentGuard(scroller, origin, (shift) => scrollPaperByContentShift(scroller, shift, readUsedSheetZoom(sheet)))
     : guard
   if (applyView) applyView(next)
   else applyPaperViewToElements(paper, scroller, next)
