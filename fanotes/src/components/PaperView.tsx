@@ -71,6 +71,7 @@ import {
   paperViewFromMemory,
   paperViewMemoryKey,
   recallPaperView,
+  recallSplitAware,
   registerPaperViewMemoryFlush,
   rememberPaperView,
   savePaperViewMemory,
@@ -219,7 +220,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     // The plane element survives a note switch. An in-flight pinch must not
     // commit its CSS zoom onto the note that just opened.
     cancelZoomGestureRef.current()
-    const remembered = recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(viewKey))
+    const remembered = recallSplitAware(viewKey, recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(viewKey)))
     setRecalled(remembered !== null)
     storeRef.current.write(paperViewFromMemory(remembered))
   }, [viewKey])
@@ -228,7 +229,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     const scroller = noteViewRef.current
     if (!scroller) return
     const memoryKey = paperViewMemoryKey(viewKey)
-    const remembered = memoryKey ? recallPaperView(loadPaperViewMemory(), memoryKey) : null
+    const remembered = memoryKey ? recallSplitAware(viewKey, recallPaperView(loadPaperViewMemory(), memoryKey)) : null
     let lastProgrammatic: { scrollLeft: number; scrollTop: number } | null = null
     let userInteracted = false
     let saveTimer = 0
