@@ -892,7 +892,9 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
       zoomGestureActiveRef.current = false
       return
     }
-    zoomContentGuardRef.current?.check()
+    // No guard check here: reading the line's offset each preview frame
+    // forces a layout. CodeMirror's re-measure resizes the text, and the
+    // guard's ResizeObserver catches that before paint.
     clearZoomGestureClock()
     const settleMs = zoomGestureSettleMsRef.current
     zoomGestureSettleMsRef.current = PAPER_ZOOM_GESTURE_SETTLE_MS
@@ -1113,7 +1115,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     }
     const startFling = () => {
       const now = performance.now()
-      const velocity = now - lastPinchAt < 120 ? { vx: 0, vy: 0 } : fingerPanReleaseVelocity(panSamples, now)
+      // Speed at the last move. On a busy main thread the lift is handled a
+      // frame or two after it, which must not read as a finger that stopped;
+      // a lift long after the last move still does.
+      const lastMove = panSamples.at(-1)?.t ?? 0
+      const velocity = now - lastPinchAt < 120 || now - lastMove > 120
+        ? { vx: 0, vy: 0 }
+        : fingerPanReleaseVelocity(panSamples, lastMove)
       panSamples = []
       if (!velocity.vx && !velocity.vy) return
       let { vx, vy } = velocity
