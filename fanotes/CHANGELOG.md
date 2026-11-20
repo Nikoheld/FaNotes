@@ -1,5 +1,72 @@
 # Änderungsverlauf
 
+## 2026.11.3-beta.6
+
+- Fix worksheet ink page growing 27 px after the first write
+- Install the root packages before the ink-stable build
+- Side toolbar workflow: install the repo root dependencies too
+- Keep the worksheet Entfernen needle and check it in pen mode
+- Side toolbar: touch-safe check, wrap lasso actions, panels beside the rail, keyboard-toolbar check follows the class change
+- Check erase, a sync pull and the worksheet overlay settle in check-ink-stable
+- Two-finger fling under load; no layout read per preview frame
+- Windows update helpers: hash with .NET and drop a leaked PowerShell 7 module path
+- Fix the vertical editor toolbar: one scrolling rail, anchored popovers, layout check
+- Desktop updater CI: allow the Chromium sandbox on the Ubuntu runner, show Electron's stderr on failure
+- CI: download Electron so the side-pages desktop part runs
+- Desktop: install updates in the background while FaNotes is closed
+- Mark the side-pages command desktop-only in the Android parity test; CI root packages
+- Keep handwriting where it was written
+- CI: run the famd checks that pass on main in the side-pages workflow
+- Add blank side pages beside PDF pages (desktop)
+- Keep the pinch centre on the text when CodeMirror re-measures mid-gesture
+- Smooth zoom and pan: anchored commits, owned pinch, pinch-true trackpad, fling
+- Split view check: serve on a free port instead of Vite's default
+- Split view: retry the fit zoom a few times while the pane sets up its own view
+- Limit touch hit areas to listed controls and drop the touch-mode resizing
+- Let check-viewport-raster accept the erase-patch reset before the raster call.
+- Split view check: wait longer for the fitted second sheet on slow runners
+- Keep the committed ink bitmaps of the last few heavy pages across note switches.
+- Split view check: report the pane geometry when the text is clipped
+- Split view: retry the fit zoom on slow machines and poll for it in the check
+- Install the root dependencies in the touch workflow
+- Split view CI: install the repository root dependencies too
+- Make finger touch work across the desktop app
+- Improve the split view: smooth divider, drop on an edge, fitted second sheet, PDF marks
+- Fix check temp paths on Windows
+- Fix new folders not showing in the tree
+- Move the held ink bitmap on a grow under the pen instead of repainting.
+- Point three stale ink checks at where the code now lives.
+- Speed up startup: lazy recognition wasm, no trocr/pdf.js at startup, async hyprctl
+- Cut layout reads and wasted work from the pen and scroll path
+- Move the OCR word context index and the writing mode spelling onto the spell worker
+- Make the host tests hermetic
+- Security fixes in the Rust host and the Electron app
+- Lint the Tauri shell's tests cleanly and run the Linux tests under Xvfb.
+- Add a page-engine Rust workflow
+- Add fanotes-gpu page engine foundation (W1-C)
+- Pass the subject book script to eval by value (clippy).
+- Bring the sync, index and story crates to main and add Rust CI.
+- Fix the spelling workflow: install clippy and the root dependencies
+- Move the spelling lexicon into a Rust wasm Web Worker
+- Add fanotes-updater: Rust port of the desktop updater logic
+- fanotes-input: native pen backends behind a PenSource trait
+- Text boxes: use the note formatting toolbar plus size slider and custom colour
+- Make two-finger pinch zoom smooth: slow pinches no longer lose their sub-threshold deltas
+- Keep the sheet's ink extent when placing a text field or note link
+- OCR: skip the sideways orientation pass on decisive pages, pause background OCR on low battery
+- Android: beta polish (minSdk crashes, share into Writing mode, PDF mark undo, integration)
+- Android: a new PDF mark past the 200 cap still saves
+- Android: handwriting recognition, math solver and corrector from ink
+- Android: PDF text selection and marks, Markdown text boxes, outline, share-in
+- Android: rebuilt pen toolbar, Zeichenstudio, quick menu, laser, figures
+- Skip onnxruntime-node's CUDA download in npm installs
+- Android: study tools parity (crypto tools, key/map/plate editors, deck-wide flashcards)
+- Android: conflict screen, note links and profile, document search index, system reminders
+- Make the tablet app's pen ink, PDF opening and release build faster
+- Keep the panel resize grab area off the note
+- Android: tablet shell, window-size classes and touch layer (WP1)
+- Keep the text box colour and size controls inside the top bar in the side toolbar and on narrow windows.
+
 ## 2026.11.3-beta.5
 
 - Keep the current Vigenère cell visible in the square
