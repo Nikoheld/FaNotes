@@ -209,6 +209,46 @@ function runHyprctlMonitors(environment) {
   })
 }
 
+function runHyprctlMonitorsAsync(environment) {
+  return new Promise((resolve, reject) => {
+    childProcess.execFile('hyprctl', ['-j', 'monitors'], {
+      encoding: 'utf8',
+      timeout: HYPRCTL_TIMEOUT_MS,
+      env: environment,
+      windowsHide: true,
+    }, (error, stdout) => (error ? reject(error) : resolve(stdout)))
+  })
+}
+
+const HYPRLAND_SCALE_CACHE_NAME = 'hyprland-scale.json'
+
+/** Where the last Hyprland monitor scale is remembered, or null when the app has no user-data path. */
+function hyprlandScaleCachePath(electronApp) {
+  try {
+    const userData = typeof electronApp?.getPath === 'function' ? electronApp.getPath('userData') : null
+    return typeof userData === 'string' && path.isAbsolute(userData) ? path.join(userData, HYPRLAND_SCALE_CACHE_NAME) : null
+  } catch {
+    return null
+  }
+}
+
+/** The scale stored by the last launch (a plain tiny file; anything odd counts as no cache). */
+function readCachedHyprlandScale(cacheFile) {
+  if (typeof cacheFile !== 'string' || !cacheFile) return null
+  try {
+    const info = fs.lstatSync(cacheFile)
+    if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > 4096) return null
+    return normalizeDeviceScale(JSON.parse(fs.readFileSync(cacheFile, 'utf8'))?.scale)
+  } catch {
+    return null
+  }
+}
+
+function writeCachedHyprlandScale(cacheFile, scale) {
+  if (typeof cacheFile !== 'string' || !cacheFile || !normalizeDeviceScale(scale)) return Promise.resolve(false)
+  return fs.promises.writeFile(cacheFile, `${JSON.stringify({ scale })}\n`, { mode: 0o600 }).then(() => true, () => false)
+}
+
 function readHyprlandMonitorScale(environment = process.env, run = runHyprctlMonitors) {
   if (!environment.HYPRLAND_INSTANCE_SIGNATURE) return null
   try {
@@ -222,12 +262,17 @@ function readHyprlandMonitorScale(environment = process.env, run = runHyprctlMon
  * Device scale for an XWayland window that the compositor leaves unscaled
  * (`force_zero_scaling`). The focused monitor's real scale is the truth — a
  * fixed 2 rendered a 1.25/1.5/1.6 desktop too large. FANOTES_DEVICE_SCALE
- * overrides; GDK_SCALE (× GDK_DPI_SCALE, the Hyprland wiki recipe) is the
- * fallback when hyprctl is unavailable.
+ * overrides; the scale cached by the previous launch is used next, so startup does
+ * not wait on hyprctl (`refreshHyprlandMonitorScale` re-checks it after `ready`);
+ * GDK_SCALE (× GDK_DPI_SCALE, the Hyprland wiki recipe) is the fallback when
+ * hyprctl is unavailable.
  */
-function resolveLinuxDeviceScale(environment = process.env, run = runHyprctlMonitors) {
+function resolveLinuxDeviceScale(environment = process.env, run = runHyprctlMonitors, cachedScale = null) {
   const explicit = normalizeDeviceScale(environment.FANOTES_DEVICE_SCALE)
   if (explicit) return { scale: explicit, source: 'FANOTES_DEVICE_SCALE' }
+  // The last launch's monitor scale: no blocking hyprctl call before the app is ready.
+  const cached = normalizeDeviceScale(cachedScale)
+  if (cached) return { scale: cached, source: 'cache' }
   const monitor = readHyprlandMonitorScale(environment, run)
   if (monitor) return { scale: monitor, source: 'hyprctl' }
   const gdkScale = Number.parseFloat(String(environment.GDK_SCALE ?? ''))
@@ -239,7 +284,7 @@ function resolveLinuxDeviceScale(environment = process.env, run = runHyprctlMoni
   return { scale: DEVICE_SCALE_FALLBACK, source: 'fallback' }
 }
 
-function configureLinuxInputPlatform(electronApp, environment = process.env, run = runHyprctlMonitors) {
+function configureLinuxInputPlatform(electronApp, environment = process.env, run = runHyprctlMonitors, options = {}) {
   if (process.platform !== 'linux') {
     return { ozone: null, scaleFactor: null, scaleSource: null, monitorScale: null, hyprlandZeroScaling: false }
   }
@@ -247,6 +292,11 @@ function configureLinuxInputPlatform(electronApp, environment = process.env, run
   commandLine.appendSwitch('ozone-platform', 'x11')
   commandLine.appendSwitch('ozone-platform-hint', 'x11')
   const hyprlandZeroScaling = readHyprlandForceZeroScaling(environment)
+  // With a cache path the monitor scale is not asked at startup when a cached value exists: the
+  // monitor query moves to `refreshHyprlandMonitorScale`, after `ready`.
+  const cacheFile = options.cacheFile ?? hyprlandScaleCachePath(electronApp)
+  const cachedScale = readCachedHyprlandScale(cacheFile)
+  const deferHyprctl = Boolean(cachedScale)
   let scaleFactor = null
   let scaleSource = null
   let monitorScale = null
@@ -256,16 +306,21 @@ function configureLinuxInputPlatform(electronApp, environment = process.env, run
       scaleFactor = existing
       scaleSource = 'command-line'
     } else {
-      const resolved = resolveLinuxDeviceScale(environment, run)
+      const resolved = resolveLinuxDeviceScale(environment, run, cachedScale)
       scaleFactor = resolved.scale
       scaleSource = resolved.source
       commandLine.appendSwitch('force-device-scale-factor', String(scaleFactor))
     }
-    monitorScale = scaleSource === 'hyprctl' ? scaleFactor : readHyprlandMonitorScale(environment, run)
-  } else {
+    if (scaleSource === 'hyprctl') monitorScale = scaleFactor
+    else if (!deferHyprctl) monitorScale = readHyprlandMonitorScale(environment, run)
+  } else if (!deferHyprctl) {
     // Compositor-scaled XWayland: Chromium must stay at 1, but a HiDPI monitor
     // then shows an upscaled (blurry) window — worth a hint in the log.
     monitorScale = readHyprlandMonitorScale(environment, run)
+  }
+  // First launch (no cached scale) still asks hyprctl here, once: the switch cannot change later.
+  if (scaleSource === 'hyprctl' && cacheFile) {
+    try { fs.writeFileSync(cacheFile, `${JSON.stringify({ scale: scaleFactor })}\n`, { mode: 0o600 }) } catch { /* best effort */ }
   }
   return {
     ozone: 'x11',
@@ -273,7 +328,29 @@ function configureLinuxInputPlatform(electronApp, environment = process.env, run
     scaleSource,
     monitorScale,
     hyprlandZeroScaling,
+    cacheFile,
   }
+}
+
+/**
+ * Async monitor query for after `ready` (never blocks the main process): returns the focused
+ * monitor's scale (or null), refreshes the cache, and flags a cached scale that no longer matches.
+ * The device scale switch cannot change at runtime, so a stale value applies from the next launch.
+ */
+async function refreshHyprlandMonitorScale(startup, environment = process.env, run = runHyprctlMonitorsAsync) {
+  if (!environment.HYPRLAND_INSTANCE_SIGNATURE) return { monitorScale: null, stale: false }
+  let monitorScale = null
+  try {
+    monitorScale = hyprlandFocusedMonitorScale(await run(environment))
+  } catch {
+    return { monitorScale: null, stale: false }
+  }
+  if (!monitorScale) return { monitorScale: null, stale: false }
+  if (startup?.cacheFile && readCachedHyprlandScale(startup.cacheFile) !== monitorScale) {
+    await writeCachedHyprlandScale(startup.cacheFile, monitorScale)
+  }
+  const stale = Boolean(startup?.hyprlandZeroScaling && startup.scaleSource === 'cache' && startup.scaleFactor !== monitorScale)
+  return { monitorScale, stale }
 }
 
 function configureLinuxGraphics(electronApp, environment = process.env) {
@@ -441,6 +518,10 @@ module.exports = {
   configureLinuxGraphics,
   configureLinuxInputPlatform,
   hyprlandFocusedMonitorScale,
+  hyprlandScaleCachePath,
+  readCachedHyprlandScale,
+  refreshHyprlandMonitorScale,
+  runHyprctlMonitorsAsync,
   linuxOzoneAppRunExecLine,
   linuxOzoneDesktopExec,
   linuxOzoneLaunchPlan,

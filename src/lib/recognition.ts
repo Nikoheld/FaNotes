@@ -12,7 +12,6 @@ import {
 import { SUPPLEMENTAL_CANONICAL_PROPER_NAMES } from '../data/supplementalProperNames'
 import { isStandardRecognitionSample } from './standardRecognition'
 import { normalizeGermanSharpS, preservedReadingCharacters } from './orthography'
-import { fuseRecogModel } from '../../fanotes/src/lib/recogCore'
 
 const SOURCE_WIDTH = 900
 const SOURCE_HEIGHT = 560
@@ -832,7 +831,7 @@ export const buildRecognitionModel = async (samples: Sample[]): Promise<Recognit
       }
     }),
   )
-  const published = publishRecognitionFusion(entries)
+  const published = await publishRecognitionFusion(entries)
   const personalEntries = entries.filter((entry) => !entry.standard)
   const classifierGroups = new Map<string, RecognitionModelEntry[]>()
   personalEntries.forEach((entry) => {
@@ -944,8 +943,10 @@ const prototypeFromFusion = (entry: {
  * `buildRecognitionModel` uses. `publishRecognitionFusionFromTypeScript` stays
  * callable for the parity check.
  */
-const publishRecognitionFusion = (entries: RecognitionModelEntry[]) => {
-  const fused = fuseRecogModel(entries.map(wireFusionEntry))
+const publishRecognitionFusion = async (entries: RecognitionModelEntry[]) => {
+  // The Rust fusion lives in the recognition wasm, which is fetched on first use, not at startup.
+  const { fuseRecogModel } = await import('../../fanotes/src/lib/recogCore')
+  const fused = await fuseRecogModel(entries.map(wireFusionEntry))
   const byId = new Map(entries.map((entry) => [entry.sampleId, entry]))
   fused.trusts.forEach((update) => {
     const entry = byId.get(update.sampleId)

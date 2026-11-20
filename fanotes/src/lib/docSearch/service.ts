@@ -3,7 +3,6 @@
  * persisted in IndexedDB, extraction in the background whenever the user is
  * not typing or writing, and a small event bus for progress and page reveals.
  */
-import { recognizeTrocrLine } from '../trocrClient'
 import type { DocIndex, SearchResult } from './docIndex'
 import { createBrowserExtractor, listSearchDocuments, type DocSearchHostApi } from './extract'
 import { DocIndexer, type IndexerProgress } from './indexer'
@@ -81,7 +80,8 @@ class DocSearchService {
       list: async () => listSearchDocuments(await api.getTree(), (path) => `${SESSION}:${this.storyVersions.get(path) ?? 0}`),
       extractor: createBrowserExtractor({
         api,
-        recognize: (pixels, width, height) => recognizeTrocrLine(pixels, width, height),
+        // The TrOCR client (ONNX runtime glue) loads on the first scanned page, not at startup.
+        recognize: async (pixels, width, height) => (await import('../trocrClient')).recognizeTrocrLine(pixels, width, height),
         producer: `fanotes-${input.platform}/${input.version ?? 'dev'} doc-search/1`,
       }),
       gate: async () => {

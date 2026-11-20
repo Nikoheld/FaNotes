@@ -29,7 +29,7 @@ try {
   fs.writeFileSync(path.join(output, 'index.html'), '<!doctype html><html><body><script type="module" src="./audit.js"></script></body></html>')
   const chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-    '--allow-file-access-from-files', `--user-data-dir=${profile}`, '--virtual-time-budget=45000',
+    '--allow-file-access-from-files', `--user-data-dir=${profile}`, '--virtual-time-budget=600000',
     '--dump-dom', pathToFileURL(path.join(output, 'index.html')).href,
   ], { stdio: ['ignore', 'pipe', 'pipe'] })
   let stdout = ''
