@@ -211,6 +211,7 @@
     "check:latest-bug": "node scripts/check-latest-bug.mjs",
     "check:ink-notice-dismiss": "node scripts/check-ink-notice-dismiss.mjs",
     "check:ink-note-switch": "node scripts/check-ink-note-switch.mjs",
+    "check:heavy-ink": "node scripts/check-heavy-ink.mjs",
     "check:ink-erase-persist": "node scripts/check-ink-erase-persist.mjs",
     "check:empty-ink-save": "node scripts/check-empty-ink-save.mjs",
     "check:ink-history-remap": "node scripts/check-ink-history-remap.mjs",

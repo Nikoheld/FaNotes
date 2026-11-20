@@ -300,6 +300,7 @@ import {
   writeExtentFromContent,
 } from '../lib/noteCanvas'
 import { growPageFromMark, keepMarkOnPage } from '../lib/paperCore'
+import { IDENTITY_AXIS, inkAxisMapOf, keepMarkOnPageAxis, planHeldInkRemap, type InkAxisMap, type InkBitmapGeometry } from '../lib/inkGrowRemap'
 import { viewportRasterEnabled } from '../lib/viewportRasterFlag'
 import {
   placeViewportRaster,
@@ -1613,7 +1614,11 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   /** Pen sample (layout px) the next live-slice plan should keep covered. */
   const livePenHintRef = useRef<InkLayoutPoint | null>(null)
   /** What the committed bitmap holds right now, so a slice move can reuse it. */
-  const committedBitmapRef = useRef<{ key: string; topPx: number } | null>(null)
+  // `provisional`: a page grow under the pen moved the bitmap by a copy (see
+  // lib/inkGrowRemap); it stands in until the pen lifts, then is repainted.
+  const committedBitmapRef = useRef<{ key: string; topPx: number; provisional?: boolean } | null>(null)
+  /** Set by a page grow mid-stroke for the redraw it runs: how the held bitmap maps onto the grown page. */
+  const growRemapRef = useRef<{ from: InkBitmapGeometry; x: InkAxisMap; y: InkAxisMap } | null>(null)
   /** Heavy pages paint across frames. A scroll keeps this job; a new page replaces it. */
   const inkPaintJobRef = useRef<InkPaintJob | null>(null)
   const redrawRef = useRef<(measureLayout?: boolean) => void>(() => {})
@@ -2531,6 +2536,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   }, [cancelInkPaint, paintLiveInk, paintViewportCommitted, syncViewportScene])
 
   const redraw = useCallback((measureLayout = false) => {
+    const growRemap = growRemapRef.current
+    growRemapRef.current = null
     const canvas = canvasRef.current
     const committedCanvas = committedCanvasRef.current
     const surface = surfaceRef.current
@@ -2668,6 +2675,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // for a heavy page. Until then the old picture stays on screen and the CSS
     // box stretches it, instead of a blank page for the whole job.
     const committedResized = committedCanvas.width !== pixelWidth || committedCanvas.height !== pixelHeight
+    // What the visible bitmap shows before a resize drops its seal (a grow under the pen copies it).
+    const heldBeforeResize = committedBitmapRef.current
     if (committedResized) committedBitmapRef.current = null
 
     // Content the committed bitmap depends on. The slice top is not part of
@@ -2690,7 +2699,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       gradientInk ? Math.round(virtualHeight) : 0,
     ].join(':')
     const held = committedBitmapRef.current
+    // A provisional bitmap is reused only while the pen is down; after the
+    // lift the page is repainted exactly (the heavy job on a heavy page).
     const shift = held && !committedCanvasDirtyRef.current && held.key === contentKey
+      && !(held.provisional && !activeStrokeRef.current)
       ? inkWindowShift(held.topPx, topPx, pixelHeight)
       : null
     const markInkPainted = () => {
@@ -2760,6 +2772,71 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       && !eraseOutside
       && !activeStrokeRef.current
       && inkPageIsHeavy(strokesRef.current)
+    // A grow under the pen on a heavy page: the bitmap held every stroke at
+    // the old layout, so a copy into the new one stands in for the repaint
+    // that would otherwise run whole in this pointer event.
+    const growPlan = growRemap
+      && !samePaint
+      && !shift
+      && !erasePatch
+      && !eraseOutside
+      && !pendingErase
+      && activeStrokeRef.current
+      && heldBeforeResize
+      && heldBeforeResize.topPx === growRemap.from.topPx
+      && !inkPaintJobRef.current
+      && committedCanvas.width === growRemap.from.width
+      && committedCanvas.height === growRemap.from.height
+      && inkPageIsHeavy(strokesRef.current)
+      ? planHeldInkRemap(growRemap.from, { width: pixelWidth, height: pixelHeight, virtualHeight, topPx }, growRemap.x, growRemap.y)
+      : null
+    const remapHeldInk = (plan: NonNullable<typeof growPlan>) => {
+      const buffer = inkBufferRef.current?.acquire(pixelWidth, pixelHeight) ?? null
+      const context = buffer?.getContext('2d') ?? null
+      if (!buffer || !context) return false
+      context.save()
+      try {
+        context.setTransform(1, 0, 0, 1, 0, 0)
+        context.globalAlpha = 1
+        context.globalCompositeOperation = 'source-over'
+        if (plan.unit) {
+          context.drawImage(committedCanvas, plan.dx, plan.dy)
+        } else {
+          context.imageSmoothingEnabled = true
+          context.imageSmoothingQuality = 'high'
+          context.drawImage(committedCanvas, plan.dx, plan.dy, committedCanvas.width * plan.scaleX, committedCanvas.height * plan.scaleY)
+        }
+      } finally {
+        context.restore()
+      }
+      const swapped = swapInkBuffer(committedCanvas, buffer)
+      inkBufferRef.current?.settle()
+      if (!swapped) return false
+      // The marker mask no longer lines up; the exact repaint after the lift rebuilds it.
+      let coverage: MarkerCoverage | null = null
+      for (const band of plan.bands) {
+        coverage = renderDocument(
+          committedCanvas,
+          strokesRef.current,
+          paperStyle,
+          settings.smoothing,
+          pixelWidth,
+          pixelHeight,
+          false,
+          sourceWidth,
+          inkWindow,
+          paintLayoutWidth || layoutWidth,
+          band,
+          settings.paperSquareMm,
+          coverage,
+        )
+      }
+      markerCoverageRef.current = coverage
+      committedBitmapRef.current = { key: contentKey, topPx, provisional: true }
+      committedCanvasDirtyRef.current = false
+      markInkPainted()
+      return true
+    }
     if (samePaint) {
       // This page is still filling in across frames. A scroll uses the same
       // picture, so it must not clear the bitmap and start again.
@@ -2788,7 +2865,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
           settings.paperSquareMm,
           markerCoverageRef.current,
         )
-        committedBitmapRef.current = { key: contentKey, topPx }
+        committedBitmapRef.current = { key: contentKey, topPx, provisional: held?.provisional }
       }
       markInkPainted()
     } else if (erasePatch) {
@@ -2809,14 +2886,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         markerCoverageRef.current,
         erasePatch,
       )
-      if (eraseHole.seal) committedBitmapRef.current = { key: contentKey, topPx }
+      if (eraseHole.seal) committedBitmapRef.current = { key: contentKey, topPx, provisional: held?.provisional }
       committedCanvasDirtyRef.current = false
       markInkPainted()
     } else if (eraseOutside) {
       cancelInkPaint()
-      if (eraseHole.seal) committedBitmapRef.current = { key: contentKey, topPx }
+      if (eraseHole.seal) committedBitmapRef.current = { key: contentKey, topPx, provisional: held?.provisional }
       committedCanvasDirtyRef.current = false
       markInkPainted()
+    } else if (growPlan && remapHeldInk(growPlan)) {
+      // The page grew under the pen: the held picture was moved by one copy.
     } else if (heavyRepaint) {
       cancelInkPaint()
       const strokes = strokesRef.current
@@ -3988,18 +4067,27 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // the page module twice per sample.
     const moveX = addX !== 0 || nextPaintW !== prevPaintW
     const moveY = addY !== 0 || nextPaintH !== prevPaintH
-    if (moveX && moveY) {
+    // Per-point remap in JS, bit-identical to the wasm keepMarkOnPage (an
+    // axis it leaves alone has no mapper): one call per sample was 30 ms of
+    // a first pen-down on a 1,000-stroke page.
+    // Per-point remap inline, bit-identical to the wasm keepMarkOnPage (an
+    // axis it leaves alone has no remap): one wasm call per sample was about
+    // 30 ms of a first pen-down near the edge of a 1,000-stroke page.
+    const remapX = moveX ? keepMarkOnPageAxis(prevPaintW, nextPaintW, addX) : null
+    const remapY = moveY ? keepMarkOnPageAxis(prevPaintH, nextPaintH, addY) : null
+    if (remapX || remapY) {
+      const xPrev = remapX?.prev ?? 1
+      const xNext = remapX?.next ?? 1
+      const xPad = remapX?.pad ?? 0
+      const yPrev = remapY?.prev ?? 1
+      const yNext = remapY?.next ?? 1
+      const yPad = remapY?.pad ?? 0
+      const doX = Boolean(remapX)
+      const doY = Boolean(remapY)
       forEachTrackedPoint((point) => {
-        point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
-        point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
-      })
-    } else if (moveY) {
-      forEachTrackedPoint((point) => {
-        point.y = keepMarkOnPage(point.y, prevPaintH, nextPaintH, addY)
-      })
-    } else if (moveX) {
-      forEachTrackedPoint((point) => {
-        point.x = keepMarkOnPage(point.x, prevPaintW, nextPaintW, addX)
+        const { x, y } = point
+        if (doX && Number.isFinite(x)) point.x = (x * xPrev + xPad) / xNext
+        if (doY && Number.isFinite(y)) point.y = (y * yPrev + yPad) / yNext
       })
     }
     const remapPose = <T extends { x: number; y: number }>(pose: T | null): T | null => {
@@ -4101,6 +4189,21 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // the same synchronous redraw that applies the new sheet size.
     const paintedStale = Math.abs(prevPaintW - canvasPixelSizeRef.current.layoutWidth) > 0.5
       || Math.abs(prevPaintH - canvasPixelSizeRef.current.layoutHeight) > 0.5
+    // Under the pen, the redraw below may move the held bitmap instead of
+    // repainting every stroke in this pointer event (lib/inkGrowRemap).
+    const placed = canvasPixelSizeRef.current
+    const mapX = moveX ? inkAxisMapOf((value) => keepMarkOnPage(value, prevPaintW, nextPaintW, addX)) : IDENTITY_AXIS
+    const mapY = moveY ? inkAxisMapOf((value) => keepMarkOnPage(value, prevPaintH, nextPaintH, addY)) : IDENTITY_AXIS
+    growRemapRef.current = activeStrokeRef.current
+      && inline
+      && !paintedStale
+      && !committedCanvasDirtyRef.current
+      && committedBitmapRef.current
+      && mapX
+      && mapY
+      && placed.width > 0
+      ? { from: { width: placed.width, height: placed.height, virtualHeight: placed.virtualHeight, topPx: placed.topPx }, x: mapX, y: mapY }
+      : null
     if (addX > 0 || addY > 0 || paintedStale) {
       committedCanvasDirtyRef.current = true
     }
@@ -4108,7 +4211,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     canvasQualityKeyRef.current = ''
     redraw(true)
     return true
-  }, [applyInkExtentStyles, forEachTrackedPoint, planInkWindowNow, resolvePaperElement, setDirty, redraw])
+  }, [applyInkExtentStyles, forEachTrackedPoint, inline, planInkWindowNow, resolvePaperElement, setDirty, redraw])
 
   /**
    * The 0–1 ink space is the painted sheet (`.unified-paper`), the same box
