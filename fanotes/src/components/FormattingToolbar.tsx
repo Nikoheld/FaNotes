@@ -86,12 +86,58 @@ const PRIMARY: Array<ActionEntry & { group: number }> = [
 
 /** Rarely used blocks: always grouped in the "Mehr" menu. `typeable` ones are hidden by the settings toggle. */
 const RARE: Array<ActionEntry & { typeable: boolean }> = [
-  { action: 'table', label: 'Tabelle', icon: Table2, typeable: false },
   { action: 'mathBlock', label: 'Mathematikblock', icon: Sigma, typeable: false },
   { action: 'details', label: 'Einklappbarer Bereich', icon: ListCollapse, typeable: false },
   { action: 'codeBlock', label: 'Codeblock', icon: Braces, typeable: true },
   { action: 'horizontalRule', label: 'Trennlinie', icon: Minus, typeable: true },
 ]
+
+const GRID_ROWS = 8
+const GRID_COLUMNS = 10
+
+/** Word-style picker: hover or arrow over the grid, click to insert a table of that size. */
+function TableGridPicker({ disabled, onPick }: { disabled: boolean; onPick: (rows: number, columns: number) => void }) {
+  const [hover, setHover] = useState({ rows: 0, columns: 0 })
+  const cells = []
+  for (let row = 1; row <= GRID_ROWS; row += 1) {
+    for (let column = 1; column <= GRID_COLUMNS; column += 1) {
+      const lit = row <= hover.rows && column <= hover.columns
+      cells.push(
+        <button
+          key={`${row}x${column}`}
+          type="button"
+                    data-menu-close
+          className={lit ? 'ftb-grid-cell is-lit' : 'ftb-grid-cell'}
+          aria-label={`Tabelle mit ${row} Zeilen und ${column} Spalten einfügen`}
+          disabled={disabled}
+          tabIndex={row === 1 && column === 1 ? 0 : -1}
+          onPointerEnter={() => setHover({ rows: row, columns: column })}
+          onFocus={() => setHover({ rows: row, columns: column })}
+          onClick={() => onPick(row, column)}
+          onKeyDown={(event) => {
+            const delta = event.key === 'ArrowRight' ? [0, 1] : event.key === 'ArrowLeft' ? [0, -1] : event.key === 'ArrowDown' ? [1, 0] : event.key === 'ArrowUp' ? [-1, 0] : null
+            if (!delta) return
+            event.preventDefault()
+            const nextRow = Math.max(1, Math.min(GRID_ROWS, row + delta[0]))
+            const nextColumn = Math.max(1, Math.min(GRID_COLUMNS, column + delta[1]))
+            const grid = event.currentTarget.parentElement
+            grid?.querySelectorAll<HTMLButtonElement>('.ftb-grid-cell').forEach((cell) => { cell.tabIndex = -1 })
+            const target = grid?.children[(nextRow - 1) * GRID_COLUMNS + nextColumn - 1] as HTMLButtonElement | undefined
+            if (target) { target.tabIndex = 0; target.focus() }
+          }}
+        />,
+      )
+    }
+  }
+  return (
+    <div className="ftb-section ftb-table-picker" role="group" aria-label="Tabelle einfügen">
+      <span className="ftb-heading"><Table2 aria-hidden="true" size={13} /> {hover.rows ? `Tabelle ${hover.rows} × ${hover.columns}` : 'Tabelle einfügen'}</span>
+      <div className="ftb-grid" role="group" aria-label="Zeilen und Spalten" style={{ gridTemplateColumns: `repeat(${GRID_COLUMNS}, 1fr)` }} onPointerLeave={() => setHover({ rows: 0, columns: 0 })}>
+        {cells}
+      </div>
+    </div>
+  )
+}
 
 /** Width of one button plus the gap, in px (matches the CSS). */
 const UNIT = 26
@@ -203,6 +249,7 @@ export const FormattingToolbar = memo(function FormattingToolbar({
           {!headingVisible && showPrimary && HEADINGS.map((entry) => row(entry))}
           {overflowPrimary.map((entry) => row(entry))}
           {rare.length > 0 && (!headingVisible || overflowPrimary.length > 0) && showPrimary ? <hr className="ftb-rule" /> : null}
+          <TableGridPicker disabled={disabled} onPick={(rows, columns) => onFormat(`table:${rows}x${columns}`)} />
           {rare.map((entry) => row(entry))}
           {!hideLatex && (
             <div className="ftb-section simple-latex-tools" role="group" aria-label="Einfaches LaTeX" title="Zahlen oder Wörter. Die Schaltflächen setzen die Formel.">

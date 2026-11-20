@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import { isDrawingInkSurfaceTarget } from '../lib/overlayInteract'
 import {
@@ -6,6 +6,7 @@ import {
   QUICK_MENU_EXTENT,
   QUICK_MENU_ITEM_SIZE,
   QUICK_MENU_TOOL_RADIUS,
+  quickMenuSelectByDirection,
   clampQuickMenuCenter,
   pointerTipDown,
   ringPositions,
@@ -31,11 +32,11 @@ type PenQuickMenuProps = {
   onClose: () => void
 }
 
-const ITEM_SELECTOR = '[data-pen-quick-item]'
-
 /**
- * Radial quick menu at the pen: tools on the inner ring, colours on the outer
- * ring. Tap an option, or keep the tip down, slide onto one and lift.
+ * Radial marking menu at the pen: tools on the inner ring, colours on the outer
+ * ring. Keep the tip down and move in the direction of an option (no need to
+ * reach it); it highlights live and lifting commits it. Lifting inside the dead
+ * zone cancels. Tapping an option still works.
  */
 export function PenQuickMenu({
   x,
@@ -51,6 +52,10 @@ export function PenQuickMenu({
   const rootRef = useRef<HTMLDivElement | null>(null)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  const [hot, setHot] = useState<string | null>(null)
+  const hotRef = useRef<string | null>(null)
+  const countsRef = useRef({ tools: tools.length, colors: colors.length })
+  countsRef.current = { tools: tools.length, colors: colors.length }
   const center = clampQuickMenuCenter(
     x,
     y,
@@ -61,22 +66,40 @@ export function PenQuickMenu({
   useEffect(() => {
     // The tip that opened the menu is still down: lifting it over an option picks it.
     let armed = true
-    const pickAt = (clientX: number, clientY: number) => {
+    const select = (clientX: number, clientY: number) => {
+      const { tools: toolCount, colors: colorCount } = countsRef.current
+      const hit = quickMenuSelectByDirection(clientX - x, clientY - y, toolCount, colorCount)
+      const id = hit ? `${hit.ring}:${hit.index}` : null
+      if (id !== hotRef.current) {
+        hotRef.current = id
+        setHot(id)
+      }
+      return id
+    }
+    const commit = () => {
       const root = rootRef.current
-      const hit = document.elementFromPoint(clientX, clientY)
-      const item = hit instanceof Element ? hit.closest(ITEM_SELECTOR) : null
-      if (root && item instanceof HTMLElement && root.contains(item)) item.click()
+      const id = hotRef.current
+      if (!root) return
+      const item = id ? root.querySelector<HTMLElement>(`[data-pen-quick-slot="${id}"]`) : null
+      // Nothing highlighted (still in the dead zone): the gesture cancels.
+      if (item) item.click()
+      else closeRef.current()
     }
     const onMove = (event: PointerEvent) => {
       if (!armed || event.pointerId !== pointerId) return
+      // Coalesced samples make a fast flick register even if the last point is back near the origin.
+      select(event.clientX, event.clientY)
       if (pointerTipDown(event)) return
       armed = false
-      pickAt(event.clientX, event.clientY)
+      commit()
     }
     const onUp = (event: PointerEvent) => {
       if (!armed || event.pointerId !== pointerId) return
       armed = false
-      if (event.type === 'pointerup') pickAt(event.clientX, event.clientY)
+      if (event.type === 'pointerup') {
+        select(event.clientX, event.clientY)
+        commit()
+      } else closeRef.current()
     }
     const onDown = (event: PointerEvent) => {
       const root = rootRef.current
@@ -109,7 +132,7 @@ export function PenQuickMenu({
       window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('blur', onBlur)
     }
-  }, [pointerId])
+  }, [pointerId, x, y])
 
   const toolSpots = ringPositions(tools.length, QUICK_MENU_TOOL_RADIUS)
   const colorSpots = ringPositions(colors.length, QUICK_MENU_COLOR_RADIUS, 0.5)
@@ -153,7 +176,8 @@ export function PenQuickMenu({
           aria-label={tool.label}
           title={tool.label}
           data-pen-quick-item={`tool:${tool.id}`}
-          className={`lw-pqm-item lw-pqm-tool${tool.active ? ' is-active' : ''}`}
+          data-pen-quick-slot={`tool:${index}`}
+          className={`lw-pqm-item lw-pqm-tool${tool.active ? ' is-active' : ''}${hot === `tool:${index}` ? ' is-hot' : ''}`}
           style={place(toolSpots[index])}
           onClick={() => onTool(tool.id)}
         >{tool.icon}</button>
@@ -167,7 +191,8 @@ export function PenQuickMenu({
           aria-label={`Farbe ${color}`}
           title={`Farbe ${color}`}
           data-pen-quick-item={`color:${color}`}
-          className={`lw-pqm-item lw-pqm-color${current === color.toLowerCase() ? ' is-active' : ''}`}
+          data-pen-quick-slot={`color:${index}`}
+          className={`lw-pqm-item lw-pqm-color${current === color.toLowerCase() ? ' is-active' : ''}${hot === `color:${index}` ? ' is-hot' : ''}`}
           style={{ ...place(colorSpots[index]), '--pqm-color': color } as CSSProperties}
           onClick={() => onColor(color)}
         />
@@ -189,6 +214,8 @@ const penQuickMenuStyles = `
 .lw-pqm-color{border:2px solid var(--panel,#1d1f26);background:var(--pqm-color);box-shadow:0 0 0 1px var(--border-strong,var(--border,#4446))}
 .lw-pqm-color:hover{transform:scale(1.12)}
 .lw-pqm-color.is-active{box-shadow:0 0 0 2px var(--panel,#1d1f26),0 0 0 4px var(--accent,#7c8cff)}
+.lw-pqm-tool.is-hot{border-color:var(--accent,#7c8cff);transform:scale(1.18);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent,#7c8cff) 45%,transparent)}
+.lw-pqm-color.is-hot{transform:scale(1.3);box-shadow:0 0 0 2px var(--panel,#1d1f26),0 0 0 4px var(--accent,#7c8cff)}
 .lw-pqm-hub:focus-visible,.lw-pqm-item:focus-visible{outline:2px solid var(--accent,#7c8cff);outline-offset:2px}
 @keyframes lw-pqm-in{from{opacity:0;transform:scale(.82)}to{opacity:1;transform:scale(1)}}
 @media (prefers-reduced-motion:reduce){.lw-pqm-disc,.lw-pqm-hub,.lw-pqm-item{animation:none}.lw-pqm-tool:hover,.lw-pqm-color:hover{transform:none}}
