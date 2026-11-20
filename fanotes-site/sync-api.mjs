@@ -1115,8 +1115,6 @@ const handlePassword = async (request, response, auth) => {
     account.sessions = { [auth.tokenHash]: account.sessions[auth.tokenHash] }
     for (const id of Object.keys(account.devices)) if (id !== auth.deviceId) delete account.devices[id]
     await saveAccount(account)
-    const { revokeAccountAccess } = await import('./mcp-grants.mjs')
-    await revokeAccountAccess(account.id)
   })
   sendEmpty(request, response, 204)
 }
@@ -1135,8 +1133,6 @@ const handleDeleteAccount = async (request, response, auth) => {
     await fs.rm(accountDirectory(account.id), { recursive: true, force: true })
     tables.delete(account.id)
     await notifyAccountDeleted(account.id)
-    const { revokeAccountAccess } = await import('./mcp-grants.mjs')
-    await revokeAccountAccess(account.id)
   })
   sendEmpty(request, response, 204)
 }
