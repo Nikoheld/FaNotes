@@ -64,7 +64,7 @@ try {
   } else {
     const { chromium: browserType } = await import(pathToFileURL(playwrightEntry).href)
     const browser = await browserType.launch({ executablePath: chromium, args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'] })
-    const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, locale: 'de-CH' })
+    const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, hasTouch: true, locale: 'de-CH' })
     const page = await context.newPage()
     if (process.env.FANOTES_SPLIT_THROTTLE) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.FANOTES_SPLIT_THROTTLE) })
     const pageErrors = []
@@ -273,6 +273,26 @@ try {
       await dropOn('application/x-fanotes-tab', alphaPath, 0.5, 0.5)
       await settle(300)
       assert.equal((await state()).split, false, 'a drop in the middle does not split')
+
+      // A finger: long press on a tab, then drag to the right edge (the touch layer replays it as a drag).
+      const cdp = await context.newCDPSession(page)
+      const tab = await page.locator('.note-tab:not(.active)[title$=".md"]').filter({ hasNotText: 'Willkommen' }).first().boundingBox()
+      const editorBox = await page.locator('.editor-split').boundingBox()
+      const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] })
+      const startX = tab.x + tab.width / 2
+      const startY = tab.y + tab.height / 2
+      await touch('touchStart', startX, startY)
+      await settle(350)
+      for (let i = 1; i <= 12; i += 1) {
+        await touch('touchMove', startX + (editorBox.x + editorBox.width - 8 - startX) * (i / 12), startY + (editorBox.y + editorBox.height / 2 - startY) * (i / 12))
+        await page.waitForTimeout(30)
+      }
+      const touchOverlay = await page.evaluate(() => document.querySelector('.split-drop-overlay')?.className ?? '')
+      await touch('touchEnd')
+      assert.match(touchOverlay, /is-right/, 'a finger drag of a tab to the edge shows the drop preview')
+      await page.waitForSelector('.editor-split.is-split .split-pane .cm-content', { timeout: 10_000 })
+      await settle(500)
+      assert.notEqual((await texts())[0], (await texts())[1], 'a finger drag of a tab to the edge splits')
 
       assert.deepEqual(pageErrors, [], `page errors: ${pageErrors.join('\n')}`)
       console.log('split-view ok')
