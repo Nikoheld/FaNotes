@@ -513,8 +513,31 @@ function describeSession(session, index = { pages: {} }) {
   }
 }
 
+/** Pixel size of a PNG, JPEG, GIF or WebP, or null. */
+function imageSize(data, extension) {
+  try {
+    if (extension === '.png') return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) }
+    if (extension === '.gif') return { width: data.readUInt16LE(6), height: data.readUInt16LE(8) }
+    if (extension === '.webp') {
+      const kind = data.subarray(12, 16).toString('ascii')
+      if (kind === 'VP8X') return { width: 1 + data.readUIntLE(24, 3), height: 1 + data.readUIntLE(27, 3) }
+      if (kind === 'VP8 ') return { width: data.readUInt16LE(26) & 0x3fff, height: data.readUInt16LE(28) & 0x3fff }
+      if (kind === 'VP8L') { const bits = data.readUInt32LE(21); return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 } }
+      return null
+    }
+    let offset = 2
+    while (offset + 9 < data.length) {
+      if (data[offset] !== 0xff) { offset += 1; continue }
+      const marker = data[offset + 1]
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { width: data.readUInt16BE(offset + 7), height: data.readUInt16BE(offset + 5) }
+      offset += 2 + data.readUInt16BE(offset + 2)
+    }
+  } catch { /* unreadable header */ }
+  return null
+}
+
 /** Stores one embedded image in the vault's asset folder (named by content hash, so a re-import reuses it). */
-async function storeImage(source, pagePath, outputRoot, vaultRoot, cache) {
+async function storeImage(source, pagePath, outputRoot, vaultRoot, cache, infoByRef) {
   if (/^(?:https?:|file:|javascript:|data:)/iu.test(source)) return null
   let decoded
   try { decoded = decodeURIComponent(source) } catch { decoded = source }
@@ -536,6 +559,10 @@ async function storeImage(source, pagePath, outputRoot, vaultRoot, cache) {
     const target = path.join(directory, name)
     if (!fs.existsSync(target)) await atomicWrite(target, data)
     result = `${IMAGE_DIRECTORY}/${name}`
+    const size = imageSize(data, extension)
+    const mime = extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : extension === '.png' ? 'image/png' : extension === '.webp' ? 'image/webp' : null
+    const dataUrl = mime ? `data:${mime};base64,${data.toString('base64')}` : null
+    infoByRef.set(result, { width: size?.width || 300, height: size?.height || 200, dataUrl: dataUrl && dataUrl.length <= 1_500_000 ? dataUrl : null })
   } catch {
     result = null
   }
@@ -596,14 +623,14 @@ async function writeNoteFiles(directory, title, markdown, famdText, modifiedAt) 
  */
 async function importOneNotePages({ session, pageIds, destination, vaultRoot, sectionFolders = true, onProgress, signal }) {
   const { convertOneNotePage, buildInkDocument } = require('./onenote-convert.cjs')
-  const { composeFamdCompanion } = require('./famd.cjs')
   const rootInfo = await fsp.lstat(vaultRoot)
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('Der aktive Vault ist kein sicherer Ordner.')
   const wanted = new Set(pageIds)
   const selected = session.pages.filter((page) => wanted.has(page.id))
   const index = await readImportIndex(vaultRoot)
-  const result = { imported: [], skipped: [], failed: [], cancelled: false, inkPages: 0, imageCount: 0, strokeCount: 0, warnings: [] }
+  const result = { imported: [], skipped: [], failed: [], cancelled: false, inkPages: 0, layoutPages: 0, imageCount: 0, strokeCount: 0, warnings: [] }
   const imageCache = new Map()
+  const imageInfo = new Map()
   const report = (done, title, status) => onProgress?.({ done, total: selected.length, title, status })
   let done = 0
   for (const page of selected) {
@@ -622,21 +649,61 @@ async function importOneNotePages({ session, pageIds, destination, vaultRoot, se
       const html = await fsp.readFile(page.file, 'utf8')
       const stored = new Map()
       for (const match of html.matchAll(/<img\b[^>]*\bsrc=(['"])([^'"]+)\1/giu)) {
-        const reference = await storeImage(decodeHtmlEntities(match[2]), page.file, session.outputRoot, vaultRoot, imageCache)
+        const reference = await storeImage(decodeHtmlEntities(match[2]), page.file, session.outputRoot, vaultRoot, imageCache, imageInfo)
         stored.set(match[2], reference)
         stored.set(decodeHtmlEntities(match[2]), reference)
       }
       const converted = convertOneNotePage(html, {
         fallbackTitle: page.title,
         resolveImage: (source) => stored.get(source) ?? null,
+        imageInfo: (reference) => imageInfo.get(reference) ?? null,
       })
       const folderSegments = sectionFolders ? page.sectionPath : []
       const directory = path.join(destination.physical, ...folderSegments)
       if (!isInside(destination.physical, directory)) throw new Error('Ein OneNote-Abschnittsname ist ungültig.')
       await fsp.mkdir(directory, { recursive: true, mode: 0o700 })
-      const inkDocument = buildInkDocument(converted.strokes, { title: converted.title, createdAt: converted.createdAt ?? undefined })
-      const famdText = inkDocument ? composeFamdCompanion('', converted.markdown, inkDocument, undefined) : null
-      const written = await writeNoteFiles(directory, page.title, converted.markdown, famdText, converted.updatedAt ?? converted.createdAt)
+      let markdown = converted.markdown
+      let famdText = null
+      let inkDocument = null
+      if (converted.strokes.length) {
+        // Free-form page: text blocks and images keep their OneNote positions in the same
+        // coordinate space as the ink, so strokes stay on the text they were written on.
+        const layout = converted.layout
+        inkDocument = buildInkDocument(converted.strokes, { title: converted.title, createdAt: converted.createdAt ?? undefined, extent: { x: layout.extentX + 48, y: layout.extentY } })
+        const width = inkDocument.sourceWidth
+        const height = inkDocument.sourceHeight
+        const unit = (value) => Math.max(0, Math.min(1, Math.round(value * 1e6) / 1e6))
+        const stamp = Date.now()
+        const textFields = layout.fields.map((field, number) => ({
+          id: `on-t${number + 1}`,
+          page: 1,
+          x: unit(field.x / width),
+          y: unit(field.y / height),
+          width: Math.max(0.12, Math.min(0.92, Math.round((field.width / width) * 1e4) / 1e4)),
+          fontSize: field.fontSize,
+          text: field.text,
+          ...(field.bold ? { bold: true } : {}),
+          updatedAt: stamp,
+        }))
+        const annotations = []
+        const flowImages = [...layout.flowImages]
+        let budget = 6_000_000
+        for (const image of layout.images) {
+          const info = imageInfo.get(image.ref)
+          if (!info?.dataUrl || annotations.length >= 12 || info.dataUrl.length > budget) { flowImages.push(`![${image.alt}](${image.ref})`); continue }
+          budget -= info.dataUrl.length
+          annotations.push({ kind: 'image', id: `on-i${annotations.length + 1}`, page: 1, x: unit(image.x / width), y: unit(image.y / height), w: Math.max(0.05, Math.min(1, image.width / width)), aspect: image.width / image.height, opacity: 1, locked: true, src: info.dataUrl, title: image.alt.slice(0, 80) })
+        }
+        if (layout.fields.length >= 190) result.warnings.push(`„${page.title}“: Textblöcke über dem Limit stehen nur in der Suche.`)
+        inkDocument.searchTranscript = layout.fields.map((field) => field.text).join('\n').slice(0, 20000)
+        markdown = `# ${converted.markdown.split('\n', 1)[0].replace(/^#\s+/u, '')}\n${flowImages.length ? `\n${flowImages.join('\n\n')}\n` : ''}`
+        const { serializeFamd } = require('./famd.cjs')
+        const { packV2Ink } = require('./famdV2.mjs')
+        const updatedAt = new Date().toISOString()
+        famdText = serializeFamd(markdown, { updatedAt, ink: packV2Ink(inkDocument), worksheets: [], textFields, annotations }, 'v2')
+        result.layoutPages += 1
+      }
+      const written = await writeNoteFiles(directory, page.title, markdown, famdText, converted.updatedAt ?? converted.createdAt)
       const logical = [destination.logical, ...folderSegments, `${written.name}.md`].filter(Boolean).join('/')
       index.pages[page.pageKey] = { path: logical, paths: [...new Set([logical, ...(existing?.paths ?? [])])].slice(0, 20), importedAt: new Date().toISOString() }
       result.imported.push({ id: page.id, title: page.title, path: logical, ink: Boolean(inkDocument), strokes: converted.strokes.length })

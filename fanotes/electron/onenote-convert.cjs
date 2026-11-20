@@ -303,10 +303,10 @@ function inkStrokesOfSvg(svg, origin) {
  * Famd ink document (schemaVersion 1, packed later by the famd writer) from strokes in
  * page pixels. Points become fractions of sourceWidth/sourceHeight.
  */
-function buildInkDocument(strokes, { title, createdAt, minWidth = MIN_PAGE_WIDTH, minHeight = MIN_PAGE_HEIGHT } = {}) {
+function buildInkDocument(strokes, { title, createdAt, minWidth = MIN_PAGE_WIDTH, minHeight = MIN_PAGE_HEIGHT, extent = null } = {}) {
   if (!strokes.length) return null
-  let maxX = 0
-  let maxY = 0
+  let maxX = extent?.x ?? 0
+  let maxY = extent?.y ?? 0
   for (const stroke of strokes) {
     for (const [x, y] of stroke.points) {
       if (x > maxX) maxX = x
@@ -404,11 +404,86 @@ function safeHref(href) {
   return /^(?:https?:|mailto:)/iu.test(value) && !/[\s()<>]/u.test(value) ? value : null
 }
 
+// ---------------------------------------------------------------------------
+// Free-form layout (pages with ink): every outline block becomes a positioned text field
+// ---------------------------------------------------------------------------
+
+const BODY_FONT = 15
+const IMAGE_LINE = /^!\[([^\]\n]*)\]\(([^)\s]+)\)$/u
+const MAX_FIELD_CHARS = 7500
+const MAX_FIELDS = 190
+
+/** Rendered height of Markdown text in a box of `width` px at `fontSize`, estimated from its lines. */
+function estimateHeight(text, width, fontSize) {
+  const charsPerLine = Math.max(8, Math.floor(width / (fontSize * 0.52)))
+  let lines = 0
+  for (const line of text.split('\n')) {
+    const heading = /^(#{1,6})\s/u.exec(line)
+    const size = heading ? fontSize * (1.7 - heading[1].length * 0.12) : fontSize
+    const visible = line.replace(/[*~`>|#-]/gu, '').length
+    lines += Math.max(1, Math.ceil((visible * size) / fontSize / charsPerLine)) * (size / fontSize)
+  }
+  return Math.ceil(lines * fontSize * 1.4)
+}
+
+function buildLayout(rootBlocks, imageInfo) {
+  const fields = []
+  const images = []
+  const flowImages = []
+  let extentX = 0
+  let extentY = 0
+  const note = (x, y, w, h) => {
+    extentX = Math.max(extentX, x + w)
+    extentY = Math.max(extentY, y + h)
+  }
+  const addField = (x, y, width, text, fontSize, bold) => {
+    const trimmed = text.trim()
+    if (!trimmed || fields.length >= MAX_FIELDS) return 0
+    const height = estimateHeight(trimmed, width, fontSize)
+    fields.push({ x, y, width, text: trimmed.slice(0, MAX_FIELD_CHARS), fontSize, ...(bold ? { bold: true } : {}), height })
+    note(x, y, width, height)
+    return height + 8
+  }
+  for (const root of rootBlocks) {
+    let y = root.top
+    if (root.title) {
+      const [heading, ...rest] = root.blocks
+      y += addField(root.left, y, root.width, String(heading ?? '').replace(/^#\s+/u, ''), 27, true) + 4
+      addField(root.left, y, root.width, rest.map((line) => line.replace(/^\*|\*$/gu, '')).join('\n\n'), 14, false)
+      continue
+    }
+    let segment = []
+    const flush = () => {
+      const text = segment.join('\n\n')
+      segment = []
+      if (!text.trim()) return
+      for (let start = 0; start < text.length; start += MAX_FIELD_CHARS) y += addField(root.left, y, root.width, text.slice(start, start + MAX_FIELD_CHARS), BODY_FONT, false)
+    }
+    for (const block of root.blocks) {
+      for (const part of block.split(/\n{2,}/u)) {
+        const trimmed = part.trim()
+        const image = IMAGE_LINE.exec(trimmed)
+        if (!image) { if (trimmed) segment.push(trimmed); continue }
+        flush()
+        const info = imageInfo(image[2])
+        if (!info) { flowImages.push(trimmed); continue }
+        const width = Math.max(24, Math.min(info.width, 600, info.maxWidth ?? 600))
+        const height = Math.round(width * (info.height / info.width))
+        images.push({ ref: image[2], alt: image[1], x: root.left, y, width, height })
+        note(root.left, y, width, height)
+        y += height + 8
+      }
+    }
+    flush()
+  }
+  return { fields, images, flowImages, extentX, extentY }
+}
+
 /**
  * Converts one page. `resolveImage(src, alt)` returns the markdown path of a stored image, or null
  * when the image could not be stored. Returns { title, markdown, strokes, pageKeyHint, ... }.
  */
-function convertOneNotePage(html, { resolveImage = () => null, fallbackTitle = 'OneNote-Seite' } = {}) {
+function convertOneNotePage(html, { resolveImage = () => null, imageInfo = () => null, fallbackTitle = 'OneNote-Seite' } = {}) {
   const document = parseHtml(html)
   const find = (node, test) => {
     for (const child of children(node)) {
@@ -621,19 +696,23 @@ function convertOneNotePage(html, { resolveImage = () => null, fallbackTitle = '
   roots.sort((left, right) => (left.title === right.title ? 0 : left.title ? -1 : 1) || left.top - right.top || left.left - right.left)
 
   const sections = []
+  const rootBlocks = []
   let subtitle = []
   for (const root of roots) {
     const container = root.node
     if (root.title) {
       // The title container holds the page title and its date lines; the title becomes the H1.
       const lines = blocks(hasClass(container, 'title') ? container : { childNodes: [container] }, root.origin, 0)
+      rootBlocks.push({ title: true, left: root.left, top: root.top, width: px(styleOf(container)['max-width']) ?? 576, blocks: [...lines] })
       const first = lines.shift()
       void first
       subtitle = subtitle.concat(lines.filter((line) => line.trim()))
       continue
     }
     const isContainerNode = hasClass(container, 'container-outline')
-    sections.push(...blocks(isContainerNode ? container : { childNodes: [container] }, root.origin, 0))
+    const produced = blocks(isContainerNode ? container : { childNodes: [container] }, root.origin, 0)
+    sections.push(...produced)
+    if (isContainerNode) rootBlocks.push({ title: false, left: root.left, top: root.top, width: px(styleOf(container)['max-width']) ?? 576, blocks: produced })
   }
 
   const lead = [`# ${paragraphText(markText(title)).replace(/\n/gu, ' ')}`]
@@ -650,6 +729,7 @@ function convertOneNotePage(html, { resolveImage = () => null, fallbackTitle = '
   return {
     title,
     markdown,
+    layout: buildLayout(rootBlocks, imageInfo),
     strokes: strokes.slice(0, MAX_STROKES),
     strokesDropped: Math.max(0, strokes.length - MAX_STROKES),
     pageId: metaValue('X-Original-Page-Id') ?? null,

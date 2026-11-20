@@ -506,6 +506,7 @@ export type OneNoteImportResult = {
   failed: Array<{ id: string; title: string; error: string }>
   cancelled: boolean
   inkPages: number
+  layoutPages: number
   imageCount: number
   strokeCount: number
   warnings: string[]

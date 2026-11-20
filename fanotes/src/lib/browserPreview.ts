@@ -566,7 +566,7 @@ export function createBrowserPreviewApi(): FaNotesApi {
       return { ...document, textBoxes: [] }
     },
     importOneNote: async () => null,
-    importOneNotePages: async () => ({ imported: [], skipped: [], failed: [], cancelled: false, inkPages: 0, imageCount: 0, strokeCount: 0, warnings: [] }),
+    importOneNotePages: async () => ({ imported: [], skipped: [], failed: [], cancelled: false, inkPages: 0, layoutPages: 0, imageCount: 0, strokeCount: 0, warnings: [] }),
     cancelOneNoteImport: async () => ({ cancelled: false }),
     closeOneNote: async () => ({ closed: true }),
     onOneNoteProgress: () => () => {},

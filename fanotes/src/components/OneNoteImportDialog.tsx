@@ -235,7 +235,7 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
               {result.inkPages
                 ? `Handschrift: ${result.strokeCount} Striche auf ${result.inkPages} ${result.inkPages === 1 ? 'Seite' : 'Seiten'} als .famd übernommen.`
                 : scan && scan.inkPageCount === 0 ? 'Diese Datei enthält keine Handschrift-Daten.' : 'In den gewählten Seiten wurde keine Handschrift gefunden.'}
-              {result.imageCount ? ` Bilder: ${result.imageCount}.` : ''}
+              {result.layoutPages ? ` ${result.layoutPages} Seiten mit Handschrift behalten das OneNote-Layout.` : ''}{result.imageCount ? ` Bilder: ${result.imageCount}.` : ''}
             </p>
             {result.skipped.length > 0 && <details><summary>{result.skipped.length} bereits importierte Seiten übersprungen</summary><ul>{result.skipped.map((item) => <li key={item.id}>{item.title}</li>)}</ul></details>}
             {result.failed.length > 0 && <div className="onenote-dialog-errors" role="alert"><strong>Fehler pro Seite</strong><ul>{result.failed.map((item) => <li key={item.id}><b>{item.title}</b>: {item.error}</li>)}</ul></div>}
