@@ -54,7 +54,7 @@ try {
   const chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
     '--js-flags=--max-old-space-size=1024',
-    `--user-data-dir=${profile}`, '--virtual-time-budget=30000',
+    `--user-data-dir=${profile}`, '--virtual-time-budget=600000',
     '--dump-dom', `http://127.0.0.1:${port}/`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] })
   let stdout = ''

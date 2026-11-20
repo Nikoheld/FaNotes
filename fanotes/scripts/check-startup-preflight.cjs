@@ -13,6 +13,8 @@ const {
   configureLinuxGraphics,
   configureLinuxInputPlatform,
   hyprlandFocusedMonitorScale,
+  readCachedHyprlandScale,
+  refreshHyprlandMonitorScale,
   linuxOzoneAppRunExecLine,
   linuxOzoneDesktopExec,
   linuxOzoneLaunchPlan,
@@ -59,6 +61,7 @@ function mockCommandLine(initial = {}) {
   }
 }
 
+const asyncChecks = []
 try {
   const dead = makeProfile(`${os.hostname()}-2147483646`)
   assert.deepEqual(
@@ -190,6 +193,48 @@ try {
   assert.equal(userFlag.getSwitchValue('force-device-scale-factor'), '1.75', 'a scale on the command line is kept')
   assert.equal(userFlagResult.scaleSource, 'command-line')
   assert.equal(userFlagResult.monitorScale, 1.5)
+
+
+  // The cached scale: no hyprctl before `ready`; the async refresh updates it afterwards.
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-hypr-cache-'))
+  temporaryProfiles.push(cacheDir)
+  const cacheFile = path.join(cacheDir, 'hyprland-scale.json')
+  const firstRun = mockCommandLine()
+  hyprctlCalls = 0
+  const firstResult = configureLinuxInputPlatform({ commandLine: firstRun }, hyprSession, hyprctl, { cacheFile })
+  assert.equal(firstResult.scaleSource, 'hyprctl', 'first launch without a cache still asks hyprctl once')
+  assert.equal(hyprctlCalls, 1)
+  assert.equal(readCachedHyprlandScale(cacheFile), 1.5, 'the first launch stores the scale')
+  const cachedRun = mockCommandLine()
+  hyprctlCalls = 0
+  const cachedResult = configureLinuxInputPlatform({ commandLine: cachedRun }, hyprSession, hyprctl, { cacheFile })
+  assert.equal(hyprctlCalls, 0, 'with a cached scale hyprctl does not run before ready')
+  assert.equal(cachedResult.scaleSource, 'cache')
+  assert.equal(cachedRun.getSwitchValue('force-device-scale-factor'), '1.5', 'the Hyprland scale fix still applies from the cache')
+  assert.equal(cachedResult.monitorScale, null, 'the monitor scale arrives after ready')
+  const cachedCompositor = mockCommandLine()
+  hyprctlCalls = 0
+  configureLinuxInputPlatform(
+    { commandLine: cachedCompositor },
+    { FANOTES_HYPRLAND_CONFIG: path.join(os.tmpdir(), 'fanotes-no-such.conf'), HOME: '', HYPRLAND_INSTANCE_SIGNATURE: 'sig' },
+    hyprctl,
+    { cacheFile },
+  )
+  assert.equal(hyprctlCalls, 0, 'the blur hint query also waits for ready')
+  fs.writeFileSync(cacheFile, '{"scale":99}')
+  assert.equal(readCachedHyprlandScale(cacheFile), null, 'an absurd cached scale is ignored')
+  fs.writeFileSync(cacheFile, '{"scale":1.5}')
+  asyncChecks.push((async () => {
+    const monitorsAfterMove = JSON.stringify([{ name: 'DP-2', scale: 1, focused: true }])
+    const stale = await refreshHyprlandMonitorScale(cachedResult, hyprSession, async () => monitorsAfterMove)
+    assert.deepEqual(stale, { monitorScale: 1, stale: true }, 'a moved monitor is reported stale')
+    assert.equal(readCachedHyprlandScale(cacheFile), 1, 'and the cache is refreshed for the next launch')
+    const same = await refreshHyprlandMonitorScale({ ...cachedResult, scaleFactor: 1 }, hyprSession, async () => monitorsAfterMove)
+    assert.deepEqual(same, { monitorScale: 1, stale: false })
+    const failed = await refreshHyprlandMonitorScale(cachedResult, hyprSession, async () => { throw new Error('hyprctl missing') })
+    assert.deepEqual(failed, { monitorScale: null, stale: false }, 'a failing hyprctl keeps the cached scale')
+    assert.deepEqual(await refreshHyprlandMonitorScale(cachedResult, {}, async () => monitorsAfterMove), { monitorScale: null, stale: false }, 'no Hyprland session: nothing to ask')
+  })())
 
   const compositorScaled = mockCommandLine()
   const compositorResult = configureLinuxInputPlatform(
@@ -389,5 +434,13 @@ try {
 
   console.log('Startup-Preflight: Lock-/Grafik-Szenarien sowie schlanker Chromium-Start, lokaler Cache, lazy Keyring, Editor-Warmup, startfreundliches AppImage und stark verzögerte Hintergrundarbeit bestanden.')
 } finally {
-  temporaryProfiles.forEach((directory) => fs.rmSync(directory, { recursive: true, force: true }))
+  // The async checks (hyprctl refresh) use the temporary directories: clean up after they settle.
+  void Promise.allSettled(asyncChecks).then((results) => {
+    temporaryProfiles.forEach((directory) => fs.rmSync(directory, { recursive: true, force: true }))
+    const failed = results.find((result) => result.status === 'rejected')
+    if (failed) {
+      console.error(failed.reason)
+      process.exitCode = 1
+    }
+  })
 }

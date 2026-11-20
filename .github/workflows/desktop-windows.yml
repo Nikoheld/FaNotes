@@ -1,8 +1,8 @@
 name: Desktop Windows checks
 
 # Runs the local MCP server check (reserved names, NTFS streams, junctions, 8.3
-# names, case-insensitive exclusions) and the vault watcher check (recursive
-# fs.watch) on Windows, where these path protections matter most. Never builds
+# names, case-insensitive exclusions) the vault watcher check (recursive
+# fs.watch) and the new-folder-visible check on Windows, where these path protections matter most. Never builds
 # or publishes a release.
 on:
   pull_request:
@@ -10,6 +10,10 @@ on:
       - 'fanotes/electron/**'
       - 'fanotes/scripts/check-local-mcp.mjs'
       - 'fanotes/scripts/check-vault-watch.cjs'
+      - 'fanotes/scripts/check-new-folder-visible.mjs'
+      - 'fanotes/src/lib/treeSync.mjs'
+      - 'fanotes/src/App.tsx'
+      - 'fanotes/src/components/FileTree.tsx'
       - 'fanotes/src/lib/calendarModel.ts'
       - 'fanotes/src/lib/homeworkStore.ts'
       - 'fanotes/package-lock.json'
@@ -40,3 +44,4 @@ jobs:
         env:
           CHECK_VERBOSE: '1'
       - run: node scripts/check-vault-watch.cjs
+      - run: node scripts/check-new-folder-visible.mjs

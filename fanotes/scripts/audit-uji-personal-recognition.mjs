@@ -119,7 +119,7 @@ try {
   const chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
     `--js-flags=--max-old-space-size=${chromiumHeap}`,
-    '--allow-file-access-from-files', `--user-data-dir=${profile}`, '--virtual-time-budget=90000',
+    '--allow-file-access-from-files', `--user-data-dir=${profile}`, '--virtual-time-budget=600000',
     '--dump-dom', pathToFileURL(path.join(output, 'index.html')).href,
   ], { stdio: ['ignore', 'pipe', 'pipe'] })
   let stdout = ''
