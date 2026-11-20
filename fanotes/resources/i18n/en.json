@@ -5027,5 +5027,10 @@
   "Teilen und Exportieren": "Share and export",
   "Add-on-Store": "Add-on store",
   "Der Schreibmodus wurde vom System beendet. Gespeichertes bleibt erhalten; öffne ihn erneut.": "Android closed Writing mode. Everything saved is kept; open it again.",
-  "Schriftfarbe": "Text colour"
+  "Schriftfarbe": "Text colour",
+  "Links öffnen": "Open on the left",
+  "Oben öffnen": "Open at the top",
+  "Unten öffnen": "Open at the bottom",
+  "Ziehe eine andere Notiz an den Rand, um die Ansicht zu teilen.": "Drag another note to an edge to split the view.",
+  "Handschrift auf einem PDF gibt es in der Hauptspalte. Öffne es dort über „Als einzige Notiz öffnen“.": "Handwriting on a PDF is available in the main pane. Open it there with “Open as the only note”."
 }

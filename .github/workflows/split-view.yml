@@ -1,0 +1,46 @@
+name: Split view checks
+
+# Layout rules and a real-browser run of the split view (open, divider, swap,
+# orientation, focus, drop on an edge, reload). Runs on pull requests that
+# touch the split view; never builds or publishes a release.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/src/App.tsx'
+      - 'fanotes/src/lib/workspaceNav.ts'
+      - 'fanotes/src/components/SplitInkEditor.tsx'
+      - 'fanotes/src/components/PaperView.tsx'
+      - 'fanotes/scripts/check-split-view.mjs'
+      - 'fanotes/scripts/check-workspace-nav.mjs'
+      - '.github/workflows/split-view.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  split:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:spelling
+      - run: node scripts/stage-main-i18n.cjs
+      - run: npx tsc -p tsconfig.app.json --noEmit
+      - run: node scripts/check-workspace-nav.mjs
+      - name: Split view in Chromium
+        env:
+          FANOTES_CHROMIUM: /usr/bin/google-chrome
+          PLAYWRIGHT_CORE: ${{ runner.temp }}/pw/node_modules/playwright-core/index.mjs
+        run: |
+          npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" playwright-core@1.65.0
+          node scripts/check-split-view.mjs

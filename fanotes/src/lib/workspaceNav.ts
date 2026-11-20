@@ -164,6 +164,42 @@ export const splitFirstPaneSize = (
   return snapToDevicePixels(available * clampSplitRatio(ratio), devicePixelRatio)
 }
 
+export type SplitDropZone = 'left' | 'right' | 'top' | 'bottom'
+
+/**
+ * Which edge of the editor a dragged note was dropped on. The outer quarter
+ * of each side counts as an edge; the middle (and anything outside) is no
+ * split drop. The nearer edge wins in a corner.
+ */
+export const splitDropZone = (
+  rect: { left: number; top: number; width: number; height: number },
+  point: { x: number; y: number },
+  edge = 0.25,
+): SplitDropZone | null => {
+  if (rect.width <= 0 || rect.height <= 0) return null
+  const x = (point.x - rect.left) / rect.width
+  const y = (point.y - rect.top) / rect.height
+  if (x < 0 || x > 1 || y < 0 || y > 1) return null
+  const candidates: Array<[SplitDropZone, number]> = [['left', x], ['right', 1 - x], ['top', y], ['bottom', 1 - y]]
+  const [zone, distance] = candidates.reduce((best, next) => (next[1] < best[1] ? next : best))
+  return distance <= edge ? zone : null
+}
+
+/** A drop zone as layout: the orientation it asks for and whether the dropped note takes the first pane. */
+export const splitPlacementForZone = (zone: SplitDropZone): { orientation: SplitOrientation; first: boolean } => ({
+  orientation: zone === 'left' || zone === 'right' ? 'columns' : 'rows',
+  first: zone === 'left' || zone === 'top',
+})
+
+/**
+ * Zoom that shows a whole sheet column in a pane narrower than the sheet.
+ * Never above 100 %, and not so small that the text stops being readable.
+ */
+export const splitFitZoom = (paneWidth: number, sheetWidth = 820, gutter = 24) => {
+  if (!Number.isFinite(paneWidth) || paneWidth <= 0) return 1
+  return Math.round(Math.min(1, Math.max(0.4, (paneWidth - gutter) / sheetWidth)) * 100) / 100
+}
+
 /** CSS px rounded to the nearest whole device pixel (the divider track uses it too). */
 export const snapToDevicePixels = (cssPx: number, devicePixelRatio: number) => {
   const dpr = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1
