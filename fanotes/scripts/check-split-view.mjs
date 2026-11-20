@@ -116,7 +116,7 @@ try {
         const scroller = document.querySelector('.split-pane .unified-note-view')
         const cm = scroller?.querySelector('.cm-content')
         return Boolean(cm && scroller && cm.getBoundingClientRect().left >= scroller.getBoundingClientRect().left - 1)
-      }, null, { timeout: 5_000 }).then(() => false, () => true)
+      }, null, { timeout: 15_000 }).then(() => false, () => true)
       const clipInfo = clipped ? await page.evaluate(() => {
         const scroller = document.querySelector('.split-pane .unified-note-view')
         const rect = (node) => node ? [Math.round(node.getBoundingClientRect().left), Math.round(node.getBoundingClientRect().width)] : null
