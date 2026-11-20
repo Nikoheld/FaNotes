@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createServer } from 'vite'
 
 const server = await createServer({
@@ -85,10 +86,7 @@ const sameFloats = (left, right, name) => {
 try {
   const { publishRecognitionFusionFromTypeScript } = await server.ssrLoadModule('/../src/lib/recognition.ts')
   const { initSync, fuseRecognitionModel } = await server.ssrLoadModule('/src/lib/recogWasm/fanotes_recog_wasm.js')
-  const { RECOG_WASM_BASE64 } = await server.ssrLoadModule('/src/lib/recogWasm/bytes.ts')
-  const binary = atob(RECOG_WASM_BASE64)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  const bytes = readFileSync(new URL('../src/lib/recogWasm/fanotes_recog_wasm_bg.wasm', import.meta.url))
   initSync({ module: bytes })
   const entries = [
     entry('p1', 'a', 2, false, 0.88, 1_000, 's1', 1),
