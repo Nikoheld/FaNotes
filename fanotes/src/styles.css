@@ -4544,48 +4544,113 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .wr-note { font: 500 12.5px/1.4 var(--ui-font, system-ui); color: var(--text-muted); }
 .markdown-editor.paper-mode .cm-lw-broken { border-left: 3px solid var(--danger); padding-left: 6px; }
 
-/* Vertical editor toolbar (setting toolbarPosition = 'side'): a left rail next to the editor stage. */
+/* Vertical editor toolbar (setting toolbarPosition = 'side'): a left rail next to the editor stage.
+   One scroll container: the whole rail scrolls when the window is lower than its content, the mode switch
+   stays pinned on top and a soft fade marks what is cut off. Popovers and panels are position: fixed, so the
+   rail's scrolling never clips them; they open beside the rail and stay inside the viewport. */
 .workspace.has-side-toolbar { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
 .workspace.has-side-toolbar > .tabs-bar { grid-column: 1 / -1; grid-row: 1; }
 .workspace.has-side-toolbar > .editor-toolbar { grid-column: 1; grid-row: 2; }
 .workspace.has-side-toolbar > .editor-stage { grid-column: 2; grid-row: 2; }
 .editor-toolbar.is-vertical,
 .editor-toolbar.is-vertical.is-type {
-  width: 44px;
+  --side-rail-width: 44px;
+  anchor-name: --side-toolbar;
+  width: var(--side-rail-width);
   height: auto;
   min-height: 0;
+  max-height: 100%;
   flex-direction: column;
+  flex-wrap: nowrap;
   align-items: center;
-  padding: 6px 0;
+  justify-content: flex-start;
   gap: 6px;
+  padding: 0 0 6px;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
   border-bottom: 0;
   border-right: 1px solid var(--border);
 }
-.editor-toolbar.is-vertical .mode-switch { flex-direction: column; height: auto; }
-.editor-toolbar.is-vertical .mode-switch button { width: 22px; height: 22px; }
-.editor-toolbar.is-vertical .toolbar-context {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
+.editor-toolbar.is-vertical::-webkit-scrollbar { display: none; }
+.editor-toolbar.is-vertical > * { flex: none; }
+/* Fade at the bottom while there is more to scroll to; the mode switch gets one on top (see below). */
+.editor-toolbar.is-vertical::after {
+  content: '';
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  order: 99;
   width: 100%;
-  flex-direction: column;
-  align-items: center;
-  overflow: hidden auto;
-  scrollbar-width: none;
+  height: 22px;
+  margin: -22px 0 -6px;
+  background: linear-gradient(to top, var(--bg) 18%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  animation: side-rail-fade-end linear both;
+  animation-timeline: scroll(nearest block);
 }
-.editor-toolbar.is-vertical .toolbar-context::-webkit-scrollbar { display: none; }
-.editor-toolbar.is-vertical .note-text-field-toolbar { flex-direction: column; flex: 0 0 auto; padding: 3px 2px; }
-.editor-toolbar.is-vertical .note-text-field-toolbar .note-text-field-sep { width: 16px; height: 1px; margin: 3px 0; }
-.editor-toolbar.is-vertical .note-text-field-toolbar .note-text-field-swatch { margin: 1px 0; }
+@keyframes side-rail-fade-end { 0% { opacity: 1; } 92% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes side-rail-fade-start { 0% { opacity: 0; } 8% { opacity: 1; } 100% { opacity: 1; } }
+
+.editor-toolbar.is-vertical .mode-switch,
+.editor-toolbar.is-vertical.is-type .mode-switch,
+.editor-toolbar.is-vertical.is-ink .mode-switch {
+  position: sticky;
+  top: 6px;
+  z-index: 7;
+  flex-direction: column;
+  height: auto;
+  margin-top: 6px;
+}
+/* Backing strip: scrolled items never show through the gaps around the pinned switch. */
+.editor-toolbar.is-vertical .mode-switch::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -6px -8px -3px;
+  background: var(--bg);
+  pointer-events: none;
+}
+.editor-toolbar.is-vertical .mode-switch::after {
+  content: '';
+  position: absolute;
+  top: calc(100% + 3px);
+  left: -8px;
+  right: -8px;
+  height: 14px;
+  background: linear-gradient(to bottom, var(--bg), transparent);
+  pointer-events: none;
+  opacity: 0;
+  animation: side-rail-fade-start linear both;
+  animation-timeline: scroll(nearest block);
+}
+.editor-toolbar.is-vertical .mode-switch button,
+.editor-toolbar.is-vertical.is-type .mode-switch button,
+.editor-toolbar.is-vertical.is-ink .mode-switch button { width: 22px; height: 22px; }
+
+.editor-toolbar.is-vertical .toolbar-context,
 .editor-toolbar.is-vertical .ink-toolbar-slot,
 .editor-toolbar.is-vertical .pdf-toolbar-slot {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   width: 100%;
+  min-width: 0;
   min-height: 0;
   flex-direction: column;
   align-items: center;
-  overflow: hidden auto;
+  overflow: visible;
 }
+.editor-toolbar.is-vertical .note-text-field-toolbar { flex-direction: column; flex: 0 0 auto; max-width: none; padding: 3px 2px; overflow: visible; }
+.editor-toolbar.is-vertical .note-text-field-toolbar .note-text-field-sep { width: 16px; height: 1px; margin: 3px 0; }
+.editor-toolbar.is-vertical .note-text-field-toolbar .note-text-field-swatch { margin: 1px 0; }
+.editor-toolbar.is-vertical .note-text-field-toolbar .formatting-toolbar { flex-direction: column; }
+.editor-toolbar.is-vertical .note-text-field-range { grid-template-columns: 1fr; justify-items: center; gap: 3px; }
+.editor-toolbar.is-vertical .note-text-field-range span { display: none; }
+.editor-toolbar.is-vertical .note-text-field-range input { width: 32px; }
+.editor-toolbar.is-vertical .note-text-field-range output { width: 40px; font-size: 10px; text-align: center; }
+.editor-toolbar.is-vertical .note-text-field-colors { flex-wrap: wrap; width: 38px; justify-content: center; }
+
+/* Typing mode */
 .editor-toolbar.is-vertical.is-type .formatting-toolbar {
   flex: 0 0 auto;
   width: 100%;
@@ -4595,13 +4660,29 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
   align-items: center;
   flex-wrap: nowrap;
   gap: 1px;
+  padding: 0;
   overflow: visible;
   mask-image: none;
 }
-.editor-toolbar.is-vertical .formatting-toolbar button.has-divider { margin-left: 0; margin-top: 5px; }
+.editor-toolbar.is-vertical .formatting-toolbar button { width: 24px; height: 24px; }
+.editor-toolbar.is-vertical .formatting-toolbar button.has-divider { margin-left: 0; margin-top: 7px; }
 .editor-toolbar.is-vertical .formatting-toolbar button.has-divider::before { left: 4px; top: -4px; width: 16px; height: 1px; }
-.editor-toolbar.is-vertical .simple-latex-tools { flex-direction: column; margin: 4px 0 0; padding: 4px 0 0; border-left: 0; }
-.editor-toolbar.is-vertical .simple-latex-tools input { width: 36px; }
+.editor-toolbar.is-vertical .simple-latex-tools {
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  height: auto;
+  gap: 1px;
+  margin: 6px 0 0;
+  padding: 6px 0 0;
+  border-left: 0;
+  border-top: 1px solid var(--border);
+}
+.editor-toolbar.is-vertical .simple-latex-tools input { width: 34px; height: 22px; padding: 0 2px; font-size: 10px; text-align: center; text-overflow: ellipsis; }
+.editor-toolbar.is-vertical .simple-latex-tools input::placeholder { font-size: 9px; }
+.editor-toolbar.is-vertical .simple-latex-tools button { width: 24px; min-width: 24px; padding: 0; }
+
+/* Ink mode: the pen strip, tools, colours and sliders stack in one 44 px column. */
 .editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome {
   flex: 0 0 auto;
   width: 100%;
@@ -4610,29 +4691,158 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  padding: 0;
   overflow: visible;
 }
 .editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-toolgroup,
-.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-colors,
 .editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-history,
 .editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-ink-actions,
 .editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-view-controls,
 .editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip {
   flex-direction: column;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   justify-content: center;
   max-width: 100%;
 }
-.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-colors { max-width: 36px; flex-direction: row; }
-.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-range { flex-direction: column; min-width: 0; }
-.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-range input { width: 32px; height: 56px; writing-mode: vertical-lr; direction: rtl; }
-.editor-toolbar.is-vertical .toolbar-context .pdf-note-toolbar { flex-direction: column; flex: 0 0 auto; padding: 0; overflow: visible; }
-.editor-toolbar.is-vertical .toolbar-context .pdf-note-search { margin: 4px 0 0; flex-direction: column; }
-.editor-toolbar.is-vertical .toolbar-end {
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip { height: auto; max-height: none; min-width: 0; gap: 6px; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-colors,
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-inks {
+  display: grid;
+  grid-template-columns: repeat(2, 16px);
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  width: 38px;
+  max-width: 38px;
+}
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-color-custom { grid-column: 1 / -1; justify-self: center; }
+/* A hairline ring keeps near-black chips visible on dark themes. */
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-colors > button:not(.is-active) { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 20%, transparent); }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-brushes,
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-symbols {
+  display: grid;
+  grid-template-columns: repeat(2, 20px);
+  justify-content: center;
+  gap: 3px;
+  width: 44px;
+  max-width: 44px;
+}
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-brushes button,
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-symbols button,
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-inks button { width: 20px; height: 20px; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-inks button { width: 16px; height: 16px; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-range {
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
+}
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-range input { width: 20px; height: 64px; writing-mode: vertical-lr; direction: rtl; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-range output { max-width: 40px; overflow: hidden; font-size: 10px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-view-reset { width: 36px; min-width: 0; padding: 0 2px; font-size: 10px; }
+/* Text-only actions (lasso: Verschieben, Kopieren, Faerben, Loeschen) wrap inside the rail instead of running out of it. */
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-draw-subtle:not(:has(svg)):not(.lw-view-reset) {
+  width: 36px;
+  height: auto;
+  min-height: 24px;
+  padding: 2px 1px;
+  font-size: 9px;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: normal;
+}
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-art-studio-trigger { width: 24px; grid-template-columns: 16px; justify-content: center; padding: 0; gap: 0; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-art-studio-trigger > :not(i):not(svg) { display: none; }
+.editor-toolbar.is-vertical .lw-draw-toolbar.is-docked-chrome .lw-pen-strip-symbols { max-width: 44px; }
+
+/* PDF toolbar: icon column, text buttons shrink to the rail width. The horizontal bar sheds items through
+   container queries on its width; a 44 px rail would shed all of them, so the rail is not a query container. */
+.editor-toolbar.is-vertical .toolbar-context .pdf-toolbar-slot { container-type: normal; }
+.editor-toolbar.is-vertical .toolbar-context .pdf-note-toolbar {
+  flex: 0 0 auto;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  overflow: visible;
+}
+.editor-toolbar.is-vertical .pdf-note-toolbar :is(.pdf-note-identity, .pdf-note-pager, .pdf-note-zoom, .pdf-note-tools) {
+  flex: 0 0 auto;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.editor-toolbar.is-vertical .pdf-note-toolbar :is(.pdf-note-pager, .pdf-note-zoom, .pdf-note-tools)::before {
+  content: '';
+  width: 16px;
+  height: 1px;
+  margin: 1px 0 3px;
+  background: var(--border);
+}
+.editor-toolbar.is-vertical .pdf-note-identity strong,
+.editor-toolbar.is-vertical .pdf-note-identity small:first-of-type { display: none; }
+.editor-toolbar.is-vertical .pdf-note-identity small { max-width: 40px; overflow: hidden; font-size: 9px; line-height: 1.2; text-align: center; text-overflow: ellipsis; }
+.editor-toolbar.is-vertical .pdf-note-pager input { width: 32px; height: 22px; padding: 0 2px; text-align: center; }
+.editor-toolbar.is-vertical .pdf-note-pager span { font-size: 10px; }
+.editor-toolbar.is-vertical .pdf-note-toolbar button { width: 24px; min-width: 24px; padding: 0; }
+/* Text buttons ("Markieren", zoom value, "Breite") keep their words but fit the rail. */
+/* "Markieren" becomes the highlighter icon (the button keeps its label for assistive technology). */
+.editor-toolbar.is-vertical .pdf-note-pager > button:not(:first-of-type):not(:last-of-type) { width: 24px; min-width: 24px; padding: 0; font-size: 0; }
+.editor-toolbar.is-vertical .pdf-note-pager > button:not(:first-of-type):not(:last-of-type)::before {
+  content: '';
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 0 auto;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 11-6 6v3h9l3-3'/%3E%3Cpath d='m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 11-6 6v3h9l3-3'/%3E%3Cpath d='m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.editor-toolbar.is-vertical .pdf-note-zoom > button:not(:has(svg)) {
+  width: 36px;
+  min-width: 0;
+  padding: 0 1px;
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-toolbar.is-vertical .pdf-note-tools > button:first-child { anchor-name: --side-pdf-search; }
+/* The search field leaves the rail: it opens beside it. */
+.editor-toolbar.is-vertical .toolbar-context .pdf-note-search {
+  position: fixed;
+  z-index: 60;
+  position-anchor: --side-pdf-search;
+  position-area: right span-all;
+  inset: auto;
+  align-self: anchor-center;
+  justify-self: start;
+  margin: 8px 0 8px 14px;
+  width: min(320px, calc(100vw - 80px));
+  flex-direction: row;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel-strong) 97%, transparent);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .32);
+}
+.editor-toolbar.is-vertical .toolbar-context .pdf-note-search input { min-width: 0; }
+.editor-toolbar.is-vertical .toolbar-context .pdf-note-search button { width: 24px; padding: 0; }
+
+/* Bottom group: note actions. Pinned to the bottom edge while the rail is higher than its content. */
+.editor-toolbar.is-vertical .toolbar-end,
+.editor-toolbar.is-vertical.is-type .toolbar-end {
   flex: none;
   width: 100%;
   height: auto;
+  margin-top: auto;
   flex-direction: column;
+  align-items: center;
   padding: 6px 0 0;
   border-left: 0;
   border-top: 1px solid var(--border);
@@ -4641,16 +4851,57 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .editor-toolbar.is-vertical .toolbar-end > *,
 .editor-toolbar.is-vertical .toolbar-end .toolbar-group { flex-direction: column; align-items: center; }
 .editor-toolbar.is-vertical .daily-nav { flex-direction: column; }
-/* Popovers open to the right of the rail instead of below the trigger. */
-.editor-toolbar.is-vertical :is(.paper-picker__menu, .note-tags-popover, .editor-more-menu, .note-backup-menu) {
-  top: auto;
-  right: auto;
-  bottom: 0;
-  left: calc(100% + 8px);
-  max-height: calc(100vh - 80px);
-  overflow-y: auto;
+.editor-toolbar.is-vertical .note-link-styles { flex-direction: column; height: auto; margin: 2px 0; }
+.editor-toolbar.is-vertical .note-link-styles button { width: 22px; height: 20px; }
+.editor-toolbar.is-vertical .note-link-styles button.is-symbol-text { width: 22px; height: 26px; flex-direction: column; gap: 0; }
+.editor-toolbar.is-vertical .note-link-styles button svg { width: 11px; height: 11px; }
+.editor-toolbar.is-vertical .subject-book-control { flex-direction: column; gap: 2px; }
+.editor-toolbar.is-vertical .subject-book-placements { flex-direction: column; margin: 0; }
+.editor-toolbar.is-vertical .subject-book-placements button { width: 36px; padding: 0 1px; overflow: hidden; font-size: 10px; text-overflow: ellipsis; }
+.editor-toolbar.is-vertical .note-tags-menu .toolbar-button { width: 24px; padding: 0; }
+.editor-toolbar.is-vertical .note-tags-menu .toolbar-button > span { display: none; }
+
+/* Popovers open to the right of the trigger, centred on it and clamped to the viewport. */
+.editor-toolbar.is-vertical :is(.paper-picker, .note-tags-menu, .note-backup-control, .editor-more) {
+  anchor-name: --side-pop;
+  anchor-scope: --side-pop;
 }
-.editor-toolbar.is-vertical.is-type .toolbar-end { height: auto; }
+.editor-toolbar.is-vertical :is(.paper-picker__menu, .note-tags-popover, .editor-more-menu, .note-backup-menu) {
+  position: fixed;
+  position-anchor: --side-pop;
+  position-area: right span-all;
+  inset: auto;
+  align-self: anchor-center;
+  justify-self: start;
+  margin: 8px 0 8px 14px;
+  max-width: calc(100vw - 72px);
+  max-height: calc(100vh - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 620;
+}
+.editor-toolbar.is-vertical .editor-more-menu::before { display: none; }
+.editor-toolbar.is-vertical .paper-picker__trigger { margin: 0; }
+
+/* The panels are portaled to <body>, outside the shell, so the aliases below keep the root's (dark) values:
+   re-derive them here or the panels are dark with dark text in the light themes. */
+:is(.lw-figure-library, .lw-art-studio, .lw-drafting-panel, .lw-conversion-panel, .lw-draw-notice).is-viewport-chrome {
+  --background: var(--bg);
+  --background-secondary: var(--bg-elevated);
+  --surface-elevated: var(--panel-strong);
+  --surface-input: var(--bg-elevated);
+  --text-primary: var(--text);
+  --text-faint: var(--text-muted);
+  color: var(--text);
+}
+/* Ink panels are portaled to the page and fixed: keep them beside the rail instead of on top of it.
+   Without a vertical rail the anchor is missing and the fallbacks give the old positions. */
+body .lw-figure-library.is-viewport-chrome { left: calc(anchor(--side-toolbar right, 6px) + 8px); right: 14px; width: auto; max-width: 360px; margin-right: auto; }
+body .lw-art-studio.is-viewport-chrome { left: calc(anchor(--side-toolbar right, 6px) + 8px); width: auto; max-width: 900px; }
+body .lw-drafting-panel.is-viewport-chrome { left: calc(anchor(--side-toolbar right, 6px) + 8px); width: auto; max-width: 420px; margin-left: auto; }
+body .lw-conversion-panel.is-viewport-chrome { left: calc(anchor(--side-toolbar right, 6px) + 8px); width: auto; max-width: 370px; margin-left: auto; }
+body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar right, 0px) + 8px), calc(50% - min(210px, calc(50vw - 14px)))); transform: none; }
 /* Text-box toolbar: same look as the note formatting bar and the pen strip. */
 .note-text-field-toolbar { flex-wrap: nowrap; max-width: 100%; overflow: auto hidden; scrollbar-width: none; }
 .note-text-field-toolbar .formatting-toolbar { flex: none; }

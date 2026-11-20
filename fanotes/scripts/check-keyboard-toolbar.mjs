@@ -10,7 +10,7 @@ const runOnce = () => {
   const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
   const formatting = readFileSync(join(root, 'src/components/FormattingToolbar.tsx'), 'utf8')
 
-  assert.match(app, /className=\{`editor-toolbar \$\{drawingOpen \? 'is-ink' : 'is-type'\}`\}/)
+  assert.match(app, /className=\{`editor-toolbar \$\{drawingOpen \? 'is-ink' : 'is-type'\} \$\{sideToolbar \? 'is-vertical' : ''\}`\}/)
   assert.match(app, /aria-label="Eingabemodus"/)
   assert.match(app, /<span>Tastatur<\/span>/)
   assert.match(app, /<span>Stift<\/span>/)
