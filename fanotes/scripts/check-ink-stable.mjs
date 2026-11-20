@@ -18,6 +18,9 @@
 // sidebar, window size, display scale, note switch), a PDF note, a worksheet
 // and a page of handwriting only. Pen samples get predicted events the way
 // Chromium's predictor adds them on real hardware.
+// The beautify scenario switches the handwriting beautifier on and checks the
+// live board: only the finished line moves (bounded), no flicker while it
+// settles, one undo restores the originals.
 // Set FANOTES_SKIP_BROWSER=1 to skip, FANOTES_CHROMIUM to pick the browser,
 // INK_STABLE_ONLY=markdown,pdf,worksheet,ink to run some sessions,
 // INK_STABLE_DIST=<dir> to reuse a build, INK_STABLE_SHOTS=<dir> for
@@ -1191,6 +1194,121 @@ try {
     }
     await sleep(400)
     await takeIssues('ink page: undo')
+  }
+
+  // Beautifier ON in the live board: only the line just finished moves, within
+  // bounds; no flicker while it settles; one undo restores the originals.
+  scenarios.beautify = async () => {
+    await evaluate(`(window.__ink.armed = false, true)`)
+    await clickUntil('button[aria-label="Neue Notiz"], button[aria-label="New note"]', `Boolean(document.querySelector('.cm-content'))`)
+    await sleep(500)
+    await penMode()
+    await evaluate('(window.__beautifyTest = true, true)')
+    // The flag is read on render; a stroke-free repaint picks it up.
+    await sleep(300)
+    const paper = await rectOf('.unified-paper')
+    const letters = (x0, base, slope) => {
+      const out = []
+      for (let i = 0; i < 7; i += 1) {
+        const x = x0 + i * 26
+        const b = base + (slope * i * 26) / 150
+        const h = 16 + (i % 2 ? 3 : -2)
+        const pts = []
+        if (i % 3 === 0) for (let k = 0; k <= 24; k += 1) pts.push({ x: x + 6 + 6 * Math.cos((k / 24) * Math.PI * 2), y: b - h / 2 + (h / 2) * Math.sin((k / 24) * Math.PI * 2) })
+        else if (i % 3 === 1) for (let k = 0; k <= 12; k += 1) pts.push({ x: x + k * 1.2, y: b - h + (k <= 6 ? (k / 6) * h : ((12 - k) / 6) * h) })
+        else for (let k = 0; k <= 12; k += 1) pts.push({ x, y: b - h * 1.4 + (k / 12) * h * 1.4 })
+        out.push(pts.map((p) => ({ x: p.x + Math.sin(p.y * 7) * 0.3, y: p.y })))
+      }
+      return out
+    }
+    const read = () => evaluate(`(() => JSON.stringify({ page: window.__beautifyPage(), strokes: window.__beautifyStrokes().map((s) => s.points.map((p) => [p.x * window.__beautifyPage().width, p.y * window.__beautifyPage().height, p.pressure])) }))()`).then(JSON.parse)
+    const sameStrokes = (a, b) => a.length === b.length && a.every((s, i) => s.length === b[i].length && s.every((p, k) => Math.abs(p[0] - b[i][k][0]) < 1e-6 && Math.abs(p[1] - b[i][k][1]) < 1e-6 && p[2] === b[i][k][2]))
+    if (verbose) console.log('beautify paper', JSON.stringify(paper), await evaluate('JSON.stringify([!!window.__beautifyStrokes, document.querySelectorAll(".unified-paper").length, document.querySelectorAll("canvas.lw-tablet-canvas-live.is-input-active").length])'))
+    const y1 = Math.max(paper.y, 140) + 150
+    const y2 = y1 + 90
+    const x0 = paper.x + 80
+    // Line one, then wait for its idle beautify and settle.
+    for (const pts of letters(x0, y1, 8)) await stroke(pts, { perFrame: 2 })
+    await sleep(1300)
+    const afterOne = await read()
+    assert.equal(afterOne.strokes.length, 7, 'line one is on the page')
+    // Page-side sampler: composite of the board's canvases over two bands, per frame.
+    await evaluate(`(() => {
+      const el = document.querySelector('.unified-paper')
+      const scratch = document.createElement('canvas')
+      window.__bs = { frames: [], run: false }
+      const band = (cv, ctx, x, y, w, h) => {
+        scratch.width = w; scratch.height = h
+        ctx.clearRect(0, 0, w, h)
+        for (const canvas of el.querySelectorAll('canvas.lw-tablet-canvas')) {
+          if (!canvas.width || !canvas.height) continue
+          const cs = getComputedStyle(canvas)
+          if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) < 0.05) continue
+          const r = canvas.getBoundingClientRect()
+          const kx = canvas.width / r.width; const ky = canvas.height / r.height
+          ctx.drawImage(canvas, (x - r.left) * kx, (y - r.top) * ky, w * kx, h * ky, 0, 0, w, h)
+        }
+        const d = ctx.getImageData(0, 0, w, h).data
+        let n = 0; let hash = 0
+        for (let i = 0; i < d.length; i += 4) { const ink = d[i + 3] >= 110 && (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) < 120; if (ink) { n += 1; hash = (hash * 31 + (i >> 2)) | 0 } }
+        return { n, hash }
+      }
+      const ctx = scratch.getContext('2d', { willReadFrequently: true })
+      window.__bs.start = (a, b) => {
+        window.__bs.frames = []; window.__bs.run = true
+        const tick = () => {
+          if (!window.__bs.run) return
+          window.__bs.frames.push({ t: performance.now(), a: band(null, ctx, a.x, a.y, a.w, a.h), b: band(null, ctx, b.x, b.y, b.w, b.h) })
+          requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      }
+      window.__bs.stop = () => { window.__bs.run = false; return window.__bs.frames }
+    })()`)
+    // Band A covers line one, band B line two (client px, generous margins).
+    const bandA = { x: Math.floor(x0 - 20), y: Math.floor(y1 - 50), w: 260, h: 80 }
+    const bandB = { x: Math.floor(x0 - 20), y: Math.floor(y2 - 50), w: 260, h: 80 }
+    const parts = letters(x0, y2, -7)
+    for (let i = 0; i < parts.length; i += 1) {
+      if (i === parts.length - 1) await evaluate(`(window.__bs.start(${JSON.stringify(bandA)}, ${JSON.stringify(bandB)}), true)`)
+      await stroke(parts[i], { perFrame: 2 })
+    }
+    const rawTwo = await read()
+    await sleep(1400)
+    const frames = await evaluate('window.__bs.stop()')
+    const afterTwo = await read()
+    assert.equal(afterTwo.strokes.length, 14)
+    const mm = afterTwo.page.width / 210
+    const W = afterTwo.page.width
+    // 1. The earlier line is untouched; the new line moved, within bounds.
+    assert.ok(sameStrokes(afterOne.strokes, rawTwo.strokes.slice(0, 7)) && sameStrokes(afterOne.strokes, afterTwo.strokes.slice(0, 7)), 'line one does not move again')
+    assert.ok(!sameStrokes(rawTwo.strokes.slice(7), afterTwo.strokes.slice(7)), 'the finished line was beautified')
+    const step = Math.round((W * 7.5) / 210)
+    let worst = 0
+    afterTwo.strokes.slice(7).forEach((s, i) => s.forEach((p, k) => {
+      const o = rawTwo.strokes[7 + i][k]
+      worst = Math.max(worst, Math.hypot(p[0] - o[0], p[1] - o[1]))
+    }))
+    assert.ok(worst <= 0.25 * step + 0.6 * mm + 1e-6, `line two moved ${worst.toFixed(2)} page px (limit ${(0.25 * step + 0.6 * mm).toFixed(2)})`)
+    assert.ok(worst > 0.05, 'the move is real')
+    // 2. Settle: ink never disappears, the other line's pixels never change.
+    assert.ok(frames.length >= 5, `sampled ${frames.length} frames`)
+    const aHashes = new Set(frames.map((f) => f.a.hash))
+    assert.equal(aHashes.size, 1, `line one pixels changed during the settle (${aHashes.size} variants)`)
+    const bMax = Math.max(...frames.map((f) => f.b.n))
+    const settled = frames.filter((f) => f.t >= frames[0].t)
+    // Line two is being written until the first sampled frame; every frame after it holds its ink.
+    const bMin = Math.min(...settled.slice(2).map((f) => f.b.n))
+    assert.ok(bMin >= bMax * 0.8, `line two flickered: ink pixels fell from ${bMax} to ${bMin}`)
+    // 3. One undo restores the original strokes of line two, in the live board.
+    await ctrl('z')
+    await sleep(500)
+    const undone = await read()
+    assert.ok(sameStrokes(undone.strokes, rawTwo.strokes), 'a single undo restores the original strokes')
+    await ctrl('z')
+    await sleep(400)
+    assert.equal((await read()).strokes.length, 13, 'the next undo removes only the last stroke')
+    await evaluate('(window.__beautifyTest = false, true)')
   }
 
   for (const [name, run] of Object.entries(scenarios)) {

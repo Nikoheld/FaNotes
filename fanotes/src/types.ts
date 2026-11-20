@@ -163,6 +163,9 @@ export type AppSettings = {
   /** Wacom pen and pad button → FaNotes action. */
   tabletButtons: import('./lib/tabletButtons').TabletButtonMap
   smoothing: number
+  /** Desktop: gently smooth and align finished handwriting. Off by default. */
+  beautifyHandwriting: boolean
+  beautifyStrength: 'subtle' | 'medium'
   scribbleEraseSensitivity: number
   /** 0 = nur sehr klare Figuren, 50 = normal, 100 = früher und großzügiger glätten. */
   shapeSnapSensitivity: number
