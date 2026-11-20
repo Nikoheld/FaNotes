@@ -8,6 +8,18 @@ if (process.argv.slice(1).includes('--mcp')) {
   return
 }
 
+// `FaNotes --background-update` (Scheduled Task, systemd user timer, XDG
+// autostart) and `--fanotes-self-test` (install helpers) are headless runs:
+// no window, no single-instance lock, no profile migration.
+if (process.argv.slice(1).includes('--background-update')) {
+  require('./background-update.cjs').runCli()
+  return
+}
+if (process.argv.slice(1).includes('--fanotes-self-test')) {
+  require('./background-update.cjs').runSelfTest()
+  return
+}
+
 const {
   applyLinuxOzoneLaunchEnvironment,
   cleanupStaleSingletonLocks,
@@ -382,6 +394,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   autoCheckUpdates: true,
   autoDownloadUpdates: true,
   installUpdatesOnQuit: true,
+  backgroundUpdates: true,
   updateChannel: channelForPackagedVersion(app.getVersion()),
   memoryBudgetMb: 0,
   ocrThreadLimit: 0,
@@ -641,6 +654,8 @@ let configWriteQueue = Promise.resolve()
 let configMutationQueue = Promise.resolve()
 let updateManager = null
 let updateManagerPromise = null
+let updateLocks = null
+let backgroundSchedulerSync = null
 let aiProviderModule = null
 let grokBuildLogin = null
 let postStartupWorkStarted = false
@@ -3713,6 +3728,98 @@ function ensureUpdateManager() {
   return updateManagerPromise
 }
 
+/** <userData>/updates locks shared with the background updater (see update-lock.cjs). */
+function desktopUpdateLocks() {
+  updateLocks ??= require('./update-lock.cjs').createUpdateLocks(path.join(app.getPath('userData'), 'updates'))
+  return updateLocks
+}
+
+/**
+ * Background updates need a stable program path for the OS scheduler: the
+ * per-user NSIS installation on Windows, the AppImage on Linux. A portable
+ * .exe (often on a USB stick) and development runs update only while open.
+ */
+function backgroundUpdateTarget(manager) {
+  if (!manager?.isSupported() || !app.isPackaged) return null
+  if (process.platform === 'win32' && manager.installationKind === 'windows-installer') return { executable: process.execPath }
+  const appImage = process.env.APPIMAGE
+  if (process.platform === 'linux' && typeof appImage === 'string' && path.isAbsolute(appImage)) return { appImage }
+  return null
+}
+
+async function readBackgroundStatus() {
+  const { readStatus } = require('./background-update.cjs')
+  return readStatus(path.join(app.getPath('userData'), 'updates'))
+}
+
+/** Registers, refreshes or removes the Scheduled Task / systemd timer to match the setting. */
+function syncBackgroundUpdates(manager) {
+  const run = async () => {
+    const target = backgroundUpdateTarget(manager)
+    if (!target) {
+      // Development and portable builds neither register nor remove: the
+      // installed copy of the same user owns the registration.
+      manager.setBackgroundInfo({ supported: false, enabled: false, registered: false, scheduler: null, registrationError: null, lastRunAt: null, lastCheckAt: null, lastResult: null, lastMessage: null })
+      return
+    }
+    const enabled = Boolean(currentSettings.backgroundUpdates && currentSettings.autoCheckUpdates)
+    const { createUpdateScheduler } = require('./update-scheduler.cjs')
+    const scheduler = createUpdateScheduler({
+      platform: process.platform,
+      env: process.env,
+      homeDir: app.getPath('home'),
+      updaterRoot: path.join(app.getPath('userData'), 'updates'),
+      executable: target.executable ?? null,
+      appImage: target.appImage ?? null,
+    })
+    const registration = await scheduler.sync(enabled)
+    const status = await readBackgroundStatus()
+    manager.setBackgroundInfo({
+      supported: true,
+      enabled,
+      registered: Boolean(registration.registered),
+      scheduler: registration.kind ?? null,
+      registrationError: registration.error ?? null,
+      lastRunAt: status.lastRunAt ?? null,
+      lastCheckAt: status.lastCheckAt ?? null,
+      lastResult: status.checkResult ?? null,
+      lastMessage: status.checkMessage ?? null,
+    })
+  }
+  // One sync at a time; a toggle during a sync queues one more.
+  backgroundSchedulerSync = (backgroundSchedulerSync ?? Promise.resolve()).then(run, run)
+    .catch((error) => console.warn('FaNotes-Hintergrund-Updates konnten nicht eingerichtet werden:', error?.message ?? error))
+  return backgroundSchedulerSync
+}
+
+/**
+ * Marks this app as running (the background updater then only stages) and,
+ * if a background install is swapping files right now, waits for it and
+ * starts the installed version instead of the half-replaced one.
+ */
+async function coordinateWithBackgroundUpdater() {
+  if (!['linux', 'win32'].includes(process.platform)) return
+  try {
+    const locks = desktopUpdateLocks()
+    locks.markAppRunning({ version: app.getVersion() })
+    const waited = await require('./update-lock.cjs').waitForInstallToFinish(locks)
+    if (!waited) return
+    let result = null
+    try {
+      result = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'updates', 'install-result.json'), 'utf8').replace(/^\uFEFF/u, ''))
+    } catch {
+      result = null
+    }
+    if (result?.ok !== true || typeof result.version !== 'string' || result.version === app.getVersion()) return
+    const appImage = process.platform === 'linux' && typeof process.env.APPIMAGE === 'string' && path.isAbsolute(process.env.APPIMAGE) ? process.env.APPIMAGE : null
+    locks.clearAppRunning()
+    app.relaunch(appImage ? { execPath: appImage, args: process.argv.slice(1) } : undefined)
+    app.exit(0)
+  } catch (error) {
+    console.warn('FaNotes konnte sich nicht mit dem Hintergrund-Updater abstimmen:', error?.message ?? error)
+  }
+}
+
 async function reportAnonymousDesktopAppOpen() {
   if (!app.isPackaged || !['linux', 'win32'].includes(process.platform)) return
   const controller = new AbortController()
@@ -3760,6 +3867,7 @@ function schedulePostStartupWork() {
       .then(() => ensureUpdateManager())
       .then(async (manager) => {
         await manager.start()
+        void syncBackgroundUpdates(manager)
         if (!currentSettings.installUpdatesOnQuit || !currentSettings.autoCheckUpdates) return
         const launch = await manager.applyPendingInstallOnLaunch()
         if (!launch?.installStarted) return
@@ -5763,6 +5871,10 @@ function registerIpcHandlers() {
         throw error
       }
       updateManager?.configure()
+      if (updateManager && (
+        previousSettings.backgroundUpdates !== currentSettings.backgroundUpdates
+        || previousSettings.autoCheckUpdates !== currentSettings.autoCheckUpdates
+      )) void syncBackgroundUpdates(updateManager)
       return { ...currentSettings }
     })
   })
@@ -5831,6 +5943,7 @@ function registerIpcHandlers() {
     autoCheckUpdates: currentSettings.autoCheckUpdates,
     autoDownloadUpdates: currentSettings.autoDownloadUpdates,
     installUpdatesOnQuit: currentSettings.installUpdatesOnQuit,
+    backgroundUpdates: currentSettings.backgroundUpdates,
     updateChannel: currentSettings.updateChannel,
   })
 
@@ -5892,9 +6005,11 @@ function registerIpcHandlers() {
   ipcMain.on(IPC.confirmClose, (event) => {
     if (!isTrustedIpcSender(event) || !mainWindow || mainWindow.isDestroyed()) return
     void (async () => {
-      if (updateManager?.shouldInstallOnQuit()) {
+      if (updateManager) {
         try {
-          await updateManager.prepareInstall()
+          // Installs without reopening FaNotes. The package may also have been
+          // staged by the background run while this window was open.
+          await updateManager.installOnQuit()
         } catch (error) {
           console.warn('Das vorbereitete FaNotes-Update konnte beim Beenden nicht installiert werden:', error?.message ?? error)
         }
@@ -6128,6 +6243,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   app.whenReady().then(async () => {
+    await coordinateWithBackgroundUpdater()
     void refreshLinuxMonitorScale()
     pendingShareOpenId = pendingShareOpenId || shareOpenIdFromArgv(process.argv)
     try { app.setAsDefaultProtocolClient('fanotes') } catch { /* the installed package registers the protocol on release */ }
@@ -6152,6 +6268,10 @@ if (!app.requestSingleInstanceLock()) {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('will-quit', () => {
+  try { updateLocks?.clearAppRunning() } catch { /* the marker is ignored once this pid is gone */ }
 })
 
 app.on('before-quit', () => {

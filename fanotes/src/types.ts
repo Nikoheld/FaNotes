@@ -170,6 +170,8 @@ export type AppSettings = {
   autoCheckUpdates: boolean
   autoDownloadUpdates: boolean
   installUpdatesOnQuit: boolean
+  /** Desktop: a Scheduled Task / systemd user timer installs updates while FaNotes is closed. */
+  backgroundUpdates: boolean
   updateChannel: 'stable' | 'beta' | 'nightly'
   /** 0 keeps Chromium/V8's normal renderer heap budget. */
   memoryBudgetMb: number
@@ -273,11 +275,32 @@ export type UpdateState = {
   error: string | null
   block: UpdateBlock | null
   checkedAt: string | null
-  installationKind: 'appimage' | 'managed-appimage' | 'windows-installer' | 'differential-appimage' | 'differential-windows'
+  installationKind: 'appimage' | 'managed-appimage' | 'windows-installer' | 'windows-portable' | 'differential-appimage' | 'differential-windows'
   autoCheckUpdates: boolean
   autoDownloadUpdates: boolean
   installUpdatesOnQuit: boolean
+  backgroundUpdates?: boolean
   updateChannel: 'stable' | 'beta' | 'nightly'
+  /** Set once after an update was installed; the app shows a short note. */
+  justUpdated?: { from: string | null; to: string; at: string | null } | null
+  /** A version whose install was rolled back; it is not installed automatically again. */
+  failedInstallVersion?: string | null
+  background?: BackgroundUpdateInfo | null
+}
+
+export type BackgroundUpdateResult = 'installing' | 'staged' | 'up-to-date' | 'available' | 'metered' | 'busy' | 'blocked' | 'error'
+
+export type BackgroundUpdateInfo = {
+  /** False for portable and development builds: they update only while open. */
+  supported: boolean
+  enabled: boolean
+  registered: boolean
+  scheduler: 'task' | 'systemd' | 'autostart' | null
+  registrationError: string | null
+  lastRunAt: string | null
+  lastCheckAt: string | null
+  lastResult: BackgroundUpdateResult | null
+  lastMessage: string | null
 }
 
 export type EnhancedMathRecognitionState = {

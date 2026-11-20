@@ -559,18 +559,23 @@ async function main() {
     const helperPath = path.join(helperDirectory, 'install.sh')
     const helperTarget = path.join(helperDirectory, 'FaNotes.AppImage')
     const stagedPath = path.join(helperDirectory, 'FaNotes.next.AppImage')
-    const markerPath = path.join(helperDirectory, 'installed.json')
+    const resultPath = path.join(helperDirectory, 'install-result.json')
     const logPath = path.join(helperDirectory, 'install.log')
     const oldExecutable = '#!/bin/sh\nexit 0\n'
-    const nextExecutable = '#!/bin/sh\nsleep 12\n'
+    // The helper starts the new file once with --fanotes-self-test; it reports its version.
+    const nextExecutable = `#!/bin/sh\nif [ "$1" = --fanotes-self-test ]; then printf '{"ok":true,"version":"${targetVersion}"}' >"$FANOTES_SELF_TEST_FILE"; exit 0; fi\nsleep 12\n`
     await fsp.mkdir(helperDirectory, { recursive: true })
     await fsp.writeFile(helperPath, INSTALL_HELPER, { mode: 0o700 })
     await fsp.writeFile(helperTarget, oldExecutable, { mode: 0o700 })
     await fsp.writeFile(stagedPath, nextExecutable, { mode: 0o700 })
+    await fsp.writeFile(path.join(helperDirectory, 'install.lock'), '{"pid":1}\n')
     const stagedSha = crypto.createHash('sha256').update(nextExecutable).digest('hex')
-    await waitForProcess(spawn('/bin/sh', [helperPath, '99999999', helperTarget, stagedPath, stagedSha, baseVersion, targetVersion, logPath, markerPath]))
+    await waitForProcess(spawn('/bin/sh', [helperPath, '99999999', helperTarget, stagedPath, stagedSha, baseVersion, targetVersion, logPath, resultPath, 'quiet']))
     assert.equal(await fsp.readFile(helperTarget, 'utf8'), nextExecutable)
-    assert.equal(JSON.parse(await fsp.readFile(markerPath, 'utf8')).version, targetVersion)
+    const installResult = JSON.parse(await fsp.readFile(resultPath, 'utf8'))
+    assert.equal(installResult.version, targetVersion)
+    assert.equal(installResult.ok, true)
+    assert.equal(fs.existsSync(path.join(helperDirectory, 'install.lock')), false, 'Der Helfer gibt die Installationssperre frei.')
 
     const patchFetchesBeforeResume = patchFetches
     const resumeDropManager = createUpdateManager({

@@ -3033,6 +3033,12 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .update-block-facts dt { color: var(--text-muted); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .update-block-facts dd { margin: 0; color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
 .update-block-log { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.update-background-status { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 8px 14px; margin: 2px 0 6px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
+.update-background-status > div { display: grid; gap: 2px; min-width: 0; }
+.update-background-status span { color: var(--text-muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.update-background-status strong { color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.update-background-status small { color: var(--text-muted); font-size: 12px; line-height: 1.35; }
+.update-background-error { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .update-hero { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 13px; margin-bottom: 13px; padding: 15px; border: 1px solid rgba(var(--accent-rgb), .22); border-radius: 13px; background: linear-gradient(125deg, rgba(var(--accent-rgb), .15), color-mix(in srgb, var(--accent-secondary) 8%, var(--panel))); }
 .update-hero.is-error { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 .update-hero-icon { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid rgba(var(--accent-rgb), .2); border-radius: 12px; color: var(--accent-readable); background: rgba(var(--accent-rgb), .16); }

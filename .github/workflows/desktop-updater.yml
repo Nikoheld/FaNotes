@@ -1,0 +1,83 @@
+name: Desktop updater
+
+# The in-app updater, the background updater (`FaNotes --background-update`),
+# its Scheduled Task / systemd timer registration and the install helpers,
+# against a local fake GitHub releases server with throwaway test keys. On
+# Linux it also runs the real headless Electron and reports its time and
+# memory. Never builds, signs or publishes a release.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/electron/updater.cjs'
+      - 'fanotes/electron/update-lock.cjs'
+      - 'fanotes/electron/update-scheduler.cjs'
+      - 'fanotes/electron/background-update.cjs'
+      - 'fanotes/electron/delta.cjs'
+      - 'fanotes/electron/releaseVersion.cjs'
+      - 'fanotes/electron/settings-sanitize.cjs'
+      - 'fanotes/build/installer.nsh'
+      - 'fanotes/scripts/check-updater.cjs'
+      - 'fanotes/scripts/check-updater-vectors.mjs'
+      - 'fanotes/scripts/check-windows-release.cjs'
+      - 'fanotes/scripts/check-background-update.cjs'
+      - 'fanotes/scripts/check-update-scheduler.cjs'
+      - 'fanotes/scripts/create-delta.cjs'
+      - 'fanotes/scripts/fixtures/updater/**'
+      - '.github/workflows/desktop-updater.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - name: Electron binary for the headless background run
+        run: node node_modules/electron/install.js
+      - name: Allow the Chromium sandbox on the runner
+        # Ubuntu 24.04 blocks unprivileged user namespaces through AppArmor;
+        # the Electron dev binary keeps its sandbox instead of --no-sandbox.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: npx tsc -p tsconfig.app.json --noEmit
+      - run: node scripts/check-updater.cjs
+      - run: node scripts/check-updater-vectors.mjs
+      - run: node scripts/check-windows-release.cjs
+      - run: node scripts/check-update-scheduler.cjs
+      - name: Background updates (fake release server, headless Electron measured)
+        run: node scripts/check-background-update.cjs
+        env:
+          FANOTES_MEASURE_BACKGROUND: '1'
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fanotes
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - run: node scripts/check-windows-release.cjs
+      - name: Scheduled Task registration (mocked and real schtasks)
+        run: node scripts/check-update-scheduler.cjs
+      - name: Windows update paths and the real PowerShell helpers
+        run: node scripts/check-background-update.cjs

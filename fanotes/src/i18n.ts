@@ -495,6 +495,10 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (availableVersion) return `${availableVersion[1]} is available${availableVersion[2] ?? ''}`
   const checkedOnExit = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) ist geprüft und wird beim Beenden installiert\.$/u.exec(source)
   if (checkedOnExit) return `${checkedOnExit[1]} is checked and will be installed on exit.`
+  const updatedTo = /^Auf Version (\d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) aktualisiert$/u.exec(source)
+  if (updatedTo) return `Updated to version ${updatedTo[1]}`
+  const rolledBack = /^FaNotes (\d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) ließ sich nicht starten und wurde zurückgesetzt\. Die automatische Installation wartet auf die nächste Version\.$/u.exec(source)
+  if (rolledBack) return `FaNotes ${rolledBack[1]} did not start and was rolled back. Automatic installation waits for the next version.`
   const readyToInstall = /^(FaNotes \d+(?:\.\d+){2}(?:-beta\.\d+|-nightly\.\d{14}\.[a-f0-9]{7,40})?) ist installationsbereit$/u.exec(source)
   if (readyToInstall) return `${readyToInstall[1]} is ready to install`
   const downloadingUpdate = /^Update wird geladen · (\d+) %$/u.exec(source)

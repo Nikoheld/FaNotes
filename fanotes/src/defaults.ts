@@ -69,6 +69,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   autoCheckUpdates: true,
   autoDownloadUpdates: true,
   installUpdatesOnQuit: true,
+  backgroundUpdates: true,
   updateChannel: 'stable',
   memoryBudgetMb: 0,
   ocrThreadLimit: 0,
