@@ -182,4 +182,18 @@ assert.ok(probe.pinch > 1, 'pinch on a touch-action:none sheet zooms in')
 assert.ok(probe.panY < 0, 'two fingers moving up pan the sheet')
 assert.deepEqual(probe.swipes, ['right'], 'a one-finger swipe is reported')
 assert.equal(probe.palmHeld, true, 'a resting hand does not zoom while the pen is down')
+{
+  // A slow pinch (0.4% span growth per sample) must still accumulate.
+  let slow = createHandGestureState()
+  slow = handGestureSample(slow, { id: 1, phase: 'down', pointerType: 'touch', x: 0, y: 0 }).state
+  slow = handGestureSample(slow, { id: 2, phase: 'down', pointerType: 'touch', x: 100, y: 0 }).state
+  let total = 1
+  for (let step = 1; step <= 10; step += 1) {
+    const result = handGestureSample(slow, { id: 2, phase: 'move', pointerType: 'touch', x: 100 + step * 0.4, y: 0 })
+    slow = result.state
+    if (result.frame) total *= result.frame.pinch
+  }
+  assert.ok(total > 1.03, `slow pinch accumulates (got ${total})`)
+}
+
 console.log('hand gestures ok', JSON.stringify(probe))

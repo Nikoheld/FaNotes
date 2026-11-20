@@ -111,6 +111,11 @@ export const handGestureSample = (state: HandGestureState, sample: HandGestureSa
   const justClaimed = live && !state.live
   const geom = geometry(points)
   let frame: HandGestureFrame | null = null
+  // A sub-threshold delta is dropped from the frame, so the baseline must not
+  // advance past it; otherwise a slow pinch or drag never accumulates and the
+  // zoom stutters in steps.
+  let keepSpan = false
+  let keepCenter = false
   if (live && points.size >= 2 && state.span > 0 && geom.span > 0) {
     let panX = geom.cx - state.cx
     let panY = geom.cy - state.cy
@@ -119,8 +124,12 @@ export const handGestureSample = (state: HandGestureState, sample: HandGestureSa
     if (Math.hypot(panX, panY) < 0.35) {
       panX = 0
       panY = 0
+      keepCenter = true
     }
-    if (Math.abs(pinch - 1) < 0.01) pinch = 1
+    if (Math.abs(pinch - 1) < 0.01) {
+      pinch = 1
+      keepSpan = true
+    }
     if (Math.abs(rotateDeg) < 0.7) rotateDeg = 0
     if (Math.abs(pinch - 1) > 0.025 && Math.abs(rotateDeg) < 3.5) rotateDeg = 0
     if (panX || panY || pinch !== 1 || rotateDeg) {
@@ -131,10 +140,10 @@ export const handGestureSample = (state: HandGestureState, sample: HandGestureSa
     state: {
       points,
       live,
-      span: points.size >= 2 ? geom.span : 0,
+      span: points.size >= 2 ? (keepSpan ? state.span : geom.span) : 0,
       angle: points.size >= 2 ? geom.angle : 0,
-      cx: geom.cx,
-      cy: geom.cy,
+      cx: keepCenter ? state.cx : geom.cx,
+      cy: keepCenter ? state.cy : geom.cy,
     },
     swallow: live || state.live,
     justClaimed,
