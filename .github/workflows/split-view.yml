@@ -32,6 +32,9 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: fanotes/package-lock.json
+      # The editor imports shared handwriting code from the repository root (hershey).
+      - run: npm ci --no-audit --no-fund
+        working-directory: .
       - run: npm ci --no-audit --no-fund
       - run: npm run build:spelling
       - run: node scripts/stage-main-i18n.cjs
