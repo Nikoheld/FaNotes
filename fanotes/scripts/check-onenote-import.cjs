@@ -9,33 +9,36 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const {
   decodeHtmlEntities,
-  importOneNoteToVault,
+  describeSession,
+  disposeSession,
+  importOneNotePages,
   sanitizeOneNoteHtml,
   materializeOneNoteTools,
-  pageDimensions,
   safeSegment,
+  scanOneNote,
   TOOL_MANIFEST,
-  writeUniqueMarkdown,
+  writeNoteFiles,
 } = require('../electron/onenote-importer.cjs')
 
 assert.equal(decodeHtmlEntities('A&#x41;&#65;&amp;'), 'AAA&')
 assert.equal(decodeHtmlEntities('&#xD800;&#x110000;&#999999999999;'), '\uFFFD\uFFFD\uFFFD')
 assert.equal(safeSegment('CON', 'OneNote-Seite'), 'OneNote-Seite')
 assert.equal(safeSegment('comic', 'OneNote-Seite'), 'comic')
-{
-  const widths = Array.from({ length: 150_000 }, () => 'width:2px;').join('')
-  const dimensions = pageDimensions(`<div style="width:1800px;${widths}">`)
-  assert.equal(dimensions.width, Math.min(3000, 1800 + 96))
-}
 async function assertUniqueNoteDoesNotReplace() {
   const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-onenote-name-'))
   try {
     await fsp.writeFile(path.join(directory, 'Seite.md'), 'keep')
-    const created = await writeUniqueMarkdown(directory, 'Seite', 'new')
+    const created = await writeNoteFiles(directory, 'Seite', 'new', null)
     assert.equal(await fsp.readFile(path.join(directory, 'Seite.md'), 'utf8'), 'keep')
-    assert.equal(await fsp.readFile(created, 'utf8'), 'new')
-    const device = await writeUniqueMarkdown(directory, 'NUL.txt', 'device')
-    assert.match(path.basename(device), /^OneNote-Seite\.md$/u)
+    assert.equal(await fsp.readFile(created.mdPath, 'utf8'), 'new')
+    // A lone .famd of the same stem is never taken over by a new note either.
+    await fsp.writeFile(path.join(directory, 'Tinte.famd'), 'keep')
+    const beside = await writeNoteFiles(directory, 'Tinte', 'body', 'ink')
+    assert.equal(await fsp.readFile(path.join(directory, 'Tinte.famd'), 'utf8'), 'keep')
+    assert.equal(path.basename(beside.mdPath), 'Tinte 2.md')
+    assert.equal(await fsp.readFile(beside.famdPath, 'utf8'), 'ink')
+    const device = await writeNoteFiles(directory, 'NUL.txt', 'device', null)
+    assert.match(path.basename(device.mdPath), /^OneNote-Seite\.md$/u)
   } finally {
     await fsp.rm(directory, { recursive: true, force: true })
   }
@@ -66,53 +69,49 @@ async function filesBelow(directory) {
 async function verifyImport(inputPath, suffix) {
   const vault = path.join(temporary, `vault-${suffix}`)
   await fsp.mkdir(vault, { mode: 0o700 })
-  const result = await importOneNoteToVault({ inputPath, vaultRoot: vault, one2html, sevenZip })
-  assert.equal(result.pageCount, 1)
-  assert.equal(result.attachmentCount, 1)
-  assert.equal(result.importedNotes.length, 1)
-  assert.match(result.rootFolder, /^OneNote – /u)
+  const session = await scanOneNote({ inputPath, one2html, sevenZip })
+  try {
+    const scan = describeSession(session)
+    assert.equal(scan.pageCount, 1)
+    assert.equal(scan.sections.length, 1)
+    assert.equal(scan.sections[0].pages[0].title, 'Test Page')
+    assert.equal(scan.sections[0].pages[0].hasInk, true)
+    assert.equal(scan.sections[0].pages[0].imageCount, 1)
+    const result = await importOneNotePages({ session, pageIds: [session.pages[0].id], destination: { physical: vault, logical: '' }, vaultRoot: vault })
+    assert.equal(result.failed.length, 0, JSON.stringify(result.failed))
+    assert.equal(result.imported.length, 1)
+    assert.equal(result.imported[0].path, 'New Section 1/Test Page.md')
+    assert.equal(result.inkPages, 1)
+    assert.equal(result.imageCount, 1)
 
-  const note = await fsp.readFile(path.join(vault, result.importedNotes[0]), 'utf8')
-  assert.match(note, /^# Test Page/mu)
-  assert.match(note, /fanotes-worksheet:[a-f0-9-]{36}/u)
-  assert.match(note, /Importierter Text · suchbar und bearbeitbar/u)
-  assert.match(note, /Lorem ipsum dolor sit amet/u)
-  const worksheetId = /fanotes-worksheet:([a-f0-9-]{36})/u.exec(note)[1]
-  const worksheet = JSON.parse(await fsp.readFile(path.join(vault, '.fanotes', 'worksheets', `${worksheetId}.json`), 'utf8'))
-  assert.equal(worksheet.kind, 'html')
-  assert.equal(worksheet.mimeType, 'text/html')
-  assert.ok(worksheet.pageWidth >= 720)
-  assert.ok(worksheet.pageHeight >= 900)
-
-  const html = await fsp.readFile(path.join(vault, '.fanotes', 'worksheets', `${worksheetId}.html`), 'utf8')
-  assert.match(html, /fanotes-onenote-safe-v1/u)
-  {
-    const guard = require('../electron/onenote-page-guard.cjs')
-    assert.equal(worksheet.htmlSha256, guard.pageSha256(html), 'the worksheet document stores the page hash')
-    assert.ok(guard.hasImporterGuard(html), 'the imported page carries the importer guard in its head')
-    assert.ok(!guard.hasImporterGuard(`<p>x</p><!-- fanotes-onenote-safe-v1 -->`), 'a comment with the marker string is not a guard')
-    assert.ok(guard.guardedPageHtml('<p>x</p>').startsWith('<meta http-equiv="Content-Security-Policy"'), 'the policy precedes any page markup when served')
+    // The fixture page has ink, so its text lives in positioned text fields and the .md keeps the title.
+    const { parseFamd } = require('../electron/famd.cjs')
+    const note = await fsp.readFile(path.join(vault, result.imported[0].path), 'utf8')
+    assert.equal(note, '# Test Page\n')
+    assert.doesNotMatch(note, /fanotes-onenote|fanotes-worksheet|<details|<svg|<div/u, 'no internal marker or HTML in the note')
+    const famdText = await fsp.readFile(path.join(vault, 'New Section 1', 'Test Page.famd'), 'utf8')
+    const famd = parseFamd(famdText)
+    const text = famd.payload.textFields.map((field) => field.text).join('\n\n')
+    assert.match(text, /^## ABCDEF$/mu)
+    assert.match(text, /^- \[ \] ABCDEF$/mu)
+    assert.match(text, /^- \[x\] ABCDEFG$/mu)
+    assert.match(text, /\*\*Lorem\*\* ipsum \*dolor\*/u)
+    assert.match(text, /\[magna\]\(https:\/\/example\.com\)/u)
+    assert.match(text, /^\| A \| B \| C \|$/mu)
+    assert.match(text, /^\$\$a=b\$\$$/mu)
+    assert.equal(famd.payload.annotations.filter((item) => item.kind === 'image').length, 1, 'the picture is a positioned image')
+    assert.ok(fs.readdirSync(path.join(vault, '.fanotes', 'assets', 'onenote')).some((name) => name.endsWith('.jpg')), 'and is also kept in the vault')
+    assert.equal(famd.payload.ink.strokes.length, 1)
+    assert.ok(famd.payload.ink.strokes[0].points.length > 50)
+    assert.ok(famd.payload.ink.sourceWidth >= 900 && famd.payload.ink.sourceHeight >= 1273)
+    assert.ok(famd.payload.ink.strokes[0].points.every((point) => point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1))
+    assert.doesNotMatch(famdText, /fanotes-onenote:/u)
+    assert.equal(famd.markdown.trim(), note.trim())
+    assert.equal(await fsp.stat(path.join(vault, '.fanotes', 'worksheets')).catch(() => null), null, 'no legacy worksheet pages are written')
+    return result
+  } finally {
+    await disposeSession(session)
   }
-  assert.match(html, /Content-Security-Policy/u)
-  assert.match(html, /<math\b/u)
-  assert.match(html, /<svg\b/u)
-  assert.match(html, /src="data:image\/jpeg;base64,/u)
-  assert.doesNotMatch(html, /<script\b|<iframe\b|<embed\b|javascript\s*:/iu)
-  assert.doesNotMatch(html, /src="https?:|href=/iu)
-
-  const manifests = (await filesBelow(path.join(vault, '.fanotes', 'onenote'))).filter((file) => file.endsWith('manifest.json'))
-  assert.equal(manifests.length, 1)
-  const manifest = JSON.parse(await fsp.readFile(manifests[0], 'utf8'))
-  assert.equal(manifest.attachments.length, 1)
-  assert.ok(manifest.originalSources.length >= 1)
-  const preservedSource = path.join(path.dirname(manifests[0]), 'original', manifest.originalSources[0].storedName)
-  assert.match(preservedSource, /\.fanotes-onenote-source$/u)
-  assert.equal(hash(await fsp.readFile(preservedSource)), manifest.originalSources[0].sha256)
-  const inert = path.join(path.dirname(manifests[0]), 'attachments', manifest.attachments[0].storedName)
-  const inertData = await fsp.readFile(inert)
-  assert.match(inert, /\.fanotes-attachment$/u)
-  assert.equal(hash(inertData), manifest.attachments[0].sha256)
-  return result
 }
 
 async function assertSanitizerVectors() {
@@ -173,14 +172,17 @@ void (async () => {
   const worksheetLayer = await fsp.readFile(path.join(root, 'src', 'components', 'WorksheetLayer.tsx'), 'utf8')
   const importer = await fsp.readFile(path.join(root, 'electron', 'onenote-importer.cjs'), 'utf8')
   assert.match(importer, /stageWindowsCrt/u)
+  assert.doesNotMatch(importer, /fanotes-onenote:|fanotes-worksheet:/u, 'the importer writes no visible markers')
   assert.match(importer, /vcruntime140\.dll/u)
   assert.match(importer, /dirname\(process\.execPath\)/u)
   assert.match(main, /require\('\.\/onenote-importer\.cjs'\)/u)
   assert.match(main, /materializeOneNoteTools/u)
   assert.match(main, /extensions:\s*\['one', 'onetoc2', 'onepkg', 'zip'\]/u)
   assert.match(preload, /importOneNote:\s*\(\)/u)
+  assert.match(preload, /importOneNotePages:\s*\(request\)/u)
   assert.match(settings, /Microsoft OneNote Import/u)
   assert.match(settings, /\.one · \.onetoc2 · \.onepkg · OneDrive-ZIP/u)
+  assert.match(main, /importOneNotePages/u)
   assert.match(worksheetLayer, /sandbox=""/u)
   assert.match(worksheetLayer, /page\.clientWidth \/ \(initialDocument\.pageWidth/u)
   // Worksheet pages render through the shared double-buffered painter, which queues
@@ -198,7 +200,7 @@ void (async () => {
     const extraResources = packageConfig.build[platform].extraResources ?? []
     assert.ok(extraResources.every((entry) => !String(entry.from ?? '').includes('resources/onenote') && !String(entry.to ?? '').includes('onenote')))
   }
-  console.log('OneNote-Import erfolgreich: direkte .one-Abschnitte, Notizbücher, ZIP, .onepkg, Hierarchie, Originalquellen, Suchtext, MathML, Ink, Bilder, CSP, Sandbox und hashgeprüfte Delta-Ressourcen geprüft.')
+  console.log('OneNote-Import erfolgreich: direkte .one-Abschnitte, Notizbücher, ZIP, .onepkg, Seitenauswahl, Markdown, MathML, Ink als .famd, Bilder und hashgeprüfte Delta-Ressourcen geprüft.')
 })().finally(() => fsp.rm(temporary, { recursive: true, force: true })).catch((error) => {
   console.error(error instanceof Error ? error.stack : String(error))
   process.exitCode = 1

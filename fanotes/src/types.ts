@@ -490,11 +490,40 @@ export type NoteHistorySnapshot = {
   bytes: number
 }
 
-export type OneNoteImportResult = {
-  rootFolder: string
+export type OneNoteScanPage = {
+  id: string
+  title: string
+  /** Nesting below the section (sub-pages), 0 for top-level pages. */
+  depth: number
+  hasInk: boolean
+  imageCount: number
+  alreadyImported: boolean
+}
+
+export type OneNoteScanSection = { path: string[]; name: string; pages: OneNoteScanPage[] }
+
+/** A converted OneNote source waiting for the user to pick pages. */
+export type OneNoteScan = {
+  sessionId: string
+  notebookName: string
+  sourceName: string
   pageCount: number
-  attachmentCount: number
-  importedNotes: string[]
+  inkPageCount: number
+  warnings: string[]
+  sections: OneNoteScanSection[]
+}
+
+export type OneNoteImportProgress = { done: number; total: number; title: string; status: 'working' | 'done' | 'finished' }
+
+export type OneNoteImportResult = {
+  imported: Array<{ id: string; title: string; path: string; ink: boolean; strokes: number }>
+  skipped: Array<{ id: string; title: string; path: string; reason: 'already-imported' }>
+  failed: Array<{ id: string; title: string; error: string }>
+  cancelled: boolean
+  inkPages: number
+  layoutPages: number
+  imageCount: number
+  strokeCount: number
   warnings: string[]
 }
 
@@ -746,7 +775,12 @@ export type FaNotesApi = {
   importWorksheet: () => Promise<WorksheetDocument | null>
   importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
   importPdfNote: (parentPath?: string) => Promise<CreateResult | null>
-  importOneNote: () => Promise<OneNoteImportResult | null>
+  /** Asks for a OneNote file, converts it and returns the page tree to choose from (null when cancelled). */
+  importOneNote: () => Promise<OneNoteScan | null>
+  importOneNotePages: (request: { sessionId: string; pageIds: string[]; destination: string; sectionFolders: boolean }) => Promise<OneNoteImportResult>
+  cancelOneNoteImport: (sessionId: string) => Promise<{ cancelled: boolean }>
+  closeOneNote: (sessionId: string) => Promise<{ closed: boolean }>
+  onOneNoteProgress: (callback: (progress: OneNoteImportProgress) => void) => () => void
   readWorksheet: (id: string) => Promise<WorksheetDocument>
   /** The verified, policy-guarded OneNote page of a worksheet, for a sandboxed srcdoc frame. */
   readWorksheetHtml: (id: string) => Promise<string>

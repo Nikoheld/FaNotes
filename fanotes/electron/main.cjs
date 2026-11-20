@@ -331,6 +331,10 @@ const IPC = Object.freeze({
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importPdfNote: 'fanotes:import-pdf-note',
   importOneNote: 'fanotes:import-onenote',
+  importOneNotePages: 'fanotes:import-onenote-pages',
+  cancelOneNoteImport: 'fanotes:cancel-onenote-import',
+  closeOneNote: 'fanotes:close-onenote',
+  oneNoteProgress: 'fanotes:onenote-progress',
   readWorksheet: 'fanotes:read-worksheet',
   readWorksheetHtml: 'fanotes:read-worksheet-html',
   saveWorksheet: 'fanotes:save-worksheet',
@@ -5597,11 +5601,23 @@ function registerIpcHandlers() {
     return { filePath: result.filePath }
   })
 
+  // OneNote import runs in two steps: importOneNote converts the chosen source and returns its
+  // notebook > section > page tree; importOneNotePages then writes the pages the user selected.
+  const oneNoteSessions = new Map()
+  const closeOneNoteSession = async (id) => {
+    const entry = oneNoteSessions.get(id)
+    if (!entry) return
+    oneNoteSessions.delete(id)
+    clearTimeout(entry.timer)
+    entry.abort.abort()
+    await require('./onenote-importer.cjs').disposeSession(entry.session)
+  }
+
   handle(IPC.importOneNote, async () => {
     await ensureBootstrap()
     const result = await dialog.showOpenDialog(mainWindow, localizedDialog({
       title: 'Microsoft OneNote in FaNotes importieren',
-      buttonLabel: 'Notizbuch importieren',
+      buttonLabel: 'Notizbuch öffnen',
       properties: ['openFile'],
       filters: [
         { name: 'Microsoft OneNote', extensions: ['one', 'onetoc2', 'onepkg', 'zip'] },
@@ -5616,13 +5632,53 @@ function registerIpcHandlers() {
     const vaultRoot = await assertCurrentVaultRoot()
     // The parser and archive code are loaded only after an explicit import.
     // This keeps OneNote completely outside the startup and idle CPU paths.
-    const { importOneNoteToVault, materializeOneNoteTools } = require('./onenote-importer.cjs')
+    const importer = require('./onenote-importer.cjs')
     const embeddedRoot = path.join(app.getAppPath(), 'resources', 'onenote')
-    const { one2html, sevenZip } = await materializeOneNoteTools({
+    const { one2html, sevenZip } = await importer.materializeOneNoteTools({
       embeddedRoot,
       cacheRoot: path.join(app.getPath('userData'), 'tool-cache', 'onenote'),
     })
-    return importOneNoteToVault({ inputPath, vaultRoot, one2html, sevenZip })
+    const session = await importer.scanOneNote({ inputPath, one2html, sevenZip })
+    const abort = new AbortController()
+    // A picker left open for good must not keep the converted pages in the temp folder.
+    const timer = setTimeout(() => { void closeOneNoteSession(session.id) }, 60 * 60 * 1000)
+    timer.unref?.()
+    oneNoteSessions.set(session.id, { session, abort, timer })
+    return importer.describeSession(session, await importer.readImportIndex(vaultRoot))
+  })
+
+  handle(IPC.importOneNotePages, async (event, request) => {
+    await ensureBootstrap()
+    const entry = oneNoteSessions.get(request?.sessionId)
+    if (!entry) throw new Error('Die OneNote-Auswahl ist abgelaufen. Öffne das Notizbuch erneut.')
+    const pageIds = Array.isArray(request.pageIds) ? request.pageIds.filter((id) => typeof id === 'string').slice(0, 20_000) : []
+    if (!pageIds.length) throw new Error('Es wurde keine Seite zum Importieren ausgewählt.')
+    const vaultRoot = await assertCurrentVaultRoot()
+    const rawDestination = typeof request.destination === 'string' ? request.destination : ''
+    const logical = rawDestination ? normalizeRelativePath(rawDestination, { allowRoot: true }).split(path.sep).join('/') : ''
+    const resolved = await resolveVaultPath(logical, { allowRoot: true, allowMissing: true, expected: 'directory', asContent: true })
+    await fsp.mkdir(resolved.target, { recursive: true, mode: 0o700 })
+    entry.abort = new AbortController()
+    const sender = event.sender
+    return require('./onenote-importer.cjs').importOneNotePages({
+      session: entry.session,
+      pageIds,
+      destination: { physical: resolved.target, logical },
+      vaultRoot,
+      sectionFolders: request.sectionFolders !== false,
+      signal: entry.abort.signal,
+      onProgress: (progress) => { if (!sender.isDestroyed()) sender.send(IPC.oneNoteProgress, progress) },
+    })
+  })
+
+  handle(IPC.cancelOneNoteImport, async (_event, sessionId) => {
+    oneNoteSessions.get(sessionId)?.abort.abort()
+    return { cancelled: true }
+  })
+
+  handle(IPC.closeOneNote, async (_event, sessionId) => {
+    await closeOneNoteSession(sessionId)
+    return { closed: true }
   })
 
   handle(IPC.readWorksheet, async (_event, rawId) => {
