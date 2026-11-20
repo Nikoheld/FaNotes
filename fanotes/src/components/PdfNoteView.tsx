@@ -58,7 +58,15 @@ import { PDF_INKING_CLASS, PDF_TOOLBAR_SLOT_ID } from '../lib/pdfInkHit'
 import { pageNeedsLocalOcr, pdfByteStamp, pdfPagePlainText, pdfTextSearchHits } from '../lib/pdfOcr'
 import { subscribePdfReveal } from '../lib/docSearch/reveal'
 import { runLocalPdfOcr } from '../lib/pdfOcrRun'
-import { VIEW_ZOOM_MIN, readSharedZoomMax, resolvePaperZoomScroller, watchSheetZoom } from '../lib/paperView'
+import {
+  SHEET_ZOOM_REPAINT_DEBOUNCE_MS,
+  VIEW_ZOOM_MIN,
+  isPinchZoomWheel,
+  readSharedZoomMax,
+  resolvePaperZoomScroller,
+  watchSheetZoom,
+  zoomFactorFromPinchWheel,
+} from '../lib/paperView'
 import { loadPaperViewMemory, recallPaperView } from '../lib/paperViewMemory'
 import { loadPdfReadingSpot, pdfScrollDeltaForSpot, pdfSpotFromBoxes, savePdfReadingSpot } from '../lib/pdfReadingSpot'
 import { bindHandGestures, pinchFactorFromWheel, shouldTakeSheetZoom } from '../../../src/lib/handGestures'
@@ -305,7 +313,14 @@ function PdfPageCanvas({
     }
     const observer = new ResizeObserver(scheduleLayout)
     observer.observe(host)
-    const stopZoom = watchSheetZoom(host, scheduleLayout)
+    const scheduleZoom = () => {
+      if (layoutTimer) window.clearTimeout(layoutTimer)
+      layoutTimer = window.setTimeout(() => {
+        layoutTimer = 0
+        paint()
+      }, SHEET_ZOOM_REPAINT_DEBOUNCE_MS)
+    }
+    const stopZoom = watchSheetZoom(host, scheduleZoom)
     const scroller = resolvePaperZoomScroller(host)
     scroller?.addEventListener('scroll', scheduleScroll, { passive: true })
     return () => {
@@ -1071,14 +1086,21 @@ export function PdfNoteView({
     const host = (node.closest('[data-hand-gesture-root]') as HTMLElement | null) ?? node
     let pageCarry = 0
     let lastWheelAt = 0
+    // One scale change (a React render and a column re-layout) per frame, not
+    // per wheel event: a trackpad pinch sends several events a frame.
+    let wheelFrame = 0
+    const applyWheelScale = () => {
+      wheelFrame = 0
+      changeScaleRef.current(scaleRef.current)
+    }
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return
       if (event.cancelable) event.preventDefault()
       event.stopPropagation()
       lastWheelAt = performance.now()
-      const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scaleRef.current * pinchFactorFromWheel(event.deltaY)))
-      scaleRef.current = next
-      changeScaleRef.current(next)
+      const factor = isPinchZoomWheel(event) ? zoomFactorFromPinchWheel(event.deltaY) : pinchFactorFromWheel(event.deltaY)
+      scaleRef.current = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scaleRef.current * factor))
+      if (!wheelFrame) wheelFrame = window.requestAnimationFrame(applyWheelScale)
     }
     host.addEventListener('wheel', onWheel, { capture: true, passive: false })
     const unbind = bindHandGestures(host, {
@@ -1116,6 +1138,7 @@ export function PdfNoteView({
       })
       : undefined
     return () => {
+      if (wheelFrame) window.cancelAnimationFrame(wheelFrame)
       host.removeEventListener('wheel', onWheel, { capture: true })
       unbind()
       unsubscribe?.()

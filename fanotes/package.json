@@ -77,6 +77,7 @@
     "check:text-stay-put": "node scripts/check-text-stay-put.mjs",
     "check:fast-scroll-text": "node scripts/check-fast-scroll-text.mjs",
     "check:zoom-stay-put": "node scripts/check-zoom-stay-put.mjs",
+    "check:zoom-anchor": "node scripts/check-zoom-anchor.mjs",
     "check:line-at-stylus": "node scripts/check-line-at-stylus.mjs",
     "check:ink-rotation-stay": "node scripts/check-ink-rotation-stay.mjs",
     "check:drafting": "node scripts/check-drafting-tools.mjs",
