@@ -81,6 +81,8 @@ export type SyncEngineOptions = {
   includeHistory?: () => boolean
   /** Attachments (images, other files) take part. Off: notes only (md, famd, PDFs, side pages, `.fanotes/` metadata). Default on. */
   includeAttachments?: () => boolean
+  /** Compare with the server's file table on start and after a reconnect. Default on; the Rust parity harness turns it off because the Rust mirror engine does not implement it. */
+  reconcile?: boolean
   /** Files the engine wrote or removed on behalf of another device – the app refreshes its tree and open tabs. */
   onApplied?: (change: { written: string[]; removed: string[] }) => void
   onConflict?: (conflict: SyncConflict) => void
@@ -723,7 +725,7 @@ export class SyncEngine {
     this.setState({ status: 'syncing', error: null, progress: null, pausedUntil: null })
     try {
       let conflicts = await this.pull()
-      if (this.needsReconcile) {
+      if (this.needsReconcile && this.options?.reconcile !== false) {
         await this.reconcileWithServer()
         this.needsReconcile = false
       }
@@ -1416,12 +1418,9 @@ export class SyncEngine {
    * under it is missing any more: its files were deleted, or a newer version
    * came back and is present again.
    */
-  /** Publishes the files that did not upload in this cycle; one log line when the set changes. */
+  /** Publishes the files that did not upload in this cycle (status line and Settings → Sync). */
   private publishFailures() {
-    const failed = [...this.failures].map(([path, reason]) => ({ path, reason })).sort((a, b) => a.path.localeCompare(b.path, 'de'))
-    const changed = failed.length !== this.snapshot.failed.length || failed.some((item, index) => item.path !== this.snapshot.failed[index].path)
-    this.setState({ failed })
-    if (changed && failed.length) this.log('warn', `${failed.length} ${failed.length === 1 ? 'Datei wurde' : 'Dateien wurden'} nicht hochgeladen.`)
+    this.setState({ failed: [...this.failures].map(([path, reason]) => ({ path, reason })).sort((a, b) => a.path.localeCompare(b.path, 'de')) })
   }
 
   /** The user asks for another attempt at the files that did not upload (also runs a full cycle). */
