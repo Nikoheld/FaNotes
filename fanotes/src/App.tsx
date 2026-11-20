@@ -6042,16 +6042,20 @@ export default function App({ startupBootstrap }: AppProps) {
   useEffect(() => {
     if (!splitPath || !splitTab || splitTab.kind === 'pdf' || isPdfNotePath(splitPath)) return
     const path = splitPath
-    let frame = window.requestAnimationFrame(() => {
-      frame = window.requestAnimationFrame(() => {
-        const scroller = splitContainerRef.current?.querySelector<HTMLElement>('.split-pane .unified-note-view')
-        if (!scroller || recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(`split:${path}`))) return
-        const view = splitPaperViewStore.read()
-        const zoom = splitFitZoom(scroller.clientWidth)
-        if (zoom < 1 && view.zoom === 1) splitPaperViewStore.write({ ...view, zoom })
-      })
-    })
-    return () => window.cancelAnimationFrame(frame)
+    const fit = () => {
+      const scroller = splitContainerRef.current?.querySelector<HTMLElement>('.split-pane .unified-note-view')
+      if (!scroller || recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(`split:${path}`))) return
+      const view = splitPaperViewStore.read()
+      const zoom = splitFitZoom(scroller.clientWidth)
+      if (zoom < 1 && view.zoom === 1) splitPaperViewStore.write({ ...view, zoom })
+    }
+    // Once after layout, once more for a slow machine whose pane was not measured yet.
+    let frame = window.requestAnimationFrame(() => { frame = window.requestAnimationFrame(fit) })
+    const retry = window.setTimeout(fit, 400)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(retry)
+    }
   }, [splitPath, splitPaperViewStore])
 
   // Divider drag of the split view; pointer capture keeps it smooth over iframes and canvases.

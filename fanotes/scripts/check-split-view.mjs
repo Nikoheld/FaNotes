@@ -111,11 +111,11 @@ try {
       assert.equal(current.focus, 'main')
 
       // The second pane opens at a zoom that shows its whole sheet (no clipped text).
-      const clipped = await page.evaluate(() => {
+      const clipped = await page.waitForFunction(() => {
         const scroller = document.querySelector('.split-pane .unified-note-view')
         const cm = scroller?.querySelector('.cm-content')
-        return cm && scroller ? cm.getBoundingClientRect().left < scroller.getBoundingClientRect().left - 1 : null
-      })
+        return Boolean(cm && scroller && cm.getBoundingClientRect().left >= scroller.getBoundingClientRect().left - 1)
+      }, null, { timeout: 5_000 }).then(() => false, () => true)
       assert.equal(clipped, false, 'the second pane does not start with its text cut off at the left edge')
 
       // Divider drag: one storage write, live track, clamped.
