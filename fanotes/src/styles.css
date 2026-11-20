@@ -167,23 +167,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .theme-oled .paper-sheet-plane, .theme-oled .unified-note-view { background: #000 !important; }
 .app-shell.theme-oled, .app-shell.theme-oled.background-gradient, .app-shell.theme-oled.background-mesh, .app-shell.theme-oled.background-paper,
 .app-shell.theme-oled.dashboard-shell.background-gradient, .app-shell.theme-oled.dashboard-shell.background-mesh, .app-shell.theme-oled.dashboard-shell.background-paper { background: #000; background-image: none; }
-/* Stored ink is dark. Invert lightness (hue kept) on the sheet's ink canvases so strokes read light on black.
-   One static filter on two canvases; nothing blurs or animates. */
-.theme-oled .unified-paper .lw-tablet-canvas { filter: invert(1) hue-rotate(180deg); }
-.theme-oled .paper-dots .paper-sheet-plane > .paper-ruling {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='14' cy='14' r='0.8' fill='rgba(255,255,255,0.28)'/%3E%3C/svg%3E");
-}
-.theme-oled .paper-squares .paper-sheet-plane > .paper-ruling,
-.theme-oled .paper-grid .paper-sheet-plane > .paper-ruling {
-  background-image: linear-gradient(to right, rgba(255,255,255,0.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.14) 1px, transparent 1px);
-}
-.theme-oled .paper-lines .paper-sheet-plane > .paper-ruling {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M0 27.5H28' stroke='rgba(255,255,255,0.2)' stroke-width='1'/%3E%3C/svg%3E");
-}
-.theme-oled .paper-millimeter .paper-sheet-plane > .paper-ruling {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M4 0V20M8 0V20M12 0V20M16 0V20M0 4H20M0 8H20M0 12H20M0 16H20' stroke='rgba(255,255,255,0.07)' stroke-width='1'/%3E%3Cpath d='M20 0H0V20' fill='none' stroke='rgba(255,255,255,0.2)' stroke-width='1'/%3E%3C/svg%3E");
-}
-
 .app-shell.theme-forest, body.app-theme-forest {
   --bg: #171a18;
   --bg-elevated: #1e221f;
@@ -5109,3 +5092,22 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .theme-oled .settings-backdrop, body.app-theme-oled .settings-backdrop { background: #000; }
 .theme-oled .settings-modal, body.app-theme-oled .settings-modal { background: #000; border-color: var(--border-strong); }
 .theme-oled .setting-card, body.app-theme-oled .setting-card, .theme-oled .settings-nav, body.app-theme-oled .settings-nav { background: #000; }
+
+/* OLED sheet: inverted ink and light ruling (kept after the base paper rules). */
+/* Stored ink is dark. Invert lightness (hue kept) on the sheet's ink canvases so strokes read light on black.
+   One static filter on two canvases; nothing blurs or animates. */
+.theme-oled .unified-paper .lw-tablet-canvas { filter: invert(1) hue-rotate(180deg); }
+.theme-oled .paper-dots .paper-sheet-plane > .paper-ruling {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Ccircle cx='14' cy='14' r='0.8' fill='rgba(255,255,255,0.28)'/%3E%3C/svg%3E");
+}
+.theme-oled .paper-squares .paper-sheet-plane > .paper-ruling,
+.theme-oled .paper-grid .paper-sheet-plane > .paper-ruling {
+  background-image: linear-gradient(to right, rgba(255,255,255,0.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(255,255,255,0.14) 1px, transparent 1px);
+}
+.theme-oled .paper-lines .paper-sheet-plane > .paper-ruling {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28'%3E%3Cpath d='M0 27.5H28' stroke='rgba(255,255,255,0.2)' stroke-width='1'/%3E%3C/svg%3E");
+}
+.theme-oled .paper-millimeter .paper-sheet-plane > .paper-ruling {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M4 0V20M8 0V20M12 0V20M16 0V20M0 4H20M0 8H20M0 12H20M0 16H20' stroke='rgba(255,255,255,0.07)' stroke-width='1'/%3E%3Cpath d='M20 0H0V20' fill='none' stroke='rgba(255,255,255,0.2)' stroke-width='1'/%3E%3C/svg%3E");
+}
+
