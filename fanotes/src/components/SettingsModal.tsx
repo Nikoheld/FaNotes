@@ -60,7 +60,7 @@ import {
   tabletButtonControlsInGroup,
   type TabletButtonAction,
 } from '../lib/tabletButtons'
-import type { AppSettings, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
+import type { AppSettings, BackgroundUpdateInfo, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
 import type { McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
@@ -317,6 +317,39 @@ const formatBytes = (bytes: number) => {
   const units = ['B', 'KB', 'MB', 'GB']
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
   return `${new Intl.NumberFormat(getUiLocale(), { maximumFractionDigits: exponent > 1 ? 1 : 0 }).format(bytes / 1024 ** exponent)} ${units[exponent]}`
+}
+
+const BACKGROUND_RESULT_LABELS: Record<NonNullable<BackgroundUpdateInfo['lastResult']>, string> = {
+  installing: 'Update im Hintergrund installiert',
+  staged: 'Update vorbereitet, wird beim Beenden installiert',
+  'up-to-date': 'Aktuell',
+  available: 'Update verfügbar, automatischer Download ist aus',
+  metered: 'Getaktete Verbindung, Download verschoben',
+  busy: 'Übersprungen, FaNotes war gerade beschäftigt',
+  blocked: 'Version zurückgesetzt, wartet auf die nächste',
+  error: 'Fehlgeschlagen, neuer Versuch später',
+}
+
+const BACKGROUND_SCHEDULER_LABELS: Record<NonNullable<BackgroundUpdateInfo['scheduler']>, string> = {
+  task: 'Windows-Aufgabenplanung',
+  systemd: 'systemd-Benutzertimer',
+  autostart: 'Autostart bei der Anmeldung',
+}
+
+const formatUpdateMoment = (value: string | null) => {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return new Intl.DateTimeFormat(getUiLocale(), { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+}
+
+const backgroundUpdateDescription = (state: UpdateState) => {
+  if (state.background && !state.background.supported) {
+    return state.installationKind === 'windows-portable'
+      ? 'In der portablen Ausgabe nicht verfügbar: Sie aktualisiert sich, während sie geöffnet ist.'
+      : 'Nur in der installierten Desktop-App verfügbar (Windows-Installer oder AppImage).'
+  }
+  return 'Sucht auch bei geschlossenem FaNotes bei der Anmeldung und alle 6 Stunden nach Updates und installiert sie still, nur mit Netz und unter Windows nur am Strom. Der nächste Start ist dann schon aktuell. Läuft FaNotes gerade, wird das Update nur vorbereitet.'
 }
 
 const updateStatusText = (state: UpdateState, isWeb = false) => {
@@ -1422,6 +1455,31 @@ export function SettingsModal({
                     <SettingRow title="Automatisch nach Updates suchen" description={updateChannelCopy(settings.updateChannel).auto}><Toggle label="Automatisch nach Updates suchen" checked={settings.autoCheckUpdates} onChange={(value) => update('autoCheckUpdates', value)} /></SettingRow>
                     <SettingRow title="Updates automatisch herunterladen" description="Lädt geprüfte Updates sofort im Hintergrund (bevorzugt nur geänderte Blöcke) und setzt abgebrochene Übertragungen fort – ohne Popup und ohne Unterbrechung."><Toggle label="Updates automatisch herunterladen" checked={settings.autoDownloadUpdates} onChange={(value) => update('autoDownloadUpdates', value)} /></SettingRow>
                     <SettingRow title="Automatisch installieren" description="Installiert ein fertig geprüftes Update nahtlos: beim Beenden nach dem Speichern aller Notizen, oder still beim nächsten Start, wenn der Download schon abgeschlossen war."><Toggle label="Update automatisch installieren" checked={settings.installUpdatesOnQuit} onChange={(value) => update('installUpdatesOnQuit', value)} /></SettingRow>
+                    <SettingRow title="Updates im Hintergrund installieren" description={backgroundUpdateDescription(updateState)}>
+                      <Toggle
+                        label="Updates im Hintergrund installieren"
+                        checked={settings.backgroundUpdates && updateState.background?.supported !== false}
+                        disabled={updateState.background?.supported === false || !settings.autoCheckUpdates}
+                        onChange={(value) => update('backgroundUpdates', value)}
+                      />
+                    </SettingRow>
+                    {updateState.background?.supported && settings.backgroundUpdates && (
+                      <div className="update-background-status" role="status">
+                        <div><span>Installierte Version</span><strong>{updateState.currentVersion}</strong></div>
+                        <div>
+                          <span>Letzte Hintergrundprüfung</span>
+                          <strong>{formatUpdateMoment(updateState.background.lastCheckAt) ?? 'Noch keine'}</strong>
+                          {updateState.background.lastResult && <small>{BACKGROUND_RESULT_LABELS[updateState.background.lastResult]}</small>}
+                        </div>
+                        <div>
+                          <span>Zeitplan</span>
+                          <strong>{updateState.background.scheduler ? BACKGROUND_SCHEDULER_LABELS[updateState.background.scheduler] : 'Nicht eingerichtet'}</strong>
+                        </div>
+                        {(updateState.background.registrationError || (updateState.background.lastResult === 'error' && updateState.background.lastMessage)) && (
+                          <p className="update-background-error">{updateState.background.registrationError ?? updateState.background.lastMessage}</p>
+                        )}
+                      </div>
+                    )}
                   </>}
                 </div>
 

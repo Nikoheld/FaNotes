@@ -8,6 +8,8 @@ const {
   PLATFORM_RELEASES,
   WINDOWS_DELTA_HELPER,
   WINDOWS_INSTALLER_ARGS,
+  WINDOWS_INSTALLER_HELPER,
+  WINDOWS_SWAP_HELPER,
   githubReleaseAssetUrl,
   stableStringify,
   verifyManifest,
@@ -75,8 +77,16 @@ assert.equal(verified.latestVersion, '2.14.0')
 assert.equal(verified.packages.installer.fileName, payload.packages.installer.fileName)
 assert.equal(verified.packages.portable.url, payload.packages.portable.url)
 assert.equal(verified.delta.target.fileName, 'app.asar')
-assert.deepEqual(WINDOWS_INSTALLER_ARGS, ['/S', '--updated', '--force-run'])
-assert.match(WINDOWS_DELTA_HELPER, /Get-FileHash[\s\S]+fanotes-backup[\s\S]+rolling back/u)
+// The helper starts FaNotes itself after the self-test, so NSIS must not (--force-run).
+assert.deepEqual(WINDOWS_INSTALLER_ARGS, ['/S', '--updated'])
+assert.match(WINDOWS_DELTA_HELPER, /Get-FileHash[\s\S]+fanotes-backup[\s\S]+Invoke-SelfTest[\s\S]+rolling back/u)
+assert.equal(WINDOWS_SWAP_HELPER, WINDOWS_DELTA_HELPER)
+assert.match(WINDOWS_INSTALLER_HELPER, /Get-FileHash[\s\S]+'\/S','--updated'[\s\S]+Invoke-SelfTest/u)
+for (const helper of [WINDOWS_SWAP_HELPER, WINDOWS_INSTALLER_HELPER]) {
+  assert.match(helper, /install\.lock/u, 'Every Windows helper releases the install lock.')
+  assert.match(helper, /\$Mode -eq 'relaunch'/u)
+  assert.doesNotMatch(helper, /--force-run/u)
+}
 assert.equal(PLATFORM_RELEASES.win32.api, 'https://api.github.com/repos/Nikoheld/FaNotes/releases')
 // The manifest must name the release it was picked from.
 assert.throws(

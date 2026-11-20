@@ -1033,6 +1033,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const openingNotesRef = useRef(new Set<string>())
   const toastCounter = useRef(0)
   const updateStatusRef = useRef<UpdateState['status']>('idle')
+  const justUpdatedNoteRef = useRef<string | null>(null)
   const secureSettingsLoadRef = useRef<Promise<void> | null>(null)
   const systemDark = useSystemDark()
 
@@ -1694,6 +1695,11 @@ export default function App({ startupBootstrap }: AppProps) {
       setUpdateState(next)
       if (next.status === 'downloaded' && previous !== 'downloaded') {
         toast(`FaNotes ${next.latestVersion} ist geprüft und wird beim Beenden installiert.`, 'success')
+      }
+      // A short, silent note once after an update (quit, launch or background); never a dialog.
+      if (next.justUpdated && justUpdatedNoteRef.current !== next.justUpdated.to) {
+        justUpdatedNoteRef.current = next.justUpdated.to
+        toast(`Auf Version ${next.justUpdated.to} aktualisiert`, 'success')
       }
     }
     const unsubscribe = window.fanotes?.onUpdateState(applyUpdateState) ?? (() => undefined)

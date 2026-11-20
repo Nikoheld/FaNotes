@@ -70,6 +70,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   autoCheckUpdates: { type: 'boolean' },
   autoDownloadUpdates: { type: 'boolean' },
   installUpdatesOnQuit: { type: 'boolean' },
+  backgroundUpdates: { type: 'boolean' },
   updateChannel: { type: 'enum', values: ['stable', 'beta', 'nightly'] },
   memoryBudgetMb: { type: 'enum', values: [0, 1536, 2048, 3072, 4096, 6144, 8192] },
   ocrThreadLimit: { type: 'enum', values: [0, 1, 2, 3, 4] },

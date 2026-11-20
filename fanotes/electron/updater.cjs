@@ -9,6 +9,7 @@ const { Readable, Transform } = require('node:stream')
 const { pipeline } = require('node:stream/promises')
 const { DELTA_FORMAT, applyDeltaPatch } = require('./delta.cjs')
 const { VERSION_PATTERN, compareSemanticVersions, deltaPathname, packagePathname, releaseVisibleOnChannel, versionChannel } = require('./releaseVersion.cjs')
+const { createUpdateLocks } = require('./update-lock.cjs')
 
 const PRODUCT_ORIGIN = 'https://fanotes.fasrv.ch'
 const GITHUB_REPOSITORY = 'Nikoheld/FaNotes'
@@ -88,6 +89,9 @@ const MAX_RELEASE_LIST_BYTES = 4 * 1024 * 1024
 const MIN_PACKAGE_BYTES = 10 * 1024 * 1024
 const MAX_PACKAGE_BYTES = 1024 * 1024 * 1024
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
+const RELEASE_CACHE_FILE = 'release-cache.json'
+const INSTALL_RESULT_FILE = 'install-result.json'
+const MAX_INSTALL_LOG_BYTES = 256 * 1024
 /** Short first poll so a staged update can be adopted before the user settles in. */
 const INITIAL_CHECK_DELAY_MS = 2_500
 const DOWNLOAD_TIMEOUT_MS = 45 * 60 * 1000
@@ -100,21 +104,23 @@ const RETRYABLE_TRANSFER_CODES = new Set([
   'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_CLOSED',
   'ERR_STREAM_PREMATURE_CLOSE',
 ])
-const WINDOWS_INSTALLER_ARGS = Object.freeze(['/S', '--updated', '--force-run'])
+// The helper runs the installer silently and starts FaNotes itself after the
+// self-test, so NSIS never launches the app on its own (`--force-run`).
+const WINDOWS_INSTALLER_ARGS = Object.freeze(['/S', '--updated'])
+const INSTALL_MODES = Object.freeze(['relaunch', 'quiet'])
 
-const WINDOWS_DELTA_HELPER = `param(
-  [Parameter(Mandatory=$true)][int]$ParentPid,
-  [Parameter(Mandatory=$true)][string]$Target,
-  [Parameter(Mandatory=$true)][string]$Staged,
-  [Parameter(Mandatory=$true)][string]$ExpectedSha,
-  [Parameter(Mandatory=$true)][string]$FromVersion,
-  [Parameter(Mandatory=$true)][string]$ToVersion,
-  [Parameter(Mandatory=$true)][string]$Executable,
-  [Parameter(Mandatory=$true)][string]$LogFile,
-  [Parameter(Mandatory=$true)][string]$MarkerFile
-)
-
+// Shared by the Windows helpers. Every helper writes install-result.json next
+// to its log, releases install.lock in the same directory when it ends, and
+// runs the installed program once with --fanotes-self-test: a headless start
+// that writes self-test.json with its version and exits. "quiet" (install on
+// quit, background install) never opens a window; "relaunch" (install at
+// launch) starts the new version afterwards.
+const WINDOWS_HELPER_COMMON = String.raw`
 $ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $ResultFile
+$selfTestFile = Join-Path $root 'self-test.json'
+$lockFile = Join-Path $root 'install.lock'
+$launchRequestFile = Join-Path $root 'launch-request.json'
 
 function Write-Log([string]$Message) {
   Add-Content -LiteralPath $LogFile -Value "$(Get-Date -Format o) $Message" -Encoding UTF8
@@ -124,24 +130,104 @@ function File-Sha256([string]$Path) {
   return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Write-Result([bool]$Ok, [string]$Reason) {
+  $value = [ordered]@{ ok = $Ok; version = $ToVersion; fromVersion = $FromVersion; mode = $Mode; reason = $Reason; at = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress
+  $temporary = "$ResultFile.tmp"
+  [System.IO.File]::WriteAllText($temporary, $value)
+  Move-Item -LiteralPath $temporary -Destination $ResultFile -Force
+}
+
+function Wait-ForExit([int]$ProcessId, [int]$Seconds) {
+  if ($ProcessId -le 0) { return }
+  $deadline = (Get-Date).AddSeconds($Seconds)
+  while (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+    if ((Get-Date) -gt $deadline) { throw 'FaNotes did not stop in time.' }
+    Start-Sleep -Milliseconds 200
+  }
+}
+
+function Move-WithRetry([string]$From, [string]$To) {
+  $deadline = (Get-Date).AddSeconds(60)
+  while ($true) {
+    try {
+      Move-Item -LiteralPath $From -Destination $To -Force
+      return
+    } catch {
+      if ((Get-Date) -gt $deadline) { throw }
+      Start-Sleep -Milliseconds 500
+    }
+  }
+}
+
+function Invoke-SelfTest([string]$Program) {
+  Remove-Item -LiteralPath $selfTestFile -Force -ErrorAction SilentlyContinue
+  $env:FANOTES_SELF_TEST_FILE = $selfTestFile
+  try {
+    $process = Start-Process -FilePath $Program -ArgumentList '--fanotes-self-test' -PassThru -WindowStyle Hidden
+    if (-not $process.WaitForExit(180000)) {
+      try { $process.Kill() } catch { }
+      return $false
+    }
+  } catch {
+    return $false
+  } finally {
+    Remove-Item Env:\FANOTES_SELF_TEST_FILE -ErrorAction SilentlyContinue
+  }
+  if (-not (Test-Path -LiteralPath $selfTestFile -PathType Leaf)) { return $false }
+  try {
+    $report = Get-Content -LiteralPath $selfTestFile -Raw | ConvertFrom-Json
+  } catch {
+    return $false
+  }
+  return ($report.ok -eq $true -and $report.version -eq $ToVersion)
+}
+
+# An app started during a background install waited for install.lock and
+# may have been closed by the installer. Start it once the files are in place.
+function Complete-LaunchRequest([string]$Program) {
+  if ($Mode -ne 'quiet' -or -not (Test-Path -LiteralPath $launchRequestFile -PathType Leaf)) { return }
+  $request = $null
+  try { $request = Get-Content -LiteralPath $launchRequestFile -Raw | ConvertFrom-Json } catch { }
+  Remove-Item -LiteralPath $launchRequestFile -Force -ErrorAction SilentlyContinue
+  if ($request -and $request.pid -and (Get-Process -Id ([int]$request.pid) -ErrorAction SilentlyContinue)) { return }
+  Start-Process -FilePath $Program | Out-Null
+}
+
+if ($Mode -ne 'relaunch' -and $Mode -ne 'quiet') { exit 9 }
+`
+
+// Replaces one file (resources\app.asar for a delta update, or the portable
+// .exe) after FaNotes exited, self-tests the result and restores the backup
+// when the new version does not come up.
+const WINDOWS_DELTA_HELPER = `param(
+  [Parameter(Mandatory=$true)][int]$ParentPid,
+  [Parameter(Mandatory=$true)][string]$Target,
+  [Parameter(Mandatory=$true)][string]$Staged,
+  [Parameter(Mandatory=$true)][string]$ExpectedSha,
+  [Parameter(Mandatory=$true)][string]$FromVersion,
+  [Parameter(Mandatory=$true)][string]$ToVersion,
+  [Parameter(Mandatory=$true)][string]$Executable,
+  [Parameter(Mandatory=$true)][string]$LogFile,
+  [Parameter(Mandatory=$true)][string]$ResultFile,
+  [Parameter(Mandatory=$true)][string]$Mode,
+  [int]$StubPid = 0
+)
+${WINDOWS_HELPER_COMMON}
 $temporary = "$Target.fanotes-new"
 $backup = "$Target.fanotes-backup"
 
 try {
-  Write-Log "FaNotes delta update helper started"
-  $deadline = (Get-Date).AddSeconds(120)
-  while (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
-    if ((Get-Date) -gt $deadline) { throw 'FaNotes did not stop within 120 seconds.' }
-    Start-Sleep -Milliseconds 200
-  }
-  if (-not (Test-Path -LiteralPath $Staged -PathType Leaf)) { throw 'The staged app.asar is missing.' }
-  if ((File-Sha256 $Staged) -ne $ExpectedSha) { throw 'The staged app.asar checksum is invalid.' }
+  Write-Log "FaNotes update helper started ($Mode)"
+  Wait-ForExit $ParentPid 120
+  Wait-ForExit $StubPid 120
+  if (-not (Test-Path -LiteralPath $Staged -PathType Leaf)) { throw 'The staged file is missing.' }
+  if ((File-Sha256 $Staged) -ne $ExpectedSha) { throw 'The staged file checksum is invalid.' }
 
   Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
   Copy-Item -LiteralPath $Staged -Destination $temporary -Force
-  if ((File-Sha256 $temporary) -ne $ExpectedSha) { throw 'The copied app.asar checksum is invalid.' }
-  Move-Item -LiteralPath $Target -Destination $backup -Force
+  if ((File-Sha256 $temporary) -ne $ExpectedSha) { throw 'The copied file checksum is invalid.' }
+  Move-WithRetry $Target $backup
   try {
     Move-Item -LiteralPath $temporary -Destination $Target -Force
   } catch {
@@ -149,33 +235,105 @@ try {
     throw
   }
 
-  $child = Start-Process -FilePath $Executable -ArgumentList "--fanotes-updated-from=$FromVersion" -PassThru
-  Start-Sleep -Seconds 8
-  if (-not $child.HasExited) {
+  if (Invoke-SelfTest $Executable) {
     Remove-Item -LiteralPath $backup,$Staged -Force -ErrorAction SilentlyContinue
-    $marker = @{ version = $ToVersion; installedAt = (Get-Date).ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress
-    Set-Content -LiteralPath $MarkerFile -Value $marker -Encoding UTF8
-    Write-Log "delta update to $ToVersion installed successfully"
+    Write-Result $true 'installed'
+    Write-Log "update to $ToVersion installed successfully"
+    if ($Mode -eq 'relaunch') {
+      Start-Process -FilePath $Executable -ArgumentList "--fanotes-updated-from=$FromVersion" | Out-Null
+    } else {
+      Complete-LaunchRequest $Executable
+    }
     exit 0
   }
 
-  Write-Log "updated application exited during health window; rolling back"
+  Write-Log "the self-test of $ToVersion failed; rolling back"
   Remove-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
   Move-Item -LiteralPath $backup -Destination $Target -Force
-  Start-Process -FilePath $Executable -ArgumentList "--fanotes-update-rollback=$ToVersion"
+  Write-Result $false 'self-test-failed'
+  if ($Mode -eq 'relaunch') {
+    Start-Process -FilePath $Executable -ArgumentList "--fanotes-update-rollback=$ToVersion" | Out-Null
+  } else {
+    Complete-LaunchRequest $Executable
+  }
   exit 18
 } catch {
-  Write-Log "delta update failed: $($_.Exception.Message)"
+  Write-Log "update failed: $($_.Exception.Message)"
   if (Test-Path -LiteralPath $backup -PathType Leaf) {
     Remove-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
     Move-Item -LiteralPath $backup -Destination $Target -Force
-    Start-Process -FilePath $Executable -ArgumentList "--fanotes-update-rollback=$ToVersion" -ErrorAction SilentlyContinue
-    Write-Log "previous app.asar restored after helper failure"
+    Write-Log "previous file restored after helper failure"
+  }
+  try { Write-Result $false 'helper-failed' } catch { }
+  if ($Mode -eq 'relaunch') {
+    Start-Process -FilePath $Executable -ArgumentList "--fanotes-update-rollback=$ToVersion" -ErrorAction SilentlyContinue | Out-Null
   }
   exit 19
+} finally {
+  Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
+}
+`
+const WINDOWS_SWAP_HELPER = WINDOWS_DELTA_HELPER
+
+// Full update of the per-user NSIS installation. NSIS keeps the previous
+// files until the new ones are written (atomicRMDir) and restores them when
+// it fails; a version that installs but fails the self-test is reported and
+// never retried automatically.
+const WINDOWS_INSTALLER_HELPER = `param(
+  [Parameter(Mandatory=$true)][int]$ParentPid,
+  [Parameter(Mandatory=$true)][string]$Installer,
+  [Parameter(Mandatory=$true)][string]$ExpectedSha,
+  [Parameter(Mandatory=$true)][string]$FromVersion,
+  [Parameter(Mandatory=$true)][string]$ToVersion,
+  [Parameter(Mandatory=$true)][string]$Executable,
+  [Parameter(Mandatory=$true)][string]$LogFile,
+  [Parameter(Mandatory=$true)][string]$ResultFile,
+  [Parameter(Mandatory=$true)][string]$Mode
+)
+${WINDOWS_HELPER_COMMON}
+try {
+  Write-Log "FaNotes installer helper started ($Mode)"
+  Wait-ForExit $ParentPid 120
+  if (-not (Test-Path -LiteralPath $Installer -PathType Leaf)) { throw 'The staged installer is missing.' }
+  if ((File-Sha256 $Installer) -ne $ExpectedSha) { throw 'The staged installer checksum is invalid.' }
+  $process = Start-Process -FilePath $Installer -ArgumentList ${WINDOWS_INSTALLER_ARGS.map((arg) => `'${arg}'`).join(',')} -PassThru -WindowStyle Hidden
+  $null = $process.Handle
+  if (-not $process.WaitForExit(900000)) { throw 'The installer did not finish within 15 minutes.' }
+  if ($process.ExitCode -ne 0) { throw "The installer ended with exit code $($process.ExitCode)." }
+
+  if (Invoke-SelfTest $Executable) {
+    Remove-Item -LiteralPath $Installer -Force -ErrorAction SilentlyContinue
+    Write-Result $true 'installed'
+    Write-Log "update to $ToVersion installed successfully"
+    if ($Mode -eq 'relaunch') {
+      Start-Process -FilePath $Executable -ArgumentList "--fanotes-updated-from=$FromVersion" | Out-Null
+    } else {
+      Complete-LaunchRequest $Executable
+    }
+    exit 0
+  }
+  Write-Log "the self-test of $ToVersion failed after the installer"
+  Write-Result $false 'self-test-failed'
+  if ($Mode -eq 'relaunch' -and (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+    Start-Process -FilePath $Executable -ArgumentList "--fanotes-update-rollback=$ToVersion" | Out-Null
+  }
+  exit 18
+} catch {
+  Write-Log "installer update failed: $($_.Exception.Message)"
+  try { Write-Result $false 'installer-failed' } catch { }
+  if ($Mode -eq 'relaunch' -and (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+    Start-Process -FilePath $Executable -ArgumentList "--fanotes-update-rollback=$ToVersion" -ErrorAction SilentlyContinue | Out-Null
+  }
+  exit 19
+} finally {
+  Remove-Item -LiteralPath $lockFile -Force -ErrorAction SilentlyContinue
 }
 `
 
+// Linux AppImage swap. Arguments: parent pid, target, staged file, SHA-256,
+// from and to version, log file, result file, mode. The self-test runs with
+// the headless Ozone platform, so it also works without a display (systemd
+// user timer). install.lock and self-test.json live next to the result file.
 const INSTALL_HELPER = `#!/bin/sh
 set -eu
 
@@ -186,13 +344,36 @@ expected_sha="$4"
 from_version="$5"
 to_version="$6"
 log_file="$7"
-marker_file="$8"
+result_file="$8"
+mode="\${9:-relaunch}"
+root="$(dirname -- "$result_file")"
+self_test_file="$root/self-test.json"
+lock_file="$root/install.lock"
 
 exec >>"$log_file" 2>&1
-echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) FaNotes update helper started"
+trap 'rm -f -- "$lock_file"' EXIT
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) FaNotes update helper started ($mode)"
 
 case "$parent_pid" in *[!0-9]*|'') echo "invalid parent pid"; exit 10;; esac
 case "$expected_sha" in *[!0-9a-f]*|'') echo "invalid checksum"; exit 11;; esac
+case "$mode" in relaunch|quiet) ;; *) echo "invalid mode"; exit 9;; esac
+
+write_result() {
+  result_tmp="\${result_file}.tmp.$$"
+  printf '{"ok":%s,"version":"%s","fromVersion":"%s","mode":"%s","reason":"%s","at":"%s"}\\n' "$1" "$to_version" "$from_version" "$mode" "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$result_tmp"
+  mv -- "$result_tmp" "$result_file"
+}
+
+self_test() {
+  rm -f -- "$self_test_file"
+  if command -v timeout >/dev/null 2>&1; then
+    FANOTES_SELF_TEST_FILE="$self_test_file" timeout 180 "$target" --fanotes-self-test --ozone-platform=headless >/dev/null 2>&1 </dev/null || return 1
+  else
+    FANOTES_SELF_TEST_FILE="$self_test_file" "$target" --fanotes-self-test --ozone-platform=headless >/dev/null 2>&1 </dev/null || return 1
+  fi
+  [ -f "$self_test_file" ] || return 1
+  grep -qF "\\"version\\":\\"$to_version\\"" "$self_test_file" && grep -qF '"ok":true' "$self_test_file"
+}
 
 wait_count=0
 while kill -0 "$parent_pid" 2>/dev/null; do
@@ -206,12 +387,14 @@ done
 
 if [ ! -f "$staged" ] || [ -L "$staged" ]; then
   echo "staged AppImage is missing or unsafe"
+  write_result false staged-missing
   exit 13
 fi
 
 actual_sha="$(sha256sum -- "$staged" | awk '{print $1}')"
 if [ "$actual_sha" != "$expected_sha" ]; then
   echo "staged AppImage checksum mismatch"
+  write_result false checksum
   exit 14
 fi
 
@@ -219,6 +402,7 @@ target_dir="$(dirname -- "$target")"
 mkdir -p -- "$target_dir"
 if [ -L "$target" ]; then
   echo "refusing to replace a symbolic link"
+  write_result false symlink
   exit 15
 fi
 
@@ -232,6 +416,7 @@ copied_sha="$(sha256sum -- "$temporary" | awk '{print $1}')"
 if [ "$copied_sha" != "$expected_sha" ]; then
   rm -f -- "$temporary"
   echo "copied AppImage checksum mismatch"
+  write_result false checksum
   exit 16
 fi
 
@@ -245,27 +430,39 @@ fi
 if ! mv -- "$temporary" "$target"; then
   if [ "$had_previous" -eq 1 ]; then mv -- "$backup" "$target"; fi
   echo "atomic replacement failed"
+  write_result false replace-failed
   exit 17
 fi
 
-"$target" --fanotes-updated-from="$from_version" >/dev/null 2>&1 &
-new_pid=$!
-sleep 8
+healthy=0
+if self_test; then
+  healthy=1
+  if [ "$mode" = relaunch ]; then
+    write_result true installed
+    "$target" --fanotes-updated-from="$from_version" >/dev/null 2>&1 &
+    new_pid=$!
+    sleep 8
+    kill -0 "$new_pid" 2>/dev/null || healthy=0
+  fi
+fi
 
-if kill -0 "$new_pid" 2>/dev/null; then
+if [ "$healthy" -eq 1 ]; then
   rm -f -- "$backup" "$staged"
-  marker_tmp="\${marker_file}.tmp.$$"
-  printf '{"version":"%s","installedAt":"%s"}\n' "$to_version" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$marker_tmp"
-  mv -- "$marker_tmp" "$marker_file"
+  write_result true installed
   echo "update to $to_version installed successfully"
   exit 0
 fi
 
-echo "updated application exited during health window; rolling back"
+echo "the new version did not start; rolling back"
 rm -f -- "$target"
 if [ "$had_previous" -eq 1 ] && [ -f "$backup" ]; then
   mv -- "$backup" "$target"
-  "$target" --fanotes-update-rollback="$to_version" >/dev/null 2>&1 &
+  write_result false self-test-failed
+  if [ "$mode" = relaunch ]; then
+    "$target" --fanotes-update-rollback="$to_version" >/dev/null 2>&1 &
+  fi
+else
+  write_result false self-test-failed
 fi
 exit 18
 `
@@ -282,6 +479,19 @@ const compareVersions = (left, right) => {
 }
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+/** The fields pickUpdateRelease reads, for the small ETag cache of the release list. */
+const reduceReleaseList = (releases) => (Array.isArray(releases) ? releases : [])
+  .filter(isPlainObject)
+  .slice(0, 101)
+  .map((item) => ({
+    tag_name: typeof item.tag_name === 'string' ? item.tag_name.slice(0, 120) : '',
+    draft: item.draft === true,
+    assets: (Array.isArray(item.assets) ? item.assets : [])
+      .filter((asset) => isPlainObject(asset) && typeof asset.name === 'string' && asset.name.startsWith('FaNotes-update-') && typeof asset.browser_download_url === 'string')
+      .slice(0, 16)
+      .map((asset) => ({ name: asset.name.slice(0, 120), browser_download_url: asset.browser_download_url.slice(0, 400) })),
+  }))
 
 const strictBase64 = (value) => {
   if (typeof value !== 'string' || value.length < 64 || value.length > 256 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value)) return null
@@ -709,14 +919,31 @@ function createUpdateManager({
   appImagePath = process.env.APPIMAGE,
   publicKeyPemOverride = null,
   expectedKeyId = EXPECTED_KEY_ID,
+  // electron-builder's portable launcher names the .exe it was started from.
+  portableExecutable = process.env.PORTABLE_EXECUTABLE_FILE,
+  executablePath = process.execPath,
+  spawnImpl = spawn,
+  // The helper waits for this process to exit before it touches any file.
+  helperParentPid = process.pid,
+  updaterRoot: updaterRootOverride = null,
+  locks: providedLocks = null,
 }) {
   const currentVersion = app.getVersion()
   const platformConfig = PLATFORM_RELEASES[platform] ?? null
   const supported = Boolean(platformConfig && (app.isPackaged || forceSupported || process.env.FANOTES_UPDATER_ALLOW_DEV === '1'))
-  const fullInstallationKind = platform === 'linux' && appImagePath ? 'appimage' : (platformConfig?.installationKind ?? 'managed-appimage')
-  const updaterRoot = path.join(app.getPath('userData'), 'updates')
+  const windowsPortable = platform === 'win32' && typeof portableExecutable === 'string' && path.isAbsolute(portableExecutable)
+  // A portable .exe is replaced by the signed portable package. Running the
+  // NSIS installer from it would create a second, installed copy and leave
+  // the portable file old, so every later start would find the same update.
+  const primaryPackage = windowsPortable ? 'portable' : platformConfig?.primaryPackage
+  const fullInstallationKind = windowsPortable
+    ? 'windows-portable'
+    : platform === 'linux' && appImagePath ? 'appimage' : (platformConfig?.installationKind ?? 'managed-appimage')
+  const updaterRoot = updaterRootOverride ?? path.join(app.getPath('userData'), 'updates')
   const persistentStatePath = path.join(updaterRoot, 'state.json')
-  const markerPath = path.join(updaterRoot, 'last-installed.json')
+  const installResultPath = path.join(updaterRoot, INSTALL_RESULT_FILE)
+  const releaseCachePath = path.join(updaterRoot, RELEASE_CACHE_FILE)
+  const locks = providedLocks ?? createUpdateLocks(updaterRoot)
   const publicKeyPath = path.join(__dirname, 'update-public-key.pem')
   const publicKeyPem = publicKeyPemOverride ?? fs.readFileSync(publicKeyPath, 'utf8')
   let manifest = null
@@ -736,6 +963,9 @@ function createUpdateManager({
   let installPrepared = false
   let started = false
   let applyingLaunchInstall = false
+  /** The version whose last install failed and was rolled back; never retried automatically. */
+  let failedInstall = null
+  let releaseCache = null
   let state = {
     status: 'idle',
     supported,
@@ -750,6 +980,9 @@ function createUpdateManager({
     block: null,
     checkedAt: null,
     installationKind: fullInstallationKind,
+    /** Set once after an update was installed (by quit, launch or the background task). */
+    justUpdated: null,
+    background: null,
   }
 
   const settings = () => {
@@ -760,11 +993,12 @@ function createUpdateManager({
       autoDownloadUpdates: stored?.autoDownloadUpdates !== false,
       // One switch: install a fully verified package when quitting or on the next launch.
       installUpdatesOnQuit: stored?.installUpdatesOnQuit !== false,
+      backgroundUpdates: stored?.backgroundUpdates !== false,
       updateChannel: channel === 'beta' || channel === 'nightly' ? channel : 'stable',
     }
   }
 
-  const snapshot = () => ({ ...state, releaseNotes: [...state.releaseNotes], ...settings() })
+  const snapshot = () => ({ ...state, releaseNotes: [...state.releaseNotes], failedInstallVersion: failedInstall?.version ?? null, ...settings() })
 
   const emit = (patch) => {
     state = { ...state, ...patch }
@@ -780,6 +1014,7 @@ function createUpdateManager({
       schemaVersion: 3,
       highestSeenVersions,
       pendingInstall,
+      failedInstall,
       updatedAt: new Date().toISOString(),
     })
   }
@@ -820,6 +1055,9 @@ function createUpdateManager({
       const raw = await fsp.readFile(persistentStatePath, 'utf8')
       if (Buffer.byteLength(raw, 'utf8') > 64 * 1024) return
       const parsed = JSON.parse(raw)
+      // Re-reads (quit path) must see what the background run wrote meanwhile.
+      pendingInstall = null
+      failedInstall = null
       for (const channel of ['stable', 'beta', 'nightly']) {
         const candidate = parsed?.highestSeenVersions?.[channel]
         if (VERSION_PATTERN.test(candidate || '')) highestSeenVersions[channel] = candidate
@@ -854,9 +1092,125 @@ function createUpdateManager({
           preparedAt: typeof pending.preparedAt === 'string' ? pending.preparedAt : null,
         }
       }
+      const failed = parsed?.failedInstall
+      if (failed && typeof failed === 'object' && VERSION_PATTERN.test(failed.version || '')) {
+        failedInstall = {
+          version: failed.version,
+          reason: typeof failed.reason === 'string' ? failed.reason.slice(0, 40) : 'unknown',
+          at: typeof failed.at === 'string' ? failed.at.slice(0, 40) : null,
+        }
+      }
     } catch (error) {
       if (error?.code !== 'ENOENT') logger.warn('FaNotes-Updaterstatus konnte nicht gelesen werden:', error?.message ?? error)
     }
+  }
+
+  /**
+   * install-result.json is written by the install helpers. A success for this
+   * version becomes the one-time "updated" note; a failure blocks that version
+   * from automatic retries, so a broken release cannot loop install, crash,
+   * roll back on every start. Only the app consumes the file (the note is for
+   * the next start); the background run just learns about failures.
+   */
+  const readInstallResult = async ({ consume }) => {
+    let raw
+    try {
+      const info = await fsp.lstat(installResultPath)
+      if (!info.isFile() || info.isSymbolicLink() || info.size > 4096) {
+        await fsp.rm(installResultPath, { force: true }).catch(() => {})
+        return
+      }
+      raw = await fsp.readFile(installResultPath, 'utf8')
+    } catch {
+      return
+    }
+    let result = null
+    try {
+      result = JSON.parse(raw.replace(/^\uFEFF/u, ''))
+    } catch {
+      result = null
+    }
+    if (consume || !result) await fsp.rm(installResultPath, { force: true }).catch(() => {})
+    if (!isPlainObject(result) || !VERSION_PATTERN.test(result.version || '')) return
+    const at = typeof result.at === 'string' && Number.isFinite(Date.parse(result.at)) ? result.at : null
+    if (result.ok === true && result.version === currentVersion) {
+      if (consume) {
+        state = {
+          ...state,
+          justUpdated: {
+            from: VERSION_PATTERN.test(result.fromVersion || '') ? result.fromVersion : null,
+            to: currentVersion,
+            at,
+          },
+        }
+      }
+      if (failedInstall?.version === currentVersion) failedInstall = null
+      if (pendingInstall && compareVersions(pendingInstall.version, currentVersion) <= 0) pendingInstall = null
+      await persistState().catch(() => {})
+    } else if (result.ok === false && result.version !== currentVersion) {
+      failedInstall = { version: result.version, reason: String(result.reason || 'unknown').slice(0, 40), at }
+      if (pendingInstall?.version === result.version) pendingInstall = null
+      await fsp.rm(path.join(updaterRoot, result.version), { recursive: true, force: true }).catch(() => {})
+      await persistState().catch(() => {})
+    }
+  }
+
+  /** Staged files of installed, older or failed versions only cost disk. */
+  const removeObsoleteStagedReleases = async () => {
+    if (locks.installHolder()) return
+    const entries = await fsp.readdir(updaterRoot, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !VERSION_PATTERN.test(entry.name)) continue
+      if (compareVersions(entry.name, currentVersion) <= 0 || entry.name === failedInstall?.version) {
+        await fsp.rm(path.join(updaterRoot, entry.name), { recursive: true, force: true }).catch(() => {})
+      }
+    }
+  }
+
+  const loadReleaseCache = async () => {
+    if (releaseCache) return releaseCache
+    releaseCache = { schemaVersion: 1, entries: {} }
+    try {
+      const raw = await fsp.readFile(releaseCachePath, 'utf8')
+      if (Buffer.byteLength(raw, 'utf8') > 512 * 1024) return releaseCache
+      const parsed = JSON.parse(raw)
+      if (isPlainObject(parsed?.entries)) {
+        for (const [url, entry] of Object.entries(parsed.entries)) {
+          if (typeof entry?.etag === 'string' && entry.etag.length <= 200 && Array.isArray(entry.releases)) {
+            releaseCache.entries[url] = { etag: entry.etag, releases: reduceReleaseList(entry.releases) }
+          }
+        }
+      }
+    } catch {
+      // A missing or damaged cache only costs one full release-list download.
+    }
+    return releaseCache
+  }
+
+  /**
+   * The release list with If-None-Match. GitHub answers an unchanged list with
+   * 304, which carries no body and does not count against the API rate limit.
+   * Only the fields the release picker reads are cached; the signed manifest
+   * is still downloaded and verified on every check.
+   */
+  const fetchReleaseList = async (url, headers, signal) => {
+    const cache = await loadReleaseCache()
+    const cached = cache.entries[url]
+    const response = await fetchGithub(url, {
+      headers: cached ? { ...headers, 'If-None-Match': cached.etag } : headers,
+      signal,
+    })
+    if (response.status === 304 && cached) {
+      await response.body?.cancel?.().catch(() => {})
+      return cached.releases
+    }
+    const listed = await readJsonResponse(response, url, 'GitHub hat keine gültige Release-Liste geliefert.', MAX_RELEASE_LIST_BYTES)
+    const releases = reduceReleaseList(Array.isArray(listed) ? listed : [listed])
+    const etag = response.headers.get('etag')
+    if (etag && etag.length <= 200) cache.entries[url] = { etag, releases }
+    else delete cache.entries[url]
+    await atomicJsonWrite(releaseCachePath, cache).catch(() => {})
+    return releases
   }
 
   const rememberHighestVersion = async (channel, version) => {
@@ -885,7 +1239,7 @@ function createUpdateManager({
    */
   const tryAdoptStagedUpdate = async (verified) => {
     if (!platformConfig || !verified?.updateAvailable) return null
-    const packageInfo = verified.packages[platformConfig.primaryPackage]
+    const packageInfo = verified.packages[primaryPackage]
     const candidates = []
     if (verified.delta?.target?.fileName) {
       candidates.push({
@@ -952,7 +1306,10 @@ function createUpdateManager({
     logger.warn('FaNotes-Updatedownload fehlgeschlagen:', line)
     try {
       await fsp.mkdir(updaterRoot, { recursive: true, mode: 0o700 })
-      await fsp.appendFile(path.join(updaterRoot, 'download-failures.log'), `${line}\n`, { encoding: 'utf8' })
+      const failureLog = path.join(updaterRoot, 'download-failures.log')
+      // Background runs log here too; keep one rotated copy at most.
+      await rotateInstallLog(failureLog)
+      await fsp.appendFile(failureLog, `${line}\n`, { encoding: 'utf8' })
     } catch (logError) {
       logger.warn('FaNotes-Updateprotokoll konnte nicht geschrieben werden:', logError?.message ?? logError)
     }
@@ -1036,18 +1393,14 @@ function createUpdateManager({
         'User-Agent': userAgent,
         'X-GitHub-Api-Version': '2022-11-28',
       }
-      const listResponse = await fetchGithub(listUrl, { headers, signal: controller.signal })
-      const listed = await readJsonResponse(listResponse, listUrl, 'GitHub hat keine gültige Release-Liste geliefert.', MAX_RELEASE_LIST_BYTES)
-      const releases = Array.isArray(listed) ? [...listed] : [listed]
+      const releases = [...await fetchReleaseList(listUrl, headers, controller.signal)]
       // GitHub orders the index by publication time and /releases/latest is the
       // newest non-prerelease. Beta and Nightly need both, or a newer Stable
       // release stays hidden behind a long prerelease list.
       if (channel !== 'stable') {
         const latestUrl = `${platformConfig.api}/latest`
         try {
-          const latestResponse = await fetchGithub(latestUrl, { headers, signal: controller.signal })
-          const latest = await readJsonResponse(latestResponse, latestUrl, 'GitHub hat keine gültige Release-Liste geliefert.', MAX_RELEASE_LIST_BYTES)
-          if (latest && typeof latest === 'object' && !Array.isArray(latest)) releases.push(latest)
+          releases.push(...await fetchReleaseList(latestUrl, headers, controller.signal))
         } catch {
           // The index still covers Stable when that release is on the first page.
         }
@@ -1060,7 +1413,10 @@ function createUpdateManager({
         signal: controller.signal,
       })
       const candidate = await readJsonResponse(manifestResponse, manifestUrl, 'GitHub hat kein gültiges JSON-Manifest geliefert.')
-      return verifyManifest(candidate, currentVersion, publicKeyPem, platform, expectedKeyId, picked.kind, picked.tagVersion)
+      const verified = verifyManifest(candidate, currentVersion, publicKeyPem, platform, expectedKeyId, picked.kind, picked.tagVersion)
+      // A Windows delta rebuilds resources\app.asar; a portable build unpacks
+      // that file into a temporary directory on every start.
+      return windowsPortable ? { ...verified, delta: null } : verified
     } catch (error) {
       if (!error?.diagnosis) {
         const resolvedAddress = await lookupHost(hostOf(listUrl))
@@ -1090,6 +1446,9 @@ function createUpdateManager({
         return next
       }
       const requestedChannel = activateConfiguredChannel()
+      // The background run and the app share one updates directory. Whoever
+      // holds the work lock checks and downloads; the other skips this round.
+      if (!locks.acquireWork({ purpose: 'check' })) return snapshot()
       emit({ status: 'checking', error: null, block: null })
       try {
         const verified = await fetchManifest(requestedChannel)
@@ -1114,6 +1473,23 @@ function createUpdateManager({
             totalBytes: 0,
             progress: 0,
             error: null,
+            block: null,
+            checkedAt,
+          })
+        }
+        if (failedInstall?.version === verified.latestVersion) {
+          // Offered again after its install was rolled back: wait for the next
+          // release. A manual "install" in the settings still works.
+          await clearPendingInstall()
+          return emit({
+            status: 'available',
+            latestVersion: verified.latestVersion,
+            publishedAt: verified.publishedAt,
+            releaseNotes: verified.releaseNotes,
+            downloadedBytes: 0,
+            totalBytes: verified.delta?.sizeBytes ?? verified.packages[primaryPackage].sizeBytes,
+            progress: 0,
+            error: `FaNotes ${verified.latestVersion} ließ sich nicht starten und wurde zurückgesetzt. Die automatische Installation wartet auf die nächste Version.`,
             block: null,
             checkedAt,
           })
@@ -1157,7 +1533,7 @@ function createUpdateManager({
           publishedAt: verified.publishedAt,
           releaseNotes: verified.releaseNotes,
           downloadedBytes: 0,
-          totalBytes: verified.delta?.sizeBytes ?? verified.packages[platformConfig.primaryPackage].sizeBytes,
+          totalBytes: verified.delta?.sizeBytes ?? verified.packages[primaryPackage].sizeBytes,
           progress: 0,
           installationKind: verified.delta
             ? (platform === 'win32' ? 'differential-windows' : 'differential-appimage')
@@ -1176,6 +1552,8 @@ function createUpdateManager({
           block: publicUpdateBlock(diagnosis),
           checkedAt: new Date().toISOString(),
         })
+      } finally {
+        locks.releaseWork()
       }
     })().finally(() => { checkPromise = null })
     return checkPromise
@@ -1351,99 +1729,104 @@ function createUpdateManager({
         await check({ manual: true })
         if (!manifest?.updateAvailable) return snapshot()
       }
-      const packageInfo = manifest.packages[platformConfig.primaryPackage]
+      const packageInfo = manifest.packages[primaryPackage]
       let delta = manifest.delta
       let deltaSource = null
       const releaseDirectory = path.join(updaterRoot, manifest.latestVersion)
-      await fsp.mkdir(releaseDirectory, { recursive: true, mode: 0o700 })
-
+      if (!locks.acquireWork({ purpose: 'download' })) return snapshot()
       try {
-        const stageSelectedUpdate = async (selectedDelta, sourcePath) => {
-          const transferInfo = selectedDelta ?? packageInfo
-          const targetInfo = selectedDelta?.target ?? packageInfo
-          const targetPath = path.join(releaseDirectory, targetInfo.fileName)
-          emit({
-            totalBytes: transferInfo.sizeBytes,
-            installationKind: selectedDelta
-              ? (platform === 'win32' ? 'differential-windows' : 'differential-appimage')
-              : fullInstallationKind,
-          })
-          const existingTarget = await fsp.lstat(targetPath).catch(() => null)
-          if (existingTarget?.isFile() && !existingTarget.isSymbolicLink() && existingTarget.size === targetInfo.sizeBytes && await sha256File(targetPath) === targetInfo.sha256) {
+        await fsp.mkdir(releaseDirectory, { recursive: true, mode: 0o700 })
+
+        try {
+          const stageSelectedUpdate = async (selectedDelta, sourcePath) => {
+            const transferInfo = selectedDelta ?? packageInfo
+            const targetInfo = selectedDelta?.target ?? packageInfo
+            const targetPath = path.join(releaseDirectory, targetInfo.fileName)
+            emit({
+              totalBytes: transferInfo.sizeBytes,
+              installationKind: selectedDelta
+                ? (platform === 'win32' ? 'differential-windows' : 'differential-appimage')
+                : fullInstallationKind,
+            })
+            const existingTarget = await fsp.lstat(targetPath).catch(() => null)
+            if (existingTarget?.isFile() && !existingTarget.isSymbolicLink() && existingTarget.size === targetInfo.sizeBytes && await sha256File(targetPath) === targetInfo.sha256) {
+              if (platform === 'linux') await fsp.chmod(targetPath, 0o700)
+              return { targetPath, transferInfo }
+            }
+            if (existingTarget) await fsp.rm(targetPath, { force: true })
+
+            const transferPath = await downloadTransfer(
+              transferInfo,
+              releaseDirectory,
+              selectedDelta ? 'application/vnd.fanotes.delta, application/octet-stream;q=0.9' : platformConfig.accept,
+            )
+            if (selectedDelta) {
+              await applyDeltaPatch({
+                patchPath: transferPath,
+                sourcePath,
+                outputPath: targetPath,
+                expected: {
+                  platform: platform === 'win32' ? 'windows' : 'linux',
+                  baseVersion: currentVersion,
+                  targetVersion: manifest.latestVersion,
+                  source: selectedDelta.source,
+                  target: selectedDelta.target,
+                },
+                signal: activeDownloadController?.signal,
+              })
+              await fsp.rm(transferPath, { force: true })
+            }
             if (platform === 'linux') await fsp.chmod(targetPath, 0o700)
             return { targetPath, transferInfo }
           }
-          if (existingTarget) await fsp.rm(targetPath, { force: true })
 
-          const transferPath = await downloadTransfer(
-            transferInfo,
-            releaseDirectory,
-            selectedDelta ? 'application/vnd.fanotes.delta, application/octet-stream;q=0.9' : platformConfig.accept,
-          )
-          if (selectedDelta) {
-            await applyDeltaPatch({
-              patchPath: transferPath,
-              sourcePath,
-              outputPath: targetPath,
-              expected: {
-                platform: platform === 'win32' ? 'windows' : 'linux',
-                baseVersion: currentVersion,
-                targetVersion: manifest.latestVersion,
-                source: selectedDelta.source,
-                target: selectedDelta.target,
-              },
-              signal: activeDownloadController?.signal,
-            })
-            await fsp.rm(transferPath, { force: true })
+          if (delta) {
+            try {
+              deltaSource = await resolveDeltaSource(delta)
+            } catch (error) {
+              logger.warn('Die lokale Delta-Basis ist nicht kompatibel; FaNotes verwendet das signierte Vollpaket:', error?.message ?? error)
+              delta = null
+            }
           }
-          if (platform === 'linux') await fsp.chmod(targetPath, 0o700)
-          return { targetPath, transferInfo }
-        }
-
-        if (delta) {
-          try {
-            deltaSource = await resolveDeltaSource(delta)
-          } catch (error) {
-            logger.warn('Die lokale Delta-Basis ist nicht kompatibel; FaNotes verwendet das signierte Vollpaket:', error?.message ?? error)
-            delta = null
-          }
-        }
-        let staged
-        if (delta) {
-          try {
-            staged = await stageSelectedUpdate(delta, deltaSource)
-          } catch (error) {
-            if (downloadCancelled || downloadTimedOut) throw error
-            logger.warn('Das Delta-Update konnte nicht sicher rekonstruiert werden; FaNotes verwendet das signierte Vollpaket:', error?.message ?? error)
-            delta = null
+          let staged
+          if (delta) {
+            try {
+              staged = await stageSelectedUpdate(delta, deltaSource)
+            } catch (error) {
+              if (downloadCancelled || downloadTimedOut) throw error
+              logger.warn('Das Delta-Update konnte nicht sicher rekonstruiert werden; FaNotes verwendet das signierte Vollpaket:', error?.message ?? error)
+              delta = null
+              staged = await stageSelectedUpdate(null, null)
+            }
+          } else {
             staged = await stageSelectedUpdate(null, null)
           }
-        } else {
-          staged = await stageSelectedUpdate(null, null)
+          downloadedPath = staged.targetPath
+          downloadedDelta = delta
+          const installInfo = delta?.target ?? packageInfo
+          await rememberPendingInstall({
+            version: manifest.latestVersion,
+            fileName: installInfo.fileName,
+            sha256: installInfo.sha256,
+            sizeBytes: installInfo.sizeBytes,
+            usedDelta: Boolean(delta),
+          })
+          return emit({
+            status: 'downloaded',
+            downloadedBytes: staged.transferInfo.sizeBytes,
+            totalBytes: staged.transferInfo.sizeBytes,
+            progress: 1,
+            installationKind: delta ? (platform === 'win32' ? 'differential-windows' : 'differential-appimage') : state.installationKind,
+            error: null,
+            block: null,
+          })
+        } catch (error) {
+          downloadedDelta = null
+          const diagnosis = await failUpdate('download', packageInfo?.url, error)
+          return emit({ status: 'error', error: diagnosis.message, block: publicUpdateBlock(diagnosis) })
         }
-        downloadedPath = staged.targetPath
-        downloadedDelta = delta
-        const installInfo = delta?.target ?? packageInfo
-        await rememberPendingInstall({
-          version: manifest.latestVersion,
-          fileName: installInfo.fileName,
-          sha256: installInfo.sha256,
-          sizeBytes: installInfo.sizeBytes,
-          usedDelta: Boolean(delta),
-        })
-        return emit({
-          status: 'downloaded',
-          downloadedBytes: staged.transferInfo.sizeBytes,
-          totalBytes: staged.transferInfo.sizeBytes,
-          progress: 1,
-          installationKind: delta ? (platform === 'win32' ? 'differential-windows' : 'differential-appimage') : state.installationKind,
-          error: null,
-          block: null,
-        })
-      } catch (error) {
-        downloadedDelta = null
-        const diagnosis = await failUpdate('download', packageInfo?.url, error)
-        return emit({ status: 'error', error: diagnosis.message, block: publicUpdateBlock(diagnosis) })
+      } finally {
+        locks.releaseWork()
       }
     })().finally(() => { downloadPromise = null })
     return downloadPromise
@@ -1529,63 +1912,102 @@ function createUpdateManager({
     }
   }
 
-  const prepareInstall = async () => {
-    if (installPrepared) return snapshot()
-    if (!manifest?.updateAvailable || !downloadedPath || state.status !== 'downloaded') {
-      throw new Error('Es ist noch kein vollständig geprüftes Update bereit.')
+  const rotateInstallLog = async (logPath) => {
+    const info = await fsp.stat(logPath).catch(() => null)
+    if (info && info.size > MAX_INSTALL_LOG_BYTES) await fsp.rename(logPath, `${logPath}.1`).catch(() => {})
+  }
+
+  const spawnHelper = async (command, args, installationKind, plan) => {
+    if (!locks.acquireInstall({ version: plan.version })) {
+      throw new Error('Ein anderes FaNotes-Update wird gerade installiert.')
     }
-    const packageInfo = manifest.packages[platformConfig.primaryPackage]
-    const installInfo = downloadedDelta?.target ?? packageInfo
-    const info = await fsp.lstat(downloadedPath)
-    if (!info.isFile() || info.isSymbolicLink() || info.size !== installInfo.sizeBytes || await sha256File(downloadedPath) !== installInfo.sha256) {
+    try {
+      const child = spawnImpl(command, args, { detached: true, stdio: 'ignore', windowsHide: true })
+      await waitForChildSpawn(child)
+      child.unref()
+      // The helper releases install.lock when it has swapped or rolled back.
+      if (Number.isSafeInteger(child.pid)) locks.handInstallTo(child.pid, { version: plan.version })
+    } catch (error) {
+      locks.releaseInstall()
+      throw error
+    }
+    installPrepared = true
+    stop({ abortDownload: false })
+    return emit({ status: 'installing', installationKind, error: null })
+  }
+
+  const powershellArgs = (helperPath, parameters) => [
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy', 'Bypass',
+    '-WindowStyle', 'Hidden',
+    '-File', helperPath,
+    ...Object.entries(parameters).flatMap(([name, value]) => [`-${name}`, String(value)]),
+  ]
+
+  /**
+   * Hands a verified package to the platform helper, which waits for this
+   * process to exit. `quiet` (quit, background) never opens a window;
+   * `relaunch` (start-up install, "install now") starts the new version.
+   */
+  const installPlan = async (plan, mode) => {
+    if (!INSTALL_MODES.includes(mode)) throw new Error('Unbekannter Installationsmodus.')
+    const info = await fsp.lstat(plan.path)
+    if (!info.isFile() || info.isSymbolicLink() || info.size !== plan.sizeBytes || await sha256File(plan.path) !== plan.sha256) {
       downloadedPath = null
       throw new Error('Das vorbereitete Update hat die abschließende Integritätsprüfung nicht bestanden.')
     }
+    await fsp.mkdir(updaterRoot, { recursive: true, mode: 0o700 })
+    const logPath = path.join(updaterRoot, 'install.log')
+    await rotateInstallLog(logPath)
+    const common = {
+      ExpectedSha: plan.sha256,
+      FromVersion: currentVersion,
+      ToVersion: plan.version,
+      LogFile: logPath,
+      ResultFile: installResultPath,
+      Mode: mode,
+    }
 
     if (platform === 'win32') {
-      if (downloadedDelta) {
-        if (typeof resourcesPath !== 'string' || !path.isAbsolute(resourcesPath)) throw new Error('Der Windows-Installationspfad ist für das Delta-Update ungültig.')
-        const target = path.resolve(resourcesPath, 'app.asar')
-        const executable = path.resolve(resourcesPath, '..', 'FaNotes.exe')
+      if (windowsPortable || plan.usedDelta) {
+        let target
+        let executable
+        if (windowsPortable) {
+          target = path.resolve(portableExecutable)
+          executable = target
+        } else {
+          if (typeof resourcesPath !== 'string' || !path.isAbsolute(resourcesPath)) throw new Error('Der Windows-Installationspfad ist für das Delta-Update ungültig.')
+          target = path.resolve(resourcesPath, 'app.asar')
+          executable = path.resolve(resourcesPath, '..', 'FaNotes.exe')
+        }
         const [targetInfo, executableInfo] = await Promise.all([fsp.lstat(target), fsp.lstat(executable)])
-        if (!targetInfo.isFile() || targetInfo.isSymbolicLink() || !executableInfo.isFile() || executableInfo.isSymbolicLink()) throw new Error('Die Windows-Installation kann nicht sicher differentiell aktualisiert werden.')
+        if (!targetInfo.isFile() || targetInfo.isSymbolicLink() || !executableInfo.isFile() || executableInfo.isSymbolicLink()) throw new Error('Die Windows-Installation kann nicht sicher aktualisiert werden.')
         await fsp.access(path.dirname(target), fs.constants.W_OK)
-        const helperPath = path.join(updaterRoot, 'install-delta.ps1')
-        const logPath = path.join(updaterRoot, 'install.log')
-        await fsp.mkdir(updaterRoot, { recursive: true, mode: 0o700 })
-        await fsp.writeFile(helperPath, WINDOWS_DELTA_HELPER, { encoding: 'utf8', mode: 0o600 })
-        const child = spawn('powershell.exe', [
-          '-NoLogo',
-          '-NoProfile',
-          '-NonInteractive',
-          '-ExecutionPolicy', 'Bypass',
-          '-File', helperPath,
-          '-ParentPid', String(process.pid),
-          '-Target', target,
-          '-Staged', downloadedPath,
-          '-ExpectedSha', installInfo.sha256,
-          '-FromVersion', currentVersion,
-          '-ToVersion', manifest.latestVersion,
-          '-Executable', executable,
-          '-LogFile', logPath,
-          '-MarkerFile', markerPath,
-        ], { detached: true, stdio: 'ignore', windowsHide: true })
-        await waitForChildSpawn(child)
-        child.unref()
-        installPrepared = true
-        stop({ abortDownload: false })
-        return emit({ status: 'installing', installationKind: 'differential-windows', error: null })
+        const helperPath = path.join(updaterRoot, 'install-swap.ps1')
+        await fsp.writeFile(helperPath, WINDOWS_SWAP_HELPER, { encoding: 'utf8', mode: 0o600 })
+        return spawnHelper('powershell.exe', powershellArgs(helperPath, {
+          ParentPid: helperParentPid,
+          Target: target,
+          Staged: plan.path,
+          Executable: executable,
+          ...common,
+          // The portable launcher stub stays alive until it has removed the unpacked app.
+          StubPid: windowsPortable && Number.isSafeInteger(process.ppid) ? process.ppid : 0,
+        }), windowsPortable ? 'windows-portable' : 'differential-windows', plan)
       }
-      const child = spawn(downloadedPath, WINDOWS_INSTALLER_ARGS, {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: false,
-      })
-      await waitForChildSpawn(child)
-      child.unref()
-      installPrepared = true
-      stop({ abortDownload: false })
-      return emit({ status: 'installing', installationKind: 'windows-installer', error: null })
+      const executable = typeof resourcesPath === 'string' && path.isAbsolute(resourcesPath)
+        ? path.resolve(resourcesPath, '..', 'FaNotes.exe')
+        : path.resolve(executablePath)
+      const helperPath = path.join(updaterRoot, 'install-windows.ps1')
+      await fsp.writeFile(helperPath, WINDOWS_INSTALLER_HELPER, { encoding: 'utf8', mode: 0o600 })
+      return spawnHelper('powershell.exe', powershellArgs(helperPath, {
+        ParentPid: helperParentPid,
+        Installer: plan.path,
+        Executable: executable,
+        ...common,
+      }), 'windows-installer', plan)
     }
 
     const destination = await determineInstallTarget()
@@ -1594,30 +2016,72 @@ function createUpdateManager({
     if (destination.kind === 'managed-appimage') await writeManagedDesktopEntry(destination.target)
 
     const helperPath = path.join(updaterRoot, 'install-update.sh')
-    const logPath = path.join(updaterRoot, 'install.log')
-    await fsp.mkdir(updaterRoot, { recursive: true, mode: 0o700 })
     await fsp.writeFile(helperPath, INSTALL_HELPER, { encoding: 'utf8', mode: 0o700 })
     await fsp.chmod(helperPath, 0o700)
-    const child = spawn('/bin/sh', [
+    return spawnHelper('/bin/sh', [
       helperPath,
-      String(process.pid),
+      String(helperParentPid),
       destination.target,
-      downloadedPath,
-      installInfo.sha256,
+      plan.path,
+      plan.sha256,
       currentVersion,
-      manifest.latestVersion,
+      plan.version,
       logPath,
-      markerPath,
-    ], { detached: true, stdio: 'ignore' })
-    await waitForChildSpawn(child)
-    child.unref()
-    installPrepared = true
-    stop({ abortDownload: false })
-    return emit({ status: 'installing', installationKind: destination.kind, error: null })
+      installResultPath,
+      mode,
+    ], destination.kind, plan)
+  }
+
+  const prepareInstall = async ({ mode = 'relaunch' } = {}) => {
+    if (installPrepared) return snapshot()
+    if (!manifest?.updateAvailable || !downloadedPath || state.status !== 'downloaded') {
+      throw new Error('Es ist noch kein vollständig geprüftes Update bereit.')
+    }
+    const installInfo = downloadedDelta?.target ?? manifest.packages[primaryPackage]
+    return installPlan({
+      version: manifest.latestVersion,
+      path: downloadedPath,
+      sha256: installInfo.sha256,
+      sizeBytes: installInfo.sizeBytes,
+      usedDelta: Boolean(downloadedDelta),
+    }, mode)
+  }
+
+  /**
+   * The background run may have staged an update while this app was open.
+   * Its pendingInstall entry was written right after a verified check, and the
+   * file is checked again by size and SHA-256 here and by the helper.
+   */
+  const persistedPendingPlan = async () => {
+    await loadPersistentState()
+    const pending = pendingInstall
+    if (!pending || pending.channel !== settings().updateChannel) return null
+    if (compareVersions(pending.version, currentVersion) <= 0 || pending.version === failedInstall?.version) return null
+    if (pending.usedDelta && platform === 'win32' && windowsPortable) return null
+    const candidatePath = path.join(updaterRoot, pending.version, pending.fileName)
+    const info = await fsp.lstat(candidatePath).catch(() => null)
+    if (!info?.isFile() || info.isSymbolicLink() || info.size !== pending.sizeBytes) return null
+    if (await sha256File(candidatePath) !== pending.sha256) return null
+    return { version: pending.version, path: candidatePath, sha256: pending.sha256, sizeBytes: pending.sizeBytes, usedDelta: pending.usedDelta }
+  }
+
+  /** Quit path: install what this app or the background run has verified, without a window. */
+  const installOnQuit = async () => {
+    if (!supported || installPrepared || !settings().installUpdatesOnQuit) return false
+    if (state.status === 'downloaded' && downloadedPath) {
+      const next = await prepareInstall({ mode: 'quiet' })
+      return next.status === 'installing'
+    }
+    if (checkPromise || downloadPromise || state.status === 'downloading' || state.status === 'checking') return false
+    const plan = await persistedPendingPlan()
+    if (!plan) return false
+    const next = await installPlan(plan, 'quiet')
+    return next.status === 'installing'
   }
 
   const shouldInstallAutomatically = () => Boolean(
     settings().installUpdatesOnQuit &&
+    manifest?.latestVersion !== failedInstall?.version &&
     state.status === 'downloaded' &&
     downloadedPath &&
     !installPrepared,
@@ -1640,13 +2104,13 @@ function createUpdateManager({
       if (next.status !== 'downloaded') {
         next = await check({ manual: false })
       }
-      if (next.status === 'available' && settings().autoDownloadUpdates) {
+      if (next.status === 'available' && settings().autoDownloadUpdates && next.latestVersion !== failedInstall?.version) {
         next = await download()
       }
       if (next.status !== 'downloaded' || !downloadedPath) {
         return { installStarted: false, state: snapshot() }
       }
-      next = await prepareInstall()
+      next = await prepareInstall({ mode: 'relaunch' })
       return { installStarted: next.status === 'installing', state: next }
     } catch (error) {
       logger.warn('Automatische Installation beim Start fehlgeschlagen:', error?.message ?? error)
@@ -1687,11 +2151,32 @@ function createUpdateManager({
     if (started && requestedChannel !== previousChannel && settings().autoCheckUpdates) void check().catch(() => {})
   }
 
+  let initialized = null
+  /** State, install results and disk cleanup, without timers (the background run uses this). */
+  const initialize = ({ consumeInstallResult = true } = {}) => {
+    initialized ??= (async () => {
+      await loadPersistentState()
+      await fsp.mkdir(updaterRoot, { recursive: true, mode: 0o700 })
+      await readInstallResult({ consume: consumeInstallResult })
+      await removeObsoleteStagedReleases()
+    })()
+    return initialized
+  }
+
+  const setBackgroundInfo = (info) => {
+    emit({ background: info && typeof info === 'object' ? { ...info } : null })
+  }
+
+  /** The renderer showed the "updated" note; it is not repeated. */
+  const acknowledgeJustUpdated = () => {
+    if (state.justUpdated) emit({ justUpdated: null })
+    return snapshot()
+  }
+
   const start = async () => {
     if (started) return snapshot()
     started = true
-    await loadPersistentState()
-    await fsp.mkdir(updaterRoot, { recursive: true, mode: 0o700 })
+    await initialize()
     activateConfiguredChannel()
     // Periodic quiet checks/downloads. Seamless install-on-launch is invoked
     // explicitly by the main process after start so tests and packaging do not
@@ -1721,15 +2206,29 @@ function createUpdateManager({
     download,
     prepareInstall,
     applyPendingInstallOnLaunch,
+    installOnQuit,
     shouldInstallOnQuit,
     shouldInstallAutomatically,
+    initialize,
+    setBackgroundInfo,
+    acknowledgeJustUpdated,
     getState: snapshot,
+    updaterRoot,
+    locks,
+    isSupported: () => supported,
+    installationKind: fullInstallationKind,
   }
 }
 
 module.exports = {
+  CHECK_INTERVAL_MS,
   EXPECTED_KEY_ID,
   INSTALL_HELPER,
+  INSTALL_MODES,
+  INSTALL_RESULT_FILE,
+  WINDOWS_INSTALLER_HELPER,
+  WINDOWS_SWAP_HELPER,
+  reduceReleaseList,
   PLATFORM_RELEASES,
   UPDATE_API,
   UPDATE_EVENT,
