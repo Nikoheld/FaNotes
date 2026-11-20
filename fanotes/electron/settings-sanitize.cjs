@@ -61,6 +61,8 @@ const SETTINGS_SCHEMA = Object.freeze({
   penOnly: { type: 'boolean' },
   tabletButtons: { type: 'tablet-buttons' },
   smoothing: { type: 'number', min: 0, max: 1 },
+  beautifyHandwriting: { type: 'boolean' },
+  beautifyStrength: { type: 'enum', values: ['subtle', 'medium'] },
   scribbleEraseSensitivity: { type: 'number', min: 0, max: 100 },
   shapeSnapSensitivity: { type: 'number', min: 0, max: 100 },
   recognitionMode: { type: 'enum', values: ['auto', 'math', 'text'] },

@@ -6,7 +6,6 @@ const fsp = require('node:fs/promises')
 const os = require('node:os')
 const path = require('node:path')
 const { spawn } = require('node:child_process')
-const { ONENOTE_PAGE_MARKER, ONENOTE_PAGE_POLICY_META, pageSha256 } = require('./onenote-page-guard.cjs')
 
 const MAX_SOURCE_BYTES = 4 * 1024 * 1024 * 1024
 const MAX_ARCHIVE_ENTRIES = 20_000
@@ -58,7 +57,6 @@ const safeSegment = (value, fallback = 'Unbenannt') => {
   return safe
 }
 
-const markdownTitle = (value) => safeSegment(value, 'OneNote-Seite').replace(/([\\`*_{}\[\]()#+.!|-])/gu, '\\$1')
 
 const atomicWrite = async (target, data) => {
   const temporary = `${target}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`
@@ -259,7 +257,7 @@ async function renderOneNoteInputs(inputs, outputRoot, one2html) {
   if (inputs.length === 1 && path.extname(inputs[0]).toLocaleLowerCase('en-US') === '.onetoc2') {
     try {
       await runTool(one2html, ['--input', inputs[0], '--output', outputRoot], { label: 'OneNote-Konvertierung' })
-      return warnings
+      return { warnings, notebookRoot: true }
     } catch (notebookError) {
       const notebookRoot = path.dirname(inputs[0])
       const files = await walkRegularFiles(notebookRoot)
@@ -271,13 +269,13 @@ async function renderOneNoteInputs(inputs, outputRoot, one2html) {
       await fsp.mkdir(outputRoot, { mode: 0o700 })
       await renderSectionsIndividually(sections, notebookRoot, outputRoot, one2html)
       warnings.push('Verschachtelte OneNote-Abschnittsgruppen wurden abschnittsweise mit ihrer Ordnerhierarchie übernommen.')
-      return warnings
+      return { warnings, notebookRoot: false }
     }
   }
   const sections = inputs.filter((candidate) => path.extname(candidate).toLocaleLowerCase('en-US') === '.one')
   if (!sections.length) throw new Error('Es wurden keine OneNote-Abschnitte für die Konvertierung gefunden.')
   await renderSectionsIndividually(sections, commonAncestor(sections), outputRoot, one2html)
-  return warnings
+  return { warnings, notebookRoot: false }
 }
 
 async function materializeOneNoteTools({ embeddedRoot, cacheRoot, platform = process.platform }) {
@@ -327,77 +325,6 @@ const decodeHtmlEntities = (value) => value
   .replace(/&#([0-9]+);/gu, (_match, number) => codePointFromEntity(number, 10))
   .replace(/&(nbsp|amp|lt|gt|quot|apos);/giu, (_match, entity) => ({ nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" })[entity.toLocaleLowerCase('en-US')])
 
-function extractSearchText(html) {
-  return decodeHtmlEntities(html
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/giu, ' ')
-    .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/giu, ' ')
-    .replace(/<head\b[^>]*>[\s\S]*?<\/head>/giu, ' ')
-    .replace(/<br\s*\/?\s*>/giu, '\n')
-    .replace(/<\/(?:p|h[1-6]|li|tr|td|div|table)>/giu, '\n')
-    .replace(/<[^>]+>/gu, ' '))
-    .replace(/[ \t]+/gu, ' ')
-    .replace(/\s*\n\s*/gu, '\n')
-    .replace(/\n{3,}/gu, '\n\n')
-    .trim()
-    .slice(0, 2_000_000)
-}
-
-function pageDimensions(html) {
-  const values = (name) => [...html.matchAll(new RegExp(`(?:^|[;\\s\"])(?:max-)?${name}\\s*:\\s*(-?[0-9.]+)px`, 'giu'))]
-    .map((match) => Number(match[1])).filter((value) => Number.isFinite(value) && value >= 0)
-  const max = (items, fallback) => {
-    if (!items.length) return fallback
-    let best = items[0]
-    for (let index = 1; index < items.length; index += 1) {
-      if (items[index] > best) best = items[index]
-    }
-    return best
-  }
-  const blockCount = (html.match(/<(?:p|li|tr|h[1-6])\b/giu) ?? []).length
-  const width = Math.max(720, Math.min(3000, max(values('left'), 0) + max(values('width'), 720) + 96))
-  const height = Math.max(900, Math.min(30_000, max(values('top'), 0) + max(values('height'), 160) + 140, blockCount * 24 + 280))
-  return { width: Math.round(width), height: Math.round(height) }
-}
-
-async function inlineImages(html, pagePath, outputRoot) {
-  const replacements = new Map()
-  let embeddedBytes = 0
-  for (const match of html.matchAll(/<img\b[^>]*\bsrc=(['"])([^'"]+)\1[^>]*>/giu)) {
-    const source = match[2]
-    if (/^(?:data:|https?:|file:|javascript:)/iu.test(source)) {
-      if (!source.startsWith('data:')) replacements.set(source, '')
-      continue
-    }
-    let decoded
-    try { decoded = decodeURIComponent(source) } catch { decoded = source }
-    const imagePath = path.resolve(path.dirname(pagePath), decoded)
-    if (!isInside(outputRoot, imagePath)) {
-      replacements.set(source, '')
-      continue
-    }
-    const format = IMAGE_FORMATS.get(path.extname(imagePath).toLocaleLowerCase('en-US'))
-    if (!format) {
-      replacements.set(source, '')
-      continue
-    }
-    try {
-      const info = await fsp.lstat(imagePath)
-      if (!info.isFile() || info.isSymbolicLink() || !info.size || info.size > MAX_IMAGE_BYTES || embeddedBytes + info.size > 96 * 1024 * 1024) throw new Error('Bildgrenze')
-      const data = await fsp.readFile(imagePath)
-      if (!format.signature(data)) throw new Error('Bildsignatur')
-      embeddedBytes += data.length
-      replacements.set(source, `data:${format.mime};base64,${data.toString('base64')}`)
-    } catch {
-      replacements.set(source, '')
-    }
-  }
-  return html.replace(/(<img\b[^>]*\bsrc=)(['"])([^'"]+)\2/giu, (full, prefix, quote, source) => {
-    if (!replacements.has(source)) return full
-    const replacement = replacements.get(source)
-    return replacement ? `${prefix}${quote}${replacement}${quote}` : prefix.replace(/\bsrc=$/u, 'data-fanotes-missing-image=') + `${quote}blocked${quote}`
-  })
-}
-
 let oneNoteSanitizer = null
 /**
  * Parses the page with parse5 and cleans it with hast-util-sanitize (the
@@ -414,28 +341,6 @@ function sanitizeOneNoteHtml(html) {
   return oneNoteSanitizer(html)
 }
 
-async function sanitizePage(pagePath, outputRoot) {
-  const info = await fsp.lstat(pagePath)
-  if (!info.isFile() || info.isSymbolicLink() || !info.size || info.size > MAX_HTML_BYTES) throw new Error('Eine OneNote-Seite ist leer oder zu groß.')
-  let html = await fsp.readFile(pagePath, 'utf8')
-  const title = decodeHtmlEntities(/<title[^>]*>([\s\S]*?)<\/title>/iu.exec(html)?.[1] ?? path.basename(pagePath, '.html')).replace(/<[^>]+>/gu, '').trim()
-  const transcript = extractSearchText(html)
-  const dimensions = pageDimensions(html)
-  html = await inlineImages(html, pagePath, outputRoot)
-  // CSS that could fetch or run something is neutralised first; the HTML
-  // sanitiser runs last, so nothing after it can turn text back into markup.
-  html = html
-    .replace(/(?:javascript|vbscript)\s*:/giu, '')
-    .replace(/@import\s+[^;]+;?/giu, '')
-    .replace(/url\s*\([^)]*\)/giu, 'none')
-    .replace(/expression\s*\([^)]*\)/giu, '')
-  html = sanitizeOneNoteHtml(html)
-  const guard = `${ONENOTE_PAGE_MARKER}${ONENOTE_PAGE_POLICY_META}<style id="fanotes-page-guard">html,body{width:${dimensions.width}px;min-width:${dimensions.width}px;min-height:${dimensions.height}px;overflow:hidden;background:#fff;color:#111}a{color:inherit;text-decoration:underline;pointer-events:none}</style>`
-  // The sanitised page is a body fragment; the guard always heads a fresh document.
-  html = `<!doctype html><html><head>${guard}</head><body>${html}</body></html>`
-  if (Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) throw new Error('Eine eingebettete OneNote-Seite überschreitet nach der Bildübernahme die sichere Größe.')
-  return { html, title: safeSegment(title, 'OneNote-Seite'), transcript, ...dimensions }
-}
 
 function buildPageParentMap(htmlFiles, outputRoot) {
   const parents = new Map()
@@ -462,207 +367,372 @@ function buildPageParentMap(htmlFiles, outputRoot) {
   return parents
 }
 
-async function writeUniqueMarkdown(directory, title, markdown) {
-  const stem = safeSegment(title, 'OneNote-Seite')
-  for (let index = 0; index < 10_000; index += 1) {
-    const name = index === 0 ? `${stem}.md` : `${stem} ${index + 1}.md`
+
+// ---------------------------------------------------------------------------
+// Two-step import: scan (pick pages) -> import (selected pages into a folder)
+// ---------------------------------------------------------------------------
+
+const IMAGE_DIRECTORY = '.fanotes/assets/onenote'
+const INDEX_RELATIVE_PATH = path.join('.fanotes', 'onenote', 'imports.json')
+const MAX_INDEX_BYTES = 8 * 1024 * 1024
+
+const sha1Short = (value) => crypto.createHash('sha1').update(value).digest('hex').slice(0, 12)
+
+/** Stable key of a page across imports: notebook, section and OneNote's own page id (title as fallback). */
+const pageKeyOf = (notebookName, sectionPath, pageId, title) => crypto
+  .createHash('sha256')
+  .update(`${notebookName}\n${sectionPath.join('/')}\n${pageId || `title:${title}`}`)
+  .digest('hex')
+  .slice(0, 24)
+
+async function readImportIndex(vaultRoot) {
+  try {
+    const raw = await fsp.readFile(path.join(vaultRoot, INDEX_RELATIVE_PATH), 'utf8')
+    if (raw.length > MAX_INDEX_BYTES) return { version: 1, pages: {} }
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && parsed.pages && typeof parsed.pages === 'object' ? { version: 1, pages: parsed.pages } : { version: 1, pages: {} }
+  } catch {
+    return { version: 1, pages: {} }
+  }
+}
+
+async function writeImportIndex(vaultRoot, index) {
+  const target = path.join(vaultRoot, INDEX_RELATIVE_PATH)
+  await fsp.mkdir(path.dirname(target), { recursive: true, mode: 0o700 })
+  await atomicWrite(target, `${JSON.stringify(index, null, 2)}\n`)
+}
+
+/**
+ * The note an earlier import wrote for this page, when it still exists inside the destination folder.
+ * Importing the page into another folder is a deliberate copy and is not skipped.
+ */
+function importedNoteIn(entry, destination, vaultRoot) {
+  const paths = [...new Set([...(Array.isArray(entry?.paths) ? entry.paths : []), entry?.path])].filter((value) => typeof value === 'string' && value && !value.includes('..'))
+  const prefix = destination.logical ? `${destination.logical}/` : ''
+  for (const logical of paths) {
+    if (prefix && !logical.startsWith(prefix)) continue
+    const candidates = [path.join(vaultRoot, ...logical.split('/'))]
+    if (prefix) candidates.unshift(path.join(destination.physical, ...logical.slice(prefix.length).split('/')))
+    if (candidates.some((candidate) => fs.existsSync(candidate))) return logical
+  }
+  return null
+}
+
+/**
+ * Converts the source once and lists what it holds. The returned session keeps the converted
+ * pages in a private temporary directory until disposeSession() so the page picker can import
+ * a selection later without converting again.
+ */
+async function scanOneNote({ inputPath, one2html, sevenZip, signal }) {
+  const sourceInfo = await fsp.lstat(inputPath)
+  if (!sourceInfo.isFile() || sourceInfo.isSymbolicLink() || !sourceInfo.size || sourceInfo.size > MAX_SOURCE_BYTES) {
+    throw new Error('Die OneNote-Quelldatei ist leer, unsicher oder größer als 4 GB.')
+  }
+  for (const executable of [one2html, sevenZip]) {
+    const info = await fsp.lstat(executable)
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error('Eine geprüfte OneNote-Importkomponente fehlt.')
+  }
+  const temporaryRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-onenote-'))
+  try {
+    const inputs = await prepareInput(inputPath, temporaryRoot, sevenZip)
+    const outputRoot = path.join(temporaryRoot, 'rendered')
+    await fsp.mkdir(outputRoot, { mode: 0o700 })
+    const rendered = await renderOneNoteInputs(inputs, outputRoot, one2html)
+    if (signal?.aborted) throw new Error('Abgebrochen.')
+    const outputFiles = await walkRegularFiles(outputRoot, { bytes: MAX_OUTPUT_BYTES })
+    const htmlFiles = outputFiles.filter((entry) => path.extname(entry.path).toLocaleLowerCase('en-US') === '.html')
+    const parentMap = buildPageParentMap(htmlFiles, outputRoot)
+    const sourceBase = path.basename(inputPath, path.extname(inputPath))
+    const notebookName = safeSegment(sourceBase === 'Open Notebook' ? path.basename(path.dirname(inputPath)) : sourceBase, 'OneNote-Notizbuch')
+    const pages = []
+    for (const entry of htmlFiles.sort((left, right) => left.path.localeCompare(right.path, 'de', { numeric: true }))) {
+      if (signal?.aborted) throw new Error('Abgebrochen.')
+      if (entry.size > MAX_HTML_BYTES) continue
+      const html = await fsp.readFile(entry.path, 'utf8')
+      if (/<nav\b/iu.test(html) || /<iframe\b/iu.test(html)) continue
+      const relative = path.relative(outputRoot, entry.path)
+      let hierarchy = path.dirname(relative).split(path.sep).filter((segment) => segment && segment !== '.')
+      if (rendered.notebookRoot && hierarchy.length) hierarchy = hierarchy.slice(1)
+      const title = decodeHtmlEntities(/<title[^>]*>([\s\S]*?)<\/title>/iu.exec(html)?.[1] ?? path.basename(entry.path, '.html')).replace(/<[^>]+>/gu, '').trim() || 'OneNote-Seite'
+      const pageId = /<meta\s+name="X-Original-Page-Id"\s+content="([^"]*)"/iu.exec(html)?.[1] ?? null
+      const sectionPath = hierarchy.map((segment) => safeSegment(segment))
+      pages.push({
+        id: sha1Short(relative),
+        file: entry.path,
+        title: safeSegment(title, 'OneNote-Seite'),
+        sectionPath,
+        parents: parentMap.get(entry.path) ?? [],
+        pageKey: pageKeyOf(notebookName, sectionPath, pageId, title),
+        hasInk: /class="ink-text"|<(?:path|polyline|line)\b[^>]*\bstroke="(?!none)/iu.test(html),
+        imageCount: (html.match(/<img\b/giu) ?? []).length,
+      })
+    }
+    if (!pages.length) throw new Error('Im OneNote-Export wurden keine lesbaren Seiten gefunden. Verwende einen aktuellen OneDrive-Export oder eine moderne .one-Datei.')
+    return {
+      id: crypto.randomUUID(),
+      root: temporaryRoot,
+      outputRoot,
+      sourceName: path.basename(inputPath),
+      notebookName,
+      warnings: rendered.warnings,
+      pages,
+    }
+  } catch (error) {
+    await fsp.rm(temporaryRoot, { recursive: true, force: true }).catch(() => {})
+    throw error
+  }
+}
+
+async function disposeSession(session) {
+  if (session?.root) await fsp.rm(session.root, { recursive: true, force: true }).catch(() => {})
+}
+
+/** What the picker shows: sections (with their folder path) and their pages. No file paths leave the main process. */
+function describeSession(session, index = { pages: {} }) {
+  const sections = new Map()
+  for (const page of session.pages) {
+    const key = page.sectionPath.join('\u0000')
+    if (!sections.has(key)) sections.set(key, { path: page.sectionPath, name: page.sectionPath.join(' / ') || session.notebookName, pages: [] })
+    sections.get(key).pages.push({
+      id: page.id,
+      title: page.title,
+      depth: Math.min(4, page.parents.length),
+      hasInk: page.hasInk,
+      imageCount: page.imageCount,
+      alreadyImported: Boolean(index.pages[page.pageKey]),
+    })
+  }
+  return {
+    sessionId: session.id,
+    notebookName: session.notebookName,
+    sourceName: session.sourceName,
+    pageCount: session.pages.length,
+    inkPageCount: session.pages.filter((page) => page.hasInk).length,
+    warnings: session.warnings,
+    sections: [...sections.values()],
+  }
+}
+
+/** Pixel size of a PNG, JPEG, GIF or WebP, or null. */
+function imageSize(data, extension) {
+  try {
+    if (extension === '.png') return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) }
+    if (extension === '.gif') return { width: data.readUInt16LE(6), height: data.readUInt16LE(8) }
+    if (extension === '.webp') {
+      const kind = data.subarray(12, 16).toString('ascii')
+      if (kind === 'VP8X') return { width: 1 + data.readUIntLE(24, 3), height: 1 + data.readUIntLE(27, 3) }
+      if (kind === 'VP8 ') return { width: data.readUInt16LE(26) & 0x3fff, height: data.readUInt16LE(28) & 0x3fff }
+      if (kind === 'VP8L') { const bits = data.readUInt32LE(21); return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 } }
+      return null
+    }
+    let offset = 2
+    while (offset + 9 < data.length) {
+      if (data[offset] !== 0xff) { offset += 1; continue }
+      const marker = data[offset + 1]
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { width: data.readUInt16BE(offset + 7), height: data.readUInt16BE(offset + 5) }
+      offset += 2 + data.readUInt16BE(offset + 2)
+    }
+  } catch { /* unreadable header */ }
+  return null
+}
+
+/** Stores one embedded image in the vault's asset folder (named by content hash, so a re-import reuses it). */
+async function storeImage(source, pagePath, outputRoot, vaultRoot, cache, infoByRef) {
+  if (/^(?:https?:|file:|javascript:|data:)/iu.test(source)) return null
+  let decoded
+  try { decoded = decodeURIComponent(source) } catch { decoded = source }
+  const imagePath = path.resolve(path.dirname(pagePath), decoded)
+  if (!isInside(outputRoot, imagePath)) return null
+  const extension = path.extname(imagePath).toLocaleLowerCase('en-US')
+  const format = IMAGE_FORMATS.get(extension)
+  if (!format) return null
+  if (cache.has(imagePath)) return cache.get(imagePath)
+  let result = null
+  try {
+    const info = await fsp.lstat(imagePath)
+    if (!info.isFile() || info.isSymbolicLink() || !info.size || info.size > MAX_IMAGE_BYTES) throw new Error('image limit')
+    const data = await fsp.readFile(imagePath)
+    if (!format.signature(data)) throw new Error('image signature')
+    const name = `${hashBuffer(data).slice(0, 24)}${extension === '.jpeg' ? '.jpg' : extension}`
+    const directory = path.join(vaultRoot, ...IMAGE_DIRECTORY.split('/'))
+    await fsp.mkdir(directory, { recursive: true, mode: 0o700 })
     const target = path.join(directory, name)
-    let handle
+    if (!fs.existsSync(target)) await atomicWrite(target, data)
+    result = `${IMAGE_DIRECTORY}/${name}`
+    const size = imageSize(data, extension)
+    const mime = extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : extension === '.png' ? 'image/png' : extension === '.webp' ? 'image/webp' : null
+    const dataUrl = mime ? `data:${mime};base64,${data.toString('base64')}` : null
+    infoByRef.set(result, { width: size?.width || 300, height: size?.height || 200, dataUrl: dataUrl && dataUrl.length <= 1_500_000 ? dataUrl : null })
+  } catch {
+    result = null
+  }
+  cache.set(imagePath, result)
+  return result
+}
+
+/** Creates `<stem>.md` (and `<stem>.famd` for ink) without replacing anything; returns the paths written. */
+async function writeNoteFiles(directory, title, markdown, famdText, modifiedAt) {
+  const stem = safeSegment(title, 'OneNote-Seite')
+  const open = (target) => fsp.open(
+    target,
+    fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0),
+    0o600,
+  )
+  for (let index = 0; index < 10_000; index += 1) {
+    const name = index === 0 ? stem : `${stem} ${index + 1}`
+    const mdPath = path.join(directory, `${name}.md`)
+    const famdPath = path.join(directory, `${name}.famd`)
+    if (!famdText && fs.existsSync(famdPath)) continue
+    let famdHandle = null
+    let mdHandle = null
     try {
-      handle = await fsp.open(
-        target,
-        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0),
-        0o600,
-      )
-      await handle.writeFile(markdown)
-      await handle.sync()
-      await handle.close()
-      return target
+      if (famdText) {
+        famdHandle = await open(famdPath)
+      }
+      mdHandle = await open(mdPath)
+      if (famdHandle) { await famdHandle.writeFile(famdText); await famdHandle.sync() }
+      await mdHandle.writeFile(markdown)
+      await mdHandle.sync()
+      await famdHandle?.close()
+      await mdHandle.close()
+      if (modifiedAt) {
+        const when = new Date(modifiedAt)
+        for (const written of famdText ? [mdPath, famdPath] : [mdPath]) await fsp.utimes(written, when, when).catch(() => {})
+      }
+      return { mdPath, famdPath: famdText ? famdPath : null, name }
     } catch (error) {
-      await handle?.close().catch(() => {})
-      if (error?.code === 'EEXIST') continue
-      await fsp.rm(target, { force: true }).catch(() => {})
+      await famdHandle?.close().catch(() => {})
+      await mdHandle?.close().catch(() => {})
+      if (error?.code === 'EEXIST') {
+        // Only a file this attempt created may be removed: the EEXIST one belongs to the user.
+        if (famdHandle && !mdHandle) await fsp.rm(famdPath, { force: true }).catch(() => {})
+        continue
+      }
+      await fsp.rm(mdPath, { force: true }).catch(() => {})
+      if (famdHandle) await fsp.rm(famdPath, { force: true }).catch(() => {})
       throw error
     }
   }
   throw new Error('Für die OneNote-Seite konnte kein freier Dateiname erzeugt werden.')
 }
 
-async function uniqueDirectory(parent, preferred) {
-  for (let index = 0; index < 10_000; index += 1) {
-    const name = index ? `${preferred} ${index + 1}` : preferred
-    const target = path.join(parent, name)
-    try {
-      await fsp.mkdir(target, { mode: 0o700 })
-      return target
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error
-    }
-  }
-  throw new Error('Für den OneNote-Import konnte kein freier Zielordner angelegt werden.')
-}
-
-async function copyInertAttachments(files, outputRoot, attachmentDirectory) {
-  const attachments = []
-  for (const entry of files) {
-    if (path.extname(entry.path).toLocaleLowerCase('en-US') === '.html') continue
-    const digest = await hashFile(entry.path)
-    const relative = path.relative(outputRoot, entry.path).split(path.sep).map((segment) => safeSegment(segment)).join('/')
-    const inertName = `${digest.slice(0, 16)}-${safeSegment(path.basename(entry.path), 'Anlage')}.fanotes-attachment`
-    const target = path.join(attachmentDirectory, inertName)
-    if (!fs.existsSync(target)) await atomicCopy(entry.path, target)
-    attachments.push({ originalPath: relative, storedName: inertName, size: entry.size, sha256: digest })
-  }
-  return attachments
-}
-
-async function preserveOriginalSources(inputPath, internalBatch) {
-  const extension = path.extname(inputPath).toLocaleLowerCase('en-US')
-  let sources = [{ path: inputPath, size: (await fsp.lstat(inputPath)).size }]
-  let sourceRoot = path.dirname(inputPath)
-  if (extension === '.onetoc2') {
-    sources = (await walkRegularFiles(sourceRoot)).filter((entry) => ['.one', '.onetoc2'].includes(path.extname(entry.path).toLocaleLowerCase('en-US')))
-  }
-  const directory = path.join(internalBatch, 'original')
-  await fsp.mkdir(directory, { recursive: true, mode: 0o700 })
-  const preserved = []
-  for (const source of sources) {
-    const digest = await hashFile(source.path)
-    const relative = path.relative(sourceRoot, source.path).split(path.sep).map((segment) => safeSegment(segment)).join('/') || safeSegment(path.basename(source.path))
-    const storedName = `${digest.slice(0, 16)}-${safeSegment(path.basename(source.path), 'OneNote')}.fanotes-onenote-source`
-    await atomicCopy(source.path, path.join(directory, storedName))
-    preserved.push({ originalPath: relative, storedName, size: source.size, sha256: digest })
-  }
-  return preserved
-}
-
-async function importOneNoteToVault({ inputPath, vaultRoot, one2html, sevenZip }) {
-  const sourceInfo = await fsp.lstat(inputPath)
-  if (!sourceInfo.isFile() || sourceInfo.isSymbolicLink() || !sourceInfo.size || sourceInfo.size > MAX_SOURCE_BYTES) {
-    throw new Error('Die OneNote-Quelldatei ist leer, unsicher oder größer als 4 GB.')
-  }
+/**
+ * Imports the chosen pages. `destination` is { physical, logical }: the resolved target folder and its
+ * vault-relative path. Every page becomes `<section>/<title>.md` (plus `.famd` when it has ink); one
+ * failing page never stops the others. Pages imported earlier are skipped.
+ */
+async function importOneNotePages({ session, pageIds, destination, vaultRoot, sectionFolders = true, onProgress, signal }) {
+  const { convertOneNotePage, buildInkDocument } = require('./onenote-convert.cjs')
   const rootInfo = await fsp.lstat(vaultRoot)
   if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error('Der aktive Vault ist kein sicherer Ordner.')
-  for (const executable of [one2html, sevenZip]) {
-    const info = await fsp.lstat(executable)
-    if (!info.isFile() || info.isSymbolicLink()) throw new Error('Eine geprüfte OneNote-Importkomponente fehlt.')
-  }
-
-  const temporaryRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'fanotes-onenote-'))
-  let noteRoot = null
-  let internalBatch = null
-  const createdWorksheets = []
-  try {
-    const inputs = await prepareInput(inputPath, temporaryRoot, sevenZip)
-    const outputRoot = path.join(temporaryRoot, 'rendered')
-    await fsp.mkdir(outputRoot, { mode: 0o700 })
-    const conversionWarnings = await renderOneNoteInputs(inputs, outputRoot, one2html)
-    const outputFiles = await walkRegularFiles(outputRoot, { bytes: MAX_OUTPUT_BYTES })
-    const pageParentMap = buildPageParentMap(outputFiles.filter((entry) => path.extname(entry.path).toLocaleLowerCase('en-US') === '.html'), outputRoot)
-    const pageFiles = []
-    for (const entry of outputFiles) {
-      if (path.extname(entry.path).toLocaleLowerCase('en-US') !== '.html') continue
-      const preview = await fsp.readFile(entry.path, { encoding: 'utf8' })
-      if (/<nav\b/iu.test(preview) || /<iframe\b/iu.test(preview)) continue
-      pageFiles.push(entry.path)
-    }
-    if (!pageFiles.length) throw new Error('Im OneNote-Export wurden keine lesbaren Seiten gefunden. Verwende einen aktuellen OneDrive-Export oder eine moderne .one-Datei.')
-
-    const sourceDigest = await hashFile(inputPath)
-    const sourceBase = path.basename(inputPath, path.extname(inputPath))
-    const notebookName = safeSegment(sourceBase === 'Open Notebook' ? path.basename(path.dirname(inputPath)) : sourceBase, 'OneNote-Notizbuch')
-    noteRoot = await uniqueDirectory(vaultRoot, `OneNote – ${notebookName}`)
-    const internalRoot = path.join(vaultRoot, '.fanotes')
-    const oneNoteRoot = path.join(internalRoot, 'onenote')
-    const worksheetsRoot = path.join(internalRoot, 'worksheets')
-    await fsp.mkdir(oneNoteRoot, { recursive: true, mode: 0o700 })
-    await fsp.mkdir(worksheetsRoot, { recursive: true, mode: 0o700 })
-    internalBatch = path.join(oneNoteRoot, crypto.randomUUID())
-    const attachmentDirectory = path.join(internalBatch, 'attachments')
-    await fsp.mkdir(attachmentDirectory, { recursive: true, mode: 0o700 })
-
-    const [attachments, originalSources] = await Promise.all([
-      copyInertAttachments(outputFiles, outputRoot, attachmentDirectory),
-      preserveOriginalSources(inputPath, internalBatch),
-    ])
-    const now = new Date().toISOString()
-    const importedNotes = []
-    for (const pagePath of pageFiles.sort((left, right) => left.localeCompare(right, 'de', { numeric: true }))) {
-      const page = await sanitizePage(pagePath, outputRoot)
-      const relativePage = path.relative(outputRoot, pagePath)
-      const hierarchy = path.dirname(relativePage).split(path.sep).filter((segment) => segment && segment !== '.')
-      const withoutDuplicateNotebook = hierarchy[0]?.localeCompare(notebookName, 'de', { sensitivity: 'base' }) === 0 ? hierarchy.slice(1) : hierarchy
-      const pageParents = pageParentMap.get(pagePath) ?? []
-      const noteDirectory = path.join(noteRoot, ...withoutDuplicateNotebook.map((segment) => safeSegment(segment)), ...pageParents.map((segment) => safeSegment(segment)))
-      if (!isInside(noteRoot, noteDirectory)) throw new Error('Eine OneNote-Seitenhierarchie ist ungültig.')
-      await fsp.mkdir(noteDirectory, { recursive: true, mode: 0o700 })
-      const id = crypto.randomUUID()
-      const sourcePath = path.join(worksheetsRoot, `${id}.html`)
-      const dataPath = path.join(worksheetsRoot, `${id}.json`)
-      const worksheet = {
-        schemaVersion: 1,
-        id,
-        title: page.title,
-        kind: 'html',
-        mimeType: 'text/html',
-        sourceRelativePath: `.fanotes/worksheets/${id}.html`,
-        dataRelativePath: `.fanotes/worksheets/${id}.json`,
-        createdAt: now,
-        updatedAt: now,
-        pageWidth: page.width,
-        pageHeight: page.height,
-        htmlSha256: pageSha256(page.html),
-        textBoxes: [],
+  const wanted = new Set(pageIds)
+  const selected = session.pages.filter((page) => wanted.has(page.id))
+  const index = await readImportIndex(vaultRoot)
+  const result = { imported: [], skipped: [], failed: [], cancelled: false, inkPages: 0, layoutPages: 0, imageCount: 0, strokeCount: 0, warnings: [] }
+  const imageCache = new Map()
+  const imageInfo = new Map()
+  const report = (done, title, status) => onProgress?.({ done, total: selected.length, title, status })
+  let done = 0
+  for (const page of selected) {
+    if (signal?.aborted) { result.cancelled = true; break }
+    report(done, page.title, 'working')
+    try {
+      const existing = index.pages[page.pageKey]
+      const present = existing ? importedNoteIn(existing, destination, vaultRoot) : null
+      if (present) {
+        result.skipped.push({ id: page.id, title: page.title, path: present, reason: 'already-imported' })
+        done += 1
+        continue
       }
-      await atomicWrite(sourcePath, page.html)
-      createdWorksheets.push(sourcePath)
-      await atomicWrite(dataPath, `${JSON.stringify(worksheet, null, 2)}\n`)
-      createdWorksheets.push(dataPath)
-      const searchable = page.transcript
-        ? `\n<details>\n<summary>Importierter Text · suchbar und bearbeitbar</summary>\n\n\`\`\`text\n${page.transcript.replaceAll('```', 'ˋˋˋ')}\n\`\`\`\n\n</details>\n`
-        : ''
-      const markdown = `# ${markdownTitle(page.title)}\n\n<!-- fanotes-onenote:${sourceDigest.slice(0, 24)} -->\n<!-- fanotes-worksheet:${id} -->\n${searchable}`
-      const notePath = await writeUniqueMarkdown(noteDirectory, page.title, markdown)
-      importedNotes.push(path.relative(vaultRoot, notePath).split(path.sep).join('/'))
+      const info = await fsp.lstat(page.file)
+      if (!info.isFile() || info.isSymbolicLink() || !info.size || info.size > MAX_HTML_BYTES) throw new Error('Die Seite ist leer oder zu groß.')
+      const html = await fsp.readFile(page.file, 'utf8')
+      const stored = new Map()
+      for (const match of html.matchAll(/<img\b[^>]*\bsrc=(['"])([^'"]+)\1/giu)) {
+        const reference = await storeImage(decodeHtmlEntities(match[2]), page.file, session.outputRoot, vaultRoot, imageCache, imageInfo)
+        stored.set(match[2], reference)
+        stored.set(decodeHtmlEntities(match[2]), reference)
+      }
+      const converted = convertOneNotePage(html, {
+        fallbackTitle: page.title,
+        resolveImage: (source) => stored.get(source) ?? null,
+        imageInfo: (reference) => imageInfo.get(reference) ?? null,
+      })
+      const folderSegments = sectionFolders ? page.sectionPath : []
+      const directory = path.join(destination.physical, ...folderSegments)
+      if (!isInside(destination.physical, directory)) throw new Error('Ein OneNote-Abschnittsname ist ungültig.')
+      await fsp.mkdir(directory, { recursive: true, mode: 0o700 })
+      let markdown = converted.markdown
+      let famdText = null
+      let inkDocument = null
+      if (converted.strokes.length) {
+        // Free-form page: text blocks and images keep their OneNote positions in the same
+        // coordinate space as the ink, so strokes stay on the text they were written on.
+        const layout = converted.layout
+        inkDocument = buildInkDocument(converted.strokes, { title: converted.title, createdAt: converted.createdAt ?? undefined, extent: { x: layout.extentX + 48, y: layout.extentY } })
+        const width = inkDocument.sourceWidth
+        const height = inkDocument.sourceHeight
+        const unit = (value) => Math.max(0, Math.min(1, Math.round(value * 1e6) / 1e6))
+        const stamp = Date.now()
+        const textFields = layout.fields.map((field, number) => ({
+          id: `on-t${number + 1}`,
+          page: 1,
+          x: unit(field.x / width),
+          y: unit(field.y / height),
+          width: Math.max(0.12, Math.min(0.92, Math.round((field.width / width) * 1e4) / 1e4)),
+          fontSize: field.fontSize,
+          text: field.text,
+          ...(field.bold ? { bold: true } : {}),
+          updatedAt: stamp,
+        }))
+        const annotations = []
+        const flowImages = [...layout.flowImages]
+        let budget = 6_000_000
+        for (const image of layout.images) {
+          const info = imageInfo.get(image.ref)
+          if (!info?.dataUrl || annotations.length >= 12 || info.dataUrl.length > budget) { flowImages.push(`![${image.alt}](${image.ref})`); continue }
+          budget -= info.dataUrl.length
+          annotations.push({ kind: 'image', id: `on-i${annotations.length + 1}`, page: 1, x: unit(image.x / width), y: unit(image.y / height), w: Math.max(0.05, Math.min(1, image.width / width)), aspect: image.width / image.height, opacity: 1, locked: true, src: info.dataUrl, title: image.alt.slice(0, 80) })
+        }
+        if (layout.fields.length >= 190) result.warnings.push(`„${page.title}“: Textblöcke über dem Limit stehen nur in der Suche.`)
+        inkDocument.searchTranscript = layout.fields.map((field) => field.text).join('\n').slice(0, 20000)
+        markdown = `# ${converted.markdown.split('\n', 1)[0].replace(/^#\s+/u, '')}\n${flowImages.length ? `\n${flowImages.join('\n\n')}\n` : ''}`
+        const { serializeFamd } = require('./famd.cjs')
+        const { packV2Ink } = require('./famdV2.mjs')
+        const updatedAt = new Date().toISOString()
+        famdText = serializeFamd(markdown, { updatedAt, ink: packV2Ink(inkDocument), worksheets: [], textFields, annotations }, 'v2')
+        result.layoutPages += 1
+      }
+      const written = await writeNoteFiles(directory, page.title, markdown, famdText, converted.updatedAt ?? converted.createdAt)
+      const logical = [destination.logical, ...folderSegments, `${written.name}.md`].filter(Boolean).join('/')
+      index.pages[page.pageKey] = { path: logical, paths: [...new Set([logical, ...(existing?.paths ?? [])])].slice(0, 20), importedAt: new Date().toISOString() }
+      result.imported.push({ id: page.id, title: page.title, path: logical, ink: Boolean(inkDocument), strokes: converted.strokes.length })
+      result.imageCount += converted.stats.images
+      result.strokeCount += converted.strokes.length
+      if (inkDocument) result.inkPages += 1
+      if (converted.stats.missingImages) result.warnings.push(`„${page.title}“: ${converted.stats.missingImages} Bild(er) konnten nicht übernommen werden.`)
+      if (converted.strokesDropped) result.warnings.push(`„${page.title}“: ${converted.strokesDropped} Handschrift-Striche über dem Limit wurden ausgelassen.`)
+    } catch (error) {
+      result.failed.push({ id: page.id, title: page.title, error: error instanceof Error ? error.message : 'Unbekannter Fehler.' })
     }
-    const manifest = {
-      schemaVersion: 1,
-      importedAt: now,
-      sourceName: path.basename(inputPath),
-      sourceSha256: sourceDigest,
-      pages: importedNotes.length,
-      attachments,
-      originalSources,
-      safety: 'Attachments are stored byte-identically with an inert .fanotes-attachment suffix and are never executed.',
-    }
-    await atomicWrite(path.join(internalBatch, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
-    return {
-      rootFolder: path.relative(vaultRoot, noteRoot).split(path.sep).join('/'),
-      pageCount: importedNotes.length,
-      attachmentCount: attachments.length,
-      importedNotes,
-      warnings: [
-        ...conversionWarnings,
-        ...(attachments.length ? ['Anlagen wurden bytegenau, aber nicht ausführbar im internen Vault-Bereich verwahrt.'] : []),
-      ],
-    }
-  } catch (error) {
-    if (noteRoot) await fsp.rm(noteRoot, { recursive: true, force: true }).catch(() => {})
-    if (internalBatch) await fsp.rm(internalBatch, { recursive: true, force: true }).catch(() => {})
-    await Promise.all(createdWorksheets.map((file) => fsp.rm(file, { force: true }).catch(() => {})))
-    throw error
-  } finally {
-    await fsp.rm(temporaryRoot, { recursive: true, force: true }).catch(() => {})
+    done += 1
+    report(done, page.title, 'done')
   }
+  if (result.imported.length) await writeImportIndex(vaultRoot, index)
+  report(done, '', 'finished')
+  return result
 }
 
 module.exports = {
   decodeHtmlEntities,
   sanitizeOneNoteHtml,
-  importOneNoteToVault,
+  describeSession,
+  disposeSession,
+  importOneNotePages,
   materializeOneNoteTools,
-  pageDimensions,
+  readImportIndex,
   safeSegment,
+  scanOneNote,
   TOOL_MANIFEST,
-  writeUniqueMarkdown,
+  writeNoteFiles,
 }

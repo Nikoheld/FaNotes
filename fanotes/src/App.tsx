@@ -312,6 +312,7 @@ const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').
 const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspace').then((module) => ({ default: module.GlyphenWerkWorkspace })))
 const WritingMode = lazy(() => import('./writing/ui/WritingMode').then((module) => ({ default: module.WritingMode })))
 const StoryImportDialog = lazy(() => import('./writing/import/ImportDialog').then((module) => ({ default: module.ImportDialog })))
+const OneNoteImportDialog = lazy(() => import('./components/OneNoteImportDialog').then((module) => ({ default: module.OneNoteImportDialog })))
 const CommandPalette = lazy(() => import('./components/CommandPalette').then((module) => ({ default: module.CommandPalette })))
 const StudyOverview = lazy(() => import('./components/StudyOverview').then((module) => ({ default: module.StudyOverview })))
 const FlashcardReview = lazy(() => import('./components/FlashcardReview').then((module) => ({ default: module.FlashcardReview })))
@@ -827,7 +828,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [worksheetSession, setWorksheetSession] = useState<WorksheetSession>({ key: 0, documents: [] })
   const [worksheetImportOpen, setWorksheetImportOpen] = useState(false)
   const [worksheetImportBusy, setWorksheetImportBusy] = useState(false)
-  const [oneNoteImportBusy, setOneNoteImportBusy] = useState(false)
+  const [oneNoteDialogOpen, setOneNoteDialogOpen] = useState(false)
   const [mutatingEntryPaths, setMutatingEntryPaths] = useState<string[]>([])
   const [overviewOpen, setOverviewOpen] = useState(false)
   const [homeworkOpen, setHomeworkOpen] = useState(false)
@@ -5678,23 +5679,25 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [requestConfirm, toast, updateContent, worksheetSession.documents])
 
-  const importOneNote = useCallback(async (): Promise<OneNoteImportResult | null> => {
-    if (oneNoteImportBusy) return null
+  /** Opens the OneNote page picker; the dialog asks for the file, converts it and imports the chosen pages. */
+  const importOneNote = useCallback(async (): Promise<null> => {
     if (isWeb) throw new Error('Binäre OneNote-Notizbücher werden sicher in der Linux- oder Windows-App importiert.')
-    setOneNoteImportBusy(true)
     setWorksheetImportOpen(false)
-    try {
-      const result = await window.fanotes.importOneNote()
-      if (!result) return null
-      vaultStructureRevisionRef.current += 1
-      await refreshTree()
-      if (result.importedNotes[0]) await openNote(result.importedNotes[0])
-      toast(`${result.pageCount} ${result.pageCount === 1 ? 'OneNote-Seite' : 'OneNote-Seiten'} layoutgetreu importiert.`, 'success')
-      return result
-    } finally {
-      setOneNoteImportBusy(false)
-    }
-  }, [isWeb, oneNoteImportBusy, openNote, refreshTree, toast])
+    setOneNoteDialogOpen(true)
+    return null
+  }, [isWeb])
+
+  const oneNoteFolders = useMemo(() => oneNoteDialogOpen
+    ? [...folderPaths(tree)].filter((entry) => !entry.split('/').some((segment) => segment.startsWith('.') || /\.story$/iu.test(segment)))
+    : [], [oneNoteDialogOpen, tree])
+
+  const finishOneNoteImport = useCallback((result: OneNoteImportResult) => {
+    vaultStructureRevisionRef.current += 1
+    void refreshTree().then(async () => {
+      if (result.imported[0]) await openNote(result.imported[0].path)
+    }).catch(() => undefined)
+    toast(`${result.imported.length} ${result.imported.length === 1 ? 'OneNote-Seite' : 'OneNote-Seiten'} als normale Notizen importiert.`, 'success')
+  }, [openNote, refreshTree, toast])
 
   /** Commands contributed by running add-ons; each run is isolated by the runtime and can never throw here. */
   const addonPaletteActions = useMemo<PaletteAction[]>(() => addonState.commands.map((command) => {
@@ -5733,7 +5736,7 @@ export default function App({ startupBootstrap }: AppProps) {
       toggleBookView()
     } },
     { id: 'worksheet', label: 'Bild oder PDF als Arbeitsblatt', detail: 'In die aktuelle oder eine neue Notiz importieren und ausfüllen', shortcut: 'Ctrl ⇧ I', group: 'Werkzeuge', keywords: 'pdf bild import arbeitsblatt ausfüllen', icon: <FileUp size={15} />, run: openWorksheetImport },
-    { id: 'onenote-import', label: 'Microsoft OneNote importieren', detail: 'Notizbuch, Abschnitte, Layout, Ink und Anlagen sicher übernehmen', group: 'Dateien', keywords: 'one onetoc2 onepkg onedrive migration', icon: <NotebookTabs size={15} />, run: () => { void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error')) } },
+    { id: 'onenote-import', label: 'Microsoft OneNote importieren', detail: 'Seiten und Zielordner wählen, Handschrift als .famd-Ink übernehmen', group: 'Dateien', keywords: 'one onetoc2 onepkg onedrive migration', icon: <NotebookTabs size={15} />, run: () => { void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error')) } },
     { id: 'ai-assistant', label: 'AI-Assistent', detail: 'LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok oder OpenCode nutzen', shortcut: 'Ctrl ⇧ A', group: 'Werkzeuge', keywords: 'ki ai lm studio ollama openai gemini anthropic grok opencode rechtschreibung fakten', icon: <Bot size={15} />, run: openLmStudio },
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht', detail: 'Ordner und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
@@ -7277,6 +7280,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </SafeBoundary>
         </Suspense>
       )}
+      {oneNoteDialogOpen && <Suspense fallback={null}><SafeBoundary name="OneNote-Import" fallbackTitle="Der OneNote-Import ist abgestürzt"><OneNoteImportDialog folders={oneNoteFolders} onClose={() => setOneNoteDialogOpen(false)} onImported={finishOneNoteImport} /></SafeBoundary></Suspense>}
       {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} onConvertFamd={convertAllFamdNotes} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
       {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}
@@ -7376,7 +7380,7 @@ export default function App({ startupBootstrap }: AppProps) {
           <div className="worksheet-import-options">
             <button type="button" disabled={!activeTab || worksheetImportBusy} onClick={() => void importWorksheet('current')}><span><Files size={22} /></span><strong>In aktuelle Notiz</strong><small>{activeTab ? activeTab.title : 'Keine Notiz geöffnet'}</small></button>
             <button type="button" disabled={worksheetImportBusy} onClick={() => void importWorksheet('new')}><span><FilePlus2 size={22} /></span><strong>Als neue Notiz</strong><small>Dateiname wird zum Notiztitel</small></button>
-            <button type="button" className="onenote-import-option" disabled={isWeb || oneNoteImportBusy} onClick={() => void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error'))}><span>{oneNoteImportBusy ? <LoaderCircle className="spin" size={22} /> : <NotebookTabs size={22} />}</span><strong>Microsoft OneNote</strong><small>{isWeb ? 'In der Linux- oder Windows-App' : 'Ganzes Notizbuch inklusive Layout, Ink und Anlagen'}</small></button>
+            <button type="button" className="onenote-import-option" disabled={isWeb} onClick={() => void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error'))}><span><NotebookTabs size={22} /></span><strong>Microsoft OneNote</strong><small>{isWeb ? 'In der Linux- oder Windows-App' : 'Seiten und Zielordner wählen, Handschrift wird .famd-Ink'}</small></button>
           </div>
           <footer><small>PDF · Bilder · ONE · ONETOC2 · ONEPKG · ZIP</small><button type="button" className="secondary-button" onClick={() => setWorksheetImportOpen(false)}>Abbrechen</button></footer>
         </section>

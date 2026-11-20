@@ -409,6 +409,37 @@ class TextWidget extends WidgetType {
   }
 }
 
+/** A whole-line `![alt](vault/path.png)` drawn as the picture itself; the source shows while the caret is on the line. */
+class ImageWidget extends WidgetType {
+  constructor(readonly alt: string, readonly source: string) { super() }
+  eq(other: ImageWidget) { return other.alt === this.alt && other.source === this.source }
+  toDOM(view: EditorView) {
+    const frame = document.createElement('div')
+    frame.className = 'cm-live-image'
+    const image = document.createElement('img')
+    image.alt = this.alt
+    image.draggable = false
+    image.decoding = 'async'
+    image.addEventListener('load', () => view.requestMeasure())
+    image.addEventListener('error', () => { frame.textContent = this.alt || 'Bild nicht gefunden'; frame.classList.add('is-missing'); view.requestMeasure() })
+    frame.append(image)
+    let relative = this.source
+    try { relative = decodeURIComponent(relative) } catch { /* keep the raw path */ }
+    void window.fanotes.readAssetDataUrl(relative).then((url) => { image.src = url }).catch(() => image.dispatchEvent(new Event('error')))
+    return frame
+  }
+  ignoreEvent() { return false }
+}
+
+const vaultImageLine = (text: string) => {
+  const match = /^\s*!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*$/u.exec(text)
+  if (!match) return null
+  const source = match[2]
+  if (/^[a-z][a-z0-9+.-]*:/iu.test(source) || source.startsWith('/') || source.split('/').includes('..')) return null
+  if (!/\.(?:png|jpe?g|gif|webp)$/iu.test(source)) return null
+  return { alt: match[1], source }
+}
+
 class TaskWidget extends WidgetType {
   constructor(readonly checked: boolean, readonly changeFrom: number) { super() }
   eq(other: TaskWidget) { return other.checked === this.checked && other.changeFrom === this.changeFrom }
@@ -883,6 +914,10 @@ const buildLivePreviewDecorations = (view: EditorView) => {
         if (metadata) {
           decorations.push(Decoration.line({ attributes: { class: 'cm-live-metadata' } }).range(line.from))
           if (line.to > line.from) decorations.push(Decoration.replace({}).range(line.from, line.to))
+        } else if (!active && vaultImageLine(line.text) && typeof window !== 'undefined' && typeof window.fanotes?.readAssetDataUrl === 'function') {
+          const image = vaultImageLine(line.text)!
+          decorations.push(Decoration.line({ attributes: { class: 'cm-live-image-line' } }).range(line.from))
+          decorations.push(Decoration.replace({ widget: new ImageWidget(image.alt, image.source) }).range(line.from, line.to))
         } else if (heading) {
           decorations.push(Decoration.line({ attributes: { class: `cm-live-heading cm-live-h${heading[2].length}` } }).range(line.from))
           if (!active) {
