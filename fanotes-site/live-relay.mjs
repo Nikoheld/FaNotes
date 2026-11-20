@@ -15,6 +15,18 @@
 //   i  init      first writer wins: stored as the channel snapshot, 409 when state exists
 //   s  snapshot  compaction: replaces the buffered updates up to `upTo`
 //
+// A note with several collaborators is one "room": the owner picks a room id and a
+// random room key, wraps the key under each accepted share's key (the server only sees
+// the wrapped bytes) and registers the mapping on every share of the note. Everyone who
+// holds an accepted share of the note posts and fetches through their own share URL, but
+// the messages land in the one room, and pushes go to every member. Revoking a member
+// means the owner rotates: a new room and key for the remaining shares, so the removed
+// member neither receives nor can decrypt anything sent afterwards.
+//
+//   GET /shares/:id/live-room?channel=C   -> { room, wrap, gen } | { room: null }
+//   GET /shares/:id/live-rooms            -> every mapping of this share
+//   PUT /shares/:id/live-room             { channel, room, wrap }  first writer wins, the owner may overwrite
+//
 // The merged text itself is persisted by the clients through the normal share
 // file path (see user-shares.mjs), so the note also works for people who are not
 // online at the same time. This buffer only has to bridge short gaps and let a
@@ -83,6 +95,7 @@ const persist = (state, shareId) => {
     const target = liveFile(join(state.dir, shareId))
     const temporary = `${target}.${randomBytes(4).toString('hex')}.tmp`
     try {
+      await fs.mkdir(join(state.dir, shareId), { recursive: true, mode: 0o700 })
       await fs.writeFile(temporary, `${JSON.stringify({ seq: state.seq, channels })}\n`, { mode: 0o600 })
       await fs.rename(temporary, target)
     } catch {
@@ -118,6 +131,33 @@ const readBody = async (request, limit, fail) => {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+const ROOM_ID = /^[a-f0-9]{32}$/u
+
+const roomMapping = (share, channel) => {
+  for (const mapping of Object.values(share.liveRooms ?? {})) if (mapping.room === channel) return mapping
+  return null
+}
+
+/** Accounts that currently belong to a room: owner and recipient of every accepted share that maps it. */
+const roomAccounts = async (host, room) => {
+  const accounts = new Set()
+  for (const share of await host.allShares()) {
+    if (share.status !== 'accepted') continue
+    if (!roomMapping(share, room)) continue
+    accounts.add(share.ownerId)
+    if (share.recipientId) accounts.add(share.recipientId)
+  }
+  return [...accounts]
+}
+
+/** Where a message for `channel` goes: the room it maps to, or the share's own channel (two people). */
+const targetFor = async (host, share, channel) => {
+  if (roomMapping(share, channel)) {
+    return { key: channel, dir: host.roomDir(), lock: `live:room:${channel}`, accounts: await roomAccounts(host, channel) }
+  }
+  return { key: share.id, dir: host.dir(), lock: `live:${share.id}`, accounts: parties(share) }
+}
+
 const channelOf = (fail, raw) => {
   if (!CHANNEL.test(raw)) fail(404, 'Diesen Kanal gibt es nicht.')
   return raw
@@ -150,18 +190,20 @@ export const postLive = async ({ auth, deps, request, id, channel: rawChannel },
   if (!validData(body.d, 17, cap)) fail(400, 'Die Nachricht ist ungültig.')
 
   const from = auth.deviceId ?? ''
+  const target = await targetFor(host, share, channelName)
   if (kind === 'p') {
     const data = { id, c: channelName, k: 'p', d: body.d, f: from }
     let delivered = 0
-    for (const account of parties(share)) delivered += host.pushToAccount(account, 'live', data)
+    for (const account of target.accounts) delivered += host.pushToAccount(account, 'live', data)
     deps.sendJson(200, { ok: true, delivered })
     return
   }
 
-  const result = await host.withLock(`live:${id}`, async () => {
+  const result = await host.withLock(target.lock, async () => {
     // Permission is checked again inside the lock: a revoke or a downgrade wins over a queued message.
     const current = await host.authorize(deps, auth, id, true)
-    const state = await stateFor(host.dir(), id)
+    if (target.key !== id && !roomMapping(current.share, channelName)) fail(404, 'Diesen Kanal gibt es nicht.')
+    const state = await stateFor(target.dir, target.key)
     let channel = state.channels.get(channelName)
     if (!channel) {
       if (state.channels.size >= max.channels) fail(413, 'Diese Freigabe hat zu viele offene Notizen.')
@@ -174,7 +216,7 @@ export const postLive = async ({ auth, deps, request, id, channel: rawChannel },
       state.seq += 1
       channel.snap = { q: state.seq, d: body.d }
       channel.bytes = size
-      persist(state, id)
+      persist(state, target.key)
       return { share: current.share, q: state.seq, seq: state.seq }
     }
     if (kind === 's') {
@@ -185,7 +227,7 @@ export const postLive = async ({ auth, deps, request, id, channel: rawChannel },
       channel.snap = { q: upTo, d: body.d }
       channel.updates = channel.updates.filter((item) => item.q > upTo)
       channel.bytes = size + channel.updates.reduce((sum, item) => sum + approxBytes(item.d), 0)
-      persist(state, id)
+      persist(state, target.key)
       return { share: current.share, q: upTo, seq: state.seq, compacted: true }
     }
     if (channel.updates.length >= max.updatesPerChannel || channel.bytes + size > max.buffer) {
@@ -195,7 +237,7 @@ export const postLive = async ({ auth, deps, request, id, channel: rawChannel },
     state.seq += 1
     channel.updates.push({ q: state.seq, d: body.d })
     channel.bytes += size
-    persist(state, id)
+    persist(state, target.key)
     return { share: current.share, q: state.seq, seq: state.seq }
   })
   if (result.exists) { deps.sendJson(409, { error: 'Für diese Notiz läuft bereits eine Sitzung.', exists: true, seq: result.seq }); return }
@@ -203,10 +245,10 @@ export const postLive = async ({ auth, deps, request, id, channel: rawChannel },
   if (kind !== 's') {
     const inline = approxBytes(body.d) <= max.inline
     const data = { id, c: channelName, k: kind, q: result.q, f: from, ...(inline ? { d: body.d } : { big: true }) }
-    for (const account of parties(result.share)) host.pushToAccount(account, 'live', data)
+    for (const account of target.accounts) host.pushToAccount(account, 'live', data)
   } else if (!result.stale) {
     const data = { id, c: channelName, k: 's', q: result.q, f: from, big: true }
-    for (const account of parties(result.share)) host.pushToAccount(account, 'live', data)
+    for (const account of target.accounts) host.pushToAccount(account, 'live', data)
   }
   deps.sendJson(200, { ok: true, q: result.q, seq: result.seq, ...(result.stale ? { stale: true } : {}) })
 }
@@ -216,7 +258,8 @@ export const getLive = async ({ auth, deps, id, channel: rawChannel, url }, host
   const channelName = channelOf(fail, rawChannel)
   rateLimit(`live:get:${auth.account.id}`, 240, 60_000)
   const { share } = await host.authorize(deps, auth, id, false)
-  const state = await stateFor(host.dir(), share.id)
+  const target = await targetFor(host, share, channelName)
+  const state = await stateFor(target.dir, target.key)
   const channel = state.channels.get(channelName)
   const since = Math.max(0, Math.trunc(Number(url.searchParams.get('since') || 0)) || 0)
   if (!channel) {
@@ -230,4 +273,58 @@ export const getLive = async ({ auth, deps, id, channel: rawChannel, url }, host
     snapshot: snapshot && (since === 0 || since < channel.snap.q) ? snapshot : null,
     updates: channel.updates.filter((item) => item.q > since),
   })
+}
+
+
+// ── Rooms ───────────────────────────────────────────────────────────────────
+
+const validWrap = (wrap) => wrap && typeof wrap === 'object' && validData(wrap.iv, 12, 16) && validData(wrap.data, 32, 256)
+
+export const getLiveRoom = async ({ auth, deps, id, url }, host) => {
+  deps.rateLimit(`live:room:${auth.account.id}`, 120, 60_000)
+  const channel = url.searchParams.get('channel') ?? ''
+  if (!CHANNEL.test(channel)) deps.fail(404, 'Diesen Kanal gibt es nicht.')
+  const { share } = await host.authorize(deps, auth, id, false)
+  const mapping = share.liveRooms?.[channel]
+  deps.sendJson(200, mapping ? { room: mapping.room, wrap: mapping.wrap, gen: mapping.gen } : { room: null })
+}
+
+export const listLiveRooms = async ({ auth, deps, id }, host) => {
+  deps.rateLimit(`live:room:${auth.account.id}`, 120, 60_000)
+  const { share } = await host.authorize(deps, auth, id, false)
+  deps.sendJson(200, { rooms: Object.entries(share.liveRooms ?? {}).map(([channel, mapping]) => ({ channel, room: mapping.room, wrap: mapping.wrap, gen: mapping.gen })) })
+}
+
+/** Removes a room's buffer when no share maps it any more. */
+export const sweepLiveRoom = async (host, room) => {
+  if (!ROOM_ID.test(room)) return
+  for (const share of await host.allShares()) if (roomMapping(share, room)) return
+  forgetLiveShare(room)
+  await fs.rm(join(host.roomDir(), room), { recursive: true, force: true }).catch(() => {})
+}
+
+export const putLiveRoom = async ({ auth, deps, id, request }, host) => {
+  const { fail, rateLimit } = deps
+  rateLimit(`live:room:put:${auth.account.id}`, 60, 60_000)
+  const text = await readBody(request, 4096, fail)
+  let body
+  try { body = JSON.parse(text) } catch { body = null }
+  if (!body || !CHANNEL.test(body.channel) || !ROOM_ID.test(body.room) || !validWrap(body.wrap)) fail(400, 'Die Raum-Angaben sind ungültig.')
+  const outcome = await host.withLock(`live:roomreg:${id}`, async () => {
+    const { share, isOwner } = await host.authorize(deps, auth, id, true)
+    const existing = share.liveRooms?.[body.channel]
+    if (existing && !isOwner) return { conflict: true }
+    if (existing && existing.room === body.room && JSON.stringify(existing.wrap) === JSON.stringify({ iv: body.wrap.iv, data: body.wrap.data })) return { share, same: true }
+    if (!existing && Object.keys(share.liveRooms ?? {}).length >= limits().channels) fail(413, 'Diese Freigabe hat zu viele offene Notizen.')
+    share.liveRooms = { ...(share.liveRooms ?? {}), [body.channel]: { room: body.room, wrap: { iv: body.wrap.iv, data: body.wrap.data }, gen: (existing?.gen ?? 0) + 1 } }
+    await host.saveShare(share)
+    return { share, previous: existing?.room }
+  })
+  if (outcome.conflict) { deps.sendJson(409, { error: 'Für diese Notiz gibt es schon einen Raum.', exists: true }); return }
+  if (!outcome.same) {
+    if (outcome.previous && outcome.previous !== body.room) await sweepLiveRoom(host, outcome.previous)
+    const data = { id, c: body.channel, change: 'room', f: auth.deviceId ?? '' }
+    for (const account of parties(outcome.share)) host.pushToAccount(account, 'live-room', data)
+  }
+  deps.sendJson(200, { ok: true })
 }

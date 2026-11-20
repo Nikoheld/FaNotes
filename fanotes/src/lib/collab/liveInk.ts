@@ -37,7 +37,7 @@ const fnv = (text: string) => {
   return hash.toString(36)
 }
 
-const round = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 10) / 10 : 0)
+const round = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 1e4) / 1e4 : 0)
 
 /** A stable id for a stroke that came from a file. */
 export const contentIdOf = (stroke: InkLike) => {
@@ -76,7 +76,7 @@ export class LiveInk<S extends InkLike> {
   private readonly dead: Y.Map<boolean>
   private readonly ids = new WeakMap<object, string>()
   private known = new Map<string, S>()
-  private lastArray: readonly S[] | null = null
+  private lastSnapshot: S[] | null = null
   private order = 0
   private readonly listener: (events: Array<Y.YEvent<any>>, transaction: Y.Transaction) => void
 
@@ -98,6 +98,32 @@ export class LiveInk<S extends InkLike> {
 
   idOf(stroke: S) {
     return this.ids.get(stroke)
+  }
+
+  /**
+   * The strokes of `list` that are (or are copies of) any of `targets`. The board may have replaced a committed
+   * stroke by an equal copy since it was handed over, so identity is tried first, then the id, then the content.
+   */
+  locate(list: readonly S[], targets: readonly S[]): Set<S> {
+    const found = new Set<S>()
+    if (!targets.length) return found
+    const wanted = new Set<S>(targets)
+    const wantedIds = new Set(targets.map((target) => this.ids.get(target)).filter((id): id is string => Boolean(id)))
+    const rest: S[] = []
+    for (const stroke of list) {
+      if (wanted.has(stroke) || wantedIds.has(this.ids.get(stroke) as string)) found.add(stroke)
+      else rest.push(stroke)
+    }
+    const matched = [...found].length
+    if (matched >= targets.length) return found
+    const signatures = new Map<string, number>()
+    for (const target of targets) signatures.set(contentIdOf(target), (signatures.get(contentIdOf(target)) ?? 0) + 1)
+    for (const stroke of rest) {
+      const signature = contentIdOf(stroke)
+      const left = signatures.get(signature)
+      if (left) { found.add(stroke); signatures.set(signature, left - 1) }
+    }
+    return found
   }
 
   get size() {
@@ -171,7 +197,7 @@ export class LiveInk<S extends InkLike> {
     const result = merged
     this.known = new Map(merged.map((stroke) => [this.ids.get(stroke) as string, stroke]))
     void present
-    this.lastArray = null
+    this.lastSnapshot = null
     return result
   }
 
@@ -188,8 +214,10 @@ export class LiveInk<S extends InkLike> {
    * strokes are compared by identity.
    */
   push(strokes: readonly S[]) {
-    if (strokes === this.lastArray) return
-    this.lastArray = strokes
+    // The board mutates its array in place (push, splice), so identity of the array says nothing: compare the items.
+    const last = this.lastSnapshot
+    if (last && last.length === strokes.length && strokes.every((stroke, index) => stroke === last[index])) return
+    this.lastSnapshot = strokes.slice()
     const entries = this.assign(strokes, false)
     const now = new Map<string, S>()
     const added: Array<Entry<S>> = []
@@ -289,6 +317,6 @@ export class LiveInk<S extends InkLike> {
       const id = this.ids.get(stroke)
       if (id) this.known.set(id, stroke)
     }
-    this.lastArray = strokes
+    this.lastSnapshot = strokes.slice()
   }
 }

@@ -54,6 +54,9 @@ export function useLiveNote(path: string | null, content: string, onDiverged?: (
       }
       if (outcome.note) {
         current = outcome.note
+        const joined = outcome.note
+        // Closed from outside (the room's key was rotated, the share changed): join again.
+        joined.onClosed(() => { if (!cancelled && current === joined) { current = null; setNote(null); setSettled(false); void attempt() } })
         setNote(outcome.note)
         setSettled(true)
         if (outcome.note.diverged !== null) {

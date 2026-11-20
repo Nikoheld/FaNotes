@@ -21,7 +21,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { forgetLiveShare, getLive, postLive, resetLiveForTests } from './live-relay.mjs'
+import { forgetLiveShare, getLive, getLiveRoom, listLiveRooms, postLive, putLiveRoom, resetLiveForTests, sweepLiveRoom } from './live-relay.mjs'
 
 const root = () => resolve(process.env.FANOTES_SYNC_DIR || '/var/lib/fanotes-sync')
 const sharesDir = () => join(root(), 'user-shares')
@@ -397,6 +397,7 @@ const destroyShare = async (share) => {
   current.tables.delete(share.id)
   forgetLiveShare(share.id)
   await fs.rm(join(sharesDir(), share.id), { recursive: true, force: true })
+  for (const mapping of Object.values(share.liveRooms ?? {})) await sweepLiveRoom(liveHost, mapping.room)
 }
 
 const respond = async ({ auth, deps, id }) => {
@@ -642,7 +643,15 @@ const deleteFile = async ({ auth, deps, id, fileId, request }) => {
   deps.sendJson(200, { revision: result.revision, rev: result.rev })
 }
 
-const liveHost = { authorize, pushToAccount, withLock, dir: sharesDir }
+const liveHost = {
+  authorize,
+  pushToAccount,
+  withLock,
+  dir: sharesDir,
+  roomDir: () => join(root(), 'live-rooms'),
+  allShares: async () => [...(await load()).shares.values()],
+  saveShare,
+}
 
 // ── Router ──────────────────────────────────────────────────────────────────
 
@@ -671,6 +680,13 @@ export const handleUserShareRoute = async (context) => {
     if (shareMatch[2] === 'changes' && method === 'GET') return changesFeed({ ...ctx, id })
     if (!shareMatch[2] && method === 'PATCH') return updateShare({ ...ctx, id })
     if (!shareMatch[2] && method === 'DELETE') return removeShare({ ...ctx, id })
+  }
+  const roomMatch = /^\/shares\/([a-f0-9]{32})\/(live-room|live-rooms)$/u.exec(route)
+  if (roomMatch) {
+    const sub = { ...ctx, id: roomMatch[1] }
+    if (roomMatch[2] === 'live-room' && method === 'GET') return getLiveRoom(sub, liveHost)
+    if (roomMatch[2] === 'live-room' && method === 'PUT') return putLiveRoom(sub, liveHost)
+    if (roomMatch[2] === 'live-rooms' && method === 'GET') return listLiveRooms(sub, liveHost)
   }
   const liveMatch = /^\/shares\/([a-f0-9]{32})\/live\/([^/]{1,64})$/u.exec(route)
   if (liveMatch) {

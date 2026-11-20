@@ -14,7 +14,7 @@
 import type { SyncHostApi, SyncScanEntry } from '../../types'
 import { SyncApi, SyncApiError, type SharePermission, type ShareStatus, type SyncSession, type UserShareIncoming, type UserShareOutgoing } from './api'
 import {
-  decryptBytes, decryptMeta, decryptShareTitle, deriveShareKeys, encryptBytes, encryptMeta, encryptShareTitle, fileIdFor, keyFingerprint, newShareKey, sha256Hex, unwrapShareKey, wrapShareKey,
+  decryptBytes, decryptMeta, decryptShareTitle, deriveShareKeys, encryptBytes, encryptMeta, encryptShareTitle, fileIdFor, keyFingerprint, newShareKey, randomBytes, sha256Hex, toHex, unwrapRoomKey, unwrapShareKey, wrapRoomKey, wrapShareKey,
   type ShareTitle, type SyncKeys,
 } from './crypto'
 import { isSyncablePath, type SyncEngine } from './engine'
@@ -233,6 +233,7 @@ export class UserShareManager {
     this.knownIncoming.clear()
     for (const channels of this.liveChannels.values()) for (const channel of [...channels]) void channel.close()
     this.liveChannels.clear()
+    this.roomKeys.clear()
     this.set({ live: false, ...(clear ? { ...emptyState() } : {}) })
   }
 
@@ -306,14 +307,17 @@ export class UserShareManager {
     try { data = dataText ? JSON.parse(dataText) as { id?: string } : null } catch { data = null }
     if (type === 'shares') void this.refresh()
     else if (type === 'files' && data?.id) void this.syncShare(data.id)
-    else if (type === 'live' && data?.id) this.routeLive(data as { id: string; c: string; k: string; q?: number; f?: string; d?: string; big?: boolean })
+    else if (type === 'live-room' && data?.id) {
+      // The room of a note changed (another collaborator started it, or the owner rotated the key after a revoke).
+      if ((data as { f?: string }).f !== this.session?.deviceId) this.closeLive(data.id)
+    } else if (type === 'live' && data?.id) this.routeLive(data as { id: string; c: string; k: string; q?: number; f?: string; d?: string; big?: boolean })
   }
 
   private routeLive(event: { id: string; c: string; k: string; q?: number; f?: string; d?: string; big?: boolean }) {
-    const channels = this.liveChannels.get(event.id)
-    if (channels?.size) for (const channel of [...channels]) void channel.handlePush(event)
+    // A room's messages carry the sender's share id, so they are matched by channel, not by share.
+    for (const channels of this.liveChannels.values()) for (const channel of [...channels]) void channel.handlePush(event)
     // A note that was waiting for somebody to start the session wakes up when the first message arrives.
-    if (event.k !== 'p') for (const wake of [...(this.liveWaiters.get(event.id) ?? [])]) wake()
+    if (event.k !== 'p') for (const waiters of this.liveWaiters.values()) for (const wake of [...waiters]) wake()
   }
 
   private armSafetyTimer() {
@@ -768,7 +772,10 @@ export class UserShareManager {
     const entry = info ? this.opened.get(info.shareId) : null
     if (!info || !session || !entry || !this.host) return { note: null, reason: 'unavailable' }
     const host = this.host
-    const channelId = (await fileIdFor(entry.keys, `live:${info.rel}`)).slice(0, 32)
+    const perShare = (await fileIdFor(entry.keys, `live:${info.rel}`)).slice(0, 32)
+    const room = await this.ensureRoom(session, entry, info, perShare, path)
+    if (!room) return { note: null, reason: 'idle' }
+    const channelId = room.room
     const vaultId = await host.vaultId()
     const storeId = await sha256Hex(new TextEncoder().encode(`live:${vaultId}:${info.shareId}:${channelId}`))
     const store: LiveStore = {
@@ -792,7 +799,7 @@ export class UserShareManager {
     }
     const { openLiveNote } = await import('../collab/liveNotes')
     const modified = await this.isLocallyModified(path, info)
-    const outcome = await openLiveNote({ info, port, keys: entry.keys, channelId, store }, localText, modified)
+    const outcome = await openLiveNote({ info, port, keys: room.keys, channelId, store }, localText, modified)
     if (!outcome.note) return outcome
     const { note } = outcome
     const channels = this.liveChannels.get(info.shareId) ?? new Set<LiveChannel>()
@@ -812,6 +819,86 @@ export class UserShareManager {
       void this.syncShare(info.shareId)
     })
     return outcome
+  }
+
+  // ── Live rooms: several collaborators in one note ─────────────────────
+
+  /** Room keys this device created or opened, so the owner can wrap them for a share accepted later. */
+  private readonly roomKeys = new Map<string, Uint8Array>()
+
+  private async roomKeysFrom(raw: Uint8Array) {
+    return deriveShareKeys(raw)
+  }
+
+  /**
+   * The room of this note: the one the server already maps for this share, or a new one (a writer may start it).
+   * The owner also puts every other accepted share of the same note into the same room.
+   */
+  private async ensureRoom(session: SyncSession, entry: Opened, info: LiveNoteInfo, perShare: string, path: string): Promise<{ room: string; keys: SyncKeys } | null> {
+    const open = async (): Promise<{ room: string; keys: SyncKeys } | null> => {
+      const found = await this.api.liveRoom(session, info.shareId, perShare)
+      if (!found.room || !found.wrap) return null
+      const raw = await unwrapRoomKey(entry.keys, perShare, found.wrap)
+      this.roomKeys.set(found.room, raw)
+      return { room: found.room, keys: await this.roomKeysFrom(raw) }
+    }
+    let result = await open()
+    if (!result && info.canWrite) {
+      const raw = randomBytes(32)
+      const room = toHex(randomBytes(16))
+      try {
+        await this.api.putLiveRoom(session, info.shareId, { channel: perShare, room, wrap: await wrapRoomKey(entry.keys, perShare, raw) })
+        this.roomKeys.set(room, raw)
+        result = { room, keys: await this.roomKeysFrom(raw) }
+      } catch (error) {
+        if (!(error instanceof SyncApiError && error.conflict)) throw error
+        result = await open()
+      }
+    }
+    if (result && info.role === 'owner') await this.unifyRoom(session, entry, path, result.room).catch(() => undefined)
+    return result
+  }
+
+  /** Owner: every other accepted share of this note joins the room (wrapped under that share's key). */
+  private async unifyRoom(session: SyncSession, own: Opened, path: string, room: string) {
+    const raw = this.roomKeys.get(room)
+    if (!raw) return
+    for (const other of this.opened.values()) {
+      if (other === own || other.view.id === own.view.id || other.view.role !== 'owner' || other.view.status !== 'accepted' || other.view.problem) continue
+      const rel = this.noteRootFor(other, path)
+      if (!rel) continue
+      const channel = (await fileIdFor(other.keys, `live:${rel}`)).slice(0, 32)
+      const current = await this.api.liveRoom(session, other.view.id, channel)
+      if (current.room === room) continue
+      await this.api.putLiveRoom(session, other.view.id, { channel, room, wrap: await wrapRoomKey(other.keys, channel, raw) })
+    }
+  }
+
+  /** Owner, before revoking a share: every room it was part of moves to a new key for the shares that stay. */
+  private async rotateRoomsBefore(session: SyncSession, removedId: string) {
+    const removed = this.opened.get(removedId)
+    if (!removed || removed.view.role !== 'owner') return
+    const { rooms } = await this.api.liveRooms(session, removedId)
+    if (!rooms.length) return
+    const stay = [...this.opened.values()].filter((other) => other.view.id !== removedId && other.view.role === 'owner' && other.view.status === 'accepted' && !other.view.problem)
+    for (const old of new Set(rooms.map((entry) => entry.room))) {
+      const fresh = toHex(randomBytes(16))
+      const raw = randomBytes(32)
+      for (const other of stay) {
+        const mine = (await this.api.liveRooms(session, other.view.id)).rooms.filter((entry) => entry.room === old)
+        for (const mapping of mine) {
+          await this.api.putLiveRoom(session, other.view.id, { channel: mapping.channel, room: fresh, wrap: await wrapRoomKey(other.keys, mapping.channel, raw) })
+          this.roomKeys.set(fresh, raw)
+        }
+        if (mine.length) this.closeLive(other.view.id)
+      }
+      this.roomKeys.delete(old)
+    }
+  }
+
+  /** Closes this device's live notes of a share (they reopen on the new room or key). */
+  private closeLive(shareId: string) {
+    for (const channel of [...(this.liveChannels.get(shareId) ?? [])]) void channel.close()
   }
 
   /** A shared copy of the local text that the live state could not take over (kept next to the note). */
@@ -869,6 +956,9 @@ export class UserShareManager {
   /** Owner: revokes at once. Recipient: leaves the share. */
   async remove(id: string) {
     this.selfInitiated.add(id)
+    // The people who stay get a new room key first, so the one who goes receives nothing they can read afterwards.
+    if (this.session) await this.rotateRoomsBefore(this.session, id).catch(() => undefined)
+    this.closeLive(id)
     await this.api.removeShare(this.requireSession(), id)
     await this.refresh()
   }

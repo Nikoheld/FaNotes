@@ -258,3 +258,14 @@ export const usernameProblem = (name: string): string | null => {
   if (!USERNAME_PATTERN.test(trimmed) || /[._-]{2}/u.test(trimmed)) return 'Erlaubt sind Buchstaben, Ziffern, Punkt, Unterstrich und Bindestrich, ohne doppelte Trennzeichen.'
   return null
 }
+
+// ── Live rooms: one key per shared note for every collaborator ──────────────
+
+/** The room key is wrapped under a share's data key, so each member's own share key opens it and nobody else's. */
+export const wrapRoomKey = async (shareKeys: SyncKeys, channel: string, roomKey: Uint8Array): Promise<{ iv: string; data: string }> => {
+  const blob = await encryptBytes(shareKeys, `liveroom:${channel}`, roomKey)
+  return { iv: toBase64(blob.subarray(0, GCM_IV_BYTES)), data: toBase64(blob.subarray(GCM_IV_BYTES)) }
+}
+
+export const unwrapRoomKey = async (shareKeys: SyncKeys, channel: string, wrap: { iv: string; data: string }): Promise<Uint8Array> =>
+  decryptBytes(shareKeys, `liveroom:${channel}`, new Uint8Array([...fromBase64(wrap.iv), ...fromBase64(wrap.data)]))

@@ -2229,9 +2229,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const ink = liveNote.attachInk<InkStroke>((change) => {
       // The other person's strokes: added, erased, moved. They also go into the undo and redo
       // snapshots, so Ctrl+Z only ever takes back this person's own work.
-      const gone = new Set<InkStroke>(change.removed)
-      const swap = new Map<InkStroke, InkStroke>(change.replaced.map((entry) => [entry.from, entry.to]))
-      const patch = (list: InkStroke[]) => list.filter((stroke) => !gone.has(stroke)).map((stroke) => swap.get(stroke) ?? stroke)
+      const live = liveInkRef.current
+      const froms = change.replaced.map((entry) => entry.from)
+      const patch = (list: InkStroke[]): InkStroke[] => {
+        if (!change.removed.length && !change.replaced.length) return list
+        // The board may hold equal copies of the strokes the other person changed, so they are found by id or content.
+        const gone = live ? live.locate(list, change.removed) : new Set<InkStroke>(change.removed)
+        const moved = live ? live.locate(list, froms) : new Set<InkStroke>(froms)
+        return list.filter((stroke) => !gone.has(stroke)).map((stroke) => {
+          if (!moved.has(stroke)) return stroke
+          const entry = change.replaced.find((candidate) => candidate.from === stroke || (live && live.idOf(candidate.from) !== undefined && live.idOf(candidate.from) === live.idOf(stroke)))
+          return entry ? entry.to : stroke
+        })
+      }
       const next = [...patch(strokesRef.current), ...change.added]
       undoRef.current = undoRef.current.map((snapshot) => [...patch(snapshot), ...change.added])
       redoRef.current = redoRef.current.map((snapshot) => [...patch(snapshot), ...change.added])

@@ -265,4 +265,76 @@ test('the server stores and pushes ciphertext only, and the buffer survives a re
   await new Promise((resolve) => setTimeout(resolve, 1000))
   assert.equal(existsSync(join(dataDirectory, 'user-shares', shareId)), false, 'revoking removes the buffer with the share')
 })
+
+const putRoom = (session, shareId, body) => call('PUT', `/api/v1/sync/shares/${shareId}/live-room`, { session, body })
+const roomWrap = () => ({ iv: b64(12), data: b64(48) })
+const hex32 = () => randomBytes(16).toString('hex')
+
+test('several collaborators in one room: everyone is pushed to, a revoked member receives nothing', async () => {
+  const tag = randomBytes(3).toString('hex')
+  const owner = await register(`ro_${tag}`)
+  const bea = await register(`rb_${tag}`)
+  const cy = await register(`rc_${tag}`)
+  const mk = async (account, name, permission) => {
+    const created = await call('POST', '/api/v1/sync/shares', { session: owner.session, body: shareBody(name, { permission }) })
+    await call('POST', `/api/v1/sync/shares/${created.json.share.id}/respond`, { session: account.session, body: { accept: true } })
+    return created.json.share.id
+  }
+  const shareB = await mk(bea, `RB_${tag}`, 'edit')
+  const shareC = await mk(cy, `RC_${tag}`, 'edit')
+  const perShare = channel()
+  const room = hex32()
+  // The first writer wins for a recipient; the owner may overwrite; a wrap must look like a wrap.
+  assert.equal((await putRoom(bea.session, shareB, { channel: perShare, room, wrap: { iv: 'x', data: 'y' } })).status, 400)
+  assert.equal((await putRoom(bea.session, shareB, { channel: perShare, room, wrap: roomWrap() })).status, 200)
+  assert.equal((await putRoom(bea.session, shareB, { channel: perShare, room: hex32(), wrap: roomWrap() })).status, 409)
+  assert.equal((await putRoom(owner.session, shareC, { channel: perShare, room, wrap: roomWrap() })).status, 200)
+  const mapped = await call('GET', `/api/v1/sync/shares/${shareC}/live-room?channel=${perShare}`, { session: cy.session })
+  assert.equal(mapped.json.room, room)
+  assert.equal((await call('GET', `/api/v1/sync/shares/${shareC}/live-room?channel=${channel()}`, { session: cy.session })).json.room, null)
+  assert.equal((await call('GET', `/api/v1/sync/shares/${shareB}/live-rooms`, { session: bea.session })).json.rooms.length, 1)
+
+  const eventsOwner = await openEvents(owner.session)
+  const eventsBea = await openEvents(bea.session)
+  const eventsCy = await openEvents(cy.session)
+  for (const e of [eventsOwner, eventsBea, eventsCy]) await e.waitFor((event) => event.type === 'ready')
+  // Each posts through their own share; all three see it, and the buffer is one.
+  const first = await live(bea.session, shareB, room, { k: 'u', d: cipher('from bea') })
+  assert.equal(first.status, 200)
+  await eventsOwner.waitFor((event) => event.type === 'live' && event.data.q === first.json.q)
+  await eventsCy.waitFor((event) => event.type === 'live' && event.data.q === first.json.q)
+  const second = await live(cy.session, shareC, room, { k: 'u', d: cipher('from cy') })
+  assert.equal(second.json.q, first.json.q + 1)
+  await eventsBea.waitFor((event) => event.type === 'live' && event.data.q === second.json.q)
+  const third = await live(owner.session, shareB, room, { k: 'p', d: cipher('owner cursor') })
+  assert.equal(third.status, 200)
+  await eventsCy.waitFor((event) => event.type === 'live' && event.data.k === 'p')
+  assert.equal((await fetchLive(owner.session, shareC, room, 0)).json.updates.length, 2)
+
+  // Rotate for the remaining members, then revoke Cy.
+  const fresh = hex32()
+  assert.equal((await putRoom(owner.session, shareB, { channel: perShare, room: fresh, wrap: roomWrap() })).status, 200)
+  await eventsBea.waitFor((event) => event.type === 'live-room')
+  const markCy = eventsCy.events.length
+  assert.equal((await call('DELETE', `/api/v1/sync/shares/${shareC}`, { session: owner.session })).status, 200)
+  const after = await live(bea.session, shareB, fresh, { k: 'u', d: cipher('after revoke') })
+  assert.equal(after.status, 200)
+  await eventsOwner.waitFor((event) => event.type === 'live' && event.data.c === fresh)
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  assert.deepEqual(eventsCy.events.slice(markCy).filter((event) => event.type === 'live'), [], 'the revoked member is pushed nothing')
+  assert.equal((await fetchLive(cy.session, shareC, room, 0)).status, 404)
+  assert.equal((await live(cy.session, shareC, room, { k: 'u', d: cipher('x') })).status, 404)
+  // The old room (still mapped on no share) is gone from the server; the new one holds the new message only.
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  assert.equal(existsSync(join(dataDirectory, 'live-rooms', room)), false)
+  assert.equal((await fetchLive(bea.session, shareB, fresh, 0)).json.updates.length, 1)
+  for (const e of [eventsOwner, eventsBea, eventsCy]) e.close()
+})
+
+test('a read-only member cannot create or change a room', async () => {
+  const { owner, friend, shareId } = await setup('read')
+  assert.equal((await putRoom(friend.session, shareId, { channel: channel(), room: hex32(), wrap: roomWrap() })).status, 403)
+  assert.equal((await putRoom(owner.session, shareId, { channel: channel(), room: hex32(), wrap: roomWrap() })).status, 200)
+})
+
 test.after(() => { server.closeAllConnections?.(); server.close(); rmSync(dataDirectory, { recursive: true, force: true }) })

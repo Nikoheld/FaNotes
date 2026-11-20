@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict'
 import { createServer as createHttpServer } from 'node:http'
 import { Readable } from 'node:stream'
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -467,16 +467,86 @@ try {
       assert.ok(/^[A-Za-z0-9+/]+={0,2}$/u.test(parsed.d), 'bodies are base64 ciphertext')
     }
     await sleep(1000)
-    for (const file of serverFiles(join(dataDirectory, 'user-shares'))) {
+    const stored = [...serverFiles(join(dataDirectory, 'user-shares')), ...(existsSync(join(dataDirectory, 'live-rooms')) ? serverFiles(join(dataDirectory, 'live-rooms')) : [])]
+    for (const file of stored) {
       const bytes = readFileSync(file).toString('latin1')
       for (const secret of secrets) assert.ok(!bytes.includes(secret), `plaintext "${secret}" stored in ${file}`)
       assert.ok(!bytes.includes('Plan'), `a name leaked into ${file}`)
     }
-    assert.ok(serverFiles(join(dataDirectory, 'user-shares')).some((file) => file.endsWith('live.json')), 'the buffer exists and is ciphertext')
+    assert.ok(stored.some((file) => file.endsWith('live.json')), 'the buffer exists and is ciphertext')
     // Another account holding another key cannot open what the relay carries.
     const stray = await crypto.deriveShareKeys(crypto.newShareKey())
     const sample = JSON.parse(liveWire.find((record) => record.body.includes('"k":"u"')).body).d
     await assert.rejects(() => crypto.decryptBytes(stray, `live:${'a'.repeat(32)}:u`, crypto.fromBase64(sample)), /entschlüsselt/u)
+  }
+
+  // ── Three people in one note; revoking one mid-session ───────────────
+  {
+    const GROUP = 'Schule/Gruppe.md'
+    const BEN_G = 'Mit mir geteilt/Anna_F/Gruppe/Gruppe.md'
+    const CLEO_G = 'Mit mir geteilt/Anna_F/Gruppe/Gruppe.md'
+    anna.host.put(GROUP, 'Gruppenarbeit\n')
+    const shareBen = await anna.shares.share({ path: GROUP, kind: 'note', username: 'Ben_K', permission: 'edit' })
+    const shareCleo = await anna.shares.share({ path: GROUP, kind: 'note', username: 'Cleo_R', permission: 'edit' })
+    await until(() => ben.host.text(BEN_G) === 'Gruppenarbeit\n' && cleo.host.text(CLEO_G) === 'Gruppenarbeit\n', 'both recipients have the group note')
+    await until(() => ben.shares.liveInfoFor(BEN_G) && cleo.shares.liveInfoFor(CLEO_G) && anna.shares.liveInfoFor(GROUP), 'all three know the note')
+    const nA = await open(anna, GROUP)
+    const nB = await open(ben, BEN_G)
+    const nC = await open(cleo, CLEO_G)
+    const room = nA.channel.options.channel
+    assert.equal(nB.channel.options.channel, room, 'all collaborators are in one room')
+    assert.equal(nC.channel.options.channel, room)
+    assert.notEqual(nA.info.shareId, nC.info.shareId, 'although they hold different shares')
+    for (const [first, second] of [[nA, nB], [nA, nC]]) assert.equal(first.ytext.toString(), second.ytext.toString())
+
+    // Concurrent typing from all three, with everyone's presence visible to everyone.
+    const tags = ['<anna>', '<ben>', '<cleo>']
+    nA.ytext.insert(0, tags[0]); nB.ytext.insert(nB.ytext.length, tags[1]); nC.ytext.insert(nC.ytext.length, tags[2])
+    await wait(() => [nA, nB, nC].every((note) => tags.every((tag) => note.ytext.toString().includes(tag))) && nA.ytext.toString() === nB.ytext.toString() && nB.ytext.toString() === nC.ytext.toString(), 'three-way concurrent typing converges')
+    nA.setPen({ x: 0.2, y: 0.3, down: true }); nB.setPen({ x: 0.5, y: 0.5, down: false }); nC.setPen({ x: 0.7, y: 0.1, down: true })
+    await wait(() => [nA, nB, nC].every((note) => note.people().length === 2), 'presence shows everyone')
+    assert.deepEqual(nA.people().map((person) => person.name), ['Ben_K', 'Cleo_R'])
+    assert.deepEqual(nC.people().map((person) => person.name), ['Anna_F', 'Ben_K'])
+
+    // The merged text is what each device saves (the app autosaves it).
+    for (const [device, path, note] of [[anna, GROUP, nA], [ben, BEN_G, nB], [cleo, CLEO_G, nC]]) device.host.put(path, note.ytext.toString())
+    const oldKeys = nC.channel.options.keys
+    const oldRoom = room
+    let cleoPushes = 0
+    const routeC = cleo.shares.routeLive.bind(cleo.shares)
+    cleo.shares.routeLive = (event) => { cleoPushes += 1; routeC(event) }
+    const mark = liveWire.length
+
+    // Anna revokes Cleo while all three are in the note.
+    await anna.shares.remove(shareCleo)
+    await until(() => nA.status === 'closed' && nB.status === 'closed', 'the remaining collaborators move to the new room')
+    await until(() => cleo.shares.liveInfoFor(CLEO_G) === null, 'Cleo loses the share')
+    const nA2 = await open(anna, GROUP)
+    const nB2 = await open(ben, BEN_G)
+    assert.notEqual(nA2.channel.options.channel, oldRoom, 'the room was rotated')
+    assert.equal(nB2.channel.options.channel, nA2.channel.options.channel)
+    assert.equal(nA2.ytext.toString(), nB2.ytext.toString())
+    nA2.ytext.insert(0, 'NACH-DEM-WIDERRUF ')
+    nB2.ytext.insert(nB2.ytext.length, ' (Ben auch)')
+    nA2.setPen({ x: 0.1, y: 0.1, down: true })
+    await wait(() => nB2.ytext.toString().includes('NACH-DEM-WIDERRUF') && nA2.ytext.toString().includes('(Ben auch)'), 'two collaborators keep editing')
+    await wait(() => nA2.people().length === 1 && nA2.people()[0].name === 'Ben_K', 'presence after the revoke shows only the remaining people')
+    await sleep(400)
+
+    // The revoked user received nothing, can fetch nothing, and could not decrypt what was sent anyway.
+    const before = cleoPushes
+    assert.equal(cleoPushes, before)
+    assert.equal(nC.ytext.toString().includes('NACH-DEM-WIDERRUF'), false, 'Cleo\'s copy of the note never saw the later edit')
+    await assert.rejects(() => cleo.api.liveFetch(cleo.engine.getSession(), shareCleo, oldRoom, 0), (error) => error.status === 404)
+    await assert.rejects(() => cleo.api.liveSend(cleo.engine.getSession(), shareCleo, oldRoom, { k: 'u', d: Buffer.alloc(40, 2).toString('base64') }), (error) => error.status === 404)
+    const later = liveWire.slice(mark).filter((record) => JSON.parse(record.body).k === 'u' && !record.path.includes(`/shares/${shareCleo}/`))
+    assert.ok(later.length > 0)
+    for (const record of later) {
+      const parsed = JSON.parse(record.body)
+      await assert.rejects(() => crypto.decryptBytes(oldKeys, `live:${oldRoom}:u`, crypto.fromBase64(parsed.d)), /entschlüsselt/u, 'the old room key opens nothing sent after the revoke')
+      assert.ok(!record.path.endsWith(`/live/${oldRoom}`), 'nothing was sent to the old room afterwards')
+    }
+    await nA2.close(); await nB2.close(); await nC.close()
   }
 
   // ── Revoking ends it at once ──────────────────────────────────────

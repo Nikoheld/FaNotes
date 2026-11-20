@@ -11,6 +11,7 @@ on:
       - 'fanotes/scripts/check-account-share.mjs'
       - 'fanotes/scripts/check-live-collab*.mjs'
       - 'fanotes/scripts/live-collab-harness/**'
+      - 'fanotes/scripts/live-ink-harness/**'
       - 'fanotes/src/lib/collab/**'
       - 'fanotes-site/user-shares.mjs'
       - 'fanotes-site/live-relay*.mjs'
@@ -52,6 +53,7 @@ jobs:
       - run: node scripts/check-account-share.mjs
       - run: node scripts/check-live-collab.mjs
       - run: node scripts/check-live-collab-editor.mjs
+      - run: node scripts/check-live-collab-ink.mjs
       - run: node scripts/check-doc-search.mjs
 
   kotlin:
