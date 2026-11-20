@@ -125,8 +125,8 @@ const CHANNELS = Object.freeze({
   requestClose: 'fanotes:request-close',
   sheetZoom: 'fanotes:sheet-zoom',
   captureWindow: 'fanotes:capture-window',
-  setFullscreen: 'fanotes:set-fullscreen',
-  fullscreenChanged: 'fanotes:fullscreen-changed',
+  setFullscreen: 'fanotes:window-fullscreen',
+  fullscreenChanged: 'fanotes:window-fullscreen-changed',
   renderPdfPage: 'fanotes:render-pdf-page',
 })
 

@@ -59,7 +59,7 @@ try {
   assert.match(read('src/components/PdfNoteView.tsx'), /Leere Seiten daneben/)
 
   // 6. Fullscreen wiring.
-  for (const file of ['electron/main.cjs', 'electron/preload.cjs']) assert.match(read(file), /fanotes:set-fullscreen/, file)
+  for (const file of ['electron/main.cjs', 'electron/preload.cjs']) assert.match(read(file), /fanotes:window-fullscreen/, file)
   assert.match(read('electron/main.cjs'), /win\.setFullScreen\(Boolean\(on\)\)/)
   assert.match(read('src/styles.css'), /\.app-shell\.toolbar-fullscreen > \.ribbon/)
   assert.match(app, /else if \(toolbarFullscreen\) setToolbarFullscreenMode\(false\)/)

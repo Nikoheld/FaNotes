@@ -328,8 +328,8 @@ const IPC = Object.freeze({
   cancelClose: 'fanotes:cancel-close',
   requestClose: 'fanotes:request-close',
   captureWindow: 'fanotes:capture-window',
-  setFullscreen: 'fanotes:set-fullscreen',
-  fullscreenChanged: 'fanotes:fullscreen-changed',
+  setFullscreen: 'fanotes:window-fullscreen',
+  fullscreenChanged: 'fanotes:window-fullscreen-changed',
   renderPdfPage: 'fanotes:render-pdf-page',
 })
 
@@ -3312,7 +3312,7 @@ function isTrustedRendererNavigation(navigationUrl) {
 // Channels that only read. Every other channel may change the vault structure
 // (create/rename/move/trash, imports, writes that create files, vault or location
 // changes), so it invalidates the watcher's cached tree walk before and after it runs.
-const READ_ONLY_IPC = /^fanotes:(get-|read-|list-|load-|recognize-|search$|render-|capture-window$|set-fullscreen$|enhanced-math-(get-state|recognize)$|qwen-vision-(get-state|recognize)$|lm-studio-|ai-|update-(get-state|check)$|open-external$|reveal-in-folder$|before-close$|renderer-ready$|story-(read|list)$|export-note-pdf$|vault-changed$)/
+const READ_ONLY_IPC = /^fanotes:(get-|read-|list-|load-|recognize-|search$|render-|capture-window$|window-fullscreen$|enhanced-math-(get-state|recognize)$|qwen-vision-(get-state|recognize)$|lm-studio-|ai-|update-(get-state|check)$|open-external$|reveal-in-folder$|before-close$|renderer-ready$|story-(read|list)$|export-note-pdf$|vault-changed$)/
 function mutatesVaultStructure(channel) {
   return !READ_ONLY_IPC.test(channel)
 }
