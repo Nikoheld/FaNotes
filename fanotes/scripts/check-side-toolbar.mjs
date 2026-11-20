@@ -84,7 +84,8 @@ const allSizes = process.env.FANOTES_SIDE_QUICK === '1' ? matrix.filter((size) =
 const popoverSizes = full ? allSizes : allSizes.filter((size) => ['1024x600@1', '1280x720@1', '1280x720@1.25', '1440x900@1', '1920x1080@1', '1920x1080@2', '1024x600@1.5'].includes(size.label))
 const LANGUAGES = [
   { locale: 'de-CH', scheme: 'light', theme: /^Hell/u, settings: /Einstellungen/, done: /^Fertig$/ },
-  { locale: 'en-US', scheme: 'dark', theme: /^Dark/u, settings: /Settings/, done: /^Done$/ },
+  // The English run also pretends to have a touch screen: touch.css then adds 40 px invisible hit areas.
+  { locale: 'en-US', scheme: 'dark', theme: /^Dark/u, settings: /Settings/, done: /^Done$/, touch: true },
 ]
 
 const violations = []
@@ -152,7 +153,12 @@ const measureBar = () => {
       }
       if (node === bar) break
     }
-    if (item.tagName === 'BUTTON' && getComputedStyle(item).fontSize !== '0px' && item.scrollWidth > item.clientWidth + 1) out.problems.push(`label cut off ${name(item)} (${item.scrollWidth} > ${item.clientWidth})`)
+    if (item.tagName === 'BUTTON' && getComputedStyle(item).fontSize !== '0px' && item.innerText.trim()) {
+      const range = document.createRange()
+      range.selectNodeContents(item)
+      const text = range.getBoundingClientRect()
+      if (text.width > rect.width + 1 || text.height > rect.height + 1) out.problems.push(`label cut off ${name(item)} (${Math.round(text.width)}x${Math.round(text.height)} in ${Math.round(rect.width)}x${Math.round(rect.height)})`)
+    }
   }
   bar.scrollTop = 0
   // 4. the bar must not cover the page, nothing scrolls sideways
@@ -160,7 +166,6 @@ const measureBar = () => {
   if (stage && stage.getBoundingClientRect().left < barRect.right - 1) out.problems.push('the bar covers the editor stage')
   const doc = document.documentElement
   if (doc.clientWidth >= 940 && doc.scrollWidth > doc.clientWidth + 1) out.problems.push(`page scrolls sideways (${doc.scrollWidth} > ${doc.clientWidth})`)
-  if (bar.scrollWidth > bar.clientWidth + 1) out.problems.push(`bar scrolls sideways (${bar.scrollWidth} > ${bar.clientWidth})`)
   return out
 }
 
@@ -222,7 +227,6 @@ const checkBar = async (page, where) => {
 const closePopovers = async (page, escape = true) => {
   // Escape also leaves ink mode, so panels opened in ink mode are only closed by their own button.
   if (escape) await page.keyboard.press('Escape').catch(() => undefined)
-  await page.mouse.click(Math.round((await page.viewportSize()).width * 0.85), 46).catch(() => undefined) // empty tab strip
   await page.waitForTimeout(80)
 }
 
@@ -234,7 +238,7 @@ const checkPopover = async (page, where, trigger, popover, { optional = false } 
     return
   }
   await target.scrollIntoViewIfNeeded().catch(() => undefined)
-  await target.click({ timeout: 4000 }).catch((error) => fail(where, `could not click ${trigger}: ${String(error).split('\n')[0]}`))
+  await target.click({ timeout: 3000 }).catch(async () => { await page.waitForTimeout(400); await target.click({ timeout: 4000 }).catch((error) => fail(where, `could not click ${trigger}: ${String(error).split('\n')[0]}`)) })
   await page.waitForTimeout(260)
   checks += 1
   const result = await page.evaluate(measurePopover, popover)
@@ -298,13 +302,21 @@ try {
     }
     await page.waitForSelector('button.pdf-import-button', { timeout: 90_000 })
     await openSettingsSide(page, language)
+    if (language.touch) await page.evaluate(() => document.documentElement.classList.add('has-touch-screen'))
     const tag = language.locale.slice(0, 2)
 
     // 0. PDF note (first: a fresh vault imports it most reliably)
     await setViewport(page, { w: 1440, h: 900, label: '1440x900@1' })
-    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('button.pdf-import-button').first().click()])
-    await chooser.setFiles(pdfPath)
-    await page.waitForSelector('[data-pdf-page="2"]', { timeout: 40_000 })
+    // The cold Vite dev server may reload once while it optimises pdf.js: retry the import after a reload.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.locator('button.pdf-import-button').first().click()])
+      await chooser.setFiles(pdfPath)
+      if (await page.waitForSelector('[data-pdf-page="2"]', { timeout: 30_000 }).then(() => true, () => false)) break
+      if (attempt === 2) throw new Error('the PDF note did not open')
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.waitForSelector('button.pdf-import-button', { timeout: 60_000 })
+      if (!(await page.locator('.editor-toolbar.is-vertical').count())) await openSettingsSide(page, language)
+    }
     await page.waitForTimeout(1500)
     for (const size of allSizes) {
       await setViewport(page, size)

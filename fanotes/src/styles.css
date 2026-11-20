@@ -4855,6 +4855,8 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
    Without a vertical rail the anchor is missing and the fallbacks give the old positions. */
 body .lw-figure-library.is-viewport-chrome { left: calc(anchor(--side-toolbar right, 6px) + 8px); right: 14px; width: auto; max-width: 360px; margin-right: auto; }
 body .lw-art-studio.is-viewport-chrome { left: calc(anchor(--side-toolbar right, 6px) + 8px); width: auto; max-width: 900px; }
+body .lw-drafting-panel.is-viewport-chrome { left: calc(anchor(--side-toolbar right, 6px) + 8px); width: auto; max-width: 420px; margin-left: auto; }
+body .lw-conversion-panel.is-viewport-chrome { left: calc(anchor(--side-toolbar right, 6px) + 8px); width: auto; max-width: 370px; margin-left: auto; }
 body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar right, 0px) + 8px), calc(50% - min(210px, calc(50vw - 14px)))); transform: none; }
 /* Text-box toolbar: same look as the note formatting bar and the pen strip. */
 .note-text-field-toolbar { flex-wrap: nowrap; max-width: 100%; overflow: auto hidden; scrollbar-width: none; }
