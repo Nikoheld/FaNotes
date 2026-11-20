@@ -10,7 +10,6 @@ import type { FaNotesApi, VaultEntry, WorksheetDocument } from '../../types'
 import { stripFamdPayload } from '../famd'
 import { enqueuePdfRender, loadVaultPdfBytes, MAX_PDF_NOTE_PAGES, openPdfDocument } from '../pdfDocument'
 import { PDF_OCR_MAX_PAGES, PDF_OCR_MIN_TEXT, collapsedPdfText, pdfByteStamp, sanitizePdfOcrCache } from '../pdfOcr'
-import { renderPdfPageForOcr } from '../pdfOcrRun'
 import type { IndexUnit, UnitKind } from './docIndex'
 import type { DocExtractor, DocSource, ExtractContext, ExtractOutcome } from './indexer'
 import { letterCount, recognizeOriented, type RecognizeLine } from './ocrOrientation'
@@ -318,6 +317,8 @@ export const createBrowserExtractor = (deps: Deps): DocExtractor => {
             const bitmap = await enqueuePdfRender(async () => {
               const page = await pdf!.getPage(pageNumber)
               try {
+                // Loaded on the first scanned page: keeps pdf.js and the OCR glue out of startup.
+                const { renderPdfPageForOcr } = await import('../pdfOcrRun')
                 return await renderPdfPageForOcr(page)
               } finally {
                 page.cleanup?.()

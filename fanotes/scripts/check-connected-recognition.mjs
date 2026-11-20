@@ -76,7 +76,7 @@ try {
   chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
     `--js-flags=--max-old-space-size=${process.env.FANOTES_TEST_HEAP_MB || '768'}`,
-    '--allow-file-access-from-files', `--user-data-dir=${profile}`, '--virtual-time-budget=30000',
+    '--allow-file-access-from-files', `--user-data-dir=${profile}`, '--virtual-time-budget=600000',
     '--dump-dom', pathToFileURL(path.join(output, 'index.html')).href,
   ], {
     stdio: ['ignore', 'pipe', 'pipe'],

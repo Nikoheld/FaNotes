@@ -23,7 +23,7 @@ import {
   setInkLexicon,
   setInkPersonalWords,
 } from './recogWasm/fanotes_recog_wasm.js'
-import { ensureRecogWasm } from './recogCore'
+import { ensureRecogWasm, loadRecogWasm } from './recogCore'
 import { effectiveOcrThreadCount } from './resourceLimits'
 import {
   INK_RETRY_VARIANTS,
@@ -385,7 +385,7 @@ const readManifest = async (root: string): Promise<InkManifest> => {
 const loadEngine = () => {
   enginePromise ??= (async () => {
     requireNative()
-    ensureRecogWasm()
+    await loadRecogWasm()
     const root = assetRoot()
     const manifest = await readManifest(root)
     return {

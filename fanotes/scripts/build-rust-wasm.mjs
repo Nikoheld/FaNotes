@@ -1,4 +1,5 @@
-// Rebuilds the embedded wasm modules from the Rust workspace at the repo root.
+// Rebuilds the wasm modules from the Rust workspace at the repo root. The recognition module is
+// written as a `.wasm` asset; the others are embedded as base64 `bytes.ts`.
 //
 //   node scripts/build-rust-wasm.mjs
 //
@@ -33,7 +34,9 @@ const allModules = [
     crate: 'fanotes-recog-wasm',
     artifact: 'fanotes_recog_wasm',
     dir: join(appRoot, 'src', 'lib', 'recogWasm'),
-    constant: 'RECOG_WASM_BASE64',
+    // Shipped as a binary asset next to the glue and fetched on first use (see recogCore.ts),
+    // not as a base64 string in the startup bundle.
+    asset: true,
     bindgenFlags: ['--remove-name-section', '--remove-producers-section'],
   },
   {
@@ -101,6 +104,11 @@ for (const module of modules) {
       if (!before || !before.equals(readFileSync(target))) changed.push(glue)
     }
     const bytes = readFileSync(join(out, `${module.artifact}_bg.wasm`))
+    if (module.asset) {
+      if (writeIfChanged(join(module.dir, `${module.artifact}_bg.wasm`), bytes)) changed.push(`${module.artifact}_bg.wasm`)
+      console.log(`${module.crate}: ${bytes.length} bytes${changed.length ? `, updated ${changed.join(', ')}` : ', unchanged'}`)
+      continue
+    }
     const source = `/* Generated from ${module.crate}. Do not edit. */\nexport const ${module.constant} = ${JSON.stringify(bytes.toString('base64'))}\n`
     if (writeIfChanged(join(module.dir, 'bytes.ts'), source)) changed.push('bytes.ts')
     console.log(`${module.crate}: ${bytes.length} bytes${changed.length ? `, updated ${changed.join(', ')}` : ', unchanged'}`)

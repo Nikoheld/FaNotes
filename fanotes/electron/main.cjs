@@ -15,6 +15,7 @@ const {
   configureLeanChromiumStartup,
   configureLinuxGraphics,
   configureLinuxInputPlatform,
+  refreshHyprlandMonitorScale,
   linuxWindowFrameOptions,
   readStartupResourceLimits,
 } = require('./startup-preflight.cjs')
@@ -85,8 +86,13 @@ const {
   numberedName,
 } = require('./note-companions.cjs')
 const { packInk: packDrawingInk } = require('./famdPack.mjs')
-const pdfOcrStore = require('./pdf-ocr.cjs')
-const pageTextStore = require('./page-text.cjs')
+// Only the PDF OCR / page-text IPC paths use these two stores: load them on first use.
+const lazyModule = (load) => {
+  let loaded = null
+  return new Proxy({}, { get: (_target, key) => (loaded ??= load())[key] })
+}
+const pdfOcrStore = lazyModule(() => require('./pdf-ocr.cjs'))
+const pageTextStore = lazyModule(() => require('./page-text.cjs'))
 const {
   composeFile: composeFamdOffThread,
   inspectDrawing: inspectDrawingOffThread,
@@ -168,11 +174,24 @@ if (linuxInputStartup.ozone === 'x11') {
       ? `FaNotes: Linux Ozone X11 plus HiDPI-Skalierung ${linuxInputStartup.scaleFactor} aus ${linuxInputStartup.scaleSource} (Hyprland force_zero_scaling).`
       : 'FaNotes: Linux Ozone X11, damit Trackpad und Stift denselben Seat teilen.',
   )
-  if (!linuxInputStartup.hyprlandZeroScaling && linuxInputStartup.monitorScale && linuxInputStartup.monitorScale !== 1) {
+}
+/**
+ * Asks Hyprland for the focused monitor's scale without blocking startup (async, after `ready`),
+ * keeps the cached scale for the next launch and logs the blur / stale-scale hints.
+ */
+const refreshLinuxMonitorScale = async () => {
+  if (linuxInputStartup.ozone !== 'x11') return
+  const { monitorScale, stale } = await refreshHyprlandMonitorScale(linuxInputStartup).catch(() => ({ monitorScale: null, stale: false }))
+  if (!monitorScale) return
+  linuxInputStartup.monitorScale = monitorScale
+  if (!linuxInputStartup.hyprlandZeroScaling && monitorScale !== 1) {
     console.info(
-      `FaNotes: Der Hyprland-Monitor skaliert mit ${linuxInputStartup.monitorScale}; das XWayland-Fenster wird hochskaliert und wirkt unscharf. `
+      `FaNotes: Der Hyprland-Monitor skaliert mit ${monitorScale}; das XWayland-Fenster wird hochskaliert und wirkt unscharf. `
       + 'Scharf wird es mit `xwayland { force_zero_scaling = true }` in der hyprland.conf — FaNotes übernimmt dann die Monitor-Skalierung selbst.',
     )
+  }
+  if (stale) {
+    console.info(`FaNotes: Die Monitor-Skalierung hat sich auf ${monitorScale} geändert (Start mit ${linuxInputStartup.scaleFactor}); sie gilt ab dem nächsten Start.`)
   }
 }
 const singletonCleanup = cleanupStaleSingletonLocks(app.getPath('userData'))
@@ -5942,6 +5961,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   app.whenReady().then(async () => {
+    void refreshLinuxMonitorScale()
     pendingShareOpenId = pendingShareOpenId || shareOpenIdFromArgv(process.argv)
     try { app.setAsDefaultProtocolClient('fanotes') } catch { /* the installed package registers the protocol on release */ }
     installModelProtocol()
