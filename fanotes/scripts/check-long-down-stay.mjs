@@ -108,7 +108,7 @@ const runOnce = () => {
   assert.match(noteCanvas, /export const markdownAndInkAfterGrowSequence/)
   assert.match(board, /originX: sourceOriginXRef\.current/)
   assert.match(board, /originY: sourceOriginYRef\.current/)
-  assert.match(board, /growPageFromMark\(/)
+  assert.match(board, /growPage(?:FromMark|AroundLiveMark)\(/)
   assert.match(paperGrow, /layoutGrowAlreadyInSource/)
   assert.match(paperGrow, /layoutGrowAlreadyInSource\(input\.prevLayoutH/)
 

@@ -211,7 +211,7 @@ const runOnce = () => {
   const paperViewLib = readFileSync(join(root, 'src/lib/paperView.ts'), 'utf8')
   const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
   assert.match(board, /from '\.\.\/lib\/noteCanvas'/)
-  assert.match(board, /growPageFromMark/)
+  assert.match(board, /growPage(?:FromMark|AroundLiveMark)/)
   assert.match(board, /keepMarkOnPage/)
   assert.match(board, /mapClientToPage/)
   assert.match(paperView, /from '\.\.\/lib\/noteCanvas'/)

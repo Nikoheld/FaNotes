@@ -5,6 +5,14 @@ export const INK_LEAP_PAGE_RATIO = 0.42
 export const INK_JUMP_DY = 0.08
 export const INK_JUMP_HYPOT = 0.12
 export const INK_FIRST_POINT_RESTART_Y = 0.05
+/**
+ * How far one sample must fall into the top band to count as a leap there.
+ * A pen writing up into the band moves a few pixels per sample; a ghost lands
+ * from far below. Without this every sample of a stroke that crossed the band
+ * edge was dropped and the ink drew a straight line to wherever the pen left
+ * the band (on a long note or PDF that edge is in the middle of the writing).
+ */
+export const INK_TOP_BAND_LEAP_DY = 0.03
 
 export type PaperSurfaceBox = {
   left: number
@@ -164,7 +172,11 @@ export const isInkCorridorLeap = (
   _sourceHeight = 1,
 ) => {
   if (!previous) return false
-  if (previous.y >= INK_FIRST_POINT_RESTART_Y && next.y < INK_FIRST_POINT_RESTART_Y) return true
+  if (
+    previous.y >= INK_FIRST_POINT_RESTART_Y
+    && next.y < INK_FIRST_POINT_RESTART_Y
+    && previous.y - next.y > INK_TOP_BAND_LEAP_DY
+  ) return true
   // Right-half writing: a sample slammed into the top band is a leap even
   // when dy is just under INK_JUMP_DY (short strokes near y≈0.08).
   if (previous.x >= 0.5 && next.x >= 0.45 && next.y < INK_FIRST_POINT_RESTART_Y && previous.y >= 0.08) return true

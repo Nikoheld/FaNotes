@@ -432,6 +432,31 @@ export const textAbsorbTargetHeight = (
   return textGrowPageHeight(painted, source)
 }
 
+/**
+ * Grow the write page around a pen mark given in the current page box (0–1 of
+ * the sheet as laid out now, every pad already part of it).
+ *
+ * `growPageFromMark` subtracts the pads already applied (`originX/Y`) from the
+ * pad it wants. That holds for a mark measured from the first page's corner,
+ * not for a live mark: once the page had grown up or left, the pen had to go
+ * past the edge by all earlier pads before the page grew again, and ink in
+ * between landed outside the sheet, where no canvas paints it.
+ */
+export const growPageAroundLiveMark = (
+  page: { width: number; height: number },
+  mark: { x?: number; y?: number },
+  painted: { width?: number; height?: number },
+  minEdge = true,
+) => {
+  if (minEdge) return growPageFromMark({ width: page.width, height: page.height, originX: 0, originY: 0 }, mark, painted)
+  // No pad above or left of the page (a PDF: its pages do not move with the
+  // ink's origin, so a pad slid the whole document under the pen). A mark in
+  // the near half never grows the far edge, so lifting it there keeps only
+  // the bottom/right growth.
+  const far = (value: number | undefined) => (value === undefined || !Number.isFinite(value) ? value : Math.max(value, 0.5))
+  return growPageFromMark({ width: page.width, height: page.height, originX: 0, originY: 0 }, { x: far(mark.x), y: far(mark.y) }, painted)
+}
+
 export type WritePageExtent = {
   width: number
   height: number
@@ -508,6 +533,8 @@ export type LiveWriteStrokeInput<T extends { x: number; y: number }> = {
   existingCount: number
   pendingStale?: PendingStaleLayoutMap | null
   stayPut?: StayPutState
+  /** False on a PDF: the page may grow down and right, never up or left. */
+  minEdgeGrow?: boolean
 }
 
 /**
@@ -524,16 +551,7 @@ export const continueLiveWriteStroke = <T extends { x: number; y: number }>(
   }
   const lifted = overlaySampleOntoWritePage(input.current, input.page, input.painted)
   const current = remapSampleThroughStaleLayout(lifted, pendingIn, input.painted)
-  const grown = growPageFromMark(
-    {
-      width: input.page.width,
-      height: input.page.height,
-      originX: input.page.originX,
-      originY: input.page.originY,
-    },
-    current,
-    writePainted,
-  )
+  const grown = growPageAroundLiveMark(input.page, current, writePainted, input.minEdgeGrow !== false)
   const grew = grown.height > input.page.height
     || grown.width > input.page.width
     || grown.padX > 0

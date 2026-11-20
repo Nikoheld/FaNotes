@@ -1,0 +1,66 @@
+name: Ink stays put
+
+# Handwriting must stay where it was written and must not flicker. Drives the
+# web build in headless Chrome with pen, mouse and touch input on a Markdown
+# note, a PDF note, a worksheet and an ink-only page, and checks every frame
+# (fanotes/scripts/check-ink-stable.mjs), plus the pen-sample and page-grow
+# logic checks next to it. Never builds or publishes a release.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/src/**'
+      - 'fanotes/index.html'
+      - 'fanotes/vite.config.ts'
+      - 'fanotes/package-lock.json'
+      - 'src/**'
+      - 'package-lock.json'
+      - 'fanotes/scripts/check-ink-stable.mjs'
+      - '.github/workflows/ink-stable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: fanotes
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            fanotes/package-lock.json
+      - name: Root dependencies (the app imports shared code from ../src)
+        working-directory: .
+        run: npm ci --no-audit --no-fund --ignore-scripts
+      - run: npm ci --no-audit --no-fund
+      - name: Pen sample and page grow logic
+        run: |
+          node scripts/check-jump-filter.mjs
+          node scripts/check-bug-pen-line-up.mjs
+          node scripts/check-midstroke-grow.mjs
+          node scripts/check-stay-put.mjs
+          node scripts/check-note-canvas.mjs
+      - name: Ink stays put (headless Chrome, every frame)
+        env:
+          FANOTES_CHROMIUM: /usr/bin/google-chrome
+          INK_STABLE_SHOTS: ${{ runner.temp }}/ink-stable-shots
+        run: |
+          mkdir -p "$INK_STABLE_SHOTS"
+          npm run check:ink-stable
+      - name: Screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ink-stable-shots
+          path: ${{ runner.temp }}/ink-stable-shots
+          if-no-files-found: ignore

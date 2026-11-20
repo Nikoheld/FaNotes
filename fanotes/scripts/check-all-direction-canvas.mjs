@@ -89,7 +89,7 @@ const runOnce = () => {
   assert.match(planeBlock, /min-height:\s*calc\(100% \* var\(--view-zoom\)\)/)
   assert.match(planeBlock, /width:\s*max\(calc\(100% \* var\(--view-zoom\)\), max-content\)/)
   const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
-  assert.match(board, /growPageFromMark/)
+  assert.match(board, /growPage(?:FromMark|AroundLiveMark)/)
   assert.match(board, /keepMarkOnPage/)
   assert.match(board, /SCROLL_ROOM/)
 

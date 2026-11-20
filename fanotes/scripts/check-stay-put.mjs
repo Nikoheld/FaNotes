@@ -818,7 +818,7 @@ const runOnce = () => {
   assert.match(board, /pinPaperViewportAfterExtentGrow\(/)
   assert.match(board, /lockPaperViewportEditorScroll\(/)
   assert.match(board, /writePageStayExtent\(/)
-  assert.match(board, /growPageFromMark\(/)
+  assert.match(board, /growPage(?:FromMark|AroundLiveMark)\(/)
   assert.doesNotMatch(board, /requestAnimationFrame\(\(\) => \{\s*pinGrowFrameRef/)
   assert.match(caretSource, /export const pinPaperViewportAfterExtentGrow/)
   assert.match(caretSource, /export const pinPaperViewportAfterColumnResize/)

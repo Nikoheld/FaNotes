@@ -100,7 +100,7 @@ try {
   const paperView = readFileSync(join(root, 'src/components/PaperView.tsx'), 'utf8')
   const paperViewLib = readFileSync(join(root, 'src/lib/paperView.ts'), 'utf8')
   assert.match(board, /writeExtentFromContent/)
-  assert.match(board, /growPageFromMark/)
+  assert.match(board, /growPage(?:FromMark|AroundLiveMark)/)
   assert.match(board, /clearInkExtentStyles/)
   assert.match(paperViewLib, /paperScrollBoundsFromVisualRect/)
   assert.match(paperView, /paper-sheet-plane/)
