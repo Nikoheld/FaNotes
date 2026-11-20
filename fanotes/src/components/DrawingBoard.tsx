@@ -300,6 +300,7 @@ import {
   writeExtentFromContent,
 } from '../lib/noteCanvas'
 import { growPageFromMark, keepMarkOnPage } from '../lib/paperCore'
+import { inkBitmapCache, inkModelSignature } from '../lib/inkBitmapCache'
 import { IDENTITY_AXIS, inkAxisMapOf, keepMarkOnPageAxis, planHeldInkRemap, type InkAxisMap, type InkBitmapGeometry } from '../lib/inkGrowRemap'
 import { viewportRasterEnabled } from '../lib/viewportRasterFlag'
 import {
@@ -2790,6 +2791,39 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       && inkPageIsHeavy(strokesRef.current)
       ? planHeldInkRemap(growRemap.from, { width: pixelWidth, height: pixelHeight, virtualHeight, topPx }, growRemap.x, growRemap.y)
       : null
+    // A page this board's drawing showed before a note switch, unchanged:
+    // its bitmap comes back from the cache instead of a repaint
+    // (lib/inkBitmapCache). Cheap checks first; the ink signature last.
+    const cachedId = inline && !inkHydratingRef.current ? drawingIdRef.current || loadedDrawingIdRef.current : null
+    const cachedCandidate = cachedId
+      && !samePaint
+      && !shift
+      && !erasePatch
+      && !eraseOutside
+      && !growPlan
+      && !activeStrokeRef.current
+      ? inkBitmapCache.peek(cachedId, contentKey, topPx)
+      : null
+    const cachedInk = cachedCandidate
+      && cachedCandidate.bitmap.width === pixelWidth
+      && cachedCandidate.bitmap.height === pixelHeight
+      && cachedCandidate.signature === inkModelSignature(strokesRef.current)
+      ? cachedCandidate
+      : null
+    const restoreCachedInk = (entry: NonNullable<typeof cachedInk>) => {
+      cancelInkPaint()
+      // Resize and copy in one task, like the heavy job's swap: no frame shows a blank page.
+      if (!swapInkBuffer(committedCanvas, entry.bitmap)) return false
+      // The entry stays: an open passes through a few layouts, and a later
+      // redraw at this same page may take it again. The board gets its own
+      // marker mask, since new marker ink writes into it.
+      const coverage = entry.coverage as MarkerCoverage | null
+      markerCoverageRef.current = coverage ? { ...coverage, mask: coverage.mask.slice() } : null
+      committedBitmapRef.current = { key: contentKey, topPx }
+      committedCanvasDirtyRef.current = false
+      markInkPainted()
+      return true
+    }
     const remapHeldInk = (plan: NonNullable<typeof growPlan>) => {
       const buffer = inkBufferRef.current?.acquire(pixelWidth, pixelHeight) ?? null
       const context = buffer?.getContext('2d') ?? null
@@ -2896,6 +2930,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       markInkPainted()
     } else if (growPlan && remapHeldInk(growPlan)) {
       // The page grew under the pen: the held picture was moved by one copy.
+    } else if (cachedInk && restoreCachedInk(cachedInk)) {
+      // The same page as before the note switch: shown from the cache.
     } else if (heavyRepaint) {
       cancelInkPaint()
       const strokes = strokesRef.current
@@ -3149,6 +3185,54 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     cancelInkPaint()
     inkBufferRef.current?.release()
   }, [cancelInkPaint])
+
+  // A closing board leaves its finished page for the next board of the same
+  // drawing (a note switch back): only a sealed, clean, idle heavy page.
+  const snapshotCommittedInkRef = useRef<(canvas: HTMLCanvasElement | null) => void>(() => {})
+  snapshotCommittedInkRef.current = (canvas) => {
+    const drawing = drawingIdRef.current || loadedDrawingIdRef.current
+    const held = committedBitmapRef.current
+    if (!inline || !canvas || !drawing || !held || held.provisional) return
+    if (
+      viewportRasterRef.current
+      || dirtyRef.current
+      || committedCanvasDirtyRef.current
+      || inkPaintJobRef.current
+      || activeStrokeRef.current
+      || liveCanvasHasInkRef.current
+      || inkHydratingRef.current
+      || inkLoadFailedRef.current
+    ) return
+    if (!canvas.width || !canvas.height || typeof createImageBitmap !== 'function') return
+    if (!inkPageIsHeavy(strokesRef.current)) return
+    const signature = inkModelSignature(strokesRef.current)
+    const coverage = markerCoverageRef.current
+    const generation = inkBitmapCache.generation()
+    // The copy is taken now (the bitmap is read at the call); only the promise settles later.
+    void createImageBitmap(canvas).then((bitmap) => {
+      inkBitmapCache.put({
+        drawingId: drawing,
+        signature,
+        contentKey: held.key,
+        topPx: held.topPx,
+        bitmap,
+        coverage,
+        coverageBytes: coverage?.mask.byteLength ?? 0,
+      }, generation)
+    }, () => {})
+  }
+  useEffect(() => {
+    // Refs are detached before a passive cleanup runs: hold the element itself.
+    const canvas = committedCanvasRef.current
+    return () => snapshotCommittedInkRef.current(canvas)
+  }, [])
+  const cachePaperStyleRef = useRef(paperStyle)
+  useEffect(() => {
+    // Cached pages were painted for the old paper.
+    if (cachePaperStyleRef.current === paperStyle) return
+    cachePaperStyleRef.current = paperStyle
+    inkBitmapCache.clear()
+  }, [paperStyle])
 
   useEffect(() => {
     if (!initialDrawingJson) return
@@ -4417,6 +4501,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (initial.zoom > 1.02) settleZoomedInk()
     const unsubscribe = paperView.subscribe((view) => {
       const zoomed = view.zoom !== viewZoomRef.current
+      // Cached pages of other notes were painted for the old zoom.
+      if (zoomed) inkBitmapCache.clear()
       adopt(view)
       if (zoomed) zoomInFlightUntilRef.current = performance.now() + ZOOM_SETTLE_MS
       if (zoomSettleTimerRef.current !== null) window.clearTimeout(zoomSettleTimerRef.current)

@@ -95,6 +95,58 @@ const near = remap.planHeldInkRemap({ width: 1740, height: 2352, virtualHeight: 
 assert.ok(near && near.unit)
 console.log(`remap math ok (${compared} wasm comparisons)`)
 
+// ---- Part 1b: the committed-bitmap cache of a note switch -----------------
+const cacheLib = await server.ssrLoadModule('/src/lib/inkBitmapCache.ts')
+let env = 'dpr1:light'
+const closed = []
+const bitmap = (name, width = 100, height = 100) => ({ name, width, height, close() { closed.push(name) } })
+const entry = (id, extra = {}) => ({ drawingId: id, signature: 's', contentKey: 'k', topPx: 0, bitmap: bitmap(id), coverage: null, coverageBytes: 0, ...extra })
+const cache = cacheLib.createInkBitmapCache({ maxEntries: 3, maxBytes: 200_000, environment: () => env, enabled: true })
+for (const id of ['a', 'b', 'c']) assert.equal(cache.put(entry(id)), true)
+assert.equal(cache.stats().entries, 3)
+assert.ok(cache.peek('a', 'k', 0))
+cache.put(entry('d'))
+assert.equal(cache.peek('a', 'k', 0), null, 'the least recently stored page leaves first')
+assert.deepEqual(closed, ['a'], 'and its bitmap is closed')
+cache.put(entry('b', { bitmap: bitmap('b2') }))
+assert.deepEqual(closed, ['a', 'b'], 'a newer copy of the same page replaces the old one')
+assert.equal(cache.stats().entries, 3)
+assert.equal(cache.put(entry('huge', { bitmap: bitmap('huge', 300, 300) })), false, 'a page above half the budget is not kept')
+assert.equal(cache.put(entry('e', { coverageBytes: 50_000 })), true)
+assert.ok(cache.stats().bytes <= 200_000, 'the byte budget holds (marker masks count)')
+// One page per drawing: another layout of the same page replaces it.
+cache.put(entry('e', { contentKey: 'k3', bitmap: bitmap('e-k3') }))
+assert.equal(cache.peek('e', 'k', 0), null, 'the older layout of that page is gone')
+assert.ok(cache.peek('e', 'k3', 0))
+assert.equal(cache.peek('e', 'k3', 8), null, 'another slice top is a miss')
+const taken = cache.take(cache.peek('e', 'k3', 0))
+assert.equal(taken.contentKey, 'k3')
+assert.equal(cache.peek('e', 'k3', 0), null, 'a taken page belongs to the board')
+const startedIn = cache.generation()
+cache.clear()
+assert.equal(cache.put(entry('late'), startedIn), false, 'a snapshot started before a clear is not stored')
+assert.equal(cache.put(entry('f')), true)
+env = 'dpr2:light'
+assert.equal(cache.peek('f', 'k', 0), null, 'a device pixel ratio change drops everything')
+cache.put(entry('g'))
+env = 'dpr2:dark'
+assert.equal(cache.peek('g', 'k', 0), null, 'and so does a theme change')
+const off = cacheLib.createInkBitmapCache({ enabled: false, environment: () => env })
+assert.equal(off.put(entry('x')), false, 'the kill switch keeps nothing')
+assert.equal(off.peek('x', 'k', 0), null)
+// The ink signature: same content, same signature, whatever the field order; any change differs.
+const sig = cacheLib.inkModelSignature
+const strokeA = { color: '#202333', baseWidth: 3.5, brush: 'fineliner', points: [{ x: 0.1, y: 0.2, t: 0, pressure: 0.5, tiltX: 0, tiltY: 0 }, { x: 0.3, y: 0.25, t: 8, pressure: 0.6, tiltX: 0, tiltY: 0 }] }
+const strokeB = { points: strokeA.points.map((p) => ({ ...p })), brush: 'fineliner', baseWidth: 3.5, color: '#202333', symbolId: undefined }
+assert.equal(sig([strokeA]), sig([strokeB]), 'field order and undefined fields do not matter')
+assert.notEqual(sig([strokeA]), sig([{ ...strokeB, color: '#202334' }]))
+assert.notEqual(sig([strokeA]), sig([{ ...strokeB, opacity: 0.5 }]))
+assert.notEqual(sig([strokeA]), sig([{ ...strokeB, figureParams: { a: 1 } }]))
+assert.notEqual(sig([strokeA]), sig([{ ...strokeB, points: [strokeB.points[0], { ...strokeB.points[1], x: 0.30000000000000004 }] }]), 'one ulp of one point is a different page')
+assert.notEqual(sig([strokeA]), sig([{ ...strokeB, points: [strokeB.points[0], { ...strokeB.points[1], pressure: 0.61 }] }]))
+assert.notEqual(sig([strokeA, strokeA]), sig([strokeA]))
+console.log('bitmap cache ok')
+
 // ---- Part 2: source guards -----------------------------------------------
 const board = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
 const extentStart = board.indexOf('const setPageExtent = useCallback(')
@@ -102,6 +154,10 @@ const extent = board.slice(extentStart, board.indexOf('\n  }, [', extentStart))
 assert.ok(extentStart > 0 && extent.length > 0)
 assert.doesNotMatch(extent, /forEachTrackedPoint\(\(point\) => \{\s*point\.[xy] = keepMarkOnPage\(/, 'no wasm call per point in a page grow')
 assert.match(extent, /growRemapRef\.current = activeStrokeRef\.current/, 'a grow under the pen hands the redraw its remap')
+assert.match(board, /\} else if \(cachedInk && restoreCachedInk\(cachedInk\)\) \{/, 'a note switch back may take the cached page')
+assert.match(board, /cachedCandidate\.signature === inkModelSignature\(strokesRef\.current\)/, 'only for the same ink')
+assert.match(board, /if \(zoomed\) inkBitmapCache\.clear\(\)/, 'a zoom drops the cache')
+assert.match(board, /cachePaperStyleRef\.current = paperStyle\s*inkBitmapCache\.clear\(\)/, 'a paper change drops the cache')
 const redrawStart = board.indexOf('const redraw = useCallback(')
 const redraw = board.slice(redrawStart, board.indexOf('\n  }, [', redrawStart))
 assert.match(redraw, /const growRemap = growRemapRef\.current\s*growRemapRef\.current = null/, 'each remap is used by one redraw only')
@@ -198,6 +254,12 @@ try {
     })
     db.close()
   }, [files, drawings])
+  // Phase A runs with the bitmap cache off (its kill switch), so a switch back
+  // paints the page from the model; phase B turns it on after a reload.
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('check-cache-on') === '1') localStorage.removeItem('fanotes.ink-bitmap-cache')
+    else localStorage.setItem('fanotes.ink-bitmap-cache', '0')
+  })
   // Count what each canvas paints: the committed layer, and the offscreen page of the heavy job.
   await page.addInitScript(() => {
     const counts = { committed: 0, other: 0 }
@@ -296,22 +358,62 @@ try {
   await waitQuiet()
   await settle(2500)
   const sealed = await committedPixels('sealed')
-  // A fresh open of the saved page paints it from the model in one go.
+  // The stand-in picture during the stroke, against the exact page (pixels whose alpha is clearly off).
+  const standIn = await comparePixels('provisional', 'sealed', 64)
+  // A switch back (cache off) paints the saved page from the model in one go.
   await openNote('Light.md')
   await settle(1500)
   await openNote('Heavy.md')
   await page.waitForSelector('.lw-tablet-canvas.is-input-active', { timeout: 30_000 })
   await waitQuiet()
-  const fresh = await committedPixels('fresh')
-  assert.equal(`${sealed.width}x${sealed.height}`, `${fresh.width}x${fresh.height}`, 'the reopened page has the same bitmap')
+  await committedPixels('fresh')
   const exact = await comparePixels('sealed', 'fresh')
-  // The stand-in picture during the stroke, against the exact page (pixels whose alpha is clearly off).
-  const standIn = await comparePixels('provisional', 'fresh', 64)
-  console.log(JSON.stringify({ sealedVsFresh: exact, provisionalVsFresh: standIn, inkPixels: fresh.ink }))
-  const differ = exact.differingBytes
-  assert.equal(differ, 0, 'after the lift the page is pixel-identical to a fresh paint')
-  assert.deepEqual(pageErrors, [])
+  console.log(JSON.stringify({ sealedVsFresh: exact, provisionalVsSealed: standIn }))
+  assert.ok(exact.sameSize && exact.differingBytes === 0, 'after the lift the page is pixel-identical to a fresh paint')
   console.log('heavy ink pen-down ok')
+
+  // Phase B: the cache on. A fresh paint after a reload, then a switch away and back.
+  await page.evaluate(() => sessionStorage.setItem('check-cache-on', '1'))
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.file-tree__entry-button[data-path="Heavy.md"]', { timeout: 120_000 })
+  assert.equal(await page.evaluate(() => localStorage.getItem('fanotes.ink-bitmap-cache')), null)
+  await openNote('Heavy.md')
+  await settle(1500)
+  if (!(await page.evaluate(() => Boolean(document.querySelector('.lw-tablet-canvas.is-input-active'))))) {
+    await page.locator('button[title^="Mit dem Stift schreiben"]').first().click()
+  }
+  await page.waitForSelector('.lw-tablet-canvas.is-input-active', { timeout: 30_000 })
+  await waitQuiet()
+  // Every paint since the reload: one open of the page from the model.
+  const freshPaints = await page.evaluate(() => window.__inkPaints.committed + window.__inkPaints.other)
+  await committedPixels('fresh')
+  // The open's fit can re-save the page (rounded coordinates): that model is
+  // not the one the closing board held, so its bitmap must not be reused. The
+  // second round trip opens the same saved page again and takes the cache.
+  const switchBack = async (name) => {
+    await openNote('Light.md')
+    await settle(1500)
+    const start = await page.evaluate(() => window.__inkPaints.committed + window.__inkPaints.other)
+    await openNote('Heavy.md')
+    await page.waitForSelector('.lw-tablet-canvas.is-input-active', { timeout: 30_000 })
+    await waitQuiet()
+    await settle(2500)
+    await committedPixels(name)
+    return await page.evaluate(() => window.__inkPaints.committed + window.__inkPaints.other) - start
+  }
+  const firstBack = await switchBack('back1')
+  const secondBack = await switchBack('back2')
+  const cachedVsPainted = await comparePixels('back2', 'back1')
+  const firstVsFresh = await comparePixels('back1', 'fresh')
+  console.log(JSON.stringify({ paintCallsFreshOpen: freshPaints, paintCallsFirstBack: firstBack, paintCallsSecondBack: secondBack, cachedVsPainted, firstVsFresh }))
+  // back1 is either a repaint (the open re-saved the page) or a cache hit of
+  // the page the fresh open painted from the same model: then it equals it.
+  assert.ok(firstBack > freshPaints / 2 || (firstVsFresh.sameSize && firstVsFresh.differingBytes === 0), 'a cached page equals the fresh paint of the same ink')
+  assert.ok(cachedVsPainted.sameSize && cachedVsPainted.differingBytes === 0, 'the cached page is pixel-identical to the painted one')
+  // What is left is a few slices of a job an open starts at a passing layout.
+  assert.ok(secondBack < freshPaints / 4, `a switch back to an unchanged page repainted it (${secondBack} paint calls, a fresh open made ${freshPaints})`)
+  assert.deepEqual(pageErrors, [])
+  console.log('heavy ink note switch ok')
 } finally {
   await browser.close()
   await server.close()
