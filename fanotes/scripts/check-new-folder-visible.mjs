@@ -150,9 +150,11 @@ const deferred = () => {
 {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'fanotes-newfolder-'))
   try {
-    const vault = fs.realpathSync(fs.mkdtempSync(path.join(base, 'vault-')))
-    const loc1 = fs.realpathSync(fs.mkdirSync(path.join(base, 'loc1'), { recursive: true }) ?? path.join(base, 'loc1'))
-    const loc2 = path.join(base, 'loc2')
+    const realBase = fs.realpathSync(base)
+    const vault = path.join(realBase, 'vault')
+    const loc1 = path.join(realBase, 'loc1')
+    const loc2 = path.join(realBase, 'loc2')
+    fs.mkdirSync(vault)
     fs.mkdirSync(path.join(loc1, 'Sub'), { recursive: true })
     fs.mkdirSync(path.join(loc2, 'Sub'), { recursive: true })
     fs.mkdirSync(path.join(loc2, 'OnlyTwo'), { recursive: true })
