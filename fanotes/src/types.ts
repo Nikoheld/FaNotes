@@ -117,6 +117,8 @@ export type AppSettings = {
   addonsAutoUpdate: boolean
   /** Sync runs on its own once a device is signed in; off keeps the account but only syncs on demand. */
   syncAutomatic: boolean
+  /** Cloud sync of the vault. New accounts start with it off; accounts that existed before keep it on. */
+  syncVaultEnabled: boolean
   /** Display name of this device in the account's device list. */
   syncDeviceName: string
   /** Newline-separated vault folders that stay on this device. */
@@ -832,8 +834,11 @@ export type SyncHostApi = {
   remove: (path: string) => Promise<void>
   readState: (vaultId: string) => Promise<string | null>
   writeState: (vaultId: string, json: string | null) => Promise<void>
-  readSecrets: () => Promise<string | null>
-  writeSecrets: (json: string | null) => Promise<void>
+  /** `slot` names a separate secret file ('device-keys'); the default slot holds the account session. */
+  readSecrets: (slot?: string) => Promise<string | null>
+  writeSecrets: (json: string | null, slot?: string) => Promise<void>
+  /** True when secrets are protected by the OS keychain (Electron). Accounts without a password need this. */
+  secretsProtected?: boolean
 }
 
 export type AddonsHostApi = {

@@ -162,7 +162,13 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
     if (typeof vaultId !== 'string' || !/^[a-f0-9]{16,64}$/u.test(vaultId)) throw new Error('Ungültige Vault-ID.')
     return path.join(stateDirectory, `state-${vaultId}.json`)
   }
-  const secretsPath = path.join(stateDirectory, 'account.secret')
+  const accountSecretsPath = path.join(stateDirectory, 'account.secret')
+  // 'device-keys' holds the keys of accounts without a password. It survives sign-out on purpose.
+  const secretsPathFor = (slot) => {
+    if (slot === undefined || slot === null) return accountSecretsPath
+    if (slot === 'device-keys') return path.join(stateDirectory, 'device-keys.secret')
+    throw new Error('Unbekannter Geheimnis-Speicher.')
+  }
   const localKeyPath = path.join(stateDirectory, 'account.key')
 
   const readLocalKey = async () => {
@@ -279,7 +285,8 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
       if (typeof json !== 'string' || Buffer.byteLength(json) > MAX_STATE_BYTES) throw new Error('Der Sync-Zustand ist ungültig.')
       await atomicWriteBytes(target, Buffer.from(json, 'utf8'), 0)
     },
-    async readSecrets() {
+    async readSecrets(slot) {
+      const secretsPath = secretsPathFor(slot)
       let raw
       try {
         raw = await fsp.readFile(secretsPath, 'utf8')
@@ -302,7 +309,8 @@ function createSyncHost({ vaultRoot, userDataDirectory, safeStorage, trashItem }
       }
       return null
     },
-    async writeSecrets(json) {
+    async writeSecrets(json, slot) {
+      const secretsPath = secretsPathFor(slot)
       if (json === null) {
         await fsp.rm(secretsPath, { force: true })
         return
@@ -342,8 +350,8 @@ function registerSyncIpc(handle, host) {
   handle(SYNC_CHANNELS.remove, (_event, relativePath) => host.remove(relativePath))
   handle(SYNC_CHANNELS.readState, (_event, vaultId) => host.readState(vaultId))
   handle(SYNC_CHANNELS.writeState, (_event, vaultId, json) => host.writeState(vaultId, json))
-  handle(SYNC_CHANNELS.readSecrets, () => host.readSecrets())
-  handle(SYNC_CHANNELS.writeSecrets, (_event, json) => host.writeSecrets(json))
+  handle(SYNC_CHANNELS.readSecrets, (_event, slot) => host.readSecrets(slot))
+  handle(SYNC_CHANNELS.writeSecrets, (_event, json, slot) => host.writeSecrets(json, slot))
 }
 
 module.exports = { coerceSyncBytes, createSyncHost, registerSyncIpc, SYNC_CHANNELS, resolveInside, normalizeRelative }
