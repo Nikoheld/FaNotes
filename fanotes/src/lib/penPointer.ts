@@ -43,8 +43,14 @@ export const mountPenPointer = (board: () => HTMLElement | null) => {
   let lastTarget: EventTarget | null = null
   let lastTool = ''
   let lastShow = false
-  const place = (event: Event) => {
-    if (!(event instanceof PointerEvent)) return
+  let pending: PointerEvent | null = null
+  let frame = 0
+  // The last sample of a frame wins: one style write per frame, not per event.
+  const paint = () => {
+    frame = 0
+    const event = pending
+    pending = null
+    if (!event) return
     const target = event.target
     const boardNode = board()
     const surface = target instanceof Element ? target.closest(PEN_SURFACE) : null
@@ -72,7 +78,13 @@ export const mountPenPointer = (board: () => HTMLElement | null) => {
     node.style.opacity = '1'
     node.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`
   }
+  const place = (event: Event) => {
+    if (!(event instanceof PointerEvent)) return
+    pending = event
+    if (!frame) frame = window.requestAnimationFrame(paint)
+  }
   const hide = () => {
+    pending = null
     lastTarget = null
     lastTool = ''
     lastShow = false
@@ -82,13 +94,16 @@ export const mountPenPointer = (board: () => HTMLElement | null) => {
     if (!event.relatedTarget) hide()
   }
 
+  // One listener: pointermove is delivered once per frame and fires for every
+  // pointer type, so the extra pointerrawupdate listener only doubled the work.
   window.addEventListener('pointermove', place, { passive: true })
-  window.addEventListener('pointerrawupdate', place, { passive: true })
   window.addEventListener('pointerout', onOut, { passive: true })
   window.addEventListener('blur', hide)
   return () => {
     window.removeEventListener('pointermove', place)
-    window.removeEventListener('pointerrawupdate', place)
+    if (frame) window.cancelAnimationFrame(frame)
+    frame = 0
+    pending = null
     window.removeEventListener('pointerout', onOut)
     window.removeEventListener('blur', hide)
     node.remove()

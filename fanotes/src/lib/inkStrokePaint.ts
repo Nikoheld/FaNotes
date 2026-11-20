@@ -183,6 +183,15 @@ const commitMarkerGuard = (guard: MarkerGuard) => {
 
 const markerBrush = (brush: string) => brush === 'marker' || brush === 'highlighter'
 
+/**
+ * True when painting this stroke reads or writes the marker coverage mask.
+ * A page without such strokes never needs the (about 12 MB) mask, so it is
+ * neither allocated, cleared nor shifted on scroll.
+ */
+export const inkStrokeNeedsMarkerCoverage = (
+  stroke: Pick<InkPaintStroke, 'purpose' | 'brush' | 'opacity' | 'symbolPaths'>,
+) => markerBrush(inkBrushOf(stroke)) || inkStrokeIsTranslucent(stroke)
+
 type InkPaintContext = CanvasRenderingContext2D
 
 const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value))
