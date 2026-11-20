@@ -221,7 +221,7 @@ try {
       assert.equal(current.rows, true, 'the orientation survives a reload')
       assert.equal(current.ratio, 55, 'the ratio survives a reload')
       both = await texts()
-      assert.ok(both[0].includes('ALPHAWORD') && both[1].includes('BETAWORD'), 'both notes survive a reload')
+      assert.ok(both[0].includes('ALPHAWORD') && both[1].includes('BETAWORD'), `both notes survive a reload: ${JSON.stringify(both.map((t) => t.slice(-40)))} ${JSON.stringify(current)}`)
 
       // Close: the editor goes back to one pane and focus resets.
       await page.locator('.split-pane-head button[aria-label="Teilung schließen"]').click()
