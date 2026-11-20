@@ -1112,6 +1112,7 @@ const SPECIAL_INKS: ReadonlyArray<{ id: Exclude<InkEffect, 'solid'>; label: stri
 const ART_PREFERENCES_KEY = 'fanotes.art-tools.v1'
 const artBrushIds = new Set<ArtBrush>(ART_BRUSHES.map(({ id }) => id))
 const inkEffectIds = new Set<InkEffect>(['solid', ...SPECIAL_INKS.map(({ id }) => id)])
+const beautifyTestFlag = () => (window as unknown as { __beautifyTest?: boolean }).__beautifyTest === true
 const isHandwritingStroke = (stroke: InkStroke) => stroke.purpose !== 'art'
 const handwritingStrokes = (strokes: InkStroke[]) => strokes.filter(isHandwritingStroke)
 
@@ -6062,6 +6063,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const beautifyTimerRef = useRef(0)
   const beautifyAnimRef = useRef(0)
   const beautifyLiveRef = useRef({ enabled: false, strength: 'subtle' as 'subtle' | 'medium', paperStyle, squareMm: 0, math: false })
+  // Read-only probes for the live-board check; they answer only while __beautifyTest is set.
+  const hooks = window as unknown as Record<string, unknown>
+  if (inputActive) {
+    hooks.__beautifyStrokes = () => (beautifyTestFlag() ? strokesRef.current : [])
+    hooks.__beautifyPage = () => ({ width: sourceWidthRef.current, height: sourceHeightRef.current })
+  }
   beautifyLiveRef.current = {
     enabled: settings.beautifyHandwriting === true && window.fanotes?.platform !== 'web',
     strength: normalizeBeautifyStrength(settings.beautifyStrength),
@@ -6084,7 +6091,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       return
     }
     if (!batch) beautifyPendingRef.current = []
-    if (!live.enabled || live.math || inkMode !== 'writing') return
+    if (!(live.enabled || beautifyTestFlag()) || live.math || inkMode !== 'writing') return
     const present = new Set(strokesRef.current)
     const list = pending.filter((stroke) => present.has(stroke))
     if (!list.length) return
@@ -6148,7 +6155,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   flushBeautifyRef.current = flushBeautify
 
   const queueBeautify = useCallback((stroke: InkStroke) => {
-    if (!beautifyLiveRef.current.enabled || !isBeautifyCandidate(stroke)) return
+    // __beautifyTest lets the live-board check switch the feature on in the web build.
+    if (!(beautifyLiveRef.current.enabled || beautifyTestFlag()) || !isBeautifyCandidate(stroke)) return
     const pending = beautifyPendingRef.current
     if (pending.length) {
       const width = sourceWidthRef.current
