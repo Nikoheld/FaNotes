@@ -61,9 +61,9 @@ export const installChromeTextSelect = (owner: Document = document) => {
   const apply = (event: PointerEvent) => {
     if (event.button !== 0) return
     token += 1
+    // No layout read here: the browser resolves style before it hit-tests the
+    // selection start, and a forced flush cost every click and pen-down.
     root.classList.toggle(CHROME_SELECT_SUPPRESS_CLASS, shouldSuppressChromeSelect(event.target))
-    // The selection starts on the following move, so the used value must be current.
-    void root.offsetWidth
   }
   const release = () => {
     const generation = token

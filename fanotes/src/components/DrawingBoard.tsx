@@ -87,6 +87,7 @@ import {
   readUsedSheetZoom,
   resolvePaperViewTarget,
   resolvePaperZoomScroller,
+  watchSheetZoom,
   zoomFactorFromWheel,
   zoomStepFromSpeed,
 } from '../lib/paperView'
@@ -169,7 +170,7 @@ import {
   mapClientToPaperPoint,
   resolveInkPointerDown,
 } from '../lib/inkSampleMap'
-import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, decideCommittedEraseHole, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkBudgetSliceClearsBitmap, inkStrokeIsTranslucent, inkStrokePaintMargin, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
+import { bitmapPatchesTouch, clearMarkerCoverageRect, createMarkerCoverage, decideCommittedEraseHole, drawInkStroke as paintInkStroke, eraseInkKeepingNoteText, inkBudgetSliceClearsBitmap, inkStrokeIsTranslucent, inkStrokeNeedsMarkerCoverage, inkStrokePaintMargin, shiftMarkerCoverage, strokeBitmapPatch, unionBitmapPatch, type BitmapPatch, type InkPaintOptions, type MarkerCoverage } from '../lib/inkStrokePaint'
 import { paperNoteTextOf } from '../lib/noteTextStay'
 import { liveTranslucentCanGrow, paintGrowingTranslucentStroke, type LiveTranslucentSession } from '../lib/liveTranslucentInk'
 import { MATH_FIGURES, FIGURE_LINE_MAX, FIGURE_LINE_MIN, FIGURE_LINE_STEP, clampFigureLineWidth, clampFigureParams, defaultFigureParams, figureLineWidthForSize, isMathFigureId, mathFigurePaths, type MathFigureGroup, type MathFigureId, type MathFigureParam } from '../lib/mathFigures'
@@ -1296,8 +1297,13 @@ const renderDocument = (
       active = null
     }
   } else if (!band) {
-    if (!active || active.width !== canvas.width || active.height !== canvas.height) active = createMarkerCoverage(canvas.width, canvas.height)
+    // The mask is about 12 MB: keep one only while a marker or see-through stroke needs it.
+    if (!visible.some(inkStrokeNeedsMarkerCoverage)) active = null
+    else if (!active || active.width !== canvas.width || active.height !== canvas.height) active = createMarkerCoverage(canvas.width, canvas.height)
     else active.mask.fill(0)
+  } else if (!active && visible.some(inkStrokeNeedsMarkerCoverage)) {
+    // The old window had no such stroke, so an empty mask is exactly right.
+    active = createMarkerCoverage(canvas.width, canvas.height)
   }
   const paintOptions = active ? { coverage: active, stamp: true } : undefined
   visible.forEach((stroke) => drawInkStroke(context, stroke, width, virtualHeight, smoothing, 1, sourceWidth, layoutWidth, stroke.points.length, paintOptions))
@@ -1358,7 +1364,8 @@ const paintInkBudgetSlice = (
     context.setTransform(1, 0, 0, 1, 0, 0)
     context.clearRect(0, 0, canvas.width, canvas.height)
     if (slice.includePaper) drawPaper(context, slice.pixelWidth, slice.pixelHeight, slice.paperStyle, slice.squareMm)
-    if (!active || active.width !== canvas.width || active.height !== canvas.height) active = createMarkerCoverage(canvas.width, canvas.height)
+    if (!slice.strokes.some((stroke) => inkStrokeNeedsMarkerCoverage(stroke) && strokeIntersectsWindow(stroke, slice.inkWindow))) active = null
+    else if (!active || active.width !== canvas.width || active.height !== canvas.height) active = createMarkerCoverage(canvas.width, canvas.height)
     else active.mask.fill(0)
   }
   let index = from
@@ -1657,6 +1664,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const resizeDirtyRef = useRef(false)
   const canvasQualityKeyRef = useRef('')
   const pointerBoundsRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null)
+  /**
+   * Paper rect for pen samples. It is measured once per stroke (and again after
+   * a scroll, resize or zoom) instead of per sample, where it could force a layout.
+   */
+  const paperSurfaceCacheRef = useRef<{
+    el: HTMLElement
+    left: number
+    top: number
+    width: number
+    height: number
+    offsetWidth: number
+    offsetHeight: number
+  } | null>(null)
   const viewZoomRef = useRef(1)
   /** Wall-clock until which a zoom gesture counts as still moving. */
   const zoomInFlightUntilRef = useRef(0)
@@ -2975,7 +2995,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       context.rect(0, 0, width, height)
       context.clip()
       context.setTransform(1, 0, 0, 1, 0, -inkWindow.y0 * virtualHeight)
-      const coverage = markerCoverageRef.current
+      let coverage = markerCoverageRef.current
+      if (!coverage && inkStrokeNeedsMarkerCoverage(stroke)) {
+        // The page had no marker ink, so its mask was never allocated; an empty one is the right start.
+        coverage = createMarkerCoverage(canvas.width, canvas.height)
+        markerCoverageRef.current = coverage
+      }
       drawInkStroke(
         context,
         stroke,
@@ -3269,6 +3294,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [initialDrawingJson])
 
+  /** Paper rect for one pen sample, cached until scroll, resize, zoom or a size change. */
+  const readOriginSurface = useCallback((el: HTMLElement, fresh = false) => {
+    const offsetWidth = el.offsetWidth
+    const offsetHeight = el.offsetHeight
+    let cached = paperSurfaceCacheRef.current
+    if (fresh || !cached || cached.el !== el || cached.offsetWidth !== offsetWidth || cached.offsetHeight !== offsetHeight) {
+      const rect = el.getBoundingClientRect()
+      cached = { el, left: rect.left, top: rect.top, width: rect.width, height: rect.height, offsetWidth, offsetHeight }
+      paperSurfaceCacheRef.current = cached
+    }
+    return cached
+  }, [])
+
   const pointFromEvent = useCallback((event: PointerEvent, preview = false): StrokePoint | null => {
     const canvas = canvasRef.current
     const originEl = (inline
@@ -3280,15 +3318,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     // A predicted sample must not rescale the page or move the last real
     // point. That mutation is what flashed a spike and then put the ink back.
     if (!preview) commitPendingGrowRemapRef.current(originEl.offsetWidth, originEl.offsetHeight)
-    const originRect = originEl.getBoundingClientRect()
-    const surface = {
-      left: originRect.left,
-      top: originRect.top,
-      width: originRect.width,
-      height: originRect.height,
-      offsetWidth: originEl.offsetWidth,
-      offsetHeight: originEl.offsetHeight,
-    }
+    const surface = readOriginSurface(originEl)
     const leftover = pendingGrowRemapRef.current
     const lastLive = activeStrokeRef.current?.points.at(-1)
     let mapped = !preview && leftover && lastLive
@@ -3399,7 +3429,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       x,
       y,
     }
-  }, [inline])
+  }, [inline, readOriginSurface])
 
   const resolvePaperElement = useCallback((): HTMLElement | null => {
     const surface = surfaceRef.current
@@ -3743,6 +3773,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useEffect(() => {
     mountedRef.current = true
     const scheduleMeasure = () => {
+      paperSurfaceCacheRef.current = null
       if (activeStrokeRef.current) {
         resizeDirtyRef.current = true
         return
@@ -3760,7 +3791,15 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const observer = new ResizeObserver(scheduleMeasure)
     if (surfaceRef.current) observer.observe(surfaceRef.current)
     if (surfaceRef.current?.parentElement) observer.observe(surfaceRef.current.parentElement)
-    const scroller = resolvePaperElement()?.closest('.unified-note-view')
+    const paper = resolvePaperElement()
+    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
+    // Pen samples reuse one paper rect per stroke; these events end its life.
+    const dropPaperRect = () => {
+      paperSurfaceCacheRef.current = null
+    }
+    window.addEventListener('scroll', dropPaperRect, { capture: true, passive: true })
+    window.addEventListener('resize', dropPaperRect, { passive: true })
+    const stopZoomWatch = paper ? watchSheetZoom(paper, dropPaperRect) : null
     // The slice follows every scroll frame. The canvases scroll with the
     // sheet, so ink inside the slice never moves; a move only re-slices
     // (bitmap copy + one band) once the visible sheet reaches the guard zone.
@@ -3806,6 +3845,10 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return () => {
       mountedRef.current = false
       observer.disconnect()
+      window.removeEventListener('scroll', dropPaperRect, { capture: true })
+      window.removeEventListener('resize', dropPaperRect)
+      stopZoomWatch?.()
+      dropPaperRect()
       scroller?.removeEventListener('scroll', settleInkWindow)
       scroller?.removeEventListener('scrollend', onScrollEnd)
       if (inkWindowIdleRef.current !== null) {
@@ -4526,17 +4569,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const originEl = (inline
       ? (canvas?.closest('.unified-paper') as HTMLElement | null)
       : null) ?? canvas
-    const originRect = originEl?.getBoundingClientRect() ?? null
-    const surface = originRect && originEl
-      ? {
-        left: originRect.left,
-        top: originRect.top,
-        width: originRect.width,
-        height: originRect.height,
-        offsetWidth: originEl.offsetWidth,
-        offsetHeight: originEl.offsetHeight,
-      }
-      : null
+    const surface = originEl ? readOriginSurface(originEl) : null
     // Unusable/0,0 first — then remap live ink — then leap-filter. Leap
     // against the pre-grow last point would drop the next same-visual sample.
     if (!surface || !acceptUsableInkClient(event, surface, viewRotationRef.current)) return
@@ -4662,7 +4695,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       livePenHintRef.current = penOnSheet
       syncInkWindow()
     }
-  }, [armShapeDwell, clearShapeDwellTimer, eraseAt, inline, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, setPageExtent, sourceHeight, sourceWidth, syncInkWindow, tool])
+  }, [armShapeDwell, clearShapeDwellTimer, eraseAt, inline, paintActiveStrokeNow, pointFromEvent, readOriginSurface, scheduleRedraw, setPageExtent, sourceHeight, sourceWidth, syncInkWindow, tool])
 
   const commitPendingSolverTap = useCallback(() => {
     const pending = pendingSolverTapRef.current
@@ -5520,17 +5553,8 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const originEl = (inline
       ? (canvas?.closest('.unified-paper') as HTMLElement | null)
       : null) ?? canvas
-    const originRect = originEl?.getBoundingClientRect() ?? null
-    const surface = originRect && originEl
-      ? {
-        left: originRect.left,
-        top: originRect.top,
-        width: originRect.width,
-        height: originRect.height,
-        offsetWidth: originEl.offsetWidth,
-        offsetHeight: originEl.offsetHeight,
-      }
-      : null
+    // A new stroke always starts from a fresh measurement.
+    const surface = originEl ? readOriginSurface(originEl, true) : null
     const start = resolveInkPointerDown(event.nativeEvent, surface, viewRotationRef.current)
     if (!start.openStroke) {
       activePointerRef.current = null
@@ -5785,7 +5809,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   // inputActive is a dependency: a board mounted inert (keyboard mode showing
   // saved ink) kept a handler that still saw inputActive=false after the pen
   // turned on, and every pen-down was refused until an unrelated grow rebuilt it.
-  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, cancelFingerPanFling, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, selectionPurpose, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
+  }, [activeArtBrush.pressure, activeArtSymbol, appendPointerEvent, artBrush, artColor, artEffect, artOpacity, artSymbolRotation, artSymbolSize, artWidth, bumpInkRevision, cancelFingerPanFling, clearRecognitionScope, clearShapeDwellTimer, closeMathCorrectionSession, closeMathSolverSelection, commitPendingSolverTap, commitStrokeToCanvas, figureId, figureLibraryOpen, figureLineWidth, figureParams, figureRotation, figureSize, inkMode, inline, inputActive, insertSectionAt, insertSubsectionAt, markPenContact, markerKeepColor, mathSolverEnabled, penColor, penWidth, pointFromEvent, readOriginSurface, redraw, restoreUnmovedSelection, scheduleRedraw, sectionPlacing, selectionMode, selectionPurpose, setDirty, settings.penOnly, settings.pressureEnabled, settings.tabletButtons, sourceHeight, sourceWidth, syncInkWindow, tool, updateHistoryState])
 
   const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     if (dragSheetWithPointer(event.pointerId, event.clientX, event.clientY, event.buttons)) {
