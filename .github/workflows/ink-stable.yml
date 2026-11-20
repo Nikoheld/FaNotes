@@ -12,6 +12,8 @@ on:
       - 'fanotes/index.html'
       - 'fanotes/vite.config.ts'
       - 'fanotes/package-lock.json'
+      - 'src/**'
+      - 'package-lock.json'
       - 'fanotes/scripts/check-ink-stable.mjs'
       - '.github/workflows/ink-stable.yml'
   workflow_dispatch:
@@ -34,7 +36,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: fanotes/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            fanotes/package-lock.json
+      - name: Root dependencies (the app imports shared code from ../src)
+        working-directory: .
+        run: npm ci --no-audit --no-fund --ignore-scripts
       - run: npm ci --no-audit --no-fund
       - name: Pen sample and page grow logic
         run: |
