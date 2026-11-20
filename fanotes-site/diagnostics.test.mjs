@@ -4,6 +4,7 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
+import { gzipSync } from 'node:zlib'
 import test from 'node:test'
 import { clientAddress, createDiagnosticsHandler, createDiagnosticsStore, validateDiagnosticsPayload } from './diagnostics-api.mjs'
 import { aggregate, readRecords } from './scripts/diagnostics-report.mjs'
@@ -23,7 +24,7 @@ const start = async (now = () => Date.now()) => {
 test('validation rejects bad ids, schema and empty payloads, and drops bad counters', () => {
   assert.equal(validateDiagnosticsPayload(null).ok, false)
   assert.equal(validateDiagnosticsPayload(payload({ installId: 'x' })).ok, false)
-  assert.equal(validateDiagnosticsPayload(payload({ schemaVersion: 2 })).ok, false)
+  assert.equal(validateDiagnosticsPayload(payload({ schemaVersion: 2 })).ok, false, 'version 2 is the batch schema only')
   assert.equal(validateDiagnosticsPayload({ schemaVersion: 1, kind: 'daily', installId: ID }).ok, false)
   const ok = validateDiagnosticsPayload(payload())
   assert.equal(ok.ok, true)
@@ -189,4 +190,52 @@ test('the nginx location overwrites X-Real-IP with the Cloudflare-aware client a
   assert.match(block, /proxy_set_header X-Real-IP \$fanotes_client_ip;/u)
   assert.doesNotMatch(block, /proxy_set_header X-Real-IP \$http_/u)
   assert.match(conf, /proxy_pass http:\/\/127\.0\.0\.1:18185;/u, 'the site process stays loopback-only behind nginx')
+})
+
+// -- schema 2 batches from the desktop app ------------------------------------------------------
+const batch = (extra = {}) => ({
+  schemaVersion: 2,
+  kind: 'batch',
+  installId: ID,
+  app: { version: '2026.11.3', platform: 'linux', arch: 'x64', language: 'de' },
+  crashes: [
+    { type: 'uncaughtException', process: 'main', class: 'TypeError', code: '', reason: '', exitCode: 0, frames: [{ file: 'main.cjs', line: 120, fn: 'openVault' }, { file: '/home/anna/Notizen/x.js', line: 1 }, { file: 'evil name.js', line: 2 }], hash: '0123456789ab', count: 2, lastAt: 1_700_000_000_000 },
+    { type: 'child-process-gone', process: 'GPU', class: 'Error', code: '', reason: 'crashed', exitCode: 139, frames: [], hash: 'abcdefabcdef', count: 1, lastAt: 1_700_000_000_000 },
+    { type: 'made-up', process: 'main', class: 'Error', hash: '0123456789ab' },
+    { type: 'uncaughtException', process: 'main', class: 'Error', hash: 'not-a-hash' },
+  ],
+  perf: { startup: { sessions: 3, medianMs: 1800, maxMs: 2600 }, penLatency: { samples: 400, p50: 6.5, p90: 11, p99: 20.4, max: 33 }, memory: { processes: 6, totalMb: 900, mainRssMb: 150 }, note: 'ignored' },
+  ...extra,
+})
+
+test('a batch keeps crashes and perf, and only keeps frames of the app itself', () => {
+  const result = validateDiagnosticsPayload(batch())
+  assert.equal(result.ok, true)
+  assert.equal(result.record.crashes.length, 2, 'unknown types and bad hashes are dropped')
+  assert.deepEqual(result.record.crashes[0].frames, [{ file: 'main.cjs', line: 120, fn: 'openVault' }], 'paths and odd names never pass')
+  assert.equal(result.record.crashes[1].reason, 'crashed')
+  assert.deepEqual(result.record.perf.penLatency, { samples: 400, p50: 6.5, p90: 11, p99: 20.4, max: 33 })
+  assert.equal('note' in result.record.perf, false)
+  assert.equal(validateDiagnosticsPayload(batch({ kind: 'daily' })).ok, false)
+  assert.equal(validateDiagnosticsPayload(batch({ crashes: 'x' })).ok, false)
+  assert.equal(validateDiagnosticsPayload({ schemaVersion: 2, kind: 'batch', installId: ID, app: {} }).ok, false, 'empty batch')
+  assert.doesNotMatch(JSON.stringify(result.record), /anna|Notizen|evil/u)
+})
+
+test('a gzipped batch is accepted, an inflation bomb and an unknown encoding are refused, and no address is stored', async () => {
+  const s = await start()
+  try {
+    const send = (body, headers = {}) => fetch(`${s.base}/api/v1/diagnostics`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body })
+    const ok = await send(gzipSync(JSON.stringify(batch())), { 'Content-Encoding': 'gzip' })
+    assert.equal(ok.status, 202)
+    assert.equal((await send(gzipSync(Buffer.alloc(5_000_000, 32)), { 'Content-Encoding': 'gzip' })).status, 413, 'inflates past the cap')
+    assert.equal((await send(Buffer.alloc(70_000, 97))).status, 413, 'oversized body')
+    assert.equal((await send('{}', { 'Content-Encoding': 'br' })).status, 415)
+    assert.equal((await send(Buffer.from('not gzip'), { 'Content-Encoding': 'gzip' })).status, 400)
+    const [file] = await readdir(s.dir)
+    const stored = await readFile(join(s.dir, file), 'utf8')
+    assert.equal(stored.split('\n').filter(Boolean).length, 1, 'only the valid batch was stored')
+    assert.doesNotMatch(stored, /127\.0\.0\.1|::1|"ip"|user-agent/iu, 'no request metadata in the data')
+    assert.match(stored, /"crashes"/u)
+  } finally { await s.close() }
 })

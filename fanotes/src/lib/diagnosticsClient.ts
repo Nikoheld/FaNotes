@@ -1,5 +1,7 @@
-// Opt-in diagnostics, renderer side. Everything here is local until the user
-// has switched a toggle on (daily report) or pressed "Jetzt Logs senden".
+// Send data, renderer side. The renderer only describes events (error class, code, bundle lines, hash,
+// feature names, pen latency numbers) and hands them to the Electron main process, which validates them,
+// keeps the queue, and does all sending. Nothing leaves from here except an explicit "Jetzt Logs senden".
+// Without the desktop bridge (web build) every record call does nothing.
 import { APP_VERSION } from './appVersion'
 import { diagnosticListeners } from './bugReport'
 import {
@@ -8,104 +10,100 @@ import {
   DIAGNOSTICS_ORIGIN,
   DIAGNOSTICS_PATH,
   buildDiagnosticsPayload,
-  dailySendDue,
   describeError,
-  errorGroupKey,
   identityFromPath,
   newInstallId,
   type DescribedError,
-  type DiagnosticsConsent,
   type DiagnosticsContext,
   type DiagnosticsPayload,
 } from './diagnostics.mjs'
 
-type Stored = { counters: Record<string, number>; errors: Record<string, number> }
 type LogEntry = DescribedError & { at: number }
+export type SendDataConsent = { crashes: boolean; errors: boolean; perf: boolean; usage: boolean }
 
 const KEY_ID = 'fanotes.diagnostics.installId'
-const KEY_LAST = 'fanotes.diagnostics.lastSentAt'
-const KEY_STORE = 'fanotes.diagnostics.counters'
+const PEN_FLUSH_AT = 120
 
-let consent: DiagnosticsConsent = { usage: false, logs: false }
-let store: Stored = { counters: {}, errors: {} }
+let consent: SendDataConsent = { crashes: false, errors: false, perf: false, usage: false }
 let logs: LogEntry[] = []
 let context: DiagnosticsContext = {}
-let vault = { notes: 0, bytes: 0 }
-let startupMs = 0
 let installed = false
-let dirty = false
-let flushTimer: number | undefined
+let penSamples: number[] = []
+let vault: { notes: number; bytes: number } | null = null
+let vaultSent = ''
 
+const bridge = () => (typeof window !== 'undefined' ? window.fanotes?.diagnostics : undefined)
 const read = (key: string) => { try { return window.localStorage.getItem(key) } catch { return null } }
 const write = (key: string, value: string | null) => {
   try { if (value === null) window.localStorage.removeItem(key); else window.localStorage.setItem(key, value) } catch { /* private mode */ }
 }
 
-export const getInstallId = () => {
+/** The ID used by the explicit report: the desktop one from the main process, else a local one (web). */
+const resolveInstallId = async () => {
+  const status = await bridge()?.status().catch(() => null)
+  if (status?.installId) return status.installId
   const existing = read(KEY_ID)
   if (existing && /^[0-9a-f]{32}$/u.test(existing)) return existing
   const created = newInstallId()
   write(KEY_ID, created)
   return created
 }
-export const rotateInstallId = () => { const created = newInstallId(); write(KEY_ID, created); return created }
 
-const wipeLocal = () => { store = { counters: {}, errors: {} }; logs = []; write(KEY_STORE, null) }
-
-const flush = () => {
-  flushTimer = undefined
-  if (!dirty || !consent.usage) return
-  dirty = false
-  write(KEY_STORE, JSON.stringify(store))
-}
-const touch = () => {
-  dirty = true
-  if (flushTimer === undefined) flushTimer = window.setTimeout(flush, 30_000)
+const flushBuffers = () => {
+  const api = bridge()
+  if (!api) return
+  if (consent.perf && penSamples.length) { api.record({ k: 'pen', samples: penSamples }); penSamples = [] }
+  if (consent.usage && vault) {
+    const key = `${vault.notes}:${Math.round(vault.bytes / 1048576)}`
+    if (key !== vaultSent) { vaultSent = key; api.record({ k: 'vault', notes: vault.notes, bytes: vault.bytes }) }
+  }
 }
 
 export const recordFeature = (name: string) => {
   if (!consent.usage || !COUNTER_NAME.test(name)) return
-  store.counters[name] = (store.counters[name] ?? 0) + 1
-  touch()
+  bridge()?.record({ k: 'feature', name })
 }
 
-const recordError = (error: unknown, fallbackMessage = '') => {
-  // Only a class, a code, bundle frames and a hash are kept. The message text is dropped here.
+/** Pen input latency (ms from the event time stamp to our handler). Buffered; no timer. */
+export const recordPenLatency = (ms: number) => {
+  if (!consent.perf || !Number.isFinite(ms) || ms < 0) return
+  penSamples.push(Math.round(ms * 10) / 10)
+  if (penSamples.length >= PEN_FLUSH_AT) flushBuffers()
+}
+
+const recordError = (error: unknown, kind: 'crash' | 'error', type = '', fallbackMessage = '') => {
+  // Only a class, a code, bundle lines and a hash are kept. The message text is dropped here.
   const entry = describeError(error, fallbackMessage)
-  if (consent.usage) {
-    const key = errorGroupKey(entry)
-    store.errors[key] = (store.errors[key] ?? 0) + 1
-    touch()
-  }
-  // The ring lives in memory only. It is sent only with a toggle or an explicit click.
   logs = [...logs, { ...entry, at: Date.now() }].slice(-DIAGNOSTICS_MAX_LOGS)
+  if (kind === 'crash' && consent.crashes) bridge()?.record({ k: 'crash', type, ...entry })
+  else if (kind === 'error' && consent.errors) bridge()?.record({ k: 'error', ...entry })
 }
 
 const install = () => {
   if (installed || typeof window === 'undefined') return
   installed = true
-  window.addEventListener('error', (event) => recordError(event.error, event.message))
-  window.addEventListener('unhandledrejection', (event) => recordError(event.reason))
-  window.addEventListener('pagehide', flush)
+  window.addEventListener('error', (event) => recordError(event.error, 'crash', 'renderer-error', event.message))
+  window.addEventListener('unhandledrejection', (event) => recordError(event.reason, 'crash', 'renderer-rejection'))
+  window.addEventListener('pagehide', flushBuffers)
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flushBuffers() })
   diagnosticListeners.add((event) => {
     if (event.kind === 'tool' && event.tool) recordFeature(`tool.${event.tool.toLowerCase().replace(/[^a-z0-9]+/gu, '-').slice(0, 30)}`)
-    else if (event.kind === 'error' && event.message) recordError(null, event.message)
+    else if (event.kind === 'error' && event.message) recordError(null, 'error', '', event.message)
   })
 }
 
-export const configureDiagnostics = (next: DiagnosticsConsent, ctx: { vaultPath?: string } = {}) => {
-  consent = { usage: next.usage === true, logs: next.logs === true }
+export const configureDiagnostics = (next: SendDataConsent, ctx: { vaultPath?: string } = {}) => {
+  consent = { crashes: next.crashes === true, errors: next.errors === true, perf: next.perf === true, usage: next.usage === true }
   context = identityFromPath(ctx.vaultPath ?? '')
   install()
-  if (consent.usage && !dirty && Object.keys(store.counters).length === 0) {
-    try { const saved = JSON.parse(read(KEY_STORE) || 'null') as Stored | null; if (saved?.counters) store = { counters: saved.counters, errors: saved.errors ?? {} } } catch { /* ignore */ }
-  }
-  if (!consent.usage && !consent.logs) wipeLocal()
-  else if (!consent.usage) { store = { counters: {}, errors: {} }; write(KEY_STORE, null) }
+  // Older versions kept counters in localStorage; the main process owns the queue now.
+  write('fanotes.diagnostics.counters', null)
+  write('fanotes.diagnostics.lastSentAt', null)
+  if (!consent.perf) penSamples = []
+  if (!consent.usage) { vault = null; vaultSent = '' }
 }
 
-export const setDiagnosticsVault = (notes: number, bytes: number) => { vault = { notes, bytes } }
-export const markStartupReady = () => { if (!startupMs && typeof performance !== 'undefined') startupMs = performance.now() }
+export const setDiagnosticsVault = (notes: number, bytes: number) => { if (consent.usage) vault = { notes, bytes } }
 
 const appInfo = () => ({
   version: APP_VERSION,
@@ -114,73 +112,43 @@ const appInfo = () => ({
   language: typeof document !== 'undefined' ? document.documentElement.lang.slice(0, 2) : '',
 })
 
-/** The exact JSON that would leave the device. `assumeConsent` shows it before a toggle is on. */
-export const previewDiagnostics = (options: { manual?: boolean; comment?: string; assumeConsent?: boolean } = {}): DiagnosticsPayload | null =>
-  buildDiagnosticsPayload({
-    consent: options.assumeConsent ? { usage: true, logs: true } : consent,
-    installId: getInstallId(),
-    app: appInfo(),
-    usage: { counters: store.counters, errors: store.errors, perf: { startupMs }, vault },
-    logs,
-    comment: options.comment,
-    context,
-    manual: options.manual,
-  })
+/** The exact JSON the next automatic batch would contain (from the main process), or null. */
+export const previewQueuedDiagnostics = async () => bridge()?.preview().catch(() => null) ?? null
 
-const post = async (payload: DiagnosticsPayload) => {
-  const response = await fetch(`${DIAGNOSTICS_ORIGIN}${DIAGNOSTICS_PATH}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    cache: 'no-store',
-    credentials: 'omit',
-    referrerPolicy: 'no-referrer',
-  })
-  return response.ok
-}
-
-/** Called on a timer; sends at most one report per day and only while a toggle is on. */
-export const sendDailyIfDue = async (now = Date.now()) => {
-  if (!dailySendDue(consent, Number(read(KEY_LAST)) || 0, now)) return false
-  const payload = previewDiagnostics()
-  if (!payload) return false
-  try {
-    if (!(await post(payload))) return false
-  } catch {
-    return false
-  }
-  write(KEY_LAST, String(now))
-  store = { counters: {}, errors: {} }
-  logs = []
-  write(KEY_STORE, null)
-  return true
-}
+/** The exact JSON of an explicit report. */
+export const previewManualReport = (comment = ''): DiagnosticsPayload | null =>
+  buildDiagnosticsPayload({ consent: { logs: true }, manual: true, installId: read(KEY_ID) || '0'.repeat(32), app: appInfo(), logs, comment, context })
 
 /** Explicit "Jetzt Logs senden": scrubbed recent errors plus an optional comment. */
 export const sendLogsNow = async (comment: string) => {
-  const manualLogs = [...logs]
-  const payload = buildDiagnosticsPayload({
-    consent: { logs: true },
-    manual: true,
-    installId: getInstallId(),
-    app: appInfo(),
-    logs: manualLogs,
-    comment,
-    context,
-  })
+  const payload = buildDiagnosticsPayload({ consent: { logs: true }, manual: true, installId: await resolveInstallId(), app: appInfo(), logs: [...logs], comment, context })
   if (!payload) return false
-  try { return await post(payload) } catch { return false }
+  try {
+    const response = await fetch(`${DIAGNOSTICS_ORIGIN}${DIAGNOSTICS_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+    })
+    return response.ok
+  } catch { return false }
 }
 
+export const getInstallStatus = async () => bridge()?.status().catch(() => null) ?? null
+export const rotateInstallId = async () => bridge()?.resetInstallId().catch(() => '') ?? ''
+
+/** Deletes what the server holds for this install and everything queued here, then a new ID is used. */
 export const deleteMyDiagnostics = async () => {
-  const id = getInstallId()
-  let ok = false
+  logs = []
+  penSamples = []
+  const api = bridge()
+  if (api) return api.deleteRemote().catch(() => false)
+  const id = await resolveInstallId()
   try {
     const response = await fetch(`${DIAGNOSTICS_ORIGIN}${DIAGNOSTICS_PATH}/${id}`, { method: 'DELETE', cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' })
-    ok = response.ok
-  } catch { ok = false }
-  wipeLocal()
-  write(KEY_LAST, null)
-  if (ok) rotateInstallId()
-  return ok
+    if (response.ok) write(KEY_ID, newInstallId())
+    return response.ok
+  } catch { return false }
 }

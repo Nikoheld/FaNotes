@@ -248,7 +248,8 @@ import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSqua
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
-import { configureDiagnostics, markStartupReady, recordFeature, sendDailyIfDue, setDiagnosticsVault } from './lib/diagnosticsClient'
+import { configureDiagnostics, recordFeature, setDiagnosticsVault } from './lib/diagnosticsClient'
+import { SendDataNotice } from './components/SendDataNotice'
 import {
   collectSendDataNutzerdaten,
   linuxHyprlandRuntimeContext,
@@ -1155,7 +1156,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (stopped) return
       const planned = planSendDataTick({
         enabled: true,
-        logs: diagnosticLog.snapshot(),
+        logs: diagnosticLog.snapshot().map(({ noteId: _noteId, ...rest }) => rest),
         nutzerdaten: collectSendDataNutzerdaten({
           version: updateState.currentVersion,
           platform: window.fanotes?.platform,
@@ -5064,18 +5065,14 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [remoteSupportSession, settings.experimentalRemoteSupport])
 
-  // Opt-in diagnostics: counters and the daily report run only while a toggle is on.
+  // Send data: the main process owns queue and sending; this only tells the renderer which events to report.
   useEffect(() => {
-    configureDiagnostics({ usage: settings.diagnosticsUsage, logs: settings.diagnosticsLogs }, { vaultPath: bootstrap?.vaultPath })
-    if (!settings.diagnosticsUsage && !settings.diagnosticsLogs) return undefined
-    const first = window.setTimeout(() => { void sendDailyIfDue() }, 90_000)
-    const timer = window.setInterval(() => { void sendDailyIfDue() }, 3_600_000)
-    return () => { window.clearTimeout(first); window.clearInterval(timer) }
-  }, [settings.diagnosticsUsage, settings.diagnosticsLogs, bootstrap?.vaultPath])
+    const on = settings.diagnosticsEnabled
+    configureDiagnostics({ crashes: on && settings.diagnosticsCrashes, errors: on && settings.diagnosticsLogs, perf: on && settings.diagnosticsPerf, usage: on && settings.diagnosticsUsage }, { vaultPath: bootstrap?.vaultPath })
+  }, [settings.diagnosticsEnabled, settings.diagnosticsCrashes, settings.diagnosticsLogs, settings.diagnosticsPerf, settings.diagnosticsUsage, bootstrap?.vaultPath])
 
   useEffect(() => {
     if (!bootstrap) return
-    markStartupReady()
     let notes = 0
     let bytes = 0
     const walk = (entries: VaultEntry[]) => { for (const entry of entries) { if (entry.kind === 'folder') walk(entry.children ?? []); else { notes += 1; bytes += entry.size ?? 0 } } }
@@ -7354,6 +7351,13 @@ export default function App({ startupBootstrap }: AppProps) {
           <footer><small>PDF · Bilder · ONE · ONETOC2 · ONEPKG · ZIP</small><button type="button" className="secondary-button" onClick={() => setWorksheetImportOpen(false)}>Abbrechen</button></footer>
         </section>
       </div>}
+      {window.fanotes.platform !== 'web' && settings.diagnosticsEnabled && !settings.diagnosticsNoticeSeen && !settingsOpen && (
+        <SendDataNotice
+          onDismiss={() => applySettings({ ...settingsRef.current, diagnosticsNoticeSeen: true })}
+          onTurnOff={() => applySettings({ ...settingsRef.current, diagnosticsEnabled: false, diagnosticsNoticeSeen: true })}
+          onOpenSettings={() => { applySettings({ ...settingsRef.current, diagnosticsNoticeSeen: true }); openSettings('senddata') }}
+        />
+      )}
       <div className="toast-stack" aria-live="polite" aria-relevant="additions">{toasts.map((item) => <div className={`toast ${item.kind}`} role={item.kind === 'error' ? 'alert' : 'status'} key={item.id}>{item.kind === 'success' ? <CheckCircle2 size={16} /> : item.kind === 'error' ? <CircleAlert size={16} /> : <Info size={16} />}<span>{item.message}</span><button type="button" aria-label="Meldung schließen" onClick={() => dismissToast(item.id)}><X size={13} /></button></div>)}</div>
     </div>
   )

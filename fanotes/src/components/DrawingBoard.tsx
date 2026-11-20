@@ -152,6 +152,7 @@ import {
   inkNoticeAutoClearDelayMs,
 } from '../lib/inkNotice'
 import { BUG_REPORT_PEN_SAMPLE_MS, buildPenDiagnosticEvent, diagnosticLog } from '../lib/bugReport'
+import { recordPenLatency } from '../lib/diagnosticsClient'
 import { boundsOfInkIndexes, copyInkSelection, inkEditUndoSnapshot, moveInkSelection, scaleInkSelection } from '../lib/inkSelect'
 import { bumpInkGeometryEpoch, strokePointBounds } from '../lib/strokeBounds'
 import { drawingDocumentJson, warmStrokeJsonWhenIdle } from '../lib/drawingJson'
@@ -4793,6 +4794,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const noteworthy = continued.grew || jump === 'skip'
     if (noteworthy || diagnosticNow - lastDiagnosticAtRef.current > BUG_REPORT_PEN_SAMPLE_MS) {
       lastDiagnosticAtRef.current = diagnosticNow
+      if (event.pointerType === 'pen') recordPenLatency(diagnosticNow - event.timeStamp)
       diagnosticLog.record(buildPenDiagnosticEvent({
         at: Date.now(),
         noteId: drawingIdRef.current,
