@@ -109,6 +109,9 @@ try {
 
       // Open: Ctrl+\ puts the most recent other note on the right.
       assert.equal((await state()).split, false)
+      // A split pane shares the note's remembered camera; one saved at zoom 1 by the full-width pane (timing dependent) is
+      // restored as-is and the sheet opens scrolled. This check is about the fit for a note without a remembered view.
+      await page.evaluate(() => localStorage.removeItem('fanotes.paperView.v1'))
       await page.keyboard.press('Control+\\')
       await page.waitForSelector('.editor-split.is-split .split-pane .cm-content', { timeout: 15_000 })
       await settle(800)

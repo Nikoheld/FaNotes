@@ -247,7 +247,7 @@ import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSquare'
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
-import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView, recallSplitAware } from './lib/paperViewMemory'
+import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
 import { configureDiagnostics, markStartupReady, recordFeature, sendDailyIfDue, setDiagnosticsVault } from './lib/diagnosticsClient'
 import {
@@ -6091,7 +6091,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const fit = () => {
       const scroller = scrollerOf()
       if (done || interacted || !scroller) return
-      if (recallSplitAware(`split:${path}`, recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(`split:${path}`)))) return
+      if (recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(`split:${path}`))) return
       const view = splitPaperViewStore.read()
       if (view.zoom !== 1) { done = true; return }
       const zoom = splitFitZoom(scroller.clientWidth)

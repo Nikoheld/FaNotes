@@ -130,15 +130,6 @@ export const paperViewFromMemory = (entry: PaperViewMemoryEntry | null): PaperVi
 )
 
 /** Split panes share the identity of the note they mirror. */
-/**
- * A split pane shares the note's remembered camera, but one saved at zoom 1 was made for another (usually wider) pane:
- * restored here it opens scrolled sideways with the text cut off. Such an entry is ignored for split panes, which fit
- * their own zoom; a deliberate other zoom is kept.
- */
-export const recallSplitAware = (viewKey: string | null | undefined, entry: PaperViewMemoryEntry | null): PaperViewMemoryEntry | null => (
-  typeof viewKey === 'string' && viewKey.startsWith('split:') && entry && entry.zoom === 1 ? null : entry
-)
-
 export const paperViewMemoryKey = (viewKey: string | null | undefined) => {
   if (typeof viewKey !== 'string' || !viewKey) return ''
   return viewKey.startsWith('split:') ? viewKey.slice('split:'.length) : viewKey
