@@ -183,7 +183,7 @@ const worksheetStyleSafeguards = [
   ['margin-left: var(--text-origin-x, 18px)', 'Arbeitsblatt-Entfernen bleibt auf der Textspalte, nicht im linken Kameraraum'],
   ['.unified-paper.has-ink-width', 'A4-Tinte ändert den linken Rand nicht'],
   ['width: min(100%, var(--paper-width, 900px))', 'Text umbricht auf der A4-Spalte'],
-  ['Sit above the full-sheet ink canvas so Entfernen stays clickable in pen mode.', 'PDF-Entfernen bleibt im Stiftmodus klickbar'],
+  ['Entfernen remains clickable', 'PDF-Entfernen bleibt im Stiftmodus klickbar'],
   ['.pdf-note-view.is-inking .pdf-note-page canvas', 'PDF-Canvas nimmt den Stift nicht, wenn Tinte an ist'],
   ['.unified-paper.is-pdf-note.has-ink-extent', 'PDF-Notiz wächst mit den Seiten, Overlay deckt das Blatt'],
   ['content-visibility: visible', 'PDF-Seiten rasterisieren nicht als 1×-Platzhalter'],

@@ -1137,6 +1137,8 @@ try {
     await waitFor(`document.querySelectorAll('.unified-paper.has-worksheet, .worksheet-layer').length > ${before}`, 30_000).catch(() => {})
     await sleep(1500)
     await penMode()
+    // Pen mode keeps the sheet under the ink and its Entfernen button on top.
+    assert.ok(await evaluate(`(() => { const button = document.querySelector('.worksheet-remove'); if (!button) return true; const r = button.getBoundingClientRect(); return Boolean(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('.worksheet-remove')) })()`), 'Entfernen on the worksheet stays clickable in pen mode')
     await resetRecorder()
     await arm('sheet', { anchor: '.worksheet-page' })
     const paper = await rectOf('.unified-paper')
