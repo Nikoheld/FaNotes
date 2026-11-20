@@ -63,6 +63,10 @@ const CHANNELS = Object.freeze({
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importPdfNote: 'fanotes:import-pdf-note',
   importOneNote: 'fanotes:import-onenote',
+  importOneNotePages: 'fanotes:import-onenote-pages',
+  cancelOneNoteImport: 'fanotes:cancel-onenote-import',
+  closeOneNote: 'fanotes:close-onenote',
+  oneNoteProgress: 'fanotes:onenote-progress',
   readWorksheet: 'fanotes:read-worksheet',
   readWorksheetHtml: 'fanotes:read-worksheet-html',
   saveWorksheet: 'fanotes:save-worksheet',
@@ -197,6 +201,15 @@ const api = Object.freeze({
   importWorksheetFromData: (payload) => invoke(CHANNELS.importWorksheetFromData, payload),
   importPdfNote: (parentPath) => invoke(CHANNELS.importPdfNote, parentPath),
   importOneNote: () => invoke(CHANNELS.importOneNote),
+  importOneNotePages: (request) => invoke(CHANNELS.importOneNotePages, request),
+  cancelOneNoteImport: (sessionId) => invoke(CHANNELS.cancelOneNoteImport, sessionId),
+  closeOneNote: (sessionId) => invoke(CHANNELS.closeOneNote, sessionId),
+  onOneNoteProgress: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, progress) => callback(progress)
+    ipcRenderer.on(CHANNELS.oneNoteProgress, listener)
+    return () => ipcRenderer.removeListener(CHANNELS.oneNoteProgress, listener)
+  },
   readWorksheet: (id) => invoke(CHANNELS.readWorksheet, id),
   readWorksheetHtml: (id) => invoke(CHANNELS.readWorksheetHtml, id),
   saveWorksheet: (document) => invoke(CHANNELS.saveWorksheet, document),
