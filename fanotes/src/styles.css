@@ -2114,8 +2114,11 @@ html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-not
 .worksheet-textbox > button { position: absolute; top: -9px; right: -9px; width: 23px; height: 23px; display: none; place-items: center; padding: 0; border: 1px solid rgba(88,34,47,.18); border-radius: 50%; color: #a33f56; background: #fff; box-shadow: 0 4px 10px rgba(0,0,0,.16); cursor: pointer; }
 .worksheet-textbox:focus-within > button, .worksheet-textbox:hover > button { display: grid; }
 .worksheet-layer.is-disabled {
-  /* Sit above the full-sheet ink canvas so Entfernen stays clickable in pen mode. */
-  z-index: 6;
+  /* Pen mode: no stacking context of its own, so the opaque sheet paints under
+     the ink board (z-index 4) while the toolbar (z-index 8) stays above it and
+     Entfernen remains clickable. With a z-index here the page covered every
+     stroke, live and saved, until the note went back to keyboard mode. */
+  z-index: auto;
   pointer-events: none;
 }
 .worksheet-layer.is-disabled .worksheet-toolbar,

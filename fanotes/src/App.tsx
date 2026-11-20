@@ -590,7 +590,10 @@ const readCompanionFields = async (path: string): Promise<NoteCompanionFields> =
 
 const attachNoteInk = (content: string, id: string) => {
   if (noteInkId(content)) return content
-  const separator = content && !content.endsWith('\n') ? '\n\n' : content ? '\n' : ''
+  // The marker line is hidden in the editor; a blank line before it is not.
+  // That blank line grew the text on the first ink save and pushed a
+  // worksheet below it away from the ink just written on it.
+  const separator = content && !content.endsWith('\n') ? '\n' : ''
   return `${content}${separator}<!-- fanotes-ink:${id} -->\n`
 }
 

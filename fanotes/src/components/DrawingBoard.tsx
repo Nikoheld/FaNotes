@@ -87,7 +87,6 @@ import {
   readUsedSheetZoom,
   resolvePaperViewTarget,
   resolvePaperZoomScroller,
-  watchSheetZoom,
   zoomFactorFromWheel,
   zoomStepFromSpeed,
 } from '../lib/paperView'
@@ -299,7 +298,7 @@ import {
   textOriginCssPx,
   writeExtentFromContent,
 } from '../lib/noteCanvas'
-import { growPageFromMark, keepMarkOnPage } from '../lib/paperCore'
+import { keepMarkOnPage } from '../lib/paperCore'
 import { viewportRasterEnabled } from '../lib/viewportRasterFlag'
 import {
   placeViewportRaster,
@@ -342,6 +341,7 @@ import {
   resolvePaintedLayoutGrow,
   textAbsorbTargetHeight,
   textTypingRoomHeight,
+  growPageAroundLiveMark,
 } from '../lib/paperGrow'
 import { readSavedInkStrokes } from '../lib/inkDocument'
 import { DraftingGuides, type DraftingReadout } from './DraftingGuides'
@@ -1664,19 +1664,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   const resizeDirtyRef = useRef(false)
   const canvasQualityKeyRef = useRef('')
   const pointerBoundsRef = useRef<{ left: number; top: number; width: number; height: number } | null>(null)
-  /**
-   * Paper rect for pen samples. It is measured once per stroke (and again after
-   * a scroll, resize or zoom) instead of per sample, where it could force a layout.
-   */
-  const paperSurfaceCacheRef = useRef<{
-    el: HTMLElement
-    left: number
-    top: number
-    width: number
-    height: number
-    offsetWidth: number
-    offsetHeight: number
-  } | null>(null)
   const viewZoomRef = useRef(1)
   /** Wall-clock until which a zoom gesture counts as still moving. */
   const zoomInFlightUntilRef = useRef(0)
@@ -3294,17 +3281,19 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [initialDrawingJson])
 
-  /** Paper rect for one pen sample, cached until scroll, resize, zoom or a size change. */
-  const readOriginSurface = useCallback((el: HTMLElement, fresh = false) => {
+  /**
+   * Paper rect for one pen sample, measured every time. A rect kept for the
+   * stroke went stale whenever the sheet moved without a scroll, resize or
+   * size event reaching it first (a bar above the note, a sidebar sliding, a
+   * camera pin run from a frame callback), and every later sample of the
+   * stroke landed that far from the pen. Reading offsetWidth/offsetHeight
+   * already settles layout, so the rect read after it costs next to nothing.
+   */
+  const readOriginSurface = useCallback((el: HTMLElement) => {
     const offsetWidth = el.offsetWidth
     const offsetHeight = el.offsetHeight
-    let cached = paperSurfaceCacheRef.current
-    if (fresh || !cached || cached.el !== el || cached.offsetWidth !== offsetWidth || cached.offsetHeight !== offsetHeight) {
-      const rect = el.getBoundingClientRect()
-      cached = { el, left: rect.left, top: rect.top, width: rect.width, height: rect.height, offsetWidth, offsetHeight }
-      paperSurfaceCacheRef.current = cached
-    }
-    return cached
+    const rect = el.getBoundingClientRect()
+    return { left: rect.left, top: rect.top, width: rect.width, height: rect.height, offsetWidth, offsetHeight }
   }, [])
 
   const pointFromEvent = useCallback((event: PointerEvent, preview = false): StrokePoint | null => {
@@ -3773,7 +3762,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   useEffect(() => {
     mountedRef.current = true
     const scheduleMeasure = () => {
-      paperSurfaceCacheRef.current = null
       if (activeStrokeRef.current) {
         resizeDirtyRef.current = true
         return
@@ -3791,15 +3779,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const observer = new ResizeObserver(scheduleMeasure)
     if (surfaceRef.current) observer.observe(surfaceRef.current)
     if (surfaceRef.current?.parentElement) observer.observe(surfaceRef.current.parentElement)
-    const paper = resolvePaperElement()
-    const scroller = paper?.closest('.unified-note-view') as HTMLElement | null
-    // Pen samples reuse one paper rect per stroke; these events end its life.
-    const dropPaperRect = () => {
-      paperSurfaceCacheRef.current = null
-    }
-    window.addEventListener('scroll', dropPaperRect, { capture: true, passive: true })
-    window.addEventListener('resize', dropPaperRect, { passive: true })
-    const stopZoomWatch = paper ? watchSheetZoom(paper, dropPaperRect) : null
+    const scroller = resolvePaperElement()?.closest('.unified-note-view') as HTMLElement | null
     // The slice follows every scroll frame. The canvases scroll with the
     // sheet, so ink inside the slice never moves; a move only re-slices
     // (bitmap copy + one band) once the visible sheet reaches the guard zone.
@@ -3845,10 +3825,6 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     return () => {
       mountedRef.current = false
       observer.disconnect()
-      window.removeEventListener('scroll', dropPaperRect, { capture: true })
-      window.removeEventListener('resize', dropPaperRect)
-      stopZoomWatch?.()
-      dropPaperRect()
       scroller?.removeEventListener('scroll', settleInkWindow)
       scroller?.removeEventListener('scrollend', onScrollEnd)
       if (inkWindowIdleRef.current !== null) {
@@ -4154,15 +4130,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const painted = { width: paper?.offsetWidth ?? 0, height: paper?.offsetHeight ?? 0 }
     const prevPaintW = writePageStayExtent(prevW, paintedLayoutRef.current.w || painted.width)
     const prevPaintH = writePageStayExtent(prevH, paintedLayoutRef.current.h || painted.height)
-    const grown = growPageFromMark(
-      {
-        width: prevW,
-        height: prevH,
-        originX: sourceOriginXRef.current,
-        originY: sourceOriginYRef.current,
-      },
+    // The pen point is in the page as laid out now, pads included.
+    const grown = growPageAroundLiveMark(
+      { width: prevW, height: prevH },
       { x: normalizedX, y: normalizedY },
       { width: writePageStayExtent(prevW, painted.width), height: writePageStayExtent(prevH, painted.height) },
+      !paper?.classList.contains('is-pdf-note'),
     )
     if (grown.height > prevH || grown.width > prevW || grown.padX > 0 || grown.padY > 0) {
       if (!setPageExtent(grown.height, grown.width, grown.padX, grown.padY)) return false
@@ -4600,6 +4573,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       painted: { width: surface.offsetWidth, height: surface.offsetHeight },
       existingCount,
       pendingStale: pendingStaleLayoutRef.current,
+      minEdgeGrow: !originEl?.classList.contains('is-pdf-note'),
       stayPut: {
         paperX: 0,
         paperY: 0,
@@ -5553,8 +5527,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const originEl = (inline
       ? (canvas?.closest('.unified-paper') as HTMLElement | null)
       : null) ?? canvas
-    // A new stroke always starts from a fresh measurement.
-    const surface = originEl ? readOriginSurface(originEl, true) : null
+    const surface = originEl ? readOriginSurface(originEl) : null
     const start = resolveInkPointerDown(event.nativeEvent, surface, viewRotationRef.current)
     if (!start.openStroke) {
       activePointerRef.current = null

@@ -146,7 +146,7 @@ const runOnce = () => {
   assert.doesNotMatch(rulingBlock, /background-position:\s*0\s+0/)
   assert.match(board, /originX: sourceOriginXRef\.current/)
   assert.match(board, /originY: sourceOriginYRef\.current/)
-  assert.match(board, /growPageFromMark\(/)
+  assert.match(board, /growPage(?:FromMark|AroundLiveMark)\(/)
   assert.match(board, /writePageStayExtent\(prevW/)
   assert.match(board, /writePageStayExtent\(nextW/)
   assert.match(board, /liveWriteStayPut\(/)
