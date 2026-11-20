@@ -1,5 +1,18 @@
 # Änderungsverlauf
 
+## 2026.11.3-beta.7
+
+- check-idle-wakeups: reload the page from inside, retry (CDP reload hangs on CI)
+- Battery: stop idle caret blink and hidden work, add idle wakeup check
+- Move OLED paper rules after the base paper rules
+- Fix folders vanishing in linked folders, drops on closed folders, tree visuals
+- Rename the fullscreen IPC channel so it is not treated as a vault mutation
+- Unify the formatting toolbar, add sub/superscript, fullscreen and a hide-Markdown-keys setting
+- Restore study time view, remove the Study tools (Lernwerkzeuge) UI instead
+- Add OLED theme, rename AI access to MCP Server, redo settings layout
+- Add stroke and area eraser modes; paint paper on PDF side pages
+- Remove the study time view, add Geografie subject, rewrite README
+
 ## 2026.11.3-beta.6
 
 - Fix worksheet ink page growing 27 px after the first write
