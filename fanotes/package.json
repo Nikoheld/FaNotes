@@ -19,6 +19,7 @@
     "check:csp": "node scripts/check-csp-delivery.cjs",
     "check:visual": "node scripts/check-visual-rendering.cjs",
     "check:vault-watch": "node scripts/check-vault-watch.cjs",
+    "check:new-folder-visible": "node scripts/check-new-folder-visible.mjs",
     "check:external-tabs-desktop": "node scripts/check-external-tabs-desktop.mjs",
     "check:notes": "node scripts/check-note-creation.cjs",
     "check:desktop-guards": "node scripts/check-desktop-guards.cjs",
