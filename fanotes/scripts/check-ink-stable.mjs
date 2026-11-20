@@ -1144,13 +1144,6 @@ try {
     const paper = await rectOf('.unified-paper')
     const y0 = Math.max(paper.y, 140) + 120
     await lines(paper.x + 140, y0, 1, { gap: 38 })
-    // Open gap (see the PR): about a second into the first writing on a
-    // worksheet the overlay page syncs a little taller; for one frame the
-    // saved layer shows the ink ~45 px too high, and a stroke written across
-    // that moment keeps its tail ~25 px off. Not judged until it settled.
-    await evaluate(`(window.__ink.armed = false, true)`)
-    await sleep(2500)
-    await evaluate(`(window.__ink.armed = true, window.__ink.mark('all', { fresh: true }), true)`)
     await lines(paper.x + 140, y0 + 38, 4, { gap: 38 })
     // The first save writes the note's ink marker: the sheet must not move.
     await sleep(2500)
