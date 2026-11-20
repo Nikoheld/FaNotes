@@ -5,11 +5,14 @@ import { readFileSync } from 'node:fs'
 const PUBLIC = new Set(['POST /prelogin', 'POST /register', 'POST /login'])
 
 const SUMMARY = {
-  'POST /prelogin': 'Return the KDF parameters for an email.',
+  'POST /prelogin': 'Return the KDF parameters for a username or an email.',
   'POST /register': 'Create an account and a device session.',
   'POST /login': 'Open a device session.',
   'GET /account': 'Return the account, its devices, and its usage.',
   'DELETE /account': 'Delete the account after the auth key is checked.',
+  'POST /username': 'Claim a unique username for an account that has none, and publish its sharing key. Cannot be changed later.',
+  'POST /email': 'Add or replace the optional recovery e-mail. The current auth key is required.',
+  'POST /userkey': 'Publish the sharing public key once for an account that has a username but no key.',
   'POST /logout': 'End this session.',
   'POST /password': 'Replace the auth key and sign out every other session.',
   'GET /changes': 'List file-table entries newer than a revision.',
@@ -111,6 +114,9 @@ const operationObject = (operation) => {
   if (operation.method === 'POST' && ['/register', '/login', '/password', '/prelogin'].includes(operation.path)) {
     const schema = operation.path === '/prelogin' ? 'PreloginRequest' : operation.path === '/password' ? 'PasswordRequest' : operation.path === '/register' ? 'RegisterRequest' : 'SessionRequest'
     spec.requestBody = { required: true, content: { 'application/json': { schema: { $ref: `#/components/schemas/${schema}` } } } }
+  }
+  if (operation.method === 'POST' && ['/username', '/email', '/userkey'].includes(operation.path)) {
+    spec.requestBody = { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/IdentityRequest' } } } }
   }
   if (operation.method === 'DELETE' && operation.path === '/account') {
     spec.requestBody = { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthKeyBody' } } } }
@@ -234,12 +240,23 @@ export const buildSyncOpenApi = (operations) => {
         AuthKeyBody: { type: 'object', required: ['authKey'], properties: { authKey: { type: 'string', description: 'Base64 auth key derived by the client. Not a password.' } } },
         Kdf: { type: 'object', required: ['algorithm', 'iterations', 'salt'], properties: { algorithm: { type: 'string', enum: ['pbkdf2-sha256'] }, iterations: { type: 'integer', minimum: 300000 }, salt: { type: 'string' } } },
         KeyWrap: { type: 'object', required: ['iv', 'data'], properties: { iv: { type: 'string' }, data: { type: 'string' } } },
-        PreloginRequest: { type: 'object', required: ['email'], properties: { email: { type: 'string', format: 'email' } } },
+        PreloginRequest: { type: 'object', properties: { username: { type: 'string' }, email: { type: 'string', format: 'email' } }, description: 'Send either a username or an email.' },
+        IdentityRequest: {
+          type: 'object',
+          properties: {
+            username: { type: 'string', description: '3 to 32 ASCII letters, digits, dot, underscore or hyphen. Unique ignoring case.' },
+            email: { type: 'string', format: 'email' },
+            authKey: { type: 'string', description: 'Required by /email.' },
+            publicKey: { type: 'string', description: 'Base64 raw P-256 public key used to wrap share keys.' },
+            userKeyWrap: { $ref: '#/components/schemas/KeyWrap' },
+          },
+        },
         Prelogin: { type: 'object', properties: { kdf: { $ref: '#/components/schemas/Kdf' } } },
         SessionRequest: {
           type: 'object',
-          required: ['email', 'authKey'],
+          required: ['authKey'],
           properties: {
+            username: { type: 'string' },
             email: { type: 'string', format: 'email' },
             authKey: { type: 'string' },
             device: { type: 'object', properties: { name: { type: 'string' }, platform: { type: 'string' } } },
@@ -247,9 +264,14 @@ export const buildSyncOpenApi = (operations) => {
         },
         RegisterRequest: {
           type: 'object',
-          required: ['email', 'authKey', 'kdf', 'vaultKeyWrap', 'device'],
+          required: ['authKey', 'kdf', 'vaultKeyWrap', 'device'],
+          description: 'A username or an email is required. A device-key account has no password: its keys come from a random key kept in the device keychain.',
           properties: {
+            username: { type: 'string' },
             email: { type: 'string', format: 'email' },
+            credential: { type: 'string', enum: ['password', 'device-key'] },
+            publicKey: { type: 'string' },
+            userKeyWrap: { $ref: '#/components/schemas/KeyWrap' },
             authKey: { type: 'string' },
             kdf: { $ref: '#/components/schemas/Kdf' },
             vaultKeyWrap: { $ref: '#/components/schemas/KeyWrap' },

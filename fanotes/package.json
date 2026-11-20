@@ -237,6 +237,7 @@
     "check:split-view": "node scripts/check-split-view.mjs",
     "check:addons": "node scripts/check-addons.mjs",
     "check:sync": "node scripts/check-sync.mjs",
+    "check:account-share": "node scripts/check-account-share.mjs",
     "check:mcp": "node scripts/check-mcp.mjs",
     "check:site-viewer": "node scripts/check-site-viewer-famd.mjs",
     "check:local-mcp": "node scripts/check-local-mcp.mjs",

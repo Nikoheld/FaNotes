@@ -294,8 +294,9 @@ const api = Object.freeze({
     remove: (relativePath) => invoke(CHANNELS.syncRemove, relativePath),
     readState: (vaultId) => invoke(CHANNELS.syncReadState, vaultId),
     writeState: (vaultId, json) => invoke(CHANNELS.syncWriteState, vaultId, json),
-    readSecrets: () => invoke(CHANNELS.syncReadSecrets),
-    writeSecrets: (json) => invoke(CHANNELS.syncWriteSecrets, json),
+    readSecrets: (slot) => invoke(CHANNELS.syncReadSecrets, slot),
+    writeSecrets: (json, slot) => invoke(CHANNELS.syncWriteSecrets, json, slot),
+    secretsProtected: true,
   },
   platform: process.platform,
 })
