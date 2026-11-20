@@ -125,7 +125,7 @@ import {
 } from './lib/pageStats'
 import { clearNoteTextFieldRescue, readNoteTextFieldRescue, writeNoteTextFieldRescue } from './lib/noteTextFieldRescue'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
-import { pruneHeadingFolds, remapHeadingFolds } from './lib/headingFolds'
+import { headingFoldKey, headingFoldScope, pruneHeadingFolds, remapHeadingFolds } from './lib/headingFolds'
 import { chooseStartSurface } from './lib/dashboardLayout'
 import {
   clonedWorksheetDocument,
@@ -833,6 +833,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const [editorMenuOpen, setEditorMenuOpen] = useState(false)
   const [sidebarToolsOpen, setSidebarToolsOpen] = useState(false)
   // Search-row slot that receives the folder tree's collapse/expand-all button.
+  // Heading-fold memory is scoped per vault (hash of the vault path).
+  const headingFoldScopeRef = useRef('')
+  headingFoldScopeRef.current = headingFoldScope(bootstrap?.vaultPath)
   const [foldSlot, setFoldSlot] = useState<HTMLElement | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [lmStudioOpen, setLmStudioOpen] = useState(false)
@@ -1035,7 +1038,7 @@ export default function App({ startupBootstrap }: AppProps) {
   if (!treeSyncRef.current) treeSyncRef.current = createTreeSync<VaultEntry[]>((next) => {
     treeRef.current = next; setTree(next)
     // Folded-heading memory of notes that no longer exist goes away.
-    if (next.length) pruneHeadingFolds(new Set(collectNotePaths(next)))
+    if (next.length) pruneHeadingFolds(headingFoldScopeRef.current, new Set(collectNotePaths(next)))
   })
   const vaultSwitchInProgressRef = useRef(false)
   const searchRequestRef = useRef(0)
@@ -3830,7 +3833,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [createDailyNote, toast])
 
   const remapNotePaperPaths = useCallback((from: string, to: string | null) => {
-    remapHeadingFolds(from, to)
+    remapHeadingFolds(headingFoldScopeRef.current, from, to)
     setNotePaperByPath((current) => {
       const next = { ...current }
       Object.entries(current).forEach(([candidate, style]) => {
@@ -6991,7 +6994,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} foldKey={activeTab.path} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main')} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} foldKey={headingFoldKey(headingFoldScopeRef.current, activeTab.path)} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -7157,7 +7160,7 @@ export default function App({ startupBootstrap }: AppProps) {
                           onChange={(content) => updateContentFor(splitTab.path, content)}
                           onSave={async (content) => { await saveContent(splitTab.path, content) }}
                           onEditActivity={(activity) => recordEditActivityFor(splitTab.path, activity)}
-                          foldKey={splitTab.path}
+                          foldKey={headingFoldKey(headingFoldScopeRef.current, splitTab.path)}
                           settings={settings}
                           paperMode
                           readOnly={(drawingOpen && focusedPane === 'split') || Boolean(tabHolds[splitTab.path])}

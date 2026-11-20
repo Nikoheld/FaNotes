@@ -4,7 +4,8 @@
  * heading's level, its text and which occurrence of that heading it is, so edits
  * that shift line numbers keep the right sections folded.
  */
-export const HEADING_FOLDS_KEY = 'fanotes.headingFolds.v1'
+/** v2 keys entries by vault scope + note path; v1 (path only, could collide across vaults) is ignored and never read. */
+export const HEADING_FOLDS_KEY = 'fanotes.headingFolds.v2'
 export const HEADING_FOLDS_MAX_NOTES = 500
 
 export type HeadingInfo = { line: number; level: number; text: string; key: string }
@@ -87,6 +88,16 @@ export const saveHeadingFolds = (store: HeadingFoldStore, storage?: StorageLike 
   try { target.setItem(HEADING_FOLDS_KEY, JSON.stringify(Object.fromEntries(entries))); return true } catch { return false }
 }
 
+/** Short stable hash of the vault path; two vaults with the same relative note path get different scopes. */
+export const headingFoldScope = (vaultPath: string | null | undefined): string => {
+  let hash = 5381
+  for (const char of vaultPath ?? '') hash = ((hash * 33) ^ char.charCodeAt(0)) >>> 0
+  return hash.toString(36)
+}
+
+/** Storage key of a note: vault scope plus note path. */
+export const headingFoldKey = (scope: string, path: string) => `${scope}|${path}`
+
 export const recallHeadingFolds = (path: string, storage?: StorageLike | null): string[] => loadHeadingFolds(storage)[path]?.keys ?? []
 
 /** An empty list forgets the note. */
@@ -101,25 +112,27 @@ export const rememberHeadingFolds = (path: string, keys: readonly string[], stor
 const underPath = (candidate: string, path: string) => candidate === path || candidate.startsWith(`${path}/`)
 
 /** A renamed or moved note (or folder) keeps its folds; `to === null` (trashed) drops them. */
-export const remapHeadingFolds = (from: string, to: string | null, storage?: StorageLike | null) => {
+export const remapHeadingFolds = (scope: string, from: string, to: string | null, storage?: StorageLike | null) => {
   const store = loadHeadingFolds(storage)
   let changed = false
-  for (const path of Object.keys(store)) {
+  for (const key of Object.keys(store)) {
+    if (!key.startsWith(`${scope}|`)) continue
+    const path = key.slice(scope.length + 1)
     if (!underPath(path, from)) continue
-    const entry = store[path]
-    delete store[path]
+    const entry = store[key]
+    delete store[key]
     changed = true
-    if (to !== null) store[path === from ? to : `${to}${path.slice(from.length)}`] = entry
+    if (to !== null) store[headingFoldKey(scope, path === from ? to : `${to}${path.slice(from.length)}`)] = entry
   }
   return changed ? saveHeadingFolds(store, storage) : false
 }
 
-/** Drops entries for notes that no longer exist. */
-export const pruneHeadingFolds = (existingPaths: ReadonlySet<string>, storage?: StorageLike | null) => {
+/** Drops entries of this vault for notes that no longer exist; other vaults are untouched. */
+export const pruneHeadingFolds = (scope: string, existingPaths: ReadonlySet<string>, storage?: StorageLike | null) => {
   const store = loadHeadingFolds(storage)
   let changed = false
-  for (const path of Object.keys(store)) {
-    if (!existingPaths.has(path)) { delete store[path]; changed = true }
+  for (const key of Object.keys(store)) {
+    if (key.startsWith(`${scope}|`) && !existingPaths.has(key.slice(scope.length + 1))) { delete store[key]; changed = true }
   }
   return changed ? saveHeadingFolds(store, storage) : false
 }
