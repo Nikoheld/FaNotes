@@ -1023,6 +1023,19 @@ export function SettingsModal({
                     ))}
                   </div>
                   <SettingRow title="Strichglättung"><Range value={settings.smoothing} min={0} max={1} step={0.05} onChange={(value) => update('smoothing', value)} /></SettingRow>
+                  {!isWeb && (
+                    <SettingRow title="Handschrift verschönern" description="Glättet fertige Handschrift behutsam: Ecken, Punkte und Strichenden bleiben, Zeilen werden leicht begradigt, auf die Papierlinie gesetzt und die Buchstabenhöhe angeglichen. Zeichnungen, Mathe, Formen und Textmarker bleiben unberührt. Jeder Schritt lässt sich mit Strg+Z rückgängig machen (Verschönern rückgängig).">
+                      <Toggle label="Handschrift verschönern" checked={settings.beautifyHandwriting === true} onChange={(value) => update('beautifyHandwriting', value)} />
+                    </SettingRow>
+                  )}
+                  {!isWeb && settings.beautifyHandwriting === true && (
+                    <SettingRow title="Stärke der Verschönerung" description="Dezent verändert kaum etwas; Mittel glättet und richtet etwas deutlicher aus.">
+                      <select aria-label="Stärke der Verschönerung" value={settings.beautifyStrength === 'medium' ? 'medium' : 'subtle'} onChange={(event) => update('beautifyStrength', event.target.value === 'medium' ? 'medium' : 'subtle')}>
+                        <option value="subtle">Dezent</option>
+                        <option value="medium">Mittel</option>
+                      </select>
+                    </SettingRow>
+                  )}
                   <SettingRow title="Durchkritzel-Empfindlichkeit" description="Niedrig verlangt mehr Überkreuzungen; hoch löscht schon nach einem kürzeren, eindeutigen Durchkritzeln."><Range value={settings.scribbleEraseSensitivity} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('scribbleEraseSensitivity', value)} /></SettingRow>
                   <SettingRow title="Form-Erkennung" description="Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen."><Range value={settings.shapeSnapSensitivity ?? 50} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('shapeSnapSensitivity', value)} /></SettingRow>
                   <SettingRow

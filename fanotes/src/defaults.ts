@@ -60,6 +60,8 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   penOnly: defaultPenOnlyForPlatform(platform),
   tabletButtons: { ...DEFAULT_TABLET_BUTTON_ACTIONS },
   smoothing: 0.68,
+  beautifyHandwriting: false,
+  beautifyStrength: 'subtle',
   scribbleEraseSensitivity: 50,
   shapeSnapSensitivity: 50,
   recognitionMode: 'auto',
