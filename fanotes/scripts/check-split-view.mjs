@@ -58,6 +58,7 @@ try {
     const browser = await browserType.launch({ executablePath: chromium, args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'] })
     const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, locale: 'de-CH' })
     const page = await context.newPage()
+    if (process.env.FANOTES_SPLIT_THROTTLE) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.FANOTES_SPLIT_THROTTLE) })
     const pageErrors = []
     page.on('pageerror', (error) => pageErrors.push(String(error)))
     const settle = (ms) => page.waitForTimeout(ms)
@@ -116,7 +117,12 @@ try {
         const cm = scroller?.querySelector('.cm-content')
         return Boolean(cm && scroller && cm.getBoundingClientRect().left >= scroller.getBoundingClientRect().left - 1)
       }, null, { timeout: 5_000 }).then(() => false, () => true)
-      assert.equal(clipped, false, 'the second pane does not start with its text cut off at the left edge')
+      const clipInfo = clipped ? await page.evaluate(() => {
+        const scroller = document.querySelector('.split-pane .unified-note-view')
+        const rect = (node) => node ? [Math.round(node.getBoundingClientRect().left), Math.round(node.getBoundingClientRect().width)] : null
+        return JSON.stringify({ scroller: rect(scroller), paper: rect(scroller?.querySelector('.unified-paper')), cm: rect(scroller?.querySelector('.cm-content')), scrollLeft: scroller?.scrollLeft, dpr: devicePixelRatio })
+      }) : ''
+      assert.equal(clipped, false, `the second pane does not start with its text cut off at the left edge ${clipInfo}`)
 
       // Divider drag: one storage write, live track, clamped.
       await page.evaluate(() => {
