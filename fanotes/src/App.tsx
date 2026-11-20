@@ -37,7 +37,9 @@ import {
   ListChecks,
   LoaderCircle,
   LayoutGrid,
+  Maximize,
   Maximize2,
+  Minimize,
   MoreHorizontal,
   MoreVertical,
   Network,
@@ -812,6 +814,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [sidebarVisible, setSidebarVisible] = useState(true)
   const [inspectorVisible, setInspectorVisible] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
+  // Window fullscreen where only the toolbar and the document stay. Pure CSS hides the rest, so leaving restores the layout as it was.
+  const [toolbarFullscreen, setToolbarFullscreen] = useState(false)
   const [drawingOpen, setDrawingOpen] = useState(false)
   const [drawingSession, setDrawingSession] = useState<DrawingSession>(EMPTY_DRAWING_SESSION)
   const [worksheetSession, setWorksheetSession] = useState<WorksheetSession>({ key: 0, documents: [] })
@@ -4772,6 +4776,14 @@ export default function App({ startupBootstrap }: AppProps) {
     return () => window.clearTimeout(timer)
   }, [searchQuery])
 
+  const setToolbarFullscreenMode = useCallback((on: boolean) => {
+    const api = window.fanotes
+    if (!api?.setFullscreen) return
+    setToolbarFullscreen(on)
+    void api.setFullscreen(on).catch(() => setToolbarFullscreen(false))
+  }, [])
+  useEffect(() => window.fanotes?.onFullscreenChange?.((on) => { if (!on) setToolbarFullscreen(false) }), [])
+
   const toggleFocusMode = useCallback(() => {
     if (focusMode) {
       setSidebarVisible(focusRestoreRef.current.sidebar)
@@ -6252,6 +6264,7 @@ export default function App({ startupBootstrap }: AppProps) {
         else if (overviewOpen) setOverviewOpen(false)
         else if (glyphenWerkOpen) setGlyphenWerkOpen(false)
         else if (drawingOpenRef.current) closeDrawing()
+        else if (toolbarFullscreen) setToolbarFullscreenMode(false)
         else if (focusMode) toggleFocusMode()
       }
     }
@@ -6267,7 +6280,7 @@ export default function App({ startupBootstrap }: AppProps) {
       window.removeEventListener('keydown', handler)
       window.removeEventListener('mouseup', mouseNav)
     }
-  }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, duplicateNote, focusMode, glyphenWerkOpen, homeworkOpen, insertStamp, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorkRequestsOrBugReport, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, textFieldPlacing, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
+  }, [calendarOpen, closeDrawing, closeTab, createNote, cycleTabs, duplicateNote, focusMode, toolbarFullscreen, setToolbarFullscreenMode, glyphenWerkOpen, homeworkOpen, insertStamp, lmStudioOpen, navigateHistory, noteLinkPlacing, openGlyphenWerk, openLmStudio, openSettings, openTabByDigit, openWorkRequestsOrBugReport, openWorksheetImport, overviewOpen, paletteOpen, removeSelectedNoteLink, reopenClosedTab, saveCurrentWork, searchOpen, selectedNoteLinkId, settingsOpen, swapSplitPanes, textFieldPlacing, toast, toggleDrawing, toggleFocusMode, toggleSplit, worksheetImportOpen])
 
   useEffect(() => {
     const placeImage = (data: DataTransfer | null, event: Event, failure: string) => {
@@ -6373,7 +6386,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const sideToolbar = editorToolbarVisible && settings.toolbarPosition === 'side'
 
   return (
-    <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
+    <div className={`app-shell theme-${theme} background-${settings.workspaceBackground} ${focusMode ? 'focus-mode' : ''} ${toolbarFullscreen ? 'toolbar-fullscreen' : ''} ${settings.compactMode ? 'compact' : ''} ${settings.reduceMotion ? 'no-motion' : ''} ${settings.glassEffects ? 'with-glass' : 'no-glass'}`} style={cssVars}>
       {snowLayerActive(theme) ? <SnowLayer reduceMotion={settings.reduceMotion} /> : null}
       {sanitizeCustomCss(settings.customCss) && <style>{sanitizeCustomCss(settings.customCss)}</style>}
       <nav className="ribbon" aria-label="Hauptnavigation">
@@ -6633,11 +6646,14 @@ export default function App({ startupBootstrap }: AppProps) {
             <div className="toolbar-context">
               {(() => {
                 const selectedTextField = selectedTextFieldId ? noteTextFields.find((field) => field.id === selectedTextFieldId) : undefined
-                if (selectedTextField) return <NoteTextFieldToolbar field={selectedTextField} onStyle={changeTextFieldStyle} onText={changeTextFieldText} onRemove={removePlacedTextField} />
                 const slot = penModeToolbarSlot(drawingOpen, isPdfActive)
-                if (slot === 'ink') return <div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" />
-                if (slot === 'pdf') return <div id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" />
-                return <FormattingToolbar disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating || activeHeld} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} />
+                // The PDF slot element must outlive every swap (text box selected, pen mode): PdfNoteView portals
+                // its bar into it once, and a re-created slot left the bar attached to a detached node (empty top bar).
+                const pdfSlot = isPdfActive ? <div key="pdf-slot" id={PDF_TOOLBAR_SLOT_ID} className="pdf-toolbar-slot" hidden={Boolean(selectedTextField) || slot !== 'pdf'} /> : null
+                if (selectedTextField) return <>{pdfSlot}<NoteTextFieldToolbar key="field-bar" field={selectedTextField} hideTypeable={Boolean(settings.hideMarkdownKeyButtons)} onStyle={changeTextFieldStyle} onText={changeTextFieldText} onRemove={removePlacedTextField} /></>
+                if (slot === 'ink') return <>{pdfSlot}<div id={INK_TOOLBAR_SLOT_ID} className="ink-toolbar-slot" /></>
+                if (slot === 'pdf') return <>{pdfSlot}</>
+                return <>{pdfSlot}<FormattingToolbar hideTypeable={Boolean(settings.hideMarkdownKeyButtons)} disabled={!activeTab || overviewOpen || homeworkOpen || calendarOpen || glyphenWerkOpen || activeEntryMutating || activeHeld} onFormat={formatMarkdown} onInsertLatex={insertSimpleLatex} onLatexError={(message) => toast(message, 'error')} /></>
               })()}
             </div>
             <div className="toolbar-group toolbar-end">
@@ -6798,6 +6814,11 @@ export default function App({ startupBootstrap }: AppProps) {
               {!isPdfActive && <button type="button" className="toolbar-button" title="Bild oder PDF als Arbeitsblatt importieren" aria-label="Arbeitsblatt importieren" onClick={openWorksheetImport}><FileUp size={14} /><span>Blatt</span></button>}
               {hasConnectedAiProvider(settings) && (
                 <button type="button" className={`toolbar-button ai ${lmStudioOpen ? 'active' : ''}`} title="Mit einem AI-Anbieter bearbeiten" aria-label="AI-Assistent öffnen" onClick={openLmStudio}><Bot size={14} /><span>AI</span></button>
+              )}
+              {window.fanotes?.setFullscreen && (
+                <button type="button" className={`toolbar-button ${toolbarFullscreen ? 'active' : ''}`} title={toolbarFullscreen ? 'Vollbild beenden (Esc)' : 'Vollbild: nur Werkzeugleiste und Dokument'} aria-label={toolbarFullscreen ? 'Vollbild beenden' : 'Vollbild'} aria-pressed={toolbarFullscreen} onClick={() => setToolbarFullscreenMode(!toolbarFullscreen)}>
+                  {toolbarFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
+                </button>
               )}
               <div className="editor-more">
                 <button type="button" className={`toolbar-button menu-trigger ${editorMenuOpen ? 'active' : ''}`} title="Weitere Notizaktionen" aria-label="Weitere Notizaktionen" aria-haspopup="menu" aria-expanded={editorMenuOpen} onClick={(event) => { event.stopPropagation(); setEditorMenuOpen((open) => !open) }}><MoreHorizontal size={16} /></button>

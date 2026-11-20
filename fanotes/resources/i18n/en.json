@@ -5083,5 +5083,16 @@
   "Bereichsradierer": "Area eraser",
   "Radierermodus": "Eraser mode",
   "Ein Strich verschwindet komplett, sobald der Radierer ihn berührt": "A stroke disappears entirely as soon as the eraser touches it",
-  "Entfernt nur den Teil unter dem Radierer": "Removes only the part under the eraser"
+  "Entfernt nur den Teil unter dem Radierer": "Removes only the part under the eraser",
+  "Überschrift 3": "Heading 3",
+  "Text tiefgestellt": "Subscript text",
+  "Text hochgestellt": "Superscript text",
+  "Formel": "Formula",
+  "Schriftgröße und Farbe": "Font size and colour",
+  "Vollbild": "Fullscreen",
+  "Vollbild beenden": "Exit fullscreen",
+  "Vollbild beenden (Esc)": "Exit fullscreen (Esc)",
+  "Vollbild: nur Werkzeugleiste und Dokument": "Fullscreen: only the toolbar and the document",
+  "Markdown-Tasten ausblenden": "Hide Markdown buttons",
+  "Blendet in der Werkzeugleiste alle Schaltflächen aus, die du auch einfach tippen kannst: Fett, Kursiv, Überschriften, Listen, Zitat, Code und Link.": "Hides every toolbar button for something you can simply type: bold, italic, headings, lists, quote, code and link."
 }

@@ -178,6 +178,8 @@ export type MarkdownFormatAction =
   | 'bold'
   | 'italic'
   | 'strike'
+  | 'subscript'
+  | 'superscript'
   | 'inlineCode'
   | 'link'
   | 'quote'
@@ -315,6 +317,8 @@ export function applyMarkdownFormat(view: EditorView, action: MarkdownFormatActi
     case 'bold': return wrapSelection(view, '**', '**', 'fetter Text')
     case 'italic': return wrapSelection(view, '*', '*', 'kursiver Text')
     case 'strike': return wrapSelection(view, '~~', '~~', 'durchgestrichener Text')
+    case 'subscript': return wrapSelection(view, '<sub>', '</sub>', 'tiefgestellt')
+    case 'superscript': return wrapSelection(view, '<sup>', '</sup>', 'hochgestellt')
     case 'inlineCode': {
       const { from, to } = view.state.selection.main
       return view.state.sliceDoc(from, to).includes('\n')

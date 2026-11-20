@@ -134,6 +134,7 @@ try {
     assert.notDeepEqual(Buffer.from(pdf), Buffer.from(plainPdf))
 
     const toolbar = renderToStaticMarkup(createElement(toolbarModule.FormattingToolbar, {
+      defaultMoreOpen: true,
       onFormat: () => undefined,
       onInsertLatex: () => undefined,
     }))
@@ -154,9 +155,9 @@ try {
     const drawingSource = readFileSync(join(root, 'src/components/DrawingBoard.tsx'), 'utf8')
     assert.equal(slots.penModeToolbarSlot(false, false), 'markdown')
     assert.equal(slots.penModeToolbarSlot(true, false), 'ink')
-    assert.match(appSource, /if \(slot === 'ink'\) return <div id=\{INK_TOOLBAR_SLOT_ID\}/)
-    assert.match(appSource, /if \(slot === 'pdf'\) return <div id=\{PDF_TOOLBAR_SLOT_ID\}/)
-    assert.match(appSource, /return <FormattingToolbar[\s\S]*?onInsertLatex=\{insertSimpleLatex\}/)
+    assert.match(appSource, /if \(slot === 'ink'\) return <>\{pdfSlot\}<div id=\{INK_TOOLBAR_SLOT_ID\}/)
+    assert.match(appSource, /id=\{PDF_TOOLBAR_SLOT_ID\} className="pdf-toolbar-slot"/)
+    assert.match(appSource, /<FormattingToolbar[\s\S]*?onInsertLatex=\{insertSimpleLatex\}/)
     assert.match(appSource, /<EditorExportControls[\s\S]*?onExportPdf=/)
     assert.match(appSource, /onExportLatex=/)
     assert.match(appSource, /exportNotePdf\(/)

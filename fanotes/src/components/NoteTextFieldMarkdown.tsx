@@ -7,6 +7,7 @@ import { translateUiText } from '../i18n'
 import {
   openableNoteTextLink,
   remarkNoteTextDialect,
+  remarkNoteTextScripts,
   remarkNoteTextSoftBreaks,
 } from '../lib/noteTextMarkdown'
 
@@ -17,7 +18,7 @@ type NoteTextFieldMarkdownProps = {
   onOpenLink: (href: string) => void
 }
 
-const REMARK_PLUGINS = [remarkGfm, remarkNoteTextDialect, remarkNoteTextSoftBreaks]
+const REMARK_PLUGINS = [remarkGfm, remarkNoteTextDialect, remarkNoteTextScripts, remarkNoteTextSoftBreaks]
 
 const isElement = (node: ElementContent | undefined): node is HastElement => node?.type === 'element'
 

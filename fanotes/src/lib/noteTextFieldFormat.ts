@@ -41,6 +41,8 @@ export function formatTextFieldText(text: string, start: number, end: number, ac
     case 'bold': return wrap(text, start, end, '**', '**', 'fetter Text')
     case 'italic': return wrap(text, start, end, '*', '*', 'kursiver Text')
     case 'strike': return wrap(text, start, end, '~~', '~~', 'durchgestrichener Text')
+    case 'subscript': return wrap(text, start, end, '<sub>', '</sub>', 'tiefgestellt')
+    case 'superscript': return wrap(text, start, end, '<sup>', '</sup>', 'hochgestellt')
     case 'inlineCode':
       return text.slice(start, end).includes('\n')
         ? template(text, start, end, '\n```\n{{selection}}\n```\n', 'Code')

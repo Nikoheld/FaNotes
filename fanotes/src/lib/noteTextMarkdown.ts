@@ -20,6 +20,39 @@ export function remarkNoteTextDialect(this: unknown) {
   extensions.push({ disable: { null: ['codeIndented', 'htmlFlow', 'htmlText'] } })
 }
 
+const SCRIPT_TAG = /<(sub|sup)>([^<\n]+)<\/\1>/gu
+
+const splitScripts = (node: MdNodes) => {
+  if (!('children' in node)) return
+  const next: MdNodes[] = []
+  let changed = false
+  for (const child of node.children as MdNodes[]) {
+    if (child.type === 'text' && child.value.includes('<s')) {
+      const value = child.value
+      let last = 0
+      for (const match of value.matchAll(SCRIPT_TAG)) {
+        changed = true
+        const at = match.index ?? 0
+        if (at > last) next.push({ type: 'text', value: value.slice(last, at) })
+        // An emphasis node rendered as <sub>/<sup>: HTML itself stays inert in text boxes.
+        next.push({ type: 'emphasis', data: { hName: match[1] }, children: [{ type: 'text', value: match[2] ?? '' }] } as MdNodes)
+        last = at + match[0].length
+      }
+      if (last === 0) next.push(child)
+      else if (last < value.length) next.push({ type: 'text', value: value.slice(last) })
+      continue
+    }
+    splitScripts(child)
+    next.push(child)
+  }
+  if (changed) (node as { children: PhrasingContent[] }).children = next as PhrasingContent[]
+}
+
+/** remark plugin: `<sub>x</sub>` and `<sup>x</sup>` (what the toolbar writes) show as sub/superscript. */
+export function remarkNoteTextScripts() {
+  return (tree: MdRoot) => splitScripts(tree)
+}
+
 const splitSoftBreaks = (node: MdNodes) => {
   if (!('children' in node)) return
   const next: MdNodes[] = []

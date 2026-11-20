@@ -48,6 +48,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   profilePublic: { type: 'boolean' },
   marginTranscript: { type: 'boolean' },
   showWordCount: { type: 'boolean' },
+  hideMarkdownKeyButtons: { type: 'boolean' },
   showOutline: { type: 'boolean' },
   defaultFolder: { type: 'relative', max: 480 },
   dailyNotesFolder: { type: 'relative', max: 480 },
