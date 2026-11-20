@@ -9,7 +9,6 @@ on:
       - 'fanotes/src/App.tsx'
       - 'fanotes/src/components/MarkdownEditor.tsx'
       - 'fanotes/src/styles.css'
-      - 'fanotes/src/lib/mcp/**'
       - 'fanotes/electron/main.cjs'
       - 'fanotes/scripts/check-idle-wakeups.mjs'
       - '.github/workflows/idle-wakeups.yml'

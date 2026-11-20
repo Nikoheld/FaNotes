@@ -33,7 +33,6 @@ globalThis.fetch = (input, init = {}) => {
 
 const dataDirectory = mkdtempSync(join(tmpdir(), 'fanotes-sync-check-'))
 process.env.FANOTES_SYNC_DIR = dataDirectory
-process.env.FANOTES_MCP_DIR = join(dataDirectory, 'mcp')
 const PORT = 18_600 + Math.floor(Math.random() * 300)
 const ORIGIN = `http://127.0.0.1:${PORT}`
 process.env.FANOTES_PUBLIC_ORIGIN = ORIGIN
@@ -1051,7 +1050,7 @@ try {
       const { defaultSettingsForPlatform } = await vite.ssrLoadModule('/src/defaults.ts')
       const render = (patch) => renderToStaticMarkup(createElement(SyncSettingsSection, {
         engine: {},
-        syncState: { status: 'idle', account: { email: 'ada@example.com', accountId: 'a'.repeat(32), deviceId: 'd' }, vaultId: 'v', lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false, ...patch },
+        syncState: { status: 'idle', account: { email: 'ada@example.com', accountId: 'a'.repeat(32), deviceId: 'd' }, vaultId: 'v', lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null, ...patch },
         settings: defaultSettingsForPlatform('linux'),
         update: () => undefined,
         platform: 'linux',

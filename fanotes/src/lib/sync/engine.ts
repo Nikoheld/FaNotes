@@ -22,7 +22,6 @@ import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
 import { judgeStoryShrink, mergeStoryFile, storyRoleOf } from '../../writing/syncMerge'
 import { conflictFingerprint, groupConflicts, keptVersionPath, numberedVariant, type ConflictGroup, type ConflictKeep } from './conflicts'
 import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncRemoteEntry, type SyncSession } from './api'
-import { mcpReaderRequest, newReaderKey, type McpGrantInfo } from '../mcp/client'
 import {
   decryptBytes, decryptMeta, deriveFromPassword, deriveSyncKeys, encryptBytes, encryptMeta, fileIdFor, fromBase64, importVaultSecret,
   isValidKdf, newKdf, newVaultSecret, passwordProblems, sha256Hex, toBase64, unwrapVaultSecret, wrapVaultSecret, type SyncKeys,
@@ -51,8 +50,6 @@ export type SyncPublicState = {
   openConflicts: number
   log: SyncLogEntry[]
   info: SyncAccountInfo | null
-  /** This device holds a connector key and can answer an approved MCP client. */
-  mcpReader: boolean
 }
 
 type LocalBase = { id: string; revision: number; sha256: string; size: number; mtimeMs: number; contentSha256?: string; blank?: boolean }
@@ -61,7 +58,7 @@ type SkippedEntry = SyncRemoteEntry & { held?: true }
 type PersistedState = { version: 1; accountId: string; cursor: number; lastSyncAt: string | null; files: Record<string, LocalBase>; conflicts: SyncConflict[]; pendingDeletes: string[]; skipped: SkippedEntry[] }
 /** What `applyRemote` did with one entry. `unreadable`: it was put off because the local file exists but cannot be read. */
 type RemoteOutcome = { result: 'written' | 'removed' | 'conflict' | 'skipped' | 'deferred' | 'noop'; path: string | null; unreadable?: true }
-type Secrets = { v: 1; accountId: string; deviceId: string; token: string; expiresAt: string; email: string; vaultSecret: string; mcpReader?: string }
+type Secrets = { v: 1; accountId: string; deviceId: string; token: string; expiresAt: string; email: string; vaultSecret: string }
 
 export type SyncEngineOptions = {
   platform: string
@@ -189,8 +186,7 @@ const parseSecrets = (raw: string | null): Secrets | null => {
   try {
     const parsed = JSON.parse(raw) as Partial<Secrets>
     if (parsed.v !== 1 || typeof parsed.accountId !== 'string' || typeof parsed.deviceId !== 'string' || typeof parsed.token !== 'string' || typeof parsed.email !== 'string' || typeof parsed.vaultSecret !== 'string') return null
-    const mcpReader = typeof parsed.mcpReader === 'string' && /^[A-Za-z0-9_-]{43,80}$/u.test(parsed.mcpReader) ? parsed.mcpReader : undefined
-    return { v: 1, accountId: parsed.accountId, deviceId: parsed.deviceId, token: parsed.token, expiresAt: typeof parsed.expiresAt === 'string' ? parsed.expiresAt : '', email: parsed.email, vaultSecret: parsed.vaultSecret, ...(mcpReader ? { mcpReader } : {}) }
+    return { v: 1, accountId: parsed.accountId, deviceId: parsed.deviceId, token: parsed.token, expiresAt: typeof parsed.expiresAt === 'string' ? parsed.expiresAt : '', email: parsed.email, vaultSecret: parsed.vaultSecret }
   } catch {
     return null
   }
@@ -230,8 +226,6 @@ export class SyncEngine {
   private session: SyncSession | null = null
   private keys: SyncKeys | null = null
   private vaultSecretBase64: string | null = null
-  private mcpReader: string | null = null
-  private mcpGrantSnapshot: McpGrantInfo[] = []
   private vaultId: string | null = null
   private state: PersistedState | null = null
   private listeners = new Set<() => void>()
@@ -258,7 +252,7 @@ export class SyncEngine {
 
   constructor(api?: SyncApi) {
     this.api = api ?? new SyncApi()
-    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false }
+    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null }
   }
 
   // ── External store API ──────────────────────────────────────────────────
@@ -356,7 +350,6 @@ export class SyncEngine {
     this.keys = await deriveSyncKeys(await importVaultSecret(fromBase64(secrets.vaultSecret)))
     this.vaultSecretBase64 = secrets.vaultSecret
     this.session = { accountId: secrets.accountId, deviceId: secrets.deviceId, token: secrets.token, expiresAt: secrets.expiresAt, email: secrets.email }
-    this.mcpReader = secrets.mcpReader ?? null
     this.vaultId ??= await this.host.vaultId()
     this.state = parseState(await this.host.readState(this.vaultId), secrets.accountId)
     // A new session starts without the previous one's pause and without its unreadable-file reports.
@@ -365,7 +358,6 @@ export class SyncEngine {
     this.setState({
       status: 'idle',
       account: { email: secrets.email, accountId: secrets.accountId, deviceId: secrets.deviceId },
-      mcpReader: Boolean(secrets.mcpReader),
       vaultId: this.vaultId,
       lastSyncAt: this.state.lastSyncAt,
       conflicts: this.state.conflicts,
@@ -447,8 +439,6 @@ export class SyncEngine {
     this.session = null
     this.keys = null
     this.vaultSecretBase64 = null
-    this.mcpReader = null
-    this.mcpGrantSnapshot = []
     this.state = null
     // The pause belonged to this session. Whoever signs in next starts with an open gate.
     this.throttledUntil = 0
@@ -457,7 +447,7 @@ export class SyncEngine {
     this.timer = null
     await this.persistSecrets(null)
     if (this.host && this.vaultId) await this.host.writeState(this.vaultId, null)
-    this.setState({ status: 'signed-out', account: null, info: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, error: null, mcpReader: false })
+    this.setState({ status: 'signed-out', account: null, info: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, error: null })
   }
 
   async refreshAccount() {
@@ -488,8 +478,7 @@ export class SyncEngine {
     const next = await deriveFromPassword(nextPassword, kdf)
     const vaultKeyWrap = await wrapVaultSecret(fromBase64(this.vaultSecretBase64), next.wrappingKey)
     await this.api.changePassword(this.session, { authKey: current.authKey, newAuthKey: next.authKey, kdf, vaultKeyWrap })
-    await this.rememberReader(null)
-    this.log('info', 'Passwort geändert; alle anderen Geräte müssen sich neu anmelden. MCP-Freigaben wurden widerrufen.')
+    this.log('info', 'Passwort geändert; alle anderen Geräte müssen sich neu anmelden.')
   }
 
   async deleteAccount(password: string) {
@@ -503,91 +492,6 @@ export class SyncEngine {
   }
 
   getSession() { return this.session }
-
-  getMcpReaderKey() { return this.mcpReader }
-
-  private currentSecrets(mcpReader: string | null): Secrets | null {
-    if (!this.session || !this.vaultSecretBase64) return null
-    return {
-      v: 1,
-      accountId: this.session.accountId,
-      deviceId: this.session.deviceId,
-      token: this.session.token,
-      expiresAt: this.session.expiresAt,
-      email: this.session.email,
-      vaultSecret: this.vaultSecretBase64,
-      ...(mcpReader ? { mcpReader } : {}),
-    }
-  }
-
-  private async rememberReader(key: string | null) {
-    this.mcpReader = key
-    if (!key) this.mcpGrantSnapshot = []
-    const secrets = this.currentSecrets(key)
-    if (secrets) await this.persistSecrets(secrets)
-    this.setState({ mcpReader: Boolean(key) })
-  }
-
-  async clearMcpReaderLocal() {
-    await this.rememberReader(null)
-  }
-
-  private async authKeyFor(password: string) {
-    if (!this.session) throw new Error('Nicht angemeldet.')
-    const { kdf } = await this.api.prelogin(this.session.email)
-    if (!isValidKdf(kdf)) throw new Error('Der Server hat unbrauchbare Schlüsselparameter geliefert.')
-    return (await deriveFromPassword(password, kdf)).authKey
-  }
-
-  async enableMcpConnector(password: string) {
-    if (!this.session) throw new Error('Nicht angemeldet.')
-    const authKey = await this.authKeyFor(password)
-    const readerKey = newReaderKey()
-    await mcpReaderRequest(this.session, '/reader', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ authKey, readerKey }),
-    })
-    await this.rememberReader(readerKey)
-    this.log('info', 'MCP-Connector ist auf diesem Gerät an. Notizen bleiben verschlüsselt, bis ein von dir erlaubter MCP-Client fragt.')
-  }
-
-  async disableMcpConnector(password: string) {
-    if (!this.session) throw new Error('Nicht angemeldet.')
-    const authKey = await this.authKeyFor(password)
-    await mcpReaderRequest(this.session, '/reader', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ authKey, everywhere: true }),
-    })
-    await this.rememberReader(null)
-    this.log('info', 'MCP-Connector ist aus. Bestehende Freigaben wurden widerrufen.')
-  }
-
-  currentMcpGrants(): McpGrantInfo[] {
-    return this.mcpGrantSnapshot
-  }
-
-  async mcpGrants(): Promise<McpGrantInfo[]> {
-    if (!this.session || !this.mcpReader) {
-      this.mcpGrantSnapshot = []
-      return []
-    }
-    const body = await mcpReaderRequest(this.session, '/reader', { method: 'GET', readerKey: this.mcpReader }) as { grants?: McpGrantInfo[] }
-    const grants = Array.isArray(body?.grants) ? body.grants : []
-    this.mcpGrantSnapshot = grants
-    return grants
-  }
-
-  async revokeMcpGrant(grantId: string) {
-    if (!this.session || !this.mcpReader) throw new Error('Der MCP-Connector ist auf diesem Gerät nicht an.')
-    await mcpReaderRequest(this.session, '/reader/revoke', {
-      method: 'POST',
-      readerKey: this.mcpReader,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grantId }),
-    })
-  }
 
   private requireHost() {
     if (!this.host || !this.options) throw new Error('Sync steht in dieser Umgebung nicht zur Verfügung.')

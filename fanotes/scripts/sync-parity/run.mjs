@@ -44,7 +44,6 @@ Date.now = () => realNow() + clockOffset
 
 const dataDirectory = mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'fanotes-sync-parity-'))
 process.env.FANOTES_SYNC_DIR = dataDirectory
-process.env.FANOTES_MCP_DIR = join(dataDirectory, 'mcp')
 const PORT = 19_100 + Math.floor(Math.random() * 600)
 export const ORIGIN = `http://127.0.0.1:${PORT}`
 process.env.FANOTES_PUBLIC_ORIGIN = ORIGIN
