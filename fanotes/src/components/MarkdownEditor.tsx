@@ -56,6 +56,9 @@ import {
   type ViewUpdate,
 } from '@codemirror/view'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
+import { TableWidget, flushTableEdits, focusTableCell, tableBlocksOf } from './markdownTableWidget'
+import { newTableText } from '../lib/markdownTable'
+import { htmlTableToMarkdown } from '../lib/markdownTableDom'
 import { createEditorFindPanel } from '../lib/editorFindBar'
 import { touchSelection } from '../lib/cmTouchSelection'
 import type { AppSettings, DetectedTextLanguage } from '../types'
@@ -188,6 +191,8 @@ export type MarkdownFormatAction =
   | 'checklist'
   | 'codeBlock'
   | 'table'
+  /** A new table of the given size: `table:<rows>x<columns>`. */
+  | `table:${number}x${number}`
   | 'mathBlock'
   | 'details'
   | 'horizontalRule'
@@ -308,7 +313,35 @@ function stripBlockPrefix(line: string) {
   return line.replace(/^(\s*)(?:#{1,6}\s+|>\s+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/u, '$1')
 }
 
+/** Inserts an empty pipe table at the selection, with a blank line on both sides, and moves into its first cell. */
+export function insertTable(view: EditorView, rows: number, columns: number) {
+  const { state } = view
+  const { from, to } = state.selection.main
+  const selected = state.sliceDoc(from, to).replace(/\s*\n\s*/gu, ' ').trim()
+  const first = state.doc.lineAt(from)
+  const last = state.doc.lineAt(to)
+  const table = newTableText(rows, columns, selected)
+  const atLineStart = from === first.from
+  const before = from === 0 ? '' : atLineStart ? (state.doc.line(first.number - 1).text.trim() ? '\n' : '') : '\n\n'
+  const restOfLine = state.sliceDoc(to, last.to).trim()
+  const nextLine = last.number < state.doc.lines ? state.doc.line(last.number + 1).text : null
+  const after = restOfLine ? '\n\n' : nextLine === null ? '\n' : nextLine.trim() ? '\n' : ''
+  const insert = `${before}${table}${after}`
+  const tableFrom = from + before.length
+  const tableEnd = tableFrom + table.length
+  view.dispatch({
+    changes: { from, to, insert },
+    selection: EditorSelection.cursor(tableEnd + (restOfLine ? 2 : 1)),
+    scrollIntoView: true,
+    userEvent: 'table.edit',
+  })
+  window.requestAnimationFrame(() => { focusTableCell(view, tableFrom, 0, 0) })
+  return true
+}
+
 export function applyMarkdownFormat(view: EditorView, action: MarkdownFormatAction) {
+  const sized = /^table:(\d+)x(\d+)$/u.exec(action)
+  if (sized) return insertTable(view, Number(sized[1]), Number(sized[2]))
   if (view.state.readOnly) return false
   switch (action) {
     case 'heading1': return transformSelectedLines(view, (line) => `# ${stripBlockPrefix(line).trimStart()}`)
@@ -337,10 +370,11 @@ export function applyMarkdownFormat(view: EditorView, action: MarkdownFormatActi
     case 'numberedList': return transformSelectedLines(view, (line, index) => `${index + 1}. ${stripBlockPrefix(line).trimStart()}`)
     case 'checklist': return transformSelectedLines(view, (line) => `- [ ] ${stripBlockPrefix(line).trimStart()}`)
     case 'codeBlock': return insertTemplate(view, '\n```\n{{selection}}\n```\n', 'Code')
-    case 'table': return insertTemplate(view, '\n| Thema | Notiz |\n| --- | --- |\n| {{selection}} |  |\n', 'Eintrag')
+    case 'table': return insertTable(view, 3, 3)
     case 'mathBlock': return insertTemplate(view, '\n$$\n{{selection}}\n$$\n', 'f(x) = x^2')
     case 'details': return insertTemplate(view, '\n<details>\n<summary>Titel</summary>\n\n{{selection}}\n\n</details>\n', 'Einklappbarer Inhalt')
     case 'horizontalRule': return insertTemplate(view, '\n\n---\n\n{{selection}}', '')
+    default: return false
   }
 }
 
@@ -424,6 +458,19 @@ export async function renderInsertedLatex(stored: string): Promise<string> {
   const parsed = editorMathSource(stored)
   return renderEditorMathHtml(parsed.source, parsed.display)
 }
+
+/** Fills an inline-math node of a table cell once KaTeX has loaded. */
+const renderTableCellMath = (node: HTMLElement, source: string) => {
+  void loadMathRenderer().then(({ default: katex }) => {
+    if (!node.isConnected) return
+    try {
+      katex.render(source, node, editorMathKatexOptions(false, false))
+    } catch {
+      node.textContent = source
+    }
+  })
+}
+const tableWidgetOptions = { math: renderTableCellMath }
 
 class MathWidget extends WidgetType {
   constructor(readonly source: string, readonly display: boolean) { super() }
@@ -688,6 +735,26 @@ const buildLivePreviewDecorations = (view: EditorView) => {
     }
   }
 
+  const tableLines = new Set<number>()
+  for (const block of tableBlocksOf(view.state)) {
+    let taken = false
+    for (let number = block.startLine; number <= block.endLine && !taken; number += 1) {
+      taken = mathLines.has(number) || detailsLines.has(number) || studyLines.has(number)
+    }
+    // The table the caret is in stays Markdown source, so every character stays editable.
+    const isEditing = view.state.selection.ranges.some((range) => range.to >= block.from && range.from <= block.to)
+    if (taken || isEditing) continue
+    for (let number = block.startLine; number <= block.endLine; number += 1) tableLines.add(number)
+    const head = view.state.doc.line(block.startLine)
+    decorations.push(Decoration.line({ attributes: { class: 'cm-table-host' } }).range(head.from))
+    decorations.push(Decoration.replace({ widget: new TableWidget(block.source, tableWidgetOptions) }).range(head.from, head.to))
+    for (let number = block.startLine + 1; number <= block.endLine; number += 1) {
+      const hidden = view.state.doc.line(number)
+      decorations.push(Decoration.line({ attributes: { class: 'cm-table-hidden' } }).range(hidden.from))
+      if (hidden.to > hidden.from) decorations.push(Decoration.replace({}).range(hidden.from, hidden.to))
+    }
+  }
+
   const addInlineDecorations = (line: ReturnType<typeof view.state.doc.line>, active: boolean) => {
     if (active || !line.text) return
     const occupied: Array<[number, number]> = []
@@ -794,6 +861,11 @@ const buildLivePreviewDecorations = (view: EditorView) => {
           position = line.to + 1
           continue
         }
+        if (tableLines.has(line.number)) {
+          if (line.to >= visible.to || line.to >= view.state.doc.length) break
+          position = line.to + 1
+          continue
+        }
         if (detailsLines.has(line.number)) {
           if (line.to >= visible.to || line.to >= view.state.doc.length) break
           position = line.to + 1
@@ -831,6 +903,45 @@ const buildLivePreviewDecorations = (view: EditorView) => {
     }
   }
   return Decoration.set(decorations, true)
+}
+
+/** Pasting a table from Word, a spreadsheet or a web page writes a Markdown pipe table. */
+const tablePaste = EditorView.domEventHandlers({
+  paste(event, view) {
+    const html = event.clipboardData?.getData('text/html') ?? ''
+    if (!html || view.state.readOnly) return false
+    const table = htmlTableToMarkdown(html)
+    if (!table) return false
+    event.preventDefault()
+    const { from, to } = view.state.selection.main
+    const line = view.state.doc.lineAt(from)
+    const before = from === line.from ? '' : '\n\n'
+    const tail = view.state.doc.lineAt(to)
+    const after = to === tail.to && tail.number === view.state.doc.lines ? '\n' : '\n\n'
+    const insert = `${before}${table}${after}`
+    view.dispatch({
+      changes: { from, to, insert },
+      selection: EditorSelection.cursor(from + insert.length),
+      scrollIntoView: true,
+      userEvent: 'input.paste',
+    })
+    return true
+  },
+})
+
+/** Arrow keys step from the text above or below a rendered table into its first or last row. */
+const enterTableByArrow = (direction: 1 | -1) => (view: EditorView) => {
+  const selection = view.state.selection.main
+  if (!selection.empty) return false
+  const line = view.state.doc.lineAt(selection.head)
+  const neighbour = line.number + direction
+  if (neighbour < 1 || neighbour > view.state.doc.lines) return false
+  const block = tableBlocksOf(view.state).find((entry) => neighbour >= entry.startLine && neighbour <= entry.endLine)
+  if (!block) return false
+  const target = view.moveVertically(selection, direction === 1)
+  const landed = view.state.doc.lineAt(target.head).number
+  if (landed !== neighbour && !(landed >= block.startLine && landed <= block.endLine)) return false
+  return focusTableCell(view, block.from, direction === 1 ? 0 : 'last', 0)
 }
 
 const livePreview = ViewPlugin.fromClass(class {
@@ -1478,7 +1589,11 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       return applyMarkdownFormat(view, action)
     },
     focus: () => viewRef.current?.focus(),
-    flushChanges: () => changeSchedulerRef.current?.flush(),
+    flushChanges: () => {
+      const view = viewRef.current
+      if (view) flushTableEdits(view)
+      changeSchedulerRef.current?.flush()
+    },
     foldHeading: (line, collapsed) => {
       const view = viewRef.current
       if (!view) return false
@@ -1616,6 +1731,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         search({ top: true, createPanel: createEditorFindPanel }),
         markdown(),
         livePreview,
+        tablePaste,
         EditorView.lineWrapping,
         saveKeymap,
         keymap.of([
@@ -1623,6 +1739,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           { key: 'Mod-i', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'italic') },
           { key: 'Mod-k', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'link') },
           { key: 'Mod-Enter', preventDefault: true, run: (view) => toggleTasksInView(view) },
+          { key: 'ArrowDown', run: enterTableByArrow(1) },
+          { key: 'ArrowUp', run: enterTableByArrow(-1) },
           indentWithTab,
           ...closeBracketsKeymap,
           ...defaultKeymap,

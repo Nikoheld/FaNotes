@@ -1,3 +1,4 @@
+import { newTableText } from './markdownTable'
 import type { MarkdownFormatAction } from '../components/MarkdownEditor'
 
 /** Result of a formatting action on a plain text box: the new text and the selection to restore. */
@@ -30,6 +31,8 @@ const template = (text: string, start: number, end: number, tpl: string, placeho
 /** Applies a markdown toolbar action to the text of a placed text box (same actions as the note editor). */
 export function formatTextFieldText(text: string, start: number, end: number, action: MarkdownFormatAction): TextFieldEdit {
   const prefixed = (prefix: (index: number) => string) => mapLines(text, start, end, (line, index) => `${prefix(index)}${stripBlockPrefix(line).trimStart()}`)
+  const sized = /^table:(\d+)x(\d+)$/u.exec(action)
+  if (sized) return template(text, start, end, `\n${newTableText(Number(sized[1]), Number(sized[2]), '{{selection}}')}\n`, 'Eintrag')
   switch (action) {
     case 'heading1': return prefixed(() => '# ')
     case 'heading2': return prefixed(() => '## ')
@@ -58,5 +61,6 @@ export function formatTextFieldText(text: string, start: number, end: number, ac
     case 'mathBlock': return template(text, start, end, '\n$$\n{{selection}}\n$$\n', 'f(x) = x^2')
     case 'details': return template(text, start, end, '\n<details>\n<summary>Titel</summary>\n\n{{selection}}\n\n</details>\n', 'Einklappbarer Inhalt')
     case 'horizontalRule': return template(text, start, end, '\n\n---\n\n{{selection}}', '')
+    default: return { text, start, end }
   }
 }
