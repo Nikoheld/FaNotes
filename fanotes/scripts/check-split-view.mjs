@@ -109,9 +109,6 @@ try {
 
       // Open: Ctrl+\ puts the most recent other note on the right.
       assert.equal((await state()).split, false)
-      // A split pane shares the note's remembered camera; one saved at zoom 1 by the full-width pane (timing dependent) is
-      // restored as-is and the sheet opens scrolled. This check is about the fit for a note without a remembered view.
-      await page.evaluate(() => localStorage.removeItem('fanotes.paperView.v1'))
       await page.keyboard.press('Control+\\')
       await page.waitForSelector('.editor-split.is-split .split-pane .cm-content', { timeout: 15_000 })
       await settle(800)
@@ -131,7 +128,7 @@ try {
       const clipInfo = clipped ? await page.evaluate(() => {
         const scroller = document.querySelector('.split-pane .unified-note-view')
         const rect = (node) => node ? [Math.round(node.getBoundingClientRect().left), Math.round(node.getBoundingClientRect().width)] : null
-        return JSON.stringify({ scroller: rect(scroller), paper: rect(scroller?.querySelector('.unified-paper')), cm: rect(scroller?.querySelector('.cm-content')), scrollLeft: scroller?.scrollLeft, memory: (() => { try { return Object.entries(JSON.parse(localStorage.getItem('fanotes.paperView.v1') || '{}')).map(([k, v]) => `${k}:${v.zoom}`) } catch { return 'unreadable' } })(), paperStyle: scroller?.querySelector('.unified-paper')?.getAttribute('style'), dpr: devicePixelRatio })
+        return JSON.stringify({ scroller: rect(scroller), paper: rect(scroller?.querySelector('.unified-paper')), cm: rect(scroller?.querySelector('.cm-content')), scrollLeft: scroller?.scrollLeft, dpr: devicePixelRatio })
       }) : ''
       assert.equal(clipped, false, `the second pane does not start with its text cut off at the left edge ${clipInfo}`)
 
@@ -215,16 +212,16 @@ try {
       await page.locator('.split-divider').focus()
       await page.keyboard.press('ArrowDown')
       assert.equal((await state()).ratio, 55, 'the vertical divider uses the up and down arrows')
-      await settle(3000)
+      await settle(300)
       await page.reload({ waitUntil: 'domcontentloaded' })
       await page.waitForSelector('.editor-split.is-split .split-pane .cm-content', { timeout: 60_000 })
-      await settle(2500)
+      await settle(800)
       current = await state()
       assert.equal(current.split, true, 'the split survives a reload')
       assert.equal(current.rows, true, 'the orientation survives a reload')
       assert.equal(current.ratio, 55, 'the ratio survives a reload')
       both = await texts()
-      assert.ok(both[0].includes('ALPHAWORD') && both[1].includes('BETAWORD'), `both notes survive a reload: ${JSON.stringify(both.map((t) => t.slice(-40)))} ${JSON.stringify(current)}`)
+      assert.ok(both[0].includes('ALPHAWORD') && both[1].includes('BETAWORD'), 'both notes survive a reload')
 
       // Close: the editor goes back to one pane and focus resets.
       await page.locator('.split-pane-head button[aria-label="Teilung schließen"]').click()
