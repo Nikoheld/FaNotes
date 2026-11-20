@@ -202,7 +202,11 @@ try {
   }
   assert.ok(page, 'no renderer page')
   await page.addInitScript(probe)
-  await page.reload({ waitUntil: 'commit', timeout: 60_000 })
+  // Reload from inside the page: CDP-driven navigations sometimes hang on Electron's file:// pages.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    page.evaluate(() => location.reload()).catch(() => {})
+    if (await page.waitForFunction(() => typeof window.__idleSnapshot === 'function', null, { timeout: 20_000 }).then(() => true, () => false)) break
+  }
   await page.waitForFunction(() => Boolean(window.fanotes && document.querySelector('.file-tree__row')), null, { timeout: 60_000 })
   await sleep(15_000) // let startup work finish
   const cdp = await page.context().newCDPSession(page)
