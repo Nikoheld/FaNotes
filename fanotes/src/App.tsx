@@ -290,6 +290,7 @@ import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
 import { createPdfMarkEraseHost, unmarkPdfNote } from './lib/pdfMarkEraseHost'
 import { getHandwritingSamples, getMathLayoutExamples, getImportedLabels, putHandwritingSamples, putMathLayoutExamples, putHandwritingLabels } from './lib/handwritingDb'
 import { SafeBoundary } from './components/SafeBoundary'
+import { createTreeSync, type TreeSync } from './lib/treeSync.mjs'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText } from './i18n'
@@ -1021,6 +1022,9 @@ export default function App({ startupBootstrap }: AppProps) {
   const mutatingEntryPathsRef = useRef(new Set<string>())
   const vaultSessionGenerationRef = useRef(0)
   const vaultStructureRevisionRef = useRef(0)
+  // Every tree result goes through this: a request issued earlier never overwrites a later one.
+  const treeSyncRef = useRef<TreeSync<VaultEntry[]> | null>(null)
+  if (!treeSyncRef.current) treeSyncRef.current = createTreeSync<VaultEntry[]>((next) => { treeRef.current = next; setTree(next) })
   const vaultSwitchInProgressRef = useRef(false)
   const searchRequestRef = useRef(0)
   const openingNotesRef = useRef(new Set<string>())
@@ -1740,13 +1744,15 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const refreshTree = useCallback(async () => {
     const session = vaultSessionGenerationRef.current
+    const sync = treeSyncRef.current!
+    const ticket = sync.begin()
     const nextTree = await window.fanotes.getTree()
     if (session !== vaultSessionGenerationRef.current) return treeRef.current
-    treeRef.current = nextTree
-    setTree(nextTree)
+    // A request issued after this one may already have been applied: keep that one.
+    const applied = sync.accept(ticket, nextTree)
     syncEngine.notifyLocalChange()
     lastOwnTreeRefreshRef.current = Date.now()
-    return nextTree
+    return applied ? nextTree : treeRef.current
   }, [])
 
   // Files that arrived from outside FaNotes; the mark goes away when the note is opened.
@@ -1761,12 +1767,15 @@ export default function App({ startupBootstrap }: AppProps) {
         change.changed.every((entryPath) => entryPath === active)
       // The open note's own autosave also shows up as a change: nothing to do then.
       if (onlyActiveChanged) return
-      void window.fanotes.getTree({ fromWatcher: true }).then((nextTree) => {
+      const sync = treeSyncRef.current!
+      const ticket = sync.begin()
+      void window.fanotes.getTree({ fromWatcher: true }).then((fetchedTree) => {
         // Only the tree is swapped. Open tabs, unsaved edits, selection, expanded
         // folders and scroll position live elsewhere and stay untouched.
         if (session !== vaultSessionGenerationRef.current) return
-        treeRef.current = nextTree
-        setTree(nextTree)
+        // This walk may be older than our own refresh (for example a folder created
+        // meanwhile): then the newer tree stays and only the arrival handling runs.
+        const nextTree = sync.accept(ticket, fetchedTree) ? fetchedTree : treeRef.current
         syncEngine.notifyLocalChange()
         const present = new Set(collectTreePaths(nextTree))
         // A truncated change list must not silently drop entries: derive arrivals from the full tree.
@@ -2097,7 +2106,9 @@ export default function App({ startupBootstrap }: AppProps) {
           window.requestIdleCallback(() => { void import('./components/DrawingBoard') }, { timeout: 4_000 })
         })
         try {
+          const sync = treeSyncRef.current!
           const loadFreshTree = async () => {
+            const freshTicket = sync.begin()
             let nextTree = await window.fanotes.getTree()
             if (!alive) return
             let nextNote = chooseRestoredNote(
@@ -2110,22 +2121,23 @@ export default function App({ startupBootstrap }: AppProps) {
               // A stale empty cache must never create a surprise note.
               const created = await window.fanotes.createNote(undefined, translateUiText('Erste Notiz'))
               if (!alive) return
+              const createdTicket = sync.begin()
               nextTree = await window.fanotes.getTree()
+              sync.accept(createdTicket, nextTree)
               nextNote = created.relativePath
             }
-            treeRef.current = nextTree
-            setTree(nextTree)
+            if (!sync.accept(freshTicket, nextTree)) nextTree = treeRef.current
             if (nextNote && !activePathRef.current) await openNote(nextNote)
             if (alive) await restoreWorkspace(data.vaultPath, nextTree)
           }
 
+          const startupTicket = sync.begin()
           const cachedTree = await window.fanotes.getCachedTree().catch(() => null)
           if (!alive) return
           const startupTree = cachedTree ?? await window.fanotes.getFastTree()
           if (!alive) return
           if (startupTree.length) {
-            treeRef.current = startupTree
-            setTree(startupTree)
+            sync.accept(startupTicket, startupTree)
             const startupNote = chooseRestoredNote(
               launchedSettings.lastOpenNotePath,
               collectNotePaths(startupTree),
@@ -2193,15 +2205,17 @@ export default function App({ startupBootstrap }: AppProps) {
       /* templates are also available from the command palette */
     }
     setSettings({ ...defaultSettingsForPlatform(window.fanotes.platform), ...data.settings })
+    const onboardingSync = treeSyncRef.current!
+    let onboardingTicket = onboardingSync.begin()
     let initialTree = await window.fanotes.getTree()
     let initialNote = firstNote(initialTree)
     if (!initialNote) {
       const created = await window.fanotes.createNote(undefined, translateUiText('Erste Notiz'))
+      onboardingTicket = onboardingSync.begin()
       initialTree = await window.fanotes.getTree()
       initialNote = created.relativePath
     }
-    treeRef.current = initialTree
-    setTree(initialTree)
+    onboardingSync.accept(onboardingTicket, initialTree)
     if (initialNote) await openNote(initialNote)
     // A fresh vault has no workspace to restore, but from here on it remembers one.
     await restoreWorkspace(data.vaultPath, initialTree)
@@ -3676,6 +3690,8 @@ export default function App({ startupBootstrap }: AppProps) {
       const created = await window.fanotes.createFolder(parent)
       if (session !== vaultSessionGenerationRef.current) return
       vaultStructureRevisionRef.current += 1
+      // An active tag filter hides folders without matching notes: the new folder must stay visible.
+      setTagFilter(null)
       setRevealPath(created.relativePath)
       await refreshTree()
       toast(parent ? `Unterordner in „${parent.split('/').pop()}“ erstellt.` : 'Neuer Ordner erstellt.', 'success')

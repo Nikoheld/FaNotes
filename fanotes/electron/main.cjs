@@ -30,6 +30,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { fileURLToPath, pathToFileURL } = require('node:url')
 const folderLocations = require('./folder-locations.cjs')
+const { createTreeScanCache, mergeTreeEntries } = require('./tree-scan.cjs')
 const vaultWatch = require('./vault-watch.cjs')
 const { coerceWorksheetBytes } = require('./worksheet-bytes.cjs')
 const { encodeWindowCapture } = require('./window-capture.cjs')
@@ -1649,8 +1650,9 @@ function folderLocationStoreNow() {
 // Notices files added, changed or removed from outside FaNotes (Explorer, other
 // programs, other sync tools) in the vault and its linked folder locations.
 let vaultWatcher = null
-/** Latest watcher walk (with colors). Reusable once, for the getTree call that follows a change event. */
-let watcherTreeScan = null
+/** Latest watcher walk (with colors). Reusable once, for the getTree call that follows a change event,
+ * and never across one of our own vault mutations (structure generation). */
+const treeScanCache = createTreeScanCache()
 let vaultWatcherRoot = null
 function ensureVaultWatch(root) {
   if (vaultWatcher && vaultWatcherRoot === root) return
@@ -1660,8 +1662,9 @@ function ensureVaultWatch(root) {
   // refresh after a change event can reuse it once instead of walking the vault again.
   const scanRoot = async () => {
     if (currentVaultPath !== root) throw new Error('vault changed')
+    const generation = treeScanCache.begin()
     const entries = applyFileColors(await readTreeDirectory(root, root, 0, await readFolderColors(root)), await readFileColorsForTree(root))
-    watcherTreeScan = { root, entries, at: Date.now(), reusable: false }
+    treeScanCache.finish(generation, root, entries)
     return entries
   }
   const getRoots = () => {
@@ -1683,7 +1686,7 @@ function ensureVaultWatch(root) {
       const truncated = lists.some((list) => list.length > 500)
       const payload = { added: cap(lists[0]), removed: cap(lists[1]), changed: cap(lists[2]), ...(truncated ? { truncated: true } : {}) }
       if (!payload.added.length && !payload.removed.length && !payload.changed.length) return
-      if (watcherTreeScan?.root === root) watcherTreeScan.reusable = true
+      treeScanCache.markReusable(root)
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC.vaultChanged, payload)
     },
   })
@@ -2415,7 +2418,10 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
     const scanReal = mapped ? await withTreeIoSlot(() => fsp.realpath(scan)).catch(() => null) : root
     if (mapped && !scanReal) continue
     for (const directoryEntry of directoryEntries) {
-      if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink() || seen.has(directoryEntry.name)) continue
+      if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink()) continue
+      const duplicate = seen.has(directoryEntry.name)
+      // Only folders can repeat across linked locations (merged below); a repeated file keeps the first.
+      if (duplicate && !directoryEntry.isDirectory()) continue
       const absolutePath = path.join(scan, directoryEntry.name)
       let info
       try {
@@ -2425,7 +2431,9 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
       }
       if (info.isSymbolicLink()) continue
       const logicalChild = logicalDir ? `${logicalDir}/${directoryEntry.name}` : directoryEntry.name
+      if (duplicate && !info.isDirectory()) continue
       if (info.isDirectory() && STORY_FOLDER.test(directoryEntry.name)) {
+        if (duplicate) continue
         // A writing-mode project is one document in the tree.
         seen.add(directoryEntry.name)
         result.push({ name: directoryEntry.name, relativePath: logicalChild, kind: 'file', extension: 'story', modifiedAt: info.mtime.toISOString() })
@@ -2435,6 +2443,12 @@ async function readTreeDirectory(root, directory, depth = 0, folderColors = new 
         const realDirectory = await withTreeIoSlot(() => fsp.realpath(absolutePath)).catch(() => null)
         if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
         const children = await readTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild)
+        if (duplicate) {
+          // Same folder name in another linked location: one logical folder with the children of both.
+          const first = result.find((item) => item.kind === 'folder' && item.name === directoryEntry.name)
+          if (first) first.children = mergeTreeEntries(first.children ?? [], children)
+          continue
+        }
         const entry = entryFromStat(root, absolutePath, info, children, folderColors.get(logicalChild))
         entry.name = directoryEntry.name
         entry.relativePath = logicalChild
@@ -2474,7 +2488,10 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
     const scanReal = mapped ? await withTreeIoSlot(() => fsp.realpath(scan)).catch(() => null) : root
     if (mapped && !scanReal) continue
     for (const directoryEntry of directoryEntries) {
-      if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink() || seen.has(directoryEntry.name)) continue
+      if (directoryEntry.name.startsWith('.') || directoryEntry.isSymbolicLink()) continue
+      const duplicate = seen.has(directoryEntry.name)
+      // Only plain folders can repeat across linked locations (merged below).
+      if (duplicate && (!directoryEntry.isDirectory() || STORY_FOLDER.test(directoryEntry.name))) continue
       const absolutePath = path.join(scan, directoryEntry.name)
       const logicalChild = logicalDir ? `${logicalDir}/${directoryEntry.name}` : directoryEntry.name
       const extensionWithDot = path.extname(directoryEntry.name).toLocaleLowerCase('en-US')
@@ -2488,6 +2505,11 @@ async function readFastTreeDirectory(root, directory, depth = 0, folderColors = 
         if (!realDirectory || !isInsideRoot(scanReal, realDirectory)) continue
         const children = await readFastTreeDirectory(root, absolutePath, depth + 1, folderColors, logicalChild).catch(() => null)
         if (!children) continue
+        if (duplicate) {
+          const first = result.find((item) => item.kind === 'folder' && item.name === directoryEntry.name)
+          if (first) first.children = mergeTreeEntries(first.children ?? [], children)
+          continue
+        }
         const color = folderColors.get(logicalChild)
         const linked = folderLocations.exactPaths(locationMap, logicalChild)
         seen.add(directoryEntry.name)
@@ -3269,13 +3291,33 @@ function isTrustedRendererNavigation(navigationUrl) {
   }
 }
 
+// Channels that only read. Every other channel may change the vault structure
+// (create/rename/move/trash, imports, writes that create files, vault or location
+// changes), so it invalidates the watcher's cached tree walk before and after it runs.
+const READ_ONLY_IPC = /^fanotes:(get-|read-|list-|load-|recognize-|search$|render-|capture-window$|enhanced-math-(get-state|recognize)$|qwen-vision-(get-state|recognize)$|lm-studio-|ai-|update-(get-state|check)$|open-external$|reveal-in-folder$|before-close$|renderer-ready$|story-(read|list)$|export-note-pdf$|vault-changed$)/
+function mutatesVaultStructure(channel) {
+  return !READ_ONLY_IPC.test(channel)
+}
+
+// Channels that add, remove or move entries. The watcher rescans right after them.
+const STRUCTURAL_IPC = /^fanotes:(create-|convert-famd|story-create$|rename-entry$|move-entry$|trash-entry$|import-|delete-worksheet$|set-folder-locations$|select-vault$|share-open$)/
+
 function handle(channel, listener) {
+  const mutating = mutatesVaultStructure(channel)
+  const structural = STRUCTURAL_IPC.test(channel)
   ipcMain.handle(channel, async (event, ...args) => {
     if (!isTrustedIpcSender(event)) throw new Error('Nicht vertrauenswürdiger IPC-Aufruf wurde blockiert.')
+    if (mutating) treeScanCache.bump()
     try {
       return await listener(event, ...args)
     } catch (error) {
       throw error instanceof Error ? error : new Error(String(error ?? 'Unbekannter interner Fehler.'))
+    } finally {
+      if (mutating) {
+        treeScanCache.bump()
+        // Do not wait for the next fs.watch hint (missing for new nested folders on some platforms).
+        if (structural) vaultWatcher?.nudge()
+      }
     }
   })
 }
@@ -3885,9 +3927,8 @@ function registerIpcHandlers() {
     const root = await assertCurrentVaultRoot()
     if (vaultPath !== root) throw new Error('Der Vault wurde während des Ladens verändert.')
     // Only the refresh that answers a watcher event may reuse its walk (once, and only while fresh).
-    const scan = watcherTreeScan
-    watcherTreeScan = null
-    if (options?.fromWatcher === true && scan?.reusable && scan.root === root && Date.now() - scan.at < 5000) return scan.entries
+    const reusable = treeScanCache.take(root, { fromWatcher: options?.fromWatcher === true })
+    if (reusable) return reusable
     const folderColors = await readFolderColors(root)
     const entries = applyFileColors(await readTreeDirectory(root, root, 0, folderColors), await readFileColorsForTree(root))
     // The verified local cache makes subsequent starts independent of a full

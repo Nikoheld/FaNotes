@@ -299,6 +299,21 @@ export const FileTree = memo(function FileTree({
     })
   }, [revealPath])
 
+  // The row only exists once the refreshed tree arrives, which is after revealPath is set.
+  // Scroll it into view once (the sidebar of a long tree may have it off-screen).
+  const scrolledRevealRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!revealPath) { scrolledRevealRef.current = null; return undefined }
+    if (scrolledRevealRef.current === revealPath) return undefined
+    const frame = window.requestAnimationFrame(() => {
+      const button = treeRef.current?.querySelector<HTMLElement>(`[data-path="${CSS.escape(revealPath)}"]`)
+      if (!button) return
+      scrolledRevealRef.current = revealPath
+      revealTreeRow(button.closest<HTMLElement>('.file-tree__row'))
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [revealPath, entries])
+
   useEffect(() => {
     if (!contextMenu) return
     const close = () => setContextMenu(null)
