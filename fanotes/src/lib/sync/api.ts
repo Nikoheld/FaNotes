@@ -1,14 +1,20 @@
 // Thin client for the FaNotes Sync HTTP API (fanotes-site/sync-api.mjs).
 // Everything that crosses this boundary is already encrypted by the caller;
 // this module only knows about revisions, ids and sessions.
-import type { SyncKdf, SyncKeyWrap } from './crypto'
+import type { ShareKeyWrap, SyncKdf, SyncKeyWrap } from './crypto'
 
 export const SYNC_HOST = 'fanotes.fasrv.ch'
 export const SYNC_ORIGIN = `https://${SYNC_HOST}`
 export const SYNC_API_PATH = '/api/v1/sync'
 const RETRY_DELAY_MS = 400
 
-export type SyncSession = { accountId: string; deviceId: string; token: string; expiresAt: string; email: string }
+export type SyncSession = { accountId: string; deviceId: string; token: string; expiresAt: string; email: string; username?: string | null; credential?: SyncCredential }
+
+export type SharePermission = 'read' | 'edit'
+export type ShareStatus = 'pending' | 'accepted' | 'declined' | 'left'
+type ShareBase = { id: string; kind: 'note' | 'folder'; permission: SharePermission; status: ShareStatus; nameEnc: { iv: string; data: string }; createdAt: string; updatedAt: string; rev: number }
+export type UserShareIncoming = ShareBase & { role: 'recipient'; owner: { username: string; publicKey: string | null }; keyWrap: ShareKeyWrap }
+export type UserShareOutgoing = ShareBase & { role: 'owner'; recipient: { username: string }; ownerKeyWrap: ShareKeyWrap }
 
 export type SyncRemoteEntry = {
   id: string
@@ -25,9 +31,20 @@ export type SyncChangesPage = { revision: number; entries: SyncRemoteEntry[]; mo
 
 export type SyncDevice = { id: string; name: string; platform: string; createdAt: string; lastSeenAt: string; current: boolean }
 
+/** How an account proves itself: a password, or a random key kept in the device's keychain. */
+export type SyncCredential = 'password' | 'device-key'
+
+/** The account's sharing key: the published public half and the private half wrapped by the vault secret. */
+export type SyncUserKey = { publicKey: string; wrap: SyncKeyWrap }
+
+export type SyncIdentity = { username: string | null; email: string | null; credential: SyncCredential; userKey: SyncUserKey | null }
+
 export type SyncAccountInfo = {
   accountId: string
-  email: string
+  email: string | null
+  username: string | null
+  credential: SyncCredential
+  userKey: SyncUserKey | null
   createdAt: string
   revision: number
   usage: { files: number; bytes: number; quotaBytes: number; maxFiles: number; maxFileBytes: number }
@@ -122,16 +139,103 @@ export class SyncApi {
     return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), session }
   }
 
-  prelogin(email: string) {
-    return this.json<{ kdf: SyncKdf }>('/prelogin', { ...this.post('/prelogin', { email }), retry: true })
+  /** `who` is an e-mail address or a username, or the explicit object. */
+  prelogin(who: string | { email?: string; username?: string }) {
+    const body = typeof who === 'string' ? (who.includes('@') ? { email: who } : { username: who }) : who
+    return this.json<{ kdf: SyncKdf }>('/prelogin', { ...this.post('/prelogin', body), retry: true })
   }
 
-  register(body: { email: string; authKey: string; kdf: SyncKdf; vaultKeyWrap: SyncKeyWrap; device: { name: string; platform: string } }) {
-    return this.json<{ accountId: string; deviceId: string; token: string; expiresAt: string; revision: number }>('/register', this.post('/register', body))
+  register(body: { email?: string; username?: string; credential?: SyncCredential; publicKey?: string; userKeyWrap?: SyncKeyWrap; authKey: string; kdf: SyncKdf; vaultKeyWrap: SyncKeyWrap; device: { name: string; platform: string } }) {
+    return this.json<{ accountId: string; deviceId: string; token: string; expiresAt: string; revision: number } & SyncIdentity>('/register', this.post('/register', body))
   }
 
-  login(body: { email: string; authKey: string; device: { name: string; platform: string } }) {
-    return this.json<{ accountId: string; deviceId: string; token: string; expiresAt: string; kdf: SyncKdf; vaultKeyWrap: SyncKeyWrap; revision: number }>('/login', this.post('/login', body))
+  login(body: { email?: string; username?: string; authKey: string; device: { name: string; platform: string } }) {
+    return this.json<{ accountId: string; deviceId: string; token: string; expiresAt: string; kdf: SyncKdf; vaultKeyWrap: SyncKeyWrap; revision: number } & SyncIdentity>('/login', this.post('/login', body))
+  }
+
+  setUsername(session: SyncSession, body: { username: string; publicKey: string; userKeyWrap: SyncKeyWrap }) {
+    return this.json<SyncIdentity>('/username', this.post('/username', body, session))
+  }
+
+  setEmail(session: SyncSession, body: { email: string; authKey: string }) {
+    return this.json<SyncIdentity>('/email', this.post('/email', body, session))
+  }
+
+  setUserKey(session: SyncSession, body: { publicKey: string; userKeyWrap: SyncKeyWrap }) {
+    return this.json<SyncIdentity>('/userkey', this.post('/userkey', body, session))
+  }
+
+  // ── Shares between accounts ───────────────────────────────────────────
+
+  lookupUser(session: SyncSession, username: string) {
+    return this.json<{ username: string; publicKey: string }>('/users/lookup', this.post('/users/lookup', { username }, session))
+  }
+
+  listShares(session: SyncSession) {
+    return this.json<{ incoming: UserShareIncoming[]; outgoing: UserShareOutgoing[]; blocked: Array<{ username: string }> }>('/shares', { session })
+  }
+
+  createShare(session: SyncSession, body: { recipient: string; kind: 'note' | 'folder'; permission: SharePermission; keyWrap: ShareKeyWrap; ownerKeyWrap: ShareKeyWrap; nameEnc: { iv: string; data: string } }) {
+    return this.json<{ share: UserShareOutgoing }>('/shares', this.post('/shares', body, session))
+  }
+
+  respondShare(session: SyncSession, id: string, body: { accept: boolean; block?: boolean }) {
+    return this.json<{ share: UserShareIncoming }>(`/shares/${id}/respond`, this.post(`/shares/${id}/respond`, body, session))
+  }
+
+  setSharePermission(session: SyncSession, id: string, permission: SharePermission) {
+    return this.json<{ share: UserShareOutgoing }>(`/shares/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ permission }), session })
+  }
+
+  /** Owner: revokes the share and deletes its ciphertext. Recipient: leaves or declines. */
+  removeShare(session: SyncSession, id: string) {
+    return this.json<{ ok: true }>(`/shares/${id}`, { method: 'DELETE', session })
+  }
+
+  blockUser(session: SyncSession, username: string) {
+    return this.json<{ ok: true }>('/blocks', this.post('/blocks', { username }, session))
+  }
+
+  unblockUser(session: SyncSession, username: string) {
+    return this.json<{ ok: true }>(`/blocks/${encodeURIComponent(username)}`, { method: 'DELETE', session })
+  }
+
+  shareChanges(session: SyncSession, id: string, since: number) {
+    return this.json<{ rev: number; entries: Array<SyncRemoteEntry & { seq: number }> }>(`/shares/${id}/changes?since=${since}`, { session })
+  }
+
+  async shareDownload(session: SyncSession, id: string, fileId: string): Promise<{ revision: number; meta: string; sha256: string; blob: Uint8Array } | { revision: number; deleted: true }> {
+    const response = await this.request(`/shares/${id}/files/${fileId}`, { session })
+    const revision = Number(response.headers.get('X-FaNotes-Revision'))
+    if (response.status === 204 || response.headers.get('X-FaNotes-Deleted') === '1') return { revision, deleted: true }
+    return { revision, meta: response.headers.get('X-FaNotes-Meta') ?? '', sha256: response.headers.get('X-FaNotes-Sha256') ?? '', blob: new Uint8Array(await response.arrayBuffer()) }
+  }
+
+  async shareUpload(session: SyncSession, id: string, fileId: string, baseRevision: number, meta: string, sha256: string, blob: Uint8Array): Promise<number> {
+    const result = await this.json<{ revision: number }>(`/shares/${id}/files/${fileId}`, {
+      method: 'PUT',
+      session,
+      headers: { 'Content-Type': 'application/octet-stream', 'If-Match': String(baseRevision), 'X-FaNotes-Meta': meta, 'X-FaNotes-Sha256': sha256 },
+      body: blob as BodyInit,
+    })
+    return result.revision
+  }
+
+  async shareRemoveFile(session: SyncSession, id: string, fileId: string, baseRevision: number): Promise<number> {
+    const result = await this.json<{ revision: number }>(`/shares/${id}/files/${fileId}`, { method: 'DELETE', session, headers: { 'If-Match': String(baseRevision) } })
+    return result.revision
+  }
+
+  /** Opens the Server-Sent Events stream the app keeps open while it runs. The caller reads `response.body`. */
+  async openEvents(session: SyncSession, signal: AbortSignal): Promise<Response> {
+    const response = await this.fetchImpl(this.url('/events'), {
+      headers: { Authorization: `Bearer ${session.token}`, 'X-FaNotes-Account': session.accountId, Accept: 'text/event-stream' },
+      credentials: 'omit',
+      cache: 'no-store',
+      signal,
+    })
+    if (!response.ok || !response.body) throw await parseError(response)
+    return response
   }
 
   account(session: SyncSession) {

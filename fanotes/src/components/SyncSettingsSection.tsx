@@ -1,9 +1,10 @@
-import { Check, Clock, Cloud, CloudOff, Copy, KeyRound, Laptop, LoaderCircle, LogOut, RefreshCw, ShieldCheck, Smartphone, Trash2, TriangleAlert, UserPlus } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Check, Clock, Cloud, CloudOff, Copy, KeyRound, Laptop, LoaderCircle, LogOut, Mail, RefreshCw, Share2, ShieldCheck, Smartphone, Trash2, TriangleAlert, UserPlus } from 'lucide-react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { getUiLocale } from '../i18n'
 import { MCP_CONNECTOR_NAME, mcpServerUrl, type McpGrantInfo } from '../lib/mcp/client'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { syncStatusLabel } from '../lib/sync/status'
+import { userShares } from '../lib/sync/userShares'
 import type { AppSettings } from '../types'
 
 type Props = {
@@ -31,7 +32,13 @@ const formatWhen = (iso: string | null) => {
 
 export function SyncSettingsSection({ engine, syncState, settings, update, platform, grants, onGrants, onOpenConflicts }: Props) {
   const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
+  const [deviceKeyAccounts, setDeviceKeyAccounts] = useState<Array<{ accountId: string; username: string }>>([])
+  const [claimName, setClaimName] = useState('')
+  const [addEmail, setAddEmail] = useState('')
+  const [addEmailPassword, setAddEmailPassword] = useState('')
+  const sharesState = useSyncExternalStore(userShares.subscribe, userShares.getState, userShares.getState)
   const [password, setPassword] = useState('')
   const [passwordRepeat, setPasswordRepeat] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -46,6 +53,13 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
   const connectorUrl = mcpServerUrl()
   const signedIn = Boolean(syncState.account)
   const unavailable = syncState.status === 'unavailable'
+
+  useEffect(() => {
+    if (signedIn) return
+    let cancelled = false
+    void Promise.resolve(engine.deviceKeyAccounts?.() ?? []).then((accounts) => { if (!cancelled) setDeviceKeyAccounts(accounts) }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [engine, signedIn, syncState.status])
 
   useEffect(() => {
     if (!signedIn) return
@@ -87,11 +101,22 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
       return
     }
     void run(mode, async () => {
-      if (mode === 'register') await engine.register(email, password)
-      else await engine.login(email, password)
+      if (mode === 'register') await engine.createAccount({ username, email, password })
+      else await engine.login(username, password)
       setPassword('')
       setPasswordRepeat('')
-    }, mode === 'register' ? 'Konto erstellt – dieses Gerät synchronisiert ab jetzt.' : 'Angemeldet – die Notizen des Kontos werden geholt.')
+    }, mode === 'register' ? 'Konto erstellt. Cloud-Sync ist aus, bis du ihn einschaltest.' : 'Angemeldet – die Notizen des Kontos werden geholt.')
+  }
+
+  const deviceKeyAccount = syncState.account?.credential === 'device-key'
+  const canKeepDeviceKey = (engine.supportsDeviceKey?.() ?? false)
+  const noPassword = mode === 'register' && !password && canKeepDeviceKey
+
+  const toggleVaultSync = () => {
+    const next = !settings.syncVaultEnabled
+    update('syncVaultEnabled', next)
+    // The setting reaches the engine through the app's settings reference; let that settle first.
+    window.setTimeout(() => engine.vaultSyncChanged(), 0)
   }
 
   const submitPassword = () => {
@@ -100,7 +125,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
       return
     }
     void run('password', async () => {
-      await engine.changePassword(currentPassword, nextPassword)
+      await engine.changePassword(deviceKeyAccount ? '' : currentPassword, nextPassword)
       setCurrentPassword('')
       setNextPassword('')
       setNextPasswordRepeat('')
@@ -118,7 +143,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
         <span>{signedIn ? <ShieldCheck size={18} /> : <Cloud size={18} />}</span>
         <div>
           <strong>Deine Notizen auf allen Geräten – Ende-zu-Ende verschlüsselt</strong>
-          <p>Sync verschlüsselt jede Datei auf diesem Gerät mit einem Schlüssel, den nur dein Passwort entsperrt. Der Server speichert ausschließlich Chiffrate und zufällige IDs – weder Inhalte noch Dateinamen sind dort lesbar. Deshalb kann ein vergessenes Passwort nicht zurückgesetzt werden.</p>
+          <p>Sync verschlüsselt jede Datei auf diesem Gerät mit einem Schlüssel, den nur dein Passwort (oder der Schlüssel dieses Geräts) entsperrt. Der Server speichert ausschließlich Chiffrate und zufällige IDs – weder Inhalte noch Dateinamen sind dort lesbar. Deshalb kann ein vergessenes Passwort nicht zurückgesetzt werden. Cloud-Sync ist für neue Konten zuerst aus; das Konto selbst dient auch zum direkten Teilen mit anderen Benutzern.</p>
         </div>
       </div>
 
@@ -135,18 +160,31 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
             </div>
           </div>
           <form className="sync-form" onSubmit={(event) => { event.preventDefault(); submitAccount() }}>
-            <label><span>E-Mail-Adresse</span><input data-i18n-ignore type="email" autoComplete="username" spellCheck={false} required value={email} placeholder="du@example.com" onChange={(event) => setEmail(event.target.value)} /></label>
-            <label><span>Passwort</span><input data-i18n-ignore type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required minLength={mode === 'register' ? 10 : 1} value={password} placeholder={mode === 'register' ? 'Mindestens 10 Zeichen' : ''} onChange={(event) => setPassword(event.target.value)} /></label>
-            {mode === 'register' && <label><span>Passwort wiederholen</span><input data-i18n-ignore type="password" autoComplete="new-password" required value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} /></label>}
+            <label><span>{mode === 'register' ? 'Benutzername' : 'Benutzername oder E-Mail-Adresse'}</span><input data-i18n-ignore type="text" autoComplete="username" spellCheck={false} required minLength={3} maxLength={mode === 'register' ? 32 : 254} value={username} placeholder={mode === 'register' ? 'z. B. anna.f' : 'dein Benutzername'} onChange={(event) => setUsername(event.target.value)} /></label>
+            {mode === 'register' && <small className="sync-form-hint">Andere teilen mit dir über diesen Namen. Er ist einmalig (Gross-/Kleinschreibung egal) und kann später nicht geändert werden.</small>}
+            <label><span>{mode === 'register' && canKeepDeviceKey ? 'Passwort (optional)' : 'Passwort'}</span><input data-i18n-ignore type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required={!(mode === 'register' && canKeepDeviceKey)} minLength={mode === 'register' && password ? 10 : 1} value={password} placeholder={mode === 'register' ? 'Mindestens 10 Zeichen' : ''} onChange={(event) => setPassword(event.target.value)} /></label>
+            {mode === 'register' && password && <label><span>Passwort wiederholen</span><input data-i18n-ignore type="password" autoComplete="new-password" required value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} /></label>}
+            {mode === 'register' && <label><span>E-Mail-Adresse (optional)</span><input data-i18n-ignore type="email" autoComplete="email" spellCheck={false} value={email} placeholder="du@example.com" onChange={(event) => setEmail(event.target.value)} /></label>}
+            {noPassword && <div className="backup-notice is-error" role="alert"><TriangleAlert size={14} /><span>Ohne Passwort/E-Mail ist dein Konto weg, wenn du dieses Gerät verlierst. Das Konto wird an einen Schlüssel gebunden, der sicher auf diesem Gerät liegt. Du kannst später ein Passwort oder eine E-Mail hinzufügen.</span></div>}
             <label><span>Name dieses Geräts</span><input data-i18n-ignore type="text" maxLength={80} value={settings.syncDeviceName} placeholder={isWeb ? 'Browser' : 'z. B. Laptop'} onChange={(event) => update('syncDeviceName', event.target.value)} /></label>
             <div className="sync-form-actions">
-              <button type="submit" className="primary-button" disabled={busy !== null || !email.trim() || !password}>
+              <button type="submit" className="primary-button" disabled={busy !== null || !username.trim() || (!password && !(mode === 'register' && canKeepDeviceKey))}>
                 {busy === mode ? <LoaderCircle className="spin" size={15} /> : mode === 'register' ? <UserPlus size={15} /> : <KeyRound size={15} />}
                 {busy === mode ? 'Schlüssel wird berechnet …' : mode === 'register' ? 'Konto erstellen' : 'Anmelden'}
               </button>
-              <small>{mode === 'register' ? 'Aus dem Passwort wird auf diesem Gerät ein Schlüssel abgeleitet (PBKDF2, 600 000 Runden); der Server sieht das Passwort nie.' : 'Bereits vorhandene Notizen bleiben erhalten. Gleichnamige Dateien mit anderem Inhalt werden als Konfliktkopie gesichert.'}</small>
+              <small>{mode === 'register' ? (password ? 'Aus dem Passwort wird auf diesem Gerät ein Schlüssel abgeleitet (PBKDF2, 600 000 Runden); der Server sieht das Passwort nie. Cloud-Sync ist zuerst aus und braucht einen eigenen Schalter.' : 'Der Schlüssel entsteht zufällig auf diesem Gerät und liegt im Schlüsselbund des Systems. Cloud-Sync ist zuerst aus und braucht einen eigenen Schalter.') : 'Bereits vorhandene Notizen bleiben erhalten. Gleichnamige Dateien mit anderem Inhalt werden als Konfliktkopie gesichert.'}</small>
             </div>
           </form>
+          {mode === 'login' && deviceKeyAccounts.length > 0 && (
+            <div className="sync-form">
+              {deviceKeyAccounts.map((entry) => (
+                <div key={entry.accountId} className="setting-row">
+                  <div className="setting-copy"><span data-i18n-ignore>{entry.username}</span><small>Dieses Konto hat kein Passwort. Der Schlüssel liegt auf diesem Gerät.</small></div>
+                  <div className="setting-control"><button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run('device-key', () => engine.loginWithDeviceKey(entry.accountId), 'Angemeldet.')}><KeyRound size={14} /> Mit Gerätschlüssel anmelden</button></div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -157,8 +195,9 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
             <div className="sync-status-hero">
               <span className="sync-status-icon">{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={20} /> : syncState.status === 'offline' ? <CloudOff size={20} /> : syncState.status === 'error' ? <TriangleAlert size={20} /> : syncState.status === 'paused' ? <Clock size={20} /> : <ShieldCheck size={20} />}</span>
               <div>
-                <strong data-i18n-ignore>{syncState.account.email}</strong>
-                <p>{syncStatusLabel(syncState)} · Zuletzt: {formatWhen(syncState.lastSyncAt)}</p>
+                <strong data-i18n-ignore>{syncState.account.username || syncState.account.email}</strong>
+                {syncState.account.username && syncState.account.email && <p data-i18n-ignore>{syncState.account.email}</p>}
+                <p>{syncState.vaultSync !== false ? `${syncStatusLabel(syncState)} · Zuletzt: ${formatWhen(syncState.lastSyncAt)}` : 'Cloud-Sync ist aus – das Konto bleibt für Freigaben angemeldet.'}</p>
                 {syncState.error && <p className="sync-status-error">{syncState.error}</p>}
                 {usage && <p data-i18n-ignore>{usage.files} Dateien · {formatBytes(usage.bytes)} von {formatBytes(usage.quotaBytes)}</p>}
                 {usage && <div className="sync-usage-bar" aria-hidden><span style={{ width: `${usagePercent}%` }} /></div>}
@@ -167,6 +206,10 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
                 <button type="button" className="primary-button" disabled={syncState.status === 'syncing'} onClick={() => void run('sync', () => engine.syncNow('manual'))}><RefreshCw className={syncState.status === 'syncing' ? 'spin' : ''} size={15} /> Jetzt synchronisieren</button>
                 <button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run('logout', () => engine.logout(), 'Abgemeldet. Die Notizen bleiben auf diesem Gerät.')}><LogOut size={15} /> Abmelden</button>
               </div>
+            </div>
+            <div className="setting-row">
+              <div className="setting-copy"><span>Notizen in der Cloud synchronisieren</span><small>Aus: nichts aus deinem Vault wird hochgeladen; Freigaben an andere funktionieren trotzdem. Ein: alle Notizen werden verschlüsselt mit deinen anderen Geräten abgeglichen.</small></div>
+              <div className="setting-control"><button type="button" className={`toggle ${settings.syncVaultEnabled ? 'is-on' : ''}`} role="switch" aria-checked={settings.syncVaultEnabled} aria-label="Notizen in der Cloud synchronisieren" onClick={toggleVaultSync}><span /></button></div>
             </div>
             <div className="setting-row">
               <div className="setting-copy"><span>Automatisch synchronisieren</span><small>Nach jedem Speichern, beim Fokuswechsel und im Hintergrund jede Minute. Aus: nur über „Jetzt synchronisieren“.</small></div>
@@ -188,6 +231,52 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
               <div className="setting-copy"><span>Name dieses Geräts</span><small>Erscheint in der Geräteliste und im Namen von Konfliktkopien.</small></div>
               <div className="setting-control"><input data-i18n-ignore type="text" maxLength={80} value={settings.syncDeviceName} placeholder={isWeb ? 'Browser' : 'z. B. Laptop'} onChange={(event) => update('syncDeviceName', event.target.value)} /></div>
             </div>
+          </div>
+
+          <div id="settings-sync-identity" className="setting-card">
+            <div className="setting-card-title"><UserPlus size={16} /><span>Benutzername, E-Mail und Passwort</span></div>
+            {deviceKeyAccount && (
+              <div className="backup-notice is-error" role="alert"><TriangleAlert size={14} /><span>Ohne Passwort/E-Mail ist dein Konto weg, wenn du dieses Gerät verlierst. Füge ein Passwort hinzu (unten), um dich auf anderen Geräten anzumelden.</span></div>
+            )}
+            {syncState.account.username
+              ? <div className="setting-row"><div className="setting-copy"><span>Benutzername</span><small>Damit teilen andere Notizen mit dir. Er ist einmalig und kann nicht geändert werden.</small></div><div className="setting-control"><strong data-i18n-ignore>{syncState.account.username}</strong></div></div>
+              : <form className="sync-form" onSubmit={(event) => { event.preventDefault(); void run('claim', async () => { await engine.claimUsername(claimName); setClaimName('') }, 'Benutzername gesetzt. Jetzt kannst du teilen und andere können mit dir teilen.') }}>
+                  <label><span>Benutzername wählen</span><input data-i18n-ignore type="text" autoComplete="off" spellCheck={false} required minLength={3} maxLength={32} value={claimName} placeholder="z. B. anna.f" onChange={(event) => setClaimName(event.target.value)} /></label>
+                  <div className="sync-form-actions"><button type="submit" className="primary-button" disabled={busy !== null || !claimName.trim()}>{busy === 'claim' ? <LoaderCircle className="spin" size={15} /> : <UserPlus size={15} />} Benutzernamen festlegen</button><small>Ohne Benutzernamen kann niemand direkt mit deinem Konto teilen. Er kann später nicht geändert werden.</small></div>
+                </form>}
+            <div className="setting-row">
+              <div className="setting-copy"><span>E-Mail-Adresse</span><small>{syncState.account.email ? 'Nur zur Wiederherstellung deines Zugangs. Ein Passwort lässt sich nicht zurücksetzen, weil nur dein Passwort den Schlüssel zu deinen Daten öffnet.' : 'Optional. Du brauchst keine E-Mail-Adresse für dieses Konto.'}</small></div>
+              <div className="setting-control"><span data-i18n-ignore>{syncState.account.email || 'keine'}</span></div>
+            </div>
+            <form className="sync-form" onSubmit={(event) => { event.preventDefault(); void run('email', async () => { await engine.setEmail(addEmail, deviceKeyAccount ? undefined : addEmailPassword); setAddEmail(''); setAddEmailPassword('') }, 'E-Mail-Adresse gespeichert.') }}>
+              <label><span>{syncState.account.email ? 'E-Mail-Adresse ändern' : 'E-Mail-Adresse hinzufügen'}</span><input data-i18n-ignore type="email" autoComplete="email" spellCheck={false} required value={addEmail} placeholder="du@example.com" onChange={(event) => setAddEmail(event.target.value)} /></label>
+              {!deviceKeyAccount && <label><span>Aktuelles Passwort</span><input data-i18n-ignore type="password" autoComplete="current-password" required value={addEmailPassword} onChange={(event) => setAddEmailPassword(event.target.value)} /></label>}
+              <div className="sync-form-actions"><button type="submit" className="secondary-button" disabled={busy !== null || !addEmail.trim() || (!deviceKeyAccount && !addEmailPassword)}>{busy === 'email' ? <LoaderCircle className="spin" size={15} /> : <Mail size={15} />} Speichern</button></div>
+            </form>
+          </div>
+
+          <div id="settings-sync-shares" className="setting-card">
+            <div className="setting-card-title"><Share2 size={16} /><span>Freigaben an Benutzer</span></div>
+            {!sharesState.ready && <div className="setting-row"><div className="setting-copy"><span>{syncState.account.username ? 'Freigaben werden vorbereitet …' : 'Noch kein Benutzername'}</span><small>{syncState.account.username ? (sharesState.error ?? 'Einen Moment.') : 'Lege oben einen Benutzernamen fest, um zu teilen und Freigaben zu erhalten.'}</small></div></div>}
+            {sharesState.ready && sharesState.shares.length === 0 && <div className="setting-row"><div className="setting-copy"><span>Noch keine Freigaben</span><small>Rechtsklick auf eine Notiz oder einen Ordner → „Mit FaNotes-Benutzer teilen …“. Empfangenes erscheint in der Seitenleiste unter „Mit mir geteilt“.</small></div></div>}
+            {sharesState.shares.map((share) => (
+              <div key={share.id} className="setting-row">
+                <div className="setting-copy">
+                  <span data-i18n-ignore>{share.name || 'Geteilte Freigabe ohne Titel'} · {share.role === 'owner' ? `an ${share.peer}` : `von ${share.peer}`}</span>
+                  <small>{share.status === 'pending' ? 'Wartet auf Annahme' : share.status === 'declined' ? 'Abgelehnt' : share.status === 'left' ? 'Hat die Freigabe verlassen' : share.permission === 'edit' ? 'Darf bearbeiten' : 'Darf lesen'}{share.problem ? ` · ${share.problem}` : ''}</small>
+                </div>
+                <div className="setting-control">
+                  {share.role === 'owner' && share.status !== 'declined' && share.status !== 'left' && <button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run(`perm-${share.id}`, () => userShares.setPermission(share.id, share.permission === 'edit' ? 'read' : 'edit'))}>{share.permission === 'edit' ? 'Nur lesen' : 'Bearbeiten erlauben'}</button>}
+                  <button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run(`share-${share.id}`, () => userShares.remove(share.id), share.role === 'owner' ? 'Freigabe widerrufen. Der Zugriff ist sofort weg.' : 'Freigabe verlassen.')}>{share.role === 'owner' ? 'Widerrufen' : 'Verlassen'}</button>
+                </div>
+              </div>
+            ))}
+            {sharesState.blocked.map((name) => (
+              <div key={`blocked-${name}`} className="setting-row">
+                <div className="setting-copy"><span data-i18n-ignore>{name}</span><small>Blockiert: Freigaben dieser Person kommen nicht bei dir an.</small></div>
+                <div className="setting-control"><button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void run(`unblock-${name}`, () => userShares.unblock(name), 'Blockierung aufgehoben.')}>Entsperren</button></div>
+              </div>
+            ))}
           </div>
 
           <div id="settings-grok-connector" className="setting-card">
@@ -217,9 +306,9 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
                 setConnectorPassword('')
               }, syncState.mcpReader ? 'Grok-Connector ist aus. Freigaben wurden widerrufen.' : 'Grok-Connector ist an. Als Nächstes die URL in Grok eintragen und die Freigabe bestätigen.')
             }}>
-              <label><span>Sync-Passwort</span><input data-i18n-ignore type="password" autoComplete="current-password" required value={connectorPassword} onChange={(event) => setConnectorPassword(event.target.value)} /></label>
+              {!deviceKeyAccount && <label><span>Sync-Passwort</span><input data-i18n-ignore type="password" autoComplete="current-password" required value={connectorPassword} onChange={(event) => setConnectorPassword(event.target.value)} /></label>}
               <div className="sync-form-actions">
-                <button type="submit" className={syncState.mcpReader ? 'secondary-button' : 'primary-button'} disabled={busy !== null || !connectorPassword}>
+                <button type="submit" className={syncState.mcpReader ? 'secondary-button' : 'primary-button'} disabled={busy !== null || (!deviceKeyAccount && !connectorPassword)}>
                   {busy === 'connector' ? <LoaderCircle className="spin" size={15} /> : <ShieldCheck size={15} />}
                   {syncState.mcpReader ? 'Connector ausschalten' : 'Connector auf diesem Gerät einschalten'}
                 </button>
@@ -266,14 +355,14 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
           )}
 
           <div id="settings-sync-password" className="setting-card">
-            <div className="setting-card-title"><KeyRound size={16} /><span>Passwort ändern</span></div>
+            <div className="setting-card-title"><KeyRound size={16} /><span>{deviceKeyAccount ? 'Passwort hinzufügen' : 'Passwort ändern'}</span></div>
             <form className="sync-form" onSubmit={(event) => { event.preventDefault(); submitPassword() }}>
-              <label><span>Aktuelles Passwort</span><input data-i18n-ignore type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
+              {!deviceKeyAccount && <label><span>Aktuelles Passwort</span><input data-i18n-ignore type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>}
               <label><span>Neues Passwort</span><input data-i18n-ignore type="password" autoComplete="new-password" required minLength={10} value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} /></label>
               <label><span>Neues Passwort wiederholen</span><input data-i18n-ignore type="password" autoComplete="new-password" required value={nextPasswordRepeat} onChange={(event) => setNextPasswordRepeat(event.target.value)} /></label>
               <div className="sync-form-actions">
-                <button type="submit" className="secondary-button" disabled={busy !== null || !currentPassword || !nextPassword}>{busy === 'password' ? <LoaderCircle className="spin" size={15} /> : <KeyRound size={15} />} Passwort ändern</button>
-                <small>Der Vault-Schlüssel wird nur neu verpackt – keine Datei muss neu hochgeladen werden.</small>
+                <button type="submit" className="secondary-button" disabled={busy !== null || (!deviceKeyAccount && !currentPassword) || !nextPassword}>{busy === 'password' ? <LoaderCircle className="spin" size={15} /> : <KeyRound size={15} />} {deviceKeyAccount ? 'Passwort hinzufügen' : 'Passwort ändern'}</button>
+                <small>{deviceKeyAccount ? 'Danach öffnet das Passwort dein Konto auf jedem Gerät; der Gerätschlüssel wird nicht mehr gebraucht.' : 'Der Vault-Schlüssel wird nur neu verpackt – keine Datei muss neu hochgeladen werden.'}</small>
               </div>
             </form>
           </div>
@@ -285,11 +374,11 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
               <div className="setting-control">
                 {!deleteOpen
                   ? <button type="button" className="backup-delete-button" disabled={busy !== null} onClick={() => setDeleteOpen(true)}><Trash2 size={14} /> Konto löschen</button>
-                  : <form className="backup-inline-confirm is-danger" role="alert" onSubmit={(event) => { event.preventDefault(); void run('delete', () => engine.deleteAccount(deletePassword), 'Konto und Serverdaten wurden gelöscht.').then((ok) => { if (ok) { setDeleteOpen(false); setDeletePassword('') } }) }}>
-                    <span>Zur Bestätigung dein Passwort:</span>
-                    <input data-i18n-ignore type="password" autoComplete="current-password" required value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} />
+                  : <form className="backup-inline-confirm is-danger" role="alert" onSubmit={(event) => { event.preventDefault(); void run('delete', () => engine.deleteAccount(deviceKeyAccount ? '' : deletePassword), 'Konto und Serverdaten wurden gelöscht.').then((ok) => { if (ok) { setDeleteOpen(false); setDeletePassword('') } }) }}>
+                    <span>{deviceKeyAccount ? 'Das Konto und seine Cloud-Daten sind danach unwiderruflich weg.' : 'Zur Bestätigung dein Passwort:'}</span>
+                    {!deviceKeyAccount && <input data-i18n-ignore type="password" autoComplete="current-password" required value={deletePassword} onChange={(event) => setDeletePassword(event.target.value)} />}
                     <button type="button" className="secondary-button" onClick={() => { setDeleteOpen(false); setDeletePassword('') }}>Abbrechen</button>
-                    <button type="submit" className="danger-button" disabled={busy !== null || !deletePassword}>Endgültig löschen</button>
+                    <button type="submit" className="danger-button" disabled={busy !== null || (!deviceKeyAccount && !deletePassword)}>Endgültig löschen</button>
                   </form>}
               </div>
             </div>
