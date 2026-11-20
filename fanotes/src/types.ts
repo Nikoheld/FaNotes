@@ -210,10 +210,20 @@ export type AppSettings = {
   experimentalNoteBackup: boolean
   /** Experimental: ongoing batched diagnostics to fasrv. Off by default. */
   experimentalSendData: boolean
-  /** Opt-in: anonymous usage statistics, at most once a day. Off by default. */
-  diagnosticsUsage: boolean
-  /** Opt-in: scrubbed error logs with the daily report. Off by default. */
+  /** Send data: master switch. On by default (migrated once, see diagnosticsSettingsVersion). */
+  diagnosticsEnabled: boolean
+  /** Send data: crash reports (main, renderer, child processes). */
+  diagnosticsCrashes: boolean
+  /** Send data: error diagnostics (error class, code and app code lines; never the message). */
   diagnosticsLogs: boolean
+  /** Send data: performance stats (startup time, pen latency percentiles, memory), at most daily. */
+  diagnosticsPerf: boolean
+  /** Send data: anonymous usage stats (feature counters, rough vault size in steps). */
+  diagnosticsUsage: boolean
+  /** 0 until the one-time migration to "on" ran. A later OFF choice is never overwritten. */
+  diagnosticsSettingsVersion: number
+  /** The one-time "FaNotes now sends anonymous diagnostics" notice was shown. */
+  diagnosticsNoticeSeen: boolean
   /** Last opened note path. Restored on launch when the file still exists. */
   lastOpenNotePath: string
   /** Persisted start-dashboard cards. Empty means the default clock, date, note, and subject. */
@@ -576,6 +586,13 @@ export type PdfiumRasterResult = {
 export type FaNotesApi = {
   bootstrap: () => Promise<BootstrapData>
   reportRendererReady: () => void
+  diagnostics?: {
+    record: (event: Record<string, unknown>) => void
+    status: () => Promise<{ installId: string; lastSentAt: number } | null>
+    preview: () => Promise<unknown>
+    resetInstallId: () => Promise<string>
+    deleteRemote: () => Promise<boolean>
+  }
   completeOnboarding: (subjects: string[]) => Promise<BootstrapData>
   selectVault: () => Promise<BootstrapData | null>
   getCachedTree: () => Promise<VaultEntry[] | null>
@@ -664,6 +681,10 @@ export type FaNotesApi = {
   /** `fanotes-page-text-v1` sidecar of a PDF (document search contract). */
   readPageText?: (relativePath: string) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
   writePageText?: (record: import('./lib/docSearch/pageText').PageTextRecord) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
+  /** Desktop: reads one text line in the low-priority OCR host process (background indexing only). */
+  recognizeIndexLine?: (request: { pixels: Uint8ClampedArray; width: number; height: number }) => Promise<string>
+  /** Desktop: how many lines the OCR host reads in parallel. */
+  getOcrIndexInfo?: () => Promise<{ workers: number }>
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   convertFamdNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>

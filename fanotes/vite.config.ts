@@ -64,6 +64,11 @@ export default defineConfig({
   build: {
     target: 'es2022',
     rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        // Hidden desktop window that reads text lines for background document indexing.
+        ocrHost: path.resolve(__dirname, 'ocr-host.html'),
+      },
       output: {
         manualChunks(id) {
           if (id.includes('node_modules/pdfjs-dist')) return 'pdfjs'

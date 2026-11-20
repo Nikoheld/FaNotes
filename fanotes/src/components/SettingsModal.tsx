@@ -65,6 +65,7 @@ import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
 import { McpSettingsSection } from './McpSettingsSection'
 import { StatisticsPage } from './StatisticsPage'
+import { DiagnosticsCard } from './DiagnosticsCard'
 import { SyncConflictsPage } from './SyncConflictsPage'
 import { ShareSettingsPage, type ShareTarget } from './ShareSettingsPage'
 import { ProfileSettingsCard } from './ProfileSettingsCard'
@@ -100,7 +101,7 @@ const UPDATE_CHANNEL_COPY = {
 
 const updateChannelCopy = (channel: AppSettings['updateChannel']) => UPDATE_CHANNEL_COPY[channel] ?? UPDATE_CHANNEL_COPY.stable
 
-export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'conflicts' | 'mcp' | 'statistics' | 'profile' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced'
+export type SettingsSection = 'appearance' | 'editor' | 'drawing' | 'files' | 'sync' | 'conflicts' | 'mcp' | 'statistics' | 'profile' | 'share' | 'addons' | 'updates' | 'accessibility' | 'experimental' | 'advanced' | 'senddata'
 
 export type SettingsModalProps = {
   platform?: string
@@ -140,7 +141,8 @@ const SECTIONS: { id: SettingsSection; label: string; description: string; icon:
   { id: 'sync', label: 'Sync', description: 'Konto, Geräte und Verschlüsselung', icon: Cloud, count: 1 },
   { id: 'mcp', label: 'MCP-Server', description: 'Claude, Cursor und andere KI-Programme', icon: Bot, count: 3 },
   { id: 'conflicts', label: 'Konflikte', description: 'Zwei Fassungen vergleichen und eine behalten', icon: GitCompareArrows, count: 0 },
-  { id: 'statistics', label: 'Statistik', description: 'Vault, Aktivität, Schule und Diagnose', icon: BarChart3, count: 0 },
+  { id: 'statistics', label: 'Statistik', description: 'Vault, Aktivität und Schule', icon: BarChart3, count: 0 },
+  { id: 'senddata', label: 'Daten senden', description: 'Absturzberichte, Fehler- und Leistungsdaten', icon: ShieldCheck, count: 5 },
   { id: 'profile', label: 'Profil', description: 'Öffentliche Aktivitätsübersicht', icon: User, count: 3 },
   { id: 'share', label: 'Teilen', description: 'Link, Kopie oder Live', icon: Share2, count: 3 },
   { id: 'addons', label: 'Add-ons', description: 'Store, Quelle und Updates', icon: Puzzle, count: 2 },
@@ -157,6 +159,7 @@ const SECTION_GROUPS: Array<{ label: string; sections: SettingsSection[] }> = [
   { label: 'Sync', sections: ['sync', 'conflicts'] },
   { label: 'MCP-Server', sections: ['mcp'] },
   { label: 'Statistik', sections: ['statistics'] },
+  { label: 'Daten senden', sections: ['senddata'] },
   { label: 'Profil', sections: ['profile'] },
   { label: 'Teilen', sections: ['share'] },
   { label: 'Add-ons', sections: ['addons'] },
@@ -189,6 +192,7 @@ const settingsOptionCount = (
     case 'conflicts': return input.syncOpenConflicts
     case 'mcp': return input.isWeb ? 0 : 6
     case 'statistics': return 2
+    case 'senddata': return 5
     case 'profile': return 3
     case 'share': return 3
     case 'addons': return 2
@@ -211,7 +215,7 @@ type SettingsSearchItem = {
 const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'MCP-Server', detail: 'Claude, Cursor und andere KI-Programme', section: 'mcp', target: 'settings-mcp-local', keywords: 'mcp ki ai claude cursor chatgpt grok server stdio http token lokal notizen aufgaben schreibzugriff' },
   { label: 'Statistik', detail: 'Statistik', section: 'statistics', target: 'settings-stat-activity', keywords: 'statistik aktivität kalender heatmap serie streak wörter notizen größe fächer lernzeit hausaufgaben karteikarten sync' },
-  { label: 'Diagnose & Verbesserung', detail: 'Statistik', section: 'statistics', target: 'settings-diagnostics', keywords: 'diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz' },
+  { label: 'Daten senden', detail: 'Absturzberichte, Fehler- und Leistungsdaten', section: 'senddata', target: 'settings-diagnostics', keywords: 'diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz' },
   { label: 'Sync-Konto', detail: 'Sync', section: 'sync', target: 'settings-sync-account', keywords: 'sync konto anmelden registrieren account login passwort e-mail cloud server geräte' },
   { label: 'Öffentliche Aktivitätsübersicht', detail: 'Profil', section: 'profile', target: 'settings-profile', keywords: 'benutzername profil user übersicht aktivität notizen zeit beigetreten tage öffentlich' },
   { label: 'Angemeldete Geräte', detail: 'Sync', section: 'sync', target: 'settings-sync-devices', keywords: 'sync geräte devices laptop tablet abmelden' },
@@ -515,10 +519,11 @@ export function SettingsModal({
     const terms = normalizeSearch(searchQuery).split(/\s+/u).filter(Boolean)
     if (!terms.length) return []
     return SETTINGS_SEARCH_ITEMS.filter((item) => {
+      if (isWeb && item.section === 'senddata') return false
       const haystack = normalizeSearch(`${item.label} ${item.detail} ${item.keywords}`)
       return terms.every((term) => haystack.includes(term))
     })
-  }, [searchQuery])
+  }, [isWeb, searchQuery])
   const openSearchResult = (result: SettingsSearchItem) => {
     setActive(result.section)
     setSearchQuery('')
@@ -773,7 +778,7 @@ export function SettingsModal({
                 })}
                 {!searchResults.length && <p>Versuche zum Beispiel „Schrift“, „Backup“ oder „Handschrift“.</p>}
               </div>
-            ) : SECTION_GROUPS.map((group) => (
+            ) : SECTION_GROUPS.filter((group) => !(isWeb && group.sections.includes('senddata'))).map((group) => (
               <div className="settings-nav-group" key={group.label}>
                 <small>{group.label}</small>
                 {group.sections.map((sectionId) => {
@@ -1323,6 +1328,10 @@ export function SettingsModal({
 
             {active === 'statistics' && (
               <StatisticsPage settings={settings} update={update} syncState={syncState} />
+            )}
+
+            {active === 'senddata' && !isWeb && (
+              <DiagnosticsCard settings={settings} update={update} />
             )}
 
             {active === 'profile' && (

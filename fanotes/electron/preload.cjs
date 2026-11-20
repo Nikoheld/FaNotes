@@ -3,6 +3,11 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 const CHANNELS = Object.freeze({
+  diagnosticsRecord: 'fanotes:diagnostics-record',
+  diagnosticsStatus: 'fanotes:diagnostics-status',
+  diagnosticsPreview: 'fanotes:diagnostics-preview',
+  diagnosticsResetId: 'fanotes:diagnostics-reset-id',
+  diagnosticsDeleteRemote: 'fanotes:diagnostics-delete-remote',
   handwritingLearning: 'fanotes:handwriting-learning',
   bootstrap: 'fanotes:bootstrap',
   rendererReady: 'fanotes:renderer-ready',
@@ -20,6 +25,8 @@ const CHANNELS = Object.freeze({
   writePdfOcr: 'fanotes:write-pdf-ocr',
   readPageText: 'fanotes:read-page-text',
   writePageText: 'fanotes:write-page-text',
+  recognizeIndexLine: 'fanotes:recognize-index-line',
+  getOcrIndexInfo: 'fanotes:get-ocr-index-info',
   createNote: 'fanotes:create-note',
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
@@ -135,6 +142,13 @@ const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args)
 const api = Object.freeze({
   bootstrap: () => invoke(CHANNELS.bootstrap),
   reportRendererReady: () => ipcRenderer.send(CHANNELS.rendererReady),
+  diagnostics: Object.freeze({
+    record: (event) => ipcRenderer.send(CHANNELS.diagnosticsRecord, event),
+    status: () => invoke(CHANNELS.diagnosticsStatus),
+    preview: () => invoke(CHANNELS.diagnosticsPreview),
+    resetInstallId: () => invoke(CHANNELS.diagnosticsResetId),
+    deleteRemote: () => invoke(CHANNELS.diagnosticsDeleteRemote),
+  }),
   completeOnboarding: (subjects) => invoke(CHANNELS.completeOnboarding, subjects),
   selectVault: () => invoke(CHANNELS.selectVault),
   getCachedTree: () => invoke(CHANNELS.getCachedTree),
@@ -149,6 +163,8 @@ const api = Object.freeze({
   writePdfOcr: (payload) => invoke(CHANNELS.writePdfOcr, payload),
   readPageText: (relativePath) => invoke(CHANNELS.readPageText, relativePath),
   writePageText: (record) => invoke(CHANNELS.writePageText, record),
+  recognizeIndexLine: (request) => invoke(CHANNELS.recognizeIndexLine, request),
+  getOcrIndexInfo: () => invoke(CHANNELS.getOcrIndexInfo),
   createNote: (parentPath, preferredName) => invoke(CHANNELS.createNote, parentPath, preferredName),
   convertFamdNotes: () => invoke(CHANNELS.convertFamdNotes),
   createFolder: (parentPath, preferredName) => invoke(CHANNELS.createFolder, parentPath, preferredName),
