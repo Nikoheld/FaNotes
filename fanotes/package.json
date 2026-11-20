@@ -220,6 +220,7 @@
     "check:ink-history-persist": "node scripts/check-ink-history-persist.mjs",
     "check:ink-sections": "node scripts/check-ink-sections.mjs",
     "check:workspace-nav": "node scripts/check-workspace-nav.mjs",
+    "check:split-view": "node scripts/check-split-view.mjs",
     "check:addons": "node scripts/check-addons.mjs",
     "check:sync": "node scripts/check-sync.mjs",
     "check:mcp": "node scripts/check-mcp.mjs",
