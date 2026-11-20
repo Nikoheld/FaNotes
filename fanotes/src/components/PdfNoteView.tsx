@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -77,6 +78,8 @@ import { bindHandGestures, pinchFactorFromWheel, shouldTakeSheetZoom } from '../
 import { usePaperView } from './PaperView'
 import { pdfSidePageRatio, type PaperBox, type PdfSideLayout, type PdfSidePageSize } from '../lib/pdfSidePages'
 import type { PdfSideLayoutHandle } from './usePdfSidePages'
+import type { PaperStyle } from '../types'
+import { sidePagePaperStepPercent } from '../lib/paperStyles'
 
 type PdfNoteViewProps = {
   path: string
@@ -100,6 +103,10 @@ type PdfNoteViewProps = {
   onSideLayout?: (handle: PdfSideLayoutHandle | null) => void
   /** Called before a re-layout of the pairs (rotation), so the ink can be saved first. */
   beforeSideRelayout?: () => Promise<void>
+  /** Paper style of the side pages (the note's own, else the settings'). */
+  sidePaper?: PaperStyle
+  /** Custom square size in mm for squares/grid; 0 keeps the built-in size. */
+  sidePaperMm?: number
 }
 
 const SIDE_PAGES_PAPER_CLASS = 'has-pdf-side-pages'
@@ -659,6 +666,8 @@ export function PdfNoteView({
   onToggleSidePages,
   onSideLayout,
   beforeSideRelayout,
+  sidePaper = 'blank',
+  sidePaperMm = 0,
 }: PdfNoteViewProps) {
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1392,6 +1401,7 @@ export function PdfNoteView({
     })
     return () => { alive = false }
   }, [pageSizes, pdf, sidePages])
+  const sideStep = sidePagePaperStepPercent(sidePaper, sidePaperMm)
   const sideActive = Boolean(sidePages && pdf && pageSizes && pageSizes.length === pdf.numPages)
 
   useLayoutEffect(() => {
@@ -1621,11 +1631,14 @@ export function PdfNoteView({
                 <div className="pdf-note-pair" key={`pair-${page}-${rotation}`}>
                   {pdfPage}
                   <div
-                    className="pdf-side-page"
+                    className={`pdf-side-page paper-${sidePaper}`}
                     data-pdf-side-page={page}
                     role="img"
                     aria-label="Leere Seite"
-                    style={{ aspectRatio: `1 / ${knownRatio}` }}
+                    style={{
+                      aspectRatio: `1 / ${knownRatio}`,
+                      ...(sideStep === null ? {} : { '--side-step': `${sideStep}cqw` }),
+                    } as CSSProperties}
                   />
                 </div>
               )

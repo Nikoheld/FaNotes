@@ -2,7 +2,6 @@ import {
   Bold,
   Braces,
   Code,
-  GraduationCap,
   Heading,
   Heading1,
   Heading2,
@@ -26,15 +25,12 @@ import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { operandsForButton, simpleLatexSnippet, type SimpleLatexButton, type SimpleLatexOperands } from '../lib/simpleLatex'
 import type { MarkdownFormatAction } from './MarkdownEditor'
 import { ToolbarMenu } from './ToolbarMenu'
-import { STUDY_KINDS, STUDY_KIND_LABELS, type StudyKind } from '../lib/study/blocks'
-import { CRYPTO_TOOLS, CRYPTO_TOOL_LABELS, type CryptoTool } from '../lib/study/crypto/model'
 
 type FormattingToolbarProps = {
   disabled?: boolean
   onFormat: (action: MarkdownFormatAction) => void
   onInsertLatex: (button: SimpleLatexButton, operands: SimpleLatexOperands) => void
   onLatexError?: (message: string) => void
-  onInsertStudy?: (kind: StudyKind, tool?: CryptoTool) => void
   /** Text boxes on the sheet take plain markdown only: no formula inputs. */
   hideLatex?: boolean
   /** Settings toggle: hide every button whose action can simply be typed as Markdown. */
@@ -106,7 +102,6 @@ export const FormattingToolbar = memo(function FormattingToolbar({
   onFormat,
   onInsertLatex,
   onLatexError,
-  onInsertStudy,
   hideLatex = false,
   hideTypeable = false,
   trailing,
@@ -170,7 +165,7 @@ export const FormattingToolbar = memo(function FormattingToolbar({
     )
   }
 
-  const hasMore = (!headingVisible && showPrimary) || overflowPrimary.length > 0 || rare.length > 0 || Boolean(onInsertStudy) || !hideLatex
+  const hasMore = (!headingVisible && showPrimary) || overflowPrimary.length > 0 || rare.length > 0 || !hideLatex
 
   let previousGroup = 0
   return (
@@ -209,22 +204,6 @@ export const FormattingToolbar = memo(function FormattingToolbar({
           {overflowPrimary.map((entry) => row(entry))}
           {rare.length > 0 && (!headingVisible || overflowPrimary.length > 0) && showPrimary ? <hr className="ftb-rule" /> : null}
           {rare.map((entry) => row(entry))}
-          {onInsertStudy && (
-            <div className="ftb-section" role="group" aria-label="Lernblöcke einfügen">
-              <span className="ftb-heading"><GraduationCap aria-hidden="true" size={13} /> Lernblöcke</span>
-              {STUDY_KINDS.filter((kind) => kind !== 'crypto').map((kind) => (
-                <button key={kind} type="button" role="menuitem" className="ftb-row" data-menu-close disabled={disabled} onClick={() => onInsertStudy(kind)}>
-                  <span>{STUDY_KIND_LABELS[kind]}</span>
-                </button>
-              ))}
-              <span className="ftb-heading">{STUDY_KIND_LABELS.crypto}</span>
-              {CRYPTO_TOOLS.map((tool) => (
-                <button key={tool} type="button" role="menuitem" className="ftb-row" data-menu-close disabled={disabled} onClick={() => onInsertStudy('crypto', tool)}>
-                  <span>{CRYPTO_TOOL_LABELS[tool]}</span>
-                </button>
-              ))}
-            </div>
-          )}
           {!hideLatex && (
             <div className="ftb-section simple-latex-tools" role="group" aria-label="Einfaches LaTeX" title="Zahlen oder Wörter. Die Schaltflächen setzen die Formel.">
               <span className="ftb-heading"><Sigma aria-hidden="true" size={13} /> Formel</span>

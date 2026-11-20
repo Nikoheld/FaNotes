@@ -40,8 +40,8 @@ try {
   assert.ok(noteHtml.includes('<sub>2</sub>') && noteHtml.includes('<sup>2</sup>'), noteHtml)
 
   // 3. Rare actions are grouped in "Mehr" and everything stays reachable.
-  const more = renderToStaticMarkup(createElement(FormattingToolbar, { defaultMoreOpen: true, onFormat: () => undefined, onInsertLatex: () => undefined, onInsertStudy: () => undefined }))
-  for (const label of ['Tabelle', 'Mathematikblock', 'Codeblock', 'Trennlinie', 'Einklappbarer Bereich', 'Lernblöcke einfügen', 'Einfaches LaTeX']) assert.ok(more.includes(`aria-label="${label}"`), label)
+  const more = renderToStaticMarkup(createElement(FormattingToolbar, { defaultMoreOpen: true, onFormat: () => undefined, onInsertLatex: () => undefined }))
+  for (const label of ['Tabelle', 'Mathematikblock', 'Codeblock', 'Trennlinie', 'Einklappbarer Bereich', 'Einfaches LaTeX']) assert.ok(more.includes(`aria-label="${label}"`), label)
 
   // 4. The setting hides the typeable buttons only.
   const hidden = renderToStaticMarkup(createElement(FormattingToolbar, { hideTypeable: true, defaultMoreOpen: true, onFormat: () => undefined, onInsertLatex: () => undefined }))
