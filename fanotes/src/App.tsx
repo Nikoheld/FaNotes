@@ -7351,7 +7351,7 @@ export default function App({ startupBootstrap }: AppProps) {
           <footer><small>PDF · Bilder · ONE · ONETOC2 · ONEPKG · ZIP</small><button type="button" className="secondary-button" onClick={() => setWorksheetImportOpen(false)}>Abbrechen</button></footer>
         </section>
       </div>}
-      {window.fanotes.platform !== 'web' && settings.diagnosticsEnabled && !settings.diagnosticsNoticeSeen && !settingsOpen && (
+      {Boolean(window.fanotes.diagnostics) && settings.diagnosticsEnabled && !settings.diagnosticsNoticeSeen && !settingsOpen && (
         <SendDataNotice
           onDismiss={() => applySettings({ ...settingsRef.current, diagnosticsNoticeSeen: true })}
           onTurnOff={() => applySettings({ ...settingsRef.current, diagnosticsEnabled: false, diagnosticsNoticeSeen: true })}
