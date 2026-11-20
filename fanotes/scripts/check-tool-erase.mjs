@@ -257,7 +257,7 @@ try {
   assert.match(boardSource, /sourceHeightRef\.current = adopted\.pageHeight/, 'catch-up stores the adopted page height')
   assert.match(
     boardSource,
-    /applyToolErase\(\s*strokesRef\.current,\s*samples,\s*eraserSize,\s*sourceWidthRef\.current,\s*sourceHeightRef\.current,/,
+    /\(eraserMode === 'stroke' \? applyStrokeErase : applyToolErase\)\(\s*strokesRef\.current,\s*samples,\s*eraserSize,\s*sourceWidthRef\.current,\s*sourceHeightRef\.current,/,
     'the eraser multiplies by the page refs catch-up just stored',
   )
 

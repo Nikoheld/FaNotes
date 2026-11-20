@@ -153,3 +153,68 @@ export const applyToolErase = <T extends ToolEraseStroke>(
   }
   return changed ? next : strokes
 }
+
+export type EraserMode = 'area' | 'stroke'
+
+export const readEraserMode = (value: unknown): EraserMode => (value === 'stroke' ? 'stroke' : 'area')
+
+/**
+ * Stroke eraser: every stroke the eraser disk touches along its path goes away
+ * whole. Strokes the path misses keep their identity, so incremental paint
+ * paths stay valid.
+ */
+export const applyStrokeErase = <T extends ToolEraseStroke>(
+  strokes: T[],
+  samples: readonly ToolErasePoint[],
+  radius: number,
+  sourceWidth: number,
+  sourceHeight: number,
+): T[] => {
+  if (!strokes.length || !samples.length || radius < 0 || sourceWidth < 1 || sourceHeight < 1) return strokes
+  const path = eraserPath(samples, sourceWidth, sourceHeight)
+  if (!path.length) return strokes
+  // Probe points along the path, dense enough that no stroke slips between two.
+  const step = Math.max(1, radius * 0.5)
+  const probes: Array<{ x: number; y: number }> = [path[0]]
+  for (let index = 1; index < path.length; index += 1) {
+    const from = path[index - 1]
+    const to = path[index]
+    const count = Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / step)
+    for (let at = 1; at <= count; at += 1) {
+      probes.push({ x: from.x + (to.x - from.x) * at / count, y: from.y + (to.y - from.y) * at / count })
+    }
+  }
+  let left = Number.POSITIVE_INFINITY
+  let top = Number.POSITIVE_INFINITY
+  let right = Number.NEGATIVE_INFINITY
+  let bottom = Number.NEGATIVE_INFINITY
+  for (const point of path) {
+    left = Math.min(left, point.x)
+    top = Math.min(top, point.y)
+    right = Math.max(right, point.x)
+    bottom = Math.max(bottom, point.y)
+  }
+  let changed = false
+  const next: T[] = []
+  for (const stroke of strokes) {
+    if (!stroke.points.length) {
+      next.push(stroke)
+      continue
+    }
+    const bounds = strokePointBounds(stroke.points)
+    const pad = radius + visibleHalfWidth(stroke) + 1
+    if (!boundsOverlap(
+      bounds.minX * sourceWidth, bounds.minY * sourceHeight, bounds.maxX * sourceWidth, bounds.maxY * sourceHeight,
+      left - pad, top - pad, right + pad, bottom + pad,
+    )) {
+      next.push(stroke)
+      continue
+    }
+    if (probes.some((probe) => strokeTouchesEraser(stroke, probe.x, probe.y, radius, sourceWidth, sourceHeight))) {
+      changed = true
+      continue
+    }
+    next.push(stroke)
+  }
+  return changed ? next : strokes
+}
