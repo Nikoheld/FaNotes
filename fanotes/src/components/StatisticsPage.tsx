@@ -6,7 +6,6 @@ import type { AppSettings } from '../types'
 import { recordFeature } from '../lib/diagnosticsClient'
 import { loadVaultStats, type StatsProgress } from '../lib/vaultStatsLoader'
 import type { HeatCell, StatsKind, StatsFileRow, VaultStats } from '../lib/vaultStats.mjs'
-import { DiagnosticsCard } from './DiagnosticsCard'
 import './statistics.css'
 
 const KIND_LABELS: Array<{ kind: StatsKind; label: string; color: string }> = [
@@ -330,7 +329,6 @@ export function StatisticsPage({ settings, update, syncState }: {
         ) : <Empty>Sync ist nicht eingerichtet. Melde dich unter Sync an, um hier den Stand zu sehen.</Empty>}
       </Card>
 
-      <DiagnosticsCard settings={settings} update={update} />
     </div>
   )
 }

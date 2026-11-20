@@ -1,0 +1,38 @@
+name: Send data
+
+# "Daten senden": scrubbing, one-time migration, off switch, batching rules and the server endpoint.
+# Pure Node checks on synthetic data; never builds a release.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/electron/diagnostics.cjs'
+      - 'fanotes/src/lib/diagnostics*'
+      - 'fanotes/src/components/DiagnosticsCard.tsx'
+      - 'fanotes/scripts/check-send-data.cjs'
+      - 'fanotes/scripts/check-diagnostics.mjs'
+      - 'fanotes-site/diagnostics-api.mjs'
+      - 'fanotes-site/diagnostics.test.mjs'
+      - '.github/workflows/send-data.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check:send-data
+      - run: npm run check:diagnostics
+      - run: node --test ../fanotes-site/diagnostics.test.mjs

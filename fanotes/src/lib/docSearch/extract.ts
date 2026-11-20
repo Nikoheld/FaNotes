@@ -12,8 +12,9 @@ import { enqueuePdfRender, loadVaultPdfBytes, MAX_PDF_NOTE_PAGES, openPdfDocumen
 import { PDF_OCR_MAX_PAGES, PDF_OCR_MIN_TEXT, collapsedPdfText, pdfByteStamp, sanitizePdfOcrCache } from '../pdfOcr'
 import type { IndexUnit, UnitKind } from './docIndex'
 import type { DocExtractor, DocSource, ExtractContext, ExtractOutcome } from './indexer'
-import { letterCount, recognizeOriented, type RecognizeLine } from './ocrOrientation'
+import { letterCount, type RecognizeLine } from './ocrOrientation'
 import { preparePageInWorker } from './ocrPrep'
+import { recognizePageCached, type OcrCacheStore } from './ocrCache'
 import { storySearchUnits } from '../../writing/searchUnits'
 import { buildPageTextRecord, PAGE_TEXT_MAX_DOCUMENT_BYTES, PAGE_TEXT_MAX_PAGE_CHARS, pageTextRecordMatches, sanitizePageTextRecord, type PageTextPage, type PageTextRecord } from './pageText'
 
@@ -28,7 +29,7 @@ const EXCLUDED_NOTES = new Set(['hausaufgaben.md', 'kalender.md'])
 
 /** Host methods the index needs; all exist on desktop and web except the page-text pair. */
 export type DocSearchHostApi = Pick<FaNotesApi, 'getTree' | 'readFile' | 'readAssetBytes' | 'readWorksheet' | 'readFamdInk'>
-  & Partial<Pick<FaNotesApi, 'readNoteCompanion' | 'readPdfOcr' | 'writePdfOcr' | 'platform' | 'storyRead' | 'storyList'>>
+  & Partial<Pick<FaNotesApi, 'readNoteCompanion' | 'readPdfOcr' | 'writePdfOcr' | 'platform' | 'storyRead' | 'storyList' | 'getOcrIndexInfo'>>
   & {
     readPageText?: (relativePath: string) => Promise<unknown>
     writePageText?: (record: PageTextRecord) => Promise<unknown>
@@ -133,15 +134,27 @@ type Deps = {
   api: DocSearchHostApi
   recognize: RecognizeLine
   producer: string
+  /** Content-addressed results of earlier recognitions (page and line level). */
+  cache?: () => Promise<OcrCacheStore | null>
+  /** Identifies engine and model; part of every cache key. */
+  engine?: string
+  /** Lines recognised in parallel (bounded by the OCR host's workers). */
+  concurrency?: () => number
 }
 
 export const createBrowserExtractor = (deps: Deps): DocExtractor => {
   const { api } = deps
 
-  const ocrBitmap = async (bitmap: { pixels: Uint8ClampedArray; width: number; height: number }, context: ExtractContext) => {
-    await context.pause()
-    return recognizeOriented(bitmap, deps.recognize, context.shouldStop, 40, preparePageInWorker)
-  }
+  const ocrBitmap = async (bitmap: { pixels: Uint8ClampedArray; width: number; height: number }, context: ExtractContext) => recognizePageCached({
+    bitmap,
+    recognize: deps.recognize,
+    store: await deps.cache?.().catch(() => null) ?? null,
+    engine: deps.engine ?? OCR_ENGINE_ID,
+    prepare: preparePageInWorker,
+    concurrency: deps.concurrency?.() ?? 1,
+    shouldStop: context.shouldStop,
+    pause: () => context.pause(),
+  })
 
   const extractWorksheets = async (source: DocSource, raw: string, context: ExtractContext, first: number) => {
     const ids = [...new Set([...raw.matchAll(WORKSHEET_MARKER)].map((match) => match[1]!))].slice(0, MAX_WORKSHEETS)

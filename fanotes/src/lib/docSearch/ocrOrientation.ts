@@ -153,6 +153,8 @@ export const recognizeOriented = async (
   shouldStop: () => boolean = () => false,
   maxLines = 40,
   prepare: PreparePage = preparePageLocal,
+  /** Lines recognised at the same time (the OCR host runs that many workers). Order is kept. */
+  concurrency = 1,
 ): Promise<OrientedResult> => {
   const prepared = await prepare(input, maxLines)
   try {
@@ -161,11 +163,13 @@ export const recognizeOriented = async (
     const readLines = async (rotation: Rotation, count: number) => {
       const lines = await prepared.lines(rotation)
       const done = read.get(rotation) ?? []
-      for (let index = done.length; index < Math.min(count, lines.length); index += 1) {
+      const end = Math.min(count, lines.length)
+      for (let index = done.length; index < end;) {
         if (shouldStop()) break
-        const line = lines[index]!
-        const text = (await recognize(line.pixels, line.width, line.height)).replace(/\s+/gu, ' ').trim()
-        done.push(text.slice(0, 500))
+        const batch = lines.slice(index, Math.min(end, index + Math.max(1, concurrency)))
+        const texts = await Promise.all(batch.map(async (line) => (await recognize(line.pixels, line.width, line.height)).replace(/\s+/gu, ' ').trim()))
+        for (const text of texts) done.push(text.slice(0, 500))
+        index += batch.length
       }
       read.set(rotation, done)
       return done
