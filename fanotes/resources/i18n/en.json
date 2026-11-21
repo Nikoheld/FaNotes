@@ -5294,5 +5294,9 @@
   "Update wird installiert …": "Installing update …",
   "FaNotes-Dateibaum konnte nach dem Erstellen nicht aktualisiert werden:": "FaNotes file tree could not be refreshed after creating:",
   "FaNotes-Dateibaum konnte nach dem Duplizieren nicht aktualisiert werden:": "FaNotes file tree could not be refreshed after duplicating:",
-  "FaNotes-Dateibaum konnte nach dem PDF-Import nicht aktualisiert werden:": "FaNotes file tree could not be refreshed after the PDF import:"
+  "FaNotes-Dateibaum konnte nach dem PDF-Import nicht aktualisiert werden:": "FaNotes file tree could not be refreshed after the PDF import:",
+  "Live in dieser Notiz": "Live in this note",
+  "Offline – deine Änderungen werden gesendet, sobald die Verbindung wieder steht.": "Offline - your changes are sent as soon as the connection is back.",
+  "Änderungen erscheinen bei allen sofort, sobald jemand dazukommt.": "Changes appear for everyone at once as soon as somebody joins.",
+  "Live": "Live"
 }

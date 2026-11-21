@@ -226,6 +226,30 @@ export class SyncApi {
     return result.revision
   }
 
+  /** Live co-editing: one end-to-end encrypted message (`d` is base64 ciphertext) for a shared note's channel. */
+  liveSend(session: SyncSession, id: string, channel: string, body: { k: 'u' | 'p' | 'i' | 's'; d: string; upTo?: number }) {
+    return this.json<{ ok: true; q?: number; seq?: number; stale?: boolean; delivered?: number }>(`/shares/${id}/live/${channel}`, this.post(`/shares/${id}/live/${channel}`, body, session))
+  }
+
+  /** Buffered live messages after `since` (and the compacted snapshot when the caller may have missed it). */
+  liveFetch(session: SyncSession, id: string, channel: string, since: number) {
+    return this.json<{ seq: number; snapshot: { q: number; d: string } | null; updates: Array<{ q: number; d: string }> }>(`/shares/${id}/live/${channel}?since=${since}`, { session })
+  }
+
+  /** The live room of a note on this share (several collaborators), with the room key wrapped under the share key. */
+  liveRoom(session: SyncSession, id: string, channel: string) {
+    return this.json<{ room: string | null; wrap?: { iv: string; data: string }; gen?: number }>(`/shares/${id}/live-room?channel=${channel}`, { session })
+  }
+
+  liveRooms(session: SyncSession, id: string) {
+    return this.json<{ rooms: Array<{ channel: string; room: string; wrap: { iv: string; data: string }; gen: number }> }>(`/shares/${id}/live-rooms`, { session })
+  }
+
+  /** First writer wins for a recipient (409 when a room exists); the owner may replace it (rotation). */
+  putLiveRoom(session: SyncSession, id: string, body: { channel: string; room: string; wrap: { iv: string; data: string } }) {
+    return this.json<{ ok: true }>(`/shares/${id}/live-room`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), session })
+  }
+
   /** Opens the Server-Sent Events stream the app keeps open while it runs. The caller reads `response.body`. */
   async openEvents(session: SyncSession, signal: AbortSignal): Promise<Response> {
     const response = await this.fetchImpl(this.url('/events'), {
