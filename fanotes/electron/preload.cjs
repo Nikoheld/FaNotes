@@ -3,6 +3,11 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 const CHANNELS = Object.freeze({
+  diagnosticsRecord: 'fanotes:diagnostics-record',
+  diagnosticsStatus: 'fanotes:diagnostics-status',
+  diagnosticsPreview: 'fanotes:diagnostics-preview',
+  diagnosticsResetId: 'fanotes:diagnostics-reset-id',
+  diagnosticsDeleteRemote: 'fanotes:diagnostics-delete-remote',
   handwritingLearning: 'fanotes:handwriting-learning',
   bootstrap: 'fanotes:bootstrap',
   rendererReady: 'fanotes:renderer-ready',
@@ -20,6 +25,8 @@ const CHANNELS = Object.freeze({
   writePdfOcr: 'fanotes:write-pdf-ocr',
   readPageText: 'fanotes:read-page-text',
   writePageText: 'fanotes:write-page-text',
+  recognizeIndexLine: 'fanotes:recognize-index-line',
+  getOcrIndexInfo: 'fanotes:get-ocr-index-info',
   createNote: 'fanotes:create-note',
   convertFamdNotes: 'fanotes:convert-famd-notes',
   createFolder: 'fanotes:create-folder',
@@ -63,6 +70,10 @@ const CHANNELS = Object.freeze({
   importWorksheetFromData: 'fanotes:import-worksheet-from-data',
   importPdfNote: 'fanotes:import-pdf-note',
   importOneNote: 'fanotes:import-onenote',
+  importOneNotePages: 'fanotes:import-onenote-pages',
+  cancelOneNoteImport: 'fanotes:cancel-onenote-import',
+  closeOneNote: 'fanotes:close-onenote',
+  oneNoteProgress: 'fanotes:onenote-progress',
   readWorksheet: 'fanotes:read-worksheet',
   readWorksheetHtml: 'fanotes:read-worksheet-html',
   saveWorksheet: 'fanotes:save-worksheet',
@@ -135,6 +146,13 @@ const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args)
 const api = Object.freeze({
   bootstrap: () => invoke(CHANNELS.bootstrap),
   reportRendererReady: () => ipcRenderer.send(CHANNELS.rendererReady),
+  diagnostics: Object.freeze({
+    record: (event) => ipcRenderer.send(CHANNELS.diagnosticsRecord, event),
+    status: () => invoke(CHANNELS.diagnosticsStatus),
+    preview: () => invoke(CHANNELS.diagnosticsPreview),
+    resetInstallId: () => invoke(CHANNELS.diagnosticsResetId),
+    deleteRemote: () => invoke(CHANNELS.diagnosticsDeleteRemote),
+  }),
   completeOnboarding: (subjects) => invoke(CHANNELS.completeOnboarding, subjects),
   selectVault: () => invoke(CHANNELS.selectVault),
   getCachedTree: () => invoke(CHANNELS.getCachedTree),
@@ -149,6 +167,8 @@ const api = Object.freeze({
   writePdfOcr: (payload) => invoke(CHANNELS.writePdfOcr, payload),
   readPageText: (relativePath) => invoke(CHANNELS.readPageText, relativePath),
   writePageText: (record) => invoke(CHANNELS.writePageText, record),
+  recognizeIndexLine: (request) => invoke(CHANNELS.recognizeIndexLine, request),
+  getOcrIndexInfo: () => invoke(CHANNELS.getOcrIndexInfo),
   createNote: (parentPath, preferredName) => invoke(CHANNELS.createNote, parentPath, preferredName),
   convertFamdNotes: () => invoke(CHANNELS.convertFamdNotes),
   createFolder: (parentPath, preferredName) => invoke(CHANNELS.createFolder, parentPath, preferredName),
@@ -197,6 +217,15 @@ const api = Object.freeze({
   importWorksheetFromData: (payload) => invoke(CHANNELS.importWorksheetFromData, payload),
   importPdfNote: (parentPath) => invoke(CHANNELS.importPdfNote, parentPath),
   importOneNote: () => invoke(CHANNELS.importOneNote),
+  importOneNotePages: (request) => invoke(CHANNELS.importOneNotePages, request),
+  cancelOneNoteImport: (sessionId) => invoke(CHANNELS.cancelOneNoteImport, sessionId),
+  closeOneNote: (sessionId) => invoke(CHANNELS.closeOneNote, sessionId),
+  onOneNoteProgress: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, progress) => callback(progress)
+    ipcRenderer.on(CHANNELS.oneNoteProgress, listener)
+    return () => ipcRenderer.removeListener(CHANNELS.oneNoteProgress, listener)
+  },
   readWorksheet: (id) => invoke(CHANNELS.readWorksheet, id),
   readWorksheetHtml: (id) => invoke(CHANNELS.readWorksheetHtml, id),
   saveWorksheet: (document) => invoke(CHANNELS.saveWorksheet, document),
@@ -294,8 +323,9 @@ const api = Object.freeze({
     remove: (relativePath) => invoke(CHANNELS.syncRemove, relativePath),
     readState: (vaultId) => invoke(CHANNELS.syncReadState, vaultId),
     writeState: (vaultId, json) => invoke(CHANNELS.syncWriteState, vaultId, json),
-    readSecrets: () => invoke(CHANNELS.syncReadSecrets),
-    writeSecrets: (json) => invoke(CHANNELS.syncWriteSecrets, json),
+    readSecrets: (slot) => invoke(CHANNELS.syncReadSecrets, slot),
+    writeSecrets: (json, slot) => invoke(CHANNELS.syncWriteSecrets, json, slot),
+    secretsProtected: true,
   },
   platform: process.platform,
 })

@@ -117,6 +117,8 @@ export type AppSettings = {
   addonsAutoUpdate: boolean
   /** Sync runs on its own once a device is signed in; off keeps the account but only syncs on demand. */
   syncAutomatic: boolean
+  /** Cloud sync of the vault. New accounts start with it off; accounts that existed before keep it on. */
+  syncVaultEnabled: boolean
   /** Display name of this device in the account's device list. */
   syncDeviceName: string
   /** Newline-separated vault folders that stay on this device. */
@@ -161,6 +163,9 @@ export type AppSettings = {
   /** Wacom pen and pad button → FaNotes action. */
   tabletButtons: import('./lib/tabletButtons').TabletButtonMap
   smoothing: number
+  /** Desktop: gently smooth and align finished handwriting. Off by default. */
+  beautifyHandwriting: boolean
+  beautifyStrength: 'subtle' | 'medium'
   scribbleEraseSensitivity: number
   /** 0 = nur sehr klare Figuren, 50 = normal, 100 = früher und großzügiger glätten. */
   shapeSnapSensitivity: number
@@ -205,10 +210,20 @@ export type AppSettings = {
   experimentalNoteBackup: boolean
   /** Experimental: ongoing batched diagnostics to fasrv. Off by default. */
   experimentalSendData: boolean
-  /** Opt-in: anonymous usage statistics, at most once a day. Off by default. */
-  diagnosticsUsage: boolean
-  /** Opt-in: scrubbed error logs with the daily report. Off by default. */
+  /** Send data: master switch. On by default (migrated once, see diagnosticsSettingsVersion). */
+  diagnosticsEnabled: boolean
+  /** Send data: crash reports (main, renderer, child processes). */
+  diagnosticsCrashes: boolean
+  /** Send data: error diagnostics (error class, code and app code lines; never the message). */
   diagnosticsLogs: boolean
+  /** Send data: performance stats (startup time, pen latency percentiles, memory), at most daily. */
+  diagnosticsPerf: boolean
+  /** Send data: anonymous usage stats (feature counters, rough vault size in steps). */
+  diagnosticsUsage: boolean
+  /** 0 until the one-time migration to "on" ran. A later OFF choice is never overwritten. */
+  diagnosticsSettingsVersion: number
+  /** The one-time "FaNotes now sends anonymous diagnostics" notice was shown. */
+  diagnosticsNoticeSeen: boolean
   /** Last opened note path. Restored on launch when the file still exists. */
   lastOpenNotePath: string
   /** Persisted start-dashboard cards. Empty means the default clock, date, note, and subject. */
@@ -475,11 +490,40 @@ export type NoteHistorySnapshot = {
   bytes: number
 }
 
-export type OneNoteImportResult = {
-  rootFolder: string
+export type OneNoteScanPage = {
+  id: string
+  title: string
+  /** Nesting below the section (sub-pages), 0 for top-level pages. */
+  depth: number
+  hasInk: boolean
+  imageCount: number
+  alreadyImported: boolean
+}
+
+export type OneNoteScanSection = { path: string[]; name: string; pages: OneNoteScanPage[] }
+
+/** A converted OneNote source waiting for the user to pick pages. */
+export type OneNoteScan = {
+  sessionId: string
+  notebookName: string
+  sourceName: string
   pageCount: number
-  attachmentCount: number
-  importedNotes: string[]
+  inkPageCount: number
+  warnings: string[]
+  sections: OneNoteScanSection[]
+}
+
+export type OneNoteImportProgress = { done: number; total: number; title: string; status: 'working' | 'done' | 'finished' }
+
+export type OneNoteImportResult = {
+  imported: Array<{ id: string; title: string; path: string; ink: boolean; strokes: number }>
+  skipped: Array<{ id: string; title: string; path: string; reason: 'already-imported' }>
+  failed: Array<{ id: string; title: string; error: string }>
+  cancelled: boolean
+  inkPages: number
+  layoutPages: number
+  imageCount: number
+  strokeCount: number
   warnings: string[]
 }
 
@@ -571,6 +615,13 @@ export type PdfiumRasterResult = {
 export type FaNotesApi = {
   bootstrap: () => Promise<BootstrapData>
   reportRendererReady: () => void
+  diagnostics?: {
+    record: (event: Record<string, unknown>) => void
+    status: () => Promise<{ installId: string; lastSentAt: number } | null>
+    preview: () => Promise<unknown>
+    resetInstallId: () => Promise<string>
+    deleteRemote: () => Promise<boolean>
+  }
   completeOnboarding: (subjects: string[]) => Promise<BootstrapData>
   selectVault: () => Promise<BootstrapData | null>
   getCachedTree: () => Promise<VaultEntry[] | null>
@@ -659,6 +710,10 @@ export type FaNotesApi = {
   /** `fanotes-page-text-v1` sidecar of a PDF (document search contract). */
   readPageText?: (relativePath: string) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
   writePageText?: (record: import('./lib/docSearch/pageText').PageTextRecord) => Promise<import('./lib/docSearch/pageText').PageTextRecord | null>
+  /** Desktop: reads one text line in the low-priority OCR host process (background indexing only). */
+  recognizeIndexLine?: (request: { pixels: Uint8ClampedArray; width: number; height: number }) => Promise<string>
+  /** Desktop: how many lines the OCR host reads in parallel. */
+  getOcrIndexInfo?: () => Promise<{ workers: number }>
   createNote: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
   convertFamdNotes?: () => Promise<{ converted: number; skipped: number; failed: number }>
   createFolder: (parentPath?: string, preferredName?: string) => Promise<CreateResult>
@@ -720,7 +775,12 @@ export type FaNotesApi = {
   importWorksheet: () => Promise<WorksheetDocument | null>
   importWorksheetFromData?: (payload: { name: string; mimeType: string; bytes: Uint8Array }) => Promise<WorksheetDocument>
   importPdfNote: (parentPath?: string) => Promise<CreateResult | null>
-  importOneNote: () => Promise<OneNoteImportResult | null>
+  /** Asks for a OneNote file, converts it and returns the page tree to choose from (null when cancelled). */
+  importOneNote: () => Promise<OneNoteScan | null>
+  importOneNotePages: (request: { sessionId: string; pageIds: string[]; destination: string; sectionFolders: boolean }) => Promise<OneNoteImportResult>
+  cancelOneNoteImport: (sessionId: string) => Promise<{ cancelled: boolean }>
+  closeOneNote: (sessionId: string) => Promise<{ closed: boolean }>
+  onOneNoteProgress: (callback: (progress: OneNoteImportProgress) => void) => () => void
   readWorksheet: (id: string) => Promise<WorksheetDocument>
   /** The verified, policy-guarded OneNote page of a worksheet, for a sandboxed srcdoc frame. */
   readWorksheetHtml: (id: string) => Promise<string>
@@ -832,8 +892,11 @@ export type SyncHostApi = {
   remove: (path: string) => Promise<void>
   readState: (vaultId: string) => Promise<string | null>
   writeState: (vaultId: string, json: string | null) => Promise<void>
-  readSecrets: () => Promise<string | null>
-  writeSecrets: (json: string | null) => Promise<void>
+  /** `slot` names a separate secret file ('device-keys'); the default slot holds the account session. */
+  readSecrets: (slot?: string) => Promise<string | null>
+  writeSecrets: (json: string | null, slot?: string) => Promise<void>
+  /** True when secrets are protected by the OS keychain (Electron). Accounts without a password need this. */
+  secretsProtected?: boolean
 }
 
 export type AddonsHostApi = {

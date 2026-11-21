@@ -21,10 +21,10 @@ const cycleWide = (error: unknown) => error instanceof SyncApiError && (error.un
 import { pathIsSyncExcluded, RECOGNITION_MODEL_SYNC_PATH } from './folderSync'
 import { judgeStoryShrink, mergeStoryFile, storyRoleOf } from '../../writing/syncMerge'
 import { conflictFingerprint, groupConflicts, keptVersionPath, numberedVariant, type ConflictGroup, type ConflictKeep } from './conflicts'
-import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncRemoteEntry, type SyncSession } from './api'
-import { mcpReaderRequest, newReaderKey, type McpGrantInfo } from '../mcp/client'
+import { SyncApi, SyncApiError, type SyncAccountInfo, type SyncCredential, type SyncRemoteEntry, type SyncSession } from './api'
+import { SHARED_INBOX_FOLDER } from './sharedInbox'
 import {
-  decryptBytes, decryptMeta, deriveFromPassword, deriveSyncKeys, encryptBytes, encryptMeta, fileIdFor, fromBase64, importVaultSecret,
+  createUserKeyPair, decryptBytes, decryptMeta, deriveFromPassword, newDeviceKey, openUserPrivateKey, usernameProblem, deriveSyncKeys, encryptBytes, encryptMeta, fileIdFor, fromBase64, importVaultSecret,
   isValidKdf, newKdf, newVaultSecret, passwordProblems, sha256Hex, toBase64, unwrapVaultSecret, wrapVaultSecret, type SyncKeys,
 } from './crypto'
 
@@ -35,7 +35,10 @@ export type SyncLogEntry = { at: string; level: 'info' | 'warn' | 'error'; text:
 
 export type SyncPublicState = {
   status: SyncStatus
-  account: { email: string; accountId: string; deviceId: string } | null
+  /** `email` is empty for an account without one. `credential`: 'device-key' means no password, the account is bound to this device's key. */
+  account: { email: string; accountId: string; deviceId: string; username: string | null; credential: SyncCredential } | null
+  /** Cloud sync of the vault. Off by default for new accounts; the account stays signed in for sharing either way. */
+  vaultSync: boolean
   vaultId: string | null
   lastSyncAt: string | null
   error: string | null
@@ -51,8 +54,6 @@ export type SyncPublicState = {
   openConflicts: number
   log: SyncLogEntry[]
   info: SyncAccountInfo | null
-  /** This device holds a connector key and can answer an approved Grok. */
-  mcpReader: boolean
 }
 
 type LocalBase = { id: string; revision: number; sha256: string; size: number; mtimeMs: number; contentSha256?: string; blank?: boolean }
@@ -61,12 +62,19 @@ type SkippedEntry = SyncRemoteEntry & { held?: true }
 type PersistedState = { version: 1; accountId: string; cursor: number; lastSyncAt: string | null; files: Record<string, LocalBase>; conflicts: SyncConflict[]; pendingDeletes: string[]; skipped: SkippedEntry[] }
 /** What `applyRemote` did with one entry. `unreadable`: it was put off because the local file exists but cannot be read. */
 type RemoteOutcome = { result: 'written' | 'removed' | 'conflict' | 'skipped' | 'deferred' | 'noop'; path: string | null; unreadable?: true }
-type Secrets = { v: 1; accountId: string; deviceId: string; token: string; expiresAt: string; email: string; vaultSecret: string; mcpReader?: string }
+type Secrets = { v: 1; accountId: string; deviceId: string; token: string; expiresAt: string; email: string; vaultSecret: string; username?: string | null; credential?: SyncCredential }
+/** Device keys stand in for the password of accounts without one. They live in a separate keychain-protected file that survives sign-out. */
+type DeviceKeys = { v: 1; keys: Record<string, { username: string; key: string }> }
+const DEVICE_KEYS_SLOT = 'device-keys'
 
 export type SyncEngineOptions = {
   platform: string
   deviceName: () => string
   automatic: () => boolean
+  /** Whether the vault itself syncs to the cloud. Missing means yes (older hosts). */
+  vaultSync?: () => boolean
+  /** Called when a new account is created so that cloud sync starts off. */
+  setVaultSync?: (enabled: boolean) => void
   /** True while the app holds unsaved edits for the path; remote changes to it wait for the next cycle. */
   isPathBusy?: (path: string) => boolean
   /** Folders that stay on this device. The rest of the vault still syncs. */
@@ -112,6 +120,8 @@ export const isSyncablePath = (path: string, options: SyncPathOptions = {}) => {
   if (SKIPPED_NAMES.has(name) || /\.tmp$/iu.test(name) || /^\.~lock\./u.test(name) || /^~\$/u.test(name)) return false
   if (path === RECOGNITION_MODEL_SYNC_PATH && !options.includeRecognitionModel) return false
   if (pathIsSyncExcluded(path, options.excludedPrefixes ?? [])) return false
+  // Notes other people shared with this account live in their own, separately encrypted share. They must not be copied into this account's cloud.
+  if (segments[0] === SHARED_INBOX_FOLDER) return false
   if (segments[0] === INTERNAL_DIRECTORY) {
     if (segments.length < 2) return false
     if (SKIPPED_INTERNAL.has(segments[1]) && !(options.includeHistory && segments[1] === 'history')) return false
@@ -189,8 +199,9 @@ const parseSecrets = (raw: string | null): Secrets | null => {
   try {
     const parsed = JSON.parse(raw) as Partial<Secrets>
     if (parsed.v !== 1 || typeof parsed.accountId !== 'string' || typeof parsed.deviceId !== 'string' || typeof parsed.token !== 'string' || typeof parsed.email !== 'string' || typeof parsed.vaultSecret !== 'string') return null
-    const mcpReader = typeof parsed.mcpReader === 'string' && /^[A-Za-z0-9_-]{43,80}$/u.test(parsed.mcpReader) ? parsed.mcpReader : undefined
-    return { v: 1, accountId: parsed.accountId, deviceId: parsed.deviceId, token: parsed.token, expiresAt: typeof parsed.expiresAt === 'string' ? parsed.expiresAt : '', email: parsed.email, vaultSecret: parsed.vaultSecret, ...(mcpReader ? { mcpReader } : {}) }
+    const username = typeof parsed.username === 'string' ? parsed.username : null
+    const credential: SyncCredential = parsed.credential === 'device-key' ? 'device-key' : 'password'
+    return { v: 1, accountId: parsed.accountId, deviceId: parsed.deviceId, token: parsed.token, expiresAt: typeof parsed.expiresAt === 'string' ? parsed.expiresAt : '', email: parsed.email, vaultSecret: parsed.vaultSecret, username, credential }
   } catch {
     return null
   }
@@ -230,8 +241,6 @@ export class SyncEngine {
   private session: SyncSession | null = null
   private keys: SyncKeys | null = null
   private vaultSecretBase64: string | null = null
-  private mcpReader: string | null = null
-  private mcpGrantSnapshot: McpGrantInfo[] = []
   private vaultId: string | null = null
   private state: PersistedState | null = null
   private listeners = new Set<() => void>()
@@ -253,12 +262,21 @@ export class SyncEngine {
     this.storyBases.set(path, { revision, bytes })
     if (this.storyBases.size > 400) this.storyBases.delete(this.storyBases.keys().next().value!)
   }
+  /** True from account creation until the settings round trip has stored "cloud sync off". */
+  private newAccountHold = false
   private disposed = false
   private windowListeners: Array<() => void> = []
+  private readonly localChangeListeners = new Set<() => void>()
+
+  /** Other components (shares) learn about every local save. */
+  onLocalChange(listener: () => void) {
+    this.localChangeListeners.add(listener)
+    return () => { this.localChangeListeners.delete(listener) }
+  }
 
   constructor(api?: SyncApi) {
     this.api = api ?? new SyncApi()
-    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null, mcpReader: false }
+    this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, log: [], info: null, vaultSync: true }
   }
 
   // ── External store API ──────────────────────────────────────────────────
@@ -320,7 +338,7 @@ export class SyncEngine {
         return
       }
       await this.adoptSecrets(secrets)
-      this.log('info', `Angemeldet als ${secrets.email}.`)
+      this.log('info', `Angemeldet als ${secrets.username || secrets.email}.`)
       this.schedule(0)
     } catch (error) {
       this.setState({ status: 'error', error: error instanceof Error ? error.message : 'Sync konnte nicht starten.' })
@@ -355,8 +373,7 @@ export class SyncEngine {
     if (!this.host) throw new Error('Sync ist nicht angebunden.')
     this.keys = await deriveSyncKeys(await importVaultSecret(fromBase64(secrets.vaultSecret)))
     this.vaultSecretBase64 = secrets.vaultSecret
-    this.session = { accountId: secrets.accountId, deviceId: secrets.deviceId, token: secrets.token, expiresAt: secrets.expiresAt, email: secrets.email }
-    this.mcpReader = secrets.mcpReader ?? null
+    this.session = { accountId: secrets.accountId, deviceId: secrets.deviceId, token: secrets.token, expiresAt: secrets.expiresAt, email: secrets.email, username: secrets.username ?? null, credential: secrets.credential ?? 'password' }
     this.vaultId ??= await this.host.vaultId()
     this.state = parseState(await this.host.readState(this.vaultId), secrets.accountId)
     // A new session starts without the previous one's pause and without its unreadable-file reports.
@@ -364,8 +381,8 @@ export class SyncEngine {
     this.unreadableLogged.clear()
     this.setState({
       status: 'idle',
-      account: { email: secrets.email, accountId: secrets.accountId, deviceId: secrets.deviceId },
-      mcpReader: Boolean(secrets.mcpReader),
+      account: { email: secrets.email, accountId: secrets.accountId, deviceId: secrets.deviceId, username: secrets.username ?? null, credential: secrets.credential ?? 'password' },
+      vaultSync: this.vaultSyncOn(),
       vaultId: this.vaultId,
       lastSyncAt: this.state.lastSyncAt,
       conflicts: this.state.conflicts,
@@ -399,6 +416,103 @@ export class SyncEngine {
 
   // ── Account ─────────────────────────────────────────────────────────────
 
+  /** Cloud sync of the vault: the user's setting, unless a brand-new account has not been through the settings round trip yet. */
+  private vaultSyncOn() {
+    return !this.newAccountHold && (this.options?.vaultSync?.() ?? true)
+  }
+
+  /** The user switched cloud sync on or off in the settings. */
+  vaultSyncChanged() {
+    this.newAccountHold = false
+    this.setState({ vaultSync: this.vaultSyncOn() })
+    if (this.vaultSyncOn()) void this.syncNow('manual')
+  }
+
+  /** The account's own device keys. Only desktop hosts that can protect them offer this. */
+  private async readDeviceKeys(): Promise<DeviceKeys> {
+    try {
+      const raw = await this.host?.readSecrets(DEVICE_KEYS_SLOT)
+      const parsed = raw ? JSON.parse(raw) as Partial<DeviceKeys> : null
+      if (parsed?.v === 1 && parsed.keys && typeof parsed.keys === 'object') return { v: 1, keys: parsed.keys }
+    } catch { /* unreadable: treated as empty */ }
+    return { v: 1, keys: {} }
+  }
+
+  private async writeDeviceKeys(keys: DeviceKeys) {
+    await this.host?.writeSecrets(Object.keys(keys.keys).length ? JSON.stringify(keys) : null, DEVICE_KEYS_SLOT)
+  }
+
+  /** True when this host can keep a device key safe (desktop). The web build cannot, so accounts without a password are not offered there. */
+  supportsDeviceKey() {
+    return Boolean(this.host?.secretsProtected)
+  }
+
+  /** Accounts on this device that open with a device key instead of a password. */
+  async deviceKeyAccounts(): Promise<Array<{ accountId: string; username: string }>> {
+    if (!this.supportsDeviceKey()) return []
+    const stored = await this.readDeviceKeys()
+    return Object.entries(stored.keys).map(([accountId, entry]) => ({ accountId, username: entry.username }))
+  }
+
+  /**
+   * Creates an account. Only a username is required. Without a password the account is bound to a random device
+   * key held in the OS keychain: whoever loses the device loses the account and its cloud data. An e-mail address
+   * is optional and only meant for a later password reset. Cloud sync starts off for every new account.
+   */
+  async createAccount(options: { username: string; email?: string; password?: string }) {
+    this.requireHost()
+    const usernameIssue = usernameProblem(options.username)
+    if (usernameIssue) throw new Error(usernameIssue)
+    const username = options.username.trim()
+    const email = options.email?.trim().toLowerCase() || undefined
+    const password = options.password || undefined
+    if (password) {
+      const problem = passwordProblems(password)
+      if (problem) throw new Error(problem)
+    } else if (!this.supportsDeviceKey()) {
+      throw new Error('Ohne Passwort geht das nur in der Desktop-App, die den Gerätschlüssel sicher speichern kann.')
+    }
+    const credential: SyncCredential = password ? 'password' : 'device-key'
+    const secretText = password ?? newDeviceKey()
+    const kdf = newKdf()
+    const { wrappingKey, authKey } = await deriveFromPassword(secretText, kdf)
+    const secret = newVaultSecret()
+    const vaultKeyWrap = await wrapVaultSecret(secret, wrappingKey)
+    const userKey = await createUserKeyPair(await importVaultSecret(secret))
+    // The device key is stored before the account exists on the server, so a crash in between cannot lock the user out of a half-made account.
+    // It is keyed by username until the account id is known.
+    let pendingKeys: DeviceKeys | null = null
+    if (credential === 'device-key') {
+      pendingKeys = await this.readDeviceKeys()
+      pendingKeys.keys[`pending:${username.toLowerCase()}`] = { username, key: secretText }
+      await this.writeDeviceKeys(pendingKeys)
+    }
+    let result: Awaited<ReturnType<SyncApi['register']>>
+    try {
+      result = await this.api.register({ username, ...(email ? { email } : {}), credential, publicKey: userKey.publicKey, userKeyWrap: userKey.wrap, authKey, kdf, vaultKeyWrap, device: this.deviceInfo() })
+    } catch (error) {
+      if (pendingKeys) {
+        delete pendingKeys.keys[`pending:${username.toLowerCase()}`]
+        await this.writeDeviceKeys(pendingKeys).catch(() => undefined)
+      }
+      throw error
+    }
+    if (pendingKeys) {
+      delete pendingKeys.keys[`pending:${username.toLowerCase()}`]
+      pendingKeys.keys[result.accountId] = { username: result.username ?? username, key: secretText }
+      await this.writeDeviceKeys(pendingKeys)
+    }
+    // A new account does not upload the vault until the user turns cloud sync on.
+    this.newAccountHold = true
+    this.options?.setVaultSync?.(false)
+    await this.signInWith({ v: 1, accountId: result.accountId, deviceId: result.deviceId, token: result.token, expiresAt: result.expiresAt, email: result.email ?? '', username: result.username ?? username, credential, vaultSecret: toBase64(secret) })
+    secret.fill(0)
+    this.log('info', credential === 'device-key'
+      ? 'Konto erstellt. Es ist an den Schlüssel dieses Geräts gebunden. Cloud-Sync ist aus, bis du ihn einschaltest.'
+      : 'Konto erstellt. Cloud-Sync ist aus, bis du ihn einschaltest.')
+  }
+
+  /** Account with an e-mail address and a password (the original way). */
   async register(email: string, password: string) {
     this.requireHost()
     const problem = passwordProblems(password)
@@ -408,22 +522,109 @@ export class SyncEngine {
     const secret = newVaultSecret()
     const vaultKeyWrap = await wrapVaultSecret(secret, wrappingKey)
     const result = await this.api.register({ email: email.trim().toLowerCase(), authKey, kdf, vaultKeyWrap, device: this.deviceInfo() })
-    await this.signInWith({ v: 1, accountId: result.accountId, deviceId: result.deviceId, token: result.token, expiresAt: result.expiresAt, email: email.trim().toLowerCase(), vaultSecret: toBase64(secret) })
+    await this.signInWith({ v: 1, accountId: result.accountId, deviceId: result.deviceId, token: result.token, expiresAt: result.expiresAt, email: email.trim().toLowerCase(), username: null, credential: 'password', vaultSecret: toBase64(secret) })
     secret.fill(0)
     this.log('info', 'Konto erstellt. Der Vault-Schlüssel wurde auf diesem Gerät erzeugt und verschlüsselt hinterlegt.')
   }
 
-  async login(email: string, password: string) {
+  /** `who` is a username or an e-mail address (an `@` means e-mail). */
+  async login(who: string, password: string) {
     this.requireHost()
-    const normalized = email.trim().toLowerCase()
-    const { kdf } = await this.api.prelogin(normalized)
+    const normalized = who.trim()
+    const identifier = normalized.includes('@') ? { email: normalized.toLowerCase() } : { username: normalized }
+    const { kdf } = await this.api.prelogin(identifier)
     if (!isValidKdf(kdf)) throw new Error('Der Server hat unbrauchbare Schlüsselparameter geliefert.')
     const { wrappingKey, authKey } = await deriveFromPassword(password, kdf)
-    const result = await this.api.login({ email: normalized, authKey, device: this.deviceInfo() })
+    const result = await this.api.login({ ...identifier, authKey, device: this.deviceInfo() })
     const secret = await unwrapVaultSecret(result.vaultKeyWrap, wrappingKey)
-    await this.signInWith({ v: 1, accountId: result.accountId, deviceId: result.deviceId, token: result.token, expiresAt: result.expiresAt, email: normalized, vaultSecret: toBase64(secret) })
+    const label = result.username || result.email || normalized
+    await this.signInWith({ v: 1, accountId: result.accountId, deviceId: result.deviceId, token: result.token, expiresAt: result.expiresAt, email: result.email ?? '', username: result.username ?? null, credential: result.credential, vaultSecret: toBase64(secret) })
     secret.fill(0)
-    this.log('info', `Angemeldet als ${normalized}. Die Notizen des Kontos werden geholt.`)
+    this.log('info', `Angemeldet als ${label}. Die Notizen des Kontos werden geholt.`)
+  }
+
+  /** Signs in again on a device that holds the account's device key. */
+  async loginWithDeviceKey(accountId: string) {
+    this.requireHost()
+    const stored = (await this.readDeviceKeys()).keys[accountId]
+    if (!stored) throw new Error('Auf diesem Gerät gibt es keinen Schlüssel für dieses Konto.')
+    const { kdf } = await this.api.prelogin({ username: stored.username })
+    if (!isValidKdf(kdf)) throw new Error('Der Server hat unbrauchbare Schlüsselparameter geliefert.')
+    const { wrappingKey, authKey } = await deriveFromPassword(stored.key, kdf)
+    const result = await this.api.login({ username: stored.username, authKey, device: this.deviceInfo() })
+    const secret = await unwrapVaultSecret(result.vaultKeyWrap, wrappingKey)
+    await this.signInWith({ v: 1, accountId: result.accountId, deviceId: result.deviceId, token: result.token, expiresAt: result.expiresAt, email: result.email ?? '', username: result.username ?? stored.username, credential: result.credential, vaultSecret: toBase64(secret) })
+    secret.fill(0)
+    this.log('info', `Angemeldet als ${result.username ?? stored.username}.`)
+  }
+
+  /** The secret that proves the account: the typed password, or the stored device key for a password-less account. */
+  private async accountSecret(password?: string) {
+    if (!this.session) throw new Error('Nicht angemeldet.')
+    if (password) return password
+    if (this.session.credential === 'device-key') {
+      const stored = (await this.readDeviceKeys()).keys[this.session.accountId]
+      if (stored) return stored.key
+      throw new Error('Der Schlüssel dieses Kontos liegt nicht auf diesem Gerät.')
+    }
+    throw new Error('Bitte das Passwort angeben.')
+  }
+
+  private loginIdentifier() {
+    if (!this.session) throw new Error('Nicht angemeldet.')
+    return this.session.username ? { username: this.session.username } : { email: this.session.email }
+  }
+
+  /** Adds a recovery e-mail to the account. The current password (or the stored device key) proves it is the owner. */
+  async setEmail(email: string, password?: string) {
+    if (!this.session) throw new Error('Nicht angemeldet.')
+    const secret = await this.accountSecret(password)
+    const { kdf } = await this.api.prelogin(this.loginIdentifier())
+    const { authKey } = await deriveFromPassword(secret, kdf)
+    const normalized = email.trim().toLowerCase()
+    const result = await this.api.setEmail(this.session, { email: normalized, authKey })
+    this.session = { ...this.session, email: result.email ?? normalized }
+    await this.persistSecrets(this.currentSecrets())
+    this.setState({ account: this.snapshot.account ? { ...this.snapshot.account, email: result.email ?? normalized } : null })
+    await this.refreshAccount()
+  }
+
+  /** Gives an older account a username (and with it the sharing key pair). Cannot be changed afterwards. */
+  async claimUsername(name: string) {
+    if (!this.session || !this.vaultSecretBase64) throw new Error('Nicht angemeldet.')
+    const problem = usernameProblem(name)
+    if (problem) throw new Error(problem)
+    const userKey = await createUserKeyPair(await importVaultSecret(fromBase64(this.vaultSecretBase64)))
+    const result = await this.api.setUsername(this.session, { username: name.trim(), publicKey: userKey.publicKey, userKeyWrap: userKey.wrap })
+    this.session = { ...this.session, username: result.username }
+    await this.persistSecrets(this.currentSecrets())
+    this.setState({ account: this.snapshot.account ? { ...this.snapshot.account, username: result.username } : null })
+    this.log('info', `Benutzername ${result.username} gesetzt.`)
+    await this.refreshAccount()
+  }
+
+  /**
+   * The key pair other people share to. Accounts made before sharing existed get one here, once they have a
+   * username. Returns null while the account has no username (nobody can share with it yet).
+   */
+  async sharingIdentity(): Promise<{ username: string; publicKey: string; privateKey: CryptoKey } | null> {
+    if (!this.session || !this.vaultSecretBase64) return null
+    const vaultSecret = await importVaultSecret(fromBase64(this.vaultSecretBase64))
+    let info = this.snapshot.info
+    if (!info || info.accountId !== this.session.accountId) info = await this.refreshAccount()
+    if (!info?.username) return null
+    if (!info.userKey) {
+      const created = await createUserKeyPair(vaultSecret)
+      try {
+        await this.api.setUserKey(this.session, { publicKey: created.publicKey, userKeyWrap: created.wrap })
+      } catch (error) {
+        // Another device made the key first: use theirs.
+        if (!(error instanceof SyncApiError && error.status === 409)) throw error
+      }
+      info = await this.refreshAccount()
+      if (!info?.userKey) return null
+    }
+    return { username: info.username!, publicKey: info.userKey!.publicKey, privateKey: await openUserPrivateKey(info.userKey!.publicKey, info.userKey!.wrap, vaultSecret) }
   }
 
   private async signInWith(secrets: Secrets) {
@@ -447,17 +648,16 @@ export class SyncEngine {
     this.session = null
     this.keys = null
     this.vaultSecretBase64 = null
-    this.mcpReader = null
-    this.mcpGrantSnapshot = []
     this.state = null
     // The pause belonged to this session. Whoever signs in next starts with an open gate.
     this.throttledUntil = 0
+    this.newAccountHold = false
     this.unreadableLogged.clear()
     if (this.timer !== null) window.clearTimeout(this.timer)
     this.timer = null
     await this.persistSecrets(null)
     if (this.host && this.vaultId) await this.host.writeState(this.vaultId, null)
-    this.setState({ status: 'signed-out', account: null, info: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, error: null, mcpReader: false })
+    this.setState({ status: 'signed-out', account: null, info: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, error: null })
   }
 
   async refreshAccount() {
@@ -482,31 +682,42 @@ export class SyncEngine {
     if (!this.session || !this.vaultSecretBase64) throw new Error('Nicht angemeldet.')
     const problem = passwordProblems(nextPassword)
     if (problem) throw new Error(problem)
-    const { kdf: currentKdf } = await this.api.prelogin(this.session.email)
-    const current = await deriveFromPassword(currentPassword, currentKdf)
+    const { kdf: currentKdf } = await this.api.prelogin(this.loginIdentifier())
+    const current = await deriveFromPassword(await this.accountSecret(currentPassword || undefined), currentKdf)
     const kdf = newKdf()
     const next = await deriveFromPassword(nextPassword, kdf)
     const vaultKeyWrap = await wrapVaultSecret(fromBase64(this.vaultSecretBase64), next.wrappingKey)
     await this.api.changePassword(this.session, { authKey: current.authKey, newAuthKey: next.authKey, kdf, vaultKeyWrap })
-    await this.rememberReader(null)
-    this.log('info', 'Passwort geändert; alle anderen Geräte müssen sich neu anmelden. Grok-Freigaben wurden widerrufen.')
+    if (this.session.credential === 'device-key') {
+      // The password replaces the device key: the account now opens anywhere with it.
+      const stored = await this.readDeviceKeys()
+      delete stored.keys[this.session.accountId]
+      await this.writeDeviceKeys(stored)
+      this.session = { ...this.session, credential: 'password' }
+      this.setState({ account: this.snapshot.account ? { ...this.snapshot.account, credential: 'password' } : null })
+    }
+    this.log('info', 'Passwort geändert; alle anderen Geräte müssen sich neu anmelden.')
   }
 
   async deleteAccount(password: string) {
     if (!this.session) throw new Error('Nicht angemeldet.')
     await this.waitIdle()
-    const { kdf } = await this.api.prelogin(this.session.email)
-    const { authKey } = await deriveFromPassword(password, kdf)
+    const { kdf } = await this.api.prelogin(this.loginIdentifier())
+    const { authKey } = await deriveFromPassword(await this.accountSecret(password || undefined), kdf)
+    const accountId = this.session.accountId
     await this.api.deleteAccount(this.session, authKey)
+    const stored = await this.readDeviceKeys()
+    if (stored.keys[accountId]) {
+      delete stored.keys[accountId]
+      await this.writeDeviceKeys(stored).catch(() => undefined)
+    }
     await this.forgetSession()
     this.log('info', 'Konto und alle Daten auf dem Server gelöscht.')
   }
 
   getSession() { return this.session }
 
-  getMcpReaderKey() { return this.mcpReader }
-
-  private currentSecrets(mcpReader: string | null): Secrets | null {
+  private currentSecrets(): Secrets | null {
     if (!this.session || !this.vaultSecretBase64) return null
     return {
       v: 1,
@@ -515,78 +726,10 @@ export class SyncEngine {
       token: this.session.token,
       expiresAt: this.session.expiresAt,
       email: this.session.email,
+      username: this.session.username ?? null,
+      credential: this.session.credential ?? 'password',
       vaultSecret: this.vaultSecretBase64,
-      ...(mcpReader ? { mcpReader } : {}),
     }
-  }
-
-  private async rememberReader(key: string | null) {
-    this.mcpReader = key
-    if (!key) this.mcpGrantSnapshot = []
-    const secrets = this.currentSecrets(key)
-    if (secrets) await this.persistSecrets(secrets)
-    this.setState({ mcpReader: Boolean(key) })
-  }
-
-  async clearMcpReaderLocal() {
-    await this.rememberReader(null)
-  }
-
-  private async authKeyFor(password: string) {
-    if (!this.session) throw new Error('Nicht angemeldet.')
-    const { kdf } = await this.api.prelogin(this.session.email)
-    if (!isValidKdf(kdf)) throw new Error('Der Server hat unbrauchbare Schlüsselparameter geliefert.')
-    return (await deriveFromPassword(password, kdf)).authKey
-  }
-
-  async enableMcpConnector(password: string) {
-    if (!this.session) throw new Error('Nicht angemeldet.')
-    const authKey = await this.authKeyFor(password)
-    const readerKey = newReaderKey()
-    await mcpReaderRequest(this.session, '/reader', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ authKey, readerKey }),
-    })
-    await this.rememberReader(readerKey)
-    this.log('info', 'Grok-Connector ist auf diesem Gerät an. Notizen bleiben verschlüsselt, bis ein von dir erlaubtes Grok fragt.')
-  }
-
-  async disableMcpConnector(password: string) {
-    if (!this.session) throw new Error('Nicht angemeldet.')
-    const authKey = await this.authKeyFor(password)
-    await mcpReaderRequest(this.session, '/reader', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ authKey, everywhere: true }),
-    })
-    await this.rememberReader(null)
-    this.log('info', 'Grok-Connector ist aus. Bestehende Freigaben wurden widerrufen.')
-  }
-
-  currentMcpGrants(): McpGrantInfo[] {
-    return this.mcpGrantSnapshot
-  }
-
-  async mcpGrants(): Promise<McpGrantInfo[]> {
-    if (!this.session || !this.mcpReader) {
-      this.mcpGrantSnapshot = []
-      return []
-    }
-    const body = await mcpReaderRequest(this.session, '/reader', { method: 'GET', readerKey: this.mcpReader }) as { grants?: McpGrantInfo[] }
-    const grants = Array.isArray(body?.grants) ? body.grants : []
-    this.mcpGrantSnapshot = grants
-    return grants
-  }
-
-  async revokeMcpGrant(grantId: string) {
-    if (!this.session || !this.mcpReader) throw new Error('Der Grok-Connector ist auf diesem Gerät nicht an.')
-    await mcpReaderRequest(this.session, '/reader/revoke', {
-      method: 'POST',
-      readerKey: this.mcpReader,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grantId }),
-    })
   }
 
   private requireHost() {
@@ -605,6 +748,9 @@ export class SyncEngine {
 
   /** The app calls this after every local write; a short debounce batches bursts of autosaves. */
   notifyLocalChange() {
+    for (const listener of [...this.localChangeListeners]) {
+      try { listener() } catch (error) { console.error('[sync] local-change listener failed', error) }
+    }
     if (!this.session || !this.options?.automatic()) return
     if (this.debounce !== null) window.clearTimeout(this.debounce)
     this.debounce = window.setTimeout(() => { this.debounce = null; void this.syncNow('local-change') }, LOCAL_DEBOUNCE_MS)
@@ -697,7 +843,13 @@ export class SyncEngine {
     // what comes next (a new 429 sets the pause again). The file listing of an earlier cycle is out of date too.
     this.throttledUntil = 0
     this.scanCache = null
-    this.setState({ status: 'syncing', error: null, progress: null, pausedUntil: null })
+    if (!this.vaultSyncOn()) {
+      // Cloud sync is off: the account stays signed in (sharing needs it), but no vault file leaves or enters this device through it.
+      this.setState({ status: 'idle', error: null, progress: null, pausedUntil: null, pendingLocal: 0, vaultSync: false })
+      this.schedule(AUTO_INTERVAL_MS)
+      return
+    }
+    this.setState({ status: 'syncing', error: null, progress: null, pausedUntil: null, vaultSync: true })
     try {
       let conflicts = await this.pull()
       const pushed = await this.push()

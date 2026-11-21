@@ -107,37 +107,38 @@ try {
   assert.equal(dailySendDue({ usage: true }, Date.now() - 3_600_000), false, 'at most once a day')
   assert.equal(dailySendDue({ logs: true }, Date.now() - 25 * 3_600_000), true)
 
-  // Client glue: while both toggles are off no fetch happens and nothing is counted.
+  // Client glue: the renderer only forwards validated-by-main events, and only for switched-on categories.
   const store = new Map()
-  globalThis.window = { localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) }, addEventListener() {}, setTimeout, clearTimeout, fanotes: { platform: 'linux' } }
-  globalThis.document = { documentElement: { lang: 'de' } }
+  const sent = []
+  globalThis.window = {
+    localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) },
+    addEventListener() {},
+    fanotes: { platform: 'linux', diagnostics: { record: (event) => sent.push(event), status: async () => ({ installId: 'b'.repeat(32), lastSentAt: 0 }), preview: async () => null, resetInstallId: async () => '', deleteRemote: async () => true } },
+  }
+  globalThis.document = { documentElement: { lang: 'de' }, addEventListener() {}, hidden: false }
   let fetches = 0
   globalThis.fetch = async () => { fetches += 1; return { ok: true } }
   const client = await server.ssrLoadModule('/src/lib/diagnosticsClient.ts')
-  client.configureDiagnostics({ usage: false, logs: false })
-  client.recordFeature('tool.pen')
-  assert.equal(await client.sendDailyIfDue(), false)
-  assert.equal(fetches, 0, 'nothing is sent while off')
-  assert.equal(client.previewDiagnostics(), null)
-  assert.equal(store.has('fanotes.diagnostics.counters'), false)
-  client.configureDiagnostics({ usage: true, logs: false })
-  client.recordFeature('tool.pen'); client.recordFeature('not a valid name!')
-  assert.deepEqual(client.previewDiagnostics().usage.counters, { 'tool.pen': 1 })
-  // Tool switches and error toasts reach the counters through the shared diagnostic log.
   const { diagnosticLog } = await server.ssrLoadModule('/src/lib/bugReport.ts')
+  client.configureDiagnostics({ crashes: false, errors: false, perf: false, usage: false })
+  client.recordFeature('tool.pen')
+  client.recordPenLatency(5)
   diagnosticLog.record({ at: Date.now(), kind: 'tool', tool: 'Eraser' })
   diagnosticLog.record({ at: Date.now(), kind: 'error', message: 'Die Notiz "Bio" konnte nicht gespeichert werden.' })
-  const counted = client.previewDiagnostics().usage
-  assert.equal(counted.counters["tool.eraser"], 1, 'a tool switch is counted')
-  assert.equal(Object.values(counted.errors).reduce((sum, n) => sum + n, 0), 1, 'an error toast is counted')
-  assert.ok(!JSON.stringify(counted).includes('konnte') && !JSON.stringify(counted).includes('Bio'), 'the error text never leaves the device')
-  assert.equal(await client.sendDailyIfDue(), true)
-  assert.equal(fetches, 1)
-  assert.equal(await client.sendDailyIfDue(), false, 'second call within a day does not send')
-  assert.equal(fetches, 1)
-  client.configureDiagnostics({ usage: false, logs: false })
+  assert.deepEqual(sent, [], 'nothing is forwarded while every category is off')
+  assert.equal(fetches, 0, 'nothing is sent while off')
+  client.configureDiagnostics({ crashes: false, errors: true, perf: false, usage: true })
+  client.recordFeature('tool.pen'); client.recordFeature('not a valid name!')
+  diagnosticLog.record({ at: Date.now(), kind: 'tool', tool: 'Eraser' })
+  diagnosticLog.record({ at: Date.now(), kind: 'error', message: 'Die Notiz "Bio" konnte nicht gespeichert werden.' })
+  assert.deepEqual(sent.filter((event) => event.k === 'feature').map((event) => event.name), ['tool.pen', 'tool.eraser'], 'a tool switch is counted, an invalid name is not')
+  const errorEvent = sent.find((event) => event.k === 'error')
+  assert.ok(errorEvent && /^[0-9a-f]{12}$/u.test(errorEvent.hash), 'an error toast becomes class + hash')
+  assert.ok(!JSON.stringify(sent).includes('konnte') && !JSON.stringify(sent).includes('Bio'), 'the error text never leaves the renderer')
+  assert.equal(sent.filter((event) => event.k === 'pen' || event.k === 'crash').length, 0, 'perf and crash stay off')
+  assert.equal(fetches, 0, 'the renderer itself never sends automatically')
   assert.equal(await client.sendLogsNow('hi'), true, 'an explicit click sends even while off')
-  assert.equal(fetches, 2)
+  assert.equal(fetches, 1)
   console.log('Diagnose-Prüfung bestanden: Bereinigung, Schema, Server-Kompatibilität, Einwilligung und "aus heisst nichts senden".')
 } finally {
   await server.close()

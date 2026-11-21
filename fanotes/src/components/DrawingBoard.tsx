@@ -61,6 +61,7 @@ import { PAPER_STYLES, drawPaperBackground } from '../lib/paperStyles'
 import { artStudioOpenForBrush, inkColorForBrush, usesPenStrip } from '../lib/inkOptionSurface'
 import { mountPenPointer } from '../lib/penPointer'
 import { clampPaperSquareMm } from '../lib/paperSquare'
+import { beautifyInk, beautifyPaperStep, blendStrokePoints, isBeautifyCandidate, normalizeBeautifyStrength } from '../lib/inkBeautify'
 import { pdfFromRgbaPages, type CanvasPdfPage } from '../lib/canvasPdf'
 import { rasterizePaperLayers, scrollPaperTo, waitForPaperPaint } from '../lib/canvasSnapshot'
 import { strokeDurationMs, strokeLengthMm, summarizeInkStrokes, type InkStrokeActivity, type InkSummary } from '../lib/pageStats'
@@ -153,6 +154,7 @@ import {
   inkNoticeAutoClearDelayMs,
 } from '../lib/inkNotice'
 import { BUG_REPORT_PEN_SAMPLE_MS, buildPenDiagnosticEvent, diagnosticLog } from '../lib/bugReport'
+import { recordPenLatency } from '../lib/diagnosticsClient'
 import { boundsOfInkIndexes, copyInkSelection, inkEditUndoSnapshot, moveInkSelection, scaleInkSelection } from '../lib/inkSelect'
 import { bumpInkGeometryEpoch, strokePointBounds } from '../lib/strokeBounds'
 import { drawingDocumentJson, warmStrokeJsonWhenIdle } from '../lib/drawingJson'
@@ -855,6 +857,8 @@ export type DrawingBoardProps = {
     | 'penOnly'
     | 'tabletButtons'
     | 'smoothing'
+    | 'beautifyHandwriting'
+    | 'beautifyStrength'
     | 'scribbleEraseSensitivity'
     | 'shapeSnapSensitivity'
     | 'recognitionMode'
@@ -1110,6 +1114,7 @@ const SPECIAL_INKS: ReadonlyArray<{ id: Exclude<InkEffect, 'solid'>; label: stri
 const ART_PREFERENCES_KEY = 'fanotes.art-tools.v1'
 const artBrushIds = new Set<ArtBrush>(ART_BRUSHES.map(({ id }) => id))
 const inkEffectIds = new Set<InkEffect>(['solid', ...SPECIAL_INKS.map(({ id }) => id)])
+const beautifyTestFlag = () => (window as unknown as { __beautifyTest?: boolean }).__beautifyTest === true
 const isHandwritingStroke = (stroke: InkStroke) => stroke.purpose !== 'art'
 const handwritingStrokes = (strokes: InkStroke[]) => strokes.filter(isHandwritingStroke)
 
@@ -4807,6 +4812,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     const noteworthy = continued.grew || jump === 'skip'
     if (noteworthy || diagnosticNow - lastDiagnosticAtRef.current > BUG_REPORT_PEN_SAMPLE_MS) {
       lastDiagnosticAtRef.current = diagnosticNow
+      if (event.pointerType === 'pen') recordPenLatency(diagnosticNow - event.timeStamp)
       diagnosticLog.record(buildPenDiagnosticEvent({
         at: Date.now(),
         noteId: drawingIdRef.current,
@@ -6069,6 +6075,139 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     }
   }, [appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, handlePointerDown, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
 
+  // ---- Optional handwriting beautifier (desktop) ---------------------------
+  // Runs after the pen lifts, never on the hot path: a finished word is queued
+  // and beautified once the pen has been idle for BEAUTIFY_IDLE_MS or the next
+  // stroke starts a new line. The result replaces the stroke objects (normal
+  // strokes, famd unchanged) as ONE undo step, settled over ~150 ms.
+  const beautifyPendingRef = useRef<InkStroke[]>([])
+  const beautifyTimerRef = useRef(0)
+  const beautifyAnimRef = useRef(0)
+  const beautifyLiveRef = useRef({ enabled: false, strength: 'subtle' as 'subtle' | 'medium', paperStyle, squareMm: 0, math: false })
+  // Read-only probes for the live-board check; they answer only while __beautifyTest is set.
+  const hooks = window as unknown as Record<string, unknown>
+  if (inputActive) {
+    hooks.__beautifyStrokes = () => (beautifyTestFlag() ? strokesRef.current : [])
+    hooks.__beautifyPage = () => ({ width: sourceWidthRef.current, height: sourceHeightRef.current })
+  }
+  beautifyLiveRef.current = {
+    enabled: settings.beautifyHandwriting === true && window.fanotes?.platform !== 'web',
+    strength: normalizeBeautifyStrength(settings.beautifyStrength),
+    paperStyle,
+    squareMm: clampPaperSquareMm(settings.paperSquareMm),
+    math: mode === 'math' || (mode === 'auto' && recognizedMode === 'math'),
+  }
+
+  const flushBeautify = useCallback((batch?: InkStroke[]) => {
+    const live = beautifyLiveRef.current
+    const pending = batch ?? beautifyPendingRef.current
+    if (!batch) {
+      window.clearTimeout(beautifyTimerRef.current)
+      beautifyTimerRef.current = 0
+    }
+    if (!pending.length) return
+    if (activeStrokeRef.current) {
+      if (!batch) beautifyTimerRef.current = window.setTimeout(() => flushBeautifyRef.current(), 300)
+      else window.setTimeout(() => flushBeautifyRef.current(batch), 300)
+      return
+    }
+    if (!batch) beautifyPendingRef.current = []
+    if (!(live.enabled || beautifyTestFlag()) || live.math || inkMode !== 'writing') return
+    const present = new Set(strokesRef.current)
+    const list = pending.filter((stroke) => present.has(stroke))
+    if (!list.length) return
+    const width = sourceWidthRef.current
+    const height = sourceHeightRef.current
+    const result = beautifyInk(list, {
+      pageWidth: width,
+      pageHeight: height,
+      strength: live.strength,
+      paperStep: beautifyPaperStep(live.paperStyle, live.squareMm, width),
+    })
+    if (!result.changed) return
+    const replacement = new Map<InkStroke, InkStroke>()
+    list.forEach((stroke, index) => {
+      const points = result.points[index]
+      if (points) replacement.set(stroke, { ...stroke, points })
+    })
+    const before = snapshotStrokes(strokesRef.current)
+    const final = before.map((stroke) => replacement.get(stroke) ?? stroke)
+    undoRef.current.push(before)
+    if (undoRef.current.length > 80) undoRef.current.shift()
+    redoRef.current = []
+    const apply = (next: InkStroke[]) => {
+      strokesRef.current = next
+      bumpInkRevision({ updateTranscript: false })
+      setDirty(true)
+      scheduleRedraw()
+    }
+    window.cancelAnimationFrame(beautifyAnimRef.current)
+    // A heavy page repaints too slowly to animate: apply at once.
+    if (before.length > 600 || typeof window.requestAnimationFrame !== 'function') {
+      apply(final)
+      return
+    }
+    const startedAt = performance.now()
+    const originals = new Map<InkStroke, InkStroke>()
+    replacement.forEach((value, key) => originals.set(value, key))
+    const step = (now: number) => {
+      if (undoRef.current.at(-1) !== before) return
+      if (activeStrokeRef.current || strokesRef.current.length !== before.length) {
+        // The pen came down or the page changed: settle on the final shape now.
+        if (!activeStrokeRef.current && strokesRef.current.length === before.length) apply(final)
+        else if (activeStrokeRef.current) strokesRef.current = strokesRef.current.map((stroke) => replacement.get(stroke) ?? stroke)
+        return
+      }
+      const t = Math.min(1, (now - startedAt) / 150)
+      if (t >= 1) {
+        apply(final)
+        return
+      }
+      const eased = t * t * (3 - 2 * t)
+      apply(before.map((stroke) => {
+        const target = replacement.get(stroke)
+        return target ? { ...target, points: blendStrokePoints(stroke.points, target.points, eased) } : stroke
+      }))
+      beautifyAnimRef.current = window.requestAnimationFrame(step)
+    }
+    beautifyAnimRef.current = window.requestAnimationFrame(step)
+  }, [bumpInkRevision, inkMode, scheduleRedraw, setDirty])
+  const flushBeautifyRef = useRef(flushBeautify)
+  flushBeautifyRef.current = flushBeautify
+
+  const queueBeautify = useCallback((stroke: InkStroke) => {
+    // __beautifyTest lets the live-board check switch the feature on in the web build.
+    if (!(beautifyLiveRef.current.enabled || beautifyTestFlag()) || !isBeautifyCandidate(stroke)) return
+    const pending = beautifyPendingRef.current
+    if (pending.length) {
+      const width = sourceWidthRef.current
+      const height = sourceHeightRef.current
+      let top = Infinity
+      let bottom = -Infinity
+      for (const item of pending) for (const point of item.points) {
+        top = Math.min(top, point.y * height)
+        bottom = Math.max(bottom, point.y * height)
+      }
+      const mid = stroke.points.reduce((sum, point) => sum + point.y * height, 0) / stroke.points.length
+      const slack = Math.max(bottom - top, 3 * width / 210) * 0.6
+      // The pen moved on to another line: finish the one before it now.
+      if (mid < top - slack || mid > bottom + slack) {
+        // After this pen-up has pushed its own undo step, not before.
+        const done = pending.slice()
+        beautifyPendingRef.current = []
+        window.setTimeout(() => flushBeautifyRef.current(done), 0)
+      }
+    }
+    beautifyPendingRef.current.push(stroke)
+    window.clearTimeout(beautifyTimerRef.current)
+    beautifyTimerRef.current = window.setTimeout(() => flushBeautifyRef.current(), 600)
+  }, [])
+
+  useEffect(() => () => {
+    window.clearTimeout(beautifyTimerRef.current)
+    window.cancelAnimationFrame(beautifyAnimRef.current)
+  }, [])
+
   const finishPointer = useCallback((event: ReactPointerEvent<HTMLElement> | PointerEvent) => {
     const pointerId = event.pointerId
     if (tabletPanRef.current?.pointerId === pointerId) {
@@ -6271,6 +6410,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
         strokesRef.current.push(activeStroke)
         committedHasStroke = commitStrokeToCanvas(activeStroke)
         gestureChangedRef.current = true
+        queueBeautify(activeStroke)
       }
     }
     activeStrokeRef.current = null
@@ -6315,7 +6455,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (!roomGrown) fitPageToInk()
     }
     scheduleRedraw()
-  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, ensureSectionRoom, fitPageToInk, flushPaintedLayoutGrow, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, planInkWindowNow, redraw, releaseTabletPan, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, updateHistoryState, wipeLiveInk])
+  }, [analyzeMathCorrectionSelection, appendPointerEvent, bumpInkRevision, clearShapeDwellTimer, commitPendingSolverTap, commitStrokeToCanvas, ensureSectionRoom, fitPageToInk, flushPaintedLayoutGrow, inkMode, mathSolverEnabled, mode, openMathSolverAtPoint, pointFromEvent, readShapeSnapProfile, planInkWindowNow, redraw, releaseTabletPan, scheduleRedraw, selectionPurpose, setDirty, settings.scribbleEraseSensitivity, sourceHeight, sourceWidth, trySnapActiveShape, queueBeautify, updateHistoryState, wipeLiveInk])
 
   const readDraftingDisplay = useCallback((): DraftingDisplay => {
     const surface = surfaceRef.current

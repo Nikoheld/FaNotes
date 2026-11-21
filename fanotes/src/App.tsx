@@ -90,8 +90,11 @@ import { sanitizeCustomCss } from './lib/customCss'
 import { addonIndexCache } from './lib/addons/indexCache'
 import { parseAddonSource } from './lib/addons/registry'
 import { addonRuntime } from './lib/addons/runtime'
-import { startMcpBridge } from './lib/mcp/bridge'
 import { syncEngine } from './lib/sync/engine'
+import { userShares } from './lib/sync/userShares'
+import { SHARED_INBOX_FOLDER } from './lib/sync/sharedInbox'
+import { SharedWithMePanel } from './components/SharedWithMePanel'
+import { ShareWithUserDialog, type ShareWithUserTarget } from './components/ShareWithUserDialog'
 import { externalArrivals, loadArrivals, saveArrivals } from './lib/newArrivals.mjs'
 import { useExternalTabChanges, useTabHolds } from './lib/useExternalTabChanges'
 import { WorkRequestsClient } from './lib/workRequests'
@@ -249,7 +252,8 @@ import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSqua
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
 import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
-import { configureDiagnostics, markStartupReady, recordFeature, sendDailyIfDue, setDiagnosticsVault } from './lib/diagnosticsClient'
+import { configureDiagnostics, recordFeature, setDiagnosticsVault } from './lib/diagnosticsClient'
+import { SendDataNotice } from './components/SendDataNotice'
 import {
   collectSendDataNutzerdaten,
   linuxHyprlandRuntimeContext,
@@ -307,6 +311,7 @@ const FirstRunOnboarding = lazy(() => import('./components/FirstRunOnboarding').
 const GlyphenWerkWorkspace = lazy(() => import('./components/GlyphenWerkWorkspace').then((module) => ({ default: module.GlyphenWerkWorkspace })))
 const WritingMode = lazy(() => import('./writing/ui/WritingMode').then((module) => ({ default: module.WritingMode })))
 const StoryImportDialog = lazy(() => import('./writing/import/ImportDialog').then((module) => ({ default: module.ImportDialog })))
+const OneNoteImportDialog = lazy(() => import('./components/OneNoteImportDialog').then((module) => ({ default: module.OneNoteImportDialog })))
 const CommandPalette = lazy(() => import('./components/CommandPalette').then((module) => ({ default: module.CommandPalette })))
 const StudyOverview = lazy(() => import('./components/StudyOverview').then((module) => ({ default: module.StudyOverview })))
 const FlashcardReview = lazy(() => import('./components/FlashcardReview').then((module) => ({ default: module.FlashcardReview })))
@@ -822,7 +827,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const [worksheetSession, setWorksheetSession] = useState<WorksheetSession>({ key: 0, documents: [] })
   const [worksheetImportOpen, setWorksheetImportOpen] = useState(false)
   const [worksheetImportBusy, setWorksheetImportBusy] = useState(false)
-  const [oneNoteImportBusy, setOneNoteImportBusy] = useState(false)
+  const [oneNoteDialogOpen, setOneNoteDialogOpen] = useState(false)
   const [mutatingEntryPaths, setMutatingEntryPaths] = useState<string[]>([])
   const [overviewOpen, setOverviewOpen] = useState(false)
   const [homeworkOpen, setHomeworkOpen] = useState(false)
@@ -875,6 +880,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [syncAccountId, workRequestsClient])
   const openWorkRequestsOrBugReport = useCallback(() => { if (workRequestsAllowed) setWorkRequestsOpen(true); else setBugReportOpen(true) }, [workRequestsAllowed])
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined)
+  const [shareWithUser, setShareWithUser] = useState<ShareWithUserTarget | null>(null)
   const [shareLinkDialog, setShareLinkDialog] = useState<{ link: string; mode: 'copy' | 'live' | 'edit' } | null>(null)
   const shareLinkInputRef = useRef<HTMLInputElement>(null)
   const shareInFlight = useRef(false)
@@ -1014,6 +1020,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const worksheetEffectPathRef = useRef('')
   const previousActivePathRef = useRef<string | null>(null)
   const settingsRef = useRef(settings)
+  const applySettingsRef = useRef<(next: AppSettings) => void>(() => undefined)
   const settingsRevisionRef = useRef(0)
   const settingsPersistedRevisionRef = useRef(0)
   const lastHomeworkSecretRef = useRef('')
@@ -1165,7 +1172,7 @@ export default function App({ startupBootstrap }: AppProps) {
       if (stopped) return
       const planned = planSendDataTick({
         enabled: true,
-        logs: diagnosticLog.snapshot(),
+        logs: diagnosticLog.snapshot().map(({ noteId: _noteId, ...rest }) => rest),
         nutzerdaten: collectSendDataNutzerdaten({
           version: updateState.currentVersion,
           platform: window.fanotes?.platform,
@@ -2810,6 +2817,8 @@ export default function App({ startupBootstrap }: AppProps) {
       platform: window.fanotes.platform,
       deviceName: () => settingsRef.current.syncDeviceName,
       automatic: () => settingsRef.current.syncAutomatic,
+      vaultSync: () => settingsRef.current.syncVaultEnabled !== false,
+      setVaultSync: (enabled) => { applySettingsRef.current({ ...settingsRef.current, syncVaultEnabled: enabled }) },
       excludedPrefixes: () => syncPrefixesFromSetting(settingsRef.current.syncExcludedFolders),
       includeRecognitionModel: () => settingsRef.current.syncHandwritingModel === true,
       includeHistory: () => settingsRef.current.syncNoteHistory === true,
@@ -2818,6 +2827,28 @@ export default function App({ startupBootstrap }: AppProps) {
       onConflict: (conflict) => syncDepsRef.current.toast(`Sync-Konflikt bei „${fileName(conflict.path)}“ – beide Fassungen sind gesichert. Vergleichen unter Einstellungen → Konflikte.`, 'info'),
       onSignedOut: (reason) => syncDepsRef.current.toast(reason, 'error'),
     })
+    if (window.fanotes.platform !== 'web' && window.fanotes.platform !== 'browser-preview') {
+      // Shares between users (desktop): the push channel opens once the sync engine has an account.
+      userShares.attach(syncApi, {
+        isPathBusy: (path) => syncDepsRef.current.isSyncPathBusy(path),
+        onApplied: (change) => { void syncDepsRef.current.applyRemoteChanges(change) },
+        onIncoming: (share) => {
+          const text = share.status === 'accepted'
+            ? `${share.peer} hat „${share.name}“ mit dir geteilt. Es liegt unter „${SHARED_INBOX_FOLDER}“.`
+            : `${share.peer} möchte „${share.name}“ mit dir teilen. Nimm es in der Seitenleiste unter „${SHARED_INBOX_FOLDER}“ an.`
+          syncDepsRef.current.toast(text, 'info')
+          try {
+            if (typeof Notification !== 'undefined' && !document.hasFocus()) {
+              const show = () => { new Notification('FaNotes', { body: text }) }
+              if (Notification.permission === 'granted') show()
+              else if (Notification.permission !== 'denied') void Notification.requestPermission().then((permission) => { if (permission === 'granted') show() })
+            }
+          } catch { /* notifications are optional */ }
+        },
+        onGone: (share, why) => syncDepsRef.current.toast(why === 'revoked' ? `${share.peer} hat die Freigabe „${share.name}“ beendet. Die Kopie wurde entfernt.` : `Die Freigabe „${share.name}“ von ${share.peer} ist beendet.`, 'info'),
+      })
+      userShares.start()
+    }
     // Sync never delays startup: the first cycle runs once the notes are on screen.
     let cancelled = false
     const timer = window.setTimeout(() => { if (!cancelled) void syncEngine.start() }, 2500)
@@ -2826,26 +2857,6 @@ export default function App({ startupBootstrap }: AppProps) {
       window.clearTimeout(timer)
       syncEngine.dispose()
     }
-  }, [syncApi])
-
-  useEffect(() => {
-    if (!syncApi) return undefined
-    const walk = (entries: VaultEntry[], into: { path: string; modifiedAt: string | null }[]) => {
-      for (const entry of entries) {
-        if (entry.kind === 'folder') walk(entry.children ?? [], into)
-        else into.push({ path: entry.relativePath, modifiedAt: entry.modifiedAt ?? null })
-      }
-      return into
-    }
-    return startMcpBridge({
-      session: () => syncEngine.getSession(),
-      readerKey: () => syncEngine.getMcpReaderKey(),
-      reader: {
-        list: async () => walk(await window.fanotes.getFastTree().catch(() => window.fanotes.getTree()), []),
-        read: (path) => window.fanotes.readFile(path),
-      },
-      onRejected: () => { void syncEngine.clearMcpReaderLocal() },
-    })
   }, [syncApi])
 
   useEffect(() => {
@@ -4241,6 +4252,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }, 180)
     settingsTimer.current = timer
   }, [stopRemoteSupport, syncPublishedHomework, toast])
+  applySettingsRef.current = applySettings
 
   const shareVaultEntry = useCallback(async (relativePath: string, mode: 'copy' | 'live' | 'edit') => {
     if (shareInFlight.current || !relativePath || !window.fanotes?.getTree || !window.fanotes.readFile) return
@@ -4680,6 +4692,7 @@ export default function App({ startupBootstrap }: AppProps) {
       setWorksheetSession((current) => ({ key: current.key + 1, documents: [] }))
       setBootstrap(selected)
       void syncEngine.switchVault().catch(() => undefined)
+      void userShares.switchVault().catch(() => undefined)
       const selectedSettings = { ...defaultSettingsForPlatform(window.fanotes.platform), ...selected.settings }
       const selectedSettingsRevision = settingsRevisionRef.current + 1
       settingsRevisionRef.current = selectedSettingsRevision
@@ -5075,18 +5088,14 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [remoteSupportSession, settings.experimentalRemoteSupport])
 
-  // Opt-in diagnostics: counters and the daily report run only while a toggle is on.
+  // Send data: the main process owns queue and sending; this only tells the renderer which events to report.
   useEffect(() => {
-    configureDiagnostics({ usage: settings.diagnosticsUsage, logs: settings.diagnosticsLogs }, { vaultPath: bootstrap?.vaultPath })
-    if (!settings.diagnosticsUsage && !settings.diagnosticsLogs) return undefined
-    const first = window.setTimeout(() => { void sendDailyIfDue() }, 90_000)
-    const timer = window.setInterval(() => { void sendDailyIfDue() }, 3_600_000)
-    return () => { window.clearTimeout(first); window.clearInterval(timer) }
-  }, [settings.diagnosticsUsage, settings.diagnosticsLogs, bootstrap?.vaultPath])
+    const on = settings.diagnosticsEnabled
+    configureDiagnostics({ crashes: on && settings.diagnosticsCrashes, errors: on && settings.diagnosticsLogs, perf: on && settings.diagnosticsPerf, usage: on && settings.diagnosticsUsage }, { vaultPath: bootstrap?.vaultPath })
+  }, [settings.diagnosticsEnabled, settings.diagnosticsCrashes, settings.diagnosticsLogs, settings.diagnosticsPerf, settings.diagnosticsUsage, bootstrap?.vaultPath])
 
   useEffect(() => {
     if (!bootstrap) return
-    markStartupReady()
     let notes = 0
     let bytes = 0
     const walk = (entries: VaultEntry[]) => { for (const entry of entries) { if (entry.kind === 'folder') walk(entry.children ?? []); else { notes += 1; bytes += entry.size ?? 0 } } }
@@ -5675,23 +5684,25 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [requestConfirm, toast, updateContent, worksheetSession.documents])
 
-  const importOneNote = useCallback(async (): Promise<OneNoteImportResult | null> => {
-    if (oneNoteImportBusy) return null
+  /** Opens the OneNote page picker; the dialog asks for the file, converts it and imports the chosen pages. */
+  const importOneNote = useCallback(async (): Promise<null> => {
     if (isWeb) throw new Error('Binäre OneNote-Notizbücher werden sicher in der Linux- oder Windows-App importiert.')
-    setOneNoteImportBusy(true)
     setWorksheetImportOpen(false)
-    try {
-      const result = await window.fanotes.importOneNote()
-      if (!result) return null
-      vaultStructureRevisionRef.current += 1
-      await refreshTree()
-      if (result.importedNotes[0]) await openNote(result.importedNotes[0])
-      toast(`${result.pageCount} ${result.pageCount === 1 ? 'OneNote-Seite' : 'OneNote-Seiten'} layoutgetreu importiert.`, 'success')
-      return result
-    } finally {
-      setOneNoteImportBusy(false)
-    }
-  }, [isWeb, oneNoteImportBusy, openNote, refreshTree, toast])
+    setOneNoteDialogOpen(true)
+    return null
+  }, [isWeb])
+
+  const oneNoteFolders = useMemo(() => oneNoteDialogOpen
+    ? [...folderPaths(tree)].filter((entry) => !entry.split('/').some((segment) => segment.startsWith('.') || /\.story$/iu.test(segment)))
+    : [], [oneNoteDialogOpen, tree])
+
+  const finishOneNoteImport = useCallback((result: OneNoteImportResult) => {
+    vaultStructureRevisionRef.current += 1
+    void refreshTree().then(async () => {
+      if (result.imported[0]) await openNote(result.imported[0].path)
+    }).catch(() => undefined)
+    toast(`${result.imported.length} ${result.imported.length === 1 ? 'OneNote-Seite' : 'OneNote-Seiten'} als normale Notizen importiert.`, 'success')
+  }, [openNote, refreshTree, toast])
 
   /** Commands contributed by running add-ons; each run is isolated by the runtime and can never throw here. */
   const addonPaletteActions = useMemo<PaletteAction[]>(() => addonState.commands.map((command) => {
@@ -5730,7 +5741,7 @@ export default function App({ startupBootstrap }: AppProps) {
       toggleBookView()
     } },
     { id: 'worksheet', label: 'Bild oder PDF als Arbeitsblatt', detail: 'In die aktuelle oder eine neue Notiz importieren und ausfüllen', shortcut: 'Ctrl ⇧ I', group: 'Werkzeuge', keywords: 'pdf bild import arbeitsblatt ausfüllen', icon: <FileUp size={15} />, run: openWorksheetImport },
-    { id: 'onenote-import', label: 'Microsoft OneNote importieren', detail: 'Notizbuch, Abschnitte, Layout, Ink und Anlagen sicher übernehmen', group: 'Dateien', keywords: 'one onetoc2 onepkg onedrive migration', icon: <NotebookTabs size={15} />, run: () => { void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error')) } },
+    { id: 'onenote-import', label: 'Microsoft OneNote importieren', detail: 'Seiten und Zielordner wählen, Handschrift als .famd-Ink übernehmen', group: 'Dateien', keywords: 'one onetoc2 onepkg onedrive migration', icon: <NotebookTabs size={15} />, run: () => { void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error')) } },
     { id: 'ai-assistant', label: 'AI-Assistent', detail: 'LM Studio, Ollama, OpenAI, Gemini, Anthropic, Grok oder OpenCode nutzen', shortcut: 'Ctrl ⇧ A', group: 'Werkzeuge', keywords: 'ki ai lm studio ollama openai gemini anthropic grok opencode rechtschreibung fakten', icon: <Bot size={15} />, run: openLmStudio },
     { id: 'glyphenwerk', label: 'GlyphenWerk öffnen', detail: 'Handschrift trainieren, live testen, korrigieren und verwalten', shortcut: 'Ctrl ⇧ G', group: 'Werkzeuge', keywords: 'training erkennung symbole test datensatz', icon: <Database size={15} />, run: openGlyphenWerk },
     { id: 'overview', label: 'Vault-Übersicht', detail: 'Ordner und offene Notizen überblicken', group: 'Navigation', icon: <Network size={15} />, run: openOverview },
@@ -5779,7 +5790,7 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'inspector', label: 'Gliederung umschalten', group: 'Ansicht', icon: <PanelRightClose size={15} />, run: () => setInspectorVisible((value) => !value) },
     { id: 'settings', label: 'Einstellungen öffnen', shortcut: 'Ctrl ,', group: 'FaNotes', icon: <Settings size={15} />, run: () => openSettings() },
     ...(syncApi && syncState.account ? [{ id: 'sync-now', label: 'Jetzt synchronisieren', detail: syncStatusLabel(syncState), group: 'FaNotes', keywords: 'sync synchronisieren cloud server geräte', icon: <Cloud size={15} />, run: () => { void syncEngine.syncNow('manual') } }] : []),
-    ...(syncApi ? [{ id: 'sync-settings', label: syncState.account ? 'Sync-Einstellungen' : 'Sync einrichten', detail: syncState.account ? syncState.account.email : 'Konto erstellen oder anmelden – Notizen auf allen Geräten', group: 'FaNotes', keywords: 'sync konto anmelden cloud geräte account login', icon: <Cloud size={15} />, run: () => openSettings('sync') }] : []),
+    ...(syncApi ? [{ id: 'sync-settings', label: syncState.account ? 'Sync-Einstellungen' : 'Sync einrichten', detail: syncState.account ? (syncState.account.username || syncState.account.email) : 'Konto erstellen oder anmelden – Notizen auf allen Geräten', group: 'FaNotes', keywords: 'sync konto anmelden cloud geräte account login', icon: <Cloud size={15} />, run: () => openSettings('sync') }] : []),
     { id: 'addon-store', label: 'Add-on-Store', detail: 'Add-ons aus GitHub entdecken, installieren und verwalten', group: 'FaNotes', keywords: 'addon add-on plugin erweiterung store extension', icon: <Puzzle size={15} />, run: () => setAddonStoreOpen(true) },
     ...addonPaletteActions,
     { id: 'reveal', label: isWeb ? 'Notiz herunterladen' : 'Im Dateimanager zeigen', detail: isWeb ? 'Aktuelle Notiz exportieren' : 'Speicherort der geöffneten Notiz öffnen', group: 'Dateien', keywords: 'ordner explorer finder dateimanager download export', icon: isWeb ? <Download size={15} /> : <FolderOpen size={15} />, run: () => { if (activePath) void window.fanotes.revealInFolder(activePath) } },
@@ -6500,6 +6511,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 {tagFilter && <button type="button" className="tag-filter-clear" onClick={() => setTagFilter(null)}>Filter aus</button>}
               </div>
             )}
+            <SharedWithMePanel onReveal={setRevealPath} toast={toast} />
             <div className="file-tree-wrap">
               <FileTree
                 entries={visibleTree}
@@ -6533,6 +6545,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onCopyWikiLink={copyWikiLink}
                 onCopyPath={(path) => { void copyPlainText(path, 'Pfad kopiert.') }}
                 onShare={shareVaultEntry}
+                onShareWithUser={syncApi && window.fanotes.platform !== 'web' && window.fanotes.platform !== 'browser-preview' ? (path, kind) => setShareWithUser({ path, kind, name: fileName(path) }) : undefined}
                 confirmTrash={(message) => requestConfirm(message, { title: 'In den Papierkorb', confirmLabel: 'Verschieben' })}
               />
             </div>
@@ -7274,6 +7287,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </SafeBoundary>
         </Suspense>
       )}
+      {oneNoteDialogOpen && <Suspense fallback={null}><SafeBoundary name="OneNote-Import" fallbackTitle="Der OneNote-Import ist abgestürzt"><OneNoteImportDialog folders={oneNoteFolders} onClose={() => setOneNoteDialogOpen(false)} onImported={finishOneNoteImport} /></SafeBoundary></Suspense>}
       {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} onConvertFamd={convertAllFamdNotes} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
       {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}
@@ -7315,6 +7329,15 @@ export default function App({ startupBootstrap }: AppProps) {
             </div>
           </section>
         </div>
+      )}
+      {shareWithUser && (
+        <ShareWithUserDialog
+          target={shareWithUser}
+          signedIn={Boolean(syncState.account)}
+          onClose={() => setShareWithUser(null)}
+          onOpenAccountSettings={() => { setShareWithUser(null); openSettings('sync') }}
+          toast={toast}
+        />
       )}
       {shareLinkDialog && (
         <div className="modal-backdrop confirm-backdrop" role="presentation" onPointerDown={(event) => { if (event.target === event.currentTarget) setShareLinkDialog(null) }}>
@@ -7364,11 +7387,18 @@ export default function App({ startupBootstrap }: AppProps) {
           <div className="worksheet-import-options">
             <button type="button" disabled={!activeTab || worksheetImportBusy} onClick={() => void importWorksheet('current')}><span><Files size={22} /></span><strong>In aktuelle Notiz</strong><small>{activeTab ? activeTab.title : 'Keine Notiz geöffnet'}</small></button>
             <button type="button" disabled={worksheetImportBusy} onClick={() => void importWorksheet('new')}><span><FilePlus2 size={22} /></span><strong>Als neue Notiz</strong><small>Dateiname wird zum Notiztitel</small></button>
-            <button type="button" className="onenote-import-option" disabled={isWeb || oneNoteImportBusy} onClick={() => void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error'))}><span>{oneNoteImportBusy ? <LoaderCircle className="spin" size={22} /> : <NotebookTabs size={22} />}</span><strong>Microsoft OneNote</strong><small>{isWeb ? 'In der Linux- oder Windows-App' : 'Ganzes Notizbuch inklusive Layout, Ink und Anlagen'}</small></button>
+            <button type="button" className="onenote-import-option" disabled={isWeb} onClick={() => void importOneNote().catch((error) => toast(error instanceof Error ? error.message : 'OneNote-Import fehlgeschlagen.', 'error'))}><span><NotebookTabs size={22} /></span><strong>Microsoft OneNote</strong><small>{isWeb ? 'In der Linux- oder Windows-App' : 'Seiten und Zielordner wählen, Handschrift wird .famd-Ink'}</small></button>
           </div>
           <footer><small>PDF · Bilder · ONE · ONETOC2 · ONEPKG · ZIP</small><button type="button" className="secondary-button" onClick={() => setWorksheetImportOpen(false)}>Abbrechen</button></footer>
         </section>
       </div>}
+      {Boolean(window.fanotes.diagnostics) && settings.diagnosticsEnabled && !settings.diagnosticsNoticeSeen && !settingsOpen && (
+        <SendDataNotice
+          onDismiss={() => applySettings({ ...settingsRef.current, diagnosticsNoticeSeen: true })}
+          onTurnOff={() => applySettings({ ...settingsRef.current, diagnosticsEnabled: false, diagnosticsNoticeSeen: true })}
+          onOpenSettings={() => { applySettings({ ...settingsRef.current, diagnosticsNoticeSeen: true }); openSettings('senddata') }}
+        />
+      )}
       <div className="toast-stack" aria-live="polite" aria-relevant="additions">{toasts.map((item) => <div className={`toast ${item.kind}`} role={item.kind === 'error' ? 'alert' : 'status'} key={item.id}>{item.kind === 'success' ? <CheckCircle2 size={16} /> : item.kind === 'error' ? <CircleAlert size={16} /> : <Info size={16} />}<span>{item.message}</span><button type="button" aria-label="Meldung schließen" onClick={() => dismissToast(item.id)}><X size={13} /></button></div>)}</div>
     </div>
   )

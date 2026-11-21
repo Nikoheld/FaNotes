@@ -172,6 +172,56 @@
         ]
       }
     },
+    "/email": {
+      "post": {
+        "operationId": "postEmail",
+        "summary": "Add or replace the optional recovery e-mail. The current auth key is required.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityRequest"
+              }
+            }
+          }
+        }
+      }
+    },
     "/files/{fileId}": {
       "get": {
         "operationId": "getFilesFileId",
@@ -974,7 +1024,7 @@
     "/prelogin": {
       "post": {
         "operationId": "postPrelogin",
-        "summary": "Return the KDF parameters for an email.",
+        "summary": "Return the KDF parameters for a username or an email.",
         "parameters": [
           {
             "$ref": "#/components/parameters/requestId"
@@ -1053,6 +1103,106 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/userkey": {
+      "post": {
+        "operationId": "postUserkey",
+        "summary": "Publish the sharing public key once for an account that has a username but no key.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/username": {
+      "post": {
+        "operationId": "postUsername",
+        "summary": "Claim a unique username for an account that has none, and publish its sharing key. Cannot be changed later.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/requestId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "An error object. The text is a fixed sentence, with no note body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": [],
+            "accountHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityRequest"
               }
             }
           }
@@ -1253,13 +1403,38 @@
       },
       "PreloginRequest": {
         "type": "object",
-        "required": [
-          "email"
-        ],
         "properties": {
+          "username": {
+            "type": "string"
+          },
           "email": {
             "type": "string",
             "format": "email"
+          }
+        },
+        "description": "Send either a username or an email."
+      },
+      "IdentityRequest": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "3 to 32 ASCII letters, digits, dot, underscore or hyphen. Unique ignoring case."
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "authKey": {
+            "type": "string",
+            "description": "Required by /email."
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "Base64 raw P-256 public key used to wrap share keys."
+          },
+          "userKeyWrap": {
+            "$ref": "#/components/schemas/KeyWrap"
           }
         }
       },
@@ -1274,10 +1449,12 @@
       "SessionRequest": {
         "type": "object",
         "required": [
-          "email",
           "authKey"
         ],
         "properties": {
+          "username": {
+            "type": "string"
+          },
           "email": {
             "type": "string",
             "format": "email"
@@ -1301,16 +1478,32 @@
       "RegisterRequest": {
         "type": "object",
         "required": [
-          "email",
           "authKey",
           "kdf",
           "vaultKeyWrap",
           "device"
         ],
+        "description": "A username or an email is required. A device-key account has no password: its keys come from a random key kept in the device keychain.",
         "properties": {
+          "username": {
+            "type": "string"
+          },
           "email": {
             "type": "string",
             "format": "email"
+          },
+          "credential": {
+            "type": "string",
+            "enum": [
+              "password",
+              "device-key"
+            ]
+          },
+          "publicKey": {
+            "type": "string"
+          },
+          "userKeyWrap": {
+            "$ref": "#/components/schemas/KeyWrap"
           },
           "authKey": {
             "type": "string"
