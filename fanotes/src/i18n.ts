@@ -36,10 +36,13 @@ let observer: MutationObserver | null = null
 let replacements: Array<[string, string]> = []
 let replacementExpression: RegExp | null = null
 let replacementPreparationScheduled = false
-const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|schritt|willkommen|zurück|weiter|fertig|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge|experimentell|verlinkung|sitzung|auspoppen|finde|pinsel|farben|piktogramme|bleistift|kalligrafie|textmarker|aquarell|deckkraft|verlauf|sammlung|ausgewogen|zeilenabstand|datenerfassung|muster|paket|modell|integriert|verbindungen|trainingspaket|aktueller|strich|frei|breite|erfassen)\b|Vault-Wurzel|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|ordner|notiz|seite|speicher|erkenn|einstell)/iu
+const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|deinen|deinem|dieser|dieses|diesen|diesem|einer|jede|jeden|jeder|auch|wurde|wurden|kann|dort|sondern|nach|über|unter|zuerst|neue|neuen|weder|hat|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|schritt|willkommen|zurück|weiter|fertig|anpassung|optionen|blatt|schreibmodus|stiftmodus|werkzeuge|experimentell|verlinkung|sitzung|auspoppen|finde|pinsel|farben|piktogramme|bleistift|kalligrafie|textmarker|aquarell|deckkraft|verlauf|sammlung|ausgewogen|zeilenabstand|datenerfassung|muster|paket|modell|integriert|verbindungen|trainingspaket|aktueller|strich|frei|breite|erfassen)\b|Vault-Wurzel|(?:ung|keit|heit|lich|isch|ieren|zeichen|schrift|farbe|ordner|notiz|seite|speicher|erkenn|einstell)/iu
 const EXACT_ONLY_REPLACEMENTS = new Set(['Frei', 'Breite', 'Pinsel', 'Farben', 'Strich', 'gespeichert', 'werden', 'Holt', 'Kopie', 'Textfeld',
   // Study tools: single words that also occur inside longer German phrases.
   'Frage', 'Ergebnis', 'Zweig', 'Merkmal', 'Gruppe', 'Gruppen', 'Nummer', 'Mischen', 'Boxen', 'Pfeile', 'Pfeil', 'Auftrag', 'Aufträge', 'Begriff', 'Stapel', 'Beispiel', 'Beispiel:', 'Zeit', 'Spalten', 'Vergleich', 'Minuten', 'Tabelle', 'Markierungen', 'Ursache', 'Wirkung', 'Fortschritt', 'Sortieren', 'Reihenfolge', 'Bildtafel', 'Beschriftung', 'Gruppenname', 'Schliessen', 'Bearbeiten', 'Entfernen', 'Hinzufügen', 'Übernehmen', 'Begriffsnetz', 'Quelle'])
+
+/** Composed chrome strings join catalog phrases with punctuation (Sync · Zuletzt, Name: Wert, Titel (2)). */
+const COMPOSED_SEPARATOR = /[·–—:;,()|/]|\s-\s|[.!?]\s/u
 
 const textSnapshots = new WeakMap<Text, { source: string; translated: string }>()
 const attributeSnapshots = new WeakMap<Element, Map<string, AttributeSnapshot>>()
@@ -61,6 +64,9 @@ function systemLanguage(): UiLanguage {
 export function resolveUiLanguage(value: UiLanguagePreference): UiLanguage {
   return value === 'system' ? systemLanguage() : value
 }
+
+/** Picks the German or English variant for text that embeds user data (names, paths) and so must bypass the DOM translator. */
+export const uiText = (german: string, english: string): string => (activeLanguage === 'en' ? english : german)
 
 export function getUiLanguage(): UiLanguage {
   return activeLanguage
@@ -88,8 +94,14 @@ function prepareReplacementIndex() {
   replacements = Object.entries(catalog)
     .filter(([source, translated]) => source !== translated && source.length >= 4 && !EXACT_ONLY_REPLACEMENTS.has(source))
     .sort(([left], [right]) => right.length - left.length)
-  replacementExpression = new RegExp(replacements.map(([source]) => source.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|'), 'gu')
+  // Whole-word matches only: a catalog key must never be replaced inside a longer word ("ein" in "einem").
+  replacementExpression = new RegExp(`(?<![\\p{L}\\p{N}])(?:${replacements.map(([source]) => source.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|')})(?![\\p{L}\\p{N}])`, 'gu')
   if (activeLanguage === 'en') translateTree(document)
+}
+
+/** Builds the fragment index right away (the app defers it until idle); used by the i18n checks. */
+export function warmUiTranslator() {
+  prepareReplacementIndex()
 }
 
 function scheduleReplacementIndex() {
@@ -140,7 +152,33 @@ function translateCore(source: string): string {
     scheduleReplacementIndex()
     return source
   }
-  return rememberDerived(source, source.replace(replacementExpression, (german) => catalog?.[german] ?? german))
+  // A bare name ("Fach A", "Ebene 3 mit Leerzeichen") has no separator: it is user data or a plain
+  // phrase that belongs in the catalog, never something to patch word by word.
+  if (!COMPOSED_SEPARATOR.test(source)) return rememberDerived(source, source)
+  return rememberDerived(source, replaceCatalogFragments(source, replacementExpression, catalog))
+}
+
+/**
+ * Fragment replacement is only safe for strings that are made of catalog
+ * phrases plus neutral glue (numbers, names, punctuation). When any text left
+ * between the matches still looks German the string is a real sentence that
+ * has no catalog entry: leave it German instead of producing half-translated
+ * nonsense ("mit onem Key"). Add the sentence to en.json to translate it.
+ */
+export function replaceCatalogFragments(source: string, expression: RegExp, translations: EnglishCatalog): string {
+  let result = ''
+  let cursor = 0
+  let matched = false
+  for (const match of source.matchAll(expression)) {
+    const between = source.slice(cursor, match.index)
+    if (GERMAN_HINT.test(between)) return source
+    result += between + (translations[match[0]] ?? match[0])
+    cursor = (match.index ?? 0) + match[0].length
+    matched = true
+  }
+  const tail = source.slice(cursor)
+  if (matched && GERMAN_HINT.test(tail)) return source
+  return matched ? result + tail : source
 }
 
 function translateComposedChrome(source: string): string | null {
@@ -234,6 +272,8 @@ function translateDerived(source: string, catalog: EnglishCatalog): string | nul
   if (composed) return composed
   const updateMessage = translateUpdateDiagnosis(source)
   if (updateMessage) return updateMessage
+  const ipcError = /^Error invoking remote method '([^']*)':\s*(?:Error:\s*)?([\s\S]+)$/u.exec(source)
+  if (ipcError) return `Error invoking remote method '${ipcError[1]}': Error: ${translateCore(ipcError[2].trim())}`
   if (/^1 Treffer$/u.test(source)) return '1 match'
   if (/^\d+ Treffer$/u.test(source)) return source.replace('Treffer', 'matches')
   const arrivedFiles = /^(\d+) neue(?:s|n)? (?:Datei|Dateien)(?: in (.+))?$/u.exec(source)

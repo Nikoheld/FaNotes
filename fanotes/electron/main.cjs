@@ -204,12 +204,17 @@ const refreshLinuxMonitorScale = async () => {
   linuxInputStartup.monitorScale = monitorScale
   if (!linuxInputStartup.hyprlandZeroScaling && monitorScale !== 1) {
     console.info(
-      `FaNotes: Der Hyprland-Monitor skaliert mit ${monitorScale}; das XWayland-Fenster wird hochskaliert und wirkt unscharf. `
-      + 'Scharf wird es mit `xwayland { force_zero_scaling = true }` in der hyprland.conf — FaNotes übernimmt dann die Monitor-Skalierung selbst.',
+      currentUiLanguage() === 'en'
+        ? `FaNotes: The Hyprland monitor scales by ${monitorScale}; the XWayland window is upscaled and looks blurry. `
+          + 'Set `xwayland { force_zero_scaling = true }` in hyprland.conf for a sharp window — FaNotes then applies the monitor scale itself.'
+        : `FaNotes: Der Hyprland-Monitor skaliert mit ${monitorScale}; das XWayland-Fenster wird hochskaliert und wirkt unscharf. `
+          + 'Scharf wird es mit `xwayland { force_zero_scaling = true }` in der hyprland.conf — FaNotes übernimmt dann die Monitor-Skalierung selbst.',
     )
   }
   if (stale) {
-    console.info(`FaNotes: Die Monitor-Skalierung hat sich auf ${monitorScale} geändert (Start mit ${linuxInputStartup.scaleFactor}); sie gilt ab dem nächsten Start.`)
+    console.info(currentUiLanguage() === 'en'
+      ? `FaNotes: The monitor scale changed to ${monitorScale} (started with ${linuxInputStartup.scaleFactor}); it applies from the next start.`
+      : `FaNotes: Die Monitor-Skalierung hat sich auf ${monitorScale} geändert (Start mit ${linuxInputStartup.scaleFactor}); sie gilt ab dem nächsten Start.`)
   }
 }
 const singletonCleanup = cleanupStaleSingletonLocks(app.getPath('userData'))
@@ -306,6 +311,7 @@ const IPC = Object.freeze({
   pickFolderLocation: 'fanotes:pick-folder-location',
   setFolderLocations: 'fanotes:set-folder-locations',
   renameEntry: 'fanotes:rename-entry',
+  duplicateFolder: 'fanotes:duplicate-folder',
   moveEntry: 'fanotes:move-entry',
   trashEntry: 'fanotes:trash-entry',
   search: 'fanotes:search',
@@ -4236,10 +4242,21 @@ function registerIpcHandlers() {
   handle(IPC.readFile, async (_event, relativePath) => {
     await ensureBootstrap()
     assertMarkdownPath(relativePath)
-    const { target } = await resolveVaultPath(relativePath, { expected: 'file' })
-    const buffer = await readRegularFileNoFollow(target, noteByteLimit(relativePath))
-    // The app works on LF; writeFile restores the file's own ending.
-    return toLf(stripFamdPayload(buffer.toString('utf8')))
+    try {
+      const { target } = await resolveVaultPath(relativePath, { expected: 'file' })
+      const buffer = await readRegularFileNoFollow(target, noteByteLimit(relativePath))
+      // The app works on LF; writeFile restores the file's own ending.
+      return toLf(stripFamdPayload(buffer.toString('utf8')))
+    } catch (error) {
+      // A PDF without handwriting has no .famd sidecar yet; that is normal and not an error.
+      // A missing .famd of a real handwriting note must still throw, so a save cannot recreate it as empty.
+      if (error?.code === 'ENOENT' && /\.famd$/iu.test(String(relativePath))) {
+        const pdfSibling = String(relativePath).replace(/\.famd$/iu, '.pdf')
+        const sibling = await resolveVaultPath(pdfSibling, { expected: 'file' }).then(() => true, () => false)
+        if (sibling) return ''
+      }
+      throw error
+    }
   })
 
   handle(IPC.writeFile, (_event, relativePath, content) => {
@@ -4288,6 +4305,11 @@ function registerIpcHandlers() {
           })
           if (existing && (!existing.isFile() || existing.isSymbolicLink())) {
             throw new Error('Die Notiz ist keine sichere reguläre Datei.')
+          }
+          // Saving replaces the file through a temporary file in its folder, which would silently
+          // bypass a read-only flag (chmod 444 / the Windows read-only attribute): refuse instead.
+          if (existing && (existing.mode & 0o222) === 0) {
+            throw Object.assign(new Error('EPERM: Die Datei ist schreibgeschützt.'), { code: 'EPERM' })
           }
           assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
           const markdownBody = stripFamdPayload(content)
@@ -4664,6 +4686,53 @@ function registerIpcHandlers() {
         console.warn('FaNotes: Seitentext konnte nicht nachgeführt werden:', error?.message ?? error)
       })
       return nextRelativePath
+    } finally {
+      mutationBarrier.release()
+    }
+  })
+
+  handle(IPC.duplicateFolder, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string' || !relativePath.trim()) throw new Error('Ungültiger Ordnerpfad.')
+    const requestedVaultGeneration = currentVaultGeneration
+    const initial = await resolveVaultPath(relativePath, { expected: 'directory' })
+    const mutationBarrier = beginFileMutationBarrier(initial.target, { recursive: true })
+    try {
+      await mutationBarrier.waitForPrecedingOperations()
+      const { root, target } = await resolveVaultPath(relativePath, { expected: 'directory' })
+      if (root !== initial.root || target !== initial.target) throw new Error('Der Vault wurde während des Duplizierens verändert.')
+      const copyWord = localizeText('Kopie', currentUiLanguage())
+      let base = path.basename(target)
+      for (const word of new Set([copyWord, 'Kopie', 'Copy'])) {
+        const stripped = base.replace(new RegExp(` ${word.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?: \\d+)?$`, 'u'), '').trim()
+        if (stripped) base = stripped
+      }
+      const destination = path.join(path.dirname(target), await availableName(path.dirname(target), `${base} ${copyWord}`))
+      if (!physicalAllowed(root, destination)) throw new Error('Das Ziel liegt außerhalb des Vaults.')
+      if (destination === target || destination.startsWith(`${target}${path.sep}`)) throw new Error('Der Ordner kann nicht in sich selbst kopiert werden.')
+      let files = 0
+      const copyTree = async (from, to) => {
+        await fsp.mkdir(to, { mode: 0o700 })
+        for (const item of await fsp.readdir(from, { withFileTypes: true })) {
+          // Symbolic links and half-written temp files are never copied.
+          if (item.isSymbolicLink() || /\.tmp$/iu.test(item.name)) continue
+          const source = path.join(from, item.name)
+          const copy = path.join(to, item.name)
+          if (item.isDirectory()) await copyTree(source, copy)
+          else if (item.isFile()) {
+            if (++files > 20000) throw new Error('Der Ordner ist zu groß zum Duplizieren.')
+            await fsp.copyFile(source, copy, fs.constants.COPYFILE_EXCL)
+          }
+        }
+      }
+      try {
+        await copyTree(target, destination)
+      } catch (error) {
+        await fsp.rm(destination, { recursive: true, force: true }).catch(() => {})
+        throw error
+      }
+      if (requestedVaultGeneration !== currentVaultGeneration) throw new Error('Der Vault wurde während des Duplizierens gewechselt.')
+      return { relativePath: logicalIdentity(root, destination) }
     } finally {
       mutationBarrier.release()
     }
@@ -5382,7 +5451,9 @@ function registerIpcHandlers() {
   })
 
   handle(IPC.readSubjectBooks, async () => {
-    await ensureBootstrap()
+    // The renderer asks before first-run onboarding is done; there are no books yet, so answer empty instead of throwing.
+    await ensureBootstrap({ allowOnboarding: true })
+    if (currentOnboardingRequired) return []
     const root = await assertCurrentVaultRoot()
     return readSubjectBooksFromVault(root)
   })

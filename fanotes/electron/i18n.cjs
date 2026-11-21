@@ -2,6 +2,7 @@
 
 let englishCatalog = null
 let replacements = null
+let fragmentExpression = null
 
 // Core file operations must remain available even when a package is damaged or
 // an old delta update omitted the full localization catalog. The complete
@@ -210,6 +211,30 @@ function catalog() {
   return englishCatalog
 }
 
+// Same rule as src/i18n.ts: whole-word fragment replacement, and only when the
+// text between the matches carries no German words (otherwise stay German).
+const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|deinen|deinem|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|dieser|dieses|diesen|diesem|einer|jede|jeden|jeder|auch|wurde|wurden|kann|dort|sondern|nach|über|unter|zuerst|neue|neuen|weder)\b|(?:ung|keit|heit|lich|isch|ieren)\b/iu
+
+function replaceCatalogFragments(source) {
+  if (!/[·–—:;,()|/]|\s-\s|[.!?]\s/u.test(source)) return source
+  if (!fragmentExpression) {
+    fragmentExpression = new RegExp(`(?<![\\p{L}\\p{N}])(?:${replacements.map(([german]) => german.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')).join('|')})(?![\\p{L}\\p{N}])`, 'gu')
+  }
+  let result = ''
+  let cursor = 0
+  let matched = false
+  for (const match of source.matchAll(fragmentExpression)) {
+    const between = source.slice(cursor, match.index)
+    if (GERMAN_HINT.test(between)) return source
+    result += between + (englishCatalog[match[0]] ?? match[0])
+    cursor = match.index + match[0].length
+    matched = true
+  }
+  const tail = source.slice(cursor)
+  if (matched && GERMAN_HINT.test(tail)) return source
+  return matched ? result + tail : source
+}
+
 function resolveLanguage(preference = 'system', systemLocale = '') {
   if (preference === 'de' || preference === 'en') return preference
   const locale = systemLocale || process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || ''
@@ -231,11 +256,7 @@ function localizeText(value, language) {
   if (translations[source] !== undefined) return `${leading}${translations[source]}${trailing}`
   const unit = applyEnglishUnits(source)
   if (unit !== null) return `${leading}${unit}${trailing}`
-  let result = source
-  for (const [german, english] of replacements) {
-    if (result.includes(german)) result = result.split(german).join(english)
-  }
-  return `${leading}${result}${trailing}`
+  return `${leading}${replaceCatalogFragments(source)}${trailing}`
 }
 
 function localizeDialogOptions(options, language) {

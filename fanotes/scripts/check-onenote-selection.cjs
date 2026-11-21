@@ -115,6 +115,20 @@ void (async () => {
       assert.ok(main.includes(channel) && fs.readFileSync(path.join(root, 'electron', 'preload.cjs'), 'utf8').includes(channel), channel)
     }
   } finally {
+    // The picker names pages like the files that are created (QA-030): same title in one section gets " 2".
+    const twins = await makeSession([
+      { title: 'Test Page', section: ['S'], pageId: '{T1}' },
+      { title: 'Test Page', section: ['S'], pageId: '{T2}' },
+    ])
+    try {
+      const names = describeSession(twins).sections[0].pages.map((entry) => entry.title)
+      assert.deepEqual(names, ['Test Page', 'Test Page 2'])
+      const twinVault = tempVault()
+      try {
+        await importOneNotePages({ session: twins, pageIds: twins.pages.map((entry) => entry.id), destination: { physical: twinVault, logical: '' }, vaultRoot: twinVault })
+        assert.deepEqual(walk(twinVault).filter((file) => file.endsWith('.md')).sort(), ['S/Test Page 2.md', 'S/Test Page.md'])
+      } finally { await fsp.rm(twinVault, { recursive: true, force: true }) }
+    } finally { await disposeSession(twins) }
     await disposeSession(session)
     await fsp.rm(vault, { recursive: true, force: true })
   }

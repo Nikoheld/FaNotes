@@ -733,6 +733,8 @@ export type FaNotesApi = {
   pickFolderLocation: () => Promise<string | null>
   setFolderLocations: (relativePath: string, paths: string[], moveContents?: boolean) => Promise<{ paths: string[]; moved: number; conflicts: string[] }>
   renameEntry: (relativePath: string, nextName: string) => Promise<string>
+  /** Copies a folder with everything in it (notes, sidecars, images) next to it as "<name> Kopie"; desktop only. */
+  duplicateFolder?: (relativePath: string) => Promise<{ relativePath: string }>
   moveEntry: (relativePath: string, destFolder?: string | null) => Promise<string>
   trashEntry: (relativePath: string) => Promise<void>
   search: (query: string) => Promise<SearchHit[]>

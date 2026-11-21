@@ -73,8 +73,9 @@ try {
 
   // QA-014: singular and plural in the table grid label.
   const toolbar = await server.ssrLoadModule('/src/components/FormattingToolbar.tsx')
-  assert.equal(toolbar.tableGridLabel(1, 1), 'Tabelle mit 1 Zeile und 1 Spalte einfügen')
-  assert.equal(toolbar.tableGridLabel(2, 3), 'Tabelle mit 2 Zeilen und 3 Spalten einfügen')
+  // The label follows the UI language (QA-017); Node reports an English system language.
+  assert.match(toolbar.tableGridLabel(1, 1), /^(?:Tabelle mit 1 Zeile und 1 Spalte einfügen|Insert table with 1 row and 1 column)$/u)
+  assert.match(toolbar.tableGridLabel(2, 3), /^(?:Tabelle mit 2 Zeilen und 3 Spalten einfügen|Insert table with 2 rows and 3 columns)$/u)
 } finally {
   await server.close()
 }

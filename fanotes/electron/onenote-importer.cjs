@@ -490,12 +490,20 @@ async function disposeSession(session) {
 /** What the picker shows: sections (with their folder path) and their pages. No file paths leave the main process. */
 function describeSession(session, index = { pages: {} }) {
   const sections = new Map()
+  // The picker shows the name the note will get: pages with the same title in one section are
+  // written as "Title", "Title 2", ... (see writeNoteFiles), so list them the same way.
+  const titleUses = new Map()
   for (const page of session.pages) {
     const key = page.sectionPath.join('\u0000')
     if (!sections.has(key)) sections.set(key, { path: page.sectionPath, name: page.sectionPath.join(' / ') || session.notebookName, pages: [] })
     sections.get(key).pages.push({
       id: page.id,
-      title: page.title,
+      title: (() => {
+        const useKey = `${key}\u0001${page.title.toLocaleLowerCase('en-US')}`
+        const uses = (titleUses.get(useKey) ?? 0) + 1
+        titleUses.set(useKey, uses)
+        return uses === 1 ? page.title : `${page.title} ${uses}`
+      })(),
       depth: Math.min(4, page.parents.length),
       hasInk: page.hasInk,
       imageCount: page.imageCount,

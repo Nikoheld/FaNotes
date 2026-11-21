@@ -118,10 +118,9 @@ export class DocIndexer {
   get isPaused() { return this.paused }
 
   progress(): IndexerProgress {
-    const counts = { indexed: 0, partial: 0, unsupported: 0, failed: 0, units: this.index.unitCount, ocrPages: 0, issues: 0 }
+    const counts = { indexed: 0, partial: 0, unsupported: 0, failed: 0, units: this.index.unitCount, ocrPages: this.index.ocrUnitCount, issues: 0 }
     for (const doc of this.index.listDocs()) {
       counts[doc.status] += 1
-      counts.ocrPages += doc.ocrPages
       counts.issues += doc.issues.length
     }
     return {

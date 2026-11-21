@@ -106,8 +106,8 @@ export function DocSearchStatus({ onIndexChanged }: { onIndexChanged: () => void
   } else if (working) line = L('Vault wird geprüft …', 'Checking vault …')
   else if (progress.state === 'error') line = progress.lastError ?? L('Der Suchindex konnte nicht aktualisiert werden.', 'The search index could not be updated.')
   else line = L(
-    `${searchable} Dokumente mit Inhalt durchsuchbar${counts.ocrPages ? ` · ${counts.ocrPages} Seiten per Texterkennung` : ''}`,
-    `${searchable} documents searchable by content${counts.ocrPages ? ` · ${counts.ocrPages} pages by text recognition` : ''}`,
+    `${searchable} ${searchable === 1 ? 'Dokument' : 'Dokumente'} mit Inhalt durchsuchbar${counts.ocrPages ? ` · ${counts.ocrPages} ${counts.ocrPages === 1 ? 'Seite' : 'Seiten'} per Texterkennung` : ''}`,
+    `${searchable} ${searchable === 1 ? 'document' : 'documents'} searchable by content${counts.ocrPages ? ` · ${counts.ocrPages} ${counts.ocrPages === 1 ? 'page' : 'pages'} by text recognition` : ''}`,
   )
   return (
     <div className={`doc-search-status ${working ? 'is-working' : ''}`}>

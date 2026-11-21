@@ -302,7 +302,7 @@ const createLocalMcpServer = ({
       case 'append_to_note':
       case 'add_task':
       case 'complete_task': {
-        if (!ctx.writeAccess) throw new McpError('Write access is off. The user can turn it on in FaNotes under Settings > KI-Zugriff (MCP).', 'forbidden')
+        if (!ctx.writeAccess) throw new McpError('Write access is off. The user can turn it on in FaNotes under Settings > MCP Server.', 'forbidden')
         if (name === 'create_note') return vault.createNote(args)
         if (name === 'append_to_note') return vault.appendToNote(args)
         if (name === 'add_task') return vault.addTask(args)
@@ -335,7 +335,7 @@ const createLocalMcpServer = ({
     }
     if (method === 'tools/call') {
       if (typeof params.name !== 'string') return rpcError(id, -32602, 'Missing tool name.')
-      if (!vault) return rpcResult(id, textResult('AI access is switched off in FaNotes. Turn it on under Settings > KI-Zugriff (MCP).', true))
+      if (!vault) return rpcResult(id, textResult('AI access is switched off in FaNotes. Turn it on under Settings > MCP Server.', true))
       const args = params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments) ? params.arguments : {}
       const known = [...TOOLS, ...WRITE_TOOLS].some((tool) => tool.name === params.name)
       if (!known) return rpcError(id, -32602, `Unknown tool: ${params.name.slice(0, 60)}`)
