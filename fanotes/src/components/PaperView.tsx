@@ -70,7 +70,7 @@ import {
   paperScrollerCanReach,
   paperViewFromMemory,
   paperViewMemoryKey,
-  recallPaperView,
+  recallPaperViewForWidth,
   registerPaperViewMemoryFlush,
   rememberPaperView,
   savePaperViewMemory,
@@ -219,7 +219,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     // The plane element survives a note switch. An in-flight pinch must not
     // commit its CSS zoom onto the note that just opened.
     cancelZoomGestureRef.current()
-    const remembered = recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(viewKey))
+    const remembered = recallPaperViewForWidth(loadPaperViewMemory(), paperViewMemoryKey(viewKey), noteViewRef.current?.clientWidth ?? 0)
     setRecalled(remembered !== null)
     storeRef.current.write(paperViewFromMemory(remembered))
   }, [viewKey])
@@ -228,7 +228,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
     const scroller = noteViewRef.current
     if (!scroller) return
     const memoryKey = paperViewMemoryKey(viewKey)
-    const remembered = memoryKey ? recallPaperView(loadPaperViewMemory(), memoryKey) : null
+    const remembered = memoryKey ? recallPaperViewForWidth(loadPaperViewMemory(), memoryKey, scroller.clientWidth) : null
     let lastProgrammatic: { scrollLeft: number; scrollTop: number } | null = null
     let userInteracted = false
     let saveTimer = 0
@@ -305,6 +305,7 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         ...centre,
         pageWidth: Math.round((pageRect.width / zoom) * 100) / 100,
         pageHeight: Math.round((pageRect.height / zoom) * 100) / 100,
+        viewWidth: Math.round(scroller.clientWidth),
         ...(anchor ? { anchor } : {}),
       }
       return latestEntry
@@ -364,6 +365,13 @@ export function PaperView({ children, className = '', viewKey, showHud = true, o
         camera.scrollTop = scrollTopForAnchorClientY(scroller, scrollerRect, anchorY)
       }
       scrollTo(camera)
+      // A sheet that fits the pane never rests scrolled sideways: the remembered
+      // spot may come from a pane of another width, and the scroll room around
+      // the sheet would leave its text cut off at the left edge.
+      if (!scroller.querySelector(PDF_PAGE_COLUMN_SELECTOR)) {
+        const fitted = centredScrollLeftForPage(scroller, scroller.getBoundingClientRect().left, page.getBoundingClientRect())
+        if (Math.abs(fitted - scroller.scrollLeft) >= 0.5) scrollTo({ scrollLeft: fitted, scrollTop: scroller.scrollTop })
+      }
       // A PDF column narrower than the window stays in the middle. The saved
       // horizontal spot is the wide plane, which would leave the sheet on one side.
       const pdfColumn = scroller.querySelector<HTMLElement>(PDF_PAGE_COLUMN_SELECTOR)
