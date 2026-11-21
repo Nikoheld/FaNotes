@@ -1,0 +1,49 @@
+name: Fullscreen, sidebar fold button, heading folds
+
+# Layout and logic checks for the toolbar fullscreen, the sidebar collapse-all button and the remembered heading folds.
+# Never builds or publishes a release.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/src/App.tsx'
+      - 'fanotes/src/styles.css'
+      - 'fanotes/src/components/FileTree.tsx'
+      - 'fanotes/src/components/MarkdownEditor.tsx'
+      - 'fanotes/src/lib/headingFolds.ts'
+      - 'fanotes/scripts/check-fullscreen-layout.mjs'
+      - 'fanotes/scripts/check-sidebar-fold-button.mjs'
+      - 'fanotes/scripts/check-heading-folds.mjs'
+      - '.github/workflows/fullscreen-folds.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fanotes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fanotes/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: .
+      - run: npm ci --no-audit --no-fund
+      - run: node scripts/stage-main-i18n.cjs
+      - run: npx tsc -p tsconfig.app.json --noEmit
+      - run: node scripts/check-heading-folds.mjs
+      - name: Fullscreen and sidebar button layout in Chromium
+        env:
+          FANOTES_CHROMIUM: /usr/bin/google-chrome
+          PLAYWRIGHT_CORE: ${{ runner.temp }}/pw/node_modules/playwright-core/index.mjs
+        run: |
+          npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" playwright-core@1.65.0
+          node scripts/check-fullscreen-layout.mjs
+          node scripts/check-sidebar-fold-button.mjs
