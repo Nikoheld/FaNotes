@@ -252,7 +252,7 @@ import { PaperView } from './components/PaperView'
 import { normalizePaperStyle } from './lib/paperStyles'
 import { clampPaperSquareMm, paperSheetPx, paperSquarePx } from './lib/paperSquare'
 import { clampViewZoom, createPaperViewStore, sharedPaperViewStore, writeSharedZoomMaxPercent, writeSharedZoomSpeed, type PaperViewStore } from './lib/paperView'
-import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView } from './lib/paperViewMemory'
+import { flushPaperViewMemory, loadPaperViewMemory, paperViewMemoryKey, recallPaperView, recallPaperViewForWidth } from './lib/paperViewMemory'
 import { diagnosticLog } from './lib/bugReport'
 import { configureDiagnostics, recordFeature, setDiagnosticsVault } from './lib/diagnosticsClient'
 import { SendDataNotice } from './components/SendDataNotice'
@@ -554,6 +554,9 @@ function collectTreePaths(entries: VaultEntry[], files = false, out: string[] = 
   }
   return out
 }
+/** Background indexing waits this long after the file tree first appears. */
+const DOC_SEARCH_START_DELAY_MS = 1_500
+
 const fileName = (path: string) => path.split('/').pop() ?? path
 const parentPath = (path: string) => path.split('/').slice(0, -1).join('/')
 const NOTE_INK_MARKER = /<!--\s*fanotes-ink:([a-zA-Z0-9_-]{1,96})\s*-->/u
@@ -957,6 +960,8 @@ export default function App({ startupBootstrap }: AppProps) {
   /** old → new path of renamed/moved entries, so late keystrokes never recreate the old file. */
   const movedPathsRef = useRef<Map<string, { to: string; at: number }>>(new Map())
   const workspaceRestoredRef = useRef(false)
+  // True once the remembered tabs and split are applied; a pagehide flush before that would overwrite them with the startup note alone.
+  const workspaceAppliedRef = useRef(false)
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const noteLinksRef = useRef<NoteLinkRecord[]>([])
   const noteTextFieldsRef = useRef<NoteTextField[]>([])
@@ -1121,15 +1126,22 @@ export default function App({ startupBootstrap }: AppProps) {
   // The open tabs, the split and the pins come back with the vault.
   useEffect(() => {
     if (!workspaceRestoredRef.current || !bootstrap) return
-    const timer = window.setTimeout(() => {
+    const write = () => {
       saveWorkspaceMemory(bootstrap.vaultPath, {
         tabs: tabs.map((tab) => tab.path),
         pinned: tabs.filter((tab) => tab.pinned).map((tab) => tab.path),
         active: activePath,
         split: splitPath,
       })
-    }, 250)
-    return () => window.clearTimeout(timer)
+    }
+    const timer = window.setTimeout(write, 250)
+    // A reload or quit inside the debounce window must not lose the last change.
+    const flush = () => { if (workspaceAppliedRef.current) write() }
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('pagehide', flush)
+    }
   }, [activePath, bootstrap, splitPath, tabs])
   useEffect(() => {
     diagnosticLog.record({
@@ -2087,11 +2099,12 @@ export default function App({ startupBootstrap }: AppProps) {
     if (workspaceRestoredRef.current) return
     workspaceRestoredRef.current = true
     const session = vaultSessionGenerationRef.current
+    workspaceAppliedRef.current = false
     const memory = loadWorkspaceMemory(vaultPath)
-    if (!memory) return
+    if (!memory) { workspaceAppliedRef.current = true; return }
     const existing = new Set(collectNotePaths(currentTree))
     const remembered = pruneWorkspaceMemory(memory, (path) => existing.has(path))
-    if (!remembered.tabs.length) return
+    if (!remembered.tabs.length) { workspaceAppliedRef.current = true; return }
     const missing = remembered.tabs.filter((path) => !tabsRef.current.some((tab) => tab.path === path))
     const loaded = await Promise.all(missing.map((path) => readNoteTab(path).catch(() => null)))
     if (session !== vaultSessionGenerationRef.current) return
@@ -2110,6 +2123,7 @@ export default function App({ startupBootstrap }: AppProps) {
       setTagIndex((current) => current[tab.path] ? current : { ...current, [tab.path]: parseNoteTags(tab.content) })
     }
     if (remembered.split && remembered.split !== activePathRef.current) setSplitPath(remembered.split)
+    workspaceAppliedRef.current = true
   }, [readNoteTab])
 
   useEffect(() => {
@@ -2143,12 +2157,15 @@ export default function App({ startupBootstrap }: AppProps) {
         })
         try {
           const sync = treeSyncRef.current!
+          // The workspace memory is written on every tab/split change; lastOpenNotePath
+          // goes through an async settings save and can lag behind a swap or a quick reload.
+          const preferredStartNote = () => loadWorkspaceMemory(data.vaultPath)?.active ?? launchedSettings.lastOpenNotePath
           const loadFreshTree = async () => {
             const freshTicket = sync.begin()
             let nextTree = await window.fanotes.getTree()
             if (!alive) return
             let nextNote = chooseRestoredNote(
-              launchedSettings.lastOpenNotePath,
+              preferredStartNote(),
               collectNotePaths(nextTree),
               firstNote(nextTree),
             )
@@ -2175,7 +2192,7 @@ export default function App({ startupBootstrap }: AppProps) {
           if (startupTree.length) {
             sync.accept(startupTicket, startupTree)
             const startupNote = chooseRestoredNote(
-              launchedSettings.lastOpenNotePath,
+              preferredStartNote(),
               collectNotePaths(startupTree),
               firstNote(startupTree),
             )
@@ -4611,18 +4628,29 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [bootstrap?.vaultPath, loadSecureSettings])
 
   // Document search: one local index per vault, filled in the background.
+  // It starts only after the file tree is on screen and the renderer is idle: opening the index
+  // (IndexedDB, a second tree scan, the OCR host) used to compete with the first paint on slow machines.
+  const startupTreeShown = tree.length > 0
   useEffect(() => {
     const vaultPath = bootstrap?.vaultPath
-    if (!vaultPath || bootstrap?.onboardingRequired) return
+    if (!vaultPath || bootstrap?.onboardingRequired || !startupTreeShown) return
     let cancelled = false
-    void import('./lib/docSearch/service').then(({ docSearch }) => {
-      if (!cancelled) void docSearch.start({ api: window.fanotes, platform: window.fanotes.platform, vaultPath, version: APP_VERSION }).catch(() => undefined)
-    })
+    let idleHandle: number | null = null
+    const timer = window.setTimeout(() => {
+      idleHandle = window.requestIdleCallback(() => {
+        idleHandle = null
+        void import('./lib/docSearch/service').then(({ docSearch }) => {
+          if (!cancelled) void docSearch.start({ api: window.fanotes, platform: window.fanotes.platform, vaultPath, version: APP_VERSION }).catch(() => undefined)
+        })
+      }, { timeout: 8_000 })
+    }, DOC_SEARCH_START_DELAY_MS)
     return () => {
       cancelled = true
+      window.clearTimeout(timer)
+      if (idleHandle !== null) window.cancelIdleCallback(idleHandle)
       void import('./lib/docSearch/service').then(({ docSearch }) => docSearch.stop())
     }
-  }, [bootstrap?.vaultPath, bootstrap?.onboardingRequired])
+  }, [bootstrap?.vaultPath, bootstrap?.onboardingRequired, startupTreeShown])
   useEffect(() => {
     if (!tree.length) return
     void import('./lib/docSearch/service').then(({ docSearch }) => docSearch.notifyChanged())
@@ -6107,8 +6135,7 @@ export default function App({ startupBootstrap }: AppProps) {
     let done = false
     const fit = () => {
       const scroller = scrollerOf()
-      if (done || interacted || !scroller) return
-      if (recallPaperView(loadPaperViewMemory(), paperViewMemoryKey(`split:${path}`))) return
+      if (done || interacted || !scroller || recallPaperViewForWidth(loadPaperViewMemory(), paperViewMemoryKey(`split:${path}`), scroller.clientWidth)) return
       const view = splitPaperViewStore.read()
       if (view.zoom !== 1) { done = true; return }
       const zoom = splitFitZoom(scroller.clientWidth)

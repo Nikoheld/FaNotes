@@ -187,6 +187,8 @@ const measure = async (page, name) => {
 }
 
 const results = []
+const launchedAt = Date.now()
+let startupReport = async (reason) => `${reason}\nelectron stdout/stderr (tail):\n${output.slice(-3000)}`
 let browser = null
 try {
   const deadline = Date.now() + 60_000
@@ -201,14 +203,35 @@ try {
     if (!page) await sleep(250)
   }
   assert.ok(page, 'no renderer page')
+  // Kept for the failure report: a startup stall on a slow runner is otherwise silent.
+  const rendererLog = []
+  const note = (line) => { rendererLog.push(`${((Date.now() - launchedAt) / 1000).toFixed(1)}s ${line}`); if (rendererLog.length > 200) rendererLog.shift() }
+  page.on('console', (message) => note(`console.${message.type()}: ${message.text().slice(0, 300)}`))
+  page.on('pageerror', (error) => note(`pageerror: ${String(error).slice(0, 300)}`))
+  page.on('requestfailed', (request) => note(`requestfailed: ${request.url().slice(0, 160)} ${request.failure()?.errorText ?? ''}`))
+  page.on('crash', () => note('renderer crashed'))
+  startupReport = async (reason) => {
+    const state = await page.evaluate(() => ({
+      url: location.href,
+      ready: document.readyState,
+      fanotes: typeof window.fanotes,
+      rows: document.querySelectorAll('.file-tree__row').length,
+      body: (document.body?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 300),
+    })).catch((error) => ({ evaluateFailed: String(error).slice(0, 200) }))
+    const processes = [...processInfo()].map(([pid, info]) => `${pid}:${info.type}:${info.ticks}`).join(' ')
+    return `${reason}\nrenderer state: ${JSON.stringify(state)}\nprocess cpu ticks: ${processes}\nrenderer console:\n${rendererLog.join('\n') || '(empty)'}\nelectron stdout/stderr (tail):\n${output.slice(-3000) || '(empty)'}`
+  }
   await page.addInitScript(probe)
   // Reload from inside the page: CDP-driven navigations sometimes hang on Electron's file:// pages.
   for (let attempt = 0; attempt < 4; attempt += 1) {
     page.evaluate(() => location.reload()).catch(() => {})
     if (await page.waitForFunction(() => typeof window.__idleSnapshot === 'function', null, { timeout: 20_000 }).then(() => true, () => false)) break
   }
-  await page.waitForFunction(() => Boolean(window.fanotes && document.querySelector('.file-tree__row')), null, { timeout: 60_000 })
-  await sleep(15_000) // let startup work finish
+  const startupWait = Number(process.env.FANOTES_IDLE_STARTUP_MS) || 60_000
+  await page.waitForFunction(() => Boolean(window.fanotes && document.querySelector('.file-tree__row')), null, { timeout: startupWait })
+    .catch(async (error) => { throw new Error(await startupReport(`startup did not finish within ${startupWait} ms: ${String(error).split('\n')[0]}`)) })
+  console.log(`startup: file tree visible ${((Date.now() - launchedAt) / 1000).toFixed(1)}s after launch`)
+  await sleep(Number(process.env.FANOTES_IDLE_SETTLE_MS) || 15_000) // let startup work finish
   const cdp = await page.context().newCDPSession(page)
 
   results.push(await measure(page, 'idle (start view)'))
