@@ -383,6 +383,9 @@ export function GlyphenWerkWorkspace({ activeView, appearance, onClose, onViewCh
       className="glyphenwerk-frame"
       src={`./glyphenwerk/index.html?embedded=1&lang=${getUiLanguage()}`}
       title="GlyphenWerk – Handschrift trainieren und testen"
+      // allow-same-origin stays (QA-034, verified): the page is served from file://, and without it the frame gets an
+      // opaque origin, Chromium refuses its module script (CORS) and the frame stays empty. frame-src/frame-ancestors
+      // limit the frame to the app's own bundled GlyphenWerk page, so the sandbox-escape warning is about our own code.
       sandbox="allow-scripts allow-same-origin allow-downloads allow-modals"
       allow="clipboard-write"
       onLoad={() => {

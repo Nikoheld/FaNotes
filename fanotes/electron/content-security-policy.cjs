@@ -50,13 +50,22 @@ function buildContentSecurityPolicy({ devServer = false, glyphenWerkFrame = fals
 /** The response headers with the policy and the isolation headers added (replacing a header of the same spelling). */
 function applySecurityHeaders(details, { devServer = false } = {}) {
   const glyphenWerkFrame = /\/glyphenwerk\//iu.test(details.url)
-  return {
+  const headers = {
     ...(details.responseHeaders ?? {}),
     'Content-Security-Policy': [buildContentSecurityPolicy({ devServer, glyphenWerkFrame })],
     'Cross-Origin-Opener-Policy': ['same-origin'],
-    'Cross-Origin-Embedder-Policy': ['require-corp'],
-    'Cross-Origin-Resource-Policy': ['same-origin'],
   }
+  // A file:// page has an opaque origin, so it is never cross-origin isolated, and COEP
+  // `require-corp` there makes Chromium refuse every Worker script (also module workers such
+  // as the spelling worker and pdf.js: "Der Rechtschreib-Worker ist abgestürzt", "Setting up
+  // fake worker"; verified on Electron 43). Served documents (dev server, custom scheme) keep
+  // the full isolation set. Real isolation for wasm threads would need the renderer to move
+  // to a custom scheme, which changes the origin and with it localStorage/IndexedDB.
+  if (!/^file:/iu.test(String(details.url ?? ''))) {
+    headers['Cross-Origin-Embedder-Policy'] = ['require-corp']
+    headers['Cross-Origin-Resource-Policy'] = ['same-origin']
+  }
+  return headers
 }
 
 /** Installs the headers on a session. `isDevServer` is asked per response because the dev URL is read from the environment. */

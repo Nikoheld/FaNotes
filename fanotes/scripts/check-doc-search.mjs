@@ -332,6 +332,25 @@ try {
     assert.deepEqual(run.index.getDoc('Bio/Scan.pdf').issues.map((issue) => `${issue.page}:${issue.status}`), ['2:empty', '3:failed'])
   })
 
+  await test('indexer: Retry re-reads a finished PDF whose page recognition failed (QA-010)', async () => {
+    const vault = makeVault()
+    vault.put('Bio/Scan.pdf', { pages: [{ scan: null }, { scan: 'Die Fotosynthese braucht Licht.' }] })
+    const run = new DocIndexer({ store: memoryStore(), list: vault.list, extractor: vault.extractor })
+    await run.schedule()
+    assert.equal(run.index.getDoc('Bio/Scan.pdf').status, 'indexed')
+    assert.deepEqual(run.index.getDoc('Bio/Scan.pdf').issues.map((issue) => `${issue.page}:${issue.status}`), ['1:failed'])
+    assert.equal(run.index.search('zellkern').length, 0)
+    const reads = vault.calls.extract.length
+    // The page now recognises fine; unchanged files are not read again, but Retry must.
+    vault.files.get('Bio/Scan.pdf').pages[0] = { scan: 'Der Zellkern steuert die Zelle.' }
+    await run.schedule()
+    assert.equal(vault.calls.extract.length, reads, 'no retry without the button')
+    await run.retryFailed()
+    assert.equal(vault.calls.extract.length, reads + 1, 'Retry read the document again')
+    assert.equal(run.index.search('zellkern')[0].page, 1)
+    assert.deepEqual(run.index.getDoc('Bio/Scan.pdf').issues, [])
+  })
+
   await test('indexer: unchanged documents are not read again; edits replace old text', async () => {
     const vault = makeVault()
     vault.put('a.md', { text: 'alter Inhalt Vulkan' })
