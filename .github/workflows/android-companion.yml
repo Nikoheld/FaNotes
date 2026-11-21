@@ -2,7 +2,14 @@ name: Android Companion
 
 on:
   pull_request:
+  # Runs on main only to write the Gradle cache that pull request runs read.
+  push:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: android-companion-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -21,18 +28,10 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
-      - name: Install poppler and qpdf (timetable PDF pipeline test)
-        # The runner's apt mirror sometimes fails DNS for minutes. The pipeline test skips without
-        # these tools, so a failed install must neither block nor fail the build.
-        timeout-minutes: 4
-        continue-on-error: true
-        run: |
-          sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/\?#http://archive.ubuntu.com/ubuntu/#g' /etc/apt/apt-mirrors.txt 2>/dev/null || true
-          for attempt in 1 2 3 4; do
-            if sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 poppler-utils qpdf; then exit 0; fi
-            echo "apt attempt $attempt failed; retrying in 30 s"; sleep 30
-          done
-          exit 1
+      # Caches Gradle's dependencies, wrapper and build cache between runs (the download was most of the job).
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - name: Install Android SDK
         run: |
           set -euo pipefail
@@ -49,23 +48,6 @@ jobs:
           yes | "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" --licenses >/dev/null
           set -o pipefail
           "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
-      - name: Schulnetz unit tests
-        run: |
-          node --test fanotes-site/schulnetz-logic.test.mjs fanotes-site/sync-guard.test.mjs fanotes-site/sync-compact.test.mjs fanotes-site/sync-fuzz.test.mjs fanotes-site/sync-integrity.test.mjs fanotes-site/sync-log.test.mjs fanotes-site/sync-openapi.test.mjs fanotes-site/sync-quota.test.mjs fanotes-site/sync-restore.test.mjs fanotes-site/user-shares.test.mjs fanotes-site/live-relay.test.mjs fanotes-site/migrate-accounts.test.mjs fanotes-site/schulnetz-i18n.test.mjs fanotes-site/kanti-web-api.test.mjs fanotes-site/absence-points.test.mjs fanotes-site/poll-schedule.test.mjs fanotes-site/grade-sla.test.mjs fanotes-site/mensa.test.mjs fanotes-site/class-timetables.test.mjs fanotes-site/lesson-marks.test.mjs fanotes-site/commute.test.mjs fanotes-site/commute-pins.test.mjs fanotes-site/commute-detail.test.mjs fanotes-site/site-seo.test.mjs fanotes-site/systemd-notify.test.mjs fanotes-site/release-cache.test.mjs fanotes-site/sync-backup.test.mjs fanotes-site/own-exams.test.mjs fanotes-site/commute-vias.test.mjs fanotes-site/commute-cache.test.mjs fanotes-site/fcm.test.mjs fanotes-site/fixture-parse.test.mjs fanotes-site/public-http.test.mjs fanotes-site/backup-status.test.mjs fanotes-site/diagnostics.test.mjs fanotes-site/work-requests.test.mjs scripts/request-worker/test/*.test.mjs
-          node fanotes/scripts/android-version-code.mjs --self-test
-      - name: Kanti+ web app (schulnetz.fasrv.ch)
-        working-directory: fanotes-site/kanti-web
-        run: |
-          npm ci --no-audit --no-fund
-          npm test
-          npm run build
-      - name: Kanti+ web app end-to-end (Playwright, local full stack)
-        working-directory: fanotes-site/kanti-web
-        run: |
-          # --with-deps goes through apt, whose mirror sometimes fails DNS on the runner; the
-          # ubuntu image already has Chromium's libraries, so fall back to the browser alone.
-          timeout 300 npx playwright install --with-deps chromium || npx playwright install chromium
-          npm run e2e
       - name: Firebase config when the secret exists
         working-directory: android
         env:
@@ -85,3 +67,43 @@ jobs:
           name: Kanti-Plus-debug
           if-no-files-found: error
           path: android/Kanti-Plus-debug.apk
+
+  site:
+    # Server, Kanti+ web app and its end-to-end tests: independent of Gradle, so they run in parallel.
+    name: Site and Kanti+ web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install poppler and qpdf (timetable PDF pipeline test)
+        # The runner's apt mirror sometimes fails DNS for minutes. The pipeline test skips without
+        # these tools, so a failed install must neither block nor fail the build.
+        timeout-minutes: 4
+        continue-on-error: true
+        run: |
+          sudo sed -i 's#http://azure.archive.ubuntu.com/ubuntu/\?#http://archive.ubuntu.com/ubuntu/#g' /etc/apt/apt-mirrors.txt 2>/dev/null || true
+          for attempt in 1 2 3 4; do
+            if sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 poppler-utils qpdf; then exit 0; fi
+            echo "apt attempt $attempt failed; retrying in 30 s"; sleep 30
+          done
+          exit 1
+      - name: Schulnetz unit tests
+        run: |
+          node --test fanotes-site/schulnetz-logic.test.mjs fanotes-site/sync-guard.test.mjs fanotes-site/sync-compact.test.mjs fanotes-site/sync-fuzz.test.mjs fanotes-site/sync-integrity.test.mjs fanotes-site/sync-log.test.mjs fanotes-site/sync-openapi.test.mjs fanotes-site/sync-quota.test.mjs fanotes-site/sync-restore.test.mjs fanotes-site/user-shares.test.mjs fanotes-site/live-relay.test.mjs fanotes-site/migrate-accounts.test.mjs fanotes-site/schulnetz-i18n.test.mjs fanotes-site/kanti-web-api.test.mjs fanotes-site/absence-points.test.mjs fanotes-site/poll-schedule.test.mjs fanotes-site/grade-sla.test.mjs fanotes-site/mensa.test.mjs fanotes-site/class-timetables.test.mjs fanotes-site/lesson-marks.test.mjs fanotes-site/commute.test.mjs fanotes-site/commute-pins.test.mjs fanotes-site/commute-detail.test.mjs fanotes-site/site-seo.test.mjs fanotes-site/systemd-notify.test.mjs fanotes-site/release-cache.test.mjs fanotes-site/sync-backup.test.mjs fanotes-site/own-exams.test.mjs fanotes-site/commute-vias.test.mjs fanotes-site/commute-cache.test.mjs fanotes-site/fcm.test.mjs fanotes-site/fixture-parse.test.mjs fanotes-site/public-http.test.mjs fanotes-site/backup-status.test.mjs fanotes-site/diagnostics.test.mjs fanotes-site/work-requests.test.mjs scripts/request-worker/test/*.test.mjs
+          node fanotes/scripts/android-version-code.mjs --self-test
+      - name: Kanti+ web app (schulnetz.fasrv.ch)
+        working-directory: fanotes-site/kanti-web
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+          npm run build
+      - name: Kanti+ web app end-to-end (Playwright, local full stack)
+        working-directory: fanotes-site/kanti-web
+        run: |
+          # --with-deps goes through apt, whose mirror sometimes fails DNS on the runner; the
+          # ubuntu image already has Chromium's libraries, so fall back to the browser alone.
+          timeout 300 npx playwright install --with-deps chromium || npx playwright install chromium
+          npm run e2e
