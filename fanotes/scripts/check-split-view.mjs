@@ -89,6 +89,16 @@ try {
       await makeNote('ALPHAWORD')
       await makeNote('BETAWORD')
       const texts = () => page.evaluate(() => [...document.querySelectorAll('.cm-content')].map((node) => node.textContent ?? ''))
+      // Editors mount lazily; on a slow runner a fixed pause is not enough. Poll until the predicate holds and report what was last seen.
+      const textsSatisfy = async (predicate, message) => {
+        let last = []
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          last = await texts()
+          if (last.length >= 2 && predicate(last)) return last
+          await settle(250)
+        }
+        assert.fail(`${message} (panes: ${JSON.stringify(last.map((text) => text.slice(0, 80)))})`)
+      }
       const state = () => page.evaluate(() => {
         const container = document.querySelector('.editor-split')
         const divider = document.querySelector('.split-divider')
@@ -114,8 +124,7 @@ try {
       await settle(800)
       let current = await state()
       assert.equal(current.split, true)
-      let both = await texts()
-      assert.ok(both[0].includes('BETAWORD') && both[1].includes('ALPHAWORD'), `main shows the active note, the pane the previous one: ${both.join(' | ')}`)
+      let both = await textsSatisfy((panes) => panes[0].includes('BETAWORD') && panes[1].includes('ALPHAWORD'), 'main shows the active note, the pane the previous one')
       assert.ok(Math.abs(current.mainW - current.paneW) <= 2, `starts at 50/50 (${current.mainW}/${current.paneW})`)
       assert.equal(current.focus, 'main')
 
@@ -220,8 +229,7 @@ try {
       assert.equal(current.split, true, 'the split survives a reload')
       assert.equal(current.rows, true, 'the orientation survives a reload')
       assert.equal(current.ratio, 55, 'the ratio survives a reload')
-      both = await texts()
-      assert.ok(both[0].includes('ALPHAWORD') && both[1].includes('BETAWORD'), 'both notes survive a reload')
+      both = await textsSatisfy((panes) => panes[0].includes('ALPHAWORD') && panes[1].includes('BETAWORD'), 'both notes survive a reload')
 
       // Close: the editor goes back to one pane and focus resets.
       await page.locator('.split-pane-head button[aria-label="Teilung schließen"]').click()
@@ -253,10 +261,7 @@ try {
       assert.match(overlay, /is-right/, 'dragging over the right edge shows the drop preview')
       await page.waitForSelector('.editor-split.is-split .split-pane .cm-content', { timeout: 10_000 })
       await settle(800)
-      both = await texts()
-      assert.notEqual(both[0], both[1])
-      assert.equal(both[0], before[0], 'the main note stays on the left')
-      assert.ok(both[1].includes(otherWord), 'the dropped note opens on the right')
+      both = await textsSatisfy((panes) => panes[0] === before[0] && panes[1].includes(otherWord), 'the main note stays on the left and the dropped note opens on the right')
       assert.equal((await state()).rows, false)
       await page.locator('.split-pane-head button[aria-label="Teilung schließen"]').click()
       await settle(400)
@@ -264,8 +269,7 @@ try {
       assert.match(overlayTop, /is-top/)
       await page.waitForSelector('.editor-split.is-split .split-pane .cm-content', { timeout: 10_000 })
       await settle(800)
-      both = await texts()
-      assert.ok(both[0].includes(otherWord) && both[1] === before[0], 'a top drop puts the note first and the former main note below')
+      both = await textsSatisfy((panes) => panes[0].includes(otherWord) && panes[1] === before[0], 'a top drop puts the note first and the former main note below')
       assert.equal((await state()).rows, true)
       // A drop in the middle opens nothing.
       await page.locator('.split-pane-head button[aria-label="Teilung schließen"]').click()
