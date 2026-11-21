@@ -229,6 +229,8 @@ try {
   await ben.shares.respond(shareId, true)
   await until(() => ben.host.text('Mit mir geteilt/Anna_F/Mathe/Mathe.md') === 'Geheimer Satz im Heft.', 'accepted share appears as a file')
   assert.equal(ben.host.text('Mit mir geteilt/Anna_F/Mathe/Mathe.famd'), '{"ink":"striche"}')
+  // QA-010: the sidebar entry of a shared note opens this file.
+  assert.equal(ben.shares.firstNotePath(shareId), 'Mit mir geteilt/Anna_F/Mathe/Mathe.md')
   assert.ok(ben.events.applied.some((change) => change.written.includes('Mit mir geteilt/Anna_F/Mathe/Mathe.md')))
   await until(() => anna.shares.getState().shares[0]?.status === 'accepted', 'the owner sees the acceptance at once')
 
@@ -256,6 +258,19 @@ try {
   ben.engine.notifyLocalChange()
   await until(() => anna.host.text('Schule/Mathe.md') === 'Ben bearbeitet jetzt mit.', 'recipient edit reaches the owner')
 
+  // QA-013: an edit made while the network is down must upload after reconnect ("Jetzt synchronisieren"), not stay stuck
+  // behind the error the failed attempt left on the share.
+  const onlineFetch = globalThis.fetch
+  globalThis.fetch = () => Promise.reject(new TypeError('network down'))
+  ben.host.put('Mit mir geteilt/Anna_F/Mathe/Mathe.md', 'Offline bearbeitet.')
+  ben.engine.notifyLocalChange()
+  await until(() => ben.shares.getState().shares[0]?.problem, 'the failed offline attempt is shown on the share')
+  assert.equal(anna.host.text('Schule/Mathe.md'), 'Ben bearbeitet jetzt mit.')
+  globalThis.fetch = onlineFetch
+  await ben.engine.syncNow('manual')
+  await until(() => anna.host.text('Schule/Mathe.md') === 'Offline bearbeitet.', 'offline edit reaches the owner after reconnect')
+  await until(() => !ben.shares.getState().shares[0]?.problem, 'the error clears once the upload worked')
+
   // The received folder never goes into Ben's own cloud vault.
   ben.settings.vaultSync = true
   ben.engine.vaultSyncChanged()
@@ -268,14 +283,14 @@ try {
   assert.equal(ben.shares.getState().shares.length, 0)
   assert.equal(ben.events.gone.length, 1)
   assert.equal(ben.events.gone[0].why, 'revoked')
-  assert.equal(anna.host.text('Schule/Mathe.md'), 'Ben bearbeitet jetzt mit.', 'the owner keeps their own note')
+  assert.equal(anna.host.text('Schule/Mathe.md'), 'Offline bearbeitet.', 'the owner keeps their own note')
 
   // People Ben accepted before are trusted: their next share needs no prompt. Anna sees it arrive as accepted at once.
   anna.host.put('Schule/Extra.md', 'zweiter Ordner')
   const trustedId = await anna.shares.share({ path: 'Schule', kind: 'folder', username: 'Ben.K', permission: 'read' })
   await until(() => ben.host.text('Mit mir geteilt/Anna_F/Schule/Extra.md') === 'zweiter Ordner', 'a trusted sender needs no approval')
   assert.equal(ben.shares.getState().pending.length, 0)
-  assert.equal(ben.host.text('Mit mir geteilt/Anna_F/Schule/Mathe.md'), 'Ben bearbeitet jetzt mit.')
+  assert.equal(ben.host.text('Mit mir geteilt/Anna_F/Schule/Mathe.md'), 'Offline bearbeitet.')
   await anna.shares.remove(trustedId)
   await until(() => ben.host.text('Mit mir geteilt/Anna_F/Schule/Extra.md') === null, 'second revoke is instant too')
 

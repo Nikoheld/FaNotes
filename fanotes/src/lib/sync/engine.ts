@@ -295,6 +295,14 @@ export class SyncEngine {
     return () => { this.localChangeListeners.delete(listener) }
   }
 
+  private readonly syncRequestListeners = new Set<() => void>()
+
+  /** Other components (shares) learn when the user asks for a sync or the network came back. */
+  onSyncRequest(listener: () => void) {
+    this.syncRequestListeners.add(listener)
+    return () => { this.syncRequestListeners.delete(listener) }
+  }
+
   constructor(api?: SyncApi) {
     this.api = api ?? new SyncApi()
     this.snapshot = { status: 'unavailable', account: null, vaultId: null, lastSyncAt: null, error: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, failed: [], log: [], info: null, vaultSync: true }
@@ -837,6 +845,7 @@ export class SyncEngine {
   /** Runs one full cycle; concurrent calls coalesce into at most one follow-up cycle. The promise settles when the engine is idle again. */
   syncNow(reason = 'manual'): Promise<void> {
     if (!this.session || !this.host) return Promise.resolve()
+    if (reason === 'manual' || reason === 'online') for (const listener of [...this.syncRequestListeners]) { try { listener() } catch (error) { console.error('[sync] sync-request listener failed', error) } }
     if (reason !== 'resume') {
       const wait = this.pauseRemaining()
       if (wait > 0) {

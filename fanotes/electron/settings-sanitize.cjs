@@ -35,6 +35,9 @@ const SETTINGS_SCHEMA = Object.freeze({
   addonSource: { type: 'string', max: 400 },
   addonsAutoUpdate: { type: 'boolean' },
   syncAutomatic: { type: 'boolean' },
+  // Cloud sync of the vault. An ABSENT key means ON (profiles that predate the
+  // switch were already syncing); a new account writes an explicit false.
+  syncVaultEnabled: { type: 'boolean' },
   syncDeviceName: { type: 'string', max: 80 },
   syncExcludedFolders: { type: 'string', max: 4000 },
   mcpEnabled: { type: 'boolean' },
@@ -44,12 +47,16 @@ const SETTINGS_SCHEMA = Object.freeze({
   syncHandwritingModel: { type: 'boolean' },
   syncNoteHistory: { type: 'boolean' },
   syncAttachments: { type: 'boolean' },
+  shareMode: { type: 'enum', values: ['copy', 'live', 'edit'] },
+  // JSON of the last share directory (src/lib/sync/share.ts serializeShareDirectory).
+  shareRecent: { type: 'string', max: 200000 },
   profileOwnerId: { type: 'string', max: 32 },
   profileUsername: { type: 'string', max: 24 },
   profilePublic: { type: 'boolean' },
   marginTranscript: { type: 'boolean' },
   showWordCount: { type: 'boolean' },
   hideMarkdownKeyButtons: { type: 'boolean' },
+  toolbarPosition: { type: 'enum', values: ['top', 'side'] },
   showOutline: { type: 'boolean' },
   defaultFolder: { type: 'relative', max: 480 },
   dailyNotesFolder: { type: 'relative', max: 480 },

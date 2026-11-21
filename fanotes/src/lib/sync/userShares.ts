@@ -110,6 +110,8 @@ export class UserShareManager {
   private opened = new Map<string, Opened>()
   private unsubscribe: (() => void) | null = null
   private unsubscribeLocal: (() => void) | null = null
+  private unsubscribeRetry: (() => void) | null = null
+  private removeOnline: (() => void) | null = null
   private abort: AbortController | null = null
   private reconnect = RECONNECT_MIN_MS
   private reconnectTimer: number | null = null
@@ -171,6 +173,11 @@ export class UserShareManager {
     }
     this.unsubscribe = this.engine.subscribe(follow)
     this.unsubscribeLocal = this.engine.onLocalChange(() => this.notifyLocalChange())
+    // Back online, or "Jetzt synchronisieren": look at every share again and push what was edited while the network was away.
+    const retry = () => { if (this.session) void this.refresh() }
+    this.unsubscribeRetry = this.engine.onSyncRequest(retry)
+    window.addEventListener('online', retry)
+    this.removeOnline = () => window.removeEventListener('online', retry)
     follow()
   }
 
@@ -178,6 +185,10 @@ export class UserShareManager {
     this.disposed = true
     this.unsubscribe?.()
     this.unsubscribeLocal?.()
+    this.unsubscribeRetry?.()
+    this.removeOnline?.()
+    this.unsubscribeRetry = null
+    this.removeOnline = null
     this.unsubscribe = null
     this.unsubscribeLocal = null
     void this.end()
@@ -326,7 +337,7 @@ export class UserShareManager {
       this.safetyTimer = null
       if (!this.session) return
       // With the channel open nothing needs polling. Without it, this keeps shares from going stale.
-      if (!this.snapshot.live) void this.refresh()
+      if (!this.snapshot.live || this.snapshot.shares.some((share) => share.problem)) void this.refresh()
       this.armSafetyTimer()
     }, SAFETY_REFRESH_MS)
   }
@@ -337,7 +348,7 @@ export class UserShareManager {
     this.localTimer = window.setTimeout(() => {
       this.localTimer = null
       for (const entry of this.opened.values()) {
-        if (this.canPush(entry.view)) void this.syncShare(entry.view.id)
+        if (this.canPush(entry)) void this.syncShare(entry.view.id)
       }
     }, LOCAL_DEBOUNCE_MS)
   }
@@ -438,7 +449,8 @@ export class UserShareManager {
 
       for (const entry of next.values()) {
         const view = entry.view
-        if (view.problem) continue
+        // A transient sync error leaves `problem` set but must not stop the next attempt (QA-013); only an unopenable share is skipped.
+        if (!this.openable(entry)) continue
         if (view.role === 'owner' && (view.status === 'accepted' || view.status === 'pending')) void this.syncShare(view.id)
         if (view.role === 'recipient' && view.status === 'accepted') void this.syncShare(view.id)
       }
@@ -473,8 +485,17 @@ export class UserShareManager {
 
   // ── Per-share sync ──────────────────────────────────────────────────────
 
-  private canPush(view: UserShareView) {
-    if (view.problem) return false
+  /**
+   * False when the share key or title could not be opened. `view.problem` is NOT the test: a failed network call also sets
+   * it (shown in the sidebar), and treating that as permanent made an edit made offline never upload after reconnect.
+   */
+  private openable(entry: Opened) {
+    return entry.title !== null
+  }
+
+  private canPush(entry: Opened) {
+    const view = entry.view
+    if (!this.openable(entry)) return false
     if (view.role === 'owner') return view.status === 'accepted' || view.status === 'pending'
     return view.status === 'accepted' && view.permission === 'edit'
   }
@@ -518,7 +539,7 @@ export class UserShareManager {
   private async runShare(id: string) {
     const session = this.session
     const entry = this.opened.get(id)
-    if (!session || !entry || !this.host || entry.view.problem) return
+    if (!session || !entry || !this.host || !this.openable(entry)) return
     if (entry.view.role === 'recipient' && entry.view.status !== 'accepted') return
     const root = this.rootFor(entry)
     if (!root) return
@@ -528,7 +549,7 @@ export class UserShareManager {
       const removed: string[] = []
       await this.pull(session, entry, root.dir, written, removed)
       if (generation !== this.generation) return
-      if (this.canPush(entry.view)) {
+      if (this.canPush(entry)) {
         const conflicted = await this.push(session, entry, root.dir)
         if (conflicted) await this.pull(session, entry, root.dir, written, removed)
       }
@@ -730,7 +751,7 @@ export class UserShareManager {
     if (!this.session || !this.identity || !/\.(md|markdown|famd)$/iu.test(path)) return null
     for (const entry of this.opened.values()) {
       const view = entry.view
-      if (view.problem || view.status !== 'accepted') continue
+      if (!this.openable(entry) || view.status !== 'accepted') continue
       const rel = this.noteRootFor(entry, path)
       if (!rel) continue
       const canWrite = view.role === 'owner' || view.permission === 'edit'
@@ -971,6 +992,14 @@ export class UserShareManager {
   async unblock(username: string) {
     await this.api.unblockUser(this.requireSession(), username)
     await this.refresh()
+  }
+
+  /** First note file of an accepted share that was already downloaded, for opening a shared note from the sidebar. */
+  firstNotePath(id: string): string | null {
+    const local = this.persisted?.shares[id]
+    if (!local?.localRoot) return null
+    const rels = Object.values(local.files).map((base) => base.rel).filter((rel) => /\.(md|markdown|famd)$/iu.test(rel)).sort((a, b) => Number(/\.famd$/iu.test(a)) - Number(/\.famd$/iu.test(b)) || a.localeCompare(b))
+    return rels.length ? this.pathFor(local.localRoot, rels[0]) : null
   }
 
   /** The shares of one vault path, for the share dialog. */
