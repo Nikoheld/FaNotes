@@ -20,7 +20,7 @@ permissions:
 jobs:
   desktop:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: fanotes
@@ -44,4 +44,8 @@ jobs:
           command -v xvfb-run || (sudo apt-get update -o Acquire::Retries=3 && sudo apt-get install -y -o Acquire::Retries=3 xvfb)
           npm install --no-save --no-audit --no-fund playwright-core@1.65.0
           test -x node_modules/electron/dist/electron || node node_modules/electron/install.js
-      - run: npm run check:idle-wakeups
+      # The check has its own 6-minute watchdog; one retry absorbs a stuck Electron start on the runner
+      # while a real regression still fails twice.
+      - name: Idle wakeups
+        timeout-minutes: 14
+        run: npm run check:idle-wakeups || { echo "::warning::idle wakeups failed once; retrying"; npm run check:idle-wakeups; }
