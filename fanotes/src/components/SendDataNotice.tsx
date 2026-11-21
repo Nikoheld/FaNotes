@@ -8,9 +8,9 @@ export function SendDataNotice({ onDismiss, onTurnOff, onOpenSettings }: { onDis
       <strong><ShieldCheck size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />FaNotes sendet jetzt anonyme Diagnosedaten, um die App zu verbessern</strong>
       <span>Nie Notizinhalte, Dateinamen oder Pfade. Du kannst es jederzeit in den Einstellungen ändern.</span>
       <div className="send-data-notice-actions">
-        <button type="button" className="primary" onClick={onTurnOff}>Ausschalten</button>
-        <button type="button" onClick={onOpenSettings}>Einstellungen</button>
-        <button type="button" onClick={onDismiss}>OK</button>
+        <button type="button" className="primary-button" onClick={onTurnOff}>Ausschalten</button>
+        <button type="button" className="secondary-button" onClick={onOpenSettings}>Einstellungen</button>
+        <button type="button" className="secondary-button" onClick={onDismiss}>OK</button>
       </div>
     </div>
   )
