@@ -66,7 +66,7 @@ import {
   X,
 } from 'lucide-react'
 import { notifyStoryWritten, storySyncBusy } from './writing/liveSync'
-import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, startTransition, useRef, useState, useSyncExternalStore, type ComponentProps } from 'react'
 import type { PaletteAction } from './components/CommandPalette'
 import type { DrawingBoardHandle, DrawingSavePayload, InkActivity } from './components/DrawingBoard'
 import { ConfirmDialog } from './components/ConfirmDialog'
@@ -301,6 +301,7 @@ import { createPdfMarkEraseHost, unmarkPdfNote } from './lib/pdfMarkEraseHost'
 import { getHandwritingSamples, getMathLayoutExamples, getImportedLabels, putHandwritingSamples, putMathLayoutExamples, putHandwritingLabels } from './lib/handwritingDb'
 import { SafeBoundary } from './components/SafeBoundary'
 import { createTreeSync, type TreeSync } from './lib/treeSync.mjs'
+import { useSettledValue, LARGE_NOTE_CHARS, LARGE_NOTE_SETTLE_MS } from './lib/useSettledValue'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
 import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText, uiText } from './i18n'
@@ -650,7 +651,7 @@ const readNoteInk = async (path: string, content: string): Promise<DrawingLibrar
   }
 }
 
-const noteWorksheetIds = (content: string) => [...content.matchAll(NOTE_WORKSHEET_MARKER)].map((match) => match[1])
+const noteWorksheetIds = (content: string) => content.includes('fanotes-worksheet') ? [...content.matchAll(NOTE_WORKSHEET_MARKER)].map((match) => match[1]) : []
 
 const attachWorksheet = (content: string, id: string) => {
   if (noteWorksheetIds(content).includes(id)) return content
@@ -1366,7 +1367,10 @@ export default function App({ startupBootstrap }: AppProps) {
   const counts = useMemo(() => countEntries(tree), [tree])
   const visibleTree = useMemo(() => filterTreeByTag(tree, tagFilter, new Map(Object.entries(tagIndex))), [tagFilter, tagIndex, tree])
   const knownTags = useMemo(() => collectVaultTags(Object.values(tagIndex).map((tags) => ({ content: tags.map((tag) => `#${tag}`).join(' ') }))), [tagIndex])
-  const activeTags = activeTab ? parseNoteTags(activeTab.content) : []
+  // Whole-text tag parsing waits for a typing pause in huge notes (QA-006).
+  const activeTagSource = useSettledValue(activeTab?.content ?? '', activeTab?.content.length ?? 0, activeTab?.path ?? '')
+  const inspectorNotes = useMemo(() => tabs.map((tab) => ({ path: tab.path, content: tab.content })), [tabs])
+  const activeTags = useMemo(() => parseNoteTags(activeTagSource), [activeTagSource])
   const splitTab = splitPath ? tabs.find((tab) => tab.path === splitPath) ?? null : null
   // The outline and backlinks follow the pane that has focus.
   const inspectorTab = focusedPane === 'split' && splitTab ? splitTab : activeTab
@@ -1546,7 +1550,7 @@ export default function App({ startupBootstrap }: AppProps) {
     return () => { alive = false }
   }, [bootstrap?.vaultPath, bootstrap?.onboardingRequired])
 
-  const activeWorksheetMarkerKey = activeTab ? noteWorksheetIds(activeTab.content).join('\0') : ''
+  const activeWorksheetMarkerKey = activeTab ? noteWorksheetIds(activeTagSource).join('\0') : ''
   useEffect(() => {
     const requestId = ++worksheetLoadRequestRef.current
     const path = activeTab?.path
@@ -2662,6 +2666,21 @@ export default function App({ startupBootstrap }: AppProps) {
    * its own path, so a change flushed while the panes switch is booked under
    * the note it belongs to and never under whichever note is active by then.
    */
+  // Tag index per note: immediate for normal notes, after a typing pause for huge ones (QA-006).
+  const tagIndexTimers = useRef(new Map<string, number>())
+  const scheduleTagIndex = useCallback((path: string, content: string) => {
+    const pending = tagIndexTimers.current.get(path)
+    if (pending !== undefined) { window.clearTimeout(pending); tagIndexTimers.current.delete(path) }
+    if (content.length < LARGE_NOTE_CHARS) {
+      setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
+      return
+    }
+    tagIndexTimers.current.set(path, window.setTimeout(() => {
+      tagIndexTimers.current.delete(path)
+      const tags = parseNoteTags(content)
+      startTransition(() => setTagIndex((current) => ({ ...current, [path]: tags })))
+    }, LARGE_NOTE_SETTLE_MS * 2))
+  }, [])
   const updateContentFor = useCallback((rawPath: string, content: string) => {
     if (!rawPath) return
     // An editor that flushes after its note was renamed or moved books the text under the new name.
@@ -2678,7 +2697,7 @@ export default function App({ startupBootstrap }: AppProps) {
     const session = pageStatsRef.current.get(path)
     if (session) pageStatsRef.current.set(path, touchPageModified(session, now))
     setTabs((current) => current.map((tab) => tab.path === path ? { ...tab, content } : tab))
-    setTagIndex((current) => ({ ...current, [path]: parseNoteTags(content) }))
+    scheduleTagIndex(path, content)
     // First keystroke after a save: the file may have changed outside FaNotes since; check before autosave can win.
     const firstKeystroke = !pendingWrites.current.has(path) && !tabHoldsRef.current[path]
     pendingWrites.current.set(path, content)
@@ -7347,7 +7366,7 @@ export default function App({ startupBootstrap }: AppProps) {
           </div>
         </main>
 
-        {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !(inspectorTab && (inspectorTab.kind === 'pdf' || isPdfNotePath(inspectorTab.path))) && <Suspense fallback={null}><RightInspector content={inspectorTab?.content ?? ''} path={inspectorTab?.path} notes={tabs.map((tab) => ({ path: tab.path, content: tab.content }))} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { commandEditor()?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
+        {inspectorVisible && settings.showOutline && !overviewOpen && !studyOpen && !homeworkOpen && !calendarOpen && !glyphenWerkOpen && !(inspectorTab && (inspectorTab.kind === 'pdf' || isPdfNotePath(inspectorTab.path))) && <Suspense fallback={null}><RightInspector content={inspectorTab?.content ?? ''} path={inspectorTab?.path} notes={inspectorNotes} history={historySnapshots} onShowHistory={() => { void openHistory() }} onRestoreHistory={(id) => { void restoreHistory(id) }} onJumpToLine={(line) => { commandEditor()?.revealLine(line) }} onOpenNote={(path) => { void openNote(path) }} /></Suspense>}
         {addonState.dockOpen && addonState.panels.length > 0 && !glyphenWerkOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Dock" fallbackTitle="Das Add-on-Dock ist abgestürzt"><AddonPanelDock panels={addonState.panels} activeKey={addonState.activePanel} runtime={addonRuntime} onClose={() => addonRuntime.setDockOpen(false)} /></SafeBoundary></Suspense>}
         {searchOpen && <Suspense fallback={null}><SearchPanel query={searchQuery} hits={searchHits} loading={searchLoading} failed={searchFailed} onQueryChange={setSearchQuery} onOpen={(hit) => { void openSearchHit(hit) }} onClose={() => setSearchOpen(false)} /></Suspense>}
       </div>
