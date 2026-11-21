@@ -32,6 +32,11 @@ try {
   assert.equal(heading.retitleGeneratedHeading('# My own title\n', 'Unbenannte Notiz', 'Physik'), null, 'a heading the user wrote stays')
   assert.equal(heading.retitleGeneratedHeading('# Unbenannte Notiz', 'Unbenannte Notiz', 'Unbenannte Notiz'), null)
 
+  // QA-021: only a PDF companion may be missing silently; a missing .famd note keeps throwing.
+  const mainSource = (await import('node:fs')).readFileSync(join(root, 'electron/main.cjs'), 'utf8')
+  const readFileHandler = mainSource.slice(mainSource.indexOf('handle(IPC.readFile,'), mainSource.indexOf('handle(IPC.writeFile,'))
+  assert.match(readFileHandler, /ENOENT[\s\S]*\.pdf[\s\S]*resolveVaultPath\(pdfSibling[\s\S]*return ''[\s\S]*throw error/u, 'read-file returns empty only when a sibling PDF exists')
+
   const chromium = process.env.FANOTES_CHROMIUM ?? '/usr/bin/chromium'
   const playwrightEntry = process.env.PLAYWRIGHT_CORE ?? '/srv/agents/fanotes/.site-redesign-tools/node_modules/playwright-core/index.mjs'
   if (process.env.FANOTES_SKIP_BROWSER === '1' || !existsSync(chromium) || !existsSync(playwrightEntry)) {

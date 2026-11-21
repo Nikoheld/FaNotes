@@ -4244,7 +4244,12 @@ function registerIpcHandlers() {
       return toLf(stripFamdPayload(buffer.toString('utf8')))
     } catch (error) {
       // A PDF without handwriting has no .famd sidecar yet; that is normal and not an error.
-      if (error?.code === 'ENOENT' && /\.famd$/iu.test(String(relativePath))) return ''
+      // A missing .famd of a real handwriting note must still throw, so a save cannot recreate it as empty.
+      if (error?.code === 'ENOENT' && /\.famd$/iu.test(String(relativePath))) {
+        const pdfSibling = String(relativePath).replace(/\.famd$/iu, '.pdf')
+        const sibling = await resolveVaultPath(pdfSibling, { expected: 'file' }).then(() => true, () => false)
+        if (sibling) return ''
+      }
       throw error
     }
   })
