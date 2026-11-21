@@ -38,4 +38,19 @@ const noteSearchExcerpt = ({ relativePath, content, transcript, needle, queryLen
   return `Dateiname · ${relativePath}`
 }
 
-module.exports = { inkAnchorForQuery, noteSearchExcerpt, readableTranscript }
+/** Internal markers (`<!-- fanotes-ink:id -->`, famd header, onenote, worksheet ...) are not note text. */
+const INTERNAL_COMMENT = /<!--\s*fanotes-[\s\S]*?-->/giu
+const stripInternalComments = (text) => String(text || '').replace(INTERNAL_COMMENT, '')
+
+/** A window of text around a match; internal markers are cut out on both sides so the index stays valid. */
+function createExcerpt(rawText, rawIndex, queryLength) {
+  const before = stripInternalComments(rawText.slice(0, rawIndex))
+  const text = `${before}${rawText.slice(rawIndex, rawIndex + queryLength)}${stripInternalComments(rawText.slice(rawIndex + queryLength))}`
+  const matchIndex = before.length
+  const start = Math.max(0, matchIndex - 95)
+  const end = Math.min(text.length, matchIndex + queryLength + 145)
+  const excerpt = text.slice(start, end).replace(/\s+/gu, ' ').trim()
+  return `${start > 0 ? '…' : ''}${excerpt}${end < text.length ? '…' : ''}`
+}
+
+module.exports = { inkAnchorForQuery, noteSearchExcerpt, readableTranscript, stripInternalComments, createExcerpt }

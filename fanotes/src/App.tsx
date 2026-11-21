@@ -83,6 +83,7 @@ import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/Ma
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { hasConnectedAiProvider } from './lib/aiProviderConnection'
 import { clipboardImageFile } from './lib/clipboardImage'
+import { friendlyFileError, sanitizeToastMessage } from './lib/fileErrors'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, inkHasMarks, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { inkJsonForRewrite } from './lib/packedInk'
 import { createAppAddonBridge, safeSettingsView, type AppAddonDeps } from './lib/addons/appBridge'
@@ -689,7 +690,8 @@ const relativeVaultPath = (fromFile: string, target: string) => {
 }
 
 const countEntries = (entries: VaultEntry[]): { files: number; folders: number } => entries.reduce((total, entry) => {
-  if (entry.kind === 'file') total.files += 1
+  // Only notes count; PDFs, images and other attachments do not.
+  if (entry.kind === 'file') total.files += /\.(?:md|markdown|famd)$/iu.test(entry.name) ? 1 : 0
   else {
     total.folders += 1
     const children = countEntries(entry.children ?? [])
@@ -1012,6 +1014,9 @@ export default function App({ startupBootstrap }: AppProps) {
     return marked
   }, [newArrivals])
   const saveTimers = useRef(new Map<string, number>())
+  /** Consecutive failed saves per note; drives the retry backoff and keeps the error toast to one. */
+  const saveFailuresRef = useRef(new Map<string, number>())
+  const saveContentRef = useRef<((path: string, content: string) => Promise<boolean>) | null>(null)
   const pendingWrites = useRef(new Map<string, string>())
   // Tabs whose file was deleted or edited outside FaNotes are paused: nothing is saved over either side until the user decides.
   const { holds: tabHolds, holdsRef: tabHoldsRef, ownWritesRef: tabOwnWritesRef, setHold: setTabHold, noteOwnWrite, moveTabState, pruneTabState } = useTabHolds()
@@ -1353,6 +1358,8 @@ export default function App({ startupBootstrap }: AppProps) {
   )), [activePath, mutatingEntryPaths])
   /** The open note's file was deleted or edited outside FaNotes; it is read-only until the user decides. */
   const activeHeld = Boolean(activePath && tabHolds[activePath])
+  // A paused tab (file deleted or changed outside) is not saved, whatever the last write said.
+  const shownSaveState: SaveState = activeHeld ? 'error' : saveState
   const counts = useMemo(() => countEntries(tree), [tree])
   const visibleTree = useMemo(() => filterTreeByTag(tree, tagFilter, new Map(Object.entries(tagIndex))), [tagFilter, tagIndex, tree])
   const knownTags = useMemo(() => collectVaultTags(Object.values(tagIndex).map((tags) => ({ content: tags.map((tag) => `#${tag}`).join(' ') }))), [tagIndex])
@@ -1596,7 +1603,8 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [worksheetSession.documents])
 
-  const toast = useCallback((message: string, kind: Toast['kind'] = 'info') => {
+  const toast = useCallback((rawMessage: string, kind: Toast['kind'] = 'info') => {
+    const message = kind === 'error' ? sanitizeToastMessage(rawMessage) : rawMessage
     // Error toasts feed the opt-in diagnostics: a hash and a count, never the text itself.
     if (kind === 'error') diagnosticLog.record({ at: Date.now(), kind: 'error', message })
     const id = ++toastCounter.current
@@ -2084,6 +2092,9 @@ export default function App({ startupBootstrap }: AppProps) {
         structureRevision === vaultStructureRevisionRef.current
       ) {
         toast(error instanceof Error ? error.message : 'Notiz konnte nicht geöffnet werden.', 'error')
+        // Typing must not continue in the note that is still shown behind the failed click.
+        const focused = document.activeElement
+        if (focused instanceof HTMLElement && focused.closest('.cm-editor')) focused.blur()
       }
       return false
     } finally {
@@ -2399,16 +2410,33 @@ export default function App({ startupBootstrap }: AppProps) {
       setTabs((current) => current.map((tab) => (
         tab.path === path ? { ...tab, savedContent: tab.content === content ? content : visibleContent } : tab
       )))
+      saveFailuresRef.current.delete(path)
       setSaveState(pendingWrites.current.size ? 'saving' : 'saved')
       return true
     } catch (error) {
       setSaveState('error')
-      toast(error instanceof Error ? error.message : 'Speichern fehlgeschlagen.', 'error')
+      const failures = (saveFailuresRef.current.get(path) ?? 0) + 1
+      saveFailuresRef.current.set(path, failures)
+      // One toast per outage; the retries stay quiet and the indicator shows the state.
+      if (failures === 1) toast(friendlyFileError(error, 'Speichern fehlgeschlagen.'), 'error')
       // The note may have been deleted, renamed or replaced outside FaNotes: reconcile the tab with its file.
       void checkTabPathRef.current?.(path)
+      // Keep trying (1 s, 2 s, 4 s ... up to 30 s) until the write goes through.
+      // A typed edit replaces this timer with its own autosave.
+      if (!options?.quiet) {
+        const delay = Math.min(30000, 1000 * 2 ** Math.min(failures - 1, 5))
+        const timer = window.setTimeout(() => {
+          saveTimers.current.delete(path)
+          const latest = pendingWrites.current.get(path)
+          if (latest === undefined || tabHoldsRef.current[path]) return
+          void saveContentRef.current?.(path, latest)
+        }, delay)
+        saveTimers.current.set(path, timer)
+      }
       return false
     }
   }, [flushPageStats, noteOwnWrite, pushEditableShare, tabHoldsRef, toast])
+  saveContentRef.current = (path, content) => saveContent(path, content)
 
   /** Writes statistics that moved on without any typing, without touching the save indicator. */
   const persistPageStatsQuietly = useCallback((path: string, minDwellDeltaMs: number) => {
@@ -6482,7 +6510,7 @@ export default function App({ startupBootstrap }: AppProps) {
           {addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}
           {addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={12} /> {addonState.panels.length}</button>}
           {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings(syncState.openConflicts > 0 ? 'conflicts' : 'sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : syncState.status === 'paused' ? <Clock size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : syncState.status === 'paused' ? 'Sync pausiert' : 'Synchron'}{syncState.openConflicts > 0 && <em title={`${syncState.openConflicts} Konflikt(e)`}>{syncState.openConflicts}</em>}{syncState.failed.length > 0 && <em className="sync-failed-badge" title={failedLabel(syncState.failed.length)}>{syncState.failed.length}</em>}</button>}
-          <button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-label="Jetzt speichern" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={12} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={12} /> : <CircleAlert size={12} />}<span>{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</span></button>
+          <button type="button" className={`save-status ${shownSaveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-label="Jetzt speichern" aria-live="polite" onClick={() => void saveCurrentWork()}>{shownSaveState === 'saved' ? <CheckCircle2 size={12} /> : shownSaveState === 'saving' ? <LoaderCircle className="spin" size={12} /> : <CircleAlert size={12} />}<span>{shownSaveState === 'saved' ? 'Gespeichert' : shownSaveState === 'saving' ? 'Speichert …' : (activeHeld ? 'Nicht gespeichert' : 'Speicherfehler')}</span></button>
         </div>
         <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={14} /><span className="ribbon-label">Einstellungen</span></button>
       </nav>
