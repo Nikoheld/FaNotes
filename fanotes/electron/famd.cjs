@@ -405,6 +405,24 @@ function famdLooksStored(source) {
   return typeof source === 'string' && (source.includes('fanotes-famd:v1') || source.includes('fanotes-famd:v2'))
 }
 
+/**
+ * True when a payload carries nothing a plain note needs a sidecar for: no ink,
+ * worksheets, text boxes, links, backups, annotations or paper style. Page
+ * statistics alone do not count; they are kept in the local store.
+ */
+function payloadIsStatsOnly(payload, body = '') {
+  if (!payload) return true
+  return !inkHasMarks(payload.ink)
+    && !(payload.worksheets?.length)
+    && worksheetIdsFromMarkdown(body).length === 0
+    && !payload.paperStyle
+    && !(payload.noteLinks?.length)
+    && !(payload.noteBackups?.length)
+    && !(payload.textFields?.length)
+    && !(payload.textFieldTombstones?.length)
+    && !(payload.annotations?.length)
+}
+
 function composeFamdCompanion(existingSource, markdown, ink, settingsPaperStyle) {
   const encoding = v2codec.famdEncodingForSave(existingSource)
   // A v2 note is written back as v2: its stored ink stays packed, and new ink
@@ -659,6 +677,7 @@ module.exports = {
   createNoteCompanion,
   FAMD_ASYNC_CHARS: famdPack.FAMD_ASYNC_CHARS,
   composeFamdCompanion,
+  payloadIsStatsOnly,
   famdLooksStored,
   inkHasMarks,
   famdEncodingForSave: v2codec.famdEncodingForSave,

@@ -73,6 +73,7 @@ const {
   FAMD_ASYNC_CHARS,
   composeFamdCompanion,
   famdLooksStored,
+  payloadIsStatsOnly,
   inkHasMarks,
   convertFamdDirectory,
   famdEncodingForSave,
@@ -88,6 +89,9 @@ const {
   stripFamdPayload,
   worksheetIdsFromMarkdown,
 } = require('./famd.cjs')
+const { createLocalPageStats } = require('./page-stats-local.cjs')
+const { createExcerpt } = require('./search-ink.cjs')
+const { detectLineEnding, toLf, applyLineEnding } = require('./line-endings.cjs')
 const { companionInkNeedsRecord, isUnexplainedEmptyPage, recordDocumentForEmptyCompanion, refusesEmptyInkSave } = require('./ink-save-guard.cjs')
 const { applyNoteTextFieldOps } = require('./noteTextFieldMerge.mjs')
 const { isLocalAiHostname } = require('./localAiHost.mjs')
@@ -2141,6 +2145,38 @@ async function snapshotNoteHistory(relativePath) {
   }
 }
 
+let localPageStatsStore = null
+function localPageStats() {
+  if (!localPageStatsStore) {
+    localPageStatsStore = createLocalPageStats({
+      directory: path.join(app.getPath('userData'), 'page-stats'),
+      atomicWrite,
+    })
+  }
+  return localPageStatsStore
+}
+
+/**
+ * A text save of a plain note has no reason to create a `.famd` that would be
+ * synced and shared: the page statistics go to the local store instead.
+ * Returns true when the sidecar write was skipped. An existing sidecar keeps
+ * being updated, so notes with ink, worksheets or text boxes behave as before.
+ */
+async function keepStatsLocal(markdownRelativePath, famdRelativePath, target, content) {
+  if (typeof content !== 'string' || !currentVaultPath) return false
+  const incoming = parseFamd(content)
+  if (!payloadIsStatsOnly(incoming.payload, incoming.markdown)) return false
+  const exists = await fsp.lstat(target).then(() => true).catch((error) => {
+    if (error?.code === 'ENOENT') return false
+    throw error
+  })
+  if (exists) return false
+  invalidateFamdCompanion(famdRelativePath)
+  const notePath = markdownRelativePath.split(path.sep).join('/')
+  if (incoming.payload?.pageStats) localPageStats().set(currentVaultPath, notePath, incoming.payload.pageStats)
+  return true
+}
+
 /** `options.inkJson` is the text of `ink`: a large drawing is composed from it in the famd worker. */
 async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefined, options = {}) {
   const extension = path.extname(markdownRelativePath).toLocaleLowerCase('en-US')
@@ -2148,6 +2184,7 @@ async function writeFamdCompanion(markdownRelativePath, markdown, ink = undefine
   const famdRelativePath = companionNotePath(markdownRelativePath, '.famd')
   const { target } = await resolveVaultPath(famdRelativePath, { allowMissing: true, expected: 'file' })
   const inkJson = ink !== undefined && typeof options.inkJson === 'string' ? options.inkJson : undefined
+  if (ink === undefined && (extension === '.md' || extension === '.markdown') && await keepStatsLocal(markdownRelativePath, famdRelativePath, target, markdown)) return
   const write = () => writeFamdCompanionNow(markdownRelativePath, famdRelativePath, target, markdown, ink, inkJson)
   if (options.heldQueueTarget === target) return write()
   return queueFileWrite(target, write)
@@ -2799,13 +2836,6 @@ async function collectMarkdownFiles(root, directory, output, depth = 0, logicalD
       }
     }
   }
-}
-
-function createExcerpt(text, matchIndex, queryLength) {
-  const start = Math.max(0, matchIndex - 95)
-  const end = Math.min(text.length, matchIndex + queryLength + 145)
-  const excerpt = text.slice(start, end).replace(/\s+/gu, ' ').trim()
-  return `${start > 0 ? '…' : ''}${excerpt}${end < text.length ? '…' : ''}`
 }
 
 function assertDrawingId(value) {
@@ -4147,7 +4177,8 @@ function registerIpcHandlers() {
     assertMarkdownPath(relativePath)
     const { target } = await resolveVaultPath(relativePath, { expected: 'file' })
     const buffer = await readRegularFileNoFollow(target, noteByteLimit(relativePath))
-    return stripFamdPayload(buffer.toString('utf8'))
+    // The app works on LF; writeFile restores the file's own ending.
+    return toLf(stripFamdPayload(buffer.toString('utf8')))
   })
 
   handle(IPC.writeFile, (_event, relativePath, content) => {
@@ -4242,7 +4273,10 @@ function registerIpcHandlers() {
                 worksheets: worksheetIdsFromMarkdown(markdownBody),
               }, famdEncodingForSave(existingMd))
             } else {
-              written = markdownBody.endsWith('\n') || markdownBody.length === 0 ? markdownBody : `${markdownBody}\n`
+              const lfBody = toLf(markdownBody)
+              const lfText = lfBody.endsWith('\n') || lfBody.length === 0 ? lfBody : `${lfBody}\n`
+              // Keep the ending the file already has (CRLF notes stay CRLF).
+              written = applyLineEnding(lfText, existingMd ? detectLineEnding(existingMd) : 'lf')
             }
           }
           await atomicWrite(target, written, { encoding: 'utf8', mode: 0o600 })
@@ -5143,6 +5177,7 @@ function registerIpcHandlers() {
       const info = await statRegularFileNoFollow(target, MAX_FAMD_BYTES)
       signature = `${info.mtimeMs}:${info.size}`
     } catch { signature = null }
+    if (!signature) return currentVaultPath ? localPageStats().get(currentVaultPath, notePath) : null
     const known = signature ? pageStatsByCompanion.get(famdRelative) : null
     if (known && known.signature === signature) return known.pageStats
     const loaded = await loadFamdCompanion(notePath)
@@ -5211,7 +5246,12 @@ function registerIpcHandlers() {
     const notePath = normalizeRelativePath(relativePath).split(path.sep).join('/')
     assertNotePath(notePath)
     const loaded = await loadFamdCompanion(notePath)
-    if (!loaded) return null
+    if (!loaded) {
+      const localStats = currentVaultPath ? localPageStats().get(currentVaultPath, notePath) : null
+      return localStats
+        ? { ink: null, pageStats: localStats, paperStyle: null, noteLinks: [], noteBackups: [], textFields: [], annotations: [] }
+        : null
+    }
     const famdRelative = companionNotePath(notePath, '.famd')
     let ink = null
     if (loaded.ink) {

@@ -3,7 +3,7 @@
  * handwriting transcript, one PDF page, one worksheet, PDF annotations).
  * Pure TypeScript with no DOM access, so every rule is tested in Node.
  */
-import { foldPlain, foldSearch, makeSnippet, matchRanges, parseDocQuery, tokenize, type Snippet } from './text'
+import { foldPlain, foldSearch, makeSnippet, matchRanges, parseDocQuery, stripInternalComments, tokenize, type Snippet } from './text'
 
 export const DOC_INDEX_FORMAT = 'fanotes-doc-index-v1'
 
@@ -311,7 +311,7 @@ export class DocIndex {
     for (const result of out) {
       const unit = this.units.get(result.unitId)!
       const readable = unit.kind === 'ink' ? unit.text.replace(/^[ \t]*\d+(?:\.\d+)?\t/gmu, '') : unit.text
-      result.snippet = makeSnippet(readable, terms)
+      result.snippet = makeSnippet(stripInternalComments(readable), terms)
       if (!result.titleOnly) result.matches = Math.max(result.matches, result.snippet.matched ?? 0)
       if (unit.kind === 'ink') {
         const y = inkLineY(unit.text, terms)

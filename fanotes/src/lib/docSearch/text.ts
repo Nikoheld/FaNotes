@@ -204,3 +204,6 @@ export const readableTranscript = (raw: string) => String(raw ?? '')
   .join(' ')
   .replace(/\s+/gu, ' ')
   .trim()
+
+/** Internal markers (`<!-- fanotes-ink:id -->`, famd header, onenote ...) are not note text. */
+export const stripInternalComments = (text: string) => text.replace(/<!--\s*fanotes-[\s\S]*?-->/giu, '')
