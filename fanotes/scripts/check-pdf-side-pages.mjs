@@ -400,6 +400,16 @@ try {
   await openPdf()
   ok('the toggle sits in the PDF toolbar', await toggleButton().count() === 1)
   ok('the toggle starts off', await toggleButton().getAttribute('aria-pressed') === 'false')
+  // QA-009: with the find field open, no toolbar button is covered by it.
+  await page.locator('.pdf-note-toolbar button[aria-label="Im PDF suchen"]').click()
+  await page.locator('.pdf-note-search input').fill('Seite')
+  await settle()
+  const covered = await page.evaluate(() => [...document.querySelectorAll('.pdf-note-toolbar button')]
+    .filter((button) => button.getBoundingClientRect().width > 0)
+    .filter((button) => { const box = button.getBoundingClientRect(); const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2); return !(hit && (hit === button || button.contains(hit))) })
+    .map((button) => button.getAttribute('aria-label')))
+  ok('the open find field covers no toolbar button', covered.length === 0, covered.join(', '))
+  await page.locator('.pdf-note-toolbar button[aria-label="Im PDF suchen"]').click()
   ok('no side pages before the toggle', (await page.locator('[data-pdf-side-page]').count()) === 0)
 
   // PDF ink written before the side pages exist.
