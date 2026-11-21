@@ -5313,3 +5313,27 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .share-user-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
 .share-user-list li { display: flex; align-items: center; gap: 8px; }
 .share-user-list li small { color: var(--text-muted); margin-right: auto; }
+
+/* Live co-editing of shared notes: who is in the note, remote cursors and pens. */
+.live-people { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; }
+.live-avatar {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--border);
+  animation: live-avatar-in 180ms ease-out;
+}
+.live-avatar.writing { box-shadow: 0 0 0 2px currentColor; outline: 2px solid var(--accent); outline-offset: 1px; }
+.live-solo, .live-offline { font-size: 11px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 3px; }
+@keyframes live-avatar-in { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: scale(1); } }
+.live-pen-layer { position: absolute; inset: 0; pointer-events: none; z-index: 6; overflow: hidden; }
+.live-pen {
+  position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+  color: var(--live-color, #2e86ab);
+  border: 2px solid var(--live-color, #2e86ab); background: color-mix(in srgb, var(--live-color, #2e86ab) 25%, transparent);
+  transition: left 90ms linear, top 90ms linear, opacity 300ms ease; will-change: left, top;
+}
+.live-pen > span {
+  position: absolute; left: 14px; top: -16px; padding: 0 5px; border-radius: 3px; font-size: 10px; line-height: 15px;
+  color: #fff; background: var(--live-color, #2e86ab); white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) { .live-avatar { animation: none; } .live-pen { transition: none; } }

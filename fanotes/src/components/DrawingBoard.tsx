@@ -46,10 +46,13 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
+import type { LiveNote } from '../lib/collab/liveNotes'
+import type { LiveInk } from '../lib/collab/liveInk'
 import { BASE_CATALOG } from '../../../src/data/catalog'
 import type {
   AutomaticRecognitionResult,
@@ -912,7 +915,11 @@ export type DrawingBoardProps = {
   /** Sheet-relative keyboard text fields. Remapped with the ink when the write page grows. */
   textFields?: readonly NoteTextField[]
   onTextFieldsExtent?: (fields: readonly NoteTextField[]) => void
+  /** A shared note open for live co-editing: strokes sync as a CRDT and the others' pens show on the sheet. */
+  liveNote?: LiveNote | null
 }
+
+const EMPTY_LIVE_PEOPLE: readonly import('../lib/collab/liveNotes').LivePerson[] = []
 
 type Notice = { kind: 'success' | 'error' | 'info'; text: string }
 
@@ -1551,6 +1558,7 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
   settings,
   drawingId,
   title = 'Handschrift',
+  liveNote = null,
   initialDrawingJson,
   packedInk = null,
   className = '',
@@ -2202,6 +2210,99 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
     if (options.updateTranscript !== false) setTranscriptRevision((current) => current + 1)
     bumpRevision()
   }, [bumpRevision])
+
+  // ── Live co-editing: strokes as a CRDT (lib/collab/liveInk.ts) ──────────
+  const liveNoteRef = useRef(liveNote)
+  liveNoteRef.current = liveNote
+  const liveInkRef = useRef<LiveInk<InkStroke> | null>(null)
+  const liveAttachedRef = useRef(false)
+  const livePenTimerRef = useRef<number | null>(null)
+  const liveSetDirtyRef = useRef(setDirty)
+  liveSetDirtyRef.current = setDirty
+  const liveBumpRef = useRef(bumpInkRevision)
+  liveBumpRef.current = bumpInkRevision
+  const [livePaper, setLivePaper] = useState<Element | null>(null)
+
+  useEffect(() => {
+    if (!liveNote) return undefined
+    liveAttachedRef.current = false
+    const revive = (value: Record<string, unknown>) => {
+      const raw = value as { baseWidth?: number; width?: number }
+      return safeInkStrokes([{ ...value, baseWidth: raw.baseWidth ?? raw.width }], initialColorRef.current)[0] ?? (value as unknown as InkStroke)
+    }
+    const ink = liveNote.attachInk<InkStroke>((change) => {
+      // The other person's strokes: added, erased, moved. They also go into the undo and redo
+      // snapshots, so Ctrl+Z only ever takes back this person's own work.
+      const live = liveInkRef.current
+      const froms = change.replaced.map((entry) => entry.from)
+      const patch = (list: InkStroke[]): InkStroke[] => {
+        if (!change.removed.length && !change.replaced.length) return list
+        // The board may hold equal copies of the strokes the other person changed, so they are found by id or content.
+        const gone = live ? live.locate(list, change.removed) : new Set<InkStroke>(change.removed)
+        const moved = live ? live.locate(list, froms) : new Set<InkStroke>(froms)
+        return list.filter((stroke) => !gone.has(stroke)).map((stroke) => {
+          if (!moved.has(stroke)) return stroke
+          const entry = change.replaced.find((candidate) => candidate.from === stroke || (live && live.idOf(candidate.from) !== undefined && live.idOf(candidate.from) === live.idOf(stroke)))
+          return entry ? entry.to : stroke
+        })
+      }
+      const next = [...patch(strokesRef.current), ...change.added]
+      undoRef.current = undoRef.current.map((snapshot) => [...patch(snapshot), ...change.added])
+      redoRef.current = redoRef.current.map((snapshot) => [...patch(snapshot), ...change.added])
+      strokesRef.current = next
+      liveInkRef.current?.acknowledge(next)
+      liveBumpRef.current()
+      liveSetDirtyRef.current(true)
+    }, revive)
+    liveInkRef.current = ink
+    const attach = () => {
+      if (liveAttachedRef.current || !inkReadyRef.current || inkHydratingRef.current || inkLoadFailedRef.current) return
+      liveAttachedRef.current = true
+      const merged = ink.attach(strokesRef.current)
+      const same = merged.length === strokesRef.current.length && merged.every((stroke, index) => stroke === strokesRef.current[index])
+      if (!same) {
+        strokesRef.current = merged
+        ink.acknowledge(merged)
+        liveBumpRef.current()
+        liveSetDirtyRef.current(true)
+      } else {
+        ink.acknowledge(strokesRef.current)
+      }
+    }
+    attach()
+    // The stored page may still be loading; keep trying until the board has its strokes.
+    const timer = window.setInterval(() => { attach(); if (liveAttachedRef.current) window.clearInterval(timer) }, 250)
+    return () => {
+      window.clearInterval(timer)
+      ink.destroy()
+      if (liveInkRef.current === ink) liveInkRef.current = null
+      liveAttachedRef.current = false
+    }
+  }, [liveNote])
+
+  // This person's committed strokes go out as adds, erases and moves (one cheap diff per change).
+  useEffect(() => {
+    if (liveAttachedRef.current && liveInkRef.current && liveNoteRef.current?.canWrite) liveInkRef.current.push(strokesRef.current)
+  }, [revision])
+
+  const reportLivePen = useCallback((point: { x: number; y: number } | null) => {
+    const note = liveNoteRef.current
+    if (!note?.canWrite) return
+    if (livePenTimerRef.current !== null) window.clearTimeout(livePenTimerRef.current)
+    livePenTimerRef.current = null
+    if (!point) { note.setPen(null); return }
+    note.setPen({ x: point.x, y: point.y, down: true })
+    // The indicator fades two seconds after the pen stops.
+    livePenTimerRef.current = window.setTimeout(() => { livePenTimerRef.current = null; note.setPen(null) }, 2000)
+  }, [])
+  const livePeople = useSyncExternalStore(
+    (listener) => (liveNote ? liveNote.onPeople(listener) : () => undefined),
+    () => (liveNote ? liveNote.people() : EMPTY_LIVE_PEOPLE),
+  )
+  useEffect(() => {
+    if (!liveNote || !inline) { setLivePaper(null); return }
+    setLivePaper(surfaceRef.current?.closest('.unified-paper') ?? null)
+  }, [inline, liveNote, revision])
 
   const updateHistoryState = useCallback(() => {
     // Undo, redo, and clear stay on the keyboard. The bar no longer shows them.
@@ -6071,9 +6172,12 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       if (activeStrokeRef.current && !paintActiveStrokeNow(predicted)) scheduleRedraw()
       // Grow the page ahead of the pen so writing never hits a hard bottom edge.
       const latest = activeStrokeRef.current?.points.at(-1)
-      if (latest) ensureWriteRoom(latest.y, latest.x)
+      if (latest) {
+        ensureWriteRoom(latest.y, latest.x)
+        if (liveNoteRef.current) reportLivePen(latest)
+      }
     }
-  }, [appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, handlePointerDown, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
+  }, [reportLivePen, appendPointerEvent, dragSheetWithPointer, ensureWriteRoom, eraseAt, handlePointerDown, inline, inputActive, paintActiveStrokeNow, pointFromEvent, scheduleRedraw, settings.penOnly])
 
   // ---- Optional handwriting beautifier (desktop) ---------------------------
   // Runs after the pen lifts, never on the hot path: a finished word is queued
@@ -9268,6 +9372,16 @@ export const DrawingBoard = memo(forwardRef<DrawingBoardHandle, DrawingBoardProp
       onLostPointerCapture={inline && overlayHitEnabled(inputActive) ? finishPointer : undefined}
     >
       <style>{drawingBoardStyles}</style>
+      {livePaper && livePeople.some((person) => person.pen) && createPortal(
+        <div className="live-pen-layer" aria-hidden="true">
+          {livePeople.filter((person) => person.pen).map((person) => (
+            <div key={person.id} className="live-pen" style={{ left: `${person.pen!.x * 100}%`, top: `${person.pen!.y * 100}%`, ['--live-color' as string]: person.color }}>
+              <span>{person.name}</span>
+            </div>
+          ))}
+        </div>,
+        livePaper,
+      )}
       <header className="lw-draw-header">
         <div className="lw-draw-title">
           <span className="lw-draw-title-icon">{inkMode === 'drawing' ? <Paintbrush size={18} /> : <PenLine size={18} />}</span>
