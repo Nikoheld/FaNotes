@@ -35,13 +35,15 @@ import {
 } from '../lib/markdownTable'
 import { renderInlineMarkdown, tabularText, type InlineRenderContext } from '../lib/markdownTableDom'
 
+import { docFlags } from '../lib/cmDocFlags'
+
 const blockCache = new WeakMap<object, TableBlock[]>()
 
 /** Pipe tables of the document, cached per document version. */
 export function tableBlocksOf(state: EditorState): TableBlock[] {
   let blocks = blockCache.get(state.doc)
   if (!blocks) {
-    blocks = state.doc.length > 4 && state.doc.toString().includes('|')
+    blocks = state.doc.length > 4 && docFlags(state.doc).pipe
       ? findTableBlocks(state.doc.lines, (number) => {
         const line = state.doc.line(number)
         return { text: line.text, from: line.from, to: line.to }

@@ -58,6 +58,8 @@ import {
   type ViewUpdate,
 } from '@codemirror/view'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
+import { wikiLinkExtension } from '../lib/cmWikiLinkParser'
+import { docFlags, primeDocFlags } from '../lib/cmDocFlags'
 import { TableWidget, flushTableEdits, focusTableCell, tableBlocksOf } from './markdownTableWidget'
 import { newTableText } from '../lib/markdownTable'
 import { htmlTableToMarkdown } from '../lib/markdownTableDom'
@@ -552,6 +554,7 @@ const cleanSummary = (value: string) => value
 
 export function findDetailsBlocks(state: EditorState): DetailsBlock[] {
   const blocks: DetailsBlock[] = []
+  if (!docFlags(state.doc).details) return blocks
   for (let number = 1; number <= state.doc.lines; number += 1) {
     const line = state.doc.line(number)
     const inline = /^\s*<details(\s+open)?\s*>\s*<summary>(.*?)<\/summary>\s*(.*?)\s*<\/details>\s*$/iu.exec(line.text)
@@ -699,7 +702,7 @@ const studyBlocksOf = (state: EditorView['state']) => {
   const key = state.doc as unknown as object
   let blocks = studyBlockCache.get(key)
   if (!blocks) {
-    blocks = state.doc.length > 20 && state.doc.toString().includes('```fanotes-') ? findStudyBlocks(state.doc.toString()) : []
+    blocks = state.doc.length > 20 && docFlags(state.doc).study ? findStudyBlocks(state.doc.toString()) : []
     studyBlockCache.set(key, blocks)
   }
   return blocks
@@ -753,7 +756,8 @@ const buildLivePreviewDecorations = (view: EditorView) => {
     }
   })
   let mathStart: ReturnType<typeof view.state.doc.line> | null = null
-  for (let number = 1; number <= view.state.doc.lines; number += 1) {
+  const mathPossible = docFlags(view.state.doc).math
+  for (let number = 1; mathPossible && number <= view.state.doc.lines; number += 1) {
     const line = view.state.doc.line(number)
     if (!/^\s*\$\$\s*$/u.test(line.text)) continue
     if (!mathStart) {
@@ -976,6 +980,23 @@ const tablePaste = EditorView.domEventHandlers({
   },
 })
 
+/**
+ * A large insertion that arrives as typed text (dictation, remote input, automation) would make the
+ * browser edit the DOM in one huge text node, which is slow and super-linear. CodeMirror takes it
+ * as one transaction instead, like a paste (QA-003).
+ */
+const BULK_INSERT_CHARS = 4000
+const bulkInsert = EditorView.domEventHandlers({
+  beforeinput(event, view) {
+    if (event.inputType !== 'insertText' || event.isComposing || view.state.readOnly) return false
+    const data = event.data
+    if (!data || data.length < BULK_INSERT_CHARS) return false
+    event.preventDefault()
+    view.dispatch(view.state.update(view.state.replaceSelection(data), { scrollIntoView: true, userEvent: 'input.type' }))
+    return true
+  },
+})
+
 /** Arrow keys step from the text above or below a rendered table into its first or last row. */
 const enterTableByArrow = (direction: 1 | -1) => (view: EditorView) => {
   const selection = view.state.selection.main
@@ -1000,6 +1021,7 @@ const livePreview = ViewPlugin.fromClass(class {
 
   update(update: ViewUpdate) {
     if (update.docChanged || update.selectionSet || update.viewportChanged) {
+      if (update.docChanged) primeDocFlags(update.startState.doc, update.state.doc, update.changes)
       this.decorations = buildLivePreviewDecorations(update.view)
     }
   }
@@ -1810,9 +1832,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         highlightActiveLine(),
         highlightSelectionMatches(),
         search({ top: true, createPanel: createEditorFindPanel }),
-        markdown(),
+        markdown({ extensions: [wikiLinkExtension] }),
         livePreview,
         tablePaste,
+        bulkInsert,
         EditorView.lineWrapping,
         saveKeymap,
         keymap.of([
@@ -1940,7 +1963,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       ],
     })
     if (!settings.spellcheck) onLanguageDetectedRef.current?.('unknown')
-  }, [ariaLabel, compartments, dark, readOnly, settings])
+    // Only the settings the editor really uses: the whole settings object changes with every unrelated
+    // switch (reduce motion, snow, ...), and reconfiguring the editor then costs time in a large note (QA-035).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ariaLabel, compartments, dark, readOnly, settings.editorFont, settings.editorFontSize, settings.lineHeight, settings.showLineNumbers, settings.spellcheck])
 
   useEffect(() => {
     const view = viewRef.current

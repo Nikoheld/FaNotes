@@ -2,14 +2,17 @@ import { ChevronRight, FileText, Hash, History, Link2, ListTree, Sparkles, Tags 
 import { useMemo, useState } from 'react'
 import { getUiLocale } from '../i18n'
 import { backlinksFor } from '../lib/backlinks'
+import { useSettledValue } from '../lib/useSettledValue'
 import { diffNoteLines, timelineHasInk } from '../lib/markdownDiff'
 import { outlineTagsFromNote, parseNoteOutline } from '../lib/noteOutline'
 import type { NoteHistorySnapshot } from '../types'
 
+const NO_NOTES: Array<{ path: string; content: string }> = []
+
 export function RightInspector({
   content,
   path,
-  notes = [],
+  notes = NO_NOTES,
   history = [],
   onJumpToLine,
   onOpenNote,
@@ -25,21 +28,25 @@ export function RightInspector({
   onShowHistory?: () => void
   onRestoreHistory?: (id: string) => void
 }) {
-  const headings = useMemo(() => parseNoteOutline(content), [content])
-  const backlinks = useMemo(() => path ? backlinksFor(path, notes) : [], [notes, path])
+  // Outline, backlinks, word count and tags are whole-text work: for a huge note they follow after a typing pause (QA-006).
+  const weight = notes.reduce((total, note) => total + note.content.length, content.length)
+  const shownContent = useSettledValue(content, weight, path ?? '')
+  const settledNotes = useSettledValue(notes, weight, path ?? '')
+  const headings = useMemo(() => parseNoteOutline(shownContent), [shownContent])
+  const backlinks = useMemo(() => path ? backlinksFor(path, settledNotes) : [], [settledNotes, path])
   const [diffId, setDiffId] = useState<string | null>(null)
   const [diffText, setDiffText] = useState('')
   const stats = useMemo(() => {
-    const visibleContent = content
+    const visibleContent = shownContent
       .replace(/<!--\s*fanotes-(?:ink|worksheet):[a-zA-Z0-9_-]{1,96}\s*-->/gu, '')
       .replace(/(?:^|\n)<!--\s*fanotes-famd:v1[\s\S]*$/u, '')
     const plain = visibleContent.replace(/[`#>*_~[\]()-]/g, ' ')
     const words = plain.trim() ? plain.trim().split(/\s+/).length : 0
     const characters = visibleContent.length
     const reading = Math.max(1, Math.ceil(words / 210))
-    const tags = outlineTagsFromNote(content)
+    const tags = outlineTagsFromNote(shownContent)
     return { words, characters, reading, tags }
-  }, [content])
+  }, [shownContent])
 
   return (
     <aside className="right-inspector">
