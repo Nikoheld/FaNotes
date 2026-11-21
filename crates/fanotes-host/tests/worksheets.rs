@@ -225,9 +225,11 @@ fn a_saved_worksheet_uses_javascript_number_text() {
     assert!(text.contains("\"fontSize\": 16\n"), "{text}");
     assert!(text.contains("\"x\": 0,"), "{text}");
     assert!(text.contains("\"y\": 1,"), "{text}");
-    assert!(!text.contains("16.0"), "{text}");
-    assert!(!text.contains("0.0"), "{text}");
-    assert!(!text.contains("1.0"), "{text}");
+    // Match whole JSON number values: `updatedAt` is the save time, and a timestamp such as
+    // "10:13:41.059Z" contains "1.0" itself.
+    assert!(!text.contains(": 16.0"), "{text}");
+    assert!(!text.contains(": 0.0"), "{text}");
+    assert!(!text.contains(": 1.0"), "{text}");
 }
 
 #[test]

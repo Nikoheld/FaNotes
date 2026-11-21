@@ -190,6 +190,15 @@ const results = []
 const launchedAt = Date.now()
 let startupReport = async (reason) => `${reason}\nelectron stdout/stderr (tail):\n${output.slice(-3000)}`
 let browser = null
+// A CI run once sat silent for 30 minutes before the job timeout killed it. Fail after a bounded
+// time instead, with the startup report, and log each startup phase so a stall shows where it is.
+const phase = (name) => console.log(`phase: ${name} (${((Date.now() - launchedAt) / 1000).toFixed(1)}s)`)
+const watchdogMs = Number(process.env.FANOTES_IDLE_WATCHDOG_MS) || 6 * 60_000
+const watchdog = setTimeout(async () => {
+  console.error(await Promise.race([startupReport(`watchdog: no result after ${watchdogMs / 1000}s`), sleep(10_000).then(() => 'watchdog: startup report timed out')]))
+  try { process.kill(-child.pid, 'SIGKILL') } catch { /* gone */ }
+  process.exit(1)
+}, watchdogMs)
 try {
   const deadline = Date.now() + 60_000
   while (!browser && Date.now() < deadline) {
@@ -197,12 +206,14 @@ try {
     if (child.exitCode !== null) throw new Error(`Electron exited: ${output.slice(-400)}`)
   }
   assert.ok(browser, 'Electron did not open a debugging port')
+  phase('connected to Electron')
   let page = null
   for (let tries = 0; tries < 120 && !page; tries += 1) {
     page = browser.contexts().flatMap((context) => context.pages()).find((candidate) => !candidate.url().startsWith('devtools')) ?? null
     if (!page) await sleep(250)
   }
   assert.ok(page, 'no renderer page')
+  phase('renderer page found')
   // Kept for the failure report: a startup stall on a slow runner is otherwise silent.
   const rendererLog = []
   const note = (line) => { rendererLog.push(`${((Date.now() - launchedAt) / 1000).toFixed(1)}s ${line}`); if (rendererLog.length > 200) rendererLog.shift() }
@@ -222,11 +233,13 @@ try {
     return `${reason}\nrenderer state: ${JSON.stringify(state)}\nprocess cpu ticks: ${processes}\nrenderer console:\n${rendererLog.join('\n') || '(empty)'}\nelectron stdout/stderr (tail):\n${output.slice(-3000) || '(empty)'}`
   }
   await page.addInitScript(probe)
+  phase('probe installed')
   // Reload from inside the page: CDP-driven navigations sometimes hang on Electron's file:// pages.
   for (let attempt = 0; attempt < 4; attempt += 1) {
     page.evaluate(() => location.reload()).catch(() => {})
     if (await page.waitForFunction(() => typeof window.__idleSnapshot === 'function', null, { timeout: 20_000 }).then(() => true, () => false)) break
   }
+  phase('page reloaded with probe')
   const startupWait = Number(process.env.FANOTES_IDLE_STARTUP_MS) || 60_000
   await page.waitForFunction(() => Boolean(window.fanotes && document.querySelector('.file-tree__row')), null, { timeout: startupWait })
     .catch(async (error) => { throw new Error(await startupReport(`startup did not finish within ${startupWait} ms: ${String(error).split('\n')[0]}`)) })
@@ -281,6 +294,7 @@ try {
   hiddenResult.hidden = true
   results.push(hiddenResult)
 } finally {
+  clearTimeout(watchdog)
   await browser?.close().catch(() => {})
   try { process.kill(-child.pid, 'SIGTERM') } catch { /* gone */ }
   await sleep(800)
