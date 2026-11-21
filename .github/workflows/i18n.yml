@@ -1,0 +1,32 @@
+name: i18n catalog
+
+# Seconds-fast guard for the English catalogs: valid JSON, no key defined twice (Android's
+# catalog test rejects those) and the canonical sorted order that keeps pull requests from
+# conflicting on the end of the file. Fix locally with `npm run i18n:sort` in fanotes/.
+on:
+  pull_request:
+    paths:
+      - 'fanotes/resources/i18n/**'
+      - 'fanotes-site/public/i18n/**'
+      - 'fanotes/scripts/sort-i18n.cjs'
+      - '.github/workflows/i18n.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: i18n-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  catalog:
+    name: i18n sorted
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: node fanotes/scripts/sort-i18n.cjs --check
