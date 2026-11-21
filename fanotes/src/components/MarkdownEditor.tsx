@@ -184,6 +184,9 @@ export type MarkdownFormatAction =
   | 'heading1'
   | 'heading2'
   | 'heading3'
+  | 'heading4'
+  | 'heading5'
+  | 'heading6'
   | 'bold'
   | 'italic'
   | 'strike'
@@ -353,6 +356,9 @@ export function applyMarkdownFormat(view: EditorView, action: MarkdownFormatActi
     case 'heading1': return transformSelectedLines(view, (line) => `# ${stripBlockPrefix(line).trimStart()}`)
     case 'heading2': return transformSelectedLines(view, (line) => `## ${stripBlockPrefix(line).trimStart()}`)
     case 'heading3': return transformSelectedLines(view, (line) => `### ${stripBlockPrefix(line).trimStart()}`)
+    case 'heading4': return transformSelectedLines(view, (line) => `#### ${stripBlockPrefix(line).trimStart()}`)
+    case 'heading5': return transformSelectedLines(view, (line) => `##### ${stripBlockPrefix(line).trimStart()}`)
+    case 'heading6': return transformSelectedLines(view, (line) => `###### ${stripBlockPrefix(line).trimStart()}`)
     case 'bold': return wrapSelection(view, '**', '**', 'fetter Text')
     case 'italic': return wrapSelection(view, '*', '*', 'kursiver Text')
     case 'strike': return wrapSelection(view, '~~', '~~', 'durchgestrichener Text')

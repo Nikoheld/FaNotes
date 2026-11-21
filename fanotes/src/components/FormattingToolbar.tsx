@@ -6,6 +6,9 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  Heading4,
+  Heading5,
+  Heading6,
   Italic,
   Link2,
   List,
@@ -62,11 +65,19 @@ type ActionEntry = {
   icon: typeof Bold
 }
 
+/** Singular and plural of the table grid cell label ("1 Zeile und 1 Spalte"). */
+export const tableGridLabel = (rows: number, columns: number) => (
+  `Tabelle mit ${rows} ${rows === 1 ? 'Zeile' : 'Zeilen'} und ${columns} ${columns === 1 ? 'Spalte' : 'Spalten'} einfügen`
+)
+
 /** Heading levels live in one menu so the bar shows no digits. */
 const HEADINGS: ActionEntry[] = [
   { action: 'heading1', label: 'Überschrift 1', icon: Heading1 },
   { action: 'heading2', label: 'Überschrift 2', icon: Heading2 },
   { action: 'heading3', label: 'Überschrift 3', icon: Heading3 },
+  { action: 'heading4', label: 'Überschrift 4', icon: Heading4 },
+  { action: 'heading5', label: 'Überschrift 5', icon: Heading5 },
+  { action: 'heading6', label: 'Überschrift 6', icon: Heading6 },
 ]
 
 /** Frequent actions in bar order; `group` draws a separator between neighbours. */
@@ -108,7 +119,7 @@ function TableGridPicker({ disabled, onPick }: { disabled: boolean; onPick: (row
           type="button"
                     data-menu-close
           className={lit ? 'ftb-grid-cell is-lit' : 'ftb-grid-cell'}
-          aria-label={`Tabelle mit ${row} Zeilen und ${column} Spalten einfügen`}
+          aria-label={tableGridLabel(row, column)}
           disabled={disabled}
           tabIndex={row === 1 && column === 1 ? 0 : -1}
           onPointerEnter={() => setHover({ rows: row, columns: column })}

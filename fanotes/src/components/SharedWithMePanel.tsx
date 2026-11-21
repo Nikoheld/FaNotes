@@ -5,6 +5,8 @@ import { userShares } from '../lib/sync/userShares'
 type Props = {
   /** Reveal a vault path in the file tree (the received copy of an accepted share). */
   onReveal: (path: string) => void
+  /** Open a note of the share in the editor. */
+  onOpen: (path: string) => void
   toast: (message: string, kind?: 'info' | 'error' | 'success') => void
 }
 
@@ -12,7 +14,7 @@ type Props = {
  * "Mit mir geteilt": shares sent to this account. Requests from people the user has not shared with before wait here
  * for a decision. Accepted shares live as folders under "Mit mir geteilt" in the file tree.
  */
-export function SharedWithMePanel({ onReveal, toast }: Props) {
+export function SharedWithMePanel({ onReveal, onOpen, toast }: Props) {
   const state = useSyncExternalStore(userShares.subscribe, userShares.getState, userShares.getState)
   const [open, setOpen] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
@@ -55,7 +57,12 @@ export function SharedWithMePanel({ onReveal, toast }: Props) {
           ))}
           {accepted.map((share) => (
             <li key={share.id}>
-              <button type="button" className="shared-with-me__item" disabled={!share.localRoot} onClick={() => share.localRoot && onReveal(share.localRoot)} title={share.problem ?? undefined}>
+              <button type="button" className="shared-with-me__item" disabled={!share.localRoot} onClick={() => {
+                if (!share.localRoot) return
+                // A shared note opens in the editor; a folder is revealed and expanded in the tree.
+                const note = share.kind === 'note' ? userShares.firstNotePath(share.id) : null
+                if (note) { onReveal(share.localRoot); onOpen(note) } else onReveal(share.localRoot)
+              }} title={share.problem ?? undefined}>
                 <FolderOpen size={14} />
                 <span data-i18n-ignore>{share.name || 'Geteilte Freigabe ohne Titel'}</span>
                 <small data-i18n-ignore>{share.peer}{share.permission === 'edit' ? '' : ' · nur lesen'}</small>
