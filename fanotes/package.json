@@ -242,6 +242,7 @@
     "check:split-view": "node scripts/check-split-view.mjs",
     "check:addons": "node scripts/check-addons.mjs",
     "check:sync": "node scripts/check-sync.mjs",
+    "check:sync-all-notes": "node scripts/check-sync-all-notes.mjs",
     "check:account-share": "node scripts/check-account-share.mjs",
     "check:live-collab": "node scripts/check-live-collab.mjs && node scripts/check-live-collab-editor.mjs && node scripts/check-live-collab-ink.mjs",
     "check:mcp": "node scripts/check-mcp.mjs",

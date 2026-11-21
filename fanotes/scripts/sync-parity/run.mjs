@@ -134,7 +134,7 @@ const createTsDevice = (id, name) => {
     const log = engine.log.bind(engine)
     engine.log = (level, text) => { events.push({ log: [level, text] }); log(level, text) }
     engine.attach(host, {
-      platform: 'linux', deviceName: () => name, automatic: () => false,
+      platform: 'linux', deviceName: () => name, automatic: () => false, reconcile: false,
       isPathBusy: (path) => settings.busy.includes(path),
       excludedPrefixes: () => settings.excluded,
       includeHistory: () => settings.includeHistory, includeRecognitionModel: () => settings.includeModel,

@@ -419,6 +419,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   mcpExcludedFolders: '',
   syncHandwritingModel: false,
   syncNoteHistory: false,
+  syncAttachments: true,
   profileOwnerId: '',
   profileUsername: '',
   profilePublic: false,
@@ -6124,6 +6125,7 @@ function registerIpcHandlers() {
     userDataDirectory: app.getPath('userData'),
     safeStorage,
     trashItem: (target) => shell.trashItem(target),
+    folderLocations: (root) => folderLocationMap(root),
   }))
   handle(IPC.setFullscreen, (event, on) => {
     const win = BrowserWindow.fromWebContents(event.sender)

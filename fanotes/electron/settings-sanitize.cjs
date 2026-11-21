@@ -43,6 +43,7 @@ const SETTINGS_SCHEMA = Object.freeze({
   mcpExcludedFolders: { type: 'string', max: 4000 },
   syncHandwritingModel: { type: 'boolean' },
   syncNoteHistory: { type: 'boolean' },
+  syncAttachments: { type: 'boolean' },
   profileOwnerId: { type: 'string', max: 32 },
   profileUsername: { type: 'string', max: 24 },
   profilePublic: { type: 'boolean' },
