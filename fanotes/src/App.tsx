@@ -6545,7 +6545,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 {tagFilter && <button type="button" className="tag-filter-clear" onClick={() => setTagFilter(null)}>Filter aus</button>}
               </div>
             )}
-            <SharedWithMePanel onReveal={setRevealPath} toast={toast} />
+            <SharedWithMePanel onReveal={setRevealPath} onOpen={(path) => { void openNote(path) }} toast={toast} />
             <div className="file-tree-wrap">
               <FileTree
                 entries={visibleTree}

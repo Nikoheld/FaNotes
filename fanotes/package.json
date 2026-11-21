@@ -17,7 +17,7 @@
     "check:graphics-contrast": "node scripts/check-graphics-contrast.mjs",
     "check:statistics": "node scripts/check-vault-stats.mjs",
     "check:diagnostics": "node scripts/check-diagnostics.mjs",
-    "check:send-data": "node scripts/check-send-data.cjs",
+    "check:send-data": "node scripts/check-send-data.cjs && node scripts/check-settings-schema.cjs",
     "check:csp": "node scripts/check-csp-delivery.cjs",
     "check:visual": "node scripts/check-visual-rendering.cjs",
     "check:vault-watch": "node scripts/check-vault-watch.cjs",
