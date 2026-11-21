@@ -1575,9 +1575,57 @@ async function ensureStarterFolder(root, folderName) {
   if (!isInsideRoot(root, realTarget)) throw new Error(`Der Ordner „${folderName}“ verlässt den Vault.`)
 }
 
+let defaultVaultChoicePromise = null
+
+/**
+ * A profile without config.json must not silently bind to an existing
+ * Documents/FaNotes folder (QA-006): ask first. Concurrent bootstrap calls
+ * on a first launch share one prompt. Resolves to a folder path to use, or
+ * null to continue with the default folder.
+ */
+async function folderHasEntries(directory) {
+  try {
+    return (await fsp.readdir(directory)).length > 0
+  } catch {
+    return false
+  }
+}
+
+function askExistingDefaultVault(defaultPath) {
+  if (!defaultVaultChoicePromise) {
+    defaultVaultChoicePromise = (async () => {
+      for (;;) {
+        const { response } = await dialog.showMessageBox(localizedDialog({
+          type: 'question',
+          title: 'Vorhandenen Ordner verwenden?',
+          message: 'Der Ordner „FaNotes“ in Dokumente existiert bereits und enthält Dateien. Möchtest du ihn als Vault verwenden oder einen anderen Ordner wählen?',
+          detail: defaultPath,
+          buttons: ['Diesen Ordner verwenden', 'Anderen Ordner wählen …'],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        }))
+        if (response === 0) return defaultPath
+        const picked = await dialog.showOpenDialog(localizedDialog({
+          title: 'FaNotes-Vault auswählen',
+          defaultPath: app.getPath('documents'),
+          buttonLabel: 'Als Vault verwenden',
+          properties: ['openDirectory', 'createDirectory'],
+        }))
+        if (!picked.canceled && picked.filePaths.length === 1) return picked.filePaths[0]
+      }
+    })().finally(() => { defaultVaultChoicePromise = null })
+  }
+  return defaultVaultChoicePromise
+}
+
 async function ensureDefaultVault() {
-  const defaultPath = path.join(app.getPath('documents'), 'FaNotes')
+  let defaultPath = path.join(app.getPath('documents'), 'FaNotes')
   let isNew = false
+
+  if (await folderHasEntries(defaultPath)) {
+    defaultPath = await askExistingDefaultVault(defaultPath)
+  }
 
   try {
     const existing = await fsp.lstat(defaultPath)
@@ -3813,6 +3861,15 @@ function ensureUpdateManager() {
 function desktopUpdateLocks() {
   updateLocks ??= require('./update-lock.cjs').createUpdateLocks(path.join(app.getPath('userData'), 'updates'))
   return updateLocks
+}
+
+/** True only for the packaged, installed app started without an isolated profile (QA-019). */
+function shouldRegisterProtocolClient() {
+  if (!app.isPackaged) return false
+  if (process.env.PORTABLE_EXECUTABLE_FILE || process.env.PORTABLE_EXECUTABLE_DIR) return false
+  if (process.env.FANOTES_TEST || process.env.FANOTES_E2E || process.env.FANOTES_USER_DATA_DIR) return false
+  if (process.argv.some((arg) => typeof arg === 'string' && arg.startsWith('--user-data-dir'))) return false
+  return true
 }
 
 /**
@@ -6446,7 +6503,11 @@ if (!app.requestSingleInstanceLock()) {
     await coordinateWithBackgroundUpdater()
     void refreshLinuxMonitorScale()
     pendingShareOpenId = pendingShareOpenId || shareOpenIdFromArgv(process.argv)
-    try { app.setAsDefaultProtocolClient('fanotes') } catch { /* the installed package registers the protocol on release */ }
+    // Only the installed, packaged app owns the fanotes:// handler (QA-019).
+    // Dev, portable and --user-data-dir/test runs must not re-point it.
+    if (shouldRegisterProtocolClient()) {
+      try { app.setAsDefaultProtocolClient('fanotes') } catch { /* the installed package registers the protocol on release */ }
+    }
     installModelProtocol()
     installSecurityPolicy()
     registerIpcHandlers()

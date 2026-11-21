@@ -142,11 +142,11 @@ export const Toolbar = memo(function Toolbar({ act, title, binderOpen, setBinder
     <details className="wm-menu">
       <summary className="wm-icon" title={L('Einfügen', 'Insert')} aria-label={L('Einfügen', 'Insert')}><Plus size={16} /><ChevronDown size={12} /></summary>
       <div className="wm-popover wm-list">
-        <button type="button" onClick={() => { act.addFootnote(); act.refocus() }}>{L('Fussnote', 'Footnote')} <kbd>Strg+Alt+F</kbd></button>
-        <button type="button" onClick={() => { act.addComment(); act.refocus() }}><MessageSquarePlus size={14} /> {L('Kommentar', 'Comment')} <kbd>Strg+Alt+M</kbd></button>
+        <button type="button" onClick={() => { act.addFootnote(); act.refocus() }}>{L('Fussnote', 'Footnote')} <kbd>Strg+Umschalt+O</kbd></button>
+        <button type="button" onClick={() => { act.addComment(); act.refocus() }}><MessageSquarePlus size={14} /> {L('Kommentar', 'Comment')} <kbd>Strg+Umschalt+M</kbd></button>
         <button type="button" onClick={() => { act.insertBreak('page'); act.refocus() }}>{L('Seitenumbruch', 'Page break')} <kbd>Strg+Enter</kbd></button>
         <button type="button" onClick={() => { act.insertBreak('scene'); act.refocus() }}>{L('Neue Szene ab hier', 'New scene from here')} <kbd>Strg+⇧+Enter</kbd></button>
-        <button type="button" onClick={() => { act.insertBreak('chapter'); act.refocus() }}>{L('Neues Kapitel ab hier', 'New chapter from here')} <kbd>Strg+Alt+Enter</kbd></button>
+        <button type="button" onClick={() => { act.insertBreak('chapter'); act.refocus() }}>{L('Neues Kapitel ab hier', 'New chapter from here')} <kbd>Strg+Umschalt+C</kbd></button>
       </div>
     </details>
     <button type="button" className={`wm-icon${findOpen ? ' is-on' : ''}`} aria-pressed={findOpen} title={L('Suchen und Ersetzen (Strg+F / Strg+H)', 'Find and replace (Ctrl+F / Ctrl+H)')} onClick={() => setFind((value) => ({ ...value, open: !value.open }))}><Search size={16} /></button>
