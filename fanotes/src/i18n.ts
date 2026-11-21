@@ -6,7 +6,7 @@ type EnglishCatalog = Record<string, string>
 type AttributeSnapshot = { source: string; translated: string }
 
 const STORAGE_KEY = 'fanotes.uiLanguage'
-const TRANSLATED_ATTRIBUTES = ['aria-label', 'alt', 'placeholder', 'title'] as const
+const TRANSLATED_ATTRIBUTES = ['aria-label', 'alt', 'placeholder', 'title', 'data-tooltip'] as const
 const USER_CONTENT_SELECTOR = [
   '[data-i18n-ignore]',
   '[contenteditable="true"]',

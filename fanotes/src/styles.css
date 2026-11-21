@@ -50,6 +50,22 @@
   --motion-fast: .16s;
   --motion-med: .24s;
   --motion-slow: .48s;
+  /* Shared polish tokens: spacing scale, radii, icon sizes, focus ring (used by dialogs, menus and notices). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-card: 10px;
+  --radius-dialog: 18px;
+  --radius-pill: 999px;
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --focus-ring: 2px solid var(--accent-readable);
+  --transition-hover: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
 * { box-sizing: border-box; }
@@ -60,7 +76,7 @@ button { color: inherit; }
 button, select { -webkit-user-select: none; user-select: none; }
 /* Text for screen readers only (live regions, extra context). */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent-readable); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible, [role="menuitem"]:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 ::selection { color: var(--text); background: color-mix(in srgb, var(--accent) 38%, var(--bg)); }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -167,6 +183,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .theme-oled .paper-sheet-plane, .theme-oled .unified-note-view { background: #000 !important; }
 .app-shell.theme-oled, .app-shell.theme-oled.background-gradient, .app-shell.theme-oled.background-mesh, .app-shell.theme-oled.background-paper,
 .app-shell.theme-oled.dashboard-shell.background-gradient, .app-shell.theme-oled.dashboard-shell.background-mesh, .app-shell.theme-oled.dashboard-shell.background-paper { background: #000; background-image: none; }
+/* The alias tokens resolve where they are declared: declared only on :root they kept the dark values in every other
+   theme (faint labels were #b3b3ae on white). Re-derive them on the shell and on the portaled body theme class. */
+.app-shell, body[class*="app-theme-"] {
+  --text-primary: var(--text);
+  --text-faint: var(--text-muted);
+  --surface-elevated: var(--panel-strong);
+  --surface-input: var(--bg-elevated);
+  --shadow-lg: var(--shadow);
+  --background: var(--bg);
+  --background-secondary: var(--bg-elevated);
+}
 .app-shell.theme-forest, body.app-theme-forest {
   --bg: #171a18;
   --bg-elevated: #1e221f;
@@ -5295,7 +5322,7 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .shared-with-me__head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 9px; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
 .shared-with-me__badge { margin-left: auto; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: #fff; font-style: normal; font-size: 11px; line-height: 18px; text-align: center; }
 .shared-with-me__list { list-style: none; margin: 0; padding: 0 6px 6px; display: grid; gap: 4px; }
-.shared-with-me__request { display: grid; gap: 6px; padding: 7px 8px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--panel-strong); font-size: 12.5px; color: var(--text); }
+.shared-with-me__request { display: grid; gap: 6px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-strong); font-size: 12.5px; color: var(--text); }
 .shared-with-me__actions { display: flex; flex-wrap: wrap; gap: 5px; }
 .shared-with-me__actions button { min-height: 32px; padding: 4px 9px; font-size: 12px; }
 .shared-with-me__item { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 32px; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
@@ -5314,6 +5341,36 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .share-user-list li { display: flex; align-items: center; gap: 8px; }
 .share-user-list li small { color: var(--text-muted); margin-right: auto; }
 
+/* ---- Polish pass: shared dialog/menu/notice rules (tokens in :root) ------------------------------------------ */
+/* One corner radius for every dialog shell (settings 20, add-on store 20, confirm 18, OneNote 17 before). */
+.settings-modal, .addon-store, .onenote-dialog, .confirm-dialog { border-radius: var(--radius-dialog); }
+/* Form fields inside dialogs share the 8px field radius (OneNote and the bug report used 10px). */
+.onenote-dialog-destination select, .onenote-dialog-destination input[type="text"], .bug-report-body textarea { border-radius: var(--radius-md); }
+/* Dialog header, body and footer use the same 18px horizontal gutter and hairline dividers. */
+.onenote-dialog > header { padding: 0 14px 0 18px; }
+.onenote-dialog-body { padding: 14px 18px; }
+.onenote-dialog > footer { padding: 8px 18px; }
+.bug-report-actions { margin-top: 2px; padding-top: 12px; border-top: 1px solid var(--border); }
+/* Context menu: share rows keep a fixed icon size (the icon shrank next to wrapped text) and a readable caption. */
+.file-tree__context-menu button > svg { flex: none; }
+.file-tree__share-choice small { font-size: 12px; }
+.file-tree__mini-action svg, .cm-table-tool svg, .toolbar-button.menu-trigger > svg { width: var(--icon-sm); height: var(--icon-sm); }
+/* Sidebar "Shared with me" panel and diagnostics notice. */
+.shared-with-me__badge { color: var(--on-accent); font-size: 12px; }
+.shared-with-me__head, .shared-with-me__item, .onenote-dialog-link, .onenote-dialog-page, .send-data-notice-actions button { transition: var(--transition-hover); }
+.shared-with-me__head:hover { background: var(--panel-hover); }
+.shared-with-me__item:active:not(:disabled), .onenote-dialog-link:active, .onenote-dialog-page:active { background: var(--panel-active); }
+.secondary-button:active:not(:disabled), .icon-button:active:not(:disabled) { background: var(--panel-active); }
+.settings-feature-badge { color: color-mix(in srgb, var(--accent-readable) 80%, var(--text)); }
+/* Dialogs and notices fade in over 160 ms instead of popping. */
+@keyframes polish-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.send-data-notice { animation: polish-rise 160ms var(--ease-out) both; }
+/* OLED: the dialog scrim is pure black, not the blue-tinted dim used on the other themes. */
+.theme-oled .modal-backdrop:not(.settings-backdrop), body.app-theme-oled .modal-backdrop:not(.settings-backdrop) { background: rgba(0, 0, 0, .78); }
+@media (prefers-reduced-motion: reduce) {
+  .send-data-notice, .confirm-dialog, .onenote-dialog, .file-tree__context-menu { animation: none !important; }
+  .shared-with-me__head, .shared-with-me__item, .onenote-dialog-link, .onenote-dialog-page, .send-data-notice-actions button { transition: none; }
+}
 /* Live co-editing of shared notes: who is in the note, remote cursors and pens. */
 .live-people { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; }
 .live-avatar {
