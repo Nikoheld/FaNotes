@@ -127,3 +127,102 @@ export const templatesToSeed = (existingPaths: readonly string[], profile: NoteP
   if (existingPaths.some((path) => path === TEMPLATES_FOLDER || path.startsWith(`${TEMPLATES_FOLDER}/`))) return []
   return templatesForProfile(profile)
 }
+
+const ENGLISH_TEMPLATES: Record<string, Pick<NoteTemplate, 'title' | 'fileName' | 'markdown'>> = {
+  protocol: {
+    title: 'Lab report',
+    fileName: 'Lab report',
+    markdown: `# Lab report
+
+**Subject:**
+**Date:**
+**Experiment:**
+
+## Setup
+
+## Observation
+
+## Result
+
+## Question
+
+`,
+  },
+  proof: {
+    title: 'Proof',
+    fileName: 'Proof',
+    markdown: `# Proof
+
+**Theorem.**
+
+## Assumptions
+
+## Proof
+
+1.
+
+## Remark
+
+`,
+  },
+  cornell: {
+    title: 'Cornell',
+    fileName: 'Cornell',
+    markdown: `# Cornell
+
+| Cues | Notes |
+| --- | --- |
+|  |  |
+
+## Summary
+
+`,
+  },
+  vocabulary: {
+    title: 'Vocabulary',
+    fileName: 'Vocabulary',
+    markdown: `# Vocabulary
+
+| Word | Translation | Example |
+| --- | --- | --- |
+|  |  |  |
+
+`,
+  },
+  journal: {
+    title: 'Journal',
+    fileName: 'Journal',
+    markdown: `# Journal
+
+## What happened
+
+## What I take with me
+
+`,
+  },
+  meeting: {
+    title: 'Meeting',
+    fileName: 'Meeting',
+    markdown: `# Meeting
+
+**Date:**
+**Attendees:**
+
+## Decisions
+
+- [ ]
+
+## Open items
+
+- [ ]
+
+`,
+  },
+}
+
+/** The template in the UI language, so notes created from it do not stay German in the English UI. */
+export const localizeTemplate = (template: NoteTemplate, language: 'de' | 'en'): NoteTemplate => (
+  language === 'en' && ENGLISH_TEMPLATES[template.id] ? { ...template, ...ENGLISH_TEMPLATES[template.id] } : template
+)
+
+export const templatesFolderName = (language: 'de' | 'en') => (language === 'en' ? 'Templates' : TEMPLATES_FOLDER)

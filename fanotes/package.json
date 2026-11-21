@@ -149,6 +149,7 @@
     "check:i18n": "node scripts/check-i18n.cjs",
     "check:i18n-translate": "node scripts/check-i18n-translate.mjs",
     "check:i18n-catalog": "node scripts/check-i18n-catalog.mjs",
+    "check:i18n-mixed": "node scripts/check-i18n-mixed.mjs",
     "i18n:sort": "node scripts/sort-i18n.cjs",
     "check:i18n-sorted": "node scripts/sort-i18n.cjs --check",
     "build:glyphenwerk": "node scripts/stage-glyphenwerk.cjs",

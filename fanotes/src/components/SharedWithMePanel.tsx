@@ -1,4 +1,5 @@
 import { Check, ChevronDown, ChevronRight, FolderOpen, Share2, UserX, X } from 'lucide-react'
+import { uiText } from '../i18n'
 import { useState, useSyncExternalStore } from 'react'
 import { userShares } from '../lib/sync/userShares'
 
@@ -47,9 +48,11 @@ export function SharedWithMePanel({ onReveal, onOpen, toast }: Props) {
         <ul className="shared-with-me__list">
           {pending.map((share) => (
             <li key={share.id} className="shared-with-me__request">
-              <span data-i18n-ignore><strong>{share.peer}</strong> möchte „{share.name || 'eine Freigabe'}“ mit dir teilen ({share.permission === 'edit' ? 'bearbeiten' : 'lesen'}).</span>
+              <span data-i18n-ignore><strong>{share.peer}</strong>{share.permission === 'edit'
+                ? uiText(` möchte „${share.name || 'eine Freigabe'}“ mit dir teilen (bearbeiten).`, ` wants to share “${share.name || 'a share'}” with you (edit).`)
+                : uiText(` möchte „${share.name || 'eine Freigabe'}“ mit dir teilen (lesen).`, ` wants to share “${share.name || 'a share'}” with you (read).`)}</span>
               <span className="shared-with-me__actions">
-                <button type="button" className="primary-button" disabled={busy === share.id} onClick={() => void act(share.id, () => userShares.respond(share.id, true), `„${share.name}“ von ${share.peer} ist jetzt da.`)}><Check size={13} /> Annehmen</button>
+                <button type="button" className="primary-button" disabled={busy === share.id} onClick={() => void act(share.id, () => userShares.respond(share.id, true), uiText(`„${share.name}“ von ${share.peer} ist jetzt da.`, `“${share.name}” from ${share.peer} is now here.`))}><Check size={13} /> Annehmen</button>
                 <button type="button" className="secondary-button" disabled={busy === share.id} onClick={() => void act(share.id, () => userShares.respond(share.id, false))}><X size={13} /> Ablehnen</button>
                 <button type="button" className="secondary-button" disabled={busy === share.id} title="Ablehnen und weitere Freigaben dieser Person blockieren" onClick={() => void act(share.id, () => userShares.respond(share.id, false, true), `${share.peer} ist blockiert.`)}><UserX size={13} /> Blockieren</button>
               </span>

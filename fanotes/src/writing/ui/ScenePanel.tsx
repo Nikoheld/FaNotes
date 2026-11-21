@@ -1,5 +1,6 @@
 // Inspector tab for the scene at the caret: synopsis, status, label, point of
 // view, characters and places, linked notes, goal, export, and snapshots.
+import { colorSwatchName } from '../../lib/colorNames'
 import { Camera, ExternalLink, Link2, LoaderCircle, Plus, RotateCcw, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { BibleEntry } from '../model/bible'
@@ -64,7 +65,7 @@ export function ScenePanel({ node, words, characters, places, stamps, onPatch, o
           <PovSelect value={node.pov} characters={characters} onChange={(pov) => onPatch({ pov })} />
         </div>
         <div className="wm-swatches" role="group" aria-label={L('Label-Farbe', 'Label colour')}>
-          {LABEL_COLORS.map((color) => <button key={color} type="button" className={node.label === color ? 'is-on' : ''} style={{ background: color }} aria-label={color} onClick={() => onPatch({ label: color })} />)}
+          {LABEL_COLORS.map((color) => <button key={color} type="button" className={node.label === color ? 'is-on' : ''} style={{ background: color }} aria-label={colorSwatchName(color)} onClick={() => onPatch({ label: color })} />)}
           <button type="button" className="wm-swatch-clear" aria-label={L('Keine Farbe', 'No colour')} onClick={() => onPatch({ label: undefined })}><X size={12} /></button>
         </div>
         <label className="wm-inline">{L('Wortziel', 'Word goal')}

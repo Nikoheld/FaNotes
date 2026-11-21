@@ -1,6 +1,7 @@
 import {
   ArrowLeft, ChevronDown, ChevronRight, FilePlus2, LoaderCircle, MoreHorizontal, Plus, Replace, Search, Trash2, X,
 } from 'lucide-react'
+import { colorSwatchName } from '../../lib/colorNames'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as commands from '../editor/commands'
 import { WritingController, type EditKind } from '../editor/controller'
@@ -1392,7 +1393,7 @@ const Binder = memo(function Binder({ nodes, currentScene, sceneWords, onOpen, o
               </div>
             )}
             <div className="wm-swatches" role="group" aria-label={L('Label-Farbe', 'Label colour')}>
-              {LABEL_COLORS.map((color) => <button key={color} type="button" className={node.label === color ? 'is-on' : ''} style={{ background: color }} aria-label={color} onClick={() => onPatch(node.id, { label: color })} />)}
+              {LABEL_COLORS.map((color) => <button key={color} type="button" className={node.label === color ? 'is-on' : ''} style={{ background: color }} aria-label={colorSwatchName(color)} onClick={() => onPatch(node.id, { label: color })} />)}
               <button type="button" className="wm-swatch-clear" aria-label={L('Keine Farbe', 'No colour')} onClick={() => onPatch(node.id, { label: undefined })}><X size={12} /></button>
             </div>
             <button type="button" role="menuitem" onClick={() => { onPatch(node.id, { exclude: node.exclude ? undefined : true }); setMenu(null) }}>

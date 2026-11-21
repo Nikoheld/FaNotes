@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { colorSwatchName } from '../lib/colorNames'
 import {
   BookOpen,
   Check,
@@ -672,7 +673,7 @@ export const FileTree = memo(function FileTree({
       <div className="folder-color-swatches" role="group" aria-label={labels.group}>
         {FOLDER_COLORS.map((color) => (
           <button
-            aria-label={color}
+            aria-label={colorSwatchName(color)}
             aria-checked={entry.color === color}
             className={entry.color === color ? 'active' : ''}
             key={color}
@@ -683,7 +684,7 @@ export const FileTree = memo(function FileTree({
             }}
             role="menuitemradio"
             style={{ '--folder-swatch': color, '--folder-swatch-contrast': bestContrastText(color) } as CSSProperties}
-            title={color}
+            title={colorSwatchName(color)}
             type="button"
           >
             {entry.color === color && <Check size={12} />}

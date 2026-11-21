@@ -126,9 +126,12 @@ export class DocIndex {
   private buckets = new Map<string, Set<string>>()
   private titleCache = new Map<string, Set<string>>()
   private totalLength = 0
+  private ocrUnits = 0
 
   get documentCount() { return this.docs.size }
   get unitCount() { return this.units.size }
+  /** Pages/images searchable through text recognition, whichever run produced them. */
+  get ocrUnitCount() { return this.ocrUnits }
 
   getDoc(path: string) { return this.docs.get(path) }
   listDocs() { return [...this.docs.values()] }
@@ -147,6 +150,7 @@ export class DocIndex {
     for (const token of tokens) tf.set(token, (tf.get(token) ?? 0) + 1)
     const stored: StoredUnit = { ...unit, length: tokens.length, tf, textKey: hashText(folded) }
     this.units.set(unit.id, stored)
+    if (unit.source === 'ocr') this.ocrUnits += 1
     let set = this.docUnits.get(unit.path)
     if (!set) { set = new Set(); this.docUnits.set(unit.path, set) }
     set.add(unit.id)
@@ -179,6 +183,7 @@ export class DocIndex {
     }
     this.totalLength -= unit.length
     this.units.delete(id)
+    if (unit.source === 'ocr') this.ocrUnits -= 1
     this.docUnits.get(unit.path)?.delete(id)
   }
 
@@ -195,6 +200,7 @@ export class DocIndex {
   clear() {
     this.units.clear(); this.docUnits.clear(); this.docs.clear(); this.postings.clear(); this.buckets.clear(); this.titleCache.clear()
     this.totalLength = 0
+    this.ocrUnits = 0
   }
 
   private expand(term: string) {

@@ -25,6 +25,7 @@ import {
   Table2,
 } from 'lucide-react'
 import { memo, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { uiText } from '../i18n'
 import { operandsForButton, simpleLatexSnippet, type SimpleLatexButton, type SimpleLatexOperands } from '../lib/simpleLatex'
 import type { MarkdownFormatAction } from './MarkdownEditor'
 import { ToolbarMenu } from './ToolbarMenu'
@@ -67,7 +68,10 @@ type ActionEntry = {
 
 /** Singular and plural of the table grid cell label ("1 Zeile und 1 Spalte"). */
 export const tableGridLabel = (rows: number, columns: number) => (
-  `Tabelle mit ${rows} ${rows === 1 ? 'Zeile' : 'Zeilen'} und ${columns} ${columns === 1 ? 'Spalte' : 'Spalten'} einfügen`
+  uiText(
+    `Tabelle mit ${rows} ${rows === 1 ? 'Zeile' : 'Zeilen'} und ${columns} ${columns === 1 ? 'Spalte' : 'Spalten'} einfügen`,
+    `Insert table with ${rows} ${rows === 1 ? 'row' : 'rows'} and ${columns} ${columns === 1 ? 'column' : 'columns'}`,
+  )
 )
 
 /** Heading levels live in one menu so the bar shows no digits. */
