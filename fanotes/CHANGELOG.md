@@ -1,5 +1,44 @@
 # Änderungsverlauf
 
+## 2026.11.3-beta.9
+
+- i18n: keep en.json sorted so pull requests stop conflicting on it
+- ci(idle-wakeups): 6-minute watchdog, phase log and one retry instead of a silent 30-minute hang
+- test(host): worksheet number check no longer trips on the save timestamp
+- ci(android): cache Gradle, cancel superseded runs, run site tests in parallel
+- i18n: drop duplicate "Live" key from merge
+- Polish pass: shared tokens, theme-correct aliases, English strings, dialog consistency
+- check-split-view: poll for pane texts instead of fixed pauses
+- Fix split pane camera and workspace restore race; defer doc indexing; idle check diagnostics
+- Live co-editing: several collaborators per note, live ink wire test
+- Restore the split check to main's version
+- Split check: do not depend on a timing-dependent remembered camera
+- Add live co-editing for shared notes (text, ink, presence)
+- Split check: give the last-open note and layout time to persist before and after the reload
+- Split check: show the pane texts when the reload assertion fails
+- Revert the scroller polling in the split fit (the cause was the shared remembered camera)
+- Split panes ignore a remembered zoom-1 camera made for another pane width
+- Split pane: fit the sheet even when the note's remembered camera is at zoom 1
+- Split check: print paper view memory and sheet style when the fit assertion fails
+- Split pane: wait for the lazy-loaded editor before fitting the sheet
+- Use one OCR worker on low memory or battery
+- Add live-board beautify check to ink-stable
+- Make background OCR indexing cheaper and low priority
+- Keep the OneNote layout on pages with ink.
+- Sync: keep the Rust parity harness on the old request sequence
+- Show the send-data notice only when the desktop bridge exists
+- Remove the remote /mcp connector; keep the local MCP server
+- Overhaul the OneNote import: normal notes, ink as .famd, page picker.
+- Add accounts without e-mail or password and end-to-end encrypted shares to a username
+- Scope remembered heading folds per vault
+- Redo markdown tables as a Word-style editor
+- Sync: upload every note, report failures, reconcile with the server
+- Add optional handwriting beautifier (desktop)
+- Send data on by default: crash reports, perf stats, one settings section
+- Fix fullscreen black area, move folder fold button into search row, remember heading folds
+- Pen marking menu by direction and support for non-Wacom pens
+- Render ink in the website .famd viewer and drop the Grok-specific MCP connector parts
+
 ## 2026.11.3-beta.8
 
 - Recover Alpha builds and reuse unchanged beta packages
