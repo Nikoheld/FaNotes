@@ -62,6 +62,7 @@ put('Bio/Zelle.md', [
   '<!-- fanotes-cards-v1', JSON.stringify({ cards: [{ id: 'c1', front: 'Was ist ein Mitochondrium?', back: 'Kraftwerk der Zelle', ease: 2.5, intervalDays: 3, due: day(-1), reps: 2, lapses: 0 }] }), '-->', '',
 ].join('\n'))
 put('Notiz.famd', famd.serializeFamd('# Handschrift\n\nerkannter Text Kartoffel', { ink: { strokes: [] }, textFields: [{ id: 'a', x: 0, y: 0, width: 10, height: 10, page: 1, text: 'Textfeld Birne' }] }))
+put('Mathe/Analysis.famd', famd.serializeFamd('# Analysis\n\nKopie des Textes', { pageStats: { createdAt: stamp, modifiedAt: stamp, openCount: 1 } }))
 put('Skripte/Buch.pdf', '%PDF-1.4\nbinary \u0000\u0001 secret-binary-marker\n')
 const sidecarName = `${createHash('sha256').update('Skripte/Buch.pdf').digest('hex').slice(0, 32)}.json`
 put(`.fanotes/page-text/${sidecarName}`, JSON.stringify({
@@ -218,6 +219,7 @@ try {
     const all = toolData(await call('list_notes', { limit: 200 })).notes
     const paths = all.map((note) => note.path)
     assert.ok(paths.includes('Mathe/Analysis.md') && paths.includes('Notiz.famd') && paths.includes('Skripte/Buch.pdf') && paths.includes('Romane/Reise.story'))
+    assert.ok(!paths.includes('Mathe/Analysis.famd') && paths.filter((path) => path === 'Mathe/Analysis.md').length === 1, 'a .famd beside a .md of the same name is listed once, as the note')
     for (const hidden of ['Privat/Tagebuch.md', 'Hausaufgaben.md', 'Kalender.md']) assert.ok(!paths.includes(hidden), `${hidden} must not be listed`)
     assert.ok(!paths.some((path) => path.startsWith('.fanotes') || path.includes('Escape') || path.endsWith('link.md')), 'symlinks and internals must not be listed')
     const mathe = toolData(await call('list_notes', { folder: 'Mathe' })).notes.map((note) => note.path)

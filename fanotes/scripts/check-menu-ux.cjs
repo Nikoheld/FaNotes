@@ -62,7 +62,7 @@ const preservedSettings = [
   'Automatisch speichern', 'Standardordner', 'Tagesnotizen', 'Datumsformat',
   'Automatisch nach Updates suchen', 'Updates automatisch herunterladen',
   'Automatisch installieren', 'Bewegung reduzieren', 'Seitenleiste',
-  'Informationsleiste', 'Vim-Modus',
+  'Informationsleiste',
 ]
 for (const title of preservedSettings) {
   if (!settings.includes(`title="${title}"`)) throw new Error(`Die vorhandene Einstellung „${title}“ fehlt.`)

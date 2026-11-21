@@ -107,7 +107,16 @@ const THROTTLE_MAX_MS = 65_000
 const MAX_LOG = 120
 const MAX_SKIPPED = 200
 const MAX_FILE_BYTES = 100 * 1024 * 1024
-const CONCURRENCY = 3
+/**
+ * Requests in flight at once. The server allows 1200 requests per minute and account (20 per second), so six
+ * uploads at a time stay well inside the budget even on a fast link; a 429 still pauses the cycle.
+ */
+const PULL_CONCURRENCY = 4
+const PUSH_CONCURRENCY = 6
+/** File bytes the uploads in flight may hold at once. Each one briefly holds the file, its canonical form and the encrypted copy. */
+const PUSH_BYTE_BUDGET = 32 * 1024 * 1024
+/** The account details (storage use, devices) are fetched again after this long even when nothing here changed. */
+const ACCOUNT_MAX_AGE_MS = 10 * 60_000
 
 const INTERNAL_DIRECTORY = '.fanotes'
 const SKIPPED_INTERNAL = new Set(['history', 'onboarding.json', 'tree-cache', 'trash'])
@@ -231,20 +240,36 @@ const parseSecrets = (raw: string | null): Secrets | null => {
  * must not leave workers behind that still write files and change the sync state: the state is saved and a new
  * cycle can start right after, and a crash in between would leave new disk content with an old base.
  */
-const runLimited = async <T>(items: T[], limit: number, task: (item: T) => Promise<void>) => {
+const runLimited = async <T>(items: T[], limit: number, task: (item: T) => Promise<void>, weighting?: { weight: (item: T) => number; budget: number }) => {
   let index = 0
   let failed = false
   let failure: unknown
+  let held = 0
+  let running = 0
+  let waiters: Array<() => void> = []
+  const wake = () => { const list = waiters; waiters = []; for (const resolve of list) resolve() }
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (!failed && index < items.length) {
       const item = items[index]
+      const weight = weighting ? weighting.weight(item) : 0
+      // A big file waits until the uploads in flight have released enough of the byte budget; it always runs alone at worst.
+      if (weighting && running > 0 && held + weight > weighting.budget) {
+        await new Promise<void>((resolve) => { waiters.push(resolve) })
+        continue
+      }
       index += 1
+      held += weight
+      running += 1
       try {
         await task(item)
       } catch (error) {
         if (!failed) failure = error
         failed = true
         return
+      } finally {
+        held -= weight
+        running -= 1
+        wake()
       }
     }
   })
@@ -253,6 +278,9 @@ const runLimited = async <T>(items: T[], limit: number, task: (item: T) => Promi
 }
 
 export class SyncEngine {
+  /** Something happened (an upload, a download, a delete) that can change the account's storage numbers. */
+  private accountStale = true
+  private accountFetchedAt = 0
   private host: SyncHostApi | null = null
   private options: SyncEngineOptions | null = null
   private api: SyncApi
@@ -693,10 +721,19 @@ export class SyncEngine {
     this.setState({ status: 'signed-out', account: null, info: null, progress: null, pausedUntil: null, pendingLocal: 0, trackedFiles: 0, heldRemote: 0, conflicts: [], openConflicts: 0, error: null })
   }
 
-  async refreshAccount() {
+  /**
+   * Fetches the account details (storage use, devices). With `onlyIfChanged` the call is skipped while the details
+   * we have are still current: nothing was uploaded, downloaded or changed since, and they are younger than ten minutes.
+   * The server sends no ETag for this route, so the engine tracks the changes that can alter the answer itself.
+   */
+  async refreshAccount(options: { onlyIfChanged?: boolean } = {}) {
     if (!this.session) return null
+    const current = this.snapshot.info
+    if (options.onlyIfChanged && current && !this.accountStale && current.accountId === this.session.accountId && Date.now() - this.accountFetchedAt < ACCOUNT_MAX_AGE_MS) return current
     try {
+      this.accountStale = false
       const info = await this.api.account(this.session)
+      this.accountFetchedAt = Date.now()
       this.setState({ info })
       return info
     } catch (error) {
@@ -969,7 +1006,7 @@ export class SyncEngine {
     let done = 0
     let completed = false
     try {
-      await runLimited(pending, CONCURRENCY, async (entry) => {
+      await runLimited(pending, PULL_CONCURRENCY, async (entry) => {
         const { result, path, unreadable } = await this.applyRemote(entry, idIndex).catch((error: unknown): RemoteOutcome => {
           // Sign-in and network errors end the cycle. One damaged or undecryptable
           // entry must not keep every local edit on this device from uploading:
@@ -979,6 +1016,7 @@ export class SyncEngine {
           return { result: 'skipped', path: null }
         })
         if (result === 'conflict') conflicts += 1
+        if (result === 'written' || result === 'removed' || result === 'conflict') this.accountStale = true
         if ((result === 'written' || result === 'conflict') && path) written.push(path)
         if (result === 'removed' && path) removed.push(path)
         // A change to a note that is open with unsaved edits, or to a file that cannot be read here, is put
@@ -1276,9 +1314,18 @@ export class SyncEngine {
     let deletes = 0
     let conflicts = 0
     let done = 0
-    const tick = () => { done += 1; this.setState({ progress: { phase: 'push', done, total: changed.length + deleted.length } }) }
+    const total = changed.length + deleted.length
+    // Live numbers while the uploads run: files done of total, the shrinking upload queue and the tracked files.
+    const tick = () => {
+      done += 1
+      this.setState({
+        progress: { phase: 'push', done, total },
+        pendingLocal: Math.max(0, total - done),
+        ...(done % 5 === 0 || done === total ? { trackedFiles: Object.keys(this.state?.files ?? {}).length } : {}),
+      })
+    }
 
-    await runLimited(changed, CONCURRENCY, async (entry) => {
+    await runLimited(changed, PUSH_CONCURRENCY, async (entry) => {
       try {
         const outcome = await this.uploadPath(entry)
         if (outcome === 'uploaded') uploads += 1
@@ -1294,7 +1341,7 @@ export class SyncEngine {
       } finally {
         tick()
       }
-    })
+    }, { weight: (entry) => entry.size, budget: PUSH_BYTE_BUDGET })
     for (const path of deleted) {
       try {
         const outcome = await this.deletePath(path)
@@ -1308,6 +1355,7 @@ export class SyncEngine {
       }
     }
     await this.settlePendingDeletes(consideredDeletes)
+    if (uploads || deletes) this.accountStale = true
     this.scanCache = null
     this.publishFailures()
     await this.persistState()
