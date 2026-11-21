@@ -573,7 +573,10 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
       }
     }
     await visit('', 0)
-    return out
+    // A .famd beside a .md of the same name is that note's sidecar (page statistics, older builds also kept a text copy),
+    // not a second note: the pair is listed once, as the Markdown note.
+    const markdownStems = new Set(out.filter((entry) => entry.kind === 'markdown').map((entry) => entry.path.replace(/\.(md|markdown)$/iu, '').toLowerCase()))
+    return out.filter((entry) => entry.kind !== 'handwriting' || !markdownStems.has(entry.path.replace(/\.famd$/iu, '').toLowerCase()))
   }
 
   const iso = (mtimeMs) => (mtimeMs ? new Date(mtimeMs).toISOString() : null)

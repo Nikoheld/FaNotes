@@ -263,7 +263,6 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'RAM- und Leistungslimits', detail: 'Erweitert', section: 'advanced', target: 'settings-resources', keywords: 'ram speicher memory cpu kerne threads leistung performance energie hintergrund modell cache' },
   { label: 'Anonyme Nutzungsstatistik', detail: 'Erweitert', section: 'advanced', target: 'settings-privacy', keywords: 'datenschutz statistik anonym land app start downloads analytics privacy' },
   { label: 'Eigenes CSS', detail: 'Erweitert', section: 'advanced', target: 'settings-css', keywords: 'custom style design code variablen' },
-  { label: 'Vim-Modus', detail: 'Erweitert', section: 'advanced', target: 'settings-vim', keywords: 'tastatur keyboard shortcuts' },
   { label: 'Fehler melden', detail: 'Erweitert', section: 'advanced', target: 'settings-bug-report', keywords: 'bug report fehler melden problem absturz protokoll' },
   { label: 'App-Daten zurücksetzen', detail: 'Erweitert', section: 'advanced', target: 'settings-reset', keywords: 'reset löschen cache ausgangszustand werkseinstellung' },
 ]
@@ -1723,9 +1722,6 @@ export function SettingsModal({
                   <div className="setting-card-title"><Code2 size={16} /><span>Eigenes CSS</span></div>
                   <p>Wird nur innerhalb der Oberfläche angewandt. Damit kannst du Abstände, Farben und Markdown-Elemente weiter personalisieren.</p>
                   <textarea spellCheck={false} value={settings.customCss} placeholder={":root {\n  --radius: 14px;\n}"} onChange={(event) => update('customCss', event.target.value)} />
-                </div>
-                <div id="settings-vim" className="setting-card">
-                  <SettingRow title="Vim-Modus" description="Vorbereitet für eine optionale Vim-Tastenbelegung."><Toggle label="Vim-Modus" checked={settings.vimMode} onChange={(value) => update('vimMode', value)} /></SettingRow>
                 </div>
                 <div id="settings-reset" className="setting-card danger-zone">
                   <div className="setting-card-title"><TriangleAlert size={16} /><span>App-Daten zurücksetzen</span></div>

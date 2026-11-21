@@ -58,7 +58,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
 
   useEffect(() => {
     if (!signedIn) return
-    void engine.refreshAccount().catch(() => undefined)
+    void engine.refreshAccount({ onlyIfChanged: true }).catch(() => undefined)
   }, [engine, signedIn, syncState.lastSyncAt])
 
   const run = async (label: string, task: () => Promise<void>, success?: string) => {
