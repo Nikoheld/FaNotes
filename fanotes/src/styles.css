@@ -5264,6 +5264,7 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .app-shell.toolbar-fullscreen .app-body { grid-template-columns: minmax(0, 1fr) !important; }
 .app-shell.toolbar-fullscreen .workspace { grid-column: 1; min-width: 0; }
 .app-shell.toolbar-fullscreen .app-body > :not(.workspace) { display: none; }
+.app-shell.toolbar-fullscreen .send-data-notice { display: none; }
 
 /* Eraser mode choice (stroke vs area) in the drawing toolbar. */
 .lw-eraser-modes { display: flex; flex: none; gap: 3px; padding: 2px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }

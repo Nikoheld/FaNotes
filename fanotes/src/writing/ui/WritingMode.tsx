@@ -540,6 +540,15 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
     const handled = (() => {
       if (mod && !event.altKey) {
         const lower = key.toLowerCase()
+        // Ctrl+Shift shortcuts: Ctrl+Alt is AltGr on Windows and types characters (QA-015).
+        if (event.shiftKey) {
+          if (lower === 'm') return addComment(), true
+          if (lower === 'o') return addFootnote(), true
+          if (lower === 'c') return run(commands.splitScene(st, { chapter: true, titles: titles() }), 'structure'), true
+          if (event.code === 'Digit1') return run(commands.setParagraphStyle(st, 'chapter'), 'format'), true
+          if (event.code === 'Digit2') return run(commands.setParagraphStyle(st, 'heading'), 'format'), true
+          if (event.code === 'Digit3') return run(commands.setParagraphStyle(st, 'subheading'), 'format'), true
+        }
         if (lower === 'z' && !event.shiftKey) return controller.undo(), true
         if ((lower === 'y') || (lower === 'z' && event.shiftKey)) return controller.redo(), true
         if (lower === 'b') return run(commands.toggleMark(st, 'b'), 'format'), true
@@ -568,15 +577,6 @@ const spelling = found?.issue.category === 'spelling' ? found.issue : null
         if (key === 'ArrowDown') return moveCaret('paragraphDown', event.shiftKey), true
         if (key === 'Home') return moveCaret('docStart', event.shiftKey), true
         if (key === 'End') return moveCaret('docEnd', event.shiftKey), true
-        return false
-      }
-      if (mod && event.altKey) {
-        if (key === '1') return run(commands.setParagraphStyle(st, 'chapter'), 'format'), true
-        if (key === '2') return run(commands.setParagraphStyle(st, 'heading'), 'format'), true
-        if (key === '3') return run(commands.setParagraphStyle(st, 'subheading'), 'format'), true
-        if (key === 'Enter') return run(commands.splitScene(st, { chapter: true, titles: titles() }), 'structure'), true
-        if (key.toLowerCase() === 'f') return addFootnote(), true
-        if (key.toLowerCase() === 'm') return addComment(), true
         return false
       }
       switch (key) {

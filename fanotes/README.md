@@ -192,6 +192,8 @@ npm run dist:dir
 npm run dist:windows
 ```
 
+`dist:windows` baut die native Formelmodell-Laufzeit (CrispEmbed) aus dem Quellcode und braucht dafür Node.js 20+, Git, CMake und unter Windows die Visual Studio Build Tools (Workload „Desktop development with C++“). Fehlt `cmake`, nutzt das Skript die vorgebauten Dateien unter `native-math/win32-x64` (wie `npm run dist:windows:ci`, das nie neu baut). Für ein Windows-Paket ohne Compiler genügt also `npm run dist:windows:ci`.
+
 `dist:dir` erzeugt den unverpackten Linux-Build unter `release/linux-unpacked`. Das Arch-kompatible portable Archiv enthält einen einzelnen Top-Level-Ordner:
 
 ```text
@@ -408,6 +410,8 @@ npm run build
 npm run dist:dir
 npm run dist:windows
 ```
+
+`dist:windows` compiles the native math-model runtime (CrispEmbed) from source, which needs Node.js 20+, Git, CMake and, on Windows, the Visual Studio Build Tools (workload "Desktop development with C++"). If `cmake` is missing the script reuses the prebuilt binaries in `native-math/win32-x64` (what `npm run dist:windows:ci` always does without rebuilding). To package for Windows without a compiler, run `npm run dist:windows:ci`.
 
 `dist:dir` produces the unpacked Linux build under `release/linux-unpacked`. The Arch-compatible portable archive contains a single top-level folder:
 

@@ -437,6 +437,14 @@ const sampleRecord = (
 
 const cache = new Map<string, Promise<Sample[]>>()
 
+const SLICE_BUDGET_MS = 8
+
+const yieldToEventLoop = (): Promise<void> => {
+  const scheduler = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler
+  if (typeof scheduler?.yield === 'function') return scheduler.yield()
+  return new Promise((resolve) => { setTimeout(resolve, 0) })
+}
+
 /**
  * Produces a trusted, read-only baseline from bundled fonts. It never enters
  * IndexedDB and therefore cannot be mistaken for personal GlyphenWerk data.
@@ -452,7 +460,14 @@ export const createStandardRecognitionSamples = async (
   const pending = (async () => {
     await waitForBundledFonts()
     const samples: Sample[] = []
-    supported.forEach((label) => {
+    // Rendering the whole baseline in one pass blocks the renderer for 1-5 s
+    // (QA-018). Hand control back to the event loop every few milliseconds.
+    let sliceStart = performance.now()
+    for (const label of supported) {
+      if (performance.now() - sliceStart > SLICE_BUDGET_MS) {
+        await yieldToEventLoop()
+        sliceStart = performance.now()
+      }
       let variant = 0
       variantsForLabel(label).forEach((font) => {
         const strokes = referenceStrokes(variant)
@@ -492,7 +507,7 @@ export const createStandardRecognitionSamples = async (
           samples.push(sampleRecord(label, variant++, renderedStrokeGlyph(broadHandwrittenStrokes), broadHandwrittenStrokes))
         }
       }
-    })
+    }
     return samples
   })()
   cache.set(signature, pending)

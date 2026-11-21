@@ -215,7 +215,7 @@ export const Inspector = memo(function Inspector({ controller, manifest, footnot
         <div className="wm-inspector-body">
           <section>
             <h4><MessageSquare size={13} /> {L('Kommentare', 'Comments')} ({notes.comments.length})</h4>
-            {!notes.comments.length && <p className="wm-hint">{L('Text markieren und Strg+Alt+M drücken.', 'Select text and press Ctrl+Alt+M.')}</p>}
+            {!notes.comments.length && <p className="wm-hint">{L('Text markieren und Strg+Umschalt+M drücken.', 'Select text and press Ctrl+Shift+M.')}</p>}
             {notes.comments.map((comment) => (
               <div key={comment.id} className={`wm-note${comment.resolved ? ' is-resolved' : ''}`}>
                 <button type="button" className="wm-note-anchor" data-i18n-ignore onClick={() => comment.paragraphId && controller.select({ anchor: { block: paragraphKey(comment.paragraphId), offset: comment.from }, head: { block: paragraphKey(comment.paragraphId), offset: comment.to } })}>„{comment.excerpt}“</button>
@@ -230,7 +230,7 @@ export const Inspector = memo(function Inspector({ controller, manifest, footnot
           </section>
           <section>
             <h4>{L('Fussnoten', 'Footnotes')} ({notes.footnotes.length})</h4>
-            {!notes.footnotes.length && <p className="wm-hint">{L('Strg+Alt+F fügt an der Schreibmarke eine Fussnote ein.', 'Ctrl+Alt+F inserts a footnote at the cursor.')}</p>}
+            {!notes.footnotes.length && <p className="wm-hint">{L('Strg+Umschalt+O fügt an der Schreibmarke eine Fussnote ein.', 'Ctrl+Shift+O inserts a footnote at the cursor.')}</p>}
             {[...notes.footnotes].sort((a, b) => Number(footnoteNumbers.get(a.id) ?? 1e9) - Number(footnoteNumbers.get(b.id) ?? 1e9)).map((note) => (
               <label key={note.id} className="wm-field wide">
                 <span>{footnoteNumbers.get(note.id) ?? '–'}</span>

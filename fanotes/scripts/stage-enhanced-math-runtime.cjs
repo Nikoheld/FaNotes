@@ -65,6 +65,17 @@ if (process.env.FANOTES_NATIVE_MATH_REUSE === '1' && fs.existsSync(stagedBinary)
   process.exit(0)
 }
 
+// Without cmake (typical Windows machine without Visual Studio Build Tools) a
+// source build is impossible: reuse the committed prebuilt binaries if present.
+if (spawnSync('cmake', ['--version'], { stdio: 'ignore', windowsHide: true }).error) {
+  if (fs.existsSync(stagedBinary)) {
+    console.warn(`cmake wurde nicht gefunden; die vorgebaute Formelmodell-Laufzeit wird wiederverwendet: ${destination}`)
+    console.warn('cmake not found: reusing the prebuilt native math runtime (same as dist:windows:ci).')
+    process.exit(0)
+  }
+  throw new Error(`cmake wurde nicht gefunden und es gibt keine vorgebaute Laufzeit unter ${destination}. Installiere cmake (unter Windows zusätzlich die Visual Studio Build Tools mit "Desktop development with C++") oder nutze "npm run dist:windows:ci" mit vorgebauten Binärdateien.`)
+}
+
 try {
   if (!requestedSource) {
     run('git', ['clone', '--filter=blob:none', '--no-checkout', SOURCE_URL, source], temporary)
