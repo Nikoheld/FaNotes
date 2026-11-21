@@ -7,7 +7,7 @@
 // crates/fanotes-host/src/onenote.rs, then cleaned with the allowlist both read
 // from electron/onenote-sanitize-policy.json.
 
-import { parseFragment, serialize } from 'parse5'
+import { parse, parseFragment, serialize } from 'parse5'
 import { fromParse5 } from 'hast-util-from-parse5'
 import { toParse5 } from 'hast-util-to-parse5'
 import { sanitize } from 'hast-util-sanitize'
@@ -69,3 +69,6 @@ export function createOneNoteSanitizer(policy) {
     return serialize(toParse5(clean))
   }
 }
+
+/** The parse5 document tree of a converted page, for the Markdown and ink converter (onenote-convert.cjs). */
+export const parseOneNoteDocument = (html) => parse(String(html))

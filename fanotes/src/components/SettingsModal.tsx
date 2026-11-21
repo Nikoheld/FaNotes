@@ -60,7 +60,7 @@ import {
   tabletButtonControlsInGroup,
   type TabletButtonAction,
 } from '../lib/tabletButtons'
-import type { AppSettings, BackgroundUpdateInfo, EnhancedMathRecognitionState, OneNoteImportResult, QwenVisionState, ServerBackupState, UpdateState } from '../types'
+import type { AppSettings, BackgroundUpdateInfo, EnhancedMathRecognitionState, QwenVisionState, ServerBackupState, UpdateState } from '../types'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { SyncSettingsSection } from './SyncSettingsSection'
 import { McpSettingsSection } from './McpSettingsSection'
@@ -117,7 +117,7 @@ export type SettingsModalProps = {
   syncState?: SyncPublicState
   initialSection?: SettingsSection
   onImportTraining?: (file: File) => Promise<void>
-  onImportOneNote?: () => Promise<OneNoteImportResult | null>
+  onImportOneNote?: () => Promise<unknown>
   updateState: UpdateState
   onCheckUpdate: () => Promise<void>
   onDownloadUpdate: () => Promise<void>
@@ -688,14 +688,9 @@ export function SettingsModal({
     setOneNoteImportBusy(true)
     setOneNoteImportStatus(null)
     try {
-      const result = await onImportOneNote()
-      if (!result) return
-      setOneNoteImportStatus({
-        kind: 'success',
-        text: `${result.pageCount} ${result.pageCount === 1 ? 'Seite wurde' : 'Seiten wurden'} in „${result.rootFolder}“ übernommen${result.attachmentCount ? ` · ${result.attachmentCount} Anlagen sicher verwahrt` : ''}.`,
-      })
+      await onImportOneNote()
     } catch (error) {
-      setOneNoteImportStatus({ kind: 'error', text: error instanceof Error ? error.message : 'Das OneNote-Notizbuch konnte nicht importiert werden.' })
+      setOneNoteImportStatus({ kind: 'error', text: error instanceof Error ? error.message : 'Das OneNote-Notizbuch konnte nicht geöffnet werden.' })
     } finally {
       setOneNoteImportBusy(false)
     }
@@ -1015,6 +1010,19 @@ export function SettingsModal({
                     ))}
                   </div>
                   <SettingRow title="Strichglättung"><Range value={settings.smoothing} min={0} max={1} step={0.05} onChange={(value) => update('smoothing', value)} /></SettingRow>
+                  {!isWeb && (
+                    <SettingRow title="Handschrift verschönern" description="Glättet fertige Handschrift behutsam: Ecken, Punkte und Strichenden bleiben, Zeilen werden leicht begradigt, auf die Papierlinie gesetzt und die Buchstabenhöhe angeglichen. Zeichnungen, Mathe, Formen und Textmarker bleiben unberührt. Jeder Schritt lässt sich mit Strg+Z rückgängig machen (Verschönern rückgängig).">
+                      <Toggle label="Handschrift verschönern" checked={settings.beautifyHandwriting === true} onChange={(value) => update('beautifyHandwriting', value)} />
+                    </SettingRow>
+                  )}
+                  {!isWeb && settings.beautifyHandwriting === true && (
+                    <SettingRow title="Stärke der Verschönerung" description="Dezent verändert kaum etwas; Mittel glättet und richtet etwas deutlicher aus.">
+                      <select aria-label="Stärke der Verschönerung" value={settings.beautifyStrength === 'medium' ? 'medium' : 'subtle'} onChange={(event) => update('beautifyStrength', event.target.value === 'medium' ? 'medium' : 'subtle')}>
+                        <option value="subtle">Dezent</option>
+                        <option value="medium">Mittel</option>
+                      </select>
+                    </SettingRow>
+                  )}
                   <SettingRow title="Durchkritzel-Empfindlichkeit" description="Niedrig verlangt mehr Überkreuzungen; hoch löscht schon nach einem kürzeren, eindeutigen Durchkritzeln."><Range value={settings.scribbleEraseSensitivity} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('scribbleEraseSensitivity', value)} /></SettingRow>
                   <SettingRow title="Form-Erkennung" description="Wie bereitwillig Stillhalten eine Linie, einen Kreis oder ein Vieleck glättet. Niedrig nur bei sehr klaren Figuren; hoch früher und auch bei unsaubereren Strichen."><Range value={settings.shapeSnapSensitivity ?? 50} min={0} max={100} step={5} suffix=" %" onChange={(value) => update('shapeSnapSensitivity', value)} /></SettingRow>
                   <SettingRow
@@ -1221,21 +1229,21 @@ export function SettingsModal({
                   <p>{isWeb ? 'Notizen, Handschrift und Arbeitsblätter werden dauerhaft im privaten Browser-Speicher dieses Geräts abgelegt. Einzelne Notizen kannst du über die Download-Schaltfläche als Markdown exportieren.' : 'Alle Notizen sind normale Markdown-Dateien. Du kannst den Ordner jederzeit mit Git, Syncthing oder deinem NAS synchronisieren.'}</p>
                 </div>
                 <div id="settings-onenote" className="setting-card onenote-import-card">
-                  <div className="setting-card-title"><NotebookTabs size={16} /><span>Microsoft OneNote Import</span><small className="settings-feature-badge">Layoutgetreu</small></div>
+                  <div className="setting-card-title"><NotebookTabs size={16} /><span>Microsoft OneNote Import</span><small className="settings-feature-badge">Seiten wählen</small></div>
                   <div className="onenote-import-intro">
                     <span><NotebookTabs size={20} /></span>
-                    <div><strong>Ein Notizbuch, vollständig in deinem Vault</strong><p>FaNotes übernimmt Abschnitte, Seitenhierarchie, freie Anordnung, Formatierung, Bilder, Freihand, Mathematik und den durchsuchbaren Text. Die Originaldarstellung bleibt als sichere, skriptfreie Seite erhalten.</p></div>
+                    <div><strong>Ein Notizbuch, vollständig in deinem Vault</strong><p>Wähle Seiten und Zielordner. Jede OneNote-Seite wird eine normale FaNotes-Notiz mit Überschriften, Listen, Tabellen, Aufgaben, Links, Formeln und Bildern; Handschrift wird zu .famd-Ink.</p></div>
                   </div>
                   <div className="onenote-preservation-grid">
                     <div><b>Struktur</b><small>Notizbuch · Gruppen · Abschnitte · Seiten</small></div>
-                    <div><b>Seitenbild</b><small>Positionen · Tabellen · Ink · Formeln · Bilder</small></div>
-                    <div><b>Sicher</b><small>Anlagen bytegenau, aber niemals ausführbar</small></div>
+                    <div><b>Normale Notizen</b><small>Markdown · Tabellen · Formeln · Bilder</small></div>
+                    <div><b>Handschrift</b><small>Wird zu .famd-Ink, wo die Datei sie enthält</small></div>
                   </div>
                   <div className="onenote-import-actions">
                     <div><strong>.one · .onetoc2 · .onepkg · OneDrive-ZIP</strong><small>Für aktuelle OneNote- und OneDrive-Exporte unter Linux und Windows.</small></div>
                     <button type="button" className="primary-button" disabled={isWeb || !onImportOneNote || oneNoteImportBusy} onClick={() => void handleOneNoteImport()}>
                       {oneNoteImportBusy ? <LoaderCircle className="spin" size={15} /> : <FileInput size={15} />}
-                      {oneNoteImportBusy ? 'Wird sicher übernommen …' : isWeb ? 'In der Desktop-App' : 'OneNote importieren'}
+                      {oneNoteImportBusy ? 'Wird gelesen …' : isWeb ? 'In der Desktop-App' : 'OneNote öffnen'}
                     </button>
                   </div>
                   {oneNoteImportStatus && <div className={`setting-import-status is-${oneNoteImportStatus.kind}`} role={oneNoteImportStatus.kind === 'error' ? 'alert' : 'status'}>

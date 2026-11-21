@@ -5237,6 +5237,59 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .lw-eraser-modes button.is-active { color: var(--text); background: var(--panel-strong); box-shadow: inset 0 0 0 1px var(--accent); }
 .lw-eraser-modes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* OneNote import dialog: pick pages, choose the destination, watch progress. */
+.onenote-dialog-backdrop { z-index: 250; }
+.onenote-dialog { width: min(720px, 94vw); max-height: min(760px, 92vh); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 17px; color: var(--text); background: var(--panel); box-shadow: var(--shadow); animation: modal-in var(--motion-med) var(--ease-out) both; }
+.onenote-dialog > header { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px 0 17px; border-bottom: 1px solid var(--border); background: linear-gradient(110deg, rgba(var(--accent-rgb), .12), transparent); }
+.onenote-dialog > header > div { min-width: 0; display: flex; align-items: center; gap: 11px; }
+.onenote-dialog > header > div > span { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 11px; color: var(--on-accent); background: var(--accent); }
+.onenote-dialog > header small { display: block; color: var(--accent-readable); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.onenote-dialog > header h2 { margin: 0; overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.onenote-dialog-body { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 10px; overflow: auto; padding: 14px 17px; }
+.onenote-dialog-toolbar { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }
+.onenote-dialog-toolbar > span { flex: 1; }
+.onenote-dialog-tree { min-height: 150px; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
+.onenote-dialog-section + .onenote-dialog-section { border-top: 1px solid var(--border); }
+.onenote-dialog-section-head { min-height: 38px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 6px; background: color-mix(in srgb, var(--panel-strong) 70%, transparent); }
+.onenote-dialog-section-head > label { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.onenote-dialog-section-head strong { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.onenote-dialog-section-head small { color: var(--text-muted); font-size: 12px; }
+.onenote-dialog-link { min-height: 28px; padding: 0 8px; border: 0; border-radius: 7px; color: var(--accent-readable); background: transparent; font-size: 12px; font-weight: 600; cursor: pointer; }
+.onenote-dialog-link:hover { background: var(--panel-hover); }
+.onenote-dialog-page { min-height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 46px; font-size: 12.5px; cursor: pointer; }
+.onenote-dialog-page:hover { background: var(--panel-hover); }
+.onenote-dialog-page.is-imported .onenote-dialog-page-title { color: var(--text-muted); }
+.onenote-dialog-page-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.onenote-dialog-page em { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 999px; color: var(--text-muted); background: var(--panel-strong); font-size: 12px; font-style: normal; }
+.onenote-dialog-page em.is-done { color: var(--success); }
+.onenote-dialog input[type="checkbox"] { width: 16px; height: 16px; flex: none; accent-color: var(--accent); }
+.onenote-dialog-note { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.onenote-dialog-destination { display: grid; gap: 10px; }
+.onenote-dialog-destination > label { display: grid; gap: 5px; font-size: 12px; color: var(--text-muted); }
+.onenote-dialog-destination select, .onenote-dialog-destination input[type="text"] { min-height: 34px; min-width: 0; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 10px; color: var(--text); background: var(--bg); font-size: 12.5px; }
+.onenote-dialog-destination .onenote-dialog-check { display: flex; align-items: center; gap: 8px; color: var(--text-soft); cursor: pointer; }
+.onenote-dialog > footer { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 17px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
+.onenote-dialog > footer small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.onenote-dialog > footer > div { display: flex; gap: 8px; flex: none; }
+.onenote-dialog-state { min-height: 190px; display: grid; place-content: center; justify-items: center; gap: 9px; padding: 24px; text-align: center; color: var(--text-muted); }
+.onenote-dialog-state strong { color: var(--text); font-size: 13px; }
+.onenote-dialog-state small { max-width: 460px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.onenote-dialog-state.is-error { color: var(--danger); }
+.onenote-dialog-progress { width: min(360px, 70vw); height: 6px; overflow: hidden; border-radius: 999px; background: var(--panel-strong); }
+.onenote-dialog-progress > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width var(--motion-fast) ease; }
+.onenote-dialog-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.onenote-dialog-counts > div { padding: 11px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-elevated); }
+.onenote-dialog-counts b { display: block; font-size: 20px; }
+.onenote-dialog-counts small { color: var(--text-muted); font-size: 12px; }
+.onenote-dialog-counts .is-bad b { color: var(--danger); }
+.onenote-dialog-summary ul { margin: 6px 0 0; padding-left: 18px; font-size: 12px; line-height: 1.55; }
+.onenote-dialog-summary summary { cursor: pointer; font-size: 12px; color: var(--text-soft); }
+.onenote-dialog-errors { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); border-radius: 11px; color: var(--text-soft); background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 12px; }
+.onenote-dialog-errors strong { color: var(--danger); }
+@media (max-width: 560px) { .onenote-dialog-counts { grid-template-columns: 1fr; } .onenote-dialog-page { padding-left: 38px !important; } }
+.cm-live-image { display: block; max-width: 100%; margin: 6px 0; }
+.cm-live-image > img { display: block; max-width: 100%; max-height: 560px; border-radius: 8px; object-fit: contain; }
+.cm-live-image.is-missing { padding: 8px 10px; border: 1px dashed var(--border-strong); border-radius: 8px; color: var(--text-muted); font-size: 12px; }
 /* Shares between FaNotes users: sidebar panel "Mit mir geteilt" and the share dialog. */
 .shared-with-me { margin: 4px 8px 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
 .shared-with-me__head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 9px; border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
