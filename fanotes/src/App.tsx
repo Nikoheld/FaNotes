@@ -83,6 +83,7 @@ import type { MarkdownEditorHandle, MarkdownFormatAction } from './components/Ma
 import type { WorksheetLayerHandle } from './components/WorksheetLayer'
 import { hasConnectedAiProvider } from './lib/aiProviderConnection'
 import { clipboardImageFile } from './lib/clipboardImage'
+import { retitleGeneratedHeading } from './lib/autoHeading'
 import { friendlyFileError, sanitizeToastMessage } from './lib/fileErrors'
 import { companionNotePath, emptyFamdPayload, famdEncodingForSave, inkHasMarks, isNoteFileName, isPdfNotePath, parseFamd, readPageStatsFromNote, serializeFamd, stripFamdPayload, writePageStatsIntoNote } from './lib/famd'
 import { inkJsonForRewrite } from './lib/packedInk'
@@ -292,7 +293,7 @@ import { parseRecognitionBundle, serializeRecognitionBundle, emptyRecognitionBun
 import { polishRecognizedText } from './lib/recognitionPolish'
 import { sanitizeAddonStrokes, inkDocumentWithStrokes } from './lib/addonInk'
 import { sanitizeCalendarDocument, serializeCalendarMarkdown, emptyCalendarDocument, isMissingNoteError, loadCalendarMarkdown, CALENDAR_NOTE_PATH } from './lib/calendarModel'
-import { templatesToSeed, templatePath, NOTE_TEMPLATES, type NoteProfileId } from './lib/noteTemplates'
+import { templatesToSeed, localizeTemplate, templatesFolderName, NOTE_TEMPLATES, type NoteProfileId } from './lib/noteTemplates'
 import { backlinksFor } from './lib/backlinks'
 import { highlightPdfImportantMarks } from './lib/pdfImportantMarks'
 import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
@@ -303,7 +304,7 @@ import { createTreeSync, type TreeSync } from './lib/treeSync.mjs'
 import { useSettledValue, LARGE_NOTE_CHARS, LARGE_NOTE_SETTLE_MS } from './lib/useSettledValue'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
-import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText } from './i18n'
+import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText, uiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
 import { snowLayerActive } from './lib/snowTheme'
 import { SnowLayer } from './components/SnowLayer'
@@ -867,6 +868,8 @@ export default function App({ startupBootstrap }: AppProps) {
   const [cardsOpen, setCardsOpen] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
+  /** Asks the file tree to start inline renaming of a freshly created note or folder. */
+  const [renameRequest, setRenameRequest] = useState<{ path: string; token: number } | null>(null)
   const [fatalError, setFatalError] = useState<string | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [updateState, setUpdateState] = useState<UpdateState>(INITIAL_UPDATE_STATE)
@@ -1523,6 +1526,8 @@ export default function App({ startupBootstrap }: AppProps) {
       setSubjectBooksReady(true)
       return
     }
+    // Nothing to read before the vault exists and first-run onboarding is done.
+    if (!bootstrap || bootstrap.onboardingRequired) return
     let alive = true
     subjectBooksLoadedRef.current = false
     setSubjectBooksReady(false)
@@ -1543,7 +1548,7 @@ export default function App({ startupBootstrap }: AppProps) {
         if (alive) setSubjectBooksReady(true)
       })
     return () => { alive = false }
-  }, [bootstrap?.vaultPath])
+  }, [bootstrap?.vaultPath, bootstrap?.onboardingRequired])
 
   const activeWorksheetMarkerKey = activeTab ? noteWorksheetIds(activeTagSource).join('\0') : ''
   useEffect(() => {
@@ -2260,14 +2265,13 @@ export default function App({ startupBootstrap }: AppProps) {
     const data = await window.fanotes.completeOnboarding(subjects)
     setBootstrap(data)
     try {
-      await window.fanotes.createFolder(undefined, 'Vorlagen')
-      for (const template of templatesToSeed([], profile)) {
-        const created = await window.fanotes.createNote('Vorlagen', template.fileName)
-        if (created.relativePath !== templatePath(template)) {
-          await window.fanotes.writeFile(created.relativePath, template.markdown)
-        } else {
-          await window.fanotes.writeFile(templatePath(template), template.markdown)
-        }
+      const language = getUiLanguage()
+      const folderName = templatesFolderName(language)
+      await window.fanotes.createFolder(undefined, folderName)
+      for (const seed of templatesToSeed([], profile)) {
+        const template = localizeTemplate(seed, language)
+        const created = await window.fanotes.createNote(folderName, template.fileName)
+        await window.fanotes.writeFile(created.relativePath, template.markdown)
       }
     } catch {
       /* templates are also available from the command palette */
@@ -2905,8 +2909,8 @@ export default function App({ startupBootstrap }: AppProps) {
         onApplied: (change) => { void syncDepsRef.current.applyRemoteChanges(change) },
         onIncoming: (share) => {
           const text = share.status === 'accepted'
-            ? `${share.peer} hat „${share.name}“ mit dir geteilt. Es liegt unter „${SHARED_INBOX_FOLDER}“.`
-            : `${share.peer} möchte „${share.name}“ mit dir teilen. Nimm es in der Seitenleiste unter „${SHARED_INBOX_FOLDER}“ an.`
+            ? uiText(`${share.peer} hat „${share.name}“ mit dir geteilt. Es liegt unter „${SHARED_INBOX_FOLDER}“.`, `${share.peer} shared “${share.name}” with you. It is under “${SHARED_INBOX_FOLDER}”.`)
+            : uiText(`${share.peer} möchte „${share.name}“ mit dir teilen. Nimm es in der Seitenleiste unter „${SHARED_INBOX_FOLDER}“ an.`, `${share.peer} wants to share “${share.name}” with you. Accept it in the sidebar under “${SHARED_INBOX_FOLDER}”.`)
           syncDepsRef.current.toast(text, 'info')
           try {
             if (typeof Notification !== 'undefined' && !document.hasFocus()) {
@@ -3062,7 +3066,7 @@ export default function App({ startupBootstrap }: AppProps) {
     setWritingPath(path)
   }, [refreshTree, storyImportParent])
 
-  const createNote = useCallback(async (parent?: string) => {
+  const createNote = useCallback(async (parent?: string, startRename = false) => {
     const session = vaultSessionGenerationRef.current
     vaultStructureRevisionRef.current += 1
     const requestedParent = normalizePath(parent ?? settings.defaultFolder ?? '')
@@ -3105,6 +3109,7 @@ export default function App({ startupBootstrap }: AppProps) {
     if (session !== vaultSessionGenerationRef.current) return
     try {
       await openNote(result.relativePath)
+      if (startRename) setRenameRequest({ path: result.relativePath, token: Date.now() })
       toast('Neue Markdown-Notiz erstellt.', 'success')
     } catch (error) {
       toast(
@@ -3777,7 +3782,7 @@ export default function App({ startupBootstrap }: AppProps) {
     }
   }, [openNote, refreshTree, settings.defaultFolder, toast, tree])
 
-  const createFolder = useCallback(async (parent?: string) => {
+  const createFolder = useCallback(async (parent?: string, startRename = false) => {
     const session = vaultSessionGenerationRef.current
     vaultStructureRevisionRef.current += 1
     try {
@@ -3788,11 +3793,34 @@ export default function App({ startupBootstrap }: AppProps) {
       setTagFilter(null)
       setRevealPath(created.relativePath)
       await refreshTree()
+      if (startRename) setRenameRequest({ path: created.relativePath, token: Date.now() })
       toast(parent ? `Unterordner in „${parent.split('/').pop()}“ erstellt.` : 'Neuer Ordner erstellt.', 'success')
     } catch (error) {
       if (session === vaultSessionGenerationRef.current) toast(error instanceof Error ? error.message : 'Ordner konnte nicht erstellt werden.', 'error')
     }
   }, [refreshTree, toast])
+
+  const duplicateFolder = useCallback(async (path: string) => {
+    const session = vaultSessionGenerationRef.current
+    try {
+      // Unsaved text of open notes in the folder goes to disk first, so the copy has it.
+      editorRef.current?.flushChanges()
+      splitEditorRef.current?.flushChanges()
+      for (const [pendingPath, content] of [...pendingWrites.current.entries()]) {
+        if (pendingPath.startsWith(`${path}/`) && !await saveContent(pendingPath, content)) return
+      }
+      vaultStructureRevisionRef.current += 1
+      const created = await window.fanotes.duplicateFolder!(path)
+      if (session !== vaultSessionGenerationRef.current) return
+      vaultStructureRevisionRef.current += 1
+      setTagFilter(null)
+      setRevealPath(created.relativePath)
+      await refreshTree()
+      toast('Ordner dupliziert.', 'success')
+    } catch (error) {
+      if (session === vaultSessionGenerationRef.current) toast(friendlyFileError(error, 'Der Ordner konnte nicht dupliziert werden.'), 'error')
+    }
+  }, [refreshTree, saveContent, toast])
 
   const openFolderPath = useCallback((path: string) => {
     setFolderPathTarget(path)
@@ -4023,7 +4051,25 @@ export default function App({ startupBootstrap }: AppProps) {
       : current)
     await refreshTree()
     await Promise.all(renamedPending.map(([renamedPath, content]) => saveContent(renamedPath, content)))
-  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapPageStats, remapWorkspacePaths, saveContent, toast])
+    // The generated "# Untitled note" first line follows the new name; a heading the user wrote stays.
+    if (/\.(?:md|markdown)$/iu.test(nextPath) && nextPath !== path) {
+      const oldStem = stripExtension(fileName(path))
+      const newStem = stripExtension(fileName(nextPath))
+      try {
+        const openTab = tabsRef.current.find((tab) => tab.path === nextPath || tab.path === path)
+        if (openTab) {
+          const current = pendingWrites.current.get(nextPath) ?? openTab.content
+          const updated = retitleGeneratedHeading(current, oldStem, newStem)
+          if (updated !== null) updateContentFor(nextPath, updated)
+        } else {
+          const updated = retitleGeneratedHeading(await window.fanotes.readFile(nextPath), oldStem, newStem)
+          if (updated !== null) await window.fanotes.writeFile(nextPath, updated)
+        }
+      } catch (error) {
+        console.warn('FaNotes: Überschrift der umbenannten Notiz konnte nicht angepasst werden:', error)
+      }
+    }
+  }, [flushDocumentLayers, refreshTree, remapNotePaperPaths, remapPageStats, remapWorkspacePaths, saveContent, toast, updateContentFor])
 
   /**
    * An open note whose file was renamed or moved outside FaNotes: the tab, the
@@ -5193,6 +5239,10 @@ export default function App({ startupBootstrap }: AppProps) {
 
   const openSearchHit = useCallback(async (hit: SearchHit) => {
     setSearchOpen(false)
+    // The sidebar box is only a launcher for the vault search: a stale query would look like an active filter.
+    setSearchQuery('')
+    setSearchHits([])
+    setSearchFailed(false)
     const reveal = (path: string) => {
       if (!hit.inkAnchor) return
       setInkReveal({ path, y: hit.inkAnchor.y, token: Date.now() })
@@ -5830,9 +5880,11 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
     ...(pdfSide.available ? [{ id: 'pdf-side-pages', label: pdfSide.shown ? 'Leere Seiten daneben ausblenden' : 'Leere Seiten daneben', detail: 'Neben jeder PDF-Seite eine leere Schreibseite gleicher Grösse', group: 'Ansicht', keywords: 'pdf leer seite daneben rechts notizen schreiben platz side blank page', icon: <SquareSplitHorizontal size={15} />, run: () => { if (isPdfActive) void pdfSide.toggle(); else toast('Öffne zuerst ein PDF.', 'info') } }] : []),
     { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => { editorRef.current?.flushChanges(); setCardsOpen(true) } },
-    ...NOTE_TEMPLATES.map((template) => ({
+    ...NOTE_TEMPLATES.map((german) => {
+      const template = localizeTemplate(german, getUiLanguage())
+      return {
       id: `template-${template.id}`,
-      label: `Vorlage: ${template.title}`,
+      label: `Vorlage: ${german.title}`,
       detail: 'In den aktuellen Ordner einfügen',
       group: 'Vorlagen',
       keywords: `vorlage template ${template.profile} ${template.title}`,
@@ -5844,7 +5896,8 @@ export default function App({ startupBootstrap }: AppProps) {
           await openNoteRef.current(created.relativePath)
         }).catch((error) => toast(error instanceof Error ? error.message : 'Vorlage konnte nicht angelegt werden.', 'error'))
       },
-    })),
+    }
+    }),
     { id: 'homework', label: 'Hausaufgaben & Termine', detail: 'To-dos, Hausaufgaben und Termine mit Fälligkeit', group: 'Navigation', keywords: 'todo hausaufgaben schule termin fällig aufgabe checklist', icon: <ClipboardList size={15} />, run: openHomework },
     { id: 'calendar', label: 'Kalender', detail: 'Tag, 3 Tage, Woche, Monat und Agenda', group: 'Navigation', keywords: 'kalender termin woche monat agenda notion calendar event', icon: <CalendarDays size={15} />, run: openCalendar },
     { id: 'daily', label: 'Heutige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', icon: <CalendarDays size={15} />, run: () => void createDailyNote() },
@@ -6572,15 +6625,15 @@ export default function App({ startupBootstrap }: AppProps) {
                 <strong>{bootstrap.vaultName}</strong>
               </div>
               <div className="sidebar-actions">
-                <button className="icon-button" type="button" title="Neue Notiz" aria-label="Neue Notiz" onClick={() => void createNote()}><FilePlus2 size={16} /></button>
-                <button className="icon-button" type="button" title="Neuer Ordner" aria-label="Neuer Ordner" onClick={() => void createFolder()}><FolderPlus size={16} /></button>
+                <button className="icon-button" type="button" title="Neue Notiz" aria-label="Neue Notiz" onClick={() => void createNote(undefined, true)}><FilePlus2 size={16} /></button>
+                <button className="icon-button" type="button" title="Neuer Ordner" aria-label="Neuer Ordner" onClick={() => void createFolder(undefined, true)}><FolderPlus size={16} /></button>
                 <button className="icon-button pdf-import-button" type="button" title="PDF importieren" aria-label="PDF importieren" onClick={() => void importPdfNote()}>PDF</button>
                 <button className="icon-button sidebar-collapse-button" type="button" title="Seitenleiste einklappen" aria-label="Seitenleiste einklappen" onClick={() => setSidebarVisible(false)}><PanelLeftClose size={16} /></button>
               </div>
             </div>
             <div className="sidebar-search" role="search" title="Notizen und Handschrift durchsuchen">
               <Search aria-hidden="true" size={14} />
-              <input value={searchQuery} placeholder="Suchen …" aria-label="Notizen suchen" onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} />
+              <input value={searchQuery} placeholder="Im Vault suchen …" aria-label="Im ganzen Vault suchen" onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} />
               {searchQuery ? <button className="search-clear" type="button" aria-label="Suche leeren" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]); setSearchFailed(false) }}><X size={13} /></button> : null}
               <span className="sidebar-fold-slot" ref={setFoldSlot} />
             </div>
@@ -6606,8 +6659,9 @@ export default function App({ startupBootstrap }: AppProps) {
                 foldSlot={foldSlot}
                 onOpen={openNote}
                 onOpenInSplit={openInSplit}
-                onCreateNote={createNote}
-                onCreateFolder={createFolder}
+                onCreateNote={(parent) => createNote(parent, true)}
+                onCreateFolder={(parent) => createFolder(parent, true)}
+                renameRequest={renameRequest}
                 onImportPdf={importPdfNote}
                 onCreateStory={(parent) => void createStory(parent)}
                 onImportStory={window.fanotes?.storyCreate ? (parent) => setStoryImportParent(parent ?? '') : undefined}
@@ -6623,6 +6677,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 onMove={moveEntry}
                 onTrash={trashEntry}
                 onDuplicate={(path) => void duplicateNote(path)}
+                onDuplicateFolder={window.fanotes.duplicateFolder ? (path) => void duplicateFolder(path) : undefined}
                 onCopyWikiLink={copyWikiLink}
                 onCopyPath={(path) => { void copyPlainText(path, 'Pfad kopiert.') }}
                 onShare={shareVaultEntry}
@@ -7090,7 +7145,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main') || live.connecting || (live.note !== null && !live.note.canWrite)} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} foldKey={headingFoldKey(headingFoldScopeRef.current, activeTab.path)} liveNote={live.note} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main') || live.connecting || (live.note !== null && !live.note.canWrite)} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} foldKey={headingFoldKey(headingFoldScopeRef.current, activeTab.path)} liveNote={live.note} notePath={activeTab.path} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -7258,6 +7313,7 @@ export default function App({ startupBootstrap }: AppProps) {
                           onSave={async (content) => { await saveContent(splitTab.path, content) }}
                           onEditActivity={(activity) => recordEditActivityFor(splitTab.path, activity)}
                           foldKey={headingFoldKey(headingFoldScopeRef.current, splitTab.path)}
+                          notePath={splitTab.path}
                           settings={settings}
                           paperMode
                           readOnly={(drawingOpen && focusedPane === 'split') || Boolean(tabHolds[splitTab.path])}

@@ -52,7 +52,7 @@ Command-palette action ids walked from `src/App.tsx`: `new-note`, `import-pdf-no
 | Toggle the task on the current line | `src/App.tsx` | `id: 'toggle-task'` |
 | Task line toggle | `src/lib/noteEveryday.ts` | `export const toggleTaskLine` |
 | Notiz-Backup Experimentell | `src/components/SettingsModal.tsx` | `title="Notiz-Backup"` |
-| Send Data Experimentell | `src/components/SettingsModal.tsx` | `title="Send Data"` |
+| Send Data Experimentell | `src/components/SettingsModal.tsx` | `title="Laufende Logs senden"` |
 | Send Data policy | `src/lib/sendData.ts` | `export const sendDataPolicy` |
 | Send Data payload | `src/lib/sendData.ts` | `export const buildSendDataPayload` |
 | Send Data battery schedule | `src/lib/sendData.ts` | `export const decideSendDataTick` |

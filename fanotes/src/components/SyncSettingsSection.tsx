@@ -1,6 +1,6 @@
 import { Check, Clock, Cloud, CloudOff, Copy, KeyRound, Laptop, LoaderCircle, LogOut, Mail, RefreshCw, Share2, ShieldCheck, Smartphone, Trash2, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { getUiLocale } from '../i18n'
+import { getUiLocale, translateUiText, uiText } from '../i18n'
 import type { SyncEngine, SyncPublicState } from '../lib/sync/engine'
 import { failedLabel, syncStatusLabel } from '../lib/sync/status'
 import { userShares } from '../lib/sync/userShares'
@@ -21,9 +21,9 @@ type Notice = { kind: 'success' | 'error'; text: string } | null
 const formatBytes = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`
 
 const formatWhen = (iso: string | null) => {
-  if (!iso) return 'noch nie'
+  if (!iso) return uiText('noch nie', 'never')
   const date = new Date(iso)
-  if (!Number.isFinite(date.getTime())) return 'unbekannt'
+  if (!Number.isFinite(date.getTime())) return uiText('unbekannt', 'unknown')
   return date.toLocaleString(getUiLocale(), { dateStyle: 'medium', timeStyle: 'short' })
 }
 
@@ -58,7 +58,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
 
   useEffect(() => {
     if (!signedIn) return
-    void engine.refreshAccount().catch(() => undefined)
+    void engine.refreshAccount({ onlyIfChanged: true }).catch(() => undefined)
   }, [engine, signedIn, syncState.lastSyncAt])
 
   const run = async (label: string, task: () => Promise<void>, success?: string) => {
@@ -141,13 +141,13 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
             </div>
           </div>
           <form className="sync-form" onSubmit={(event) => { event.preventDefault(); submitAccount() }}>
-            <label><span>{mode === 'register' ? 'Benutzername' : 'Benutzername oder E-Mail-Adresse'}</span><input data-i18n-ignore type="text" autoComplete="username" spellCheck={false} required minLength={3} maxLength={mode === 'register' ? 32 : 254} value={username} placeholder={mode === 'register' ? 'z. B. anna.f' : 'dein Benutzername'} onChange={(event) => setUsername(event.target.value)} /></label>
+            <label><span>{mode === 'register' ? 'Benutzername' : 'Benutzername oder E-Mail-Adresse'}</span><input data-i18n-ignore type="text" autoComplete="username" spellCheck={false} required minLength={3} maxLength={mode === 'register' ? 32 : 254} value={username} placeholder={mode === 'register' ? uiText('z. B. anna.f', 'e.g. anna.f') : uiText('dein Benutzername', 'your username')} onChange={(event) => setUsername(event.target.value)} /></label>
             {mode === 'register' && <small className="sync-form-hint">Andere teilen mit dir über diesen Namen. Er ist einmalig (Gross-/Kleinschreibung egal) und kann später nicht geändert werden.</small>}
-            <label><span>{mode === 'register' && canKeepDeviceKey ? 'Passwort (optional)' : 'Passwort'}</span><input data-i18n-ignore type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required={!(mode === 'register' && canKeepDeviceKey)} minLength={mode === 'register' && password ? 10 : 1} value={password} placeholder={mode === 'register' ? 'Mindestens 10 Zeichen' : ''} onChange={(event) => setPassword(event.target.value)} /></label>
+            <label><span>{mode === 'register' && canKeepDeviceKey ? 'Passwort (optional)' : 'Passwort'}</span><input data-i18n-ignore type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} required={!(mode === 'register' && canKeepDeviceKey)} minLength={mode === 'register' && password ? 10 : 1} value={password} placeholder={mode === 'register' ? uiText('Mindestens 10 Zeichen', 'At least 10 characters') : ''} onChange={(event) => setPassword(event.target.value)} /></label>
             {mode === 'register' && password && <label><span>Passwort wiederholen</span><input data-i18n-ignore type="password" autoComplete="new-password" required value={passwordRepeat} onChange={(event) => setPasswordRepeat(event.target.value)} /></label>}
             {mode === 'register' && <label><span>E-Mail-Adresse (optional)</span><input data-i18n-ignore type="email" autoComplete="email" spellCheck={false} value={email} placeholder="du@example.com" onChange={(event) => setEmail(event.target.value)} /></label>}
             {noPassword && <div className="backup-notice is-error" role="alert"><TriangleAlert size={14} /><span>Ohne Passwort/E-Mail ist dein Konto weg, wenn du dieses Gerät verlierst. Das Konto wird an einen Schlüssel gebunden, der sicher auf diesem Gerät liegt. Du kannst später ein Passwort oder eine E-Mail hinzufügen.</span></div>}
-            <label><span>Name dieses Geräts</span><input data-i18n-ignore type="text" maxLength={80} value={settings.syncDeviceName} placeholder={isWeb ? 'Browser' : 'z. B. Laptop'} onChange={(event) => update('syncDeviceName', event.target.value)} /></label>
+            <label><span>Name dieses Geräts</span><input data-i18n-ignore type="text" maxLength={80} value={settings.syncDeviceName} placeholder={isWeb ? 'Browser' : uiText('z. B. Laptop', 'e.g. Laptop')} onChange={(event) => update('syncDeviceName', event.target.value)} /></label>
             <div className="sync-form-actions">
               <button type="submit" className="primary-button" disabled={busy !== null || !username.trim() || (!password && !(mode === 'register' && canKeepDeviceKey))}>
                 {busy === mode ? <LoaderCircle className="spin" size={15} /> : mode === 'register' ? <UserPlus size={15} /> : <KeyRound size={15} />}
@@ -178,9 +178,9 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
               <div>
                 <strong data-i18n-ignore>{syncState.account.username || syncState.account.email}</strong>
                 {syncState.account.username && syncState.account.email && <p data-i18n-ignore>{syncState.account.email}</p>}
-                <p>{syncState.vaultSync !== false ? `${syncStatusLabel(syncState)} · Zuletzt: ${formatWhen(syncState.lastSyncAt)}` : 'Cloud-Sync ist aus – das Konto bleibt für Freigaben angemeldet.'}</p>
+                <p data-i18n-ignore>{syncState.vaultSync !== false ? `${translateUiText(syncStatusLabel(syncState))} · ${uiText('Zuletzt', 'Last synced')}: ${formatWhen(syncState.lastSyncAt)}` : translateUiText('Cloud-Sync ist aus – das Konto bleibt für Freigaben angemeldet.')}</p>
                 {syncState.error && <p className="sync-status-error">{syncState.error}</p>}
-                {usage && <p data-i18n-ignore>{usage.files} Dateien · {formatBytes(usage.bytes)} von {formatBytes(usage.quotaBytes)}</p>}
+                {usage && <p data-i18n-ignore>{uiText(`${usage.files} Dateien · ${formatBytes(usage.bytes)} von ${formatBytes(usage.quotaBytes)}`, `${usage.files} ${usage.files === 1 ? 'file' : 'files'} · ${formatBytes(usage.bytes)} of ${formatBytes(usage.quotaBytes)}`)}</p>}
                 {usage && <div className="sync-usage-bar" aria-hidden><span style={{ width: `${usagePercent}%` }} /></div>}
               </div>
               <div className="update-actions">
@@ -226,12 +226,12 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
             {syncState.account.username
               ? <div className="setting-row"><div className="setting-copy"><span>Benutzername</span><small>Damit teilen andere Notizen mit dir. Er ist einmalig und kann nicht geändert werden.</small></div><div className="setting-control"><strong data-i18n-ignore>{syncState.account.username}</strong></div></div>
               : <form className="sync-form" onSubmit={(event) => { event.preventDefault(); void run('claim', async () => { await engine.claimUsername(claimName); setClaimName('') }, 'Benutzername gesetzt. Jetzt kannst du teilen und andere können mit dir teilen.') }}>
-                  <label><span>Benutzername wählen</span><input data-i18n-ignore type="text" autoComplete="off" spellCheck={false} required minLength={3} maxLength={32} value={claimName} placeholder="z. B. anna.f" onChange={(event) => setClaimName(event.target.value)} /></label>
+                  <label><span>Benutzername wählen</span><input data-i18n-ignore type="text" autoComplete="off" spellCheck={false} required minLength={3} maxLength={32} value={claimName} placeholder={uiText('z. B. anna.f', 'e.g. anna.f')} onChange={(event) => setClaimName(event.target.value)} /></label>
                   <div className="sync-form-actions"><button type="submit" className="primary-button" disabled={busy !== null || !claimName.trim()}>{busy === 'claim' ? <LoaderCircle className="spin" size={15} /> : <UserPlus size={15} />} Benutzernamen festlegen</button><small>Ohne Benutzernamen kann niemand direkt mit deinem Konto teilen. Er kann später nicht geändert werden.</small></div>
                 </form>}
             <div className="setting-row">
               <div className="setting-copy"><span>E-Mail-Adresse</span><small>{syncState.account.email ? 'Nur zur Wiederherstellung deines Zugangs. Ein Passwort lässt sich nicht zurücksetzen, weil nur dein Passwort den Schlüssel zu deinen Daten öffnet.' : 'Optional. Du brauchst keine E-Mail-Adresse für dieses Konto.'}</small></div>
-              <div className="setting-control"><span data-i18n-ignore>{syncState.account.email || 'keine'}</span></div>
+              <div className="setting-control"><span data-i18n-ignore>{syncState.account.email || uiText('keine', 'none')}</span></div>
             </div>
             <form className="sync-form" onSubmit={(event) => { event.preventDefault(); void run('email', async () => { await engine.setEmail(addEmail, deviceKeyAccount ? undefined : addEmailPassword); setAddEmail(''); setAddEmailPassword('') }, 'E-Mail-Adresse gespeichert.') }}>
               <label><span>{syncState.account.email ? 'E-Mail-Adresse ändern' : 'E-Mail-Adresse hinzufügen'}</span><input data-i18n-ignore type="email" autoComplete="email" spellCheck={false} required value={addEmail} placeholder="du@example.com" onChange={(event) => setAddEmail(event.target.value)} /></label>
@@ -270,7 +270,7 @@ export function SyncSettingsSection({ engine, syncState, settings, update, platf
             {info?.devices.map((device) => (
               <div key={device.id} className="setting-row sync-device-row">
                 <div className="setting-copy">
-                  <span data-i18n-ignore>{device.platform === 'web' || device.platform === 'browser-preview' ? <Smartphone size={13} /> : <Laptop size={13} />} {device.name}{device.current ? <em> · dieses Gerät</em> : null}</span>
+                  <span data-i18n-ignore>{device.platform === 'web' || device.platform === 'browser-preview' ? <Smartphone size={13} /> : <Laptop size={13} />} {device.name}{device.current ? <em>{uiText(' · dieses Gerät', ' · this device')}</em> : null}</span>
                   <small>Zuletzt aktiv: {formatWhen(device.lastSeenAt)}</small>
                 </div>
                 <div className="setting-control">

@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { colorSwatchName } from '../lib/colorNames'
 import {
   BookOpen,
   Check,
@@ -75,6 +76,8 @@ export type FileTreeProps = {
   onMove: (relativePath: string, destFolder: string) => MaybePromise<string | void>
   onTrash: (relativePath: string) => MaybePromise
   onDuplicate?: (relativePath: string) => MaybePromise
+  /** Copies a folder with everything in it (desktop only). */
+  onDuplicateFolder?: (relativePath: string) => MaybePromise
   onCopyWikiLink?: (relativePath: string) => MaybePromise
   onCopyPath?: (relativePath: string) => MaybePromise
   /** Upload this note, or every note in this folder, as a frozen copy, a live link, or an editable share. */
@@ -91,6 +94,8 @@ export type FileTreeProps = {
   emptyLabel?: string
   /** Expand this folder and its parents after creating a nested folder. */
   revealPath?: string | null
+  /** Starts inline renaming of this entry once it appears in the tree (a freshly created note or folder). */
+  renameRequest?: { path: string; token: number } | null
 }
 
 type ContextMenuState = {
@@ -242,6 +247,7 @@ export const FileTree = memo(function FileTree({
   onMove,
   onTrash,
   onDuplicate,
+  onDuplicateFolder,
   onCopyWikiLink,
   onCopyPath,
   onShare,
@@ -255,6 +261,7 @@ export const FileTree = memo(function FileTree({
   showRootActions = true,
   emptyLabel = 'Noch keine Notizen vorhanden',
   revealPath = null,
+  renameRequest = null,
 }: FileTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => readExpandedFolders(expansionStorageKey))
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -326,6 +333,26 @@ export const FileTree = memo(function FileTree({
     })
     return () => window.cancelAnimationFrame(frame)
   }, [revealPath, entries])
+
+  // A new note or folder asks for its name right away. The row exists only after the refreshed tree
+  // arrives, and the editor may still be taking focus, so the field opens a moment later.
+  const handledRenameRef = useRef(0)
+  useEffect(() => {
+    if (!renameRequest || handledRenameRef.current === renameRequest.token) return undefined
+    if (Date.now() - renameRequest.token > 10000) return undefined
+    const entry = entries.find((item) => item.relativePath === renameRequest.path)
+    if (!entry) return undefined
+    const timer = window.setTimeout(() => {
+      handledRenameRef.current = renameRequest.token
+      setExpanded((current) => {
+        const next = new Set(current)
+        parentFolders(entry.relativePath).forEach((path) => next.add(path))
+        return next
+      })
+      setRenaming({ entry, value: entry.name })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [renameRequest, entries])
 
   useEffect(() => {
     if (!contextMenu) return
@@ -646,7 +673,7 @@ export const FileTree = memo(function FileTree({
       <div className="folder-color-swatches" role="group" aria-label={labels.group}>
         {FOLDER_COLORS.map((color) => (
           <button
-            aria-label={color}
+            aria-label={colorSwatchName(color)}
             aria-checked={entry.color === color}
             className={entry.color === color ? 'active' : ''}
             key={color}
@@ -657,7 +684,7 @@ export const FileTree = memo(function FileTree({
             }}
             role="menuitemradio"
             style={{ '--folder-swatch': color, '--folder-swatch-contrast': bestContrastText(color) } as CSSProperties}
-            title={color}
+            title={colorSwatchName(color)}
             type="button"
           >
             {entry.color === color && <Check size={12} />}
@@ -1121,7 +1148,7 @@ export const FileTree = memo(function FileTree({
               <span className="file-tree__menu-separator" role="separator" />
             </>
           )}
-          {(onDuplicate || onCopyWikiLink || onCopyPath) && (
+          {(onDuplicate || onDuplicateFolder || onCopyWikiLink || onCopyPath) && (
             <>
               <span className="file-tree__menu-label">Kopieren</span>
               {contextMenu.entry.kind === 'file' && onDuplicate && !isPdfEntry(contextMenu.entry) && !isStoryEntry(contextMenu.entry) && (
@@ -1136,6 +1163,20 @@ export const FileTree = memo(function FileTree({
                 >
                   <Files aria-hidden="true" size={15} />
                   Notiz duplizieren
+                </button>
+              )}
+              {contextMenu.entry.kind === 'folder' && onDuplicateFolder && (
+                <button
+                  onClick={() => {
+                    const path = contextMenu.entry.relativePath
+                    setContextMenu(null)
+                    void Promise.resolve(onDuplicateFolder(path))
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Files aria-hidden="true" size={15} />
+                  Ordner duplizieren
                 </button>
               )}
               {contextMenu.entry.kind === 'file' && onCopyWikiLink && (

@@ -1,4 +1,5 @@
 import { Eye, LoaderCircle, Pencil, Share2, TriangleAlert, X } from 'lucide-react'
+import { uiText } from '../i18n'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { usernameProblem } from '../lib/sync/crypto'
 import type { SharePermission } from '../lib/sync/api'
@@ -81,7 +82,7 @@ export function ShareWithUserDialog({ target, signedIn, onClose, onOpenAccountSe
       <section className="confirm-dialog share-user-dialog" role="dialog" aria-modal="true" aria-labelledby="fanotes-share-user-title" onPointerDown={(event) => event.stopPropagation()}>
         <header className="confirm-dialog-header">
           <span className="confirm-dialog-icon"><Share2 size={16} /></span>
-          <div><h3 id="fanotes-share-user-title">„{target.name}“ mit einem Benutzer teilen</h3></div>
+          <div><h3 id="fanotes-share-user-title" data-i18n-ignore>{uiText(`„${target.name}“ mit einem Benutzer teilen`, `Share “${target.name}” with a user`)}</h3></div>
           <button type="button" className="icon-button" aria-label="Schließen" onClick={onClose}><X size={16} /></button>
         </header>
         <div className="confirm-dialog-body">
@@ -95,11 +96,11 @@ export function ShareWithUserDialog({ target, signedIn, onClose, onOpenAccountSe
             <>
               <label className="share-user-field">
                 <span>FaNotes-Benutzername</span>
-                <input data-i18n-ignore autoFocus type="text" autoComplete="off" spellCheck={false} maxLength={32} value={name} placeholder="genauer Benutzername" onChange={(event) => setName(event.target.value)} />
+                <input data-i18n-ignore autoFocus type="text" autoComplete="off" spellCheck={false} maxLength={32} value={name} placeholder={uiText('genauer Benutzername', 'exact username')} onChange={(event) => setName(event.target.value)} />
               </label>
               <p className="share-user-status" role="status" aria-live="polite">
                 {lookupState === 'busy' && <><LoaderCircle className="spin" size={13} /> Sucht …</>}
-                {found && <span data-i18n-ignore>Gefunden: <strong>{found.username}</strong> · Schlüssel {found.fingerprint}</span>}
+                {found && <span data-i18n-ignore>{uiText('Gefunden: ', 'Found: ')}<strong>{found.username}</strong>{uiText(' · Schlüssel ', ' · key ')}{found.fingerprint}</span>}
                 {lookupState === 'missing' && !found && 'Kein Konto mit genau diesem Benutzernamen.'}
                 {lookupState === 'limited' && 'Zu viele Suchen. Bitte später erneut versuchen.'}
                 {lookupState === 'idle' && !found && name.trim() && usernameProblem(name.trim()) && usernameProblem(name.trim())}
@@ -117,7 +118,7 @@ export function ShareWithUserDialog({ target, signedIn, onClose, onOpenAccountSe
                     <li key={share.id}>
                       <span data-i18n-ignore>{share.peer}</span>
                       <small>{share.status === 'pending' ? 'wartet auf Annahme' : share.status === 'declined' ? 'abgelehnt' : share.status === 'left' ? 'verlassen' : share.permission === 'edit' ? 'darf bearbeiten' : 'darf lesen'}</small>
-                      <button type="button" className="secondary-button" onClick={() => void userShares.remove(share.id).then(() => toast(`Die Freigabe an ${share.peer} wurde widerrufen.`, 'info')).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Widerrufen hat nicht geklappt.'))}>Widerrufen</button>
+                      <button type="button" className="secondary-button" onClick={() => void userShares.remove(share.id).then(() => toast(uiText(`Die Freigabe an ${share.peer} wurde widerrufen.`, `The share with ${share.peer} was revoked.`), 'info')).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Widerrufen hat nicht geklappt.'))}>Widerrufen</button>
                     </li>
                   ))}
                 </ul>

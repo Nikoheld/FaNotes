@@ -11,6 +11,7 @@ import {
   defaultKeymap,
   history,
   historyKeymap,
+  redo,
   indentWithTab,
 } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
@@ -31,6 +32,7 @@ import {
 } from '@codemirror/language'
 import {
   Compartment,
+  Facet,
   EditorSelection,
   EditorState,
   StateEffect,
@@ -63,6 +65,8 @@ import { docFlags, primeDocFlags } from '../lib/cmDocFlags'
 import { TableWidget, flushTableEdits, focusTableCell, tableBlocksOf } from './markdownTableWidget'
 import { newTableText } from '../lib/markdownTable'
 import { htmlTableToMarkdown } from '../lib/markdownTableDom'
+import { htmlToMarkdown } from '../lib/htmlToMarkdown'
+import { imageCandidates, isLocalImageSource } from '../lib/noteImagePaths'
 import { createEditorFindPanel } from '../lib/editorFindBar'
 import { touchSelection } from '../lib/cmTouchSelection'
 import type { AppSettings, DetectedTextLanguage } from '../types'
@@ -180,6 +184,8 @@ export type MarkdownEditorProps = {
   foldKey?: string
   /** A shared note open for live co-editing: the text, the others' cursors and a per-user undo come from it. */
   liveNote?: import('../lib/collab/liveNotes').LiveNote | null
+  /** Vault path of the note: relative image paths resolve against its folder. */
+  notePath?: string
 }
 
 export type MarkdownFormatAction =
@@ -423,8 +429,8 @@ class TextWidget extends WidgetType {
 
 /** A whole-line `![alt](vault/path.png)` drawn as the picture itself; the source shows while the caret is on the line. */
 class ImageWidget extends WidgetType {
-  constructor(readonly alt: string, readonly source: string) { super() }
-  eq(other: ImageWidget) { return other.alt === this.alt && other.source === this.source }
+  constructor(readonly alt: string, readonly source: string, readonly notePath: string) { super() }
+  eq(other: ImageWidget) { return other.alt === this.alt && other.source === this.source && other.notePath === this.notePath }
   toDOM(view: EditorView) {
     const frame = document.createElement('div')
     frame.className = 'cm-live-image'
@@ -437,7 +443,12 @@ class ImageWidget extends WidgetType {
     frame.append(image)
     let relative = this.source
     try { relative = decodeURIComponent(relative) } catch { /* keep the raw path */ }
-    void window.fanotes.readAssetDataUrl(relative).then((url) => { image.src = url }).catch(() => image.dispatchEvent(new Event('error')))
+    const candidates = imageCandidates(relative, this.notePath)
+    const tryNext = (index: number) => {
+      if (index >= candidates.length) { image.dispatchEvent(new Event('error')); return }
+      void window.fanotes.readAssetDataUrl(candidates[index]).then((url) => { image.src = url }).catch(() => tryNext(index + 1))
+    }
+    tryNext(0)
     return frame
   }
   ignoreEvent() { return false }
@@ -447,8 +458,9 @@ const vaultImageLine = (text: string) => {
   const match = /^\s*!\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)\s*$/u.exec(text)
   if (!match) return null
   const source = match[2]
-  if (/^[a-z][a-z0-9+.-]*:/iu.test(source) || source.startsWith('/') || source.split('/').includes('..')) return null
-  if (!/\.(?:png|jpe?g|gif|webp)$/iu.test(source)) return null
+  let decoded = source
+  try { decoded = decodeURIComponent(source) } catch { /* keep the raw path */ }
+  if (!isLocalImageSource(decoded)) return null
   return { alt: match[1], source }
 }
 
@@ -708,6 +720,9 @@ const studyBlocksOf = (state: EditorView['state']) => {
   return blocks
 }
 
+/** Vault path of the open note, so image references resolve against its folder. */
+const notePathFacet = Facet.define<string, string>({ combine: (values) => values[0] ?? '' })
+
 const buildLivePreviewDecorations = (view: EditorView) => {
   const decorations: Range<Decoration>[] = []
   const visited = new Set<number>()
@@ -931,7 +946,7 @@ const buildLivePreviewDecorations = (view: EditorView) => {
         } else if (!active && vaultImageLine(line.text) && typeof window !== 'undefined' && typeof window.fanotes?.readAssetDataUrl === 'function') {
           const image = vaultImageLine(line.text)!
           decorations.push(Decoration.line({ attributes: { class: 'cm-live-image-line' } }).range(line.from))
-          decorations.push(Decoration.replace({ widget: new ImageWidget(image.alt, image.source) }).range(line.from, line.to))
+          decorations.push(Decoration.replace({ widget: new ImageWidget(image.alt, image.source, view.state.facet(notePathFacet)) }).range(line.from, line.to))
         } else if (heading) {
           decorations.push(Decoration.line({ attributes: { class: `cm-live-heading cm-live-h${heading[2].length}` } }).range(line.from))
           if (!active) {
@@ -956,13 +971,33 @@ const buildLivePreviewDecorations = (view: EditorView) => {
   return Decoration.set(decorations, true)
 }
 
-/** Pasting a table from Word, a spreadsheet or a web page writes a Markdown pipe table. */
+/** Ctrl+Shift+V pastes the plain-text flavour: remembered from the key press to the paste event right after it. */
+let plainPasteRequestedAt = 0
+
+/** Pasting a table from Word, a spreadsheet or a web page writes a Markdown pipe table; other rich HTML becomes Markdown text. */
 const tablePaste = EditorView.domEventHandlers({
+  keydown(event) {
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'v') plainPasteRequestedAt = Date.now()
+    return false
+  },
   paste(event, view) {
     const html = event.clipboardData?.getData('text/html') ?? ''
     if (!html || view.state.readOnly) return false
+    if (Date.now() - plainPasteRequestedAt < 1000) { plainPasteRequestedAt = 0; return false }
     const table = htmlTableToMarkdown(html)
-    if (!table) return false
+    if (!table) {
+      const markdown = htmlToMarkdown(html)
+      if (!markdown) return false
+      event.preventDefault()
+      const { from, to } = view.state.selection.main
+      view.dispatch({
+        changes: { from, to, insert: markdown },
+        selection: EditorSelection.cursor(from + markdown.length),
+        scrollIntoView: true,
+        userEvent: 'input.paste',
+      })
+      return true
+    }
     event.preventDefault()
     const { from, to } = view.state.selection.main
     const line = view.state.doc.lineAt(from)
@@ -1619,6 +1654,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   onEditActivity,
   foldKey,
   liveNote = null,
+  notePath = '',
 }: MarkdownEditorProps, forwardedRef) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -1811,6 +1847,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         highlightSpecialChars(),
         compartments.history.of(history()),
         compartments.live.of([]),
+        notePathFacet.of(notePath),
         // The paper scroller (not .cm-scroller) pans the sheet. "Fixed" gutters
         // are `position: sticky; left: 0` and would ride over the first glyphs
         // (82% white) whenever the zoomed sheet is scrolled sideways.
@@ -1839,6 +1876,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         EditorView.lineWrapping,
         saveKeymap,
         keymap.of([
+          { key: 'Mod-Shift-z', preventDefault: true, run: redo },
           { key: 'Mod-b', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'bold') },
           { key: 'Mod-i', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'italic') },
           { key: 'Mod-k', preventDefault: true, run: (view) => applyMarkdownFormat(view, 'link') },
