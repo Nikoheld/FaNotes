@@ -35,6 +35,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import type { VaultEntry } from '../types'
 import { bestContrastText } from '../lib/colorContrast'
 import { folderPathsIn, nextExpandedFolders } from '../lib/noteQoL'
@@ -84,6 +85,8 @@ export type FileTreeProps = {
   className?: string
   rootLabel?: string
   showHeader?: boolean
+  /** When set, the collapse/expand-all button renders into this element (the sidebar search row) instead of its own row. */
+  foldSlot?: HTMLElement | null
   showRootActions?: boolean
   emptyLabel?: string
   /** Expand this folder and its parents after creating a nested folder. */
@@ -248,6 +251,7 @@ export const FileTree = memo(function FileTree({
   className = '',
   rootLabel = 'Dateien',
   showHeader = true,
+  foldSlot = null,
   showRootActions = true,
   emptyLabel = 'Noch keine Notizen vorhanden',
   revealPath = null,
@@ -884,6 +888,23 @@ export const FileTree = memo(function FileTree({
     )
   }
 
+  const foldButton = (
+    <button
+      type="button"
+      className={foldSlot ? 'file-tree__fold-button is-compact' : 'file-tree__fold-button'}
+      aria-label={foldLabel}
+      title={foldLabel}
+      onMouseDown={rememberTreeScroll}
+      onClick={(event) => {
+        holdTreeScroll(() => setExpanded(nextExpandedFolders(expanded, folderList)))
+        event.currentTarget.focus({ preventScroll: true })
+      }}
+    >
+      {foldersOpen ? <ChevronsDownUp aria-hidden="true" size={14} /> : <ChevronsUpDown aria-hidden="true" size={14} />}
+      {foldSlot ? null : <span>{foldLabel}</span>}
+    </button>
+  )
+
   return (
     <section
       ref={treeRef}
@@ -931,24 +952,7 @@ export const FileTree = memo(function FileTree({
         </div>
       )}
 
-      {folderList.length > 0 && (
-        <div className="file-tree__fold">
-          <button
-            type="button"
-            className="file-tree__fold-button"
-            aria-label={foldLabel}
-            title={foldLabel}
-            onMouseDown={rememberTreeScroll}
-            onClick={(event) => {
-              holdTreeScroll(() => setExpanded(nextExpandedFolders(expanded, folderList)))
-              event.currentTarget.focus({ preventScroll: true })
-            }}
-          >
-            {foldersOpen ? <ChevronsDownUp aria-hidden="true" size={14} /> : <ChevronsUpDown aria-hidden="true" size={14} />}
-            <span>{foldLabel}</span>
-          </button>
-        </div>
-      )}
+      {folderList.length > 0 && (foldSlot ? createPortal(foldButton, foldSlot) : <div className="file-tree__fold">{foldButton}</div>)}
 
       {orderedEntries.length > 0 ? (
         <ul className="file-tree__root" role="tree">

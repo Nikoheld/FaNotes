@@ -100,7 +100,7 @@ import { useLiveNote } from './components/useLiveNote'
 import { externalArrivals, loadArrivals, saveArrivals } from './lib/newArrivals.mjs'
 import { useExternalTabChanges, useTabHolds } from './lib/useExternalTabChanges'
 import { WorkRequestsClient } from './lib/workRequests'
-import { syncStatusLabel } from './lib/sync/status'
+import { failedLabel, syncStatusLabel } from './lib/sync/status'
 import type { SettingsSection } from './components/SettingsModal'
 import { ProfileOverviewPublisher } from './components/ProfileOverviewPublisher'
 import { createAddonFetchText, createAddonStoragePort } from './lib/addons/storagePort'
@@ -130,6 +130,7 @@ import {
 } from './lib/pageStats'
 import { clearNoteTextFieldRescue, readNoteTextFieldRescue, writeNoteTextFieldRescue } from './lib/noteTextFieldRescue'
 import { chooseRestoredNote, collectNotePaths } from './lib/lastOpenNote'
+import { headingFoldKey, headingFoldScope, pruneHeadingFolds, remapHeadingFolds } from './lib/headingFolds'
 import { chooseStartSurface } from './lib/dashboardLayout'
 import {
   clonedWorksheetDocument,
@@ -841,6 +842,11 @@ export default function App({ startupBootstrap }: AppProps) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [editorMenuOpen, setEditorMenuOpen] = useState(false)
   const [sidebarToolsOpen, setSidebarToolsOpen] = useState(false)
+  // Search-row slot that receives the folder tree's collapse/expand-all button.
+  // Heading-fold memory is scoped per vault (hash of the vault path).
+  const headingFoldScopeRef = useRef('')
+  headingFoldScopeRef.current = headingFoldScope(bootstrap?.vaultPath)
+  const [foldSlot, setFoldSlot] = useState<HTMLElement | null>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [lmStudioOpen, setLmStudioOpen] = useState(false)
   const [glyphenWerkOpen, setGlyphenWerkOpen] = useState(false)
@@ -1043,7 +1049,11 @@ export default function App({ startupBootstrap }: AppProps) {
   const vaultStructureRevisionRef = useRef(0)
   // Every tree result goes through this: a request issued earlier never overwrites a later one.
   const treeSyncRef = useRef<TreeSync<VaultEntry[]> | null>(null)
-  if (!treeSyncRef.current) treeSyncRef.current = createTreeSync<VaultEntry[]>((next) => { treeRef.current = next; setTree(next) })
+  if (!treeSyncRef.current) treeSyncRef.current = createTreeSync<VaultEntry[]>((next) => {
+    treeRef.current = next; setTree(next)
+    // Folded-heading memory of notes that no longer exist goes away.
+    if (next.length) pruneHeadingFolds(headingFoldScopeRef.current, new Set(collectNotePaths(next)))
+  })
   const vaultSwitchInProgressRef = useRef(false)
   const searchRequestRef = useRef(0)
   const openingNotesRef = useRef(new Set<string>())
@@ -2835,6 +2845,7 @@ export default function App({ startupBootstrap }: AppProps) {
       excludedPrefixes: () => syncPrefixesFromSetting(settingsRef.current.syncExcludedFolders),
       includeRecognitionModel: () => settingsRef.current.syncHandwritingModel === true,
       includeHistory: () => settingsRef.current.syncNoteHistory === true,
+      includeAttachments: () => settingsRef.current.syncAttachments !== false,
       isPathBusy: (path) => syncDepsRef.current.isSyncPathBusy(path),
       onApplied: (change) => { void syncDepsRef.current.applyRemoteChanges(change) },
       onConflict: (conflict) => syncDepsRef.current.toast(`Sync-Konflikt bei „${fileName(conflict.path)}“ – beide Fassungen sind gesichert. Vergleichen unter Einstellungen → Konflikte.`, 'info'),
@@ -3857,6 +3868,7 @@ export default function App({ startupBootstrap }: AppProps) {
   }, [createDailyNote, toast])
 
   const remapNotePaperPaths = useCallback((from: string, to: string | null) => {
+    remapHeadingFolds(headingFoldScopeRef.current, from, to)
     setNotePaperByPath((current) => {
       const next = { ...current }
       Object.entries(current).forEach(([candidate, style]) => {
@@ -6469,7 +6481,7 @@ export default function App({ startupBootstrap }: AppProps) {
           {updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={12} /> Update {Math.round(updateState.progress * 100)} %</span>}
           {addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}
           {addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={12} /> {addonState.panels.length}</button>}
-          {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings(syncState.openConflicts > 0 ? 'conflicts' : 'sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : syncState.status === 'paused' ? <Clock size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : syncState.status === 'paused' ? 'Sync pausiert' : 'Synchron'}{syncState.openConflicts > 0 && <em title={`${syncState.openConflicts} Konflikt(e)`}>{syncState.openConflicts}</em>}</button>}
+          {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings(syncState.openConflicts > 0 ? 'conflicts' : 'sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : syncState.status === 'paused' ? <Clock size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : syncState.status === 'paused' ? 'Sync pausiert' : 'Synchron'}{syncState.openConflicts > 0 && <em title={`${syncState.openConflicts} Konflikt(e)`}>{syncState.openConflicts}</em>}{syncState.failed.length > 0 && <em className="sync-failed-badge" title={failedLabel(syncState.failed.length)}>{syncState.failed.length}</em>}</button>}
           <button type="button" className={`save-status ${saveState === 'saved' ? 'save-ok' : 'save-pending'}`} title="Jetzt speichern (Strg+S)" aria-label="Jetzt speichern" aria-live="polite" onClick={() => void saveCurrentWork()}>{saveState === 'saved' ? <CheckCircle2 size={12} /> : saveState === 'saving' ? <LoaderCircle className="spin" size={12} /> : <CircleAlert size={12} />}<span>{saveState === 'saved' ? 'Gespeichert' : saveState === 'saving' ? 'Speichert …' : 'Speicherfehler'}</span></button>
         </div>
         <button type="button" title="Einstellungen (Strg+,)" data-tooltip="Einstellungen · Strg ," aria-label="Einstellungen öffnen" onClick={() => openSettings()}><Settings size={14} /><span className="ribbon-label">Einstellungen</span></button>
@@ -6523,6 +6535,7 @@ export default function App({ startupBootstrap }: AppProps) {
               <Search aria-hidden="true" size={14} />
               <input value={searchQuery} placeholder="Suchen …" aria-label="Notizen suchen" onChange={(event) => { setSearchQuery(event.target.value); setSearchOpen(true) }} onFocus={() => setSearchOpen(true)} />
               {searchQuery ? <button className="search-clear" type="button" aria-label="Suche leeren" title="Suche leeren" onMouseDown={(event) => event.preventDefault()} onClick={() => { setSearchQuery(''); setSearchHits([]); setSearchFailed(false) }}><X size={13} /></button> : null}
+              <span className="sidebar-fold-slot" ref={setFoldSlot} />
             </div>
             {knownTags.length > 0 && (
               <div className="tag-filter" aria-label="Nach Schlagwort filtern">
@@ -6543,6 +6556,7 @@ export default function App({ startupBootstrap }: AppProps) {
                 expansionStorageKey={`fanotes.treeExpanded.v1:${bootstrap?.vaultPath || 'default'}`}
                 rootLabel="Notizen"
                 showHeader={false}
+                foldSlot={foldSlot}
                 onOpen={openNote}
                 onOpenInSplit={openInSplit}
                 onCreateNote={createNote}
@@ -7029,7 +7043,7 @@ export default function App({ startupBootstrap }: AppProps) {
                   ) : (
                   <div className="editor-pane">
                     <SafeBoundary name="Editor" fallbackTitle="Der Editor ist abgestürzt">
-                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main') || live.connecting || (live.note !== null && !live.note.canWrite)} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} liveNote={live.note} />
+                      <MarkdownEditor ref={editorRef} key={activeTab.path} content={activeTab.content} onChange={(content) => updateContentFor(activeTab.path, content)} onSave={async (content) => { await saveContent(activeTab.path, content) }} settings={settings} focusToken={focusToken} readOnly={activeEntryMutating || activeHeld || (drawingOpen && focusedPane === 'main') || live.connecting || (live.note !== null && !live.note.canWrite)} paperMode onEditActivity={(activity) => recordEditActivityFor(activeTab.path, activity)} foldKey={headingFoldKey(headingFoldScopeRef.current, activeTab.path)} liveNote={live.note} />
                     </SafeBoundary>
                   </div>
                   )}
@@ -7196,6 +7210,7 @@ export default function App({ startupBootstrap }: AppProps) {
                           onChange={(content) => updateContentFor(splitTab.path, content)}
                           onSave={async (content) => { await saveContent(splitTab.path, content) }}
                           onEditActivity={(activity) => recordEditActivityFor(splitTab.path, activity)}
+                          foldKey={headingFoldKey(headingFoldScopeRef.current, splitTab.path)}
                           settings={settings}
                           paperMode
                           readOnly={(drawingOpen && focusedPane === 'split') || Boolean(tabHolds[splitTab.path])}

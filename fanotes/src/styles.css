@@ -505,6 +505,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .file-tree__header { height: 29px; display: flex; align-items: center; padding: 0 4px 0 7px; }
 .file-tree__fold { display: flex; justify-content: flex-end; padding: 0 2px 4px; position: sticky; top: 0; z-index: 2; background: var(--bg-elevated); }
 .file-tree__fold-button { min-height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border: 0; border-radius: 6px; color: var(--text-muted); background: transparent; font-size: 11px; cursor: pointer; }
+.sidebar-fold-slot { flex: none; display: inline-flex; align-items: center; margin-right: -3px; }
+.sidebar-fold-slot:empty { display: none; }
+.file-tree__fold-button.is-compact { width: 23px; min-width: 23px; height: 23px; min-height: 23px; padding: 0; justify-content: center; }
+.file-tree__fold-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .file-tree__fold-button:hover { color: var(--text); background: var(--panel-hover); }
 .file-tree__title { flex: 1; color: var(--text-muted); font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 .file-tree__root-actions { display: flex; gap: 1px; }
@@ -3851,6 +3855,10 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .sync-status-hero .sync-status-error { color: var(--danger); }
 .sync-usage-bar { height: 4px; margin-top: 4px; border-radius: 2px; background: color-mix(in srgb, var(--text-muted) 20%, transparent); overflow: hidden; }
 .sync-usage-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--accent); transition: width var(--motion-fast) ease; }
+.sync-failed-list { margin: 0; padding: 4px 14px 12px; list-style: none; display: grid; gap: 6px; max-height: 260px; overflow: auto; }
+.sync-failed-list li { display: grid; gap: 1px; min-width: 0; }
+.sync-failed-list strong { font-size: 13px; overflow-wrap: anywhere; }
+.sync-failed-list small { color: var(--text-muted); overflow-wrap: anywhere; }
 .sync-device-row .setting-copy > span { display: inline-flex; align-items: center; gap: 6px; }
 .sync-device-row em { color: var(--accent-readable); font-size: 12px; font-style: normal; font-weight: 600; }
 .sync-card-action { margin-left: auto; min-height: 24px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: 0; cursor: pointer; }
@@ -5251,7 +5259,10 @@ body .lw-draw-notice.is-viewport-chrome { left: max(calc(anchor(--side-toolbar r
 .app-shell.toolbar-fullscreen { grid-template-rows: 0 minmax(0, 1fr); }
 .app-shell.toolbar-fullscreen > .ribbon,
 .app-shell.toolbar-fullscreen .tabs-bar { display: none; }
-.app-shell.toolbar-fullscreen .app-body { grid-template-columns: minmax(0, 1fr); }
+/* App.tsx sets grid-template-columns inline (sidebar width, 0px when hidden); without !important that inline value
+   wins, the hidden sidebar's column stays and the workspace lands in it: the document fills a sliver, the rest is black. */
+.app-shell.toolbar-fullscreen .app-body { grid-template-columns: minmax(0, 1fr) !important; }
+.app-shell.toolbar-fullscreen .workspace { grid-column: 1; min-width: 0; }
 .app-shell.toolbar-fullscreen .app-body > :not(.workspace) { display: none; }
 
 /* Eraser mode choice (stroke vs area) in the drawing toolbar. */
