@@ -306,6 +306,7 @@ const IPC = Object.freeze({
   pickFolderLocation: 'fanotes:pick-folder-location',
   setFolderLocations: 'fanotes:set-folder-locations',
   renameEntry: 'fanotes:rename-entry',
+  duplicateFolder: 'fanotes:duplicate-folder',
   moveEntry: 'fanotes:move-entry',
   trashEntry: 'fanotes:trash-entry',
   search: 'fanotes:search',
@@ -4236,10 +4237,16 @@ function registerIpcHandlers() {
   handle(IPC.readFile, async (_event, relativePath) => {
     await ensureBootstrap()
     assertMarkdownPath(relativePath)
-    const { target } = await resolveVaultPath(relativePath, { expected: 'file' })
-    const buffer = await readRegularFileNoFollow(target, noteByteLimit(relativePath))
-    // The app works on LF; writeFile restores the file's own ending.
-    return toLf(stripFamdPayload(buffer.toString('utf8')))
+    try {
+      const { target } = await resolveVaultPath(relativePath, { expected: 'file' })
+      const buffer = await readRegularFileNoFollow(target, noteByteLimit(relativePath))
+      // The app works on LF; writeFile restores the file's own ending.
+      return toLf(stripFamdPayload(buffer.toString('utf8')))
+    } catch (error) {
+      // A PDF without handwriting has no .famd sidecar yet; that is normal and not an error.
+      if (error?.code === 'ENOENT' && /\.famd$/iu.test(String(relativePath))) return ''
+      throw error
+    }
   })
 
   handle(IPC.writeFile, (_event, relativePath, content) => {
@@ -4288,6 +4295,11 @@ function registerIpcHandlers() {
           })
           if (existing && (!existing.isFile() || existing.isSymbolicLink())) {
             throw new Error('Die Notiz ist keine sichere reguläre Datei.')
+          }
+          // Saving replaces the file through a temporary file in its folder, which would silently
+          // bypass a read-only flag (chmod 444 / the Windows read-only attribute): refuse instead.
+          if (existing && (existing.mode & 0o222) === 0) {
+            throw Object.assign(new Error('EPERM: Die Datei ist schreibgeschützt.'), { code: 'EPERM' })
           }
           assertVaultWriteContext(requestedVaultPath, requestedVaultGeneration)
           const markdownBody = stripFamdPayload(content)
@@ -4664,6 +4676,53 @@ function registerIpcHandlers() {
         console.warn('FaNotes: Seitentext konnte nicht nachgeführt werden:', error?.message ?? error)
       })
       return nextRelativePath
+    } finally {
+      mutationBarrier.release()
+    }
+  })
+
+  handle(IPC.duplicateFolder, async (_event, relativePath) => {
+    await ensureBootstrap()
+    if (typeof relativePath !== 'string' || !relativePath.trim()) throw new Error('Ungültiger Ordnerpfad.')
+    const requestedVaultGeneration = currentVaultGeneration
+    const initial = await resolveVaultPath(relativePath, { expected: 'directory' })
+    const mutationBarrier = beginFileMutationBarrier(initial.target, { recursive: true })
+    try {
+      await mutationBarrier.waitForPrecedingOperations()
+      const { root, target } = await resolveVaultPath(relativePath, { expected: 'directory' })
+      if (root !== initial.root || target !== initial.target) throw new Error('Der Vault wurde während des Duplizierens verändert.')
+      const copyWord = localizeText('Kopie', currentUiLanguage())
+      let base = path.basename(target)
+      for (const word of new Set([copyWord, 'Kopie', 'Copy'])) {
+        const stripped = base.replace(new RegExp(` ${word.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?: \\d+)?$`, 'u'), '').trim()
+        if (stripped) base = stripped
+      }
+      const destination = path.join(path.dirname(target), await availableName(path.dirname(target), `${base} ${copyWord}`))
+      if (!physicalAllowed(root, destination)) throw new Error('Das Ziel liegt außerhalb des Vaults.')
+      if (destination === target || destination.startsWith(`${target}${path.sep}`)) throw new Error('Der Ordner kann nicht in sich selbst kopiert werden.')
+      let files = 0
+      const copyTree = async (from, to) => {
+        await fsp.mkdir(to, { mode: 0o700 })
+        for (const item of await fsp.readdir(from, { withFileTypes: true })) {
+          // Symbolic links and half-written temp files are never copied.
+          if (item.isSymbolicLink() || /\.tmp$/iu.test(item.name)) continue
+          const source = path.join(from, item.name)
+          const copy = path.join(to, item.name)
+          if (item.isDirectory()) await copyTree(source, copy)
+          else if (item.isFile()) {
+            if (++files > 20000) throw new Error('Der Ordner ist zu groß zum Duplizieren.')
+            await fsp.copyFile(source, copy, fs.constants.COPYFILE_EXCL)
+          }
+        }
+      }
+      try {
+        await copyTree(target, destination)
+      } catch (error) {
+        await fsp.rm(destination, { recursive: true, force: true }).catch(() => {})
+        throw error
+      }
+      if (requestedVaultGeneration !== currentVaultGeneration) throw new Error('Der Vault wurde während des Duplizierens gewechselt.')
+      return { relativePath: logicalIdentity(root, destination) }
     } finally {
       mutationBarrier.release()
     }
