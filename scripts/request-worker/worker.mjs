@@ -93,7 +93,7 @@ class Job {
     st.conflictFixes = st.conflictFixes || 0
     if (st.conflictFixes >= MAX_CONFLICT_FIXES) { await this.fail('Merge-Konflikt mit main liess sich nicht lösen'); return false }
     st.conflictFixes++
-    st.pending.push({ id: `conflict-${st.conflictFixes}`, text: 'The pull request now has merge conflicts with main (other requests were merged meanwhile). Run `git fetch origin main` and `git merge origin/main` on your branch, resolve every conflict so both sides keep working (in fanotes/resources/i18n/en.json and package.json keep both added blocks, valid JSON, no duplicate keys), run the relevant checks and tsc again, commit the merge and push. Do not open a new pull request.' })
+    st.pending.push({ id: `conflict-${st.conflictFixes}`, text: 'The pull request now has merge conflicts with main (other requests were merged meanwhile). Run `git fetch origin main` and `git merge origin/main` on your branch, resolve every conflict so both sides keep working (in fanotes/resources/i18n/en.json keep both sides, then run `npm run i18n:sort` in fanotes/; in package.json keep both added blocks), run the relevant checks and tsc again, commit the merge and push. Do not open a new pull request.' })
     await this.postEvent('Konflikt mit main, Claude führt main zusammen', { percent: 88 })
     await this.postStatus({ status: 'working' })
     this.go('running')
