@@ -328,7 +328,9 @@
     "subtlex-word-frequencies": "^2.0.0",
     "typescript": "^5.8.3",
     "vite": "^7.0.4",
-    "wait-on": "^8.0.4"
+    "wait-on": "^8.0.4",
+    "y-codemirror.next": "^0.3.6",
+    "yjs": "^13.6.33"
   },
   "build": {
     "appId": "ch.fanotes.app",
@@ -468,9 +470,5 @@
         "--ozone-platform-hint=x11"
       ]
     }
-  },
-  "dependencies": {
-    "y-codemirror.next": "^0.3.6",
-    "yjs": "^13.6.33"
   }
 }
