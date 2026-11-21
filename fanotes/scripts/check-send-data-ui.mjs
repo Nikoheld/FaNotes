@@ -24,7 +24,7 @@ const { sendDataPolicy } = await server.ssrLoadModule('/src/lib/sendData.ts')
 
 const runOnce = () => {
   assert.match(settingsSource, /id: 'experimental'/)
-  assert.match(settingsSource, /title="Send Data"/)
+  assert.match(settingsSource, /title="Laufende Logs senden"/)
   assert.match(settingsSource, /experimentalSendData/)
   assert.match(defaultsSource, /experimentalSendData: false/)
   assert.match(typesSource, /experimentalSendData: boolean/)

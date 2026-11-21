@@ -95,6 +95,18 @@ try {
   const unit = (path, kind, n, textValue, extra = {}) => ({ id: `${path}#${kind}:${n}`, path, kind, source: 'text', text: textValue, ...extra })
   const doc = (path, title, kind = 'pdf', extra = {}) => ({ path, title, kind, fingerprint: 'f1', extractor: EXTRACTOR_VERSION, status: 'indexed', attempts: 0, issues: [], ocrPages: 0, updatedAt: 0, ...extra })
 
+  await test('status: the text-recognition page count covers every recognised page, not only the last run', () => {
+    const index = new DocIndex()
+    index.setDoc(doc('Scan.pdf', 'Scan'))
+    for (const page of [1, 2, 3]) index.addUnit(unit('Scan.pdf', 'pdf-page', page, `Gescannte Seite ${page} Text`, { page, source: 'ocr' }))
+    index.addUnit(unit('Scan.pdf', 'pdf-page', 4, 'Textebene Seite vier', { page: 4, source: 'text-layer' }))
+    assert.equal(index.ocrUnitCount, 3)
+    index.removeUnit('Scan.pdf#pdf-page:3')
+    assert.equal(index.ocrUnitCount, 2)
+    index.clear()
+    assert.equal(index.ocrUnitCount, 0)
+  })
+
   await test('search: AND of terms, prefixes, case and umlauts, page numbers', () => {
     const index = new DocIndex()
     index.setDoc(doc('Physik/Energie.pdf', 'Energie'))

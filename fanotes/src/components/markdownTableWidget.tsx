@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { translateUiText } from '../i18n'
 import { createRoot, type Root as ReactRoot } from 'react-dom/client'
 import { isolateHistory, redo, undo } from '@codemirror/commands'
 import { EditorSelection, EditorState } from '@codemirror/state'
@@ -82,20 +83,20 @@ function TableToolbar({ state, actions }: { state: ToolbarState; actions: Toolba
   const button = (label: string, icon: ReactNode, run: () => void, options: { disabled?: boolean; pressed?: boolean; text?: string; danger?: boolean } = {}) => (
     <button
       type="button"
-      aria-label={label}
-      title={label}
+      aria-label={translateUiText(label)}
+      title={translateUiText(label)}
       aria-pressed={options.pressed}
       className={options.danger ? 'cm-table-tool is-danger' : 'cm-table-tool'}
       disabled={off || options.disabled}
       onClick={run}
     >
       {icon}
-      {options.text ? <span>{options.text}</span> : null}
+      {options.text ? <span>{translateUiText(options.text)}</span> : null}
     </button>
   )
   const size = 15
   return (
-    <div className="cm-table-toolbar" role="toolbar" aria-label="Tabelle bearbeiten" onPointerDown={(event) => event.preventDefault()}>
+    <div className="cm-table-toolbar" role="toolbar" aria-label={translateUiText('Tabelle bearbeiten')} onPointerDown={(event) => event.preventDefault()}>
       {button('Zeile oberhalb einfügen', <BetweenHorizontalStart size={size} />, actions.rowAbove, { disabled: state.row === 0 })}
       {button('Zeile unterhalb einfügen', <BetweenHorizontalEnd size={size} />, actions.rowBelow)}
       {button('Spalte links einfügen', <BetweenVerticalStart size={size} />, actions.columnLeft)}
@@ -175,14 +176,14 @@ class TableController {
     const addRow = doc.createElement('button')
     addRow.type = 'button'
     addRow.className = 'cm-table-add cm-table-add-row'
-    addRow.setAttribute('aria-label', 'Zeile am Ende hinzufügen')
-    addRow.title = 'Zeile hinzufügen'
+    addRow.setAttribute('aria-label', translateUiText('Zeile am Ende hinzufügen'))
+    addRow.title = translateUiText('Zeile hinzufügen')
     addRow.textContent = '+'
     const addColumn = doc.createElement('button')
     addColumn.type = 'button'
     addColumn.className = 'cm-table-add cm-table-add-column'
-    addColumn.setAttribute('aria-label', 'Spalte am Ende hinzufügen')
-    addColumn.title = 'Spalte hinzufügen'
+    addColumn.setAttribute('aria-label', translateUiText('Spalte am Ende hinzufügen'))
+    addColumn.title = translateUiText('Spalte hinzufügen')
     addColumn.textContent = '+'
     for (const add of [addRow, addColumn]) add.addEventListener('pointerdown', (event) => event.preventDefault())
     addRow.addEventListener('click', () => this.change(insertRow(this.model, tableRowCount(this.model)), { row: tableRowCount(this.model), column: 0 }))

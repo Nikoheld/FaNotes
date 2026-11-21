@@ -204,12 +204,17 @@ const refreshLinuxMonitorScale = async () => {
   linuxInputStartup.monitorScale = monitorScale
   if (!linuxInputStartup.hyprlandZeroScaling && monitorScale !== 1) {
     console.info(
-      `FaNotes: Der Hyprland-Monitor skaliert mit ${monitorScale}; das XWayland-Fenster wird hochskaliert und wirkt unscharf. `
-      + 'Scharf wird es mit `xwayland { force_zero_scaling = true }` in der hyprland.conf — FaNotes übernimmt dann die Monitor-Skalierung selbst.',
+      currentUiLanguage() === 'en'
+        ? `FaNotes: The Hyprland monitor scales by ${monitorScale}; the XWayland window is upscaled and looks blurry. `
+          + 'Set `xwayland { force_zero_scaling = true }` in hyprland.conf for a sharp window — FaNotes then applies the monitor scale itself.'
+        : `FaNotes: Der Hyprland-Monitor skaliert mit ${monitorScale}; das XWayland-Fenster wird hochskaliert und wirkt unscharf. `
+          + 'Scharf wird es mit `xwayland { force_zero_scaling = true }` in der hyprland.conf — FaNotes übernimmt dann die Monitor-Skalierung selbst.',
     )
   }
   if (stale) {
-    console.info(`FaNotes: Die Monitor-Skalierung hat sich auf ${monitorScale} geändert (Start mit ${linuxInputStartup.scaleFactor}); sie gilt ab dem nächsten Start.`)
+    console.info(currentUiLanguage() === 'en'
+      ? `FaNotes: The monitor scale changed to ${monitorScale} (started with ${linuxInputStartup.scaleFactor}); it applies from the next start.`
+      : `FaNotes: Die Monitor-Skalierung hat sich auf ${monitorScale} geändert (Start mit ${linuxInputStartup.scaleFactor}); sie gilt ab dem nächsten Start.`)
   }
 }
 const singletonCleanup = cleanupStaleSingletonLocks(app.getPath('userData'))
@@ -5382,7 +5387,9 @@ function registerIpcHandlers() {
   })
 
   handle(IPC.readSubjectBooks, async () => {
-    await ensureBootstrap()
+    // The renderer asks before first-run onboarding is done; there are no books yet, so answer empty instead of throwing.
+    await ensureBootstrap({ allowOnboarding: true })
+    if (currentOnboardingRequired) return []
     const root = await assertCurrentVaultRoot()
     return readSubjectBooksFromVault(root)
   })

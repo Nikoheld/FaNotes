@@ -1,3 +1,4 @@
+import { uiText } from '../i18n'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, FolderPlus, ImageIcon, LoaderCircle, NotebookTabs, PenLine, X } from 'lucide-react'
 import type { OneNoteImportProgress, OneNoteImportResult, OneNoteScan } from '../types'
@@ -164,7 +165,7 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
                       </button>
                       <label>
                         <input type="checkbox" checked={count === ids.length} ref={(input) => { if (input) input.indeterminate = count > 0 && count < ids.length }} onChange={(event) => toggle(ids, event.target.checked)} />
-                        <strong>{section.name}</strong>
+                        <strong data-i18n-ignore>{section.name}</strong>
                         <small>{count}/{ids.length}</small>
                       </label>
                       <button type="button" className="onenote-dialog-link" onClick={() => toggle(ids, true)}>Alle</button>
@@ -173,7 +174,7 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
                     {open && section.pages.map((page) => (
                       <label key={page.id} className={`onenote-dialog-page${page.alreadyImported ? ' is-imported' : ''}`} style={{ paddingLeft: 46 + page.depth * 16 }} role="treeitem" aria-selected={selected.has(page.id)}>
                         <input type="checkbox" checked={selected.has(page.id)} onChange={(event) => toggle([page.id], event.target.checked)} />
-                        <span className="onenote-dialog-page-title">{page.title}</span>
+                        <span className="onenote-dialog-page-title" data-i18n-ignore>{page.title}</span>
                         {page.hasInk && <em title="Enthält Handschrift"><PenLine size={12} />Handschrift</em>}
                         {page.imageCount > 0 && <em title="Enthält Bilder"><ImageIcon size={12} />{page.imageCount}</em>}
                         {page.alreadyImported && <em className="is-done"><Check size={12} />Bereits importiert</em>}
@@ -190,7 +191,7 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
                 <span>Zielordner</span>
                 <select value={folder} onChange={(event) => setFolder(event.target.value)}>
                   <option value={ROOT}>Vault (oberste Ebene)</option>
-                  {folderOptions.map((entry) => <option key={entry} value={entry}>{entry}</option>)}
+                  {folderOptions.map((entry) => <option key={entry} value={entry} data-i18n-ignore>{entry}</option>)}
                   <option value={NEW_FOLDER}>Neuer Ordner …</option>
                 </select>
               </label>
@@ -218,7 +219,7 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
             <LoaderCircle className="spin" size={22} />
             <strong>{cancelling ? 'Wird abgebrochen …' : 'Seiten werden importiert …'}</strong>
             <div className="onenote-dialog-progress" aria-hidden><i style={{ width: `${progress && progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }} /></div>
-            <small>{progress ? `${progress.done} von ${progress.total}${progress.title && progress.status === 'working' ? ` · ${progress.title}` : ''}` : ''}</small>
+            <small data-i18n-ignore>{progress ? `${progress.done} ${uiText('von', 'of')} ${progress.total}${progress.title && progress.status === 'working' ? ` · ${progress.title}` : ''}` : ''}</small>
           </div>
           <footer><small>Bereits geschriebene Seiten bleiben erhalten.</small><div><button type="button" className="secondary-button" disabled={cancelling} onClick={cancel}>Abbrechen</button></div></footer>
         </>}
@@ -231,14 +232,14 @@ export function OneNoteImportDialog({ folders, onClose, onImported }: Props) {
               <div className={result.failed.length ? 'is-bad' : ''}><b>{result.failed.length}</b><small>fehlgeschlagen</small></div>
             </div>
             {result.cancelled && <p className="onenote-dialog-note">Der Import wurde abgebrochen. Die bis dahin geschriebenen Seiten sind im Vault.</p>}
-            <p className="onenote-dialog-note">
+            <p className="onenote-dialog-note" data-i18n-ignore>
               {result.inkPages
-                ? `Handschrift: ${result.strokeCount} Striche auf ${result.inkPages} ${result.inkPages === 1 ? 'Seite' : 'Seiten'} als .famd übernommen.`
-                : scan && scan.inkPageCount === 0 ? 'Diese Datei enthält keine Handschrift-Daten.' : 'In den gewählten Seiten wurde keine Handschrift gefunden.'}
-              {result.layoutPages ? ` ${result.layoutPages} Seiten mit Handschrift behalten das OneNote-Layout.` : ''}{result.imageCount ? ` Bilder: ${result.imageCount}.` : ''}
+                ? uiText(`Handschrift: ${result.strokeCount} Striche auf ${result.inkPages} ${result.inkPages === 1 ? 'Seite' : 'Seiten'} als .famd übernommen.`, `Handwriting: ${result.strokeCount} ${result.strokeCount === 1 ? 'stroke' : 'strokes'} on ${result.inkPages} ${result.inkPages === 1 ? 'page' : 'pages'} saved as .famd.`)
+                : scan && scan.inkPageCount === 0 ? uiText('Diese Datei enthält keine Handschrift-Daten.', 'This file contains no handwriting data.') : uiText('In den gewählten Seiten wurde keine Handschrift gefunden.', 'No handwriting was found in the selected pages.')}
+              {result.layoutPages ? uiText(` ${result.layoutPages} Seiten mit Handschrift behalten das OneNote-Layout.`, ` ${result.layoutPages} ${result.layoutPages === 1 ? 'page' : 'pages'} with handwriting keep the OneNote layout.`) : ''}{result.imageCount ? uiText(` Bilder: ${result.imageCount}.`, ` Images: ${result.imageCount}.`) : ''}
             </p>
-            {result.skipped.length > 0 && <details><summary>{result.skipped.length} bereits importierte Seiten übersprungen</summary><ul>{result.skipped.map((item) => <li key={item.id}>{item.title}</li>)}</ul></details>}
-            {result.failed.length > 0 && <div className="onenote-dialog-errors" role="alert"><strong>Fehler pro Seite</strong><ul>{result.failed.map((item) => <li key={item.id}><b>{item.title}</b>: {item.error}</li>)}</ul></div>}
+            {result.skipped.length > 0 && <details><summary>{result.skipped.length} bereits importierte Seiten übersprungen</summary><ul>{result.skipped.map((item) => <li key={item.id} data-i18n-ignore>{item.title}</li>)}</ul></details>}
+            {result.failed.length > 0 && <div className="onenote-dialog-errors" role="alert"><strong>Fehler pro Seite</strong><ul>{result.failed.map((item) => <li key={item.id}><b data-i18n-ignore>{item.title}</b>: {item.error}</li>)}</ul></div>}
             {result.warnings.length > 0 && <details><summary>{result.warnings.length} Hinweise</summary><ul>{result.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
           </div>
           <footer><small>{destination ? <>Ziel: {destination}</> : 'Ziel: oberste Ebene des Vaults'}</small><div><button type="button" className="primary-button" onClick={close}>Fertig</button></div></footer>

@@ -40,8 +40,9 @@ import {
   User,
   X,
 } from 'lucide-react'
+import { colorSwatchName } from '../lib/colorNames'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getUiLocale } from '../i18n'
+import { getUiLocale, uiText } from '../i18n'
 import {
   generateHomeworkApiChannelId,
   generateHomeworkApiSecret,
@@ -249,7 +250,7 @@ const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { label: 'Hausaufgaben API', detail: 'Experimentell', section: 'experimental', target: 'settings-homework-api', keywords: 'hausaufgaben api fasrv passwort auth termine liste erledigt patch post delete' },
   { label: 'Remote Support', detail: 'Experimentell', section: 'experimental', target: 'settings-remote-support', keywords: 'remote support sitzung debug test code token fernwartung' },
   { label: 'Notiz-Backup', detail: 'Dateien & Vault', section: 'files', target: 'settings-note-backup', keywords: 'backup sichern wiederherstellen snapshot notiz experimentell' },
-  { label: 'Send Data', detail: 'Experimentell', section: 'experimental', target: 'settings-send-data', keywords: 'send data logs nutzerdaten hyprland telemetry diagnostik server' },
+  { label: 'Laufende Logs senden', detail: 'Experimentell', section: 'experimental', target: 'settings-send-data', keywords: 'send data laufend logs nutzerdaten hyprland telemetry diagnostik server' },
   { label: 'Vault & Speicherort', detail: 'Dateien & Vault', section: 'files', target: 'settings-vault', keywords: 'ordner wechseln pfad notizen markdown nas browser' },
   { label: 'Microsoft OneNote importieren', detail: 'Dateien & Vault', section: 'files', target: 'settings-onenote', keywords: 'one onetoc2 onepkg onedrive zip notizbuch migration' },
   { label: 'Server-Backup', detail: 'Dateien & Vault', section: 'files', target: 'settings-backup', keywords: 'sicherung cloud wiederherstellen recovery kopie' },
@@ -780,7 +781,7 @@ export function SettingsModal({
                   const item = SECTIONS.find((candidate) => candidate.id === sectionId)!
                   const Icon = item.icon
                   return (
-                    <button key={item.id} type="button" className={active === item.id ? 'active' : ''} title={item.description} onClick={() => setActive(item.id)}>
+                    <button key={item.id} type="button" className={active === item.id ? 'active' : ''} title={item.description} aria-label={item.label} aria-current={active === item.id ? 'page' : undefined} onClick={() => setActive(item.id)}>
                       <Icon size={14} />
                       <span><b>{item.label}</b><small>{item.description}</small></span>
                       {item.id === 'conflicts' && (syncState?.openConflicts ?? 0) > 0 && <em className="settings-nav-badge" aria-label={`${syncState?.openConflicts} offen`}>{syncState?.openConflicts}</em>}
@@ -849,7 +850,7 @@ export function SettingsModal({
                         <button
                           type="button"
                           key={color}
-                          aria-label={`Akzent ${color}`}
+                          aria-label={uiText(`Akzent ${colorSwatchName(color)}`, `Accent ${colorSwatchName(color)}`)}
                           className={settings.accent === color ? 'active' : ''}
                           style={{ '--swatch': color, '--swatch-contrast': bestContrastText(color) } as React.CSSProperties}
                           onClick={() => update('accent', color)}
@@ -1597,11 +1598,11 @@ export function SettingsModal({
                 )}
                 <div id="settings-send-data">
                 <SettingRow
-                  title="Send Data"
-                  description="Schickt laufend gebündelte Logs, Laufzeit-Nutzerdaten und Linux/Hyprland-Kontext an fanotes.fasrv.ch. Wenn Send Data an ist, nutzt FaNotes denselben Hyprland-Kontext lokal: Löschfragen bleiben im Fenster statt als Hyprland-Dialog oben in der Ecke. Standard aus. Es geht nicht der ganze Vault mit; Intervalle und Grösse sind begrenzt, damit der Akku nicht leidet."
+                  title="Laufende Logs senden"
+                  description="Zusätzlich zu den Diagnosedaten unter „Daten senden“: schickt laufend gebündelte Logs, Laufzeit-Nutzerdaten und Linux/Hyprland-Kontext an fanotes.fasrv.ch. Ist dieser Schalter an, nutzt FaNotes denselben Hyprland-Kontext lokal: Löschfragen bleiben im Fenster statt als Hyprland-Dialog oben in der Ecke. Standard aus. Es geht nicht der ganze Vault mit; Intervalle und Grösse sind begrenzt, damit der Akku nicht leidet."
                 >
                   <Toggle
-                    label="Send Data"
+                    label="Laufende Logs senden"
                     checked={settings.experimentalSendData}
                     onChange={(value) => update('experimentalSendData', value)}
                   />

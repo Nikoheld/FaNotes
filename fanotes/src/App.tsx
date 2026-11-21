@@ -292,7 +292,7 @@ import { parseRecognitionBundle, serializeRecognitionBundle, emptyRecognitionBun
 import { polishRecognizedText } from './lib/recognitionPolish'
 import { sanitizeAddonStrokes, inkDocumentWithStrokes } from './lib/addonInk'
 import { sanitizeCalendarDocument, serializeCalendarMarkdown, emptyCalendarDocument, isMissingNoteError, loadCalendarMarkdown, CALENDAR_NOTE_PATH } from './lib/calendarModel'
-import { templatesToSeed, templatePath, NOTE_TEMPLATES, type NoteProfileId } from './lib/noteTemplates'
+import { templatesToSeed, localizeTemplate, templatesFolderName, NOTE_TEMPLATES, type NoteProfileId } from './lib/noteTemplates'
 import { backlinksFor } from './lib/backlinks'
 import { highlightPdfImportantMarks } from './lib/pdfImportantMarks'
 import { readPdfMarks, writePdfMarks, addPdfMark } from './lib/pdfTextMarks'
@@ -302,7 +302,7 @@ import { SafeBoundary } from './components/SafeBoundary'
 import { createTreeSync, type TreeSync } from './lib/treeSync.mjs'
 import { applyNoteTags, collectVaultTags, filterTreeByTag, parseNoteTags } from './lib/noteTags'
 import { applyRendererResourceLimits } from './lib/resourceLimits'
-import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText } from './i18n'
+import { getUiLanguage, getUiLocale, setUiLanguage, translateUiText, uiText } from './i18n'
 import { bestContrastText, ensureReadableColor } from './lib/colorContrast'
 import { snowLayerActive } from './lib/snowTheme'
 import { SnowLayer } from './components/SnowLayer'
@@ -1519,6 +1519,8 @@ export default function App({ startupBootstrap }: AppProps) {
       setSubjectBooksReady(true)
       return
     }
+    // Nothing to read before the vault exists and first-run onboarding is done.
+    if (!bootstrap || bootstrap.onboardingRequired) return
     let alive = true
     subjectBooksLoadedRef.current = false
     setSubjectBooksReady(false)
@@ -1539,7 +1541,7 @@ export default function App({ startupBootstrap }: AppProps) {
         if (alive) setSubjectBooksReady(true)
       })
     return () => { alive = false }
-  }, [bootstrap?.vaultPath])
+  }, [bootstrap?.vaultPath, bootstrap?.onboardingRequired])
 
   const activeWorksheetMarkerKey = activeTab ? noteWorksheetIds(activeTab.content).join('\0') : ''
   useEffect(() => {
@@ -2256,14 +2258,13 @@ export default function App({ startupBootstrap }: AppProps) {
     const data = await window.fanotes.completeOnboarding(subjects)
     setBootstrap(data)
     try {
-      await window.fanotes.createFolder(undefined, 'Vorlagen')
-      for (const template of templatesToSeed([], profile)) {
-        const created = await window.fanotes.createNote('Vorlagen', template.fileName)
-        if (created.relativePath !== templatePath(template)) {
-          await window.fanotes.writeFile(created.relativePath, template.markdown)
-        } else {
-          await window.fanotes.writeFile(templatePath(template), template.markdown)
-        }
+      const language = getUiLanguage()
+      const folderName = templatesFolderName(language)
+      await window.fanotes.createFolder(undefined, folderName)
+      for (const seed of templatesToSeed([], profile)) {
+        const template = localizeTemplate(seed, language)
+        const created = await window.fanotes.createNote(folderName, template.fileName)
+        await window.fanotes.writeFile(created.relativePath, template.markdown)
       }
     } catch {
       /* templates are also available from the command palette */
@@ -2886,8 +2887,8 @@ export default function App({ startupBootstrap }: AppProps) {
         onApplied: (change) => { void syncDepsRef.current.applyRemoteChanges(change) },
         onIncoming: (share) => {
           const text = share.status === 'accepted'
-            ? `${share.peer} hat „${share.name}“ mit dir geteilt. Es liegt unter „${SHARED_INBOX_FOLDER}“.`
-            : `${share.peer} möchte „${share.name}“ mit dir teilen. Nimm es in der Seitenleiste unter „${SHARED_INBOX_FOLDER}“ an.`
+            ? uiText(`${share.peer} hat „${share.name}“ mit dir geteilt. Es liegt unter „${SHARED_INBOX_FOLDER}“.`, `${share.peer} shared “${share.name}” with you. It is under “${SHARED_INBOX_FOLDER}”.`)
+            : uiText(`${share.peer} möchte „${share.name}“ mit dir teilen. Nimm es in der Seitenleiste unter „${SHARED_INBOX_FOLDER}“ an.`, `${share.peer} wants to share “${share.name}” with you. Accept it in the sidebar under “${SHARED_INBOX_FOLDER}”.`)
           syncDepsRef.current.toast(text, 'info')
           try {
             if (typeof Notification !== 'undefined' && !document.hasFocus()) {
@@ -5811,9 +5812,11 @@ export default function App({ startupBootstrap }: AppProps) {
     { id: 'study', label: 'Lernzeit', detail: 'Zeit, Tippen und Handschrift je Fach, nur lokal', group: 'Ansicht', keywords: 'statistik lernen heatmap', icon: <BarChart3 size={15} />, run: () => { setStudyOpen(true); setOverviewOpen(false); setHomeworkOpen(false); setCalendarOpen(false); setGlyphenWerkOpen(false) } },
     ...(pdfSide.available ? [{ id: 'pdf-side-pages', label: pdfSide.shown ? 'Leere Seiten daneben ausblenden' : 'Leere Seiten daneben', detail: 'Neben jeder PDF-Seite eine leere Schreibseite gleicher Grösse', group: 'Ansicht', keywords: 'pdf leer seite daneben rechts notizen schreiben platz side blank page', icon: <SquareSplitHorizontal size={15} />, run: () => { if (isPdfActive) void pdfSide.toggle(); else toast('Öffne zuerst ein PDF.', 'info') } }] : []),
     { id: 'flashcards', label: 'Karteikarten', detail: 'Lernfragen dieser Notiz wiederholen', group: 'Lernen', keywords: 'flashcards karten spaced', icon: <Sparkles size={15} />, run: () => { editorRef.current?.flushChanges(); setCardsOpen(true) } },
-    ...NOTE_TEMPLATES.map((template) => ({
+    ...NOTE_TEMPLATES.map((german) => {
+      const template = localizeTemplate(german, getUiLanguage())
+      return {
       id: `template-${template.id}`,
-      label: `Vorlage: ${template.title}`,
+      label: `Vorlage: ${german.title}`,
       detail: 'In den aktuellen Ordner einfügen',
       group: 'Vorlagen',
       keywords: `vorlage template ${template.profile} ${template.title}`,
@@ -5825,7 +5828,8 @@ export default function App({ startupBootstrap }: AppProps) {
           await openNoteRef.current(created.relativePath)
         }).catch((error) => toast(error instanceof Error ? error.message : 'Vorlage konnte nicht angelegt werden.', 'error'))
       },
-    })),
+    }
+    }),
     { id: 'homework', label: 'Hausaufgaben & Termine', detail: 'To-dos, Hausaufgaben und Termine mit Fälligkeit', group: 'Navigation', keywords: 'todo hausaufgaben schule termin fällig aufgabe checklist', icon: <ClipboardList size={15} />, run: openHomework },
     { id: 'calendar', label: 'Kalender', detail: 'Tag, 3 Tage, Woche, Monat und Agenda', group: 'Navigation', keywords: 'kalender termin woche monat agenda notion calendar event', icon: <CalendarDays size={15} />, run: openCalendar },
     { id: 'daily', label: 'Heutige Tagesnotiz', detail: settings.dailyNotesFolder, group: 'Dateien', icon: <CalendarDays size={15} />, run: () => void createDailyNote() },

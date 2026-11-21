@@ -1,4 +1,5 @@
 // Character and place sheets, and the story timeline.
+import { colorSwatchName } from '../../lib/colorNames'
 import { Archive, ArrowDown, ArrowUp, ArrowUpRight, Plus, Search, Trash2, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { mentionPattern, newBibleEntry, type BibleEntry, type BibleKind } from '../model/bible'
@@ -86,7 +87,7 @@ export function BibleSheets({ kind, entries, binder, scenes, writer, onSave, onO
             </label>
           </div>
           <div className="wm-swatches" role="group" aria-label={L('Farbe', 'Colour')}>
-            {LABEL_COLORS.map((color) => <button key={color} type="button" className={entry.color === color ? 'is-on' : ''} style={{ background: color }} aria-label={color} onClick={() => patch({ color })} />)}
+            {LABEL_COLORS.map((color) => <button key={color} type="button" className={entry.color === color ? 'is-on' : ''} style={{ background: color }} aria-label={colorSwatchName(color)} onClick={() => patch({ color })} />)}
             <button type="button" className="wm-swatch-clear" aria-label={L('Keine Farbe', 'No colour')} onClick={() => patch({ color: undefined })}><X size={12} /></button>
           </div>
           {entry.fields.map((field, index) => (
