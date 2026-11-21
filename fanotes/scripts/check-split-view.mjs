@@ -78,8 +78,14 @@ try {
         await settle(800)
       }
       const makeNote = async (word) => {
+        // Startup restores the first note after the shell paints; a click before that does nothing.
+        await page.waitForSelector('.note-tab.active', { timeout: 90_000 })
+        const activeBefore = await page.evaluate(() => document.querySelector('.note-tab.active')?.getAttribute('title') ?? '')
         await page.locator('button[aria-label="Neue Notiz"]').first().click()
-        await page.waitForSelector('.cm-content', { timeout: 60_000 })
+        // The welcome note's editor is already on screen, so waiting for any .cm-content is not enough: on a slow runner the
+        // typing would land in the old note. Wait until the new note is the active tab and its editor shows it.
+        await page.waitForFunction((previous) => (document.querySelector('.note-tab.active')?.getAttribute('title') ?? '') !== previous
+          && /^#\s*Unbenannte Notiz/u.test(document.querySelector('.cm-content')?.textContent ?? ''), activeBefore, { timeout: 60_000 })
         await settle(500)
         await page.locator('.cm-content').first().click()
         await page.keyboard.press('Control+End')
