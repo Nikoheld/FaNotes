@@ -9,7 +9,12 @@ on:
       - 'fanotes/src/writing/**'
       - 'fanotes/src/lib/sync/**'
       - 'fanotes/scripts/check-account-share.mjs'
+      - 'fanotes/scripts/check-live-collab*.mjs'
+      - 'fanotes/scripts/live-collab-harness/**'
+      - 'fanotes/scripts/live-ink-harness/**'
+      - 'fanotes/src/lib/collab/**'
       - 'fanotes-site/user-shares.mjs'
+      - 'fanotes-site/live-relay*.mjs'
       - 'fanotes/src/lib/docSearch/**'
       - 'fanotes/scripts/check-writing*.mjs'
       - 'fanotes/scripts/fixtures/writing-sync/**'
@@ -46,6 +51,9 @@ jobs:
       - run: node scripts/check-writing-sync.mjs
       - run: node scripts/check-sync.mjs
       - run: node scripts/check-account-share.mjs
+      - run: node scripts/check-live-collab.mjs
+      - run: node scripts/check-live-collab-editor.mjs
+      - run: node scripts/check-live-collab-ink.mjs
       - run: node scripts/check-doc-search.mjs
 
   kotlin:
