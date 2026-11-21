@@ -176,6 +176,8 @@ export type MarkdownEditorProps = {
   onEditActivity?: (activity: EditActivity) => void
   /** Note path: folded headings are remembered under it (local profile data, not in the note) and restored on open. */
   foldKey?: string
+  /** A shared note open for live co-editing: the text, the others' cursors and a per-user undo come from it. */
+  liveNote?: import('../lib/collab/liveNotes').LiveNote | null
 }
 
 export type MarkdownFormatAction =
@@ -1588,6 +1590,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   onLanguageDetected,
   onEditActivity,
   foldKey,
+  liveNote = null,
 }: MarkdownEditorProps, forwardedRef) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -1615,6 +1618,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       contentAttributes: new Compartment(),
       editable: new Compartment(),
       spelling: new Compartment(),
+      history: new Compartment(),
+      live: new Compartment(),
     }),
     [],
   )
@@ -1776,7 +1781,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       doc: content,
       extensions: [
         highlightSpecialChars(),
-        history(),
+        compartments.history.of(history()),
+        compartments.live.of([]),
         // The paper scroller (not .cm-scroller) pans the sheet. "Fixed" gutters
         // are `position: sticky; left: 0` and would ride over the first glyphs
         // (82% white) whenever the zoomed sheet is scrolled sideways.
@@ -1967,6 +1973,31 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       syncingExternalContent.current = false
     }
   }, [content])
+
+  // Live co-editing: the editor takes the shared text over, then every edit and cursor goes through Yjs.
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !liveNote) return
+    let cancelled = false
+    void import('../lib/collab/liveEditor').then(({ liveEditorExtension }) => {
+      if (cancelled || viewRef.current !== view) return
+      const shared = liveNote.ytext.toString()
+      const current = view.state.doc.toString()
+      if (current !== shared) {
+        const span = minimalReplacement(current, shared)
+        // The shared text is the truth now; this is not an undo step. The editor reports it like any change,
+        // so the app's copy and the autosave follow.
+        view.dispatch({ changes: { from: span.from, to: span.to, insert: span.insert }, annotations: Transaction.addToHistory.of(false) })
+      }
+      view.dispatch({ effects: [compartments.history.reconfigure([]), compartments.live.reconfigure(liveEditorExtension(liveNote))] })
+    })
+    return () => {
+      cancelled = true
+      if (viewRef.current === view) {
+        view.dispatch({ effects: [compartments.live.reconfigure([]), compartments.history.reconfigure(history())] })
+      }
+    }
+  }, [compartments, liveNote])
 
   useEffect(() => {
     if (!autocorrectEnabled) return
