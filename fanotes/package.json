@@ -28,6 +28,7 @@
     "check:notes": "node scripts/check-note-creation.cjs",
     "check:desktop-guards": "node scripts/check-desktop-guards.cjs",
     "check:tauri-channels": "node scripts/check-tauri-channel-parity.mjs",
+    "check:qa-linux-editor": "node scripts/check-qa-linux-editor.mjs",
     "check:qa-editor-files": "node scripts/check-qa-editor-files.mjs",
     "check:famd": "node scripts/check-famd.cjs && node scripts/check-famd-v2.cjs && node scripts/check-famd-open.cjs",
     "check:famd-v2": "node scripts/check-famd-v2.cjs",
