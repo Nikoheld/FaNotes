@@ -3985,7 +3985,7 @@ async function coordinateWithBackgroundUpdater() {
     if (result?.ok !== true || typeof result.version !== 'string' || result.version === app.getVersion()) return
     const appImage = process.platform === 'linux' && typeof process.env.APPIMAGE === 'string' && path.isAbsolute(process.env.APPIMAGE) ? process.env.APPIMAGE : null
     locks.clearAppRunning()
-    app.relaunch(appImage ? { execPath: appImage, args: process.argv.slice(1) } : undefined)
+    app.relaunch(appImage ? { execPath: appImage, args: require('./updater.cjs').collectRelaunchArgs(process.argv) } : undefined)
     app.exit(0)
   } catch (error) {
     console.warn('FaNotes konnte sich nicht mit dem Hintergrund-Updater abstimmen:', error?.message ?? error)

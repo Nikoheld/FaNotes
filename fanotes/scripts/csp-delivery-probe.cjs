@@ -32,11 +32,11 @@ async function run(label, url, { expectLoad = true } = {}) {
   // Only the page itself: a frame that frame-src refuses is an expected result, reported through the violations.
   window.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => { if (isMainFrame) failure = `${code} ${description}` })
   await window.loadURL(url).catch((error) => { failure ||= String(error?.message ?? error).split(' ')[0] })
-  await wait(500)
+  await wait(900)
   let page = null
   if (!failure || !expectLoad) {
     page = await window.webContents.executeJavaScript(
-      '({ inlineRan: window.__inlineRan === true, evalBlocked: window.__evalBlocked, violations: window.__violations || [], pwned: window.__pwned === true })',
+      '({ inlineRan: window.__inlineRan === true, evalBlocked: window.__evalBlocked, violations: window.__violations || [], pwned: window.__pwned === true, workerState: window.__workerState || "none" })',
     ).catch(() => null)
   }
   const frames = window.webContents.mainFrame.frames.map((frame) => String(frame.url ?? ''))

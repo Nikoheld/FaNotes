@@ -109,6 +109,32 @@ const RETRYABLE_TRANSFER_CODES = new Set([
 const WINDOWS_INSTALLER_ARGS = Object.freeze(['/S', '--updated'])
 const INSTALL_MODES = Object.freeze(['relaunch', 'quiet'])
 
+// Launch switches that belong to one run only and must not be repeated when
+// the updater (or an update-triggered relaunch) starts the new version.
+const ONE_SHOT_SWITCH = /^--(?:fanotes-|remote-debugging-|inspect|updated$|squirrel-|type=|original-process-start-time|enable-crash-reporter|crashpad-handler-pid)/u
+const MAX_RELAUNCH_ARGS = 64
+const MAX_RELAUNCH_ARG_LENGTH = 1024
+
+/**
+ * The Chromium/Electron switches the user started this process with (for
+ * example --use-gl, --use-angle, --force-device-scale-factor, --ozone-platform,
+ * --disable-features) so a relaunch behaves like the original start. File and
+ * URL arguments, one-shot FaNotes arguments and debugging ports are dropped.
+ * @param {string[]} argv process.argv; element 0 is the executable
+ */
+const collectRelaunchArgs = (argv) => {
+  if (!Array.isArray(argv)) return []
+  const kept = []
+  for (const arg of argv.slice(1)) {
+    if (typeof arg !== 'string' || arg.length < 3 || arg.length > MAX_RELAUNCH_ARG_LENGTH) continue
+    if (!arg.startsWith('--') || arg.includes('\0') || /[\r\n]/u.test(arg)) continue
+    if (ONE_SHOT_SWITCH.test(arg)) continue
+    kept.push(arg)
+    if (kept.length >= MAX_RELAUNCH_ARGS) break
+  }
+  return kept
+}
+
 // Shared by the Windows helpers. Every helper writes install-result.json next
 // to its log, releases install.lock in the same directory when it ends, and
 // runs the installed program once with --fanotes-self-test: a headless start
@@ -121,6 +147,20 @@ $root = Split-Path -Parent $ResultFile
 $selfTestFile = Join-Path $root 'self-test.json'
 $lockFile = Join-Path $root 'install.lock'
 $launchRequestFile = Join-Path $root 'launch-request.json'
+
+# The user's Chromium switches (base64 of a JSON array) the old instance was
+# started with, plus --fanotes-updated-from, quoted for Start-Process.
+function Get-RelaunchArguments {
+  $list = @()
+  if ($LaunchArgs) {
+    try {
+      $decoded = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($LaunchArgs))
+      foreach ($item in @(ConvertFrom-Json -InputObject $decoded)) { if ($item -is [string] -and $item.StartsWith('--')) { $list += $item } }
+    } catch { }
+  }
+  $list += "--fanotes-updated-from=$FromVersion"
+  return @($list | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
+}
 
 function Write-Log([string]$Message) {
   Add-Content -LiteralPath $LogFile -Value "$(Get-Date -Format o) $Message" -Encoding UTF8
@@ -218,6 +258,7 @@ const WINDOWS_DELTA_HELPER = `param(
   [Parameter(Mandatory=$true)][string]$LogFile,
   [Parameter(Mandatory=$true)][string]$ResultFile,
   [Parameter(Mandatory=$true)][string]$Mode,
+  [string]$LaunchArgs = '',
   [int]$StubPid = 0
 )
 ${WINDOWS_HELPER_COMMON}
@@ -248,7 +289,7 @@ try {
     Write-Result $true 'installed'
     Write-Log "update to $ToVersion installed successfully"
     if ($Mode -eq 'relaunch') {
-      Start-Process -FilePath $Executable -ArgumentList "--fanotes-updated-from=$FromVersion" | Out-Null
+      Start-Process -FilePath $Executable -ArgumentList (Get-RelaunchArguments) | Out-Null
     } else {
       Complete-LaunchRequest $Executable
     }
@@ -296,7 +337,8 @@ const WINDOWS_INSTALLER_HELPER = `param(
   [Parameter(Mandatory=$true)][string]$Executable,
   [Parameter(Mandatory=$true)][string]$LogFile,
   [Parameter(Mandatory=$true)][string]$ResultFile,
-  [Parameter(Mandatory=$true)][string]$Mode
+  [Parameter(Mandatory=$true)][string]$Mode,
+  [string]$LaunchArgs = ''
 )
 ${WINDOWS_HELPER_COMMON}
 try {
@@ -314,7 +356,7 @@ try {
     Write-Result $true 'installed'
     Write-Log "update to $ToVersion installed successfully"
     if ($Mode -eq 'relaunch') {
-      Start-Process -FilePath $Executable -ArgumentList "--fanotes-updated-from=$FromVersion" | Out-Null
+      Start-Process -FilePath $Executable -ArgumentList (Get-RelaunchArguments) | Out-Null
     } else {
       Complete-LaunchRequest $Executable
     }
@@ -354,6 +396,9 @@ to_version="$6"
 log_file="$7"
 result_file="$8"
 mode="\${9:-relaunch}"
+# Arguments 10 and up are the user's launch switches; they are repeated
+# verbatim as separate words, never re-parsed by the shell.
+if [ "$#" -ge 9 ]; then shift 9; else shift "$#"; fi
 root="$(dirname -- "$result_file")"
 self_test_file="$root/self-test.json"
 lock_file="$root/install.lock"
@@ -447,7 +492,7 @@ if self_test; then
   healthy=1
   if [ "$mode" = relaunch ]; then
     write_result true installed
-    "$target" --fanotes-updated-from="$from_version" >/dev/null 2>&1 &
+    "$target" "$@" --fanotes-updated-from="$from_version" >/dev/null 2>&1 &
     new_pid=$!
     sleep 8
     kill -0 "$new_pid" 2>/dev/null || healthy=0
@@ -467,7 +512,7 @@ if [ "$had_previous" -eq 1 ] && [ -f "$backup" ]; then
   mv -- "$backup" "$target"
   write_result false self-test-failed
   if [ "$mode" = relaunch ]; then
-    "$target" --fanotes-update-rollback="$to_version" >/dev/null 2>&1 &
+    "$target" "$@" --fanotes-update-rollback="$to_version" >/dev/null 2>&1 &
   fi
 else
   write_result false self-test-failed
@@ -931,12 +976,15 @@ function createUpdateManager({
   portableExecutable = process.env.PORTABLE_EXECUTABLE_FILE,
   executablePath = process.execPath,
   spawnImpl = spawn,
+  // The switches this process was started with; repeated when relaunching.
+  launchArgv = process.argv,
   // The helper waits for this process to exit before it touches any file.
   helperParentPid = process.pid,
   updaterRoot: updaterRootOverride = null,
   locks: providedLocks = null,
 }) {
   const currentVersion = app.getVersion()
+  const relaunchArgs = collectRelaunchArgs(launchArgv)
   const platformConfig = PLATFORM_RELEASES[platform] ?? null
   const supported = Boolean(platformConfig && (app.isPackaged || forceSupported || process.env.FANOTES_UPDATER_ALLOW_DEV === '1'))
   const windowsPortable = platform === 'win32' && typeof portableExecutable === 'string' && path.isAbsolute(portableExecutable)
@@ -1980,6 +2028,8 @@ function createUpdateManager({
       LogFile: logPath,
       ResultFile: installResultPath,
       Mode: mode,
+      // Windows helpers take the switches as one base64 JSON argument.
+      LaunchArgs: Buffer.from(JSON.stringify(relaunchArgs), 'utf8').toString('base64'),
     }
 
     if (platform === 'win32') {
@@ -2041,6 +2091,7 @@ function createUpdateManager({
       logPath,
       installResultPath,
       mode,
+      ...relaunchArgs,
     ], destination.kind, plan)
   }
 
@@ -2233,6 +2284,7 @@ function createUpdateManager({
 }
 
 module.exports = {
+  collectRelaunchArgs,
   CHECK_INTERVAL_MS,
   EXPECTED_KEY_ID,
   INSTALL_HELPER,

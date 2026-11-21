@@ -11,7 +11,7 @@ const { pipeline } = require('node:stream/promises')
 const { applyDeltaPatch } = require('../electron/delta.cjs')
 const { createDeltaPatch } = require('./create-delta.cjs')
 const { EventEmitter } = require('node:events')
-const { compareVersions, createUpdateManager, diagnoseUpdateFailure, githubReleaseAssetUrl, INSTALL_HELPER, isPrivateAddress, pickUpdateRelease, shouldReplaceManagedDesktopFile, stableStringify, verifyManifest, waitForChildSpawn } = require('../electron/updater.cjs')
+const { collectRelaunchArgs, compareVersions, createUpdateManager, diagnoseUpdateFailure, githubReleaseAssetUrl, INSTALL_HELPER, isPrivateAddress, pickUpdateRelease, shouldReplaceManagedDesktopFile, stableStringify, verifyManifest, waitForChildSpawn } = require('../electron/updater.cjs')
 const {
   EMPTY_NIGHTLY_CHANGELOG,
   DELTA_ROUTE_PATTERN,
@@ -576,6 +576,28 @@ async function main() {
     assert.equal(installResult.version, targetVersion)
     assert.equal(installResult.ok, true)
     assert.equal(fs.existsSync(path.join(helperDirectory, 'install.lock')), false, 'Der Helfer gibt die Installationssperre frei.')
+
+    // Relaunch keeps the user's Chromium switches (quoted safely) and drops one-shot arguments.
+    {
+      const relaunchDirectory = path.join(temporary, 'relaunch-helper')
+      const relaunchTarget = path.join(relaunchDirectory, 'FaNotes.AppImage')
+      const relaunchStaged = path.join(relaunchDirectory, 'FaNotes.next.AppImage')
+      const argsFile = path.join(relaunchDirectory, 'args.txt')
+      const switches = collectRelaunchArgs(['/opt/FaNotes', '--use-gl=angle', '--use-angle=gl', '--force-device-scale-factor=2', '--disable-features=Vulkan,DefaultANGLEVulkan', '--ozone-platform=x11', '--fanotes-updated-from=1.0.0', '--remote-debugging-port=9222', '/home/u/note.md', 'fanotes://open', '--window-title=a b $(touch pwned) "q"'])
+      assert.deepEqual(switches, ['--use-gl=angle', '--use-angle=gl', '--force-device-scale-factor=2', '--disable-features=Vulkan,DefaultANGLEVulkan', '--ozone-platform=x11', '--window-title=a b $(touch pwned) "q"'])
+      assert.deepEqual(collectRelaunchArgs(undefined), [])
+      const relaunchExecutable = `#!/bin/sh\nif [ "$1" = --fanotes-self-test ]; then printf '{"ok":true,"version":"${targetVersion}"}' >"$FANOTES_SELF_TEST_FILE"; exit 0; fi\nfor a in "$@"; do printf '%s\\n' "$a" >>"${argsFile}"; done\nsleep 12\n`
+      await fsp.mkdir(relaunchDirectory, { recursive: true })
+      await fsp.writeFile(helperPath, INSTALL_HELPER, { mode: 0o700 })
+      await fsp.writeFile(relaunchTarget, '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+      await fsp.writeFile(relaunchStaged, relaunchExecutable, { mode: 0o700 })
+      const relaunchSha = crypto.createHash('sha256').update(relaunchExecutable).digest('hex')
+      const relaunchChild = spawn('/bin/sh', [helperPath, '99999999', relaunchTarget, relaunchStaged, relaunchSha, baseVersion, targetVersion, path.join(relaunchDirectory, 'install.log'), path.join(relaunchDirectory, 'install-result.json'), 'relaunch', ...switches], { stdio: 'ignore' })
+      await waitForProcess(relaunchChild)
+      const recorded = (await fsp.readFile(argsFile, 'utf8')).split('\n').filter(Boolean)
+      assert.deepEqual(recorded, [...switches, `--fanotes-updated-from=${baseVersion}`])
+      assert.equal(fs.existsSync(path.join(temporary, 'pwned')) || fs.existsSync(path.join(process.cwd(), 'pwned')), false)
+    }
 
     const patchFetchesBeforeResume = patchFetches
     const resumeDropManager = createUpdateManager({

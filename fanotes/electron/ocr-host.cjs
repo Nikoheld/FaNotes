@@ -29,12 +29,37 @@ const workerCount = (configured, cores = os.cpus().length, totalMemory = os.tota
   return Math.max(1, Math.min(wanted, half))
 }
 
+/**
+ * Lowers the priority of a process. On Linux setpriority() acts on one thread, not the whole process
+ * (QA-032: the OCR renderer still ran at nice 0 because only its main thread was lowered), so every
+ * thread under /proc/<pid>/task is set; threads created later inherit the nice value of their creator,
+ * and the caller repeats this when the host (re)starts or gets work. Failures are ignored: it is not
+ * permitted everywhere and the process then just runs at normal priority.
+ */
+const lowerProcessPriority = (pid, { osModule = os, fsModule = require('node:fs'), platform = process.platform } = {}) => {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return 0
+  const level = osModule.constants.priority.PRIORITY_BELOW_NORMAL
+  let lowered = 0
+  const set = (id) => {
+    try { osModule.setPriority(id, level); lowered += 1 } catch { /* gone, or not permitted */ }
+  }
+  set(pid)
+  if (platform === 'linux') {
+    let threads = []
+    try { threads = fsModule.readdirSync(`/proc/${pid}/task`) } catch { /* no procfs */ }
+    for (const name of threads) {
+      const id = Number(name)
+      if (Number.isSafeInteger(id) && id > 0 && id !== pid) set(id)
+    }
+  }
+  return lowered
+}
+
 const lowerPriority = (webContents) => {
   try {
-    const pid = webContents.getOSProcessId()
-    if (pid > 0) os.setPriority(pid, os.constants.priority.PRIORITY_BELOW_NORMAL)
+    lowerProcessPriority(webContents.getOSProcessId())
   } catch {
-    // Not permitted everywhere; the process still runs, only at normal priority.
+    // The process may already be gone.
   }
 }
 
@@ -157,6 +182,8 @@ function createOcrHost(options) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { pending.delete(id); reject(new Error('OCR-Zeitlimit')); if (!pending.size) scheduleClose() }, REQUEST_TIMEOUT_MS)
       pending.set(id, { resolve, reject, timer })
+      // Worker threads the renderer started since the last call inherit the lowered value, but re-apply cheaply.
+      lowerPriority(target.webContents)
       target.webContents.send(CHANNEL_LINE, id, { pixels: request.pixels, width: request.width, height: request.height })
     })
   }
@@ -164,4 +191,4 @@ function createOcrHost(options) {
   return { recognize, close, workers, get running() { return Boolean(win) } }
 }
 
-module.exports = { createOcrHost, workerCount, validRequest, CHANNEL_LINE, CHANNEL_RESULT, CHANNEL_READY }
+module.exports = { createOcrHost, workerCount, lowerProcessPriority, validRequest, CHANNEL_LINE, CHANNEL_RESULT, CHANNEL_READY }

@@ -54,7 +54,11 @@ const directives = (policy) => new Map(policy.split(';').map((entry) => entry.tr
 
   const headers = applySecurityHeaders({ url: 'file:///app/dist/index.html', responseHeaders: { 'Content-Type': ['text/html'], 'X-Other': ['1'] } })
   assert.deepEqual(headers['Content-Security-Policy'], [buildContentSecurityPolicy()])
-  assert.deepEqual([headers['Cross-Origin-Opener-Policy'], headers['Cross-Origin-Embedder-Policy'], headers['Cross-Origin-Resource-Policy']], [['same-origin'], ['require-corp'], ['same-origin']])
+  // file:// documents have an opaque origin and can never be cross-origin isolated; COEP/CORP there only
+  // block the module workers (spelling, pdf.js), so they get COOP alone. Served documents get all three.
+  assert.deepEqual([headers['Cross-Origin-Opener-Policy'], headers['Cross-Origin-Embedder-Policy'], headers['Cross-Origin-Resource-Policy']], [['same-origin'], undefined, undefined])
+  const served = applySecurityHeaders({ url: 'http://127.0.0.1:5174/index.html' })
+  assert.deepEqual([served['Cross-Origin-Opener-Policy'], served['Cross-Origin-Embedder-Policy'], served['Cross-Origin-Resource-Policy']], [['same-origin'], ['require-corp'], ['same-origin']])
   assert.deepEqual(headers['X-Other'], ['1'], 'other headers pass through')
   assert.deepEqual(applySecurityHeaders({ url: 'file:///app/dist/glyphenwerk/index.html' })['Content-Security-Policy'], [buildContentSecurityPolicy({ glyphenWerkFrame: true })])
   assert.ok(applySecurityHeaders({ url: 'fanotes-model://local/x' })['Content-Security-Policy'][0].includes("frame-ancestors 'none'"))
@@ -106,7 +110,15 @@ const PAGES = {
     'window.__violations = []',
     "document.addEventListener('securitypolicyviolation', (event) => window.__violations.push(event.effectiveDirective))",
     'try { eval("1"); window.__evalBlocked = false } catch { window.__evalBlocked = true }',
+    // QA-008: the spelling and pdf.js workers are module workers; the isolation headers must not stop them.
+    "window.__workerState = 'pending'",
+    'try {',
+    "  const worker = new Worker('./probe-worker.js', { type: 'module' })",
+    "  worker.onmessage = () => { window.__workerState = 'ok'; worker.terminate() }",
+    "  worker.onerror = () => { window.__workerState = 'error' }",
+    "} catch { window.__workerState = 'throw' }",
   ].join('\n'),
+  'probe-worker.js': "self.postMessage('ready')",
   'inline.html': '<!doctype html><html lang="en"><head><meta charset="utf-8"><script src="./probe.js"></script></head><body><script>window.__inlineRan = true</script><p>inline</p></body></html>',
   'frame-data.html': '<!doctype html><html lang="en"><head><meta charset="utf-8"><script src="./probe.js"></script></head><body><iframe sandbox="" src="data:text/html;base64,PHA+ZGF0YTwvcD4="></iframe></body></html>',
   'frame-srcdoc.html': '<!doctype html><html lang="en"><head><meta charset="utf-8"><script src="./probe.js"></script></head><body><iframe sandbox="" referrerpolicy="no-referrer" srcdoc="&lt;!doctype html&gt;&lt;p&gt;worksheet&lt;/p&gt;&lt;script&gt;parent.__pwned=true&lt;/script&gt;"></iframe></body></html>',
@@ -122,6 +134,7 @@ const expectations = (result) => {
     assert.deepEqual(result.violations, [], `${label}: nothing is reported`)
     return
   }
+  if (page === 'inline.html' && label !== 'custom-scheme:inline.html') assert.equal(result.workerState, 'ok', `${label}: a module worker starts (the isolation headers must not block it)`)
   assert.equal(result.evalBlocked, true, `${label}: eval is blocked`)
   assert.ok(violated('script-src'), `${label}: the eval attempt was reported`)
   if (page === 'inline.html') {

@@ -188,12 +188,19 @@ export class DocIndexer {
   /** Stops the running pass after the current batch. */
   cancel() { this.stopToken += 1 }
 
-  /** Retries failed documents now instead of after their backoff. */
+  /**
+   * Retries failed documents now instead of after their backoff. A document that finished but has pages
+   * whose recognition failed (status `indexed`/`partial` with a failed issue, QA-010) is read again too:
+   * the extractor reuses the cached text of the pages that worked and only recognises the failed ones.
+   */
   retryFailed() {
     for (const doc of this.index.listDocs()) {
       if (doc.status === 'failed' || doc.status === 'unsupported') {
         const next: DocRecord = { ...doc, nextRetryAt: 0, fingerprint: doc.status === 'unsupported' ? '' : doc.fingerprint }
         this.index.setDoc(next)
+      } else if (doc.issues.some((issue) => issue.status === 'failed')) {
+        // A fingerprint that no longer matches makes the next pass read the whole document again.
+        this.index.setDoc({ ...doc, fingerprint: '', attempts: 0 })
       }
     }
     return this.schedule()

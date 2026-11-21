@@ -174,6 +174,8 @@ npm ci
 npm run dev
 ```
 
+npm 12 führt die Installationsskripte von Abhängigkeiten nicht mehr aus. Das `postinstall`-Skript des Projekts (`scripts/ensure-electron.cjs`) lädt die Electron-Binärdatei deshalb nach, wenn sie fehlt. Falls das offline scheitert („Electron failed to install correctly“), hilft `node node_modules/electron/install.js`.
+
 Nützliche Prüfungen und Builds:
 
 ```bash
@@ -392,6 +394,8 @@ cd fanotes
 npm ci
 npm run dev
 ```
+
+npm 12 no longer runs the install scripts of dependencies. The project's own `postinstall` script (`scripts/ensure-electron.cjs`) therefore downloads the Electron binary when it is missing. If that fails offline ("Electron failed to install correctly"), run `node node_modules/electron/install.js`.
 
 Useful checks and builds:
 

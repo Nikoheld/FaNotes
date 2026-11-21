@@ -61,6 +61,13 @@ export XDG_DATA_DIRS="\${APPDIR}/usr/share\${XDG_DATA_DIRS:+:\${XDG_DATA_DIRS}}:
 export LD_LIBRARY_PATH="\${APPDIR}/usr/lib\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}"
 export GSETTINGS_SCHEMA_DIR="\${APPDIR}/usr/share/glib-2.0/schemas\${GSETTINGS_SCHEMA_DIR:+:\${GSETTINGS_SCHEMA_DIR}}"
 
+# QA-014: the SquashFS mount decompresses lazily on every page fault, which costs a packaged start
+# ~1.5 s more than the same files unpacked (measured 2.0 s vs 0.35 s to the first window). Reading the
+# start-up files once in the background fills the page cache while Electron initialises.
+if [[ "\${FANOTES_NO_PREWARM:-}" != 1 ]]; then
+  ( cat "\${APPDIR}/fanotes" "\${APPDIR}/icudtl.dat" "\${APPDIR}/v8_context_snapshot.bin" "\${APPDIR}/snapshot_blob.bin" "\${APPDIR}/resources.pak" >/dev/null 2>&1 & ) >/dev/null 2>&1
+fi
+
 # Sicherheit ist eine harte Anforderung: die Chromium-Sandbox bleibt aktiv.
 # Ozone X11 must be on the real argv before the Electron binary starts.
 ${linuxOzoneAppRunExecLine('"${APPDIR}/fanotes"')}

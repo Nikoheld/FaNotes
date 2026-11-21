@@ -4573,7 +4573,11 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 
 /* PDF toolbar in the ribbon: never wrap or overlap, shed detail as the room shrinks (panel open, narrow window). */
 .toolbar-context .pdf-toolbar-slot { container-type: inline-size; container-name: pdftoolbar; }
-.toolbar-context .pdf-note-toolbar { overflow: hidden; }
+/* QA-009: the toolbar never shrinks below its buttons (the title gives way first); the open find field takes what is
+   left instead of covering the last buttons (blank pages alongside, rotate). */
+.toolbar-context .pdf-note-toolbar { overflow: hidden; flex: 1 1 auto; min-width: min-content; }
+.toolbar-context .pdf-toolbar-slot > .pdf-note-search { flex: 0 1 220px; min-width: 150px; width: auto; }
+.toolbar-context .pdf-toolbar-slot > .pdf-note-search input { min-width: 0; }
 .toolbar-context .pdf-note-toolbar > * { flex: none; white-space: nowrap; }
 .toolbar-context .pdf-note-toolbar button { white-space: nowrap; }
 .toolbar-context .pdf-note-toolbar .pdf-note-identity { flex: 0 1 auto; min-width: 0; overflow: hidden; }
