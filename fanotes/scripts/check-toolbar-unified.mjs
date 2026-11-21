@@ -41,12 +41,12 @@ try {
 
   // 3. Rare actions are grouped in "Mehr" and everything stays reachable.
   const more = renderToStaticMarkup(createElement(FormattingToolbar, { defaultMoreOpen: true, onFormat: () => undefined, onInsertLatex: () => undefined }))
-  for (const label of ['Tabelle', 'Mathematikblock', 'Codeblock', 'Trennlinie', 'Einklappbarer Bereich', 'Einfaches LaTeX']) assert.ok(more.includes(`aria-label="${label}"`), label)
+  for (const label of ['Tabelle einfügen', 'Mathematikblock', 'Codeblock', 'Trennlinie', 'Einklappbarer Bereich', 'Einfaches LaTeX']) assert.ok(more.includes(`aria-label="${label}"`), label)
 
   // 4. The setting hides the typeable buttons only.
   const hidden = renderToStaticMarkup(createElement(FormattingToolbar, { hideTypeable: true, defaultMoreOpen: true, onFormat: () => undefined, onInsertLatex: () => undefined }))
   for (const label of ['Fett', 'Kursiv', 'Aufzählung', 'Zitat', 'Link', 'Code', 'Codeblock', 'Überschrift']) assert.ok(!hidden.includes(`aria-label="${label}"`), `${label} stays hidden`)
-  for (const label of ['Tabelle', 'Mathematikblock', 'Mehr']) assert.ok(hidden.includes(`aria-label="${label}"`), label)
+  for (const label of ['Tabelle einfügen', 'Mathematikblock', 'Mehr']) assert.ok(hidden.includes(`aria-label="${label}"`), label)
   for (const file of ['src/types.ts', 'src/defaults.ts', 'electron/settings-sanitize.cjs', 'electron/main.cjs']) assert.match(read(file), /hideMarkdownKeyButtons/, file)
   assert.match(read('src/components/SettingsModal.tsx'), /Markdown-Tasten ausblenden/)
   assert.match(read('resources/i18n/en.json'), /"Markdown-Tasten ausblenden": "Hide Markdown buttons"/)
