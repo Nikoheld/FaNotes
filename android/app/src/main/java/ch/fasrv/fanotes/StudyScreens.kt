@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -201,7 +202,7 @@ private fun StudyTasksTab(model: FaNotesViewModel, onJump: (Int) -> Unit) {
     LinearProgressIndicator(progress = { progress.ratio.toFloat() }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
     val summary = counted("${progress.done} von ${progress.total} erledigt", "${progress.done} of ${progress.total} done") +
         if (progress.plannedMinutes > 0) counted(" · noch ca. ${progress.remainingMinutes} von ${progress.plannedMinutes} Min.", " · about ${progress.remainingMinutes} of ${progress.plannedMinutes} min left") else ""
-    Text(summary, fontSize = 13.sp)
+    Text(ui(summary), fontSize = 13.sp)
     Row {
         TextButton(onClick = { model.scanStudyTasks() }, enabled = !scanning && detectionAvailable) { Text(ui(if (scanning) "Suche …" else "Neu erkennen")) }
         TextButton(onClick = { model.addStudyTask() }) { Text(ui("Auftrag hinzufügen")) }
@@ -279,7 +280,7 @@ internal fun EditField(key: String, initial: String, label: String, modifier: Mo
             value = it
             onChange(it)
         },
-        label = { Text(label) },
+        label = { Text(ui(label)) },
         modifier = modifier,
         singleLine = true,
         keyboardOptions = if (numeric) KeyboardOptions(keyboardType = KeyboardType.Number) else KeyboardOptions.Default,
@@ -309,10 +310,10 @@ private fun StudyMarksTab(model: FaNotesViewModel, onJump: (Int) -> Unit) {
         ) { Text(ui("Als Notiz kopieren")) }
     }
     grouped.forEach { group ->
-        TextButton(onClick = { onJump(group.page) }) { Text("${ui("Seite")} ${group.page}", fontWeight = FontWeight.SemiBold) }
+        TextButton(onClick = { onJump(group.page) }) { Text(ui("${ui("Seite")} ${group.page}"), fontWeight = FontWeight.SemiBold) }
         group.marks.forEach { mark ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                VerbatimText(
+                Text(
                     mark.quote,
                     modifier = Modifier.weight(1f).clickable { onJump(mark.page) }.padding(start = 12.dp),
                     fontSize = 13.sp,
@@ -377,16 +378,16 @@ fun StudyBlockDialog(model: FaNotesViewModel) {
         onDismissRequest = { model.closeStudyBlock() },
         modifier = Modifier.fillMaxWidth(0.96f).widthIn(max = 920.dp),
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-        title = { Text(title) },
+        title = { Text(ui(title)) },
         text = {
             Column(Modifier.heightIn(max = (screenHeight * 0.68f).dp).verticalScroll(rememberScrollState())) {
                 when (ref.kind) {
-                    StudyKind.SORT -> if (sort != null) SortBoardEditor(sort) { model.writeStudyBlock(sortDataJson(it)) } else Text(unreadable)
-                    StudyKind.TERM -> if (terms != null) TermEditor(terms) { model.writeStudyBlock(termDataJson(it)) } else Text(unreadable)
-                    StudyKind.KEY -> if (key != null) Mirrored(key, { model.writeStudyBlock(keyDataJson(it)) }) { data, update -> KeyEditor(model, data, update) } else Text(unreadable)
-                    StudyKind.MAP -> if (map != null) Mirrored(map, { model.writeStudyBlock(mapDataJson(it)) }) { data, update -> MapEditor(data, update) } else Text(unreadable)
-                    StudyKind.PLATE -> if (plate != null) Mirrored(plate, { model.writeStudyBlock(plateDataJson(it)) }) { data, update -> PlateEditor(model, data, update) } else Text(unreadable)
-                    StudyKind.CRYPTO -> if (crypto != null) Mirrored(crypto, { model.writeStudyBlock(cryptoDataJson(it)) }) { data, update -> CryptoEditor(data) { next -> update { next } } } else Text(unreadable)
+                    StudyKind.SORT -> if (sort != null) SortBoardEditor(sort) { model.writeStudyBlock(sortDataJson(it)) } else Text(ui(unreadable))
+                    StudyKind.TERM -> if (terms != null) TermEditor(terms) { model.writeStudyBlock(termDataJson(it)) } else Text(ui(unreadable))
+                    StudyKind.KEY -> if (key != null) Mirrored(key, { model.writeStudyBlock(keyDataJson(it)) }) { data, update -> KeyEditor(model, data, update) } else Text(ui(unreadable))
+                    StudyKind.MAP -> if (map != null) Mirrored(map, { model.writeStudyBlock(mapDataJson(it)) }) { data, update -> MapEditor(data, update) } else Text(ui(unreadable))
+                    StudyKind.PLATE -> if (plate != null) Mirrored(plate, { model.writeStudyBlock(plateDataJson(it)) }) { data, update -> PlateEditor(model, data, update) } else Text(ui(unreadable))
+                    StudyKind.CRYPTO -> if (crypto != null) Mirrored(crypto, { model.writeStudyBlock(cryptoDataJson(it)) }) { data, update -> CryptoEditor(data) { next -> update { next } } } else Text(ui(unreadable))
                 }
             }
         },
@@ -460,7 +461,7 @@ private fun SortBoardEditor(data: SortData, onChange: (SortData) -> Unit) {
                     )
                 },
         ) {
-            Text(label, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontSize = 14.sp)
+            Text(ui(label), modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), fontSize = 14.sp)
         }
     }
 
@@ -484,7 +485,7 @@ private fun SortBoardEditor(data: SortData, onChange: (SortData) -> Unit) {
                     .border(BorderStroke(if (hover == group.id) 2.dp else 1.dp, if (hover == group.id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(10.dp))
                     .padding(6.dp),
             ) {
-                VerbatimText(group.title.ifEmpty { ui("Gruppe") }, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(group.title.ifEmpty { ui("Gruppe") }, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 group.cards.forEachIndexed { position, id ->
                     CardChip(id, (if (data.sequence) "${position + 1}. " else "") + text[id].orEmpty())
                 }
@@ -496,7 +497,7 @@ private fun SortBoardEditor(data: SortData, onChange: (SortData) -> Unit) {
         Text(ui("Verschieben nach:"), fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
         FlowRow {
             data.groups.forEach { group ->
-                TextButton(onClick = { onChange(moveCard(data, chosen, group.id)) }) { VerbatimText(group.title.ifEmpty { ui("Gruppe") }) }
+                TextButton(onClick = { onChange(moveCard(data, chosen, group.id)) }) { Text(group.title.ifEmpty { ui("Gruppe") }) }
             }
             TextButton(onClick = { onChange(moveCard(data, chosen, null)) }) { Text(ui("Zurück zu „Noch nicht eingeordnet“")) }
             TextButton(onClick = {

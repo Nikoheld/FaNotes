@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -1527,7 +1528,7 @@ fun FaNotesScreen(
             title = { Text("FaNotes ${offered.version}") },
             text = {
                 Text(
-                    updateLabel.ifBlank { "Eine neuere Version liegt auf GitHub bereit." },
+                    updateLabel.ifBlank { ui("Eine neuere Version liegt auf GitHub bereit.") },
                     fontSize = 14.sp,
                 )
             },
@@ -1535,7 +1536,7 @@ fun FaNotesScreen(
                 TextButton(
                     enabled = !updateBusy,
                     onClick = { model.downloadAndroidUpdate { file -> installAndroidApk(context, file) } },
-                ) { Text(if (updateBusy) "Lädt…" else "Installieren") }
+                ) { Text(ui(if (updateBusy) "Lädt…" else "Installieren")) }
             },
             dismissButton = {
                 TextButton(onClick = { model.clearUpdateOffer() }, enabled = !updateBusy) { Text(ui("Später")) }
@@ -1561,7 +1562,7 @@ fun FaNotesScreen(
         }
         val atRoot = !path.contains('/')
         PromptCard(ch.fasrv.fanotes.desk.PROMPT_MOVE, onDismiss = { moving = null }, confirmLabel = null, onConfirm = {}) {
-            VerbatimText(path.substringAfterLast('/'), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(path.substringAfterLast('/'), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             if (!atRoot) {
                 PromptChoice(ch.fasrv.fanotes.desk.PROMPT_ROOT) { model.moveEntry(path, ""); moving = null }
             }
@@ -1569,7 +1570,7 @@ fun FaNotesScreen(
                 PromptChoice(folder) { model.moveEntry(path, folder); moving = null }
             }
             if (atRoot && folders.isEmpty()) {
-                Text(ch.fasrv.fanotes.desk.PROMPT_NO_FOLDER, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                Text(ui(ch.fasrv.fanotes.desk.PROMPT_NO_FOLDER), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             }
         }
     }
@@ -1792,7 +1793,7 @@ private fun TagFilterChip(label: String, active: Boolean, onClick: () -> Unit) {
         ch.fasrv.fanotes.desk.TAG_FILTER_BORDER_ALPHA
     }
     Text(
-        label,
+        ui(label),
         fontSize = 12.sp,
         color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
         modifier = Modifier
@@ -1932,7 +1933,7 @@ private fun VaultPane(
             Text(ui("Konflikte"), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp))
             conflicts.forEach { conflict ->
                 Column(Modifier.padding(vertical = 4.dp)) {
-                    VerbatimText(conflict.path.substringAfterLast('/'), maxLines = 1, fontSize = 13.sp)
+                    Text(conflict.path.substringAfterLast('/'), maxLines = 1, fontSize = 13.sp)
                     Row {
                         TextButton(onClick = { onResolve(conflict, "remote") }) { Text(ui("Server")) }
                         TextButton(onClick = { onResolve(conflict, "local") }) { Text(ui("Tablet")) }
@@ -1977,11 +1978,11 @@ private fun VaultPane(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    ch.fasrv.fanotes.desk.EMPTY_VAULT_MESSAGE,
+                    ui(ch.fasrv.fanotes.desk.EMPTY_VAULT_MESSAGE),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
-                TextButton(onClick = onCreateNote) { Text(ch.fasrv.fanotes.desk.EMPTY_VAULT_ACTION) }
+                TextButton(onClick = onCreateNote) { Text(ui(ch.fasrv.fanotes.desk.EMPTY_VAULT_ACTION)) }
             }
         } else LazyColumn(
             Modifier
@@ -2080,7 +2081,7 @@ private fun VaultPane(
                     onClick = action,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     modifier = Modifier.heightIn(min = 36.dp),
-                ) { Text(label, fontSize = 12.sp, maxLines = 1) }
+                ) { Text(ui(label), fontSize = 12.sp, maxLines = 1) }
             }
         }
         Box(
@@ -2156,7 +2157,7 @@ private fun TreeMenuItem(label: String, danger: Boolean = false, onClick: () -> 
             tint = tint,
         )
         Text(
-            label,
+            ui(label),
             fontSize = 12.sp,
             color = if (danger) MaterialTheme.colorScheme.error else LocalStatusInk.current.soft,
         )
@@ -2274,7 +2275,7 @@ private fun NoteRow(
             )
         }
         Text(
-            if (!folder) "" else if (openFolder) "▾" else "▸",
+            ui(if (!folder) "" else if (openFolder) "▾" else "▸"),
             fontSize = 12.sp,
             color = LocalStatusInk.current.muted,
             modifier = Modifier.width(ch.fasrv.fanotes.desk.TREE_CHEVRON_DP.dp).clickable {
@@ -2371,7 +2372,7 @@ private fun NoteRow(
                 },
                 tint = LocalStatusInk.current.muted,
             )
-        } else VerbatimText(
+        } else Text(
             node.name,
             maxLines = 1,
             fontSize = ch.fasrv.fanotes.desk.TREE_LABEL_SP.sp,
@@ -2492,7 +2493,7 @@ private fun NoteRow(
                                     letterSpacing = 0.07.em,
                                     color = LocalStatusInk.current.muted,
                                 )
-                                VerbatimText(node.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
+                                Text(node.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
                             }
                         }
                         Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
@@ -2726,7 +2727,7 @@ private fun EditorHeader(
             )
             Brushes.forEach { (id, label) ->
                 Text(
-                    label,
+                    ui(label),
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (id == style.brush) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent)
@@ -2737,7 +2738,7 @@ private fun EditorHeader(
             }
             Papers.forEach { (id, label) ->
                 Text(
-                    label,
+                    ui(label),
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (id == paper) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else Color.Transparent)
@@ -3091,14 +3092,14 @@ private fun EmptyEditor(
                 modifier = Modifier.padding(top = 20.dp, bottom = 7.dp),
             )
             Text(
-                ch.fasrv.fanotes.desk.PLACEHOLDER_TITLE,
+                ui(ch.fasrv.fanotes.desk.PLACEHOLDER_TITLE),
                 fontSize = ch.fasrv.fanotes.desk.PLACEHOLDER_TITLE_SP.sp,
                 letterSpacing = (-0.03).em,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
             )
             Text(
-                ch.fasrv.fanotes.desk.PLACEHOLDER_BODY,
+                ui(ch.fasrv.fanotes.desk.PLACEHOLDER_BODY),
                 fontSize = ch.fasrv.fanotes.desk.PLACEHOLDER_BODY_SP.sp,
                 lineHeight = 21.sp,
                 color = ink.muted,
@@ -3120,7 +3121,7 @@ private fun EmptyEditor(
             }
             if (recent.isNotEmpty()) {
                 Text(
-                    "Zuletzt geöffnete Notizen",
+                    ui("Zuletzt geöffnete Notizen"),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = ink.muted,
@@ -3161,7 +3162,7 @@ private fun EmptyEditorButton(
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = ink)
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
     }
 }
 
@@ -3985,7 +3986,7 @@ private fun WorksheetImportDialog(
                             color = accent,
                         )
                         Text(
-                            ch.fasrv.fanotes.desk.SHEET_IMPORT_TITLE,
+                            ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_TITLE),
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 2.dp),
@@ -4008,7 +4009,7 @@ private fun WorksheetImportDialog(
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(rule))
                 Text(
-                    ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY,
+                    ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_BODY),
                     fontSize = 12.sp,
                     lineHeight = 19.sp,
                     color = ink.muted,
@@ -4056,7 +4057,7 @@ private fun WorksheetImportDialog(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Text(
-                        ch.fasrv.fanotes.desk.SHEET_IMPORT_FORMATS,
+                        ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_FORMATS),
                         fontSize = 12.sp,
                         color = ink.muted,
                         modifier = Modifier.weight(1f),
@@ -4073,7 +4074,7 @@ private fun WorksheetImportDialog(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            ch.fasrv.fanotes.desk.SHEET_IMPORT_CANCEL,
+                            ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_CANCEL),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = ink.soft,
@@ -4124,8 +4125,8 @@ private fun SheetImportChoice(
         }
     }
     val copy = @Composable {
-        Text(title, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
-        Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        Text(ui(title), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(ui(detail), fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
     }
     if (wide) {
         Row(frame, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_ONENOTE_GAP_DP.dp)) {
@@ -4195,7 +4196,7 @@ private fun TrashDialog(
             ) {
                 Text(ui("Papierkorb"), fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
                 Text(
-                    "Gelöschte Notizen bleiben auf diesem Tablet. Andere Geräte sehen sie nicht.",
+                    ui("Gelöschte Notizen bleiben auf diesem Tablet. Andere Geräte sehen sie nicht."),
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.muted,
                     lineHeight = 17.sp,
@@ -4209,9 +4210,9 @@ private fun TrashDialog(
                     ) {
                         items.forEach { item ->
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                VerbatimText(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    "${if (item.folder) "Ordner" else "Notiz"} · ${item.path}",
+                                    ui("${if (item.folder) "Ordner" else "Notiz"} · ${item.path}"),
                                     fontSize = 12.sp,
                                     color = LocalStatusInk.current.muted,
                                     maxLines = 1,
@@ -4283,7 +4284,7 @@ private fun PromptCard(
                     .padding(ch.fasrv.fanotes.desk.PROMPT_PAD_DP.dp),
                 verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.PROMPT_GAP_DP.dp),
             ) {
-                Text(title, fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
+                Text(ui(title), fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
                 content()
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                     PromptButton(dismissLabel, primary = false, onClick = onDismiss)
@@ -4319,7 +4320,7 @@ private fun PromptField(
             Box(
                 Modifier.fillMaxWidth().heightIn(min = minHeightDp.dp).border(1.dp, strong, shape).clip(shape).background(MaterialTheme.colorScheme.background).padding(horizontal = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_X_DP.dp, vertical = ch.fasrv.fanotes.desk.PROMPT_FIELD_PAD_Y_DP.dp),
             ) {
-                if (value.isEmpty()) Text(placeholder, fontSize = 16.sp, color = LocalStatusInk.current.muted)
+                if (value.isEmpty()) Text(ui(placeholder), fontSize = 16.sp, color = LocalStatusInk.current.muted)
                 inner()
             }
         },
@@ -4334,7 +4335,7 @@ private fun PromptChoice(label: String, onClick: () -> Unit) {
         Modifier.fillMaxWidth().heightIn(min = ch.fasrv.fanotes.desk.PROMPT_ROW_DP.dp).clip(shape).border(1.dp, rule, shape).clickable(onClick = onClick).padding(horizontal = 10.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(ui(label), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -4348,7 +4349,7 @@ private fun PromptButton(label: String, primary: Boolean, enabled: Boolean = tru
         Modifier.height(ch.fasrv.fanotes.desk.PROMPT_BUTTON_DP.dp).alpha(if (enabled) 1f else 0.45f).clip(shape).background(fill).border(1.dp, border, shape).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink)
     }
 }
 

@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,7 +56,7 @@ internal fun StudyChoice(label: String, selected: Boolean, onClick: () -> Unit, 
         modifier = modifier.heightIn(min = TouchTarget).clickable(role = Role.RadioButton, onClick = onClick),
     ) {
         Box(Modifier.padding(horizontal = 16.dp).heightIn(min = TouchTarget), contentAlignment = Alignment.Center) {
-            Text(label, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+            Text(ui(label), fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
         }
     }
 }
@@ -64,23 +65,23 @@ internal fun StudyChoice(label: String, selected: Boolean, onClick: () -> Unit, 
 @Composable
 internal fun ActionButton(label: String, enabled: Boolean = true, modifier: Modifier = Modifier, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, enabled = enabled, modifier = modifier.defaultMinSize(minWidth = TouchTarget, minHeight = TouchTarget)) {
-        Text(label, fontSize = 14.sp)
+        Text(ui(label), fontSize = 14.sp)
     }
 }
 
 @Composable
 internal fun Muted(text: String, modifier: Modifier = Modifier) {
-    Text(text, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), modifier = modifier.padding(vertical = 4.dp))
+    Text(ui(text), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), modifier = modifier.padding(vertical = 4.dp))
 }
 
 @Composable
 internal fun ErrorText(text: String) {
-    Text(text, fontSize = 13.sp, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 4.dp))
+    Text(ui(text), fontSize = 13.sp, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 4.dp))
 }
 
 @Composable
 internal fun SectionTitle(text: String) {
-    Text(text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
+    Text(ui(text), fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.padding(top = 14.dp, bottom = 4.dp))
 }
 
 enum class CellVerdict { OK, BAD, OPEN }
@@ -162,7 +163,7 @@ internal fun SyncField(
         OutlinedTextField(
             value = value,
             onValueChange = { onChange(it.take(maxChars)) },
-            label = if (label.isEmpty()) null else ({ Text(label) }),
+            label = if (label.isEmpty()) null else ({ Text(ui(label)) }),
             modifier = modifier.defaultMinSize(minHeight = TouchTarget),
             singleLine = minLines <= 1,
             minLines = minLines,

@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -156,7 +157,7 @@ private fun StatSkeleton() {
 @Composable
 private fun StatLine(label: String, value: String, detail: String? = null, divider: Boolean = true) {
     SettingRow(label, detail, divider = divider) {
-        VerbatimText(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -207,9 +208,9 @@ private fun VaultCards(data: VaultStats, anchorY: MutableMap<String, Int>) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 9.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.size(9.dp).clip(CircleShape).background(color))
-                    VerbatimText(subject.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text(subject.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Text(
-                        "${count(subject.count)} · ${ch.fasrv.fanotes.sync.syncByteLabel(subject.bytes)}" + if (subject.words > 0) " · ${count(subject.words)} " + t("Wörter") else "",
+                        ui("${count(subject.count)} · ${ch.fasrv.fanotes.sync.syncByteLabel(subject.bytes)}" + if (subject.words > 0) " · ${count(subject.words)} " + t("Wörter") else ""),
                         fontSize = 11.sp, color = LocalStatusInk.current.muted,
                     )
                 }
@@ -232,7 +233,7 @@ private fun FileListCard(title: String, rows: List<ch.fasrv.fanotes.desk.StatFil
                 ch.fasrv.fanotes.vault.titleOf(row.path).ifBlank { row.name },
                 ch.fasrv.fanotes.desk.overviewPathParent(row.path),
                 divider = index != rows.lastIndex,
-            ) { VerbatimText(value(row), fontSize = 12.sp, color = LocalStatusInk.current.soft) }
+            ) { Text(value(row), fontSize = 12.sp, color = LocalStatusInk.current.soft) }
         }
     }
 }
@@ -317,7 +318,7 @@ private fun TimeCard(data: VaultStats) {
                         Box(Modifier.height(50.dp).fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                             Box(Modifier.fillMaxWidth().height((3 + 46f * time.byWeekday.getOrElse(index) { 0 } / peak).dp).clip(RoundedCornerShape(3.dp)).background(accent.copy(alpha = 0.8f)))
                         }
-                        Text(label, fontSize = 10.sp, color = LocalStatusInk.current.muted)
+                        Text(ui(label), fontSize = 10.sp, color = LocalStatusInk.current.muted)
                     }
                 }
             }
@@ -329,7 +330,7 @@ private fun TimeCard(data: VaultStats) {
                 time.bySubject.forEach { row ->
                     Column {
                         Row {
-                            VerbatimText(row.name, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(row.name, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(ch.fasrv.fanotes.desk.formatStudyDuration(row.dwellMs), fontSize = 11.sp, color = LocalStatusInk.current.muted)
                         }
                         Bar(row.dwellMs.toFloat() / top, folderColor(row.color, accent), Modifier.padding(top = 3.dp))

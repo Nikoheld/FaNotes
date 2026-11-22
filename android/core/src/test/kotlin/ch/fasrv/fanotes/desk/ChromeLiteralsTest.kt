@@ -92,6 +92,19 @@ class ChromeLiteralsTest {
         assertEquals(emptyList<String>(), missing, "ui(...) source without an English entry in en.json")
     }
 
+    /** User data (names, paths, titles of notes and folders) is shown as written; it must never go through `ui(...)`. */
+    @Test
+    fun userDataNeverGoesThroughUi() {
+        val userData = Regex("\\b(?:ui|ChromeText\\.ui)\\(\\s*(?:[A-Za-z_][\\w?]*\\.)*(?:name|path|email|subject|noteTitle|folderName|fileName|stem)\\s*\\)")
+        val offenders = ArrayList<String>()
+        for (file in sources) {
+            file.readLines().forEachIndexed { index, line ->
+                if (userData.containsMatchIn(line)) offenders += "${file.name}:${index + 1}: ${line.trim().take(100)}"
+            }
+        }
+        assertEquals(emptyList<String>(), offenders, "user data passed through ui(...)")
+    }
+
     @Test
     fun germanNeverShowsEszett() {
         for ((source, _) in catalog) {

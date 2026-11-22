@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Canvas
@@ -333,7 +334,7 @@ private fun StatusLabel(
         contentAlignment = Alignment.CenterStart,
     ) {
         Text(
-            text,
+            ui(text),
             color = color,
             fontSize = 12.sp,
             fontWeight = fontWeight,
@@ -470,7 +471,7 @@ private fun RibbonButton(
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                shown,
+                ui(shown),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -564,7 +565,7 @@ private fun StatusChip(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            label,
+            ui(label),
             fontSize = 12.sp,
             color = ink,
             maxLines = 1,
@@ -1010,7 +1011,7 @@ private fun NoteTabChip(
                     ),
                     tint = if (glyph == "pin") accent else titleColor,
                 )
-                VerbatimText(
+                Text(
                     name,
                     fontSize = 12.sp,
                     color = titleColor,
@@ -1088,7 +1089,7 @@ private fun NoteTabChip(
                 onClick = { menu = false; onOpenSplit() },
             )
             DropdownMenuItem(
-                text = { Text(if (pinned) "Lösen" else "Anheften") },
+                text = { Text(ui(if (pinned) "Lösen" else "Anheften")) },
                 onClick = { menu = false; onTogglePin() },
             )
             DropdownMenuItem(text = { Text(ui("Pfad kopieren")) }, onClick = { menu = false; onCopyPath() })
@@ -1142,7 +1143,7 @@ private fun VaultSearchField(query: String, onQuery: (String) -> Unit, keys: Mod
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             decorationBox = { inner ->
                 Box {
-                    if (query.isEmpty()) Text(ch.fasrv.fanotes.desk.SEARCH_PLACEHOLDER, fontSize = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_SP.sp, color = ink.muted, maxLines = 1)
+                    if (query.isEmpty()) Text(ui(ch.fasrv.fanotes.desk.SEARCH_PLACEHOLDER), fontSize = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_SP.sp, color = ink.muted, maxLines = 1)
                     inner()
                 }
             },
@@ -1161,7 +1162,7 @@ private fun VaultSearchField(query: String, onQuery: (String) -> Unit, keys: Mod
 @Composable
 private fun SearchKbd(label: String) {
     Text(
-        label,
+        ui(label),
         fontSize = 12.sp,
         color = LocalStatusInk.current.muted,
         modifier = Modifier
@@ -1206,7 +1207,7 @@ fun SearchScreen(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    ch.fasrv.fanotes.desk.SEARCH_EYEBROW,
+                    ui(ch.fasrv.fanotes.desk.SEARCH_EYEBROW),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.12.em,
@@ -1246,7 +1247,7 @@ fun SearchScreen(
         }
         VaultSearchField(query, { model.searchVaultText(it) }, searchKeys)
         Text(
-            if (query.trim().length >= 2) "${hits.size} Treffer" else "Text, Handschrift und PDFs",
+            ui(if (query.trim().length >= 2) "${hits.size} Treffer" else "Text, Handschrift und PDFs"),
             modifier = Modifier.padding(start = 14.dp, top = 8.dp, end = 14.dp, bottom = 0.dp),
             fontSize = 12.sp,
             color = LocalStatusInk.current.muted,
@@ -1260,13 +1261,13 @@ fun SearchScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    ch.fasrv.fanotes.desk.SEARCH_EMPTY_TITLE,
+                    ui(ch.fasrv.fanotes.desk.SEARCH_EMPTY_TITLE),
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.soft,
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 Text(
-                    ch.fasrv.fanotes.desk.SEARCH_EMPTY_HINT,
+                    ui(ch.fasrv.fanotes.desk.SEARCH_EMPTY_HINT),
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.muted,
                     textAlign = TextAlign.Center,
@@ -1276,7 +1277,7 @@ fun SearchScreen(
             }
         } else if (hits.isEmpty()) {
             Text(
-                "Keine Treffer für „${query.trim()}“.",
+                ui("Keine Treffer für „${query.trim()}“."),
                 modifier = Modifier.padding(top = ch.fasrv.fanotes.desk.SEARCH_EMPTY_PAD_TOP_DP.dp, start = 18.dp, end = 18.dp),
                 fontSize = 12.sp,
                 color = LocalStatusInk.current.muted,
@@ -1372,11 +1373,11 @@ fun SearchScreen(
                 if (hasHardwareKeyboard()) {
                     SearchKbd("↑")
                     SearchKbd("↓")
-                    Text(ch.fasrv.fanotes.desk.SEARCH_CHOOSE, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 7.dp))
+                    Text(ui(ch.fasrv.fanotes.desk.SEARCH_CHOOSE), fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 7.dp))
                     SearchKbd("Esc")
                 }
                 Text(
-                    ch.fasrv.fanotes.desk.SEARCH_FOOTER_CLOSE,
+                    ui(ch.fasrv.fanotes.desk.SEARCH_FOOTER_CLOSE),
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.muted,
                     modifier = Modifier.heightIn(min = LocalTouch.current.chipHitDp.dp).clickable(onClick = onClose),
@@ -1506,7 +1507,7 @@ fun HomeworkScreen(model: FaNotesViewModel) {
             )
             var accessOpen by remember { mutableStateOf(settings["homework-channel"].orEmpty().isBlank()) }
             if (settings["homework-channel"].orEmpty().isNotBlank()) {
-                TextButton(onClick = { accessOpen = !accessOpen }) { Text(if (accessOpen) "Zugangsdaten ausblenden" else "Zugangsdaten anzeigen") }
+                TextButton(onClick = { accessOpen = !accessOpen }) { Text(ui(if (accessOpen) "Zugangsdaten ausblenden" else "Zugangsdaten anzeigen")) }
             }
             if (accessOpen) {
                 OutlinedTextField(
@@ -1527,7 +1528,7 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                 TextButton(onClick = { model.generateHomeworkAccess() }) { Text(ui("Kanal erzeugen")) }
                 TextButton(onClick = { model.publishHomework() }) { Text(ui("Veröffentlichen")) }
             }
-            if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+            if (!status.isNullOrBlank()) Text(ui(status.orEmpty()), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
             if (planner != "list") {
                 val days = ch.fasrv.fanotes.desk.homeworkPlannerDays(cursor, planner)
                 val byDate = shownTasks.filter { it.dueDate != null }.groupBy { it.dueDate }
@@ -1713,7 +1714,7 @@ private fun HomeworkHeading() {
         )
     }
     Text(
-        ch.fasrv.fanotes.desk.HOMEWORK_TITLE,
+        ui(ch.fasrv.fanotes.desk.HOMEWORK_TITLE),
         color = MaterialTheme.colorScheme.onSurface,
         fontSize = ch.fasrv.fanotes.desk.HOMEWORK_TITLE_SP.sp,
         fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_TITLE_WEIGHT),
@@ -1768,7 +1769,7 @@ private fun HomeworkIntro() {
                         .background(ink.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_CODE_FILL)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    VerbatimText(path, style = codeStyle, maxLines = 1)
+                    Text(path, style = codeStyle, maxLines = 1)
                 }
             },
         ),
@@ -1796,7 +1797,7 @@ private fun HomeworkHeaderActions(onOpen: () -> Unit, onClose: () -> Unit) {
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                ch.fasrv.fanotes.desk.HOMEWORK_OPEN_NOTE,
+                ui(ch.fasrv.fanotes.desk.HOMEWORK_OPEN_NOTE),
                 color = ink.soft,
                 fontSize = 12.sp,
                 fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_SECONDARY_WEIGHT),
@@ -1859,7 +1860,7 @@ private fun HomeworkStat(count: Int, label: String, warn: Boolean) {
             fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_STAT_WEIGHT),
         )
         Text(
-            label,
+            ui(label),
             color = if (warn) ink.warning else ink.muted,
             fontSize = ch.fasrv.fanotes.desk.HOMEWORK_STAT_SP.sp,
         )
@@ -2091,7 +2092,7 @@ private fun HomeworkTextField(
                     Box(Modifier.fillMaxWidth()) {
                         if (value.isEmpty() && placeholder.isNotEmpty()) {
                             Text(
-                                placeholder,
+                                ui(placeholder),
                                 color = LocalStatusInk.current.muted,
                                 fontSize = ch.fasrv.fanotes.desk.HOMEWORK_INPUT_SP.sp,
                                 fontWeight = FontWeight(textWeight),
@@ -2140,7 +2141,7 @@ private fun HomeworkSelect(
             }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 options.forEach { (id, name) ->
-                    DropdownMenuItem(text = { VerbatimText(name) }, onClick = { onPick(id); open = false })
+                    DropdownMenuItem(text = { Text(name) }, onClick = { onPick(id); open = false })
                 }
             }
         }
@@ -2211,7 +2212,7 @@ private fun HomeworkAddButton(enabled: Boolean, onClick: () -> Unit) {
             tint = ink,
         )
         Text(
-            ch.fasrv.fanotes.desk.HOMEWORK_ADD,
+            ui(ch.fasrv.fanotes.desk.HOMEWORK_ADD),
             color = ink,
             fontSize = 12.sp,
             fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_PRIMARY_WEIGHT),
@@ -2233,7 +2234,7 @@ private fun HomeworkSuggestion(label: String, onClick: () -> Unit) {
             .padding(horizontal = ch.fasrv.fanotes.desk.HOMEWORK_STAT_PAD_X_DP.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = LocalStatusInk.current.muted, fontSize = 12.sp, fontWeight = FontWeight(650))
+        Text(ui(label), color = LocalStatusInk.current.muted, fontSize = 12.sp, fontWeight = FontWeight(650))
     }
 }
 
@@ -2273,7 +2274,7 @@ private fun HomeworkChoice(label: String, active: Boolean, onClick: () -> Unit) 
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            label,
+            ui(label),
             color = color,
             fontSize = ch.fasrv.fanotes.desk.HOMEWORK_CHIP_SP.sp,
             fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_CHIP_WEIGHT),
@@ -2307,9 +2308,9 @@ private fun HomeworkEmpty() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
     ) {
-        Text(ch.fasrv.fanotes.desk.HOMEWORK_EMPTY_TITLE, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(ui(ch.fasrv.fanotes.desk.HOMEWORK_EMPTY_TITLE), color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Text(
-            ch.fasrv.fanotes.desk.HOMEWORK_EMPTY_BODY,
+            ui(ch.fasrv.fanotes.desk.HOMEWORK_EMPTY_BODY),
             modifier = Modifier.widthIn(max = 360.dp),
             color = LocalStatusInk.current.muted,
             fontSize = 12.sp,
@@ -2356,7 +2357,7 @@ private fun HomeworkBucket(
             if (toggle != null) {
                 Spacer(Modifier.weight(1f))
                 Text(
-                    toggle,
+                    ui(toggle),
                     color = accent,
                     fontSize = 12.sp,
                     fontWeight = FontWeight(700),
@@ -2464,7 +2465,7 @@ private fun HomeworkTaskCard(
                     if (task.subject.isNotBlank()) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(12.dp), tint = ink.muted)
-                            VerbatimText(task.subject, color = ink.muted, fontSize = 12.sp)
+                            Text(task.subject, color = ink.muted, fontSize = 12.sp)
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2482,11 +2483,11 @@ private fun HomeworkTaskCard(
                         )
                     }
                     if (task.priority == "high") {
-                        Text(ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_HIGH, color = ink.warning, fontSize = 12.sp, fontWeight = FontWeight(800))
+                        Text(ui(ch.fasrv.fanotes.desk.HOMEWORK_PRIORITY_HIGH), color = ink.warning, fontSize = 12.sp, fontWeight = FontWeight(800))
                     }
                 }
                 if (task.notes.isNotBlank()) {
-                    VerbatimText(task.notes, modifier = Modifier.padding(top = 4.dp), color = ink.soft, fontSize = 12.sp, lineHeight = 18.sp)
+                    Text(task.notes, modifier = Modifier.padding(top = 4.dp), color = ink.soft, fontSize = 12.sp, lineHeight = 18.sp)
                 }
             }
             Box(
@@ -2697,7 +2698,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 Box(
                     Modifier.size(ch.fasrv.fanotes.desk.CAL_ICON_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable(onClickLabel = if (step < 0) "Vorheriger Zeitraum" else "Nächster Zeitraum") { shiftCalendar(step) },
                     contentAlignment = Alignment.Center,
-                ) { VerbatimText(mark) }
+                ) { Text(mark) }
             }
             Row(
                 Modifier.widthIn(min = 120.dp),
@@ -2756,7 +2757,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                         }.padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(label, fontSize = 12.sp, color = if (active) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
+                        Text(ui(label), fontSize = 12.sp, color = if (active) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
                     }
                 }
             }
@@ -2777,7 +2778,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 Box(
                     Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable(onClick = action).padding(horizontal = 10.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text(label, fontSize = 12.sp) }
+                ) { Text(ui(label), fontSize = 12.sp) }
             }
         }
         if (reminder != null) {
@@ -2791,7 +2792,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 TextButton(onClick = { dismissedReminders = dismissedReminders + reminder.key }) { Text(ui("Schliessen")) }
             }
         }
-        if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+        if (!status.isNullOrBlank()) Text(ui(status.orEmpty()), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
             }
             val calendarTail: @Composable () -> Unit = {
         Text("${ui("Am")} ${ch.fasrv.fanotes.desk.calendarDayLabel(anchor)}", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
@@ -2827,7 +2828,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("none" to "Einmal", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
                 TextButton(onClick = { recurrence = id }) {
-                    Text(label, color = if (recurrence == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                    Text(ui(label), color = if (recurrence == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
             }
         }
@@ -2957,7 +2958,7 @@ private fun CalendarRangeEmpty(
     val occupied = range.count { date -> document.events.any { ch.fasrv.fanotes.desk.occurrencesOn(it, date) } }
     if (ch.fasrv.fanotes.desk.calendarRangeIsEmpty(view, occupied)) {
         Text(
-            ch.fasrv.fanotes.desk.CAL_EMPTY,
+            ui(ch.fasrv.fanotes.desk.CAL_EMPTY),
             fontSize = 12.sp,
             color = LocalStatusInk.current.muted,
             modifier = Modifier.padding(vertical = 8.dp),
@@ -3020,7 +3021,7 @@ private fun CalendarMini(
     val label = anchor.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", ch.fasrv.fanotes.desk.calendarLocale()))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(ui("‹"), modifier = Modifier.clickable(onClickLabel = ui("Vorheriger Zeitraum")) { onShift(-1) }.padding(4.dp))
-        Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(650))
+        Text(ui(label), modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(650))
         Text(ui("›"), modifier = Modifier.clickable(onClickLabel = ui("Nächster Zeitraum")) { onShift(1) }.padding(4.dp))
     }
     Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
@@ -3237,7 +3238,7 @@ private fun DayColumns(
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                     Box(Modifier.width(gutter).padding(top = 8.dp), contentAlignment = Alignment.CenterEnd) {
-                        Text(ch.fasrv.fanotes.desk.CAL_ALL_DAY, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 8.dp))
+                        Text(ui(ch.fasrv.fanotes.desk.CAL_ALL_DAY), fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(end = 8.dp))
                     }
                     days.forEach { date ->
                         Column(Modifier.width(column).padding(end = 4.dp).heightIn(min = 34.dp)) {
@@ -3458,7 +3459,7 @@ private fun TimedBlock(
             }
             .padding(horizontal = ch.fasrv.fanotes.desk.CAL_EVENT_PAD_X_DP.dp, vertical = ch.fasrv.fanotes.desk.CAL_EVENT_PAD_Y_DP.dp),
     ) {
-        VerbatimText(slice.event.title, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight(650), maxLines = 2)
+        Text(slice.event.title, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight(650), maxLines = 2)
         Text(
             "%02d:%02d".format(slice.originStart.hour, slice.originStart.minute),
             color = LocalStatusInk.current.muted,
@@ -3480,7 +3481,7 @@ private fun AgendaList(
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(ch.fasrv.fanotes.desk.calendarHeading("day", date), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Text(
-                    ch.fasrv.fanotes.desk.CAL_DAILY,
+                    ui(ch.fasrv.fanotes.desk.CAL_DAILY),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.clickable { onDaily(date) },
@@ -3497,7 +3498,7 @@ private fun AgendaList(
                     Text(ch.fasrv.fanotes.desk.agendaWhenLabel(event), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     Text(event.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                     ch.fasrv.fanotes.desk.agendaPlace(event)?.let { place ->
-                        VerbatimText(place, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1)
+                        Text(place, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1)
                     }
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
@@ -3591,7 +3592,7 @@ private fun CalendarNameDialog(
     val clean = name.replace(Regex("""\s+"""), " ").trim()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = { Text(ui(title)) },
         text = {
             OutlinedTextField(
                 name,
@@ -3833,7 +3834,7 @@ private fun CalendarEventEditor(
                 verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_GAP_DP.dp),
             ) {
                 if (draft.detaches) {
-                    Text(ch.fasrv.fanotes.desk.CAL_EDITOR_DETACH, fontSize = 12.sp, color = ink.muted)
+                    Text(ui(ch.fasrv.fanotes.desk.CAL_EDITOR_DETACH), fontSize = 12.sp, color = ink.muted)
                 }
                 CalEditorInput(
                     draft.title,
@@ -3846,7 +3847,7 @@ private fun CalendarEventEditor(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = draft.allDay, onCheckedChange = { onChange(draft.copy(allDay = it)) })
-                    Text(ch.fasrv.fanotes.desk.CAL_EDITOR_ALL_DAY, fontSize = 12.sp, color = ink.muted)
+                    Text(ui(ch.fasrv.fanotes.desk.CAL_EDITOR_ALL_DAY), fontSize = 12.sp, color = ink.muted)
                 }
                 if (draft.allDay) {
                     CalEditorField(ch.fasrv.fanotes.desk.CAL_EDITOR_START, draft.startDate, { onChange(draft.copy(startDate = it.take(10))) })
@@ -3917,7 +3918,7 @@ private fun CalEditorField(
     placeholder: String = "",
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_GAP_DP.dp)) {
-        Text(label, fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
+        Text(ui(label), fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
         CalEditorInput(value, onChange, singleLine = singleLine, placeholder = placeholder)
     }
 }
@@ -3936,7 +3937,7 @@ private fun CalEditorWhen(
         verticalAlignment = Alignment.Bottom,
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_GAP_DP.dp)) {
-            Text(label, fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
+            Text(ui(label), fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
             CalEditorInput(date, onDate)
         }
         Box(Modifier.widthIn(min = 88.dp)) { CalEditorInput(time, onTime, contentDescription = ui(label)) }
@@ -3947,12 +3948,12 @@ private fun CalEditorWhen(
 private fun CalEditorMenu(label: String, value: String, options: List<Pair<String, String>>, onPick: (String) -> Unit) {
     var open by remember(value) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_GAP_DP.dp)) {
-        Text(label, fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
+        Text(ui(label), fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
         Box {
             CalEditorInput(value, {}, readOnly = true, onClick = { if (options.isNotEmpty()) open = true })
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 options.forEach { (id, name) ->
-                    DropdownMenuItem(text = { VerbatimText(name) }, onClick = { onPick(id); open = false })
+                    DropdownMenuItem(text = { Text(name) }, onClick = { onPick(id); open = false })
                 }
             }
         }
@@ -3987,7 +3988,7 @@ private fun CalEditorInput(
             .then(if (contentDescription.isNotEmpty()) Modifier.semantics { this.contentDescription = contentDescription } else Modifier),
     ) {
         if (value.isEmpty() && placeholder.isNotEmpty()) {
-            Text(placeholder, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ui(placeholder), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
         BasicTextField(
             value = value,
@@ -4030,7 +4031,7 @@ private fun CalEditorAction(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_ICON_DP.dp), tint = ink)
-        Text(label, fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_SP.sp, color = ink)
+        Text(ui(label), fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_ACTION_SP.sp, color = ink)
     }
 }
 
@@ -4094,13 +4095,13 @@ fun BugReportDialog(model: FaNotesViewModel) {
                         )
                         Column {
                             Text(
-                                ch.fasrv.fanotes.desk.BUG_REPORT_TITLE,
+                                ui(ch.fasrv.fanotes.desk.BUG_REPORT_TITLE),
                                 fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_TITLE_SP.sp,
                                 fontWeight = FontWeight(650),
                                 letterSpacing = (-0.02).em,
                             )
                             Text(
-                                ch.fasrv.fanotes.desk.BUG_REPORT_DETAIL,
+                                ui(ch.fasrv.fanotes.desk.BUG_REPORT_DETAIL),
                                 fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_DETAIL_SP.sp,
                                 fontWeight = FontWeight.Medium,
                                 lineHeight = 17.sp,
@@ -4138,7 +4139,7 @@ fun BugReportDialog(model: FaNotesViewModel) {
                     verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.BUG_REPORT_BODY_GAP_DP.dp),
                 ) {
                     Text(
-                        ch.fasrv.fanotes.desk.BUG_REPORT_LABEL,
+                        ui(ch.fasrv.fanotes.desk.BUG_REPORT_LABEL),
                         fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_LABEL_SP.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -4166,7 +4167,7 @@ fun BugReportDialog(model: FaNotesViewModel) {
                             Box {
                                 if (description.isEmpty()) {
                                     Text(
-                                        ch.fasrv.fanotes.desk.BUG_REPORT_PLACEHOLDER,
+                                        ui(ch.fasrv.fanotes.desk.BUG_REPORT_PLACEHOLDER),
                                         color = ink.muted,
                                         fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_FIELD_SP.sp,
                                         fontWeight = FontWeight.Medium,
@@ -4197,7 +4198,7 @@ fun BugReportDialog(model: FaNotesViewModel) {
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                ch.fasrv.fanotes.desk.BUG_REPORT_CANCEL,
+                                ui(ch.fasrv.fanotes.desk.BUG_REPORT_CANCEL),
                                 fontSize = ch.fasrv.fanotes.desk.BUG_REPORT_BUTTON_SP.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = ink.soft,
@@ -4316,13 +4317,13 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            ch.fasrv.fanotes.desk.CONFIRM_EYEBROW,
+                            ui(ch.fasrv.fanotes.desk.CONFIRM_EYEBROW),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.12.em,
                             color = MaterialTheme.colorScheme.error,
                         )
-                        VerbatimText(
+                        Text(
                             request.title,
                             fontSize = ch.fasrv.fanotes.desk.CONFIRM_TITLE_SP.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -4332,7 +4333,7 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
                     }
                 }
                 Text(
-                    request.message,
+                    ui(request.message),
                     fontSize = ch.fasrv.fanotes.desk.CONFIRM_BODY_SP.sp,
                     lineHeight = 19.sp,
                     color = LocalStatusInk.current.soft,
@@ -4351,7 +4352,7 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
                             .padding(horizontal = ch.fasrv.fanotes.desk.CONFIRM_BUTTON_PAD_DP.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(request.cancelLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = LocalStatusInk.current.soft)
+                        Text(ui(request.cancelLabel), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = LocalStatusInk.current.soft)
                     }
                     Box(
                         Modifier
@@ -4365,7 +4366,7 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
                             .padding(horizontal = ch.fasrv.fanotes.desk.CONFIRM_BUTTON_PAD_DP.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(request.confirmLabel, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
+                        Text(ui(request.confirmLabel), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
                     }
                 }
             }
@@ -4429,7 +4430,7 @@ fun OverviewScreen(
                             )
                             Text("${folder.noteCount}", fontSize = 13.sp)
                         }
-                        ch.fasrv.fanotes.desk.overviewSubfolderLabel(folder.subfolders)?.let { Text(it, fontSize = 12.sp) }
+                        ch.fasrv.fanotes.desk.overviewSubfolderLabel(folder.subfolders)?.let { Text(ui(it), fontSize = 12.sp) }
                         Text(ch.fasrv.fanotes.desk.overviewLatestLabel(folder), fontSize = 13.sp)
                         Text(ch.fasrv.fanotes.desk.overviewModifiedLabel(folder.latestModifiedMs), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
                     }
@@ -4438,7 +4439,7 @@ fun OverviewScreen(
             Column(Modifier.weight(1f)) {
                 Text(ui("Zuletzt geöffnet"), fontWeight = FontWeight.SemiBold)
                 Text(
-                    if (recent.isEmpty()) "Noch leer" else "${recent.size} im Verlauf",
+                    ui(if (recent.isEmpty()) "Noch leer" else "${recent.size} im Verlauf"),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                 )
@@ -4560,7 +4561,7 @@ fun CardsScreen(model: FaNotesViewModel) {
                         androidx.compose.material3.FilledTonalButton(
                             onClick = { applyGrade(grade) },
                             modifier = Modifier.weight(1f).heightIn(min = 64.dp),
-                        ) { Text(label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
+                        ) { Text(ui(label), fontSize = 18.sp, fontWeight = FontWeight.SemiBold) }
                     }
                 }
             }
@@ -4581,7 +4582,7 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("links" to "Links", "rechts" to "Rechts", "oben" to "Oben", "unten" to "Unten", "popout" to "Auspoppen").forEach { (id, label) ->
                 TextButton(onClick = { model.updateDesk("book-placement", id) }) {
-                    Text(label, color = if (placement == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                    Text(ui(label), color = if (placement == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
             }
         }
@@ -4624,7 +4625,7 @@ private fun PathPicker(placeholder: String, options: List<String>, value: String
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                value.ifBlank { placeholder },
+                if (value.isBlank()) ui(placeholder) else value,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -4635,7 +4636,7 @@ private fun PathPicker(placeholder: String, options: List<String>, value: String
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             if (options.isEmpty()) DropdownMenuItem(text = { Text(ui("Nichts gefunden")) }, enabled = false, onClick = {})
             options.forEach { path ->
-                DropdownMenuItem(text = { VerbatimText(path, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = {
+                DropdownMenuItem(text = { Text(path, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = {
                     open = false
                     onPick(path)
                 })
@@ -4649,12 +4650,12 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
     val pane by model.bookPane.collectAsStateWithLifecycle()
     val page = pane ?: return
     Column(modifier.padding(8.dp)) {
-        VerbatimText(page.title, maxLines = 1, fontWeight = FontWeight.SemiBold)
+        Text(page.title, maxLines = 1, fontWeight = FontWeight.SemiBold)
         if (page.needsPassword) {
             val rejected by model.bookPasswordRejected.collectAsStateWithLifecycle()
             var draft by remember(page.bookPath) { mutableStateOf("") }
             val supported = ch.fasrv.fanotes.desk.pdfPasswordSupported(android.os.Build.VERSION.SDK_INT)
-            Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_TITLE, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            Text(ui(ch.fasrv.fanotes.desk.PDF_PASSWORD_TITLE), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
             if (!supported) {
                 Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_NEEDS_ANDROID_15, fontSize = 13.sp)
             } else {
@@ -4666,8 +4667,8 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
                     visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     label = { Text(ui("Passwort")) },
                 )
-                if (rejected) Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_WRONG, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = { model.submitBookPassword(draft) }) { Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_ACTION) }
+                if (rejected) Text(ui(ch.fasrv.fanotes.desk.PDF_PASSWORD_WRONG), fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { model.submitBookPassword(draft) }) { Text(ui(ch.fasrv.fanotes.desk.PDF_PASSWORD_ACTION)) }
             }
             return@Column
         }
@@ -4860,7 +4861,7 @@ fun HistoryScreen(model: FaNotesViewModel) {
     val comparison by model.historyComparison.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Text(ui("Versionsverlauf"), style = MaterialTheme.typography.titleLarge)
-        Text(open?.path ?: "Keine Notiz geöffnet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(open?.path ?: ui("Keine Notiz geöffnet."), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         Text(ui("Dieselbe Ablage wie auf dem Desktop: .fanotes/history, höchstens 30 Fassungen je Notiz."), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         if (history.isEmpty()) {
             Text(ui("Für diese Notiz liegt noch keine ältere Fassung vor. Sie entsteht, sobald die Notiz erneut gespeichert wird."), modifier = Modifier.padding(top = 12.dp))
@@ -4941,8 +4942,8 @@ fun FirstRunDialog(
                             val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(1, screenWidth)
                             val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(1, screenWidth).dp
                             val copy: @Composable () -> Unit = {
-                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_TITLE, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
-                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_BODY, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 480.dp))
+                                Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_TITLE), fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
+                                Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_PROFILE_BODY), fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 480.dp))
                                 Row(Modifier.padding(top = 25.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { go(0) }
                                     FirstRunContinue(ch.fasrv.fanotes.desk.FIRST_RUN_NEXT) { go(2) }
@@ -4985,7 +4986,7 @@ fun FirstRunDialog(
                             val (copyWeight, panelWeight) = ch.fasrv.fanotes.desk.firstRunColumnWeights(3, screenWidth)
                             val gap = ch.fasrv.fanotes.desk.firstRunColumnGap(3, screenWidth).dp
                             val intro: @Composable () -> Unit = {
-                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_FOLDER_TITLE, fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.052).em, lineHeight = 34.sp, modifier = Modifier.padding(top = 18.dp))
+                                Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_FOLDER_TITLE), fontSize = 32.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.052).em, lineHeight = 34.sp, modifier = Modifier.padding(top = 18.dp))
                                 Text(ch.fasrv.fanotes.desk.firstRunFolderIntro(profile?.title ?: "Schule"), fontSize = 12.sp, lineHeight = 21.sp, color = ink.muted, modifier = Modifier.padding(top = 13.dp).widthIn(max = 540.dp))
                                 Row(
                                     Modifier.padding(top = 24.dp).heightIn(min = 67.dp).fillMaxWidth().clip(RoundedCornerShape(13.dp)).border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f), RoundedCornerShape(13.dp)).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)).padding(horizontal = 13.dp, vertical = 10.dp),
@@ -4996,12 +4997,12 @@ fun FirstRunDialog(
                                         Icon(Icons.Filled.Inbox, contentDescription = null, modifier = Modifier.size(21.dp), tint = accent)
                                     }
                                     Column(Modifier.weight(1f)) {
-                                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX, fontSize = 12.sp)
-                                        Text(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_DETAIL, fontSize = 12.sp, color = ink.muted, modifier = Modifier.padding(top = 4.dp))
+                                        Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX), fontSize = 12.sp)
+                                        Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_DETAIL), fontSize = 12.sp, color = ink.muted, modifier = Modifier.padding(top = 4.dp))
                                     }
                                     Icon(Icons.Filled.Check, contentDescription = ui("Ausgewählt"), modifier = Modifier.size(17.dp), tint = accent)
                                 }
-                                Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED, fontSize = 12.sp, color = ink.soft, modifier = Modifier.padding(top = 15.dp))
+                                Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED), fontSize = 12.sp, color = ink.soft, modifier = Modifier.padding(top = 15.dp))
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED_DETAIL.replaceFirstChar { it.uppercase() }, fontSize = 12.sp, color = ink.muted, lineHeight = 19.sp)
                                 FirstRunQuiet(ch.fasrv.fanotes.desk.FIRST_RUN_BACK, leading = true) { go(2) }
                             }
@@ -5089,8 +5090,8 @@ private fun FirstRunBrand(step: Int, onStep: (Int) -> Unit) {
             Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_LOGO_ICON_DP.dp), tint = MaterialTheme.colorScheme.background)
         }
         Column(Modifier.widthIn(min = 120.dp)) {
-            Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND, fontSize = 14.sp, letterSpacing = (-0.01).em)
-            Text(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND_DETAIL, fontSize = 12.sp, color = ink.muted, modifier = Modifier.padding(top = 2.dp))
+            Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND), fontSize = 14.sp, letterSpacing = (-0.01).em)
+            Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND_DETAIL), fontSize = 12.sp, color = ink.muted, modifier = Modifier.padding(top = 2.dp))
         }
         Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
             ch.fasrv.fanotes.desk.FIRST_RUN_STEPS.forEachIndexed { index, label ->
@@ -5138,7 +5139,7 @@ private fun FirstRunBrand(step: Int, onStep: (Int) -> Unit) {
                         if (complete) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(12.dp), tint = number)
                         else Text("${index + 1}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = number)
                     }
-                    Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (active) MaterialTheme.colorScheme.onSurface else ink.muted, maxLines = 1)
+                    Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (active) MaterialTheme.colorScheme.onSurface else ink.muted, maxLines = 1)
                 }
             }
         }
@@ -5160,7 +5161,7 @@ private fun FirstRunBrand(step: Int, onStep: (Int) -> Unit) {
         ) {
             Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_ICON_DP.dp), tint = localInk)
             Text(
-                ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL,
+                ui(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL),
                 fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_SP.sp,
                 fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_LOCAL_WEIGHT),
                 color = localInk,
@@ -5188,16 +5189,16 @@ private fun FirstRunChip(label: String, accent: Color) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp), tint = accent)
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = LocalStatusInk.current.soft)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = LocalStatusInk.current.soft)
     }
 }
 
 @Composable
 private fun FirstRunWelcomeCopy(accent: Color, onContinue: () -> Unit) {
     val ink = LocalStatusInk.current
-    Text(ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_WELCOME, fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_SP.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.058).em, lineHeight = 38.sp, modifier = Modifier.padding(top = 18.dp))
-    Text(ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_EMPHASIS, fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_SP.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.058).em, lineHeight = 38.sp, color = accent)
-    Text(ch.fasrv.fanotes.desk.FIRST_RUN_BODY_WELCOME, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 500.dp))
+    Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_WELCOME), fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_SP.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.058).em, lineHeight = 38.sp, modifier = Modifier.padding(top = 18.dp))
+    Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_EMPHASIS), fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_TITLE_SP.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.058).em, lineHeight = 38.sp, color = accent)
+    Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_BODY_WELCOME), fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 500.dp))
     FlowRow(Modifier.padding(top = 25.dp), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         ch.fasrv.fanotes.desk.FIRST_RUN_BENEFITS.forEach { benefit ->
             FirstRunChip(benefit, accent)
@@ -5284,7 +5285,7 @@ private fun WelcomePreview(modifier: Modifier) {
                         )
                     }
                     Text(
-                        ch.fasrv.fanotes.desk.FIRST_RUN_BRAND,
+                        ui(ch.fasrv.fanotes.desk.FIRST_RUN_BRAND),
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.End,
                         fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADER_TITLE_SP.sp,
@@ -5337,7 +5338,7 @@ private fun WelcomePreview(modifier: Modifier) {
                             tint = ink.soft,
                         )
                         Text(
-                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS_HEADING,
+                            ui(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SUBJECTS_HEADING),
                             fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_SP.sp,
                             fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING_WEIGHT),
                             color = ink.soft,
@@ -5386,14 +5387,14 @@ private fun WelcomePreview(modifier: Modifier) {
                         ),
                 ) {
                     Text(
-                        ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER,
+                        ui(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER),
                         fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER_SP.sp,
                         fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER_WEIGHT),
                         letterSpacing = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER_TRACKING_EM.em,
                         color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_KICKER_INK),
                     )
                     Text(
-                        ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING,
+                        ui(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HEADING),
                         fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_SP.sp,
                         fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_WEIGHT),
                         letterSpacing = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_PAPER_TITLE_TRACKING_EM.em,
@@ -5405,7 +5406,7 @@ private fun WelcomePreview(modifier: Modifier) {
                         ),
                     )
                     Text(
-                        ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED,
+                        ui(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED),
                         fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED_SP.sp,
                         lineHeight = (ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED_SP * ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED_LINE).sp,
                         color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_TYPED_INK),
@@ -5488,7 +5489,7 @@ private fun WelcomePreview(modifier: Modifier) {
                             tint = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_INK),
                         )
                         Text(
-                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_QUERY,
+                            ui(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_QUERY),
                             fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_FONT_SP.sp,
                             lineHeight = (ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_FONT_SP * ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_LINE).sp,
                             color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_INK),
@@ -5498,7 +5499,7 @@ private fun WelcomePreview(modifier: Modifier) {
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HITS,
+                            ui(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_HITS),
                             fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_HITS_SP.sp,
                             lineHeight = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_SEARCH_HITS_SP.sp,
                             fontWeight = FontWeight.Bold,
@@ -5567,7 +5568,7 @@ private fun WelcomePreviewFloat(
             tint = Color(ch.fasrv.fanotes.desk.firstRunPreviewFloatIcon(dark)),
         )
         Text(
-            label,
+            ui(label),
             fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_SP.sp,
             fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_FLOAT_WEIGHT),
             color = ink.soft,
@@ -5578,8 +5579,8 @@ private fun WelcomePreviewFloat(
 @Composable
 private fun FirstRunWritingCopy(accent: Color, onStep: (Int) -> Unit) {
     val ink = LocalStatusInk.current
-    Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE, fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
-    Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_BODY, fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 490.dp))
+    Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE), fontSize = 34.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.055).em, lineHeight = 36.sp, modifier = Modifier.padding(top = 18.dp))
+    Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_BODY), fontSize = 13.sp, lineHeight = 22.sp, color = ink.muted, modifier = Modifier.padding(top = 15.dp).widthIn(max = 490.dp))
     Column(Modifier.padding(top = 21.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         val icons = listOf(Icons.Filled.Keyboard, Icons.Filled.Edit, Icons.Filled.Search)
         ch.fasrv.fanotes.desk.FIRST_RUN_WRITING.forEachIndexed { index, (title, detail) ->
@@ -5591,8 +5592,8 @@ private fun FirstRunWritingCopy(accent: Color, onStep: (Int) -> Unit) {
                     Icon(icons[index], contentDescription = null, modifier = Modifier.size(17.dp), tint = accent)
                 }
                 Column {
-                    Text(title, fontSize = 12.sp, color = ink.soft)
-                    Text(detail, fontSize = 12.sp, color = ink.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
+                    Text(ui(title), fontSize = 12.sp, color = ink.soft)
+                    Text(ui(detail), fontSize = 12.sp, color = ink.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
                 }
             }
         }
@@ -5675,7 +5676,7 @@ private fun WritingPreview(modifier: Modifier) {
                 }
             }
             Spacer(Modifier.weight(1f))
-            Text(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FILE, fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FILE_SP.sp, color = ink.muted)
+            Text(ui(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FILE), fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FILE_SP.sp, color = ink.muted)
         }
         Box(
             Modifier
@@ -5702,7 +5703,7 @@ private fun WritingPreview(modifier: Modifier) {
                     color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_DATE_INK),
                 )
                 Text(
-                    ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_HEADING,
+                    ui(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_HEADING),
                     fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_SP.sp,
                     fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_WEIGHT),
                     letterSpacing = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TITLE_TRACKING_EM.em,
@@ -5714,7 +5715,7 @@ private fun WritingPreview(modifier: Modifier) {
                     ),
                 )
                 Text(
-                    ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED,
+                    ui(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED),
                     fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_SP.sp,
                     lineHeight = (ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_SP * ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_LINE).sp,
                     color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_INK),
@@ -5797,14 +5798,14 @@ private fun WritingPreview(modifier: Modifier) {
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_RECOGNIZED,
+                            ui(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_RECOGNIZED),
                             fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_SP.sp,
                             fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_WEIGHT),
                             lineHeight = (ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_SP * ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_LINE).sp,
                             color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TYPED_INK),
                         )
                         Text(
-                            ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FORMULA,
+                            ui(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_FORMULA),
                             fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_SP.sp,
                             fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_WEIGHT),
                             color = Color(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_TRANSCRIPT_DETAIL_INK),
@@ -5842,7 +5843,7 @@ private fun WritingPreview(modifier: Modifier) {
                 Box(Modifier.align(Alignment.TopStart).offset(x = -outset, y = -outset).size(handle).clip(handleShape).border(1.dp, accent, handleShape).background(Color.White))
                 Box(Modifier.align(Alignment.BottomEnd).offset(x = outset, y = outset).size(handle).clip(handleShape).border(1.dp, accent, handleShape).background(Color.White))
                 Text(
-                    ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_CONVERT,
+                    ui(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_CONVERT),
                     fontSize = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_LABEL_SP.sp,
                     fontWeight = FontWeight(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_SELECTION_LABEL_WEIGHT),
                     color = Color.White,
@@ -5869,7 +5870,7 @@ private fun FirstRunContinue(label: String, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
     ) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
         Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.background)
     }
 }
@@ -5882,7 +5883,7 @@ private fun FirstRunQuiet(label: String, leading: Boolean = false, onClick: () -
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (leading) Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp), tint = LocalStatusInk.current.muted)
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = LocalStatusInk.current.muted)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = LocalStatusInk.current.muted)
     }
 }
 
@@ -5927,8 +5928,8 @@ private fun FirstRunProfileCard(
             Icon(icons[profile.id] ?: Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(23.dp), tint = accent)
         }
         Column(Modifier.weight(1f)) {
-            Text(profile.title, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 2.dp))
-            Text(profile.description, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp))
+            Text(ui(profile.title), fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = 2.dp))
+            Text(ui(profile.description), fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 19.sp, modifier = Modifier.padding(top = 8.dp))
         }
         Box(
             Modifier.size(20.dp).clip(CircleShape).border(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA), CircleShape).background(if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface),
@@ -5962,7 +5963,7 @@ fun StudyScreen(model: FaNotesViewModel) {
                     val bar = (4 + (value.toFloat() / peak.toFloat()) * 88).dp
                     Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp).height(bar).background(MaterialTheme.colorScheme.primary))
-                        Text(label, fontSize = 11.sp)
+                        Text(ui(label), fontSize = 11.sp)
                     }
                 }
             }
@@ -6110,7 +6111,7 @@ private fun SyncCardAction(label: String, onClick: () -> Unit) {
     val pressed by interaction.collectIsPressedAsState()
     val hot = hovered || pressed
     Text(
-        label,
+        ui(label),
         fontSize = 12.sp,
         fontWeight = FontWeight(600),
         color = if (hot) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
@@ -6141,8 +6142,8 @@ private fun AiStep(number: Int, title: String, detail: String, content: @Composa
                 Text("$number", fontSize = 12.sp, color = MaterialTheme.colorScheme.background)
             }
             Column {
-                Text(title, fontSize = 12.sp)
-                Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp))
+                Text(ui(title), fontSize = 12.sp)
+                Text(ui(detail), fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp))
             }
         }
         content()
@@ -6185,8 +6186,8 @@ private fun AiChoiceCard(title: String, detail: String, badge: String, selected:
                 if (selected) Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(14.dp), tint = accent) else Spacer(Modifier.size(14.dp))
             }
             Column(Modifier.weight(1f)) {
-                Text(title, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft)
-                Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                Text(ui(title), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft)
+                Text(ui(detail), fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
         }
         if (badge.isNotEmpty()) {
@@ -6213,14 +6214,14 @@ private fun AiPanelButton(label: String, primary: Boolean, enabled: Boolean = tr
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink, maxLines = 1)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = ink, maxLines = 1)
     }
 }
 
 @Composable
 private fun AiSegment(label: String, selected: Boolean, onClick: () -> Unit) {
     Text(
-        label,
+        ui(label),
         fontSize = 12.sp,
         color = if (selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
         modifier = Modifier
@@ -6250,7 +6251,7 @@ private fun AiField(
         MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
     }
     Column(Modifier.fillMaxWidth().padding(top = 9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight(650), color = LocalStatusInk.current.soft)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight(650), color = LocalStatusInk.current.soft)
         BasicTextField(
             value = value,
             onValueChange = onValue,
@@ -6358,8 +6359,8 @@ fun AiScreen(model: FaNotesViewModel) {
             }
             Column(Modifier.weight(1f)) {
                 Text(upperUi(ch.fasrv.fanotes.desk.AI_PANEL_EYEBROW), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(ch.fasrv.fanotes.desk.AI_PANEL_TITLE, fontSize = 18.sp, letterSpacing = (-0.035).em, maxLines = 1)
-                Text(ch.fasrv.fanotes.desk.AI_PANEL_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                Text(ui(ch.fasrv.fanotes.desk.AI_PANEL_TITLE), fontSize = 18.sp, letterSpacing = (-0.035).em, maxLines = 1)
+                Text(ui(ch.fasrv.fanotes.desk.AI_PANEL_DETAIL), fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
             Box(
                 Modifier.size(34.dp).clip(RoundedCornerShape(6.dp)).clickable(enabled = !busy, onClick = dismiss),
@@ -6394,7 +6395,7 @@ fun AiScreen(model: FaNotesViewModel) {
                             modifier = Modifier.padding(top = 12.dp),
                         )
                         Text(
-                            if (definition.local) "Deine Notiz bleibt im lokalen Netzwerk." else "Die Notiz wird zur Verarbeitung an den gewählten Anbieter übertragen.",
+                            ui(if (definition.local) "Deine Notiz bleibt im lokalen Netzwerk." else "Die Notiz wird zur Verarbeitung an den gewählten Anbieter übertragen."),
                             fontSize = 12.sp,
                             color = LocalStatusInk.current.muted,
                         )
@@ -6451,7 +6452,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                     .clickable { model.updateDesk("ai-$provider-model", listed.key) }
                                     .padding(horizontal = 9.dp, vertical = 7.dp),
                             ) {
-                                VerbatimText(listed.title, fontSize = 12.sp, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                                Text(listed.title, fontSize = 12.sp, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
                                 if (listed.detail.isNotBlank()) Text(listed.detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1)
                             }
                         }
@@ -6468,7 +6469,7 @@ fun AiScreen(model: FaNotesViewModel) {
                             AiField(ch.fasrv.fanotes.desk.AI_INSTRUCTION_LABEL, instruction, { instruction = it }, hint = ch.fasrv.fanotes.desk.AI_INSTRUCTION_HINT, minLines = 4)
                         }
                         if ("facts" in actions) {
-                            Text(ch.fasrv.fanotes.desk.AI_FACTS_WARNING, fontSize = 12.sp, lineHeight = 17.sp, color = LocalStatusInk.current.warning, modifier = Modifier.padding(top = 9.dp))
+                            Text(ui(ch.fasrv.fanotes.desk.AI_FACTS_WARNING), fontSize = 12.sp, lineHeight = 17.sp, color = LocalStatusInk.current.warning, modifier = Modifier.padding(top = 9.dp))
                         }
                     }
                 }
@@ -6485,7 +6486,7 @@ fun AiScreen(model: FaNotesViewModel) {
             )
             if (note != null) {
                 Text(ui("Aktuelle Notiz"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                VerbatimText(note?.path.orEmpty(), fontWeight = FontWeight.SemiBold)
+                Text(note?.path.orEmpty(), fontWeight = FontWeight.SemiBold)
                 Text("${live.length} Zeichen", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
             }
         } else {
@@ -6763,7 +6764,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     if (taskLine.indent.isNotEmpty()) {
-                                        VerbatimText(taskLine.indent, fontSize = base.sp, color = MaterialTheme.colorScheme.onSurface)
+                                        Text(taskLine.indent, fontSize = base.sp, color = MaterialTheme.colorScheme.onSurface)
                                     }
                                     Box(
                                         Modifier
@@ -6849,7 +6850,7 @@ fun AiScreen(model: FaNotesViewModel) {
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(upperUi(ch.fasrv.fanotes.desk.AI_PREVIEW_EYEBROW), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1)
-                        Text(previewHeading, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(ui(previewHeading), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (preview != null) {
                         Row(
@@ -6865,7 +6866,7 @@ fun AiScreen(model: FaNotesViewModel) {
             val previewFooter: @Composable () -> Unit = {
                 Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
                     if (status.isNotBlank()) {
-                        Text(status, fontSize = 12.sp, color = LocalStatusInk.current.soft, modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 9.dp))
+                        Text(ui(status), fontSize = 12.sp, color = LocalStatusInk.current.soft, modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 9.dp))
                     }
                     Box(Modifier.fillMaxWidth().height(1.dp).background(panelRule))
                     Row(
@@ -7055,7 +7056,7 @@ private fun PreviewRich(
             ),
         ) {
             Text(
-                slot.label,
+                ui(slot.label),
                 color = codeInk,
                 fontFamily = FontFamily.Monospace,
                 fontSize = box.textPx.sp,
@@ -7530,7 +7531,7 @@ private fun SettingCopy(
     val shownDescription = description?.let { ch.fasrv.fanotes.desk.ChromeText.ui(it).replace("ß", "ss") }
     Column(modifier) {
         if (glyph == null && mark == null) {
-            Text(shownTitle, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_COPY_WEIGHT), color = MaterialTheme.colorScheme.onSurface)
+            Text(ui(shownTitle), fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTING_COPY_WEIGHT), color = MaterialTheme.colorScheme.onSurface)
         } else {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -7564,7 +7565,7 @@ private fun SettingCopy(
             }
         }
         if (!shownDescription.isNullOrBlank()) {
-            Text(shownDescription, fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
+            Text(ui(shownDescription), fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp, modifier = Modifier.padding(top = 3.dp))
         }
     }
 }
@@ -7765,7 +7766,7 @@ private fun SettingsSearchField(query: String, onQuery: (String) -> Unit) {
             decorationBox = { inner ->
                 Box {
                     if (query.isEmpty()) {
-                        Text(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_PLACEHOLDER, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                        Text(ui(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_PLACEHOLDER), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     }
                     inner()
                 }
@@ -7919,7 +7920,7 @@ internal fun SyncModeSwitch(register: Boolean, onRegister: (Boolean) -> Unit) {
                 Modifier.height(ch.fasrv.fanotes.sync.SYNC_MODE_DP.dp).clip(chip).background(if (on) LocalStatusInk.current.panelStrong else Color.Transparent).clickable { onRegister(flag) }.padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label, fontSize = 12.sp, fontWeight = FontWeight(650), color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted)
+                Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight(650), color = if (on) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted)
             }
         }
     }
@@ -7951,7 +7952,7 @@ internal fun SyncSignInFields(model: FaNotesViewModel, register: Boolean) {
             model.setSyncDeviceName(device)
         }, ch.fasrv.fanotes.sync.SYNC_ACCOUNT_DEVICE_HINT)
         val problem = localError
-        if (!problem.isNullOrBlank()) Text(problem, fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+        if (!problem.isNullOrBlank()) Text(ui(problem), fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp)) {
             val shape = RoundedCornerShape(6.dp)
             Box(
@@ -7990,7 +7991,7 @@ private fun SyncFormField(
     val shape = RoundedCornerShape(ch.fasrv.fanotes.sync.SYNC_FORM_FIELD_RADIUS_DP.dp)
     val strong = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.PREVIEW_BORDER_STRONG_ALPHA)
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight(650), color = LocalStatusInk.current.soft)
+        Text(ui(label), fontSize = 12.sp, fontWeight = FontWeight(650), color = LocalStatusInk.current.soft)
         BasicTextField(
             value = value,
             onValueChange = onChange,
@@ -8005,7 +8006,7 @@ private fun SyncFormField(
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     if (value.isEmpty() && placeholder.isNotEmpty()) {
-                        Text(placeholder, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                        Text(ui(placeholder), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     }
                     inner()
                 }
@@ -8145,8 +8146,8 @@ private fun SettingsPage(
                 }
                 if (!navCollapsed) {
                     Column(Modifier.weight(1f)) {
-                        Text(ch.fasrv.fanotes.desk.SETTINGS_BRAND, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Text(ch.fasrv.fanotes.desk.SETTINGS_BRAND_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp))
+                        Text(ui(ch.fasrv.fanotes.desk.SETTINGS_BRAND), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(ui(ch.fasrv.fanotes.desk.SETTINGS_BRAND_DETAIL), fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp))
                     }
                 }
             }
@@ -8189,8 +8190,8 @@ private fun SettingsPage(
                             ) {
                                 Icon(settingsSectionIcon(item.section), contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.SETTINGS_RESULT_ICON_DP.dp), tint = LocalStatusInk.current.muted)
                                 Column(Modifier.weight(1f)) {
-                                    Text(item.label, fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_LABEL_WEIGHT))
-                                    Text(item.detail, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                                    Text(ui(item.label), fontSize = 12.sp, fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_LABEL_WEIGHT))
+                                    Text(ui(item.detail), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                                 }
                                 Icon(
                                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
@@ -8202,7 +8203,7 @@ private fun SettingsPage(
                         }
                         if (settingsResults.isEmpty()) {
                             Text(
-                                ch.fasrv.fanotes.desk.SETTINGS_SEARCH_HINT,
+                                ui(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_HINT),
                                 fontSize = 12.sp,
                                 lineHeight = 18.sp,
                                 color = LocalStatusInk.current.muted,
@@ -8247,12 +8248,12 @@ private fun SettingsPage(
                             verticalArrangement = Arrangement.Center,
                         ) {
                             Text(
-                                item.label,
+                                ui(item.label),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_LABEL_WEIGHT),
                                 color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
                             )
-                            Text(item.detail, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                            Text(ui(item.detail), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                         }
                     }
                 }
@@ -8406,7 +8407,7 @@ private fun SettingsPage(
                             Column {
                                 ch.fasrv.fanotes.desk.UI_FONTS.forEach { face ->
                                     Text(
-                                        face.label,
+                                        ui(face.label),
                                         fontSize = 12.sp,
                                         fontWeight = if (uiFont == face.id) FontWeight.SemiBold else FontWeight.Normal,
                                         color = if (uiFont == face.id) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
@@ -8419,7 +8420,7 @@ private fun SettingsPage(
                             Column {
                                 ch.fasrv.fanotes.desk.EDITOR_FONTS.forEach { face ->
                                     Text(
-                                        face.label,
+                                        ui(face.label),
                                         fontSize = 12.sp,
                                         fontWeight = if (metrics.editorFontId == face.id) FontWeight.SemiBold else FontWeight.Normal,
                                         color = if (metrics.editorFontId == face.id) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
@@ -8596,10 +8597,10 @@ private fun SettingsPage(
                         ) {
                             Column(horizontalAlignment = Alignment.End) {
                                 TextButton(onClick = { model.convertOldNotes() }, enabled = !standardBusy) {
-                                    Text(if (standardBusy) "Aktualisiert …" else "Aktualisieren")
+                                    Text(ui(if (standardBusy) "Aktualisiert …" else "Aktualisieren"))
                                 }
                                 if (!standardStatus.isNullOrBlank()) {
-                                    Text(standardStatus.orEmpty(), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                                    Text(ui(standardStatus.orEmpty()), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                                 }
                             }
                         }
@@ -8672,14 +8673,14 @@ private fun SettingsPage(
                     ) {
                         if (sync.account != null) {
                             Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                VerbatimText(sync.account?.email.orEmpty(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(sync.account?.email.orEmpty(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
                                     "${ch.fasrv.fanotes.sync.syncStatusLabel(sync)} · Zuletzt: ${ch.fasrv.fanotes.sync.syncDeviceSeenLabel(sync.lastSyncAt)}",
                                     fontSize = 12.sp,
                                     color = LocalStatusInk.current.muted,
                                 )
                                 if (!sync.error.isNullOrBlank()) {
-                                    VerbatimText(sync.error.orEmpty(), fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                    Text(sync.error.orEmpty(), fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
                                 }
                                 val info = sync.info
                                 if (info != null) {
@@ -8809,14 +8810,14 @@ private fun SettingsPage(
                         SettingRow("Installiert", copy.small) {
                             Column {
                                 Text(model.installedVersion.ifBlank { "—" }, fontSize = 12.sp)
-                                if (update.isNotBlank()) Text(update, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                                if (update.isNotBlank()) Text(ui(update), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                             }
                         }
                         SettingRow("Update-Kanal", copy.description) {
                             Column {
                                 listOf("stable" to "Stable", "beta" to "Beta", "nightly" to "Nightly").forEach { (id, label) ->
                                     Text(
-                                        label,
+                                        ui(label),
                                         fontSize = 12.sp,
                                         fontWeight = if (channel == id) FontWeight.SemiBold else FontWeight.Normal,
                                         color = if (channel == id) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
@@ -8912,7 +8913,7 @@ private fun SettingsPage(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    ch.fasrv.fanotes.desk.SETTINGS_SAVED,
+                    ui(ch.fasrv.fanotes.desk.SETTINGS_SAVED),
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.success,
                     modifier = Modifier.weight(1f),
@@ -8926,7 +8927,7 @@ private fun SettingsPage(
                         .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(ch.fasrv.fanotes.desk.SETTINGS_DONE, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
+                    Text(ui(ch.fasrv.fanotes.desk.SETTINGS_DONE), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.background)
                 }
             }
         }
@@ -9049,7 +9050,7 @@ private fun PaperStylePicker(style: String, onSelect: (String) -> Unit) {
     val current = ch.fasrv.fanotes.desk.paperStyleLabel(style)
     Box {
         Text(
-            current,
+            ui(current),
             fontSize = 12.sp,
             modifier = Modifier
                 .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.7f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
@@ -9069,8 +9070,8 @@ private fun PaperStylePicker(style: String, onSelect: (String) -> Unit) {
                 DropdownMenuItem(
                     text = {
                         Column {
-                            Text(option.label, fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold, fontSize = 12.sp)
-                            Text(option.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                            Text(ui(option.label), fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold, fontSize = 12.sp)
+                            Text(ui(option.detail), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                         }
                     },
                     onClick = {
@@ -9098,7 +9099,7 @@ fun MarginTranscript(model: FaNotesViewModel) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                 line.text.split(Regex("""(\s+)""")).forEach { part ->
                     if (part.isBlank()) {
-                        VerbatimText(part)
+                        Text(part)
                     } else if (editing == "$index:$part") {
                         OutlinedTextField(
                             draft,
@@ -9112,7 +9113,7 @@ fun MarginTranscript(model: FaNotesViewModel) {
                             editing = null
                         }) { Text(ui("OK")) }
                     } else {
-                        VerbatimText(
+                        Text(
                             part,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.clickable {
@@ -9136,7 +9137,7 @@ fun PdfThumbStrip(model: FaNotesViewModel) {
     // The "Seiten" panel exists to show the pages: show the thumbnails right away.
     androidx.compose.runtime.LaunchedEffect(Unit) { if (!model.pdfThumbOpen.value) model.togglePdfThumbs() }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
-        TextButton(onClick = { model.togglePdfThumbs() }) { Text(if (open) "Miniaturen ●" else "Miniaturen") }
+        TextButton(onClick = { model.togglePdfThumbs() }) { Text(ui(if (open) "Miniaturen ●" else "Miniaturen")) }
         if (open) {
             // Lazy: a page change or a scroll composes only the thumbnails on screen, not all 80.
             androidx.compose.foundation.lazy.LazyRow(
@@ -9176,7 +9177,7 @@ fun PdfThumbStrip(model: FaNotesViewModel) {
 private fun SearchFlag(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(checked, onChange)
-        Text(label, fontSize = 13.sp)
+        Text(ui(label), fontSize = 13.sp)
     }
 }
 
@@ -9215,7 +9216,7 @@ fun NoteSearchBar(model: FaNotesViewModel) {
                 singleLine = true,
                 label = { Text(ui("Im Text suchen …")) },
             )
-            if (status.isNotEmpty()) Text(status, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+            if (status.isNotEmpty()) Text(ui(status), fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
         }
         if (query.isNotEmpty()) {
             Row(
@@ -9266,7 +9267,7 @@ fun PdfPasswordPrompt(model: FaNotesViewModel) {
     var draft by remember { mutableStateOf("") }
     val supported = ch.fasrv.fanotes.desk.pdfPasswordSupported(android.os.Build.VERSION.SDK_INT)
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-        Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_TITLE, fontWeight = FontWeight.SemiBold)
+        Text(ui(ch.fasrv.fanotes.desk.PDF_PASSWORD_TITLE), fontWeight = FontWeight.SemiBold)
         if (!supported) {
             Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_NEEDS_ANDROID_15, fontSize = 13.sp)
             return@Column
@@ -9279,8 +9280,8 @@ fun PdfPasswordPrompt(model: FaNotesViewModel) {
             visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
             label = { Text(ui("Passwort")) },
         )
-        if (rejected) Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_WRONG, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
-        TextButton(onClick = { model.submitPdfPassword(draft) }) { Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_ACTION) }
+        if (rejected) Text(ui(ch.fasrv.fanotes.desk.PDF_PASSWORD_WRONG), fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
+        TextButton(onClick = { model.submitPdfPassword(draft) }) { Text(ui(ch.fasrv.fanotes.desk.PDF_PASSWORD_ACTION)) }
     }
 }
 
@@ -9298,7 +9299,7 @@ fun PdfNoteToolbar(model: FaNotesViewModel) {
     androidx.compose.runtime.LaunchedEffect(page) { draft = page.toString() }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            VerbatimText(open?.title ?: "PDF", fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
+            Text(open?.title ?: "PDF", fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
             Text(ch.fasrv.fanotes.desk.pdfPageCountLabel(count), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
         }
         Row(
@@ -9365,7 +9366,7 @@ fun PdfSearchBar(model: FaNotesViewModel) {
                 label = { Text(ui("Im PDF suchen …")) },
             )
             if (status.isNotEmpty()) {
-                Text(status, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
+                Text(ui(status), fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -9414,7 +9415,7 @@ fun PdfQuoteMarks(model: FaNotesViewModel) {
             OutlinedTextField(quote, { quote = it.take(400) }, label = { Text(ui("Zitat")) }, modifier = Modifier.weight(1f), singleLine = true)
         }
         Row {
-            TextButton(onClick = { underline = !underline }) { Text(if (underline) "Unterstreichen" else "Markieren") }
+            TextButton(onClick = { underline = !underline }) { Text(ui(if (underline) "Unterstreichen" else "Markieren")) }
             TextButton(onClick = {
                 val number = page.toIntOrNull() ?: return@TextButton
                 if (quote.isNotBlank()) {
@@ -9449,9 +9450,9 @@ fun NoteRelations(model: FaNotesViewModel, onOpen: (String) -> Unit) {
         }
         incoming.forEach { link ->
             Column(Modifier.fillMaxWidth().clickable { onOpen(link.path) }.padding(vertical = 4.dp)) {
-                VerbatimText(link.title, fontSize = 13.sp)
+                Text(link.title, fontSize = 13.sp)
                 if (link.excerpt.isNotEmpty()) {
-                    VerbatimText(link.excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f), maxLines = 2)
+                    Text(link.excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f), maxLines = 2)
                 }
             }
         }
@@ -9587,8 +9588,8 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                             )
                             .padding(horizontal = 6.dp, vertical = 7.dp),
                     ) {
-                        Text(label, fontSize = 12.sp, color = LocalStatusInk.current.muted)
-                        VerbatimText(
+                        Text(ui(label), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                        Text(
                             value,
                             fontSize = 12.sp,
                             fontWeight = FontWeight(ch.fasrv.fanotes.desk.INSPECTOR_VALUE_WEIGHT),
@@ -9598,7 +9599,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                 }
             }
             Text(ui("${stats.headings} Überschriften · ${stats.tasksDone}/${stats.tasks} Aufgaben"), fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 6.dp))
-            if (path != null) VerbatimText(path, fontSize = 12.sp, color = muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
+            if (path != null) Text(path, fontSize = 12.sp, color = muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
             NoteRelations(model, onOpen)
             InspectorHeading("Versionen")
             TextButton(onClick = { model.openHistory() }) { Text(ui("Verlauf laden")) }
@@ -9870,14 +9871,14 @@ fun CommandPalette(
                                 is PaletteRow.Note -> ch.fasrv.fanotes.desk.presentNoteText(row.folder)
                             }
                             Text(
-                                title,
+                                ui(title),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (index == selected) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.soft,
                                 maxLines = 1,
                             )
                             if (detail.isNotEmpty()) {
-                                Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp), maxLines = 1)
+                                Text(ui(detail), fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 2.dp), maxLines = 1)
                             }
                         }
                         val shortcut = when (row) {
@@ -9886,7 +9887,7 @@ fun CommandPalette(
                         }
                         if (shortcut.isNotEmpty()) {
                             Text(
-                                shortcut,
+                                ui(shortcut),
                                 fontSize = 12.sp,
                                 color = LocalStatusInk.current.muted,
                                 modifier = Modifier

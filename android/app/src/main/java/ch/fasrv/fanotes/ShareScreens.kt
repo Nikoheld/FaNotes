@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -72,7 +73,7 @@ fun ShareDialogHost(model: FaNotesViewModel) {
                         color = LocalStatusInk.current.muted,
                     )
                 } else {
-                    Text(if (created.mode == ShareMode.LIVE) "Live-Link erstellt" else "Link erstellt", fontSize = 13.sp, color = LocalStatusInk.current.success)
+                    Text(ui(if (created.mode == ShareMode.LIVE) "Live-Link erstellt" else "Link erstellt"), fontSize = 13.sp, color = LocalStatusInk.current.success)
                     SelectionContainer { Text(created.link, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { clipboard.setText(AnnotatedString(created.link)); model.message.value = "Link kopiert." }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Kopieren")) }
@@ -80,7 +81,7 @@ fun ShareDialogHost(model: FaNotesViewModel) {
                     }
                     TextButton(onClick = { service.stop(created.id) { model.message.value = it } }, modifier = Modifier.heightIn(min = Target)) { Text(ui("Freigabe beenden"), color = MaterialTheme.colorScheme.error) }
                 }
-                current.error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
+                current.error?.let { Text(ui(it), color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
                 if (current.busy) Text(ui("Wird hochgeladen …"), fontSize = 13.sp, color = LocalStatusInk.current.muted)
             }
         },
@@ -105,8 +106,8 @@ private fun ModeRow(title: String, text: String, selected: Boolean, onClick: () 
     ) {
         RadioButton(selected = selected, onClick = onClick)
         Column(Modifier.padding(start = 4.dp)) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(text, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ui(title), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(ui(text), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
     }
 }

@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,7 +58,7 @@ fun PdfOutlinePanel(model: FaNotesViewModel) {
                     .padding(start = (12 + depth * 20).dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                VerbatimText(
+                Text(
                     item.title,
                     modifier = Modifier.weight(1f),
                     fontSize = if (depth == 0) 15.sp else 14.sp,

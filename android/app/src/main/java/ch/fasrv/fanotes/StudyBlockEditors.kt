@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -215,7 +216,7 @@ private fun NodePicker(names: Map<String, String>, selected: String, onPick: (St
         ActionButton((names[selected] ?: "?").take(24)) { open = true }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             names.forEach { (id, name) ->
-                DropdownMenuItem(text = { VerbatimText(name, fontWeight = if (id == selected) FontWeight.Bold else FontWeight.Normal) }, onClick = { open = false; onPick(id) })
+                DropdownMenuItem(text = { Text(name, fontWeight = if (id == selected) FontWeight.Bold else FontWeight.Normal) }, onClick = { open = false; onPick(id) })
             }
         }
     }

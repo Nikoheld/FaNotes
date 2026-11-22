@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
@@ -106,7 +107,7 @@ fun ConflictScreen(model: FaNotesViewModel, onClose: () -> Unit) {
                 LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(conflicts, key = { it.copyPath }) { conflict ->
                         val on = conflict.copyPath == selected?.copyPath
-                        VerbatimText(
+                        Text(
                             conflict.path.substringAfterLast('/'),
                             maxLines = 1,
                             fontSize = 14.sp,
@@ -152,7 +153,7 @@ private fun ConflictListHeader(count: Int, onClear: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(ui("Sync-Konflikte"), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, letterSpacing = 1.sp)
-            Text(if (count == 1) "1 Datei" else "$count Dateien", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(ui(if (count == 1) "1 Datei" else "$count Dateien"), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         }
         TextButton(onClick = onClear, modifier = Modifier.heightIn(min = Target)) { Text(ui("Liste leeren")) }
     }
@@ -169,7 +170,7 @@ private fun ConflictRow(conflict: SyncConflict, selected: Boolean, onClick: () -
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        VerbatimText(conflict.path.substringAfterLast('/'), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        Text(conflict.path.substringAfterLast('/'), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         Text(
             conflict.path.substringBeforeLast('/', "").ifEmpty { "Hauptordner" } + " · " + conflict.at.take(16).replace('T', ' '),
             fontSize = 12.sp,
@@ -244,13 +245,13 @@ private fun ConflictDetail(
 @Composable
 private fun ChoiceButton(id: String, label: String, modifier: Modifier, onClick: () -> Unit) {
     if (id == "both") {
-        OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 52.dp)) { Text(label, fontSize = 15.sp) }
+        OutlinedButton(onClick = onClick, modifier = modifier.heightIn(min = 52.dp)) { Text(ui(label), fontSize = 15.sp) }
     } else {
         Button(
             onClick = onClick,
             modifier = modifier.heightIn(min = 52.dp),
             colors = if (id == "remote") ButtonDefaults.buttonColors() else ButtonDefaults.filledTonalButtonColors(),
-        ) { Text(label, fontSize = 15.sp) }
+        ) { Text(ui(label), fontSize = 15.sp) }
     }
 }
 
@@ -272,8 +273,8 @@ private fun VersionPanel(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text(subtitle, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ui(title), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(ui(subtitle), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
         Text(conflictSummary(preview), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         when (preview) {
@@ -375,7 +376,7 @@ private fun PdfFirstPage(path: String, model: FaNotesViewModel) {
 @Composable
 private fun ShowBitmap(bitmap: Bitmap?, missing: String = "Vorschau wird geladen …") {
     if (bitmap == null) {
-        Text(missing, fontSize = 13.sp, color = LocalStatusInk.current.muted)
+        Text(ui(missing), fontSize = 13.sp, color = LocalStatusInk.current.muted)
         return
     }
     Image(

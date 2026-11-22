@@ -1,5 +1,6 @@
 package ch.fasrv.fanotes
 
+import androidx.compose.material3.Text
 import android.graphics.Paint
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -301,7 +302,7 @@ private fun Bars(rows: List<FreqRow>, max: Double) {
     Column {
         rows.forEach { row ->
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(26.dp)) {
-                VerbatimText(row.letter.toString(), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, modifier = Modifier.width(22.dp))
+                Text(row.letter.toString(), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, modifier = Modifier.width(22.dp))
                 Box(Modifier.weight(1f)) {
                     Box(Modifier.fillMaxWidth(if (max > 0) (row.percent / max).toFloat().coerceIn(0.01f, 1f) else 0.01f).height(12.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)))
                 }
@@ -340,7 +341,7 @@ private fun FreqTool(data: FreqData, onChange: (CryptoData) -> Unit) {
             present.forEach { row ->
                 val plain = data.map[row.letter]
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    VerbatimText(row.letter.toString(), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text(row.letter.toString(), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                     PadCell(
                         plain?.toString().orEmpty(),
                         verdict = if (plain != null && duplicates[plain] != null) CellVerdict.BAD else CellVerdict.OPEN,
@@ -438,7 +439,7 @@ private fun VigenereTool(data: VigenereData, onChange: (CryptoData) -> Unit) {
         FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             rows.plain.forEachIndexed { index, ch ->
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    VerbatimText(ch.toString(), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text(ch.toString(), fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                     Text(rows.key[index].toString(), fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary)
                     PadCell(cellText(data.answer.getOrNull(index)).uppercase(), states.getOrNull(index)?.verdict() ?: CellVerdict.OPEN, focus == index, description = "Geheimtext, Position ${index + 1}") { focus = index }
                 }
@@ -507,12 +508,12 @@ private fun XorTool(data: XorData, onChange: (CryptoData) -> Unit) {
             letters.plain.forEachIndexed { index, ch ->
                 Column(Modifier.padding(4.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        VerbatimText(ch.toString(), fontWeight = FontWeight.Bold, fontSize = 18.sp, fontFamily = FontFamily.Monospace)
+                        Text(ch.toString(), fontWeight = FontWeight.Bold, fontSize = 18.sp, fontFamily = FontFamily.Monospace)
                         Text("  ⊕  ${letters.key[index]}", fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.primary)
                     }
                     rowsSpec.forEach { (row, label) ->
                         val states = if (checked) checkBitsRow(letters, cells, row, index) else emptyList()
-                        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                        Text(ui(label), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                         Row {
                             for (bit in 0 until BITS) {
                                 PadCell(
@@ -570,7 +571,7 @@ private fun ModTool(data: ModData, onChange: (CryptoData) -> Unit) {
         SyncField("mb", data.b, if (data.op == ModOp.POWER) "b (Exponent)" else "b", Modifier.weight(1f), numeric = true) { onChange(data.copy(b = digitsOnly(it))) }
         SyncField("mm", data.m, "m (Modulus)", Modifier.weight(1f), numeric = true) { onChange(data.copy(m = digitsOnly(it))) }
     }
-    MOD_RULES.forEach { Text(it, fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp)) }
+    MOD_RULES.forEach { Text(ui(it), fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.padding(vertical = 2.dp)) }
     if (data.a.isNotEmpty() && data.b.isNotEmpty() && data.m.isNotEmpty()) {
         val head = if (data.op == ModOp.POWER) "${data.a} hoch ${data.b}" else "${data.a} ${if (data.op == ModOp.TIMES) "·" else "+"} ${data.b}"
         Text("$head mod ${data.m}", fontWeight = FontWeight.Bold, fontSize = 17.sp, modifier = Modifier.padding(vertical = 8.dp))
@@ -623,7 +624,7 @@ private fun DhTool(data: DhData, onChange: (CryptoData) -> Unit) {
     fun Step(field: DhField, label: String, value: String, set: (String) -> DhData) {
         val state = if (asked[field] == true) checkDhField(data.y, data.p, data.a, data.b, field, value) else FieldState.OPEN
         Column(Modifier.padding(vertical = 6.dp)) {
-            Text(label, fontSize = 13.sp)
+            Text(ui(label), fontSize = 13.sp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SyncField("d-${field.id}", value, "", Modifier.width(180.dp), numeric = true) { asked[field] = false; onChange(set(digitsOnly(it))) }
                 Gap(8.dp)
