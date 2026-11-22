@@ -158,6 +158,12 @@ try {
   assert.ok(!isSyncablePath('.DS_Store'))
   assert.equal(conflictCopyPath('Mathe/Algebra.md', 'Laptop', new Date(2026, 8, 8, 9, 5)), 'Mathe/Algebra (Konflikt Laptop 2026-09-08 09-05).md')
   assert.equal(conflictCopyPath('README', 'A/B:C', new Date(2026, 0, 1, 0, 0)), 'README (Konflikt A B C 2026-01-01 00-00)')
+  // A 250-character name with umlauts: the copy shortens the stem so the name stays within 255 bytes.
+  const longStem = `Leeres Periodensystem für Schüler ${'x'.repeat(216)}`
+  const longCopy = conflictCopyPath(`Chemie/${longStem}.png`, 'Laptop', new Date(2026, 10, 22, 9, 5))
+  const longLeaf = longCopy.slice('Chemie/'.length)
+  assert.ok(new TextEncoder().encode(longLeaf).length <= 255)
+  assert.ok(longLeaf.endsWith(' (Konflikt Laptop 2026-11-22 09-05).png') && longStem.startsWith(longLeaf.slice(0, longLeaf.indexOf(' (Konflikt'))))
   const persistedBase = (id, revision) => ({ id, revision, sha256: 'ab'.repeat(32), size: 4, mtimeMs: 1 })
   const persistedRaw = JSON.stringify({
     version: 1,

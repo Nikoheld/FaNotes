@@ -603,6 +603,33 @@ class SyncEngineTest {
     }
 
     @Test
+    fun aRemoteFileWhoseNameIsTooLongIsSkippedWhileTheRestOfTheSyncRuns() = runBlocking {
+        val server = MemorySyncServer()
+        val hostA = MemoryHost("long-a")
+        val hostB = MemoryHost("long-b")
+        val engineA = engine(SyncApi(server), hostA, "Laptop A")
+        val engineB = engine(SyncApi(server), hostB, "Tablet B")
+        try {
+            engineA.registerAndSettle("ada@example.com", "correct horse")
+            engineB.loginAndSettle("ada@example.com", "correct horse")
+            // 256 bytes: allowed on the laptop, too long for this device.
+            val tooLong = "Chemie/" + "ü".repeat(128) + ".png"
+            hostA.put(tooLong, byteArrayOf(1, 2, 3), 1_000)
+            hostA.put("Chemie/Good.md", "Still arrives\n".encodeToByteArray(), 1_500)
+            engineA.syncNow()
+            engineB.syncNow()
+            assertEquals(SyncStatus.IDLE, engineB.state.value.status)
+            assertEquals(null, engineB.state.value.error)
+            assertEquals("Still arrives\n", hostB.read("Chemie/Good.md").decodeToString())
+            assertTrue(synchronized(hostB.files) { tooLong !in hostB.files })
+            assertTrue(engineB.state.value.log.any { it.level == "warn" && it.text.contains("too long") })
+        } finally {
+            engineA.close()
+            engineB.close()
+        }
+    }
+
+    @Test
     fun aDamagedRemoteBlobIsSkippedWhileTheRestOfThePullAndThePushRun() = runBlocking {
         val server = MemorySyncServer()
         val hostA = MemoryHost("damaged-a")

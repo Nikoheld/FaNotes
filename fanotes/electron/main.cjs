@@ -1219,7 +1219,7 @@ async function atomicWrite(targetPath, data, options = {}) {
   const directory = path.dirname(targetPath)
   const temporaryPath = path.join(
     directory,
-    `.${path.basename(targetPath)}.${process.pid}.${crypto.randomBytes(10).toString('hex')}.tmp`,
+    `.fanotes-${process.pid}.${crypto.randomBytes(10).toString('hex')}.tmp`,
   )
   let handle
   try {

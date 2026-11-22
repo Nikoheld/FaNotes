@@ -198,7 +198,7 @@ async function resolveLinked(linkedFolders, raw, { allowMissing = false } = {}) 
 async function atomicWriteBytes(target, bytes, mtimeMs) {
   const directory = path.dirname(target)
   await fsp.mkdir(directory, { recursive: true, mode: 0o700 })
-  const temporary = path.join(directory, `.${path.basename(target)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`)
+  const temporary = path.join(directory, `.fanotes-${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`)
   let handle
   try {
     handle = await fsp.open(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0), 0o600)
