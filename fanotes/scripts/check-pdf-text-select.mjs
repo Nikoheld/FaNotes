@@ -56,7 +56,8 @@ const runOnce = () => {
 
   const css = readFileSync(join(root, 'src/styles.css'), 'utf8')
   const board = readFileSync(join(root, 'src/components/PdfNoteView.tsx'), 'utf8')
-  const layerStart = css.indexOf('.pdf-note-text-layer {')
+  // styles.css also has an earlier `.pdf-note-text-layer {` rule (contrast filter); the geometry rule carries the pdf.js contract.
+  const layerStart = css.indexOf('.pdf-note-text-layer {\n  /* pdf.js TextLayer contract')
   assert.ok(layerStart >= 0)
   const layerBlock = css.slice(layerStart, layerStart + 1400)
   assert.match(layerBlock, /--total-scale-factor:\s*calc\(\s*var\(--scale-factor\)\s*\*\s*var\(--user-unit\)\s*\)/)

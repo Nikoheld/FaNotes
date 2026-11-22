@@ -133,7 +133,7 @@ const runOnce = () => {
   )
   assert.match(noteCanvas, /export const paintedStayExtent/)
   assert.match(noteCanvas, /export const markdownAndInkAfterGrowSequence/)
-  assert.match(noteCanvas, /liveW = writePageStayExtent/)
+  assert.match(noteCanvas, /nextW = writePageStayExtent\(prevW, paintedStayExtent\(next\.width, layout\.width\)\)/)
   assert.match(noteCanvas, /finiteOriginPx\(pad\)/)
   assert.match(noteCanvas, /originX: page\.originX/)
   assert.match(noteCanvas, /paperTextX: stay\.textX/)

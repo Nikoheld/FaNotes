@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vite'
+import { singleEntryPlugin } from './fixtures/single-entry-plugin.mjs'
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const workspaceRoot = path.resolve(appRoot, '..')
@@ -57,6 +58,7 @@ const waitForChromium = () => new Promise((resolve, reject) => {
 
 try {
   await build({
+    plugins: [singleEntryPlugin(path.join(appRoot, 'scripts/fixtures/connected-recognition-harness.ts'))],
     root: workspaceRoot,
     logLevel: 'error',
     build: {

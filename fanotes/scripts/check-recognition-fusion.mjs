@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { createServer } from 'vite'
 
 const server = await createServer({
-  root: '/workspace/fanotes',
+  root: fileURLToPath(new URL('..', import.meta.url)),
   appType: 'custom',
   logLevel: 'error',
   optimizeDeps: { noDiscovery: true },

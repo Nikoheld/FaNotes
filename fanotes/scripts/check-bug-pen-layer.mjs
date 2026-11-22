@@ -159,7 +159,8 @@ try {
   assert.match(appSource, /INK_OVERLAY_CRASH_TITLE/)
   // The boundary is keyed by the note's own session (overlaySessionForNote), so
   // a session loaded for another note never mounts under this note's path.
-  assert.match(appSource, /key=\{`stiftebene:\$\{activeTab\.path\}:\$\{noteDrawingSession\.key\}`\}/)
+  // inkBoard is the note session or, for a PDF with blank side pages, the side-page board of that same note.
+  assert.match(appSource, /key=\{`stiftebene:\$\{activeTab\.path\}:\$\{inkBoard\.key\}`\}/)
   assert.match(boardSource, /portalInkToolbar\(createPortal/)
   assert.match(boardSource, /liveInkToolbarHost/)
   // The hit rule lives in the board's inline stylesheet. styles.css only holds the

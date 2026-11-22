@@ -155,7 +155,7 @@ void (async () => {
     socket = await connect(debugPort, chromium)
     const cdp = createCdp(socket)
     await Promise.all([cdp.send('Runtime.enable'), cdp.send('Page.enable'), cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })])
-    await waitFor(cdp, `document.documentElement?.lang === 'en' && Boolean(document.querySelector('.first-run')) && document.querySelectorAll('.first-run-profiles > button').length === 4 && document.querySelectorAll('.first-run-subjects > button').length === 11`, 'English onboarding')
+    await waitFor(cdp, `document.documentElement?.lang === 'en' && Boolean(document.querySelector('.first-run')) && document.querySelectorAll('.first-run-profiles > button').length === 4 && document.querySelectorAll('.first-run-subjects > button').length === ${require('../electron/onboarding.cjs').STARTER_SUBJECTS.length}`, 'English onboarding')
     await audit(cdp, 'Setup onboarding')
     await capture(cdp, 'onboarding-setup')
     const profiles = await cdp.evaluate(`[...document.querySelectorAll('.first-run-profiles strong')].map((node) => node.textContent)`)
@@ -187,7 +187,9 @@ void (async () => {
     }
     await cdp.evaluate(`document.querySelector('.settings-content header .icon-button')?.click()`)
 
-    await cdp.evaluate(`document.querySelector('button[aria-label="Open AI Assistant"]')?.click()`)
+    // The toolbar AI button only exists once an AI provider is connected (18127fd2), and this profile has none, so the
+    // panel is opened with its shortcut (Ctrl+Shift+A), which works without a connection.
+    await cdp.evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'A', ctrlKey: true, shiftKey: true, bubbles: true }))`)
     await waitFor(cdp, `Boolean(document.querySelector('.ai-panel'))`, 'English AI panel')
     await audit(cdp, 'AI panel')
     await capture(cdp, 'ai-panel')

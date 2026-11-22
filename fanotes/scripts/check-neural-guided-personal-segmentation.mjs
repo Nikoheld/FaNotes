@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'vite'
+import { singleEntryPlugin } from './fixtures/single-entry-plugin.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const workspace = path.resolve(root, '..')
@@ -16,6 +17,7 @@ let server
 
 try {
   await build({
+    plugins: [singleEntryPlugin(path.join(root, 'scripts/fixtures/neural-guided-personal-segmentation-harness.ts'))],
     root: workspace,
     logLevel: 'error',
     build: {
@@ -51,17 +53,64 @@ try {
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   const port = server.address().port
+  // The page waits for the spelling worker, which does not advance Chromium's virtual time: with
+  // `--virtual-time-budget --dump-dom` the budget ran out while the worker was still loading and the dump was
+  // taken before the result existed. Run in real time instead and poll the page over the DevTools protocol.
+  const debugPort = 20_000 + Math.floor(Math.random() * 20_000)
   const chromium = spawn('chromium', [
     '--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
     '--js-flags=--max-old-space-size=1024',
-    `--user-data-dir=${profile}`, '--virtual-time-budget=600000',
-    '--dump-dom', `http://127.0.0.1:${port}/`,
-  ], { stdio: ['ignore', 'pipe', 'pipe'] })
-  let stdout = ''
+    `--user-data-dir=${profile}`, `--remote-debugging-port=${debugPort}`,
+    `http://127.0.0.1:${port}/`,
+  ], { stdio: ['ignore', 'ignore', 'pipe'] })
   let stderr = ''
-  chromium.stdout.on('data', (chunk) => { stdout += chunk })
   chromium.stderr.on('data', (chunk) => { stderr += chunk })
-  assert.equal(await new Promise((resolve) => chromium.on('close', resolve)), 0, stderr)
+  const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+  let stdout = ''
+  try {
+    let pageSocket
+    for (let attempt = 0; attempt < 100 && !pageSocket; attempt += 1) {
+      try {
+        const pages = await fetch(`http://127.0.0.1:${debugPort}/json`).then((response) => response.json())
+        pageSocket = pages.find((entry) => entry.type === 'page' && entry.url.startsWith(`http://127.0.0.1:${port}`))?.webSocketDebuggerUrl
+      } catch { /* Chromium is still starting */ }
+      if (!pageSocket) await wait(100)
+    }
+    assert.ok(pageSocket, `Chromium-Testseite fehlt: ${stderr.slice(0, 600)}`)
+    const socket = new WebSocket(pageSocket)
+    await new Promise((resolve, reject) => {
+      socket.addEventListener('open', resolve, { once: true })
+      socket.addEventListener('error', reject, { once: true })
+    })
+    let sequence = 0
+    const pending = new Map()
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data)
+      const handler = pending.get(message.id)
+      if (!handler) return
+      pending.delete(message.id)
+      handler(message.result)
+    })
+    const evaluate = (expression) => new Promise((resolve) => {
+      const id = ++sequence
+      pending.set(id, resolve)
+      socket.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, returnByValue: true } }))
+    })
+    const deadline = Date.now() + 240_000
+    while (Date.now() < deadline) {
+      const probe = await evaluate(`Boolean(document.getElementById('result') || document.getElementById('error'))`)
+      if (probe?.result?.value) break
+      await wait(250)
+    }
+    stdout = (await evaluate('document.documentElement.outerHTML'))?.result?.value ?? ''
+    socket.close()
+  } finally {
+    if (chromium.exitCode === null) {
+      const closed = new Promise((resolve) => chromium.once('close', resolve))
+      chromium.kill('SIGTERM')
+      await Promise.race([closed, wait(2_000)])
+    }
+  }
   const error = /<pre id="error">([\s\S]*?)<\/pre>/u.exec(stdout)?.[1]
   assert.equal(error, undefined, error)
   const encoded = /<pre id="result">([\s\S]*?)<\/pre>/u.exec(stdout)?.[1]

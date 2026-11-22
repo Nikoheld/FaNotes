@@ -175,7 +175,7 @@ try {
   assert.match(boardSource, /cleared: true/)
   assert.match(boardSource, /budgetCleared: Boolean\(painting\?\.cleared\)/)
   assert.equal(
-    boardSource.match(/if \(eraseHole\.seal\) committedBitmapRef\.current = \{ key: contentKey, topPx \}/g)?.length,
+    boardSource.match(/if \(eraseHole\.seal\) committedBitmapRef\.current = \{ key: contentKey, topPx(?:, provisional: held\?\.provisional)? \}/g)?.length,
     2,
     'both erase seals wait for the hole decision',
   )

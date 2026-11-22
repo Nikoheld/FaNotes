@@ -193,7 +193,7 @@ assert.doesNotMatch(loaderSource, /readNotePageStats|readNotePaperStyle|readNote
 assert.match(app, /NoteTextFieldLayer/u)
 assert.match(app, /writeNoteTextFields/u)
 assert.match(app, /is-placing-text-field/u)
-const revealSource = app.slice(app.indexOf('const revealOpenedNote = useCallback'), app.indexOf('const openNote = useCallback'))
+const revealSource = app.slice(app.indexOf('const revealOpenedNote = useCallback'), app.indexOf('const prepareDocumentOpen = useCallback'))
 assert.match(revealSource, /setActivePath\(path\)/u)
 assert.match(revealSource, /void loadNoteCompanion\(path\)/u)
 assert.doesNotMatch(revealSource, /await /u)
@@ -420,10 +420,12 @@ async function assertUnreadableRecordsStayPut() {
 void assertUnreadableRecordsStayPut().then(() => {
   const viewerDir = path.join(__dirname, '..', '..', 'fanotes-site', 'public', 'viewer')
   const viewerHtml = fs.readFileSync(path.join(viewerDir, 'index.html'), 'utf8')
-  const viewerJs = fs.readFileSync(path.join(viewerDir, 'viewer.js'), 'utf8')
+  // The viewer is split: viewer.js (UI), famd-read.js (parser) and ink-render.js (drawing). All of them must stay read-only.
+  const viewerParts = ['viewer.js', 'famd-read.js', 'ink-render.js'].map((name) => fs.readFileSync(path.join(viewerDir, name), 'utf8'))
+  const viewerJs = viewerParts.join('\n')
   assert.match(viewerHtml, /Nur anschauen/u)
-  assert.match(viewerJs, /parseFamd/u)
-  assert.match(viewerJs, /fanotes-famd-v1/u)
+  assert.match(viewerParts[0], /readFamd/u)
+  assert.match(viewerParts[1], /fanotes-famd-v1/u)
   assert.doesNotMatch(viewerJs, /writeFile|createNote|indexedDB|localStorage|fetch\(/u)
   console.log('FAMD-Prüfung erfolgreich: Markdown bleibt lesbar, Handschrift sitzt im Längen-präfixierten Block, Begleiterpfade, Verschieben und der Nur-Lesen-Viewer stimmen.')
 }).catch((error) => {
