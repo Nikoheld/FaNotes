@@ -75,6 +75,12 @@ android {
         unitTests {
             // Robolectric needs the merged resources and manifest to render the real UI on the JVM.
             isIncludeAndroidResources = true
+            all { test ->
+                // Robolectric runs offline: android-all jars come from Gradle (cached by CI), never from Maven at test time.
+                test.dependsOn(syncRobolectricAndroidAll)
+                test.systemProperty("robolectric.offline", "true")
+                test.systemProperty("robolectric.dependency.dir", robolectricJarsDir.get().asFile.absolutePath)
+            }
         }
     }
 
@@ -83,6 +89,23 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+// android-all-instrumented jars for the SDK levels the Robolectric tests use. Robolectric 4.14.1 asks for
+// 14 (@Config(sdk = [34])) and 15 (tests without @Config run on the default SDK, target SDK capped to 35).
+// One configuration per jar: all versions share one module, so a single configuration would keep only the newest.
+val robolectricAndroidAllVersions = listOf("14-robolectric-10818077-i7", "15-robolectric-12650502-i7")
+val robolectricAndroidAllConfigs = robolectricAndroidAllVersions.mapIndexed { i, version ->
+    configurations.create("robolectricAndroidAll$i") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+        dependencies.add(project.dependencies.create("org.robolectric:android-all-instrumented:$version"))
+    }
+}
+val robolectricJarsDir = layout.buildDirectory.dir("robolectric-android-all")
+val syncRobolectricAndroidAll by tasks.registering(Sync::class) {
+    robolectricAndroidAllConfigs.forEach { from(it) }
+    into(robolectricJarsDir)
 }
 
 dependencies {
