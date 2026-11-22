@@ -660,6 +660,8 @@ class SyncEngine(
         }
         val path = meta.path
         if (!acceptsPath(path)) return ApplyResult("skipped", null)
+        // A name over 255 bytes cannot be stored here. Only this file waits; the rest of the sync runs.
+        if (!fitsNameLimit(path)) throw RemoteEntryUnusable("name", path)
         diagnostic("sync applyRemote declaredBytes=${meta.size} deepCopyDepth=0")
         requireSyncDocumentBudget(path, meta.size)
         val base = table.files[path]
@@ -1252,6 +1254,7 @@ class SyncEngine(
             "decrypt" -> "it could not be decrypted"
             "checksum" -> "its checksum did not match"
             "unreadable" -> "it could not be read as a note"
+            "name" -> "its name is too long for this device; shorten it on the other device"
             else -> "the server could not provide it"
         }
     }

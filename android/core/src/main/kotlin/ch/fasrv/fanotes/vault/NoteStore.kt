@@ -845,7 +845,8 @@ class DirectoryVault(val root: Path) : VaultIo {
     override fun write(path: String, bytes: ByteArray) {
         val target = resolve(path)
         Files.createDirectories(target.parent)
-        val temp = target.resolveSibling(target.fileName.toString() + ".${UUID.randomUUID()}.tmp")
+        // Not "<name>.<uuid>.tmp": a long name plus the suffix passes the 255-byte name limit.
+        val temp = target.resolveSibling(".${UUID.randomUUID()}.tmp")
         Files.write(temp, bytes)
         try {
             Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)

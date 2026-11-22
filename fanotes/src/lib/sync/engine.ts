@@ -163,7 +163,27 @@ export const conflictCopyPath = (path: string, deviceName: string, at: Date) => 
   const extension = dot > 0 ? name.slice(dot) : ''
   const stamp = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')} ${String(at.getHours()).padStart(2, '0')}-${String(at.getMinutes()).padStart(2, '0')}`
   const device = deviceName.replace(/[\\/:*?"<>|\0-\x1f]/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 40) || 'Gerät'
-  return `${directory}${stem} (Konflikt ${device} ${stamp})${extension}`
+  const suffix = ` (Konflikt ${device} ${stamp})${extension}`
+  // A long name plus the suffix can pass the 255-byte name limit: shorten the stem, keep the suffix.
+  return `${directory}${takeUtf8Bytes(stem, MAX_NAME_BYTES - utf8Length(suffix))}${suffix}`
+}
+
+/** Linux and Android allow 255 bytes (UTF-8) per file or folder name. */
+export const MAX_NAME_BYTES = 255
+const utf8Length = (text: string) => new TextEncoder().encode(text).length
+
+/** `text` cut to at most `maxBytes` UTF-8 bytes, never inside a character. */
+export const takeUtf8Bytes = (text: string, maxBytes: number) => {
+  if (utf8Length(text) <= maxBytes) return text
+  let used = 0
+  let result = ''
+  for (const character of text) {
+    const size = utf8Length(character)
+    if (used + size > maxBytes) break
+    used += size
+    result += character
+  }
+  return result.trimEnd()
 }
 
 const defaultDeviceName = (platform: string) => {

@@ -63,9 +63,30 @@ fun toggleSyncPrefix(value: String, folder: String): String {
     return list.joinToString("\n")
 }
 
+/** Linux and Android allow 255 bytes (UTF-8) per file or folder name. */
+const val MAX_NAME_BYTES = 255
+
+/** True when every name in [path] fits the device's file system (`File name too long` otherwise). */
+fun fitsNameLimit(path: String): Boolean = path.split('/').all { it.toByteArray(Charsets.UTF_8).size <= MAX_NAME_BYTES }
+
+/** [text] cut to at most [maxBytes] UTF-8 bytes, never inside a character. */
+fun takeUtf8Bytes(text: String, maxBytes: Int): String {
+    if (text.toByteArray(Charsets.UTF_8).size <= maxBytes) return text
+    var used = 0
+    var end = 0
+    while (end < text.length) {
+        val next = text.offsetByCodePoints(end, 1)
+        val size = text.substring(end, next).toByteArray(Charsets.UTF_8).size
+        if (used + size > maxBytes) break
+        used += size
+        end = next
+    }
+    return text.substring(0, end).trimEnd()
+}
+
 private val CONFLICT_STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH-mm")
 
-/** `<name> (Konflikt <device> <YYYY-MM-DD HH-MM>).<ext>`, local time, matching the desktop client. */
+/** `<name> (Konflikt <device> <YYYY-MM-DD HH-MM>).<ext>`, local time, matching the desktop client. A too long name is shortened. */
 fun conflictCopyPath(path: String, deviceName: String, at: Instant, zone: ZoneId = ZoneId.systemDefault()): String {
     val slash = path.lastIndexOf('/')
     val directory = if (slash >= 0) path.substring(0, slash + 1) else ""
@@ -80,7 +101,10 @@ fun conflictCopyPath(path: String, deviceName: String, at: Instant, zone: ZoneId
         .trim()
         .take(40)
         .ifBlank { "Gerät" }
-    return "$directory$stem (Konflikt $device $stamp)$extension"
+    val suffix = " (Konflikt $device $stamp)$extension"
+    // A long name plus the suffix can pass the file system limit: shorten the stem, keep the suffix.
+    val fitted = takeUtf8Bytes(stem, MAX_NAME_BYTES - suffix.toByteArray(Charsets.UTF_8).size)
+    return "$directory$fitted$suffix"
 }
 
 fun diffLines(before: String, after: String): List<DiffRow> {

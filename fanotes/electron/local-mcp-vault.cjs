@@ -1001,7 +1001,7 @@ const createVault = ({ root, excluded = [], now = () => new Date() }) => {
   // ── writes ──
 
   const writeTemp = async (target, data, mode) => {
-    const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${crypto.randomBytes(10).toString('hex')}.tmp`)
+    const temp = path.join(path.dirname(target), `.fanotes-${process.pid}.${crypto.randomBytes(10).toString('hex')}.tmp`)
     const handle = await fsp.open(temp, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0), mode)
     try {
       await handle.writeFile(data, { encoding: 'utf8' })
