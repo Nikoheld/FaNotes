@@ -554,7 +554,10 @@ export class SyncEngine {
       throw new Error('Ohne Passwort geht das nur in der Desktop-App, die den Gerätschlüssel sicher speichern kann.')
     }
     const credential: SyncCredential = password ? 'password' : 'device-key'
-    const secretText = password ?? newDeviceKey()
+    const pendingId = `pending:${username.toLowerCase()}`
+    // A device-key attempt that was cut off (timeout) may have created the account: retry with the same key.
+    const earlierPending = credential === 'device-key' ? (await this.readDeviceKeys()).keys[pendingId] : undefined
+    const secretText = password ?? earlierPending?.key ?? newDeviceKey()
     const kdf = newKdf()
     const { wrappingKey, authKey } = await deriveFromPassword(secretText, kdf)
     const secret = newVaultSecret()
@@ -573,7 +576,16 @@ export class SyncEngine {
       result = await this.api.register({ username, ...(email ? { email } : {}), credential, publicKey: userKey.publicKey, userKeyWrap: userKey.wrap, authKey, kdf, vaultKeyWrap, device: this.deviceInfo() })
     } catch (error) {
       if (pendingKeys) {
-        delete pendingKeys.keys[`pending:${username.toLowerCase()}`]
+        const unknownOutcome = !(error instanceof SyncApiError) || error.status === 0
+        if (unknownOutcome) throw error // the server may have created the account: keep the key for a retry or sign-in
+        if (error.status === 409 && earlierPending) {
+          // Taken, and we hold a key from an earlier attempt: that attempt may be the one that made it.
+          try {
+            await this.loginWithDeviceKey(pendingId)
+            return
+          } catch { /* not our account */ }
+        }
+        delete pendingKeys.keys[pendingId]
         await this.writeDeviceKeys(pendingKeys).catch(() => undefined)
       }
       throw error
@@ -636,6 +648,13 @@ export class SyncEngine {
     const secret = await unwrapVaultSecret(result.vaultKeyWrap, wrappingKey)
     await this.signInWith({ v: 1, accountId: result.accountId, deviceId: result.deviceId, token: result.token, expiresAt: result.expiresAt, email: result.email ?? '', username: result.username ?? stored.username, credential: result.credential, vaultSecret: toBase64(secret) })
     secret.fill(0)
+    if (accountId.startsWith('pending:')) {
+      // The account exists after all: file the key under its id.
+      const keys = await this.readDeviceKeys()
+      delete keys.keys[accountId]
+      keys.keys[result.accountId] = { username: result.username ?? stored.username, key: stored.key }
+      await this.writeDeviceKeys(keys)
+    }
     this.log('info', `Angemeldet als ${result.username ?? stored.username}.`)
   }
 

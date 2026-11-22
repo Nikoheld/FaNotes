@@ -55,7 +55,6 @@ val SETTINGS_SEARCH_ITEMS: List<SettingsSearchItem> = listOf(
     SettingsSearchItem("Seitenleisten-Breite", "Bedienung", "accessibility", "settings-comfort", "sidebar informationsleiste panel breite layout"),
     SettingsSearchItem("Statistik", "Statistik", "statistics", "settings-stat-activity", "statistik aktivität kalender heatmap serie streak wörter notizen größe fächer lernzeit hausaufgaben karteikarten sync"),
     SettingsSearchItem("Diagnose & Verbesserung", "Statistik", "statistics", "settings-diagnostics", "diagnose logs senden nutzungsstatistik telemetrie anonym absturz fehlerbericht daten löschen datenschutz"),
-    SettingsSearchItem("Eigenes CSS", "Erweitert", "advanced", "settings-css", "custom style design code variablen css"),
 )
 
 /** Desktop `normalizeSearch`: accents fold away and ß becomes ss. */
@@ -87,11 +86,10 @@ val SETTINGS_NAV: List<SettingsNavItem> = listOf(
     SettingsNavItem("files", "Dateien & Vault", "Import, Ordner und Speichern", "Stift & Arbeitsbereich", 7),
     SettingsNavItem("sync", "Sync", "Konto, Geräte und Verschlüsselung", "FaNotes & System", 6),
     SettingsNavItem("statistics", "Statistik", "Vault, Aktivität, Schule und Diagnose", "FaNotes & System", 0),
-    SettingsNavItem("addons", "Add-ons", "Store, Quelle und Updates", "FaNotes & System", 3),
+    SettingsNavItem("addons", "Add-ons", "Nur im Desktop verfügbar", "FaNotes & System", 0),
     SettingsNavItem("updates", "Updates", "Stable, Beta und Sicherheit", "FaNotes & System", 4),
     SettingsNavItem("accessibility", "Bedienung", "Bewegung und Lesbarkeit", "FaNotes & System", 3),
     SettingsNavItem("experimental", "Experimentell", "Unfertige Funktionen, standardmässig aus", "FaNotes & System", 5),
-    SettingsNavItem("advanced", "Erweitert", "Ressourcen, Datenschutz und App-Daten", "FaNotes & System", 10),
 )
 
 /** The settings page the desktop `openSettings` call would show. An unknown id stays on Darstellung. */
@@ -104,6 +102,8 @@ fun settingsSectionToOpen(requested: String?): String {
 fun settingsEyebrow(count: Int) = "Anpassung · $count Optionen"
 
 /** The Statistik page has no options to count; it says where the numbers come from. */
+const val SETTINGS_ADDONS_EYEBROW = "Nur im Desktop"
+
 const val SETTINGS_STATISTICS_EYEBROW = "Nur auf diesem Gerät berechnet"
 
 /** Groups in desktop order, each with its rows. */

@@ -79,6 +79,7 @@ export class LiveChannel {
   status: LiveStatus = 'connecting'
   private readonly statusListeners = new Set<(status: LiveStatus) => void>()
   private readonly docListeners = new Set<() => void>()
+  private readonly closeListeners = new Set<() => void>()
   private lastSeq = 0
   private compactedTo = 0
   private uncompactedUpdates = 0
@@ -112,6 +113,11 @@ export class LiveChannel {
   onStatus(listener: (status: LiveStatus) => void) {
     this.statusListeners.add(listener)
     return () => { this.statusListeners.delete(listener) }
+  }
+
+  /** Fires once when the channel has closed, whoever closed it (the note, the share manager, a withdrawn permission). */
+  onClosed(listener: () => void) {
+    this.closeListeners.add(listener)
   }
 
   /** Fires after a remote change landed (people list, saved state). */
@@ -330,10 +336,9 @@ export class LiveChannel {
       return
     }
     if (event.k === 's') return
-    if (own) {
-      if (typeof event.q === 'number') this.lastSeq = Math.max(this.lastSeq, event.q)
-      return
-    }
+    // Our own messages never advance the cursor: the sequence is shared by all notes and devices, so a
+    // number past the cursor does not mean everything before it was seen. Only a fetch (or a received update) does.
+    if (own) return
     if (!event.d || event.big) {
       void this.catchUp()
       return
@@ -419,8 +424,7 @@ export class LiveChannel {
       if (update.length > SNAPSHOT_INSTEAD_OF_UPDATE_BYTES) {
         await this.compact(true)
       } else {
-        const sent = await this.options.port.send({ k: 'u', d: await this.seal(update) })
-        if (typeof sent.q === 'number') this.lastSeq = Math.max(this.lastSeq, sent.q)
+        await this.options.port.send({ k: 'u', d: await this.seal(update) })
         this.uncompactedUpdates += 1
         this.uncompactedBytes += update.length
         this.setStatus('live')
@@ -560,5 +564,8 @@ export class LiveChannel {
     this.docListeners.clear()
     this.awareness.clearRemote()
     this.doc.destroy()
+    const closeListeners = [...this.closeListeners]
+    this.closeListeners.clear()
+    for (const listener of closeListeners) listener()
   }
 }

@@ -213,7 +213,7 @@ function catalog() {
 
 // Same rule as src/i18n.ts: whole-word fragment replacement, and only when the
 // text between the matches carries no German words (otherwise stay German).
-const GERMAN_HINT = /[ÄÖÜäöüß]|\b(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|deinen|deinem|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|dieser|dieses|diesen|diesem|einer|jede|jeden|jeder|auch|wurde|wurden|kann|dort|sondern|nach|über|unter|zuerst|neue|neuen|weder)\b|(?:ung|keit|heit|lich|isch|ieren)\b/iu
+const GERMAN_HINT = /[ÄÖÜäöüß]|(?<![\p{L}\p{N}_])(?:der|die|das|den|dem|des|ein|eine|einen|einem|und|oder|für|mit|ohne|von|bei|auf|aus|zu|zum|zur|dein|deine|deinen|deinem|wird|werden|ist|sind|nicht|noch|nur|alle|keine|bitte|dieser|dieses|diesen|diesem|einer|jede|jeden|jeder|auch|wurde|wurden|kann|dort|sondern|nach|über|unter|zuerst|neue|neuen|weder)(?![\p{L}\p{N}_])|(?:ung|keit|heit|lich|isch|ieren)(?![\p{L}\p{N}_])/iu
 
 function replaceCatalogFragments(source) {
   if (!/[·–—:;,()|/]|\s-\s|[.!?]\s/u.test(source)) return source

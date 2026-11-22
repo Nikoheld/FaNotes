@@ -26,7 +26,8 @@ const fail = (message) => problems.push(message)
 // -- CSS reading ---------------------------------------------------------------------------
 const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const hexVars = (block) => Object.fromEntries([...block.matchAll(/--([\w-]+)\s*:\s*(#[\da-f]{3,8})\s*;/gi)].map((match) => [match[1], match[2].toLowerCase()]))
-const blocks = (source, selector) => [...source.matchAll(new RegExp(`(?:^|\\n)${escape(selector)}\\s*\\{([^}]+)\\}`, 'g'))].map((match) => match[1]).join('\n')
+// The selector may be followed by more selectors (`.app-shell.theme-light, body.app-theme-light {`).
+const blocks = (source, selector) => [...source.matchAll(new RegExp(`(?:^|\\n)${escape(selector)}(?:,[^{]*)?\\s*\\{([^}]+)\\}`, 'g'))].map((match) => match[1]).join('\n')
 const percent = (source, pattern, label) => {
   const value = Number(pattern.exec(source)?.[1])
   if (!Number.isFinite(value)) fail(`could not read ${label}; the CSS changed, update this check`)

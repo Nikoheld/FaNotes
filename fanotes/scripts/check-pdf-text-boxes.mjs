@@ -554,10 +554,18 @@ try {
   near(secondBox.x, second.x, 6, 'page 2 x')
   near(secondBox.y, second.y, 6, 'page 2 y')
   await page.keyboard.type('Seite zwei')
-  // toolbar: bigger font, bold, colour
-  await page.locator('.note-text-field-toolbar button[aria-label="Larger text"], .note-text-field-toolbar button[aria-label="Schrift größer"]').click()
-  await page.locator('.note-text-field-toolbar button[aria-pressed][aria-label="Bold"], .note-text-field-toolbar button[aria-label="Fett"]').click()
-  await page.locator('.note-text-field-toolbar button[aria-label="Blue"], .note-text-field-toolbar button[aria-label="Blau"]').click()
+  // toolbar: bigger font and colour live in the "Schriftgröße und Farbe" popover of the unified formatting bar; the
+  // bar's Fett button now writes Markdown into the text, so the box's own bold flag is toggled with Ctrl+B.
+  const sizeMenu = page.locator('.note-text-field-toolbar button[aria-label="Font size and colour"], .note-text-field-toolbar button[aria-label="Schriftgröße und Farbe"]')
+  await sizeMenu.click()
+  await page.locator('.note-text-field-colors button[aria-label="Blue"], .note-text-field-colors button[aria-label="Blau"]').click()
+  // The popover stays open after a swatch (the box must stay selected, which the portalled popover used to break).
+  const sizeRange = page.locator('.note-text-field-range input[type="range"]')
+  if (!(await sizeRange.isVisible())) await sizeMenu.click()
+  await sizeRange.fill('28')
+  await page.keyboard.press('Escape').catch(() => {})
+  await page.locator('[data-note-text-field]').filter({ hasText: '' }).evaluateAll((nodes) => { const n = nodes.find((x) => x.value === 'Seite zwei'); n?.focus() })
+  await page.keyboard.press('Control+b')
   await settle()
   list = await boxes()
   const styledBox = list.find((item) => item.value === 'Seite zwei')

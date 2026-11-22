@@ -81,7 +81,7 @@ Text #übung und mehr.
   assert.match(editor, /revealLine:/)
   assert.match(inspector, /parseNoteOutline/)
   assert.match(inspector, /onJumpToLine\?\.\(heading\.line\)/)
-  assert.match(app, /editorRef\.current\?\.revealLine\(line\)/)
+  assert.match(app, /commandEditor\(\)\?\.revealLine\(line\)/)
 
   console.log(JSON.stringify({ version: APP_VERSION, headings: headings.length, tags }))
   console.log('note-outline ok')

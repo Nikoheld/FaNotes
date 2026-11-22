@@ -293,7 +293,9 @@ export function NoteTextFieldLayer({
     if (!selectedId) return
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target
-      if (target instanceof Element && target.closest('.note-text-field, .note-text-field-toolbar')) return
+      // The size/colour popover of the toolbar is portalled to <body> (ToolbarMenu), so it is not inside
+      // .note-text-field-toolbar in the DOM; a press on its slider or swatches must not deselect the box.
+      if (target instanceof Element && target.closest('.note-text-field, .note-text-field-toolbar, .ftb-popover')) return
       // A press that a tool swallows (pen, touch) never moves focus, so the box would keep typing unseen.
       const active = document.activeElement
       if (active instanceof HTMLElement && active.closest('.note-text-field')) active.blur()

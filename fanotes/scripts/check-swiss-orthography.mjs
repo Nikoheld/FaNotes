@@ -46,11 +46,13 @@ try {
     pressureEnabled: true,
     seed: 1,
   })
-  assert.equal(synthesized.normalizedText, 'Strasse SS')
+  // Since the handwriting-synthesis redesign (f414385c) a typed ß/ẞ is written as the letter it is (ß is one glyph, see
+  // check-personal-handwriting.mjs), not folded to ss/SS; it must still never be reported as a missing character.
+  assert.equal(synthesized.normalizedText, 'Straße ẞ')
   assert.equal(synthesized.missingCharacters.includes('ß'), false)
   assert.equal(synthesized.missingCharacters.includes('ẞ'), false)
 
-  console.log('Schweizer Orthografie geprüft: ß bleibt ein Buchstabe; Wörterbuch und Text-zu-Handschrift falten ß/ẞ weiter zu ss/SS.')
+  console.log('Schweizer Orthografie geprüft: ß bleibt ein Buchstabe; Wörterbuch und Texterkennung falten ß/ẞ weiter zu ss/SS; Text-zu-Handschrift schreibt ß/ẞ als Buchstaben.')
 } finally {
   await server.close()
 }

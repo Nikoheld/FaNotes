@@ -5,7 +5,7 @@ import { createServer } from 'vite'
 const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const settingsModal = readFileSync(new URL('../src/components/SettingsModal.tsx', import.meta.url), 'utf8')
-const main = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8')
+const main = readFileSync(new URL('../electron/settings-sanitize.cjs', import.meta.url), 'utf8') // the stored-settings schema
 
 const server = await createServer({
   appType: 'custom',

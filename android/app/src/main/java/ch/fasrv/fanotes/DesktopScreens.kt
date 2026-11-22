@@ -299,7 +299,7 @@ private fun Modifier.scrollEndFade(state: ScrollState, horizontal: Boolean, colo
 
 /** True when a physical keyboard is attached; key-shortcut hints are shown only then. */
 @Composable
-private fun hasHardwareKeyboard(): Boolean {
+internal fun hasHardwareKeyboard(): Boolean {
     val config = LocalConfiguration.current
     return config.keyboard != android.content.res.Configuration.KEYBOARD_NOKEYS &&
         config.hardKeyboardHidden == android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO
@@ -904,7 +904,8 @@ private fun NoteTabChip(
     var menu by remember { mutableStateOf(false) }
     val textLeft = remember { floatArrayOf(0f) }
     val name = path.substringAfterLast('/').substringBeforeLast('.')
-    val box = ch.fasrv.fanotes.desk.noteTabBox(pinned)
+    // Tabs size to their title (no fixed 168 dp basis): short titles used to leave wide gaps between tabs.
+    val box = ch.fasrv.fanotes.desk.noteTabBox(pinned).let { if (pinned) it else it.copy(basisDp = 0, minWidthDp = ch.fasrv.fanotes.desk.ANDROID_TAB_MIN_DP) }
     val shape = RoundedCornerShape(box.radiusDp.dp)
     val tabInteraction = remember(path) { MutableInteractionSource() }
     val tabHovered by tabInteraction.collectIsHoveredAsState()
@@ -2520,6 +2521,7 @@ private fun homeworkMix(base: Color, tint: Color, tintShare: Float): Color {
     )
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImportIcs: () -> Unit = {}, onExportIcs: () -> Unit = {}) {
     val document by model.calendar.collectAsStateWithLifecycle()
@@ -2669,7 +2671,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     Text(ui("Gespeichert in Kalender.md."), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                 }
                 TextButton(onClick = { listsOpen = !listsOpen }) {
-                    Text(if (listsOpen) "Listen ausblenden" else "Listen (${document.calendars.size})")
+                    Text(if (listsOpen) ui("Listen ausblenden") else "${ui("Listen")} (${document.calendars.size})")
                 }
                 TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text(ui("Als Notiz öffnen")) }
             }
@@ -2678,10 +2680,12 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         }
         val calRule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
         val calShape = RoundedCornerShape(8.dp)
-        Row(
+        // Wraps onto a second line on a narrow screen; one Row squeezed the title down to a stray ".".
+        FlowRow(
             Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
             horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.CAL_TOOLBAR_GAP_DP.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable {
@@ -2697,7 +2701,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 ) { Text(mark) }
             }
             Row(
-                Modifier.weight(1f, fill = false),
+                Modifier.widthIn(min = 120.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -2712,7 +2716,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 if (view == "week") {
                     val monday = ch.fasrv.fanotes.desk.calendarRange("week", anchor).first()
                     Text(
-                        "${ch.fasrv.fanotes.desk.CAL_WEEK} ${ch.fasrv.fanotes.desk.calendarIsoWeek(monday)}",
+                        "${ui(ch.fasrv.fanotes.desk.CAL_WEEK)} ${ch.fasrv.fanotes.desk.calendarIsoWeek(monday)}",
                         fontSize = 12.sp,
                         fontWeight = FontWeight(550),
                         color = LocalStatusInk.current.muted,
@@ -2735,7 +2739,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     modifier = Modifier.weight(1f),
                     decorationBox = { inner ->
                         Box(contentAlignment = Alignment.CenterStart) {
-                            if (calendarQuery.isEmpty()) Text(ch.fasrv.fanotes.desk.CAL_SEARCH, color = LocalStatusInk.current.muted, fontSize = 12.sp)
+                            if (calendarQuery.isEmpty()) Text(ui(ch.fasrv.fanotes.desk.CAL_SEARCH), color = LocalStatusInk.current.muted, fontSize = 12.sp)
                             inner()
                         }
                     },
@@ -2768,7 +2772,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.background)
-                Text(ch.fasrv.fanotes.desk.CAL_NEW_EVENT, fontSize = 12.sp, color = MaterialTheme.colorScheme.background)
+                Text(ui(ch.fasrv.fanotes.desk.CAL_NEW_EVENT), fontSize = 12.sp, color = MaterialTheme.colorScheme.background)
             }
             ch.fasrv.fanotes.desk.CAL_TOOLBAR_FILE_ACTIONS.zip(listOf(onExportIcs, onImportIcs)).forEach { (label, action) ->
                 Box(
@@ -2791,7 +2795,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
             }
             val calendarTail: @Composable () -> Unit = {
-        Text("Am ${ch.fasrv.fanotes.desk.calendarDayLabel(anchor)}", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
+        Text("${ui("Am")} ${ch.fasrv.fanotes.desk.calendarDayLabel(anchor)}", modifier = Modifier.padding(top = 8.dp), fontWeight = FontWeight.SemiBold)
         EventsOn(model, shown, anchor) { editor = draftFor(it, anchor) }
         editor?.let { current ->
             CalendarEventEditor(
@@ -2824,7 +2828,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("none" to "Einmal", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
                 TextButton(onClick = { recurrence = id }) {
-                    Text(label, color = if (recurrence == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                    Text(ui(label), color = if (recurrence == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
             }
         }
@@ -3014,15 +3018,15 @@ private fun CalendarMini(
 ) {
     val days = ch.fasrv.fanotes.desk.calendarRange("month", anchor)
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
-    val label = anchor.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.GERMAN))
+    val label = anchor.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", ch.fasrv.fanotes.desk.calendarLocale()))
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(ui("‹"), modifier = Modifier.clickable(onClickLabel = "Vorheriger Zeitraum") { onShift(-1) }.padding(4.dp))
         Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(650))
         Text(ui("›"), modifier = Modifier.clickable(onClickLabel = "Nächster Zeitraum") { onShift(1) }.padding(4.dp))
     }
     Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { day ->
-            Text(day.uppercase(java.util.Locale.GERMAN), modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(700), letterSpacing = 0.04.em, color = LocalStatusInk.current.muted)
+        ch.fasrv.fanotes.desk.calendarRange("week", anchor).map { ch.fasrv.fanotes.desk.calendarWeekdayShort(it) }.forEach { day ->
+            Text(day.uppercase(ch.fasrv.fanotes.desk.calendarLocale()), modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(700), letterSpacing = 0.04.em, color = LocalStatusInk.current.muted)
         }
     }
     days.chunked(7).forEach { week ->
@@ -3081,9 +3085,9 @@ private fun MonthGrid(
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     Column(modifier.fillMaxWidth().fillMaxHeight()) {
     Row(Modifier.fillMaxWidth()) {
-        listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { label ->
+        days.take(7).map { ch.fasrv.fanotes.desk.calendarWeekdayShort(it) }.forEach { label ->
             Text(
-                label.uppercase(java.util.Locale.GERMAN),
+                label.uppercase(ch.fasrv.fanotes.desk.calendarLocale()),
                 modifier = Modifier.weight(1f),
                 textAlign = TextAlign.Center,
                 fontSize = 12.sp,
@@ -3218,7 +3222,7 @@ private fun DayColumns(
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(
-                                ch.fasrv.fanotes.desk.calendarWeekdayShort(date).uppercase(java.util.Locale.GERMAN),
+                                ch.fasrv.fanotes.desk.calendarWeekdayShort(date).uppercase(ch.fasrv.fanotes.desk.calendarLocale()),
                                 fontSize = 12.sp,
                                 color = LocalStatusInk.current.muted,
                                 letterSpacing = 0.04.em,
@@ -8291,7 +8295,7 @@ private fun SettingsPage(
                 }
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (current.id == "statistics") ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.desk.SETTINGS_STATISTICS_EYEBROW) else ch.fasrv.fanotes.desk.settingsEyebrow(current.count),
+                        if (current.id == "statistics") ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.desk.SETTINGS_STATISTICS_EYEBROW) else if (current.id == "addons") ch.fasrv.fanotes.desk.ChromeText.ui(ch.fasrv.fanotes.desk.SETTINGS_ADDONS_EYEBROW) else ch.fasrv.fanotes.desk.settingsEyebrow(current.count),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_EYEBROW_TRACKING.em,
@@ -8781,12 +8785,20 @@ private fun SettingsPage(
                     Text(ui("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben."), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     ConflictShortcutCard(model, Modifier.settingsAnchor("sync", "settings-conflicts", anchorY))
                     ShareSettingsCard(model, Modifier.settingsAnchor("sync", "settings-shares", anchorY))
-                    ProfileSettingsCard(model, Modifier.settingsAnchor("sync", "settings-profile", anchorY))
+                    // "Name festlegen" is pointless while signed out: show the profile only with an account or an existing name.
+                    if (sync.account != null || model.shares.profile.value.claimed) {
+                        ProfileSettingsCard(model, Modifier.settingsAnchor("sync", "settings-profile", anchorY))
+                    }
                     SyncLogCard(sync.log)
                 }
                 "statistics" -> StatisticsSection(model, viewportWidth, anchorY)
                 "addons" -> SettingCard("Add-ons", Icons.Filled.Extension) {
-                    SettingRow("Erweiterungen", "Add-ons des Desktops bleiben Dateien im Vault. Andere Erweiterungen werden nicht ausgeführt.", divider = false) {}
+                    Text(
+                        ui("Add-ons gibt es nur im Desktop. Ihre Dateien bleiben im Vault, werden auf dem Tablet aber nicht ausgeführt."),
+                        fontSize = 12.sp,
+                        color = LocalStatusInk.current.muted,
+                        modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
+                    )
                 }
                 "updates" -> {
                     val channel = ch.fasrv.fanotes.desk.updateChannelId(settings["update-channel"])
@@ -9870,7 +9882,7 @@ fun CommandPalette(
                             }
                         }
                         val shortcut = when (row) {
-                            is PaletteRow.Command -> row.command.shortcut
+                            is PaletteRow.Command -> if (keyboardHints) row.command.shortcut else ""
                             is PaletteRow.Note -> mark
                         }
                         if (shortcut.isNotEmpty()) {

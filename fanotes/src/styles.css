@@ -4621,7 +4621,6 @@ button.addon-status-item:hover { background: var(--panel-hover); color: var(--te
 .lw-raw { max-height: 40vh; margin: 0; overflow: auto; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-strong); color: var(--text); font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; }
 .lw-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; display: contents; }
 .lw-fieldset:disabled { opacity: .55; }
-.markdown-editor.paper-mode .cm-lw-broken { border-left: 3px solid #b42318; padding-left: 6px; }
 
 /* Work requests panel ("Fehler & Wünsche") */
 .work-requests-modal.bug-report-modal { width: min(560px, 94vw); max-height: min(720px, 92vh); grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }

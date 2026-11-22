@@ -63,7 +63,6 @@ import ch.fasrv.fanotes.study.TermData
 import ch.fasrv.fanotes.study.TermEntry
 import ch.fasrv.fanotes.study.defaultSortData
 import ch.fasrv.fanotes.study.defaultTermData
-import ch.fasrv.fanotes.study.STUDY_SHEET_WIDTH_DP
 import ch.fasrv.fanotes.study.formatClock
 import ch.fasrv.fanotes.study.groupMarksByPage
 import ch.fasrv.fanotes.study.liveSeconds
@@ -116,7 +115,7 @@ fun StudySheet(model: FaNotesViewModel, initialTab: String, modifier: Modifier =
         val jump: (Int) -> Unit = { page -> if (model.jumpToStudyPage(page) && compact) folded = true }
         Surface(
             modifier = Modifier
-                .widthIn(max = STUDY_SHEET_WIDTH_DP.dp)
+                // Edge to edge at the bottom of the page area: no floating card over the page.
                 .fillMaxWidth()
                 .heightIn(max = if (folded) SheetHeader + 12.dp else studySheetMaxHeightDp(windowHeight).dp),
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
@@ -296,17 +295,20 @@ private fun StudyMarksTab(model: FaNotesViewModel, onJump: (Int) -> Unit) {
     val context = LocalContext.current
     val marks = remember(markdown) { ch.fasrv.fanotes.desk.readPdfMarks(markdown) }
     val grouped = remember(marks) { groupMarksByPage(marks) }
-    Text(counted("${marks.size} Markierungen auf ${grouped.size} Seiten", "${marks.size} highlights on ${grouped.size} pages"), fontSize = 13.sp)
-    TextButton(
-        enabled = marks.isNotEmpty(),
-        onClick = {
-            val title = open?.title ?: "PDF"
-            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(title, marksToMarkdown(title, marks)))
-            model.message.value = "Markierungen als Notiz kopiert."
-        },
-    ) { Text(ui("Als Notiz kopieren")) }
-    if (marks.isEmpty()) Text(ui("Markiere Text im PDF mit dem Textmarker. Alle Stellen erscheinen hier nach Seite sortiert."), fontSize = 13.sp)
+    if (marks.isEmpty()) {
+        // One honest line instead of "0 Markierungen auf 0 Seiten" plus a disabled copy button.
+        Text(ui("Noch keine Markierungen. Markiere Text im PDF mit dem Textmarker; alle Stellen erscheinen hier nach Seite sortiert."), fontSize = 13.sp, modifier = Modifier.padding(vertical = 8.dp))
+    } else {
+        Text(counted("${marks.size} Markierungen auf ${grouped.size} Seiten", "${marks.size} highlights on ${grouped.size} pages"), fontSize = 13.sp)
+        TextButton(
+            onClick = {
+                val title = open?.title ?: "PDF"
+                val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(title, marksToMarkdown(title, marks)))
+                model.message.value = "Markierungen als Notiz kopiert."
+            },
+        ) { Text(ui("Als Notiz kopieren")) }
+    }
     grouped.forEach { group ->
         TextButton(onClick = { onJump(group.page) }) { Text("${ui("Seite")} ${group.page}", fontWeight = FontWeight.SemiBold) }
         group.marks.forEach { mark ->
