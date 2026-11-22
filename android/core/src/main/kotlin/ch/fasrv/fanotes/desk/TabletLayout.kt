@@ -21,11 +21,15 @@ fun widthClass(widthDp: Int): WidthClass = when {
 /** Smallest comfortable finger target (Android guideline). */
 const val TOUCH_MIN_DP = 48
 
-/** Setting "touch-large": explicit "on"/"off", otherwise on below the expanded width class. */
-fun touchLarge(raw: String?, widthDp: Int): Boolean = when (raw) {
+/**
+ * Setting "touch-large": explicit "on"/"off". Unset, it follows the input hardware, not the window
+ * width: a device with a touchscreen is finger-navigated (a tablet in landscape is 840 dp or wider
+ * and still needs 48 dp targets), so the large layer is on; a touchless device keeps the compact one.
+ */
+fun touchLarge(raw: String?, touchscreen: Boolean): Boolean = when (raw) {
     "on" -> true
     "off" -> false
-    else -> widthClass(widthDp) != WidthClass.EXPANDED
+    else -> touchscreen
 }
 
 /**
@@ -48,6 +52,10 @@ data class TouchMetrics(val large: Boolean) {
     val menuRowDp: Int get() = if (large) TOUCH_MIN_DP else TREE_MENU_ROW_DP
     val sidebarActionDp: Int get() = if (large) TOUCH_MIN_DP else 30
     val settingRowMinDp: Int get() = if (large) 56 else 0
+    /** Hit box of a round colour swatch; the drawn dot keeps its compact size. */
+    val swatchHitDp: Int get() = if (large) TOUCH_MIN_DP else SWATCH_HIT_DP
+    /** Hit height of a chip or text link (tags, sidebar links, segment options). */
+    val chipHitDp: Int get() = if (large) TOUCH_MIN_DP else 0
     /** Hit target of the split divider; Compose extends a narrower layout box to this for touch. */
     val dividerHitDp: Int get() = if (large) TOUCH_MIN_DP else SPLIT_DIVIDER_DP
     /** Layout thickness of the divider; the drawn strip stays [dividerVisualDp]. */
@@ -59,6 +67,22 @@ data class TouchMetrics(val large: Boolean) {
 }
 
 const val SPLIT_DIVIDER_DP = 8
+
+/**
+ * Below this window width the ribbon's extra tools (Tagesnotiz ... Einstellungen) open in a popup menu;
+ * inline they would run past the screen edge. Landscape tablets (>= 1000 dp) keep them inline like the desktop.
+ */
+const val RIBBON_TOOLS_POPUP_BELOW_DP = 1000
+
+/** Compact swatch hit box (the drawn dot is SWATCH_DP = 23 plus its gap). */
+const val SWATCH_HIT_DP = 23
+
+/**
+ * A settings row puts the label beside the control only when the content column is at least this wide;
+ * narrower, it stacks. The modal on an 800 dp portrait tablet leaves ~470 dp, where a 360 dp control
+ * squeezed the label to one letter per line (the old 420 dp limit was too low).
+ */
+const val SETTING_ROW_STACK_BELOW_DP = 560
 
 /** How the sidebar is shown for a window. */
 enum class SidebarMode { PINNED, DRAWER }

@@ -53,6 +53,7 @@ class ThemePaletteTest {
         assertTrue(themeChoiceSelected(null, "system"))
         assertTrue(themeChoiceSelected("aurora", "aurora"))
         assertFalse(themeChoiceSelected("dark", "system"))
-        assertEquals(7, THEME_CHOICES.size)
+        assertEquals(8, THEME_CHOICES.size)
+        assertEquals("oled", THEME_CHOICES.last().id)
     }
 }

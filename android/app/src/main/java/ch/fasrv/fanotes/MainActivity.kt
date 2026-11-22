@@ -354,8 +354,8 @@ class MainActivity : ComponentActivity() {
                 desk["ui-font"].orEmpty(),
                 ch.fasrv.fanotes.desk.parseCustomChrome(css),
             ) {
-                val touchWidth = LocalConfiguration.current.screenWidthDp
-                CompositionLocalProvider(LocalTouch provides ch.fasrv.fanotes.desk.TouchMetrics(ch.fasrv.fanotes.desk.touchLarge(desk["touch-large"], touchWidth))) {
+                val touchscreen = androidx.compose.ui.platform.LocalContext.current.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)
+                CompositionLocalProvider(LocalTouch provides ch.fasrv.fanotes.desk.TouchMetrics(ch.fasrv.fanotes.desk.touchLarge(desk["touch-large"], touchscreen))) {
                 FaNotesScreen(
                     model = model,
                     onOpenVault = { openTree.launch(null) },
@@ -557,7 +557,10 @@ fun FaNotesTheme(
         }
     }
     CompositionLocalProvider(LocalStatusInk provides statusInk, LocalDeskThemeId provides palette.id) {
-        MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
+        MaterialTheme(colorScheme = scheme, typography = chromeTypography(family)) {
+            // Text outside a Surface would keep the default black content colour: dark on dark in every dark theme.
+            CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides scheme.onSurface, content = content)
+        }
     }
 }
 
