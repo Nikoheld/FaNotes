@@ -1860,7 +1860,7 @@ private fun VaultPane(
             horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_HEADER_GAP_DP.dp),
         ) {
             Text(
-                vaultLabel,
+                if (vaultLabel == "Auf diesem Tablet") ui(vaultLabel) else vaultLabel,
                 modifier = Modifier
                     .weight(1f)
                     .padding(
@@ -2062,7 +2062,7 @@ private fun VaultPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                ch.fasrv.fanotes.desk.sidebarFileLabel(ch.fasrv.fanotes.desk.sidebarFileCount(tree)),
+                ch.fasrv.fanotes.desk.sidebarFileLabel(ch.fasrv.fanotes.desk.sidebarFileCount(tree), ch.fasrv.fanotes.desk.ChromeText.language),
                 fontSize = 12.sp,
                 color = LocalStatusInk.current.muted,
             )

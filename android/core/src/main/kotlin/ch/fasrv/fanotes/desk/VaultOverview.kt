@@ -150,7 +150,8 @@ fun sidebarFileCount(nodes: List<VaultNode>): Int = nodes.sumOf { node ->
 }
 
 /** Desktop sidebar footer: „1 Notiz“ or „N Notizen“. */
-fun sidebarFileLabel(count: Int) = if (count == 1) "1 Notiz" else "$count Notizen"
+fun sidebarFileLabel(count: Int, language: String = "de") =
+    if (language == "en") (if (count == 1) "1 note" else "$count notes") else if (count == 1) "1 Notiz" else "$count Notizen"
 
 /** Sidebar footer after the later chrome pass. */
 const val SIDEBAR_FOOTER_DP = 34

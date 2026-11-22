@@ -845,13 +845,13 @@ private fun NoteHistoryButton(back: Boolean, enabled: Boolean, onClick: () -> Un
         ) {
             Icon(
                 if (back) Icons.AutoMirrored.Filled.ArrowBack else Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = if (back) "Zurück" else "Vorwärts",
+                contentDescription = ui(if (back) "Zurück" else "Vorwärts"),
                 modifier = Modifier.size(ch.fasrv.fanotes.desk.NOTE_NAV_ICON_DP.dp),
                 tint = color,
             )
             if (back) {
                 Text(
-                    "Zurück",
+                    ui("Zurück"),
                     fontSize = ch.fasrv.fanotes.desk.NOTE_NAV_FONT_SP.sp,
                     fontWeight = FontWeight(ch.fasrv.fanotes.desk.NOTE_NAV_WEIGHT),
                     color = color,
@@ -1053,14 +1053,14 @@ private fun NoteTabChip(
                         .clickable(
                             interactionSource = closeInteraction,
                             indication = null,
-                            onClickLabel = "Tab schliessen",
+                            onClickLabel = ui("Tab schließen"),
                             onClick = onClose,
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Filled.Close,
-                        contentDescription = "$name schliessen",
+                        contentDescription = ui("Schließen") + ": $name",
                         modifier = Modifier.size(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_ICON_DP.dp),
                         tint = titleColor,
                     )
@@ -1213,7 +1213,7 @@ fun SearchScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    "Notizen durchsuchen",
+                    ui("Notizen durchsuchen"),
                     fontSize = ch.fasrv.fanotes.desk.SEARCH_TITLE_SP.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 4.dp),
@@ -1500,7 +1500,7 @@ fun HomeworkScreen(model: FaNotesViewModel) {
             ) { filter = it }
             Text(ui("Freigabe"), modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
             Text(
-                "Teilt die Aufgabenliste mit dem Desktop und per Link. Die Zugangsdaten bleiben auf diesem Tablet.",
+                ui("Teilt die Aufgabenliste mit dem Desktop und per Link. Die Zugangsdaten bleiben auf diesem Tablet."),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             )
@@ -1576,7 +1576,7 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                             contentAlignment = Alignment.Center,
                         ) { Text(ui("›")) }
                         Text(
-                            "Heute",
+                            ui("Heute"),
                             color = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f)),
                             fontSize = 12.sp,
                             fontWeight = FontWeight(700),
@@ -2753,7 +2753,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                         }.padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(label, fontSize = 12.sp, color = if (active) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
+                        Text(ui(label), fontSize = 12.sp, color = if (active) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
                     }
                 }
             }
@@ -2774,7 +2774,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 Box(
                     Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable(onClick = action).padding(horizontal = 10.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text(label, fontSize = 12.sp) }
+                ) { Text(ui(label), fontSize = 12.sp) }
             }
         }
         if (reminder != null) {
@@ -3255,7 +3255,7 @@ private fun DayColumns(
                                 )
                             }
                             Text(
-                                "+",
+                                ui("+"),
                                 fontSize = 12.sp,
                                 color = LocalStatusInk.current.muted,
                                 modifier = Modifier.clickable(onClickLabel = "Neuer Termin") {
@@ -4390,7 +4390,7 @@ fun OverviewScreen(
             Column(Modifier.weight(1f)) {
                 Text(ui("Ordnerübersicht"), style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "Alle Ordner auf einen Blick. Tippe eine Zeile an, um die letzte Notiz zu öffnen.",
+                    ui("Alle Ordner auf einen Blick. Tippe eine Zeile an, um die letzte Notiz zu öffnen."),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 )
@@ -6476,7 +6476,7 @@ fun AiScreen(model: FaNotesViewModel) {
         if (result == null) {
             Text(ui("Deine Notiz bleibt unverändert"), fontWeight = FontWeight.SemiBold)
             Text(
-                "FaNotes erstellt zuerst eine Vorschau. Erst „Ergebnis übernehmen“ ersetzt den Inhalt der geöffneten Markdown-Datei.",
+                ui("FaNotes erstellt zuerst eine Vorschau. Erst „Ergebnis übernehmen“ ersetzt den Inhalt der geöffneten Markdown-Datei."),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             )
@@ -8980,7 +8980,7 @@ fun NoteTagBar(model: FaNotesViewModel) {
         if (backupPolicy.visible) {
             Box {
                 Text(
-                    "Backup",
+                    ui("Backup"),
                     fontSize = 12.sp,
                     modifier = Modifier
                         .padding(end = 8.dp)
@@ -9515,7 +9515,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Gliederung",
+                    ui("Gliederung"),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier

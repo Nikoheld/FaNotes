@@ -864,7 +864,19 @@ class DirectoryVault(val root: Path) : VaultIo {
 
     override fun isReadOnly(path: String): Boolean {
         val target = resolve(path)
-        return Files.isRegularFile(target) && !Files.isWritable(target)
+        if (!Files.isRegularFile(target)) return false
+        // The mode bits decide (desktop: `(mode & 0o222) === 0`); `isWritable` is the fallback off POSIX file systems.
+        val bits = try {
+            Files.getPosixFilePermissions(target)
+        } catch (_: Exception) {
+            return !Files.isWritable(target)
+        }
+        val writeBits = setOf(
+            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+            java.nio.file.attribute.PosixFilePermission.GROUP_WRITE,
+            java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE,
+        )
+        return bits.none { it in writeBits } || !Files.isWritable(target)
     }
 
     override fun delete(path: String) {
