@@ -73,7 +73,7 @@ fun decodeGlyphLibrary(text: String): List<GlyphSample> {
 
 fun importGlyphArchive(bytes: ByteArray): GlyphImportResult {
     if (bytes.isEmpty()) throw GlyphImportException("Die Trainingsdatei ist leer.")
-    if (bytes.size > GLYPH_ARCHIVE_MAX_BYTES) throw GlyphImportException("Die Trainingsdatei darf höchstens 8 MB groß sein.")
+    if (bytes.size > GLYPH_ARCHIVE_MAX_BYTES) throw GlyphImportException("Die Trainingsdatei darf höchstens 8 MB gross sein.")
     val text = if (bytes.size >= 2 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()) {
         manifestText(bytes)
     } else {
@@ -97,7 +97,7 @@ private fun manifestText(bytes: ByteArray): String {
                     val count = zip.read(buffer)
                     if (count < 0) break
                     read += count
-                    if (read > GLYPH_ARCHIVE_MAX_BYTES) throw GlyphImportException("manifest.jsonl ist zu groß.")
+                    if (read > GLYPH_ARCHIVE_MAX_BYTES) throw GlyphImportException("manifest.jsonl ist zu gross.")
                     out.write(buffer, 0, count)
                 }
                 found += String(out.toByteArray(), Charsets.UTF_8)
@@ -119,7 +119,7 @@ private fun parseManifest(text: String): GlyphImportResult {
     lines.forEachIndexed { index, line ->
         if (line.isBlank()) return@forEachIndexed
         if (line.length > MAX_LINE_CHARS) {
-            warn(warnings, "Zeile ${index + 1}: Datensatz ist zu groß.")
+            warn(warnings, "Zeile ${index + 1}: Datensatz ist zu gross.")
             return@forEachIndexed
         }
         val record = runCatching { parseJson(line) as? JsonValue.Obj }.getOrNull()

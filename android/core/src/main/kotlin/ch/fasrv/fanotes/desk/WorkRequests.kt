@@ -213,8 +213,8 @@ fun validateWorkRequestDraft(draft: WorkRequestDraft): DraftProblem? {
 fun workRequestDraftProblemText(problem: DraftProblem): String = when (problem) {
     DraftProblem.Title -> "Bitte gib einen Titel an (höchstens $WORK_REQUEST_TITLE_MAX Zeichen)."
     DraftProblem.Description -> "Bitte beschreibe die Anfrage (höchstens $WORK_REQUEST_DESCRIPTION_MAX Zeichen)."
-    DraftProblem.Screenshot -> "Der Screenshot ist zu groß oder hat ein unbekanntes Format."
-    DraftProblem.Logs -> "Die Protokolle sind zu groß, um sie anzuhängen."
+    DraftProblem.Screenshot -> "Der Screenshot ist zu gross oder hat ein unbekanntes Format."
+    DraftProblem.Logs -> "Die Protokolle sind zu gross, um sie anzuhängen."
 }
 
 /** POST body of a new request; the screenshot goes as raw base64 and the logs as JSON lines. */

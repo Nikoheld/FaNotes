@@ -98,7 +98,7 @@ class AiAssistTest {
         assertEquals(12, AI_PANEL_RADIUS_DP)
         assertEquals(33, AI_FIELD_HEIGHT_DP)
         assertEquals(8, AI_FIELD_RADIUS_DP)
-        assertEquals("AI-Menü schließen", AI_CLOSE)
+        assertEquals("AI-Menü schliessen", AI_CLOSE)
         assertEquals("3 · Prüfen", AI_PREVIEW_EYEBROW)
     }
 

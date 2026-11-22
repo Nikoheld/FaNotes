@@ -371,8 +371,8 @@ fun DeskRibbon(
             .horizontalScroll(ribbonScroll).padding(horizontal = 8.dp + tabletSideInset()),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("F", modifier = Modifier.padding(end = 8.dp), fontWeight = FontWeight.SemiBold, color = mark)
-        Text("FaNotes", fontWeight = FontWeight.SemiBold, color = mark, modifier = Modifier.padding(end = 12.dp))
+        Text(ui("F"), modifier = Modifier.padding(end = 8.dp), fontWeight = FontWeight.SemiBold, color = mark)
+        Text(ui("FaNotes"), fontWeight = FontWeight.SemiBold, color = mark, modifier = Modifier.padding(end = 12.dp))
         if (focus) {
             RibbonButton("Fokus aus", active = false, onClick = onFocus)
             return@Row
@@ -531,7 +531,7 @@ fun FaNotesToast(
                 .clickable(onClickLabel = "Schliessen", onClick = onDismiss),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Filled.Close, contentDescription = "Schliessen", modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
+            Icon(Icons.Filled.Close, contentDescription = ui("Schliessen"), modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
         }
     }
 }
@@ -845,13 +845,13 @@ private fun NoteHistoryButton(back: Boolean, enabled: Boolean, onClick: () -> Un
         ) {
             Icon(
                 if (back) Icons.AutoMirrored.Filled.ArrowBack else Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = if (back) "Zurück" else "Vorwärts",
+                contentDescription = ui(if (back) "Zurück" else "Vorwärts"),
                 modifier = Modifier.size(ch.fasrv.fanotes.desk.NOTE_NAV_ICON_DP.dp),
                 tint = color,
             )
             if (back) {
                 Text(
-                    "Zurück",
+                    ui("Zurück"),
                     fontSize = ch.fasrv.fanotes.desk.NOTE_NAV_FONT_SP.sp,
                     fontWeight = FontWeight(ch.fasrv.fanotes.desk.NOTE_NAV_WEIGHT),
                     color = color,
@@ -938,7 +938,7 @@ private fun NoteTabChip(
                 )
                 .hoverable(tabInteraction)
                 .onGloballyPositioned { onPosition(it.boundsInRoot()) }
-                .semantics { if (dragging) contentDescription = "Wird verschoben" },
+                .semantics { if (dragging) contentDescription = ui("Wird verschoben") },
         ) {
         Row(
             Modifier
@@ -1021,7 +1021,7 @@ private fun NoteTabChip(
                 if (inSplit) {
                     Icon(
                         Icons.Filled.ViewColumn,
-                        contentDescription = "In der zweiten Spalte",
+                        contentDescription = ui("In der zweiten Spalte"),
                         modifier = Modifier.size(ch.fasrv.fanotes.desk.NOTE_TAB_SPLIT_DP.dp),
                         tint = accent,
                     )
@@ -1032,7 +1032,7 @@ private fun NoteTabChip(
                             .size(6.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary)
-                            .semantics { contentDescription = "Noch nicht gespeichert" },
+                            .semantics { contentDescription = ui("Noch nicht gespeichert") },
                     )
                 }
             }
@@ -1053,14 +1053,14 @@ private fun NoteTabChip(
                         .clickable(
                             interactionSource = closeInteraction,
                             indication = null,
-                            onClickLabel = "Tab schliessen",
+                            onClickLabel = ui("Tab schließen"),
                             onClick = onClose,
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         Icons.Filled.Close,
-                        contentDescription = "$name schliessen",
+                        contentDescription = ui("Schließen") + ": $name",
                         modifier = Modifier.size(ch.fasrv.fanotes.desk.NOTE_TAB_CLOSE_ICON_DP.dp),
                         tint = titleColor,
                     )
@@ -1083,7 +1083,7 @@ private fun NoteTabChip(
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(
-                text = { Text("Rechts öffnen") },
+                text = { Text(ui("Rechts öffnen")) },
                 enabled = !inSplit,
                 onClick = { menu = false; onOpenSplit() },
             )
@@ -1091,20 +1091,20 @@ private fun NoteTabChip(
                 text = { Text(if (pinned) "Lösen" else "Anheften") },
                 onClick = { menu = false; onTogglePin() },
             )
-            DropdownMenuItem(text = { Text("Pfad kopieren") }, onClick = { menu = false; onCopyPath() })
-            DropdownMenuItem(text = { Text("Im Dateimanager zeigen") }, onClick = { menu = false; onReveal() })
+            DropdownMenuItem(text = { Text(ui("Pfad kopieren")) }, onClick = { menu = false; onCopyPath() })
+            DropdownMenuItem(text = { Text(ui("Im Dateimanager zeigen")) }, onClick = { menu = false; onReveal() })
             DropdownMenuItem(
-                text = { Text("Schliessen") },
+                text = { Text(ui("Schliessen")) },
                 enabled = !pinned,
                 onClick = { menu = false; onClose() },
             )
             DropdownMenuItem(
-                text = { Text("Andere schliessen") },
+                text = { Text(ui("Andere schliessen")) },
                 enabled = canCloseOthers,
                 onClick = { menu = false; onCloseOthers() },
             )
             DropdownMenuItem(
-                text = { Text("Rechts davon schliessen") },
+                text = { Text(ui("Rechts davon schliessen")) },
                 enabled = canCloseRight,
                 onClick = { menu = false; onCloseRight() },
             )
@@ -1152,7 +1152,7 @@ private fun VaultSearchField(query: String, onQuery: (String) -> Unit, keys: Mod
                 Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_RADIUS_DP.dp)).clickable(onClickLabel = "Suchbegriff löschen") { onQuery("") },
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Close, contentDescription = "Suchbegriff löschen", modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_ICON_DP.dp), tint = ink.muted)
+                Icon(Icons.Filled.Close, contentDescription = ui("Suchbegriff löschen"), modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_ICON_DP.dp), tint = ink.muted)
             }
         }
     }
@@ -1213,7 +1213,7 @@ fun SearchScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    "Notizen durchsuchen",
+                    ui("Notizen durchsuchen"),
                     fontSize = ch.fasrv.fanotes.desk.SEARCH_TITLE_SP.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 4.dp),
@@ -1376,7 +1376,7 @@ fun SearchScreen(
                     SearchKbd("Esc")
                 }
                 Text(
-                    ch.fasrv.fanotes.desk.SEARCH_FOOTER_CLOSE.replace("ß", "ss"),
+                    ch.fasrv.fanotes.desk.SEARCH_FOOTER_CLOSE,
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.muted,
                     modifier = Modifier.heightIn(min = LocalTouch.current.chipHitDp.dp).clickable(onClick = onClose),
@@ -1498,9 +1498,9 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                 ),
                 filter,
             ) { filter = it }
-            Text("Freigabe", modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
+            Text(ui("Freigabe"), modifier = Modifier.padding(top = 12.dp), fontWeight = FontWeight.SemiBold)
             Text(
-                "Teilt die Aufgabenliste mit dem Desktop und per Link. Die Zugangsdaten bleiben auf diesem Tablet.",
+                ui("Teilt die Aufgabenliste mit dem Desktop und per Link. Die Zugangsdaten bleiben auf diesem Tablet."),
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             )
@@ -1512,20 +1512,20 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                 OutlinedTextField(
                     settings["homework-channel"].orEmpty(),
                     { model.updateDesk("homework-channel", it.trim()) },
-                    label = { Text("Kanal-ID") },
+                    label = { Text(ui("Kanal-ID")) },
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                 )
                 OutlinedTextField(
                     settings["homework-secret"].orEmpty(),
                     { model.updateDesk("homework-secret", it.trim()) },
-                    label = { Text("Geheimnis") },
+                    label = { Text(ui("Geheimnis")) },
                     visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
             Row {
-                TextButton(onClick = { model.generateHomeworkAccess() }) { Text("Kanal erzeugen") }
-                TextButton(onClick = { model.publishHomework() }) { Text("Veröffentlichen") }
+                TextButton(onClick = { model.generateHomeworkAccess() }) { Text(ui("Kanal erzeugen")) }
+                TextButton(onClick = { model.publishHomework() }) { Text(ui("Veröffentlichen")) }
             }
             if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
             if (planner != "list") {
@@ -1556,7 +1556,7 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                                     cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, -1)
                                 },
                             contentAlignment = Alignment.Center,
-                        ) { Text("‹") }
+                        ) { Text(ui("‹")) }
                         Text(
                             ch.fasrv.fanotes.desk.homeworkPlannerLabel(cursor, planner),
                             modifier = Modifier.weight(1f),
@@ -1574,9 +1574,9 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                                     cursor = ch.fasrv.fanotes.desk.homeworkPlannerShift(cursor, planner, 1)
                                 },
                             contentAlignment = Alignment.Center,
-                        ) { Text("›") }
+                        ) { Text(ui("›")) }
                         Text(
-                            "Heute",
+                            ui("Heute"),
                             color = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f)),
                             fontSize = 12.sp,
                             fontWeight = FontWeight(700),
@@ -2611,7 +2611,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     verticalArrangement = Arrangement.spacedBy(notePin.gapDp.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Kalender", modifier = Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
+                        Text(ui("Kalender"), modifier = Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight(650), letterSpacing = (-0.01).em)
                         Box(
                             Modifier
                                 .size(ch.fasrv.fanotes.desk.CAL_ICON_DP.dp)
@@ -2620,7 +2620,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                                 .clickable { model.showDestination("notes") },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(Icons.Filled.Close, contentDescription = "Schliessen", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(Icons.Filled.Close, contentDescription = ui("Schliessen"), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                     CalendarMini(anchor, shown.events, onSelect = {
@@ -2648,7 +2648,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                                 .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA), RoundedCornerShape(8.dp))
                                 .clickable { onOpenNote(CALENDAR_NOTE_PATH) }
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
-                        ) { Text("Als Notiz öffnen", fontSize = 12.sp) }
+                        ) { Text(ui("Als Notiz öffnen"), fontSize = 12.sp) }
                     }
                     if (notePin.lastChild) {
                         calendarList()
@@ -2665,13 +2665,13 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             var listsOpen by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Kalender", style = MaterialTheme.typography.titleLarge)
-                    Text("Gespeichert in Kalender.md.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    Text(ui("Kalender"), style = MaterialTheme.typography.titleLarge)
+                    Text(ui("Gespeichert in Kalender.md."), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                 }
                 TextButton(onClick = { listsOpen = !listsOpen }) {
                     Text(if (listsOpen) "Listen ausblenden" else "Listen (${document.calendars.size})")
                 }
-                TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text("Als Notiz öffnen") }
+                TextButton(onClick = { onOpenNote(CALENDAR_NOTE_PATH) }) { Text(ui("Als Notiz öffnen")) }
             }
             // The calendar lists stay collapsed on a narrow screen: they used to take a third of the height before the grid.
             if (listsOpen) CalendarLists(model, document, calendarName) { calendarName = it }
@@ -2689,7 +2689,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     month = YearMonth.now()
                 }.padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Heute", fontSize = 12.sp) }
+            ) { Text(ui("Heute"), fontSize = 12.sp) }
             listOf(-1 to "‹", 1 to "›").forEach { (step, mark) ->
                 Box(
                     Modifier.size(ch.fasrv.fanotes.desk.CAL_ICON_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable(onClickLabel = if (step < 0) "Vorheriger Zeitraum" else "Nächster Zeitraum") { shiftCalendar(step) },
@@ -2753,7 +2753,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                         }.padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(label, fontSize = 12.sp, color = if (active) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
+                        Text(ui(label), fontSize = 12.sp, color = if (active) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
                     }
                 }
             }
@@ -2774,7 +2774,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 Box(
                     Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable(onClick = action).padding(horizontal = 10.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text(label, fontSize = 12.sp) }
+                ) { Text(ui(label), fontSize = 12.sp) }
             }
         }
         if (reminder != null) {
@@ -2785,7 +2785,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                     fontSize = 13.sp,
                     modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { dismissedReminders = dismissedReminders + reminder.key }) { Text("Schliessen") }
+                TextButton(onClick = { dismissedReminders = dismissedReminders + reminder.key }) { Text(ui("Schliessen")) }
             }
         }
         if (!status.isNullOrBlank()) Text(status.orEmpty(), fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
@@ -2829,14 +2829,14 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(title, { title = it }, label = { Text("Neuer Termin") }, modifier = Modifier.weight(1f))
-            OutlinedTextField(time, { time = it }, label = { Text("Uhrzeit") }, modifier = Modifier.weight(0.5f))
+            OutlinedTextField(title, { title = it }, label = { Text(ui("Neuer Termin")) }, modifier = Modifier.weight(1f))
+            OutlinedTextField(time, { time = it }, label = { Text(ui("Uhrzeit")) }, modifier = Modifier.weight(0.5f))
             TextButton(onClick = {
                 if (title.isNotBlank()) {
                     model.addCalendarEvent(title, day, calendarId, recurrence, time)
                     title = ""
                 }
-            }) { Text("Eintragen") }
+            }) { Text(ui("Eintragen")) }
         }
             }
             Column(
@@ -3016,9 +3016,9 @@ private fun CalendarMini(
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val label = anchor.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", java.util.Locale.GERMAN))
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("‹", modifier = Modifier.clickable(onClickLabel = "Vorheriger Zeitraum") { onShift(-1) }.padding(4.dp))
+        Text(ui("‹"), modifier = Modifier.clickable(onClickLabel = "Vorheriger Zeitraum") { onShift(-1) }.padding(4.dp))
         Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(650))
-        Text("›", modifier = Modifier.clickable(onClickLabel = "Nächster Zeitraum") { onShift(1) }.padding(4.dp))
+        Text(ui("›"), modifier = Modifier.clickable(onClickLabel = "Nächster Zeitraum") { onShift(1) }.padding(4.dp))
     }
     Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
         listOf("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So").forEach { day ->
@@ -3255,7 +3255,7 @@ private fun DayColumns(
                                 )
                             }
                             Text(
-                                "+",
+                                ui("+"),
                                 fontSize = 12.sp,
                                 color = LocalStatusInk.current.muted,
                                 modifier = Modifier.clickable(onClickLabel = "Neuer Termin") {
@@ -3515,7 +3515,7 @@ private fun CalendarLists(
     Column(
         Modifier.fillMaxWidth().padding(top = 8.dp).background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp),
     ) {
-        Text("Kalender", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(ui("Kalender"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         document.calendars.forEach { calendar ->
             var menu by remember(calendar.id) { mutableStateOf(false) }
             Row(
@@ -3542,12 +3542,12 @@ private fun CalendarLists(
                         Icon(Icons.Filled.MoreVert, contentDescription = "Kalender-Optionen für ${calendar.name}", modifier = Modifier.size(18.dp))
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Umbenennen") }, onClick = {
+                        DropdownMenuItem(text = { Text(ui("Umbenennen")) }, onClick = {
                             menu = false
                             renaming = calendar
                         })
                         if (document.calendars.size > 1) {
-                            DropdownMenuItem(text = { Text("Entfernen") }, onClick = {
+                            DropdownMenuItem(text = { Text(ui("Entfernen")) }, onClick = {
                                 menu = false
                                 model.deleteCalendarList(calendar.id)
                             })
@@ -3559,7 +3559,7 @@ private fun CalendarLists(
         TextButton(onClick = { creating = true }) {
             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Neuer Kalender")
+            Text(ui("Neuer Kalender"))
         }
     }
     renaming?.let { calendar ->
@@ -3593,7 +3593,7 @@ private fun CalendarNameDialog(
             OutlinedTextField(
                 name,
                 { name = it.take(80) },
-                label = { Text("Name") },
+                label = { Text(ui("Name")) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { if (clean.isNotEmpty()) onConfirm(clean) }),
@@ -3601,7 +3601,7 @@ private fun CalendarNameDialog(
             )
         },
         confirmButton = { TextButton(enabled = clean.isNotEmpty(), onClick = { onConfirm(clean) }) { Text(confirm) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(ui("Abbrechen")) } },
     )
 }
 
@@ -3637,13 +3637,13 @@ private fun EventsOn(
                 )
             }
             Row(Modifier.horizontalScroll(rememberScrollState())) {
-                TextButton(onClick = { onEdit(event) }) { Text("Bearbeiten") }
-                TextButton(onClick = { model.shiftCalendarEvent(event.id, 1) }) { Text("+1 Tag") }
-                TextButton(onClick = { model.duplicateCalendarEvent(event.id) }) { Text("Kopie") }
+                TextButton(onClick = { onEdit(event) }) { Text(ui("Bearbeiten")) }
+                TextButton(onClick = { model.shiftCalendarEvent(event.id, 1) }) { Text(ui("+1 Tag")) }
+                TextButton(onClick = { model.duplicateCalendarEvent(event.id) }) { Text(ui("Kopie")) }
                 if (event.recurrence != "none" && event.recurrence.isNotBlank()) {
-                    TextButton(onClick = { model.skipCalendarOccurrence(event.id, day.toString()) }) { Text("Auslassen") }
+                    TextButton(onClick = { model.skipCalendarOccurrence(event.id, day.toString()) }) { Text(ui("Auslassen")) }
                 }
-                TextButton(onClick = { model.deleteCalendarEvent(event.id) }) { Text("Löschen") }
+                TextButton(onClick = { model.deleteCalendarEvent(event.id) }) { Text(ui("Löschen")) }
             }
         }
     }
@@ -4115,7 +4115,7 @@ fun BugReportDialog(model: FaNotesViewModel) {
                     ) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "Schliessen",
+                            contentDescription = ui("Schliessen"),
                             modifier = Modifier.size(ch.fasrv.fanotes.desk.BUG_REPORT_CLOSE_ICON_DP.dp),
                             tint = ink.muted,
                         )
@@ -4388,25 +4388,25 @@ fun OverviewScreen(
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Ordnerübersicht", style = MaterialTheme.typography.titleLarge)
+                Text(ui("Ordnerübersicht"), style = MaterialTheme.typography.titleLarge)
                 Text(
-                    "Alle Ordner auf einen Blick. Tippe eine Zeile an, um die letzte Notiz zu öffnen.",
+                    ui("Alle Ordner auf einen Blick. Tippe eine Zeile an, um die letzte Notiz zu öffnen."),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 )
             }
-            TextButton(onClick = onCreate) { Text("Neue Notiz") }
-            TextButton(onClick = onClose) { Text("Schliessen") }
+            TextButton(onClick = onCreate) { Text(ui("Neue Notiz")) }
+            TextButton(onClick = onClose) { Text(ui("Schliessen")) }
         }
         Text(ch.fasrv.fanotes.desk.overviewStatsLine(picture.topFolders, picture.noteCount), modifier = Modifier.padding(top = 12.dp))
         Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(Modifier.weight(1.6f)) {
-                Text("Deine Ordner", fontWeight = FontWeight.SemiBold)
+                Text(ui("Deine Ordner"), fontWeight = FontWeight.SemiBold)
                 Text(ch.fasrv.fanotes.desk.overviewFolderCountLabel(picture.folders.size), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
                 if (picture.folders.isEmpty()) {
-                    Text("Noch keine Ordner", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-                    Text("Lege einen Fachordner an oder schreibe eine Notiz. Die Übersicht füllt sich automatisch.", fontSize = 13.sp)
-                    TextButton(onClick = onCreate) { Text("Erste Notiz erstellen") }
+                    Text(ui("Noch keine Ordner"), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+                    Text(ui("Lege einen Fachordner an oder schreibe eine Notiz. Die Übersicht füllt sich automatisch."), fontSize = 13.sp)
+                    TextButton(onClick = onCreate) { Text(ui("Erste Notiz erstellen")) }
                 }
                 picture.folders.forEach { folder ->
                     val tint = folder.color?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() }
@@ -4433,15 +4433,15 @@ fun OverviewScreen(
                 }
             }
             Column(Modifier.weight(1f)) {
-                Text("Zuletzt geöffnet", fontWeight = FontWeight.SemiBold)
+                Text(ui("Zuletzt geöffnet"), fontWeight = FontWeight.SemiBold)
                 Text(
                     if (recent.isEmpty()) "Noch leer" else "${recent.size} im Verlauf",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
                 )
                 if (recent.isEmpty()) {
-                    Text("Noch keine offenen Notizen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
-                    Text("Geöffnete Dokumente bleiben hier griffbereit.", fontSize = 13.sp)
+                    Text(ui("Noch keine offenen Notizen"), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
+                    Text(ui("Geöffnete Dokumente bleiben hier griffbereit."), fontSize = 13.sp)
                 }
                 recent.forEach { path ->
                     Row(
@@ -4453,7 +4453,7 @@ fun OverviewScreen(
                             Text(ch.fasrv.fanotes.desk.overviewPathParent(path), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
                         }
                         if (unsaved && open?.path == path) {
-                            Text("●", color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 6.dp))
+                            Text(ui("●"), color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(start = 6.dp))
                         }
                     }
                 }
@@ -4515,7 +4515,7 @@ fun CardsScreen(model: FaNotesViewModel) {
         },
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Karteikarten", style = MaterialTheme.typography.titleLarge)
+        Text(ui("Karteikarten"), style = MaterialTheme.typography.titleLarge)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             StudyChoice("Alle Notizen", wholeDeck, { wholeDeck = true })
             StudyChoice("Diese Notiz", !wholeDeck, { wholeDeck = false })
@@ -4529,7 +4529,7 @@ fun CardsScreen(model: FaNotesViewModel) {
             }
         } else "${queue.size} Karten in dieser Notiz"
         Text(ch.fasrv.fanotes.desk.ChromeText.ui(summary), fontSize = 13.sp)
-        Text("Fragen stehen unter ## Lernfragen, der Plan in fanotes-cards-v1. Definitionskarten und Bildtafeln zählen mit.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+        Text(ui("Fragen stehen unter ## Lernfragen, der Plan in fanotes-cards-v1. Definitionskarten und Bildtafeln zählen mit."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
         if (current == null) {
             Text(if (wholeDeck && deck.loading) "Einen Moment …" else if (wholeDeck && deck.cards.isEmpty()) "Noch keine Karten. Schreibe in einer Notiz unter ## Lernfragen Frage-Antwort-Paare, oder öffne eine Notiz und tippe auf Karten erstellen (braucht ein KI-Modell)." else if (wholeDeck) "Alles gelernt: In keiner Notiz ist heute eine Karte fällig." else "In dieser Notiz sind keine Karten fällig.", modifier = Modifier.padding(vertical = 24.dp))
         } else {
@@ -4546,11 +4546,11 @@ fun CardsScreen(model: FaNotesViewModel) {
                     current.path?.let { Text(ch.fasrv.fanotes.study.deckNoteTitle(it), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)) }
                     Text(if (showBack) card.back.ifBlank { "Keine Antwort" } else card.front, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(vertical = 12.dp))
                     picture?.let { Image(bitmap = it, contentDescription = null, modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp)) }
-                    if (!showBack) Text("Antippen oder nach links wischen, um die Antwort zu zeigen.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    if (!showBack) Text(ui("Antippen oder nach links wischen, um die Antwort zu zeigen."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 }
             }
             if (!showBack) {
-                androidx.compose.material3.Button(onClick = { showBack = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) { Text("Antwort zeigen", fontSize = 18.sp) }
+                androidx.compose.material3.Button(onClick = { showBack = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) { Text(ui("Antwort zeigen"), fontSize = 18.sp) }
             } else {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     listOf("again" to "Nochmal", "hard" to "Schwer", "good" to "Gut", "easy" to "Leicht").forEach { (grade, label) ->
@@ -4573,8 +4573,8 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
     var pdf by remember { mutableStateOf("") }
     val placement = settings["book-placement"].orEmpty().ifBlank { "rechts" }
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("Fachbuch", style = MaterialTheme.typography.titleLarge)
-        Text("Verknüpft ein PDF-Buch mit einem Fach-Ordner. Es öffnet sich neben den Notizen dieses Fachs, die Seite bleibt erhalten.", fontSize = 13.sp)
+        Text(ui("Fachbuch"), style = MaterialTheme.typography.titleLarge)
+        Text(ui("Verknüpft ein PDF-Buch mit einem Fach-Ordner. Es öffnet sich neben den Notizen dieses Fachs, die Seite bleibt erhalten."), fontSize = 13.sp)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("links" to "Links", "rechts" to "Rechts", "oben" to "Oben", "unten" to "Unten", "popout" to "Auspoppen").forEach { (id, label) ->
                 TextButton(onClick = { model.updateDesk("book-placement", id) }) {
@@ -4591,17 +4591,17 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                 folder = ""
                 pdf = ""
             }
-        }) { Text("Verbinden") }
+        }) { Text(ui("Verbinden")) }
         books.forEach { book ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).clickable { onOpen(book.bookPath) }.padding(vertical = 10.dp)) {
                     Text(book.subjectPath, fontWeight = FontWeight.SemiBold)
                     Text("${book.bookPath} · Seite ${book.lastPage}", fontSize = 13.sp)
                 }
-                TextButton(onClick = { model.detachSubjectBook(book.subjectPath) }) { Text("Buch entfernen") }
+                TextButton(onClick = { model.detachSubjectBook(book.subjectPath) }) { Text(ui("Buch entfernen")) }
             }
         }
-        if (books.isEmpty()) Text("Noch kein Fachbuch verbunden. Wähle oben einen Fach-Ordner und ein PDF aus deinem Vault (importiere ein PDF zuerst über das Menü eines Ordners) und tippe auf Verbinden.", modifier = Modifier.padding(top = 12.dp))
+        if (books.isEmpty()) Text(ui("Noch kein Fachbuch verbunden. Wähle oben einen Fach-Ordner und ein PDF aus deinem Vault (importiere ein PDF zuerst über das Menü eines Ordners) und tippe auf Verbinden."), modifier = Modifier.padding(top = 12.dp))
     }
 }
 
@@ -4630,7 +4630,7 @@ private fun PathPicker(placeholder: String, options: List<String>, value: String
             Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = LocalStatusInk.current.muted)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (options.isEmpty()) DropdownMenuItem(text = { Text("Nichts gefunden") }, enabled = false, onClick = {})
+            if (options.isEmpty()) DropdownMenuItem(text = { Text(ui("Nichts gefunden")) }, enabled = false, onClick = {})
             options.forEach { path ->
                 DropdownMenuItem(text = { Text(path, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = {
                     open = false
@@ -4661,7 +4661,7 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                    label = { Text("Passwort") },
+                    label = { Text(ui("Passwort")) },
                 )
                 if (rejected) Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_WRONG, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
                 TextButton(onClick = { model.submitBookPassword(draft) }) { Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_ACTION) }
@@ -4678,9 +4678,9 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
             )
         }
         Row {
-            TextButton(onClick = { model.turnBook(-1) }) { Text("‹") }
-            TextButton(onClick = { model.turnBook(1) }) { Text("›") }
-            TextButton(onClick = { onOpen(page.bookPath) }) { Text("Öffnen") }
+            TextButton(onClick = { model.turnBook(-1) }) { Text(ui("‹")) }
+            TextButton(onClick = { model.turnBook(1) }) { Text(ui("›")) }
+            TextButton(onClick = { onOpen(page.bookPath) }) { Text(ui("Öffnen")) }
         }
     }
 }
@@ -4764,7 +4764,7 @@ fun HistoryDialog(model: FaNotesViewModel, themeId: String) {
                     ) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "Schliessen",
+                            contentDescription = ui("Schliessen"),
                             modifier = Modifier.size(ch.fasrv.fanotes.vault.HISTORY_DIALOG_CLOSE_ICON_DP.dp),
                             tint = ink.muted,
                         )
@@ -4856,23 +4856,23 @@ fun HistoryScreen(model: FaNotesViewModel) {
     val open by model.open.collectAsStateWithLifecycle()
     val comparison by model.historyComparison.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("Versionsverlauf", style = MaterialTheme.typography.titleLarge)
+        Text(ui("Versionsverlauf"), style = MaterialTheme.typography.titleLarge)
         Text(open?.path ?: "Keine Notiz geöffnet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-        Text("Dieselbe Ablage wie auf dem Desktop: .fanotes/history, höchstens 30 Fassungen je Notiz.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(ui("Dieselbe Ablage wie auf dem Desktop: .fanotes/history, höchstens 30 Fassungen je Notiz."), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         if (history.isEmpty()) {
-            Text("Für diese Notiz liegt noch keine ältere Fassung vor. Sie entsteht, sobald die Notiz erneut gespeichert wird.", modifier = Modifier.padding(top = 12.dp))
+            Text(ui("Für diese Notiz liegt noch keine ältere Fassung vor. Sie entsteht, sobald die Notiz erneut gespeichert wird."), modifier = Modifier.padding(top = 12.dp))
         }
         NoteHistoryRows(model, history, comparison)
         val backupsOn = model.deskSettings.collectAsStateWithLifecycle().value["experimental-backup"] == "on"
         if (backupsOn && open != null) {
             val backups = ch.fasrv.fanotes.desk.parseNoteBackups(open?.payload?.array("noteBackups")).filter { it.notePath == open?.path }.asReversed()
-            Text("Sicherungen", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-            Text("Liegen in der Notiz selbst, höchstens 40, wie auf dem Desktop.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-            TextButton(onClick = { model.snapshotNote() }) { Text("Sicherung anlegen") }
+            Text(ui("Sicherungen"), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+            Text(ui("Liegen in der Notiz selbst, höchstens 40, wie auf dem Desktop."), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            TextButton(onClick = { model.snapshotNote() }) { Text(ui("Sicherung anlegen")) }
             backups.forEach { backup ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(backup.createdAt, modifier = Modifier.weight(1f), fontSize = 13.sp)
-                    TextButton(onClick = { model.restoreNoteBackup(backup.id) }) { Text("Wiederherstellen") }
+                    TextButton(onClick = { model.restoreNoteBackup(backup.id) }) { Text(ui("Wiederherstellen")) }
                 }
             }
         }
@@ -4996,7 +4996,7 @@ fun FirstRunDialog(
                                         Text(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX, fontSize = 12.sp)
                                         Text(ch.fasrv.fanotes.desk.FIRST_RUN_INBOX_DETAIL, fontSize = 12.sp, color = ink.muted, modifier = Modifier.padding(top = 4.dp))
                                     }
-                                    Icon(Icons.Filled.Check, contentDescription = "Ausgewählt", modifier = Modifier.size(17.dp), tint = accent)
+                                    Icon(Icons.Filled.Check, contentDescription = ui("Ausgewählt"), modifier = Modifier.size(17.dp), tint = accent)
                                 }
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED, fontSize = 12.sp, color = ink.soft, modifier = Modifier.padding(top = 15.dp))
                                 Text(ch.fasrv.fanotes.desk.FIRST_RUN_PREPARED_DETAIL.replaceFirstChar { it.uppercase() }, fontSize = 12.sp, color = ink.muted, lineHeight = 19.sp)
@@ -5426,7 +5426,7 @@ private fun WelcomePreview(modifier: Modifier) {
                         Modifier
                             .fillMaxWidth()
                             .height(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_INK_HEIGHT_DP.dp)
-                            .semantics { contentDescription = "Handschriftliche Formel" },
+                            .semantics { contentDescription = ui("Handschriftliche Formel") },
                     ) {
                         val fit = ch.fasrv.fanotes.desk.firstRunPreviewInkFit(size.width, size.height) ?: return@Canvas
                         val path = androidx.compose.ui.graphics.Path()
@@ -5724,7 +5724,7 @@ private fun WritingPreview(modifier: Modifier) {
                         .padding(top = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_INK_MARGIN_TOP_DP.dp)
                         .fillMaxWidth()
                         .height(inkHeight)
-                        .semantics { contentDescription = "Handschriftliche Integralrechnung" },
+                        .semantics { contentDescription = ui("Handschriftliche Integralrechnung") },
                 ) {
                     val meet = ch.fasrv.fanotes.desk.previewInkMeet(
                         size.width,
@@ -5941,10 +5941,10 @@ fun StudyScreen(model: FaNotesViewModel) {
     val picture by model.study.collectAsStateWithLifecycle()
     val overview = picture
     Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
-        Text("Lernzeit", style = MaterialTheme.typography.titleLarge)
-        Text("Aus den stillen Seitenstatistiken auf diesem Gerät. Nichts wird gesendet.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(ui("Lernzeit"), style = MaterialTheme.typography.titleLarge)
+        Text(ui("Aus den stillen Seitenstatistiken auf diesem Gerät. Nichts wird gesendet."), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
         if (overview == null) {
-            Text("Wird gelesen …", modifier = Modifier.padding(top = 12.dp))
+            Text(ui("Wird gelesen …"), modifier = Modifier.padding(top = 12.dp))
         } else {
             Text("${overview.notes} Seiten", modifier = Modifier.padding(top = 12.dp))
             Text("Auf Seiten  ${ch.fasrv.fanotes.desk.formatStudyDuration(overview.dwellMs)}", modifier = Modifier.padding(top = 8.dp))
@@ -5963,8 +5963,8 @@ fun StudyScreen(model: FaNotesViewModel) {
                     }
                 }
             }
-            Text("Fächer", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
-            if (overview.subjects.isEmpty()) Text("Noch keine Seitenstatistik.")
+            Text(ui("Fächer"), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 16.dp))
+            if (overview.subjects.isEmpty()) Text(ui("Noch keine Seitenstatistik."))
             // Internal folders (.fanotes, .trash ...) are not subjects.
             ch.fasrv.fanotes.desk.visibleStudySubjects(overview.subjects).forEach { row ->
                 Text(ch.fasrv.fanotes.desk.studySubjectSummary(row))
@@ -5987,7 +5987,7 @@ fun ConflictList(model: FaNotesViewModel) {
             SettingRow(conflict.path, "Lokale Fassung gesichert als „${conflict.copyPath}“", divider = index != sync.conflicts.lastIndex || current != null) {
                 Row {
                     if (markdown) {
-                        TextButton(onClick = { model.openConflictReview(conflict) }) { Text("Vergleichen") }
+                        TextButton(onClick = { model.openConflictReview(conflict) }) { Text(ui("Vergleichen")) }
                     }
                     TextButton(onClick = { model.resolveConflict(conflict, "remote") }) { Text(ch.fasrv.fanotes.sync.conflictChoiceLabel("remote")) }
                     TextButton(onClick = { model.resolveConflict(conflict, "local") }) { Text(ch.fasrv.fanotes.sync.conflictChoiceLabel("local")) }
@@ -5998,7 +5998,7 @@ fun ConflictList(model: FaNotesViewModel) {
             }
             if (current != null) {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Markdown-Konflikt. Die Serverfassung behält den Pfad, die lokale Fassung liegt in der Kopie.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                    Text(ui("Markdown-Konflikt. Die Serverfassung behält den Pfad, die lokale Fassung liegt in der Kopie."), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     Column(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
                         ch.fasrv.fanotes.sync.conflictDiffRows(current.local, current.remote).forEach { row ->
                             val color = when (row.kind) {
@@ -6014,7 +6014,7 @@ fun ConflictList(model: FaNotesViewModel) {
                             )
                         }
                     }
-                    TextButton(onClick = { model.closeConflictReview() }) { Text("Schliessen") }
+                    TextButton(onClick = { model.closeConflictReview() }) { Text(ui("Schliessen")) }
                 }
             }
         }
@@ -6077,7 +6077,7 @@ private fun SyncPasswordCards(model: FaNotesViewModel) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(repeatPassword, { repeatPassword = it }, modifier = Modifier.widthIn(min = 170.dp), singleLine = true, visualTransformation = mask)
                 TextButton(onClick = { model.changeSyncPassword(current, next, repeatPassword) }, enabled = current.isNotEmpty() && next.isNotEmpty()) {
-                    Text("Passwort ändern")
+                    Text(ui("Passwort ändern"))
                 }
             }
         }
@@ -6085,14 +6085,14 @@ private fun SyncPasswordCards(model: FaNotesViewModel) {
     SettingCard("Konto löschen", Icons.Filled.Delete) {
         SettingRow("Konto und alle Daten auf dem Server löschen", "Die Notizen auf deinen Geräten bleiben erhalten. Andere Geräte werden abgemeldet.", divider = false) {
             if (!deleteOpen) {
-                TextButton(onClick = { deleteOpen = true }) { Text("Konto löschen") }
+                TextButton(onClick = { deleteOpen = true }) { Text(ui("Konto löschen")) }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Zur Bestätigung dein Passwort:", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                    Text(ui("Zur Bestätigung dein Passwort:"), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     OutlinedTextField(deletePassword, { deletePassword = it }, modifier = Modifier.widthIn(min = 170.dp), singleLine = true, visualTransformation = mask)
                     Row {
-                        TextButton(onClick = { deleteOpen = false; deletePassword = "" }) { Text("Abbrechen") }
-                        TextButton(onClick = { model.deleteSyncAccount(deletePassword) }, enabled = deletePassword.isNotEmpty()) { Text("Endgültig löschen") }
+                        TextButton(onClick = { deleteOpen = false; deletePassword = "" }) { Text(ui("Abbrechen")) }
+                        TextButton(onClick = { model.deleteSyncAccount(deletePassword) }, enabled = deletePassword.isNotEmpty()) { Text(ui("Endgültig löschen")) }
                     }
                 }
             }
@@ -6432,7 +6432,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                     .clickable { model.loadAiModels(provider, setting("url"), setting("key"), setting("user")) },
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Icon(Icons.Filled.Sync, contentDescription = "Modelle laden", modifier = Modifier.size(16.dp), tint = accent)
+                                Icon(Icons.Filled.Sync, contentDescription = ui("Modelle laden"), modifier = Modifier.size(16.dp), tint = accent)
                             }
                         }
                         models.forEach { listed ->
@@ -6474,24 +6474,24 @@ fun AiScreen(model: FaNotesViewModel) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 12.dp)) {
         val result = preview
         if (result == null) {
-            Text("Deine Notiz bleibt unverändert", fontWeight = FontWeight.SemiBold)
+            Text(ui("Deine Notiz bleibt unverändert"), fontWeight = FontWeight.SemiBold)
             Text(
-                "FaNotes erstellt zuerst eine Vorschau. Erst „Ergebnis übernehmen“ ersetzt den Inhalt der geöffneten Markdown-Datei.",
+                ui("FaNotes erstellt zuerst eine Vorschau. Erst „Ergebnis übernehmen“ ersetzt den Inhalt der geöffneten Markdown-Datei."),
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             )
             if (note != null) {
-                Text("Aktuelle Notiz", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Text(ui("Aktuelle Notiz"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 Text(note?.path.orEmpty(), fontWeight = FontWeight.SemiBold)
                 Text("${live.length} Zeichen", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
             }
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { pretty = true }) {
-                    Text("Schön", fontWeight = if (pretty) FontWeight.SemiBold else FontWeight.Normal, color = if (pretty) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                    Text(ui("Schön"), fontWeight = if (pretty) FontWeight.SemiBold else FontWeight.Normal, color = if (pretty) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
                 TextButton(onClick = { pretty = false }) {
-                    Text("Markdown", fontWeight = if (!pretty) FontWeight.SemiBold else FontWeight.Normal, color = if (!pretty) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                    Text(ui("Markdown"), fontWeight = if (!pretty) FontWeight.SemiBold else FontWeight.Normal, color = if (!pretty) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
             }
             val metrics = ch.fasrv.fanotes.desk.editorMetrics(settings)
@@ -6771,7 +6771,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         if (taskLine.checked) {
-                                            Text("✓", color = MaterialTheme.colorScheme.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            Text(ui("✓"), color = MaterialTheme.colorScheme.onPrimary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                     Spacer(Modifier.width((base * taskChrome.gapEm).dp))
@@ -8358,7 +8358,7 @@ private fun SettingsPage(
                                         ch.fasrv.fanotes.desk.parseAccent(next)?.let { model.updateDesk("accent", it) }
                                     },
                                     modifier = Modifier.widthIn(min = 170.dp),
-                                    label = { Text("Eigene Akzentfarbe") },
+                                    label = { Text(ui("Eigene Akzentfarbe")) },
                                     singleLine = true,
                                 )
                             }
@@ -8374,7 +8374,7 @@ private fun SettingsPage(
                                         ch.fasrv.fanotes.desk.parseAccent(next)?.let { model.updateDesk("accent-secondary", it) }
                                     },
                                     modifier = Modifier.widthIn(min = 170.dp),
-                                    label = { Text("Eigene zweite Akzentfarbe") },
+                                    label = { Text(ui("Eigene zweite Akzentfarbe")) },
                                     singleLine = true,
                                 )
                             }
@@ -8444,7 +8444,7 @@ private fun SettingsPage(
                         Modifier.settingsAnchor("editor", "settings-editor", anchorY),
                     ) {
                         SettingRow("Live-Ansicht", "Markdown wird direkt auf der Seite bearbeitet und formatiert – ohne getrennte Vorschau.") {
-                            Text("Immer aktiv", fontSize = 12.sp, color = LocalStatusInk.current.soft)
+                            Text(ui("Immer aktiv"), fontSize = 12.sp, color = LocalStatusInk.current.soft)
                         }
                         SettingRow("Lesbare Zeilenlänge", "Begrenzt lange Textzeilen für angenehmes Lesen.", modifier = Modifier.settingsAnchor("editor", "settings-width", anchorY)) {
                             Switch(
@@ -8622,7 +8622,7 @@ private fun SettingsPage(
                                 settings["daily-folder"].orEmpty(),
                                 { model.updateDesk("daily-folder", it) },
                                 modifier = Modifier.widthIn(min = 170.dp),
-                                placeholder = { Text("Tagesnotizen") },
+                                placeholder = { Text(ui("Tagesnotizen")) },
                                 singleLine = true,
                             )
                         }
@@ -8638,8 +8638,8 @@ private fun SettingsPage(
                     SettingCard("Aktueller Vault", Icons.Filled.Folder, Modifier.settingsAnchor("files", "settings-vault", anchorY)) {
                         SettingRow("Ordner", "Notizen bleiben Markdown-Dateien in diesem Ordner.", divider = false) {
                             Column {
-                                TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
-                                TextButton(onClick = onPrivate) { Text("Tablet-Vault verwenden") }
+                                TextButton(onClick = onOpenVault) { Text(ui("Vault-Ordner öffnen")) }
+                                TextButton(onClick = onPrivate) { Text(ui("Tablet-Vault verwenden")) }
                             }
                         }
                     }
@@ -8711,9 +8711,9 @@ private fun SettingsPage(
                         SettingRow("Konto") {
                             Row {
                                 TextButton(onClick = onSync, enabled = sync.status != ch.fasrv.fanotes.sync.SyncStatus.SYNCING) {
-                                    Text("Jetzt synchronisieren")
+                                    Text(ui("Jetzt synchronisieren"))
                                 }
-                                TextButton(onClick = { model.logout() }) { Text("Abmelden") }
+                                TextButton(onClick = { model.logout() }) { Text(ui("Abmelden")) }
                             }
                         }
                         SettingRow("Automatisch synchronisieren", "Nach jedem Speichern und im Hintergrund. Aus: nur über „Jetzt synchronisieren“.") {
@@ -8758,7 +8758,7 @@ private fun SettingsPage(
                                 syncDeviceNote.orEmpty(),
                                 divider = false,
                             ) {
-                                TextButton(onClick = { model.refreshSyncDevices() }) { Text("Erneut laden") }
+                                TextButton(onClick = { model.refreshSyncDevices() }) { Text(ui("Erneut laden")) }
                             }
                             devices.isEmpty() && sync.info == null -> SettingRow("Geräteliste wird geladen …", divider = false) {}
                             devices.isEmpty() -> SettingRow("Keine weiteren Geräte", divider = false) {}
@@ -8771,14 +8771,14 @@ private fun SettingsPage(
                                     mark = if (device.current) ch.fasrv.fanotes.sync.SYNC_DEVICE_MARK else null,
                                 ) {
                                     if (ch.fasrv.fanotes.sync.syncDeviceCanSignOut(device.current)) {
-                                        TextButton(onClick = { model.removeSyncDevice(device.id, device.name) }) { Text("Abmelden") }
+                                        TextButton(onClick = { model.removeSyncDevice(device.id, device.name) }) { Text(ui("Abmelden")) }
                                     }
                                 }
                             }
                         }
                     }
                     if (sync.account != null) SyncPasswordCards(model)
-                    Text("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                    Text(ui("Ein Konflikt behält die Serverfassung auf dem ursprünglichen Pfad. Die Tablet-Fassung liegt daneben."), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     ConflictShortcutCard(model, Modifier.settingsAnchor("sync", "settings-conflicts", anchorY))
                     ShareSettingsCard(model, Modifier.settingsAnchor("sync", "settings-shares", anchorY))
                     ProfileSettingsCard(model, Modifier.settingsAnchor("sync", "settings-profile", anchorY))
@@ -8825,12 +8825,12 @@ private fun SettingsPage(
                         }
                         SettingRow("Release", divider = false) {
                             Column {
-                                TextButton(onClick = { model.checkUpdate() }, enabled = !busy) { Text("Nach einem Release suchen") }
+                                TextButton(onClick = { model.checkUpdate() }, enabled = !busy) { Text(ui("Nach einem Release suchen")) }
                                 if (offer != null) {
                                     TextButton(
                                         onClick = { model.downloadAndroidUpdate { file -> installAndroidApk(context, file) } },
                                         enabled = !busy,
-                                    ) { Text("APK laden und installieren") }
+                                    ) { Text(ui("APK laden und installieren")) }
                                 }
                             }
                         }
@@ -8872,20 +8872,20 @@ private fun SettingsPage(
                 "advanced" -> {
                     SettingCard("Eigenes CSS", Icons.Filled.Code, Modifier.settingsAnchor("advanced", "settings-css", anchorY)) {
                         Column(Modifier.padding(horizontal = 15.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Übernommen werden nur Variablen wie --accent, --bg, --panel, --text, --radius oder --sidebar-width; Selektoren und andere Regeln werden ignoriert.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                            Text(ui("Übernommen werden nur Variablen wie --accent, --bg, --panel, --text, --radius oder --sidebar-width; Selektoren und andere Regeln werden ignoriert."), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                             OutlinedTextField(
                                 css,
                                 { model.updateCustomCss(it) },
                                 modifier = Modifier.fillMaxWidth().heightIn(min = 140.dp),
                                 placeholder = { Text(":root {\n  --radius: 14px;\n}") },
                             )
-                            Text("Secrets liegen im Android-Keystore, nicht im Vault.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+                            Text(ui("Secrets liegen im Android-Keystore, nicht im Vault."), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                         }
                     }
                 }
             }
-            TextButton(onClick = { model.openBugReport() }) { Text("Fehler melden") }
-            Text("Die letzten fünf Minuten (Stift, Notiz, Werkzeug) werden an fanotes.fasrv.ch geschickt.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            TextButton(onClick = { model.openBugReport() }) { Text(ui("Fehler melden")) }
+            Text(ui("Die letzten fünf Minuten (Stift, Notiz, Werkzeug) werden an fanotes.fasrv.ch geschickt."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
             }
             Box(
                 Modifier
@@ -8972,7 +8972,7 @@ fun NoteTagBar(model: FaNotesViewModel) {
                 { draft = it.take(40) },
                 modifier = Modifier.width(160.dp),
                 singleLine = true,
-                label = { Text("Tag hinzufügen") },
+                label = { Text(ui("Tag hinzufügen")) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { addTag() }),
             )
@@ -8980,7 +8980,7 @@ fun NoteTagBar(model: FaNotesViewModel) {
         if (backupPolicy.visible) {
             Box {
                 Text(
-                    "Backup",
+                    ui("Backup"),
                     fontSize = 12.sp,
                     modifier = Modifier
                         .padding(end = 8.dp)
@@ -9000,8 +9000,8 @@ fun NoteTagBar(model: FaNotesViewModel) {
                     DropdownMenuItem(
                         text = {
                             Column {
-                                Text("Weiteres Backup", fontWeight = FontWeight.SemiBold)
-                                Text("Aktuelle Notiz so sichern, wie sie ist", fontSize = 12.sp)
+                                Text(ui("Weiteres Backup"), fontWeight = FontWeight.SemiBold)
+                                Text(ui("Aktuelle Notiz so sichern, wie sie ist"), fontSize = 12.sp)
                             }
                         },
                         onClick = {
@@ -9013,7 +9013,7 @@ fun NoteTagBar(model: FaNotesViewModel) {
                         DropdownMenuItem(
                             text = {
                                 Column {
-                                    Text("Wiederherstellen", fontWeight = FontWeight.SemiBold)
+                                    Text(ui("Wiederherstellen"), fontWeight = FontWeight.SemiBold)
                                     Text(ch.fasrv.fanotes.desk.noteBackupStamp(snapshot.createdAt), fontSize = 12.sp)
                                 }
                             },
@@ -9082,7 +9082,7 @@ fun MarginTranscript(model: FaNotesViewModel) {
     var editing by remember(token, path) { mutableStateOf<String?>(null) }
     var draft by remember(token, path) { mutableStateOf("") }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-        Text("Randtranskript", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+        Text(ui("Randtranskript"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
         lines.forEachIndexed { index, line ->
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                 line.text.split(Regex("""(\s+)""")).forEach { part ->
@@ -9094,12 +9094,12 @@ fun MarginTranscript(model: FaNotesViewModel) {
                             { draft = it },
                             modifier = Modifier.width(140.dp),
                             singleLine = true,
-                            label = { Text("Wort korrigieren") },
+                            label = { Text(ui("Wort korrigieren")) },
                         )
                         TextButton(onClick = {
                             model.correctTranscriptWord(part, draft)
                             editing = null
-                        }) { Text("OK") }
+                        }) { Text(ui("OK")) }
                     } else {
                         Text(
                             part,
@@ -9202,7 +9202,7 @@ fun NoteSearchBar(model: FaNotesViewModel) {
                     }
                 },
                 singleLine = true,
-                label = { Text("Im Text suchen …") },
+                label = { Text(ui("Im Text suchen …")) },
             )
             if (status.isNotEmpty()) Text(status, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
         }
@@ -9211,8 +9211,8 @@ fun NoteSearchBar(model: FaNotesViewModel) {
                 Modifier.horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = { model.stepNoteSearch(-1) }, enabled = hits.isNotEmpty()) { Text("Vorheriger Treffer") }
-                TextButton(onClick = { model.stepNoteSearch(1) }, enabled = hits.isNotEmpty()) { Text("Nächster Treffer") }
+                TextButton(onClick = { model.stepNoteSearch(-1) }, enabled = hits.isNotEmpty()) { Text(ui("Vorheriger Treffer")) }
+                TextButton(onClick = { model.stepNoteSearch(1) }, enabled = hits.isNotEmpty()) { Text(ui("Nächster Treffer")) }
                 SearchFlag("Gross-/Kleinschreibung", caseSensitive, model::setNoteSearchCaseSensitive)
                 SearchFlag("Regulärer Ausdruck", regexp, model::setNoteSearchRegexp)
                 SearchFlag("Ganzes Wort", wholeWord, model::setNoteSearchWholeWord)
@@ -9222,13 +9222,13 @@ fun NoteSearchBar(model: FaNotesViewModel) {
                 { replacement = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                label = { Text("Ersetzen") },
+                label = { Text(ui("Ersetzen")) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { model.replaceCurrentNoteSearch(replacement) }),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { model.replaceCurrentNoteSearch(replacement) }, enabled = hits.isNotEmpty()) { Text("Ersetzen") }
-                TextButton(onClick = { model.replaceAllNoteSearch(replacement) }, enabled = hits.isNotEmpty()) { Text("Alle ersetzen") }
+                TextButton(onClick = { model.replaceCurrentNoteSearch(replacement) }, enabled = hits.isNotEmpty()) { Text(ui("Ersetzen")) }
+                TextButton(onClick = { model.replaceAllNoteSearch(replacement) }, enabled = hits.isNotEmpty()) { Text(ui("Alle ersetzen")) }
             }
             val windowStart = (index - 2).coerceAtLeast(0)
             hits.drop(windowStart).take(6).forEachIndexed { offset, hit ->
@@ -9266,7 +9266,7 @@ fun PdfPasswordPrompt(model: FaNotesViewModel) {
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-            label = { Text("Passwort") },
+            label = { Text(ui("Passwort")) },
         )
         if (rejected) Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_WRONG, fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
         TextButton(onClick = { model.submitPdfPassword(draft) }) { Text(ch.fasrv.fanotes.desk.PDF_PASSWORD_ACTION) }
@@ -9294,35 +9294,35 @@ fun PdfNoteToolbar(model: FaNotesViewModel) {
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = { model.goToPdfPage(page - 1) }, enabled = page > 1) { Text("Vorherige Seite") }
+            TextButton(onClick = { model.goToPdfPage(page - 1) }, enabled = page > 1) { Text(ui("Vorherige Seite")) }
             OutlinedTextField(
                 draft,
                 { draft = it.filter { char -> char.isDigit() }.take(4) },
                 modifier = Modifier.width(72.dp),
                 singleLine = true,
-                label = { Text("Seite") },
+                label = { Text(ui("Seite")) },
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = {
                     draft.toIntOrNull()?.let(model::goToPdfPage)
                 }),
             )
             Text("/ ${if (count > 0) count else "…"}", fontSize = 12.sp, modifier = Modifier.padding(horizontal = 6.dp))
-            TextButton(onClick = { model.goToPdfPage(page + 1) }, enabled = count > 0 && page < count) { Text("Nächste Seite") }
-            TextButton(onClick = { model.requestPdfCamera("out") }, enabled = zoom > 0.5 + 1e-4) { Text("Verkleinern") }
+            TextButton(onClick = { model.goToPdfPage(page + 1) }, enabled = count > 0 && page < count) { Text(ui("Nächste Seite")) }
+            TextButton(onClick = { model.requestPdfCamera("out") }, enabled = zoom > 0.5 + 1e-4) { Text(ui("Verkleinern")) }
             Text(
                 ch.fasrv.fanotes.desk.pdfZoomPercentLabel(zoom),
                 fontSize = 12.sp,
                 fontWeight = if (mode == "custom") FontWeight.SemiBold else FontWeight.Normal,
                 modifier = Modifier.padding(horizontal = 4.dp),
             )
-            TextButton(onClick = { model.requestPdfCamera("in") }, enabled = zoom < zoomMax - 1e-4) { Text("Vergrössern") }
+            TextButton(onClick = { model.requestPdfCamera("in") }, enabled = zoom < zoomMax - 1e-4) { Text(ui("Vergrössern")) }
             TextButton(onClick = { model.requestPdfCamera("fit-width") }) {
-                Text("Breite", fontWeight = if (mode == "fit-width") FontWeight.Bold else FontWeight.Normal)
+                Text(ui("Breite"), fontWeight = if (mode == "fit-width") FontWeight.Bold else FontWeight.Normal)
             }
             TextButton(onClick = { model.requestPdfCamera("fit-page") }) {
-                Text("Ganze Seite", fontWeight = if (mode == "fit-page") FontWeight.Bold else FontWeight.Normal)
+                Text(ui("Ganze Seite"), fontWeight = if (mode == "fit-page") FontWeight.Bold else FontWeight.Normal)
             }
-            TextButton(onClick = { model.requestPdfCamera("rotate") }) { Text("Drehen") }
+            TextButton(onClick = { model.requestPdfCamera("rotate") }) { Text(ui("Drehen")) }
         }
     }
 }
@@ -9351,15 +9351,15 @@ fun PdfSearchBar(model: FaNotesViewModel) {
                 { model.updatePdfSearch(it) },
                 modifier = Modifier.weight(1f).focusRequester(searchFocus),
                 singleLine = true,
-                label = { Text("Im PDF suchen …") },
+                label = { Text(ui("Im PDF suchen …")) },
             )
             if (status.isNotEmpty()) {
                 Text(status, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp))
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { model.stepPdfSearch(-1) }, enabled = hits.isNotEmpty()) { Text("Vorheriger Treffer") }
-            TextButton(onClick = { model.stepPdfSearch(1) }, enabled = hits.isNotEmpty()) { Text("Nächster Treffer") }
+            TextButton(onClick = { model.stepPdfSearch(-1) }, enabled = hits.isNotEmpty()) { Text(ui("Vorheriger Treffer")) }
+            TextButton(onClick = { model.stepPdfSearch(1) }, enabled = hits.isNotEmpty()) { Text(ui("Nächster Treffer")) }
         }
         val windowStart = (index - 2).coerceAtLeast(0)
         hits.drop(windowStart).take(6).forEachIndexed { offset, hit ->
@@ -9385,8 +9385,8 @@ fun PdfQuoteMarks(model: FaNotesViewModel) {
     var quote by remember { mutableStateOf("") }
     var underline by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
-        Text("PDF-Markierungen", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-        Text("Zitate bleiben in der Notiz, dieselbe Datei wie auf dem Desktop.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
+        Text(ui("PDF-Markierungen"), fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+        Text(ui("Zitate bleiben in der Notiz, dieselbe Datei wie auf dem Desktop."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
         marks.forEach { mark ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -9395,12 +9395,12 @@ fun PdfQuoteMarks(model: FaNotesViewModel) {
                     fontSize = 13.sp,
                     maxLines = 2,
                 )
-                TextButton(onClick = { model.removePdfQuote(mark.id) }) { Text("Entfernen") }
+                TextButton(onClick = { model.removePdfQuote(mark.id) }) { Text(ui("Entfernen")) }
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(page, { page = it.take(4) }, label = { Text("Seite") }, modifier = Modifier.width(88.dp), singleLine = true)
-            OutlinedTextField(quote, { quote = it.take(400) }, label = { Text("Zitat") }, modifier = Modifier.weight(1f), singleLine = true)
+            OutlinedTextField(page, { page = it.take(4) }, label = { Text(ui("Seite")) }, modifier = Modifier.width(88.dp), singleLine = true)
+            OutlinedTextField(quote, { quote = it.take(400) }, label = { Text(ui("Zitat")) }, modifier = Modifier.weight(1f), singleLine = true)
         }
         Row {
             TextButton(onClick = { underline = !underline }) { Text(if (underline) "Unterstreichen" else "Markieren") }
@@ -9410,7 +9410,7 @@ fun PdfQuoteMarks(model: FaNotesViewModel) {
                     model.addPdfQuote(number, quote, if (underline) "underline" else "highlight")
                     quote = ""
                 }
-            }) { Text("Hinzufügen") }
+            }) { Text(ui("Hinzufügen")) }
         }
     }
 }
@@ -9434,7 +9434,7 @@ fun NoteRelations(model: FaNotesViewModel, onOpen: (String) -> Unit) {
         }
         InspectorHeading("Rückverweise")
         if (incoming.isEmpty()) {
-            Text("Keine Wiki-Links auf diese Notiz.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            Text(ui("Keine Wiki-Links auf diese Notiz."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
         }
         incoming.forEach { link ->
             Column(Modifier.fillMaxWidth().clickable { onOpen(link.path) }.padding(vertical = 4.dp)) {
@@ -9460,8 +9460,8 @@ private fun NoteHistoryRows(
                     Text(ch.fasrv.fanotes.vault.historyStampLabel(snapshot.createdAt), fontSize = 14.sp)
                     Text("${snapshot.bytes} Bytes", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                 }
-                TextButton(onClick = { model.compareHistory(snapshot.id) }) { Text("Vergleichen") }
-                TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text("Wiederherstellen") }
+                TextButton(onClick = { model.compareHistory(snapshot.id) }) { Text(ui("Vergleichen")) }
+                TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text(ui("Wiederherstellen")) }
             }
             val shown = comparison
             if (shown != null && shown.first == snapshot.id) HistoryDiff(shown.second)
@@ -9480,7 +9480,7 @@ private fun HistoryDiff(diff: String) {
         Text(line, color = color, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
     }
     if (ch.fasrv.fanotes.desk.timelineHasInk(diff)) {
-        Text("Enthält Handschrift.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        Text(ui("Enthält Handschrift."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
     }
 }
 
@@ -9515,7 +9515,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Gliederung",
+                    ui("Gliederung"),
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
@@ -9540,7 +9540,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
             InspectorHeading("Gliederung")
             val headings = parseNoteOutline(markdown)
             if (headings.isEmpty()) {
-                Text("Überschriften erscheinen hier automatisch.", fontSize = 12.sp, color = muted)
+                Text(ui("Überschriften erscheinen hier automatisch."), fontSize = 12.sp, color = muted)
             }
             headings.forEach { heading ->
                 Text(
@@ -9590,7 +9590,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
             if (path != null) Text(path, fontSize = 12.sp, color = muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
             NoteRelations(model, onOpen)
             InspectorHeading("Versionen")
-            TextButton(onClick = { model.openHistory() }) { Text("Verlauf laden") }
+            TextButton(onClick = { model.openHistory() }) { Text(ui("Verlauf laden")) }
             history.forEach { snapshot ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -9599,7 +9599,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.weight(1f).clickable { model.compareHistory(snapshot.id) }.padding(vertical = 4.dp),
                     )
-                    TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text("Wiederherstellen") }
+                    TextButton(onClick = { model.restoreHistory(snapshot.id) }) { Text(ui("Wiederherstellen")) }
                 }
             }
             val shown = comparison
@@ -9607,7 +9607,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
             InspectorHeading("Tags")
             val tags = parseNoteTags(markdown)
             if (tags.isEmpty()) {
-                Text("Noch keine Tags.", fontSize = 12.sp, color = muted)
+                Text(ui("Noch keine Tags."), fontSize = 12.sp, color = muted)
             } else {
                 FlowRow(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     tags.forEach { tag ->
@@ -9635,8 +9635,8 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                     .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
                     .padding(10.dp),
             ) {
-                Text("Local first", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = LocalStatusInk.current.soft)
-                Text("Deine Inhalte bleiben als lesbare Dateien in deinem Vault.", fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 3.dp))
+                Text(ui("Local first"), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = LocalStatusInk.current.soft)
+                Text(ui("Deine Inhalte bleiben als lesbare Dateien in deinem Vault."), fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 3.dp))
             }
         }
     }
@@ -9772,7 +9772,7 @@ fun CommandPalette(
                     .clickable(onClickLabel = "Schliessen", onClick = onDismiss),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Close, contentDescription = "Schliessen", modifier = Modifier.size(16.dp), tint = LocalStatusInk.current.muted)
+                Icon(Icons.Filled.Close, contentDescription = ui("Schliessen"), modifier = Modifier.size(16.dp), tint = LocalStatusInk.current.muted)
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(rule))

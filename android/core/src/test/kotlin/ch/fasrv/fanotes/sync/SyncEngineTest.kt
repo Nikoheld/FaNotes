@@ -705,6 +705,42 @@ class SyncEngineTest {
     }
 
     @Test
+    fun uploadsRunInParallelWithinTheBoundAndEveryFileArrives() = runBlocking {
+        val server = MemorySyncServer()
+        val host = MemoryHost("vault")
+        val engine = engine(SyncApi(server), host, "Tablet")
+        val otherHost = MemoryHost("other")
+        val other = engine(SyncApi(server), otherHost, "Other")
+        try {
+            engine.registerAndSettle("ada@example.com", "correct horse")
+            for (index in 1..12) host.put("Notes/N$index.md", "Note $index\n".encodeToByteArray(), 1_000L + index)
+            val running = java.util.concurrent.atomic.AtomicInteger()
+            val peak = java.util.concurrent.atomic.AtomicInteger()
+            server.beforeRequest = {
+                peak.accumulateAndGet(running.incrementAndGet()) { a, b -> maxOf(a, b) }
+                try { delay(40) } finally { running.decrementAndGet() }
+            }
+            val progress = java.util.Collections.synchronizedList(mutableListOf<Int>())
+            val watcher = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                engine.state.collect { state -> state.progress?.takeIf { it.phase == "push" }?.let { progress += it.done } }
+            }
+            engine.syncNow()
+            delay(100)
+            watcher.cancel()
+            server.beforeRequest = null
+            assertTrue(peak.get() > 1, "uploads were sequential, peak=${peak.get()}")
+            assertTrue(peak.get() <= PUSH_CONCURRENCY, "peak=${peak.get()}")
+            assertTrue(progress.contains(12) && progress == progress.sorted(), "progress: $progress")
+            other.loginAndSettle("ada@example.com", "correct horse")
+            other.syncNow()
+            for (index in 1..12) assertEquals("Note $index\n", otherHost.read("Notes/N$index.md").decodeToString())
+        } finally {
+            other.close()
+            engine.close()
+        }
+    }
+
+    @Test
     fun startThenPauseNeverPublishesOfflineAndTheCycleCompletes() = runBlocking {
         val server = MemorySyncServer()
         val host = MemoryHost("vault")

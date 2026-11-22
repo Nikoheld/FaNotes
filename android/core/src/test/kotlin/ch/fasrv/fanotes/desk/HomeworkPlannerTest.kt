@@ -208,7 +208,7 @@ class HomeworkPlannerTest {
         assertEquals(24, HOMEWORK_SHELL_INSET_DP)
         assertEquals(30, HOMEWORK_SHELL_PAD_TOP_DP)
         assertEquals("Als Notiz öffnen", HOMEWORK_OPEN_NOTE)
-        assertEquals("Schließen", HOMEWORK_CLOSE)
+        assertEquals("Schliessen", HOMEWORK_CLOSE)
         assertEquals(34, HOMEWORK_ACTION_DP)
         assertEquals("Liste", HOMEWORK_VIEW_LIST)
         assertEquals("Offen", HOMEWORK_FILTER_OPEN)
