@@ -99,6 +99,8 @@ const runLogic = () => {
   const suppress = css.slice(suppressStart, css.indexOf('.toolbar-button {', suppressStart))
   for (const selector of TOP_CHROME_SELECTORS) assert.ok(suppress.includes(selector), selector)
   assert.match(suppress, /user-select:\s*none/)
+  // A universal descendant rule behind a root class restyles the whole document on every click.
+  assert.doesNotMatch(suppress.slice(0, suppress.indexOf('{')), /\*/)
   assert.doesNotMatch(suppress, /pdf-note-text-layer|\.cm-content|#fff|#f1f2f6|249,\s*249,\s*252/)
   assert.match(appSource, /installChromeTextSelect\(\)/)
   assert.match(css, /(?<!is-inking )\.pdf-note-text-layer :is\(span, br\) \{[^}]*user-select:\s*text/)

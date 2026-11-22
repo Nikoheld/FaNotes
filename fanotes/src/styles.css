@@ -1299,9 +1299,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   background: var(--bg);
 }
 /* While a drag starts off a label, the top bars drop out of the selection.
-   A drag that starts on the label still selects it. Fields stay editable. */
-html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-note-toolbar, .pdf-note-search, .fanotes-find, .subject-book-pdf-toolbar, .subject-book-pane-bar, .split-pane-head),
-html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-note-toolbar, .pdf-note-search, .fanotes-find, .subject-book-pdf-toolbar, .subject-book-pane-bar, .split-pane-head) * {
+   A drag that starts on the label still selects it. Fields stay editable.
+   No `*` descendant rule: user-select: auto follows the parent, and a universal rule behind an
+   <html> class made the browser restyle the whole document on every press and release. */
+html.is-suppress-chrome-select :is(.ribbon, .tabs-bar, .editor-toolbar, .pdf-note-toolbar, .pdf-note-search, .fanotes-find, .subject-book-pdf-toolbar, .subject-book-pane-bar, .split-pane-head) {
   -webkit-user-select: none;
   user-select: none;
 }
