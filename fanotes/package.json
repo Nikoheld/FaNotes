@@ -257,6 +257,7 @@
     "check:addons": "node scripts/check-addons.mjs",
     "check:sync": "node scripts/check-sync.mjs",
     "check:sync-parallel": "node scripts/check-sync-parallel.mjs",
+    "check:sync-stress": "node scripts/check-sync-stress.mjs",
     "check:sync-all-notes": "node scripts/check-sync-all-notes.mjs",
     "check:account-share": "node scripts/check-account-share.mjs",
     "check:live-collab": "node scripts/check-live-channel-gaps.mjs && node scripts/check-live-collab.mjs && node scripts/check-live-collab-editor.mjs && node scripts/check-live-collab-ink.mjs",
