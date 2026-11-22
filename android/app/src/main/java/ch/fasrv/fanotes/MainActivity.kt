@@ -1567,7 +1567,7 @@ fun FaNotesScreen(
                 PromptChoice(ch.fasrv.fanotes.desk.PROMPT_ROOT) { model.moveEntry(path, ""); moving = null }
             }
             folders.forEach { folder ->
-                PromptChoice(folder) { model.moveEntry(path, folder); moving = null }
+                PromptChoice(folder, verbatim = true) { model.moveEntry(path, folder); moving = null }
             }
             if (atRoot && folders.isEmpty()) {
                 Text(ui(ch.fasrv.fanotes.desk.PROMPT_NO_FOLDER), fontSize = 12.sp, color = LocalStatusInk.current.muted)
@@ -4030,11 +4030,11 @@ private fun WorksheetImportDialog(
                     verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_GAP_DP.dp),
                 ) {
                     if (stacked) {
-                        SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE, noteTitle != null, onCurrent)
+                        SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE), noteTitle != null, onCurrent)
                         SheetImportChoice(Icons.AutoMirrored.Filled.NoteAdd, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW_DETAIL, true, onNew)
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_OPTION_GAP_DP.dp)) {
-                            SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE, noteTitle != null, onCurrent, Modifier.weight(1f))
+                            SheetImportChoice(Icons.Filled.FileCopy, ch.fasrv.fanotes.desk.SHEET_IMPORT_CURRENT, noteTitle ?: ui(ch.fasrv.fanotes.desk.SHEET_IMPORT_NONE), noteTitle != null, onCurrent, Modifier.weight(1f))
                             SheetImportChoice(Icons.AutoMirrored.Filled.NoteAdd, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW, ch.fasrv.fanotes.desk.SHEET_IMPORT_NEW_DETAIL, true, onNew, Modifier.weight(1f))
                         }
                     }
@@ -4126,7 +4126,7 @@ private fun SheetImportChoice(
     }
     val copy = @Composable {
         Text(ui(title), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
-        Text(ui(detail), fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        Text(detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
     }
     if (wide) {
         Row(frame, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SHEET_IMPORT_ONENOTE_GAP_DP.dp)) {
@@ -4328,14 +4328,14 @@ private fun PromptField(
 }
 
 @Composable
-private fun PromptChoice(label: String, onClick: () -> Unit) {
+private fun PromptChoice(label: String, verbatim: Boolean = false, onClick: () -> Unit) {
     val shape = RoundedCornerShape(ch.fasrv.fanotes.desk.PROMPT_ROW_RADIUS_DP.dp)
     val rule = MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)
     Box(
         Modifier.fillMaxWidth().heightIn(min = ch.fasrv.fanotes.desk.PROMPT_ROW_DP.dp).clip(shape).border(1.dp, rule, shape).clickable(onClick = onClick).padding(horizontal = 10.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Text(ui(label), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+        Text(if (verbatim) label else ui(label), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 

@@ -325,6 +325,7 @@ private fun StatusLabel(
     fontWeight: FontWeight? = null,
     maxWidthDp: Int? = null,
     onClick: (() -> Unit)? = null,
+    verbatim: Boolean = false,
 ) {
     Box(
         modifier
@@ -334,7 +335,7 @@ private fun StatusLabel(
         contentAlignment = Alignment.CenterStart,
     ) {
         Text(
-            ui(text),
+            if (verbatim) text else ui(text),
             color = color,
             fontSize = 12.sp,
             fontWeight = fontWeight,
@@ -546,6 +547,7 @@ private fun StatusChip(
     padDp: Int = ch.fasrv.fanotes.desk.STATUS_CRUMB_PAD_DP,
     maxWidthDp: Int? = null,
     badge: Int = 0,
+    verbatim: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -565,7 +567,7 @@ private fun StatusChip(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            ui(label),
+            if (verbatim) label else ui(label),
             fontSize = 12.sp,
             color = ink,
             maxLines = 1,
@@ -673,6 +675,7 @@ fun DeskStatusBar(
                             ink.soft,
                             fontWeight = FontWeight.SemiBold,
                             maxWidthDp = ch.fasrv.fanotes.desk.STATUS_NOTE_MAX_DP,
+                            verbatim = true,
                         )
                     } else {
                         StatusChip(
@@ -681,6 +684,7 @@ fun DeskStatusBar(
                             onClick = { onCrumb(crumb.path) },
                             onClickLabel = ui("„$crumbLabel“ in der Dateileiste zeigen"),
                             maxWidthDp = ch.fasrv.fanotes.desk.STATUS_FOLDER_MAX_DP,
+                            verbatim = true,
                         )
                     }
                 }
