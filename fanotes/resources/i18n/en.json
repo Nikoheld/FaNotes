@@ -5479,6 +5479,8 @@
   "ZIP importieren": "Import ZIP",
   "ZIP-Datensatz wurde erstellt.": "ZIP dataset was created.",
   "Zirkel": "Compass",
+  "Zirkel (Radius gesperrt)": "Compass (radius locked)",
+  "Zirkel drehen (ohne zu zeichnen)": "Turn the compass (without drawing)",
   "Zirkel: Nadel setzen, gelb Radius messen/übertragen, grün Bogen zeichnen, Kreis-Taste für einen ganzen Kreis": "Compass: place the needle, yellow measures/transfers the radius, green draws an arc, the circle button draws a full circle",
   "Zirkel: Nadel setzen, Radius messen, Bogen zeichnen": "Compass: set the needle, measure the radius, draw an arc",
   "Zitat": "Quote",
