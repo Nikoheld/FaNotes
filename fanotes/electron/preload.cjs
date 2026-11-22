@@ -109,6 +109,7 @@ const CHANNELS = Object.freeze({
   updateCheck: 'fanotes:update-check',
   updateDownload: 'fanotes:update-download',
   updateInstall: 'fanotes:update-install',
+  updateInstallLater: 'fanotes:update-install-later',
   updateState: 'fanotes:update-state',
   revealInFolder: 'fanotes:reveal-in-folder',
   openExternal: 'fanotes:open-external',
@@ -262,6 +263,7 @@ const api = Object.freeze({
   checkForUpdates: () => invoke(CHANNELS.updateCheck),
   downloadUpdate: () => invoke(CHANNELS.updateDownload),
   installUpdate: () => invoke(CHANNELS.updateInstall),
+  installUpdateOnQuit: (requested = true) => invoke(CHANNELS.updateInstallLater, requested !== false),
   onUpdateState: (callback) => {
     if (typeof callback !== 'function') return () => {}
     const listener = (_event, state) => callback(state)

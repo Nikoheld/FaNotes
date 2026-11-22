@@ -124,6 +124,7 @@ export type SettingsModalProps = {
   onCheckUpdate: () => Promise<void>
   onDownloadUpdate: () => Promise<void>
   onInstallUpdate: () => Promise<void>
+  onInstallUpdateOnQuit?: (requested: boolean) => Promise<void>
   onResetSettings: () => void
   onResetAppData: () => Promise<void>
   onOpenBugReport?: () => void
@@ -365,12 +366,12 @@ const updateStatusText = (state: UpdateState, isWeb = false) => {
   if (isWeb) return 'Web-App lädt Aktualisierungen automatisch'
   if (!state.supported) return 'In der installierten Linux-App aktiv'
   if (state.status === 'checking') return 'Suche nach einer neuen Version …'
-  if (state.status === 'available') return `FaNotes ${state.latestVersion} ist verfügbar`
+  if (state.status === 'available') return `FaNotes ${state.latestVersion} ist verfügbar${state.totalBytes > 0 ? ` · ${formatBytes(state.totalBytes)}` : ''}`
   if (state.status === 'downloading') return `Update wird geladen · ${Math.round(state.progress * 100)} %`
-  if (state.status === 'downloaded') return `FaNotes ${state.latestVersion} ist installationsbereit`
-  if (state.status === 'installing') return 'Update wird beim Neustart installiert …'
+  if (state.status === 'downloaded') return `FaNotes ${state.latestVersion} ist geprüft und bereit`
+  if (state.status === 'installing') return 'Update wird installiert, FaNotes startet neu …'
   if (state.status === 'up-to-date') return `FaNotes ${state.currentVersion} ist aktuell`
-  if (state.status === 'error') return 'Updateprüfung benötigt Aufmerksamkeit'
+  if (state.status === 'error') return state.failedPhase === 'download' ? 'Update-Download fehlgeschlagen' : 'Updateprüfung fehlgeschlagen'
   return 'Automatische Updateprüfung ist bereit'
 }
 
@@ -467,6 +468,7 @@ export function SettingsModal({
   onCheckUpdate,
   onDownloadUpdate,
   onInstallUpdate,
+  onInstallUpdateOnQuit,
   onResetSettings,
   onResetAppData,
   onOpenBugReport,
@@ -1407,7 +1409,13 @@ export function SettingsModal({
                       <RefreshCw className={updateState.status === 'checking' ? 'spin' : ''} size={15} /> Jetzt prüfen
                     </button>
                     {updateState.status === 'available' && <button type="button" className="primary-button" onClick={() => void onDownloadUpdate()}><Download size={15} /> {isWeb ? 'Vorbereiten' : 'Herunterladen'}</button>}
-                    {updateState.status === 'downloaded' && <button type="button" className="primary-button" onClick={() => void onInstallUpdate()}><Rocket size={15} /> {isWeb ? 'Neu laden' : 'Neu starten'}</button>}
+                    {updateState.status === 'error' && updateState.failedPhase === 'download' && <button type="button" className="primary-button" onClick={() => void onDownloadUpdate()}><RefreshCw size={15} /> Erneut versuchen</button>}
+                    {!isWeb && updateState.status === 'downloaded' && !updateState.installUpdatesOnQuit && onInstallUpdateOnQuit && (
+                      updateState.installOnQuitRequested
+                        ? <button type="button" className="secondary-button" onClick={() => void onInstallUpdateOnQuit(false)}>Nicht beim Beenden installieren</button>
+                        : <button type="button" className="secondary-button" onClick={() => void onInstallUpdateOnQuit(true)}>Beim Beenden installieren</button>
+                    )}
+                    {updateState.status === 'downloaded' && <button type="button" className="primary-button" onClick={() => void onInstallUpdate()}><Rocket size={15} /> {isWeb ? 'Neu laden' : 'Jetzt neu starten'}</button>}
                   </div>
                 </div>
 
@@ -1436,8 +1444,20 @@ export function SettingsModal({
                           : 'Der Fortschritt aktualisiert sich während des Downloads. Bei Abbruch wird fortgesetzt.')
                         : updateState.installationKind.startsWith('differential-')
                           ? 'Nur geänderte Binärblöcke wurden übertragen; unveränderte Daten kamen aus der installierten Version.'
-                          : 'Der Download kann nach einem Verbindungsabbruch fortgesetzt werden.'}
+                          : (updateState.installUpdatesOnQuit || updateState.installOnQuitRequested)
+                            ? 'Wird beim Beenden von FaNotes installiert. „Jetzt neu starten“ speichert zuerst alle Notizen und öffnet danach die neue Version.'
+                            : 'Der Neustart speichert zuerst alle Notizen und dauert wenige Sekunden. Die bisherige Version bleibt erhalten, bis die neue gestartet ist.'}
                     </small>
+                  </div>
+                )}
+
+                {updateState.rolledBack && (
+                  <div className="update-rollback-note" role="alert">
+                    <div className="setting-import-status is-error">
+                      <X size={15} />
+                      <span><strong>FaNotes {updateState.rolledBack.version} wurde zurückgesetzt.</strong> {updateState.rolledBack.message} Die bisherige Version {updateState.currentVersion} läuft weiter und das Update wird nicht erneut automatisch versucht.</span>
+                    </div>
+                    <small>Details stehen im Update-Protokoll unter updates/install.log.</small>
                   </div>
                 )}
 

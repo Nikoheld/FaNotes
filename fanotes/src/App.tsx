@@ -1078,6 +1078,7 @@ export default function App({ startupBootstrap }: AppProps) {
   const toastCounter = useRef(0)
   const updateStatusRef = useRef<UpdateState['status']>('idle')
   const justUpdatedNoteRef = useRef<string | null>(null)
+  const rolledBackNoteRef = useRef<string | null>(null)
   const secureSettingsLoadRef = useRef<Promise<void> | null>(null)
   const systemDark = useSystemDark()
 
@@ -1748,6 +1749,15 @@ export default function App({ startupBootstrap }: AppProps) {
     return opened
   }, [flushPageStats])
 
+  const installUpdateOnQuit = useCallback(async (requested: boolean) => {
+    try {
+      setUpdateState(await (window.fanotes.installUpdateOnQuit?.(requested) ?? window.fanotes.getUpdateState()))
+      if (requested) toast('Das Update wird installiert, sobald du FaNotes beendest.', 'success')
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Das Update konnte nicht vorgemerkt werden.', 'error')
+    }
+  }, [toast])
+
   useEffect(() => {
     let alive = true
     let idleId: number | null = null
@@ -1757,7 +1767,24 @@ export default function App({ startupBootstrap }: AppProps) {
       updateStatusRef.current = next.status
       setUpdateState(next)
       if (next.status === 'downloaded' && previous !== 'downloaded') {
-        toast(`FaNotes ${next.latestVersion} ist geprüft und wird beim Beenden installiert.`, 'success')
+        // One short line of release notes, so the toast says what is new without another click.
+        const firstNote = next.releaseNotes[0]?.replaceAll('**', '').replaceAll('`', '').trim()
+        const note = firstNote ? ` Neu: ${firstNote.length > 90 ? `${firstNote.slice(0, 89)}…` : firstNote}` : ''
+        toast(next.installUpdatesOnQuit || next.installOnQuitRequested
+          ? `FaNotes ${next.latestVersion} ist geprüft und wird beim Beenden installiert.${note}`
+          : `FaNotes ${next.latestVersion} ist geprüft und bereit. Installiere es unter „Update bereit“, wann es dir passt.${note}`, 'success')
+      }
+      if (next.status === 'error' && previous !== 'error' && next.failedPhase === 'download') {
+        toast('Der Update-Download ist fehlgeschlagen. FaNotes versucht es automatisch erneut; Details stehen in den Einstellungen unter Updates.', 'error')
+      }
+      // A restart into the update that could not start: the app stays open, so a later close must work again.
+      if (next.status === 'downloaded' && next.error && closeInProgressRef.current) {
+        closeInProgressRef.current = false
+        toast(`Das Update konnte nicht gestartet werden: ${next.error}`, 'error')
+      }
+      if (next.rolledBack && rolledBackNoteRef.current !== next.rolledBack.version) {
+        rolledBackNoteRef.current = next.rolledBack.version
+        toast(`FaNotes ${next.rolledBack.version} ließ sich nicht starten. Die bisherige Version ${next.currentVersion} wurde wiederhergestellt. ${next.rolledBack.message}`, 'error')
       }
       // A short, silent note once after an update (quit, launch or background); never a dialog.
       if (next.justUpdated && justUpdatedNoteRef.current !== next.justUpdated.to) {
@@ -4905,8 +4932,9 @@ export default function App({ startupBootstrap }: AppProps) {
         toast('Update abgebrochen: Nicht alle Änderungen konnten sicher gespeichert werden.', 'error')
         return
       }
+      // Main closes the window through the normal save path, then the helper swaps the file and starts the new version.
       setUpdateState(await window.fanotes.installUpdate())
-      toast('FaNotes startet gleich mit der neuen Version neu.', 'success')
+      toast('Notizen werden gespeichert, dann startet FaNotes mit der neuen Version neu.', 'info')
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Das Update konnte nicht installiert werden.', 'error')
     }
@@ -6587,7 +6615,8 @@ export default function App({ startupBootstrap }: AppProps) {
         )}
         <div className="ribbon-status">
           {updateState.status === 'downloaded' && <button type="button" className="update-ready-button" title={`FaNotes ${updateState.latestVersion} installieren und neu starten`} onClick={() => void installUpdate()}><ShieldCheck size={12} /> Update bereit</button>}
-          {updateState.status === 'downloading' && <span><LoaderCircle className="spin" size={12} /> Update {Math.round(updateState.progress * 100)} %</span>}
+          {updateState.status === 'downloading' && <span title={updateState.totalBytes > 0 ? `Update ${updateState.latestVersion ?? ''}: ${Math.round(updateState.downloadedBytes / 1048576)} von ${Math.round(updateState.totalBytes / 1048576)} MB` : undefined}><LoaderCircle className="spin" size={12} /> Update {Math.round(updateState.progress * 100)} %</span>}
+          {updateState.status === 'error' && updateState.failedPhase === 'download' && <button type="button" className="update-ready-button is-failed" title="Update-Download fehlgeschlagen. Details und erneut versuchen" onClick={() => openSettings('updates')}><CircleAlert size={12} /> Update fehlgeschlagen</button>}
           {addonState.statusItems.map((item) => item.clickable ? <button key={`${item.addonId}/${item.id}`} type="button" className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore onClick={() => addonRuntime.clickStatusItem(item.addonId, item.id)}>{item.text}</button> : <span key={`${item.addonId}/${item.id}`} className="addon-status-item" title={item.title ?? undefined} data-i18n-ignore>{item.text}</span>)}
           {addonState.panels.length > 0 && !addonState.dockOpen && <button type="button" className="addon-status-item addon-status-item--dock" title="Add-on-Panels einblenden" onClick={() => addonRuntime.setDockOpen(true)}><Puzzle size={12} /> {addonState.panels.length}</button>}
           {syncApi && syncState.account && <button type="button" className={`sync-status-item is-${syncState.status}`} title={`Sync · ${syncState.account.email} · ${syncStatusLabel(syncState)}${syncState.error ? ` · ${syncState.error}` : ''}`} aria-live="polite" onClick={() => openSettings(syncState.openConflicts > 0 ? 'conflicts' : 'sync')}>{syncState.status === 'syncing' ? <LoaderCircle className="spin" size={12} /> : syncState.status === 'offline' ? <CloudOff size={12} /> : syncState.status === 'error' ? <CircleAlert size={12} /> : syncState.status === 'paused' ? <Clock size={12} /> : <Cloud size={12} />}{syncState.status === 'syncing' ? 'Sync …' : syncState.status === 'offline' ? 'Offline' : syncState.status === 'error' ? 'Sync-Fehler' : syncState.status === 'paused' ? 'Sync pausiert' : 'Synchron'}{syncState.openConflicts > 0 && <em title={`${syncState.openConflicts} Konflikt(e)`}>{syncState.openConflicts}</em>}{syncState.failed.length > 0 && <em className="sync-failed-badge" title={failedLabel(syncState.failed.length)}>{syncState.failed.length}</em>}</button>}
@@ -7445,7 +7474,7 @@ export default function App({ startupBootstrap }: AppProps) {
         </Suspense>
       )}
       {oneNoteDialogOpen && <Suspense fallback={null}><SafeBoundary name="OneNote-Import" fallbackTitle="Der OneNote-Import ist abgestürzt"><OneNoteImportDialog folders={oneNoteFolders} onClose={() => setOneNoteDialogOpen(false)} onImported={finishOneNoteImport} /></SafeBoundary></Suspense>}
-      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} onConvertFamd={convertAllFamdNotes} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SafeBoundary name="Einstellungen" fallbackTitle="Die Einstellungen sind abgestürzt"><SettingsModal syncEngine={syncApi ? syncEngine : undefined} syncState={syncState} initialSection={settingsSection} platform={window.fanotes.platform} settings={settings} vaultPath={bootstrap.vaultPath} updateState={updateState} onChange={applySettings} onClose={() => { setSettingsOpen(false); setSettingsSection(undefined) }} onSelectVault={() => void selectVault()} onOpenGlyphenWerk={() => { setSettingsOpen(false); openGlyphenWerk() }} onOpenAddonStore={() => { setSettingsOpen(false); openAddonStore() }} addonSummary={{ installed: addonState.installed.length, running: addonState.installed.filter((record) => addonState.statuses[record.id]?.state === 'running').length }} onImportTraining={importTrainingFromSettings} onImportOneNote={importOneNote} onCheckUpdate={checkForUpdates} onDownloadUpdate={downloadUpdate} onInstallUpdate={installUpdate} onInstallUpdateOnQuit={installUpdateOnQuit} onResetSettings={resetSettings} onResetAppData={resetAppData} onOpenBugReport={() => { setSettingsOpen(false); setBugReportOpen(true) }} onConvertNotes={convertAllNotesToCurrentStandard} onConvertFamd={convertAllFamdNotes} remoteSupportSession={remoteSupportSession} onRemoteSupportStart={startRemoteSupport} onRemoteSupportStop={stopRemoteSupport} /></SafeBoundary></Suspense>}
       {addonStoreOpen && <Suspense fallback={null}><SafeBoundary name="Add-on-Store" fallbackTitle="Der Add-on-Store ist abgestürzt"><AddonStoreModal open onClose={() => setAddonStoreOpen(false)} runtime={addonRuntime} runtimeState={addonState} source={addonSource} fetchText={addonFetchText} onOpenExternal={(url) => { void window.fanotes.openExternal(url).catch(() => toast('Der Link konnte nicht geöffnet werden.', 'error')) }} toast={toast} sourceText={settings.addonSource} onChangeSource={(value) => { addonIndexCache.reset(); applySettings({ ...settingsRef.current, addonSource: value }) }} autoUpdate={settings.addonsAutoUpdate} onChangeAutoUpdate={(value) => applySettings({ ...settingsRef.current, addonsAutoUpdate: value })} /></SafeBoundary></Suspense>}
       {addonPrompt && <Suspense fallback={null}><SafeBoundary name="Add-on-Eingabe" fallbackTitle="Der Add-on-Dialog ist abgestürzt"><AddonPromptDialog request={addonPrompt} /></SafeBoundary></Suspense>}
       {sharePeople && (
