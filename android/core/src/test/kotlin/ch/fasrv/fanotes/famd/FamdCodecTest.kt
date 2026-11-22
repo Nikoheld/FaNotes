@@ -6,6 +6,7 @@ import ch.fasrv.fanotes.json.jsonString
 import ch.fasrv.fanotes.json.stringify
 import ch.fasrv.fanotes.vault.DirectoryVault
 import ch.fasrv.fanotes.vault.NoteStore
+import ch.fasrv.fanotes.vault.createInkNote
 import java.nio.file.Files
 import kotlin.math.abs
 import kotlin.test.Test
@@ -130,7 +131,7 @@ class FamdCodecTest {
         val root = Files.createTempDirectory("fanotes-famd-android")
         val vault = DirectoryVault(root)
         val store = NoteStore(vault)
-        val created = store.createMarkdown("", "Neu")
+        val created = store.createInkNote("", "Neu")
         val createdFamd = vault.read("Neu.famd")!!.decodeToString()
         assertTrue(createdFamd.contains("fanotes-famd:v2"))
         assertTrue(!createdFamd.contains("fanotes-famd:v1"))

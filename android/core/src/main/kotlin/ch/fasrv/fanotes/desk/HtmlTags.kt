@@ -30,14 +30,31 @@ fun htmlTagCompletion(text: String, cursor: Int): HtmlTagCompletion? {
 fun htmlAutoClose(before: String, start: Int, deleted: Int, after: String): MarkdownEdit? {
     if (deleted != 0 || start < 0 || start > before.length) return null
     if (after.length != before.length + 1 || start >= after.length) return null
-    if (after.substring(0, start) != before.substring(0, start)) return null
-    if (after.substring(start + 1) != before.substring(start)) return null
-    return when (after[start]) {
-        '>' -> closeAfterGreaterThan(after, start)
-        '/' -> closeAfterSlash(after, start)
-        else -> null
-    }
+    val typed = after[start]
+    if (typed != '>' && typed != '/') return null
+    if (!after.regionMatches(0, before, 0, start)) return null
+    if (!after.regionMatches(start + 1, before, start, before.length - start)) return null
+    if (after.length > LARGE_NOTE_CHARS) return htmlAutoCloseLocal(after, start, typed)
+    return htmlAutoCloseIn(after, start, typed)
 }
+
+private fun htmlAutoCloseIn(after: String, start: Int, typed: Char): MarkdownEdit? = when (typed) {
+    '>' -> closeAfterGreaterThan(after, start)
+    else -> closeAfterSlash(after, start)
+}
+
+/** Large notes: only the lines around the caret are looked at, so a keystroke does not scan the whole note. */
+private fun htmlAutoCloseLocal(after: String, start: Int, typed: Char): MarkdownEdit? {
+    var from = (start - HTML_CONTEXT_BEFORE).coerceAtLeast(0)
+    if (from > 0) from = after.lastIndexOf('\n', from).let { if (it < 0) from else it + 1 }
+    val to = (start + HTML_CONTEXT_AFTER).coerceAtMost(after.length)
+    val local = htmlAutoCloseIn(after.substring(from, to), start - from, typed) ?: return null
+    val text = after.substring(0, from) + local.text + after.substring(to)
+    return MarkdownEdit(text, local.selectionStart + from, local.selectionEnd + from)
+}
+
+private const val HTML_CONTEXT_BEFORE = 6000
+private const val HTML_CONTEXT_AFTER = 2000
 
 internal fun hidesHtmlCompletion(text: String, index: Int): Boolean {
     if (insideCodeFence(text, index)) return true
@@ -197,7 +214,7 @@ private fun unclosedHtmlTag(text: String, before: Int): String? {
         }
         val closer = index + 1 < before && text[index + 1] == '/'
         val nameStart = index + if (closer) 2 else 1
-        val name = text.drop(nameStart).take(before - nameStart).takeWhile { isTagChar(it) }
+        val name = text.substring(nameStart.coerceAtMost(before), before).takeWhile { isTagChar(it) }
         if (name.isEmpty() || !name[0].isLetter()) {
             index++
             continue

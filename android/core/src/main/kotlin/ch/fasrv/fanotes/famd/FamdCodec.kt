@@ -77,6 +77,40 @@ fun detachWorksheet(content: String, id: String): String {
         .replace(Regex("""^\n+"""), "")
 }
 
+/**
+ * True when nothing in a note needs a `.famd` sidecar: no ink strokes, worksheets, links, backups, text
+ * boxes or annotations, and no paper style other than the default. Page statistics do not count (desktop
+ * keeps those in a local store). Mirrors `payloadIsStatsOnly` of the desktop client.
+ */
+fun payloadIsStatsOnly(payload: JsonValue.Obj?, body: String, hasStrokes: Boolean, paperStyle: String): Boolean {
+    if (hasStrokes || worksheetIdsFromMarkdown(body).isNotEmpty()) return false
+    if (paperStyle != "dots") return false
+    if (payload == null) return true
+    if (payload.string("paperStyle").let { it != null && it != "dots" }) return false
+    if (inkHasMarks(payload.get("ink"))) return false
+    return listOf("worksheets", "noteLinks", "noteBackups", "textFields", "textFieldTombstones", "annotations")
+        .none { payload.array(it)?.items.orEmpty().isNotEmpty() }
+}
+
+/** `crlf` when most line breaks in [text] are CRLF, otherwise `lf` (same rule as the desktop `detectLineEnding`). */
+fun detectLineEnding(text: String): String {
+    var crlf = 0
+    var lf = 0
+    var i = text.indexOf('\n')
+    while (i >= 0) {
+        if (i > 0 && text[i - 1] == '\r') crlf++ else lf++
+        i = text.indexOf('\n', i + 1)
+    }
+    return if (crlf > lf) "crlf" else "lf"
+}
+
+/** CRLF and lone CR become LF, so the editor never sees carriage returns. */
+fun toLf(text: String): String = if (text.indexOf('\r') < 0) text else text.replace("\r\n", "\n").replace('\r', '\n')
+
+/** LF text written with the file's own line ending. */
+fun applyLineEnding(text: String, ending: String): String =
+    if (ending == "crlf") toLf(text).replace("\n", "\r\n") else text
+
 fun noteInkId(markdown: String): String? = INK_MARKER.find(markdown)?.groupValues?.get(1)
 
 /** Same attachment rule as `attachNoteInk` in the desktop client. */

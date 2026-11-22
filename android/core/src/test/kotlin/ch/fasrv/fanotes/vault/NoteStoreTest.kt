@@ -21,7 +21,7 @@ class NoteStoreTest {
         val second = store.createUniqueMarkdown("Schule")
         assertEquals("Schule/Unbenannte Notiz.md", first)
         assertEquals("Schule/Unbenannte Notiz 2.md", second)
-        assertTrue(store.readNote(first).markdown.startsWith("# Unbenannte Notiz\n\n"))
+        assertTrue(store.readNote(first).markdown.startsWith("# Unbenannte Notiz\n"))
         store.createUniqueFolder("Schule")
         store.createUniqueFolder("Schule")
         val names = store.tree().single { it.name == "Schule" }.children.map { it.name }

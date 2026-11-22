@@ -142,7 +142,7 @@ class NoteHistoryTest {
     fun savingANoteKeepsThePreviousMarkdown() {
         val vault = DirectoryVault(Files.createTempDirectory("fanotes-history-save"))
         val store = NoteStore(vault)
-        val path = store.createMarkdown("", "Lecture")
+        val path = store.createInkNote("", "Lecture")
         val note = store.readNote(path)
         store.save(note, note.document, "Zweite Fassung\n")
         val history = listNoteHistory(vault, path)
