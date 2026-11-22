@@ -22,6 +22,7 @@
     "check:diagnostics": "node scripts/check-diagnostics.mjs",
     "check:send-data": "node scripts/check-send-data.cjs && node scripts/check-settings-schema.cjs",
     "check:qa-shell-windows": "node scripts/check-qa-shell-windows.cjs",
+    "check:windows-review": "node scripts/check-windows-review.mjs",
     "check:csp": "node scripts/check-csp-delivery.cjs",
     "check:visual": "node scripts/check-visual-rendering.cjs",
     "check:vault-watch": "node scripts/check-vault-watch.cjs",

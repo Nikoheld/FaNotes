@@ -127,7 +127,22 @@ export type SyncPathOptions = {
   includeRecognitionModel?: boolean
   includeHistory?: boolean
   includeAttachments?: boolean
+  /** This device is Windows: names from Linux or Android that NTFS cannot hold are not synced here. */
+  windowsNames?: boolean
 }
+
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|conin\$|conout\$|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3])$/iu
+
+/**
+ * A name Windows cannot create: illegal characters (a colon would even open an NTFS alternate data stream),
+ * a reserved device name with or without extension, or a trailing dot or space. Mirrors electron/entry-names.cjs.
+ */
+export const isWindowsUnsafeSyncName = (segment: string) => (
+  !segment
+  || /[<>:"|?*\0-\x1f]/u.test(segment)
+  || /[. ]$/u.test(segment)
+  || WINDOWS_DEVICE_NAME.test(segment.split('.')[0].trim())
+)
 
 /** A note, PDF note or shared metadata file. Everything else is an attachment. */
 export const isNoteSyncPath = (path: string) => (
@@ -141,6 +156,7 @@ export const isSyncablePath = (path: string, options: SyncPathOptions = {}) => {
   if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return false
   const name = segments[segments.length - 1]
   if (SKIPPED_NAMES.has(name) || /\.tmp$/iu.test(name) || /^\.~lock\./u.test(name) || /^~\$/u.test(name)) return false
+  if (options.windowsNames && segments.some(isWindowsUnsafeSyncName)) return false
   if (path === RECOGNITION_MODEL_SYNC_PATH && !options.includeRecognitionModel) return false
   if (pathIsSyncExcluded(path, options.excludedPrefixes ?? [])) return false
   if (options.includeAttachments === false && !isNoteSyncPath(path)) return false
@@ -316,6 +332,8 @@ export class SyncEngine {
   /** Compare the local manifest with the server's in the next cycle: after sign-in or start, and after the connection came back. */
   private needsReconcile = true
   private failures = new Map<string, string>()
+  /** Remote names this Windows device cannot store: recorded once, shown in the failure list, never retried. */
+  private unsupportedNames = new Map<string, string>()
   private timer: number | null = null
   /** While the server throttles, nothing starts a request: only the scheduled resume runs, at this time (epoch ms). A manual sync waits for it too. */
   private throttledUntil = 0
@@ -378,6 +396,7 @@ export class SyncEngine {
       includeRecognitionModel: this.options?.includeRecognitionModel?.() ?? false,
       includeHistory: this.options?.includeHistory?.() ?? false,
       includeAttachments: this.options?.includeAttachments?.() ?? true,
+      windowsNames: this.options?.platform === 'win32',
     }
   }
 
@@ -458,6 +477,7 @@ export class SyncEngine {
     this.throttledUntil = 0
     this.needsReconcile = true
     this.failures.clear()
+    this.unsupportedNames.clear()
     this.unreadableLogged.clear()
     this.setState({
       failed: [],
@@ -1131,7 +1151,18 @@ export class SyncEngine {
       return { result: 'skipped', path: null }
     }
     const path = meta.path
-    if (!this.acceptsPath(path)) return { result: 'skipped', path: null }
+    if (!this.acceptsPath(path)) {
+      if (this.pathOptions().windowsNames && path.split('/').some(isWindowsUnsafeSyncName)) {
+        if (!this.unsupportedNames.has(path)) {
+          this.unsupportedNames.set(path, 'Der Name ist unter Windows nicht erlaubt; die Datei bleibt auf den anderen Geräten und wird hier nicht synchronisiert.')
+          this.log('warn', `„${path}“ hat einen Namen, den Windows nicht speichern kann, und wird auf diesem Gerät nicht synchronisiert.`)
+          this.publishFailures()
+        }
+        // Final, not "skipped": a skipped entry stays on the retry list and would be pulled and logged every cycle.
+        return { result: 'noop', path: null }
+      }
+      return { result: 'skipped', path: null }
+    }
     const base = this.state.files[path]
     // We already hold this or a newer revision (our own upload, or a re-fetch after a held cursor).
     if (base && base.id === entry.id && entry.revision <= base.revision) return { result: 'noop', path }
@@ -1681,7 +1712,7 @@ export class SyncEngine {
    */
   /** Publishes the files that did not upload in this cycle (status line and Settings → Sync). */
   private publishFailures() {
-    this.setState({ failed: [...this.failures].map(([path, reason]) => ({ path, reason })).sort((a, b) => a.path.localeCompare(b.path, 'de')) })
+    this.setState({ failed: [...this.failures, ...this.unsupportedNames].map(([path, reason]) => ({ path, reason })).sort((a, b) => a.path.localeCompare(b.path, 'de')) })
   }
 
   /** The user asks for another attempt at the files that did not upload (also runs a full cycle). */

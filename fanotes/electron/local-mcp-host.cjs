@@ -16,7 +16,7 @@ const { normalizeExcluded } = require('./local-mcp-vault.cjs')
 // user data, where a client can point at it (and the path survives updates of the AppImage).
 const MCP_RUNTIME_FILES = [
   'fanotes-mcp.cjs', 'local-mcp.cjs', 'local-mcp-transport.cjs', 'local-mcp-vault.cjs', 'local-mcp-host.cjs',
-  'german-search.cjs', 'famd.cjs', 'famdV2.mjs', 'famdPack.mjs', 'noteAnnotation.mjs',
+  'german-search.cjs', 'fs-retry.cjs', 'famd.cjs', 'famdV2.mjs', 'famdPack.mjs', 'noteAnnotation.mjs',
 ]
 
 /** Copies the stdio server files to `<userData>/mcp`; returns the entry path, or '' when that failed. */
