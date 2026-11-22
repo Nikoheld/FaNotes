@@ -37,6 +37,15 @@ fun visitNote(history: NoteTrail, path: String): NoteTrail {
     return NoteTrail(entries, entries.lastIndex)
 }
 
+/** History after a restart: the other open tabs first, the active note last, so Back reaches a neighbouring tab. */
+fun restoredNoteTrail(tabs: List<String>, active: String): NoteTrail {
+    val entries = tabs.filter { it != active } + active
+    return NoteTrail(entries, entries.lastIndex)
+}
+
+/** Minimum width of an unpinned tab on Android; the width otherwise follows the title. */
+const val ANDROID_TAB_MIN_DP = 96
+
 fun canGoBack(history: NoteTrail) = history.index > 0
 
 fun canGoForward(history: NoteTrail) = history.index >= 0 && history.index < history.entries.lastIndex

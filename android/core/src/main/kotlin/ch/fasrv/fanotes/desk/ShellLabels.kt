@@ -6,7 +6,12 @@ import java.util.Locale
 
 /** Long German date for the calendar day section ("Sonntag, 22. November 2026"); the ISO form stays internal. */
 fun calendarDayLabel(day: LocalDate): String =
-    day.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM yyyy", Locale.GERMAN))
+    if (calendarLocale() == Locale.ENGLISH) day.format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", Locale.ENGLISH))
+    else day.format(DateTimeFormatter.ofPattern("EEEE, d. MMMM yyyy", Locale.GERMAN))
+
+/** Locale of calendar dates: English when the UI language is English, German otherwise. */
+fun calendarLocale(language: String = ChromeText.language): Locale =
+    if (language.startsWith("en", ignoreCase = true)) Locale.ENGLISH else Locale.GERMAN
 
 /** Weekday labels of the study-time chart with their index into `dwellByWeekday` (0 = Sunday); Monday first like the calendar. */
 val STUDY_WEEKDAY_ORDER: List<Pair<Int, String>> =
