@@ -140,7 +140,7 @@ fun StudySheet(model: FaNotesViewModel, initialTab: String, modifier: Modifier =
                     Text(ui(if (tab == "study-marks") "Markierungen" else "Aufträge"), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     SheetTimerText(model)
                     TextButton(onClick = { folded = !folded }) { Text(ui(if (folded) "Aufklappen" else "Einklappen")) }
-                    TextButton(onClick = { model.openEditorMenu(null) }) { Text(ui("Schließen")) }
+                    TextButton(onClick = { model.openEditorMenu(null) }) { Text(ui("Schliessen")) }
                 }
                 if (!folded) {
                     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
@@ -370,7 +370,7 @@ fun StudyBlockDialog(model: FaNotesViewModel) {
         StudyKind.PLATE -> "Bildtafel"
         StudyKind.CRYPTO -> "Krypto-Werkzeug"
     }
-    val unreadable = "Dieser Block ist nicht lesbar oder zu groß für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."
+    val unreadable = "Dieser Block ist nicht lesbar oder zu gross für das Tablet. Er bleibt unverändert; du siehst und bearbeitest ihn über „Quelltext zeigen“."
     val screenHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp
     AlertDialog(
         onDismissRequest = { model.closeStudyBlock() },

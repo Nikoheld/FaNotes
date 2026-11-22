@@ -19,9 +19,37 @@ fun resolveUiLanguage(preference: String?, deviceLanguages: List<String>): Strin
     }
 }
 
+/** Swiss spelling: UI text never shows "ß". */
+fun swissSpelling(text: String): String = if (text.indexOf('ß') < 0) text else text.replace("ß", "ss")
+
+/**
+ * The catalog keyed by Swiss spelling too, so a source written with "ss" finds the desktop's "ß" key.
+ * One index is kept for the catalog map in use.
+ */
+private class SwissIndex(val catalog: Map<String, String>) {
+    val byNormalized: Map<String, String> = HashMap<String, String>().also { map ->
+        for ((key, value) in catalog) if (key.indexOf('ß') >= 0) map.putIfAbsent(swissSpelling(key), value)
+    }
+}
+
+@Volatile private var swissIndex: SwissIndex? = null
+
+private fun swissLookup(catalog: Map<String, String>, source: String): String? {
+    var index = swissIndex
+    if (index == null || index.catalog !== catalog) {
+        index = SwissIndex(catalog)
+        swissIndex = index
+    }
+    return index.byNormalized[source]
+}
+
+/**
+ * German keeps the source (in Swiss spelling); English is the desktop catalog, looked up by the exact
+ * German source, or by its "ss" form for a key the desktop spells with "ß".
+ */
 fun translateChrome(source: String, language: String, catalog: Map<String, String>): String {
-    if (language != "en") return source
-    return catalog[source] ?: source
+    if (language != "en") return swissSpelling(source)
+    return catalog[source] ?: swissLookup(catalog, source) ?: swissSpelling(source)
 }
 
 /** Note bodies, file names, and other user text stay as written. */

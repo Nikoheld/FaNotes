@@ -97,7 +97,19 @@ class WritingActivity : ComponentActivity() {
         }
         intent.getStringExtra(EXTRA_PATH)?.let { holdStory(it) }
         web.addJavascriptInterface(StoryBridge(graph.vault, onSaved = { graph.engine.notifyLocalChange() }, onClose = { runOnUiThread { finish() } }, onCreated = { path -> runOnUiThread { holdStory(path) } }, onBusy = { busy -> gate?.report(busy) }), "FaNotesAndroid")
-        setContentView(web)
+        // Edge-to-edge (targetSdk 36): keep the editor out from under the status bar, the gesture bar, a cutout and the keyboard.
+        val container = android.widget.FrameLayout(this)
+        container.addView(web, android.widget.FrameLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(container) { view, insets ->
+            val bars = insets.getInsets(
+                androidx.core.view.WindowInsetsCompat.Type.systemBars() or
+                    androidx.core.view.WindowInsetsCompat.Type.displayCutout() or
+                    androidx.core.view.WindowInsetsCompat.Type.ime(),
+            )
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            androidx.core.view.WindowInsetsCompat.CONSUMED
+        }
+        setContentView(container)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             // The editor saves and then calls close(); a second press while it saves is ignored.
             override fun handleOnBackPressed() { if (webGone) finish() else web.evaluateJavascript("window.dispatchEvent(new Event('fanotes-writing-close'))", null) }
@@ -169,7 +181,13 @@ class WritingActivity : ComponentActivity() {
             return try {
                 WebResourceResponse(mimeOf(path), if (mimeOf(path).startsWith("text") || path.endsWith(".js")) "utf-8" else null, context.assets.open("writing/$path"))
             } catch (_: java.io.IOException) {
-                WebResourceResponse("text/plain", "utf-8", 404, "Not found", emptyMap(), null)
+                // A build without the web bundle: a readable page instead of the WebView's raw error.
+                if (path.endsWith(".html")) {
+                    val lang = if (Locale.getDefault().language == "de") "de" else "en"
+                    WebResourceResponse("text/html", "utf-8", ch.fasrv.fanotes.desk.bundleMissingPage(lang).byteInputStream())
+                } else {
+                    WebResourceResponse("text/plain", "utf-8", 404, "Not found", emptyMap(), null)
+                }
             }
         }
 

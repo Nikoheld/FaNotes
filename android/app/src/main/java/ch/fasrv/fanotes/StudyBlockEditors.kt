@@ -281,5 +281,5 @@ fun PlateEditor(model: FaNotesViewModel, data: PlateData, update: Update<PlateDa
         ActionButton("Bilder hinzufügen", data.items.size < PLATE_MAX_ITEMS) { addMany.launch("image/*") }
         ActionButton("Eintrag ohne Bild", data.items.size < PLATE_MAX_ITEMS) { update { d -> plateAddItem(d, "", "") } }
     }
-    Muted("Einträge mit Bild und Name erscheinen auch als Karteikarten („Wie heißt das?“).")
+    Muted("Einträge mit Bild und Name erscheinen auch als Karteikarten („Wie heisst das?“).")
 }

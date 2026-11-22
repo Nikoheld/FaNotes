@@ -354,8 +354,8 @@ class MainActivity : ComponentActivity() {
                 desk["ui-font"].orEmpty(),
                 ch.fasrv.fanotes.desk.parseCustomChrome(css),
             ) {
-                val touchWidth = LocalConfiguration.current.screenWidthDp
-                CompositionLocalProvider(LocalTouch provides ch.fasrv.fanotes.desk.TouchMetrics(ch.fasrv.fanotes.desk.touchLarge(desk["touch-large"], touchWidth))) {
+                val touchscreen = androidx.compose.ui.platform.LocalContext.current.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN)
+                CompositionLocalProvider(LocalTouch provides ch.fasrv.fanotes.desk.TouchMetrics(ch.fasrv.fanotes.desk.touchLarge(desk["touch-large"], touchscreen))) {
                 FaNotesScreen(
                     model = model,
                     onOpenVault = { openTree.launch(null) },
@@ -557,7 +557,10 @@ fun FaNotesTheme(
         }
     }
     CompositionLocalProvider(LocalStatusInk provides statusInk, LocalDeskThemeId provides palette.id) {
-        MaterialTheme(colorScheme = scheme, typography = chromeTypography(family), content = content)
+        MaterialTheme(colorScheme = scheme, typography = chromeTypography(family)) {
+            // Text outside a Surface would keep the default black content colour: dark on dark in every dark theme.
+            CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides scheme.onSurface, content = content)
+        }
     }
 }
 
@@ -676,7 +679,7 @@ fun FaNotesScreen(
     var sidebarLive by remember { mutableStateOf<Int?>(null) }
     var panelLive by remember { mutableStateOf<Int?>(null) }
     val signedIn = sync.account != null
-    val syncText = if (syncPending && sync.status != SyncStatus.SYNCING) "Startet…" else syncDetail(sync)
+    val syncText = if (syncPending && sync.status != SyncStatus.SYNCING) ui("Startet…") else syncDetail(sync)
     LaunchedEffect(sync.status) {
         if (sync.status == SyncStatus.SYNCING) syncPending = false
     }
@@ -1102,7 +1105,7 @@ fun FaNotesScreen(
                     PanelResizeHandle(
                         startDp = sidebarDp,
                         growsRight = true,
-                        description = "Seitenleiste verbreitern",
+                        description = ui("Seitenleiste verbreitern"),
                         hitDp = ch.fasrv.fanotes.desk.panelHandleHitDp(touch.large),
                         onResize = { sidebarLive = ch.fasrv.fanotes.desk.clampSidebarDp(it) },
                         onCommit = {
@@ -1199,7 +1202,7 @@ fun FaNotesScreen(
                         PanelResizeHandle(
                             startDp = panelDp,
                             growsRight = false,
-                            description = "Informationsleiste verbreitern",
+                            description = ui("Informationsleiste verbreitern"),
                             hitDp = ch.fasrv.fanotes.desk.panelHandleHitDp(touch.large),
                             onResize = { panelLive = ch.fasrv.fanotes.desk.clampPanelDp(it) },
                             onCommit = {
@@ -1438,7 +1441,7 @@ fun FaNotesScreen(
             "Add-on-Store",
             onDismiss = { model.addonStoreOpen.value = false },
             confirmLabel = ch.fasrv.fanotes.desk.ChromeText.ui("Installieren"),
-            dismissLabel = ch.fasrv.fanotes.desk.ChromeText.ui("Schließen"),
+            dismissLabel = ch.fasrv.fanotes.desk.ChromeText.ui("Schliessen"),
             onConfirm = { model.requestAddonImport() },
         ) {
             Text(
@@ -1458,17 +1461,17 @@ fun FaNotesScreen(
     }
     if (mathOpen) {
         PromptCard(
-            "Mathe",
+            ui("Mathe"),
             onDismiss = { mathOpen = false },
-            confirmLabel = "In die Notiz",
+            confirmLabel = ui("In die Notiz"),
             confirmEnabled = mathOk,
-            dismissLabel = "Schließen",
+            dismissLabel = ui("Schließen"),
             onConfirm = {
                 if (mathOk) model.insertMath(mathOutput)
                 mathOpen = false
             },
         ) {
-            Text("Ausrechnen, Vereinfachen, Ausmultiplizieren, Faktorisieren und Gleichungen bis Grad 2.", fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp)
+            Text(ui("Ausrechnen, Vereinfachen, Ausmultiplizieren, Faktorisieren und Gleichungen bis Grad 2."), fontSize = 12.sp, color = LocalStatusInk.current.muted, lineHeight = 17.sp)
             PromptField(mathInput, { mathInput = it }, "Ausdruck", onDone = {})
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(
@@ -1528,7 +1531,7 @@ fun FaNotesScreen(
                 ) { Text(if (updateBusy) "Lädt…" else "Installieren") }
             },
             dismissButton = {
-                TextButton(onClick = { model.clearUpdateOffer() }, enabled = !updateBusy) { Text("Später") }
+                TextButton(onClick = { model.clearUpdateOffer() }, enabled = !updateBusy) { Text(ui("Später")) }
             },
         )
     }
@@ -1675,12 +1678,12 @@ private fun SidebarLabelButton(label: String, onClick: () -> Unit, wide: Boolean
             .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_ACTION_RADIUS_DP.dp))
             .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
             .hoverable(interaction)
-            .clickable(interactionSource = interaction, indication = null, onClickLabel = description, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = null, onClickLabel = ui(description), onClick = onClick)
             .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_PDF_PAD_DP.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            label,
+            ui(label),
             fontSize = 12.sp,
             fontWeight = if (wide) FontWeight.ExtraBold else FontWeight.Medium,
             letterSpacing = if (wide) ch.fasrv.fanotes.desk.SIDEBAR_PDF_TRACKING.em else 0.em,
@@ -1707,7 +1710,7 @@ private fun SidebarSearchField(query: String, onQuery: (String) -> Unit, onFocus
             .background(if (hot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
             .hoverable(interaction)
             .padding(horizontal = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_PAD_DP.dp)
-            .semantics { contentDescription = "Notizen suchen" },
+            .semantics { contentDescription = ui("Notizen suchen") },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_GAP_DP.dp),
     ) {
@@ -1736,7 +1739,7 @@ private fun SidebarSearchField(query: String, onQuery: (String) -> Unit, onFocus
             decorationBox = { inner ->
                 Box {
                     if (query.isEmpty()) {
-                        Text("Suchen …", fontSize = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_SP.sp, color = ink.muted)
+                        Text(ui("Suchen …"), fontSize = ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_SP.sp, color = ink.muted)
                     }
                     inner()
                 }
@@ -1756,7 +1759,7 @@ private fun SidebarSearchField(query: String, onQuery: (String) -> Unit, onFocus
             ) {
                 Icon(
                     Icons.Filled.Close,
-                    contentDescription = "Suche leeren",
+                    contentDescription = ui("Suche leeren"),
                     modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_ICON_DP.dp),
                     tint = if (clearHot) MaterialTheme.colorScheme.onSurface else ink.muted,
                 )
@@ -1857,7 +1860,7 @@ private fun VaultPane(
             horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SIDEBAR_HEADER_GAP_DP.dp),
         ) {
             Text(
-                vaultLabel,
+                if (vaultLabel == "Auf diesem Tablet") ui(vaultLabel) else vaultLabel,
                 modifier = Modifier
                     .weight(1f)
                     .padding(
@@ -1900,15 +1903,15 @@ private fun VaultPane(
             )
         }
         if (conflicts.isNotEmpty()) {
-            Text("Konflikte", fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp))
+            Text(ui("Konflikte"), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp))
             conflicts.forEach { conflict ->
                 Column(Modifier.padding(vertical = 4.dp)) {
                     Text(conflict.path.substringAfterLast('/'), maxLines = 1, fontSize = 13.sp)
                     Row {
-                        TextButton(onClick = { onResolve(conflict, "remote") }) { Text("Server") }
-                        TextButton(onClick = { onResolve(conflict, "local") }) { Text("Tablet") }
+                        TextButton(onClick = { onResolve(conflict, "remote") }) { Text(ui("Server")) }
+                        TextButton(onClick = { onResolve(conflict, "local") }) { Text(ui("Tablet")) }
                         if (ch.fasrv.fanotes.desk.isMarkdownConflictPath(conflict.path)) {
-                            TextButton(onClick = { onResolve(conflict, "both") }) { Text("Beide") }
+                            TextButton(onClick = { onResolve(conflict, "both") }) { Text(ui("Beide")) }
                         }
                     }
                 }
@@ -2040,8 +2043,8 @@ private fun VaultPane(
                 )
             }
         }
-        TextButton(onClick = onOpenVault) { Text("Vault-Ordner öffnen") }
-        TextButton(onClick = onPrivateVault) { Text("Tablet-Vault verwenden") }
+        TextButton(onClick = onOpenVault) { Text(ui("Vault-Ordner öffnen")) }
+        TextButton(onClick = onPrivateVault) { Text(ui("Tablet-Vault verwenden")) }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -2059,7 +2062,7 @@ private fun VaultPane(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                ch.fasrv.fanotes.desk.sidebarFileLabel(ch.fasrv.fanotes.desk.sidebarFileCount(tree)),
+                ch.fasrv.fanotes.desk.sidebarFileLabel(ch.fasrv.fanotes.desk.sidebarFileCount(tree), ch.fasrv.fanotes.desk.ChromeText.language),
                 fontSize = 12.sp,
                 color = LocalStatusInk.current.muted,
             )
@@ -2317,13 +2320,13 @@ private fun NoteRow(
             )
             Icon(
                 Icons.Filled.Check,
-                contentDescription = "Namen übernehmen",
+                contentDescription = ui("Namen übernehmen"),
                 modifier = Modifier.size(ch.fasrv.fanotes.desk.TREE_RENAME_ACTION_DP.dp).clickable { finish() },
                 tint = LocalStatusInk.current.muted,
             )
             Icon(
                 Icons.Filled.Close,
-                contentDescription = "Umbenennen abbrechen",
+                contentDescription = ui("Umbenennen abbrechen"),
                 modifier = Modifier.size(ch.fasrv.fanotes.desk.TREE_RENAME_ACTION_DP.dp).clickable {
                     canceling = true
                     onCancelRename()
@@ -2407,7 +2410,7 @@ private fun NoteRow(
             Box {
                 Icon(
                     Icons.Filled.MoreVert,
-                    contentDescription = "Aktionen für ${node.name}",
+                    contentDescription = ui("Aktionen für") + " ${node.name}",
                     tint = LocalStatusInk.current.muted,
                     modifier = Modifier.size(22.dp).clickable { menu = true },
                 )
@@ -2658,10 +2661,10 @@ private fun EditorHeader(
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (showMenu) IconButton(onClick = onMenu) { Icon(Icons.Filled.Menu, contentDescription = "Notizen") }
+            if (showMenu) IconButton(onClick = onMenu) { Icon(Icons.Filled.Menu, contentDescription = ui("Notizen")) }
             Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f), maxLines = 1)
-            TextButton(onClick = onDeleteSelection) { Text("Auswahl löschen") }
-            TextButton(onClick = { onFinger(!fingerDraws) }) { Text(if (fingerDraws) "Finger zeichnet" else "Finger blättert") }
+            TextButton(onClick = onDeleteSelection) { Text(ui("Auswahl löschen")) }
+            TextButton(onClick = { onFinger(!fingerDraws) }) { Text(ui(if (fingerDraws) "Finger zeichnet" else "Finger blättert")) }
         }
         Row(
             Modifier.horizontalScroll(rememberScrollState()),
@@ -2721,12 +2724,12 @@ private fun EditorTools(
     textOn: Boolean,
 ) {
     NavigationBar {
-        NavigationBarItem(selected = tool == InkTool.PEN, onClick = { onTool(InkTool.PEN) }, icon = { Icon(Icons.Filled.Edit, contentDescription = "Stift") }, label = { Text("Stift") })
-        NavigationBarItem(selected = tool == InkTool.ERASER, onClick = { onTool(InkTool.ERASER) }, icon = { Icon(Icons.Filled.CleaningServices, contentDescription = "Radierer") }, label = { Text("Radierer") })
-        NavigationBarItem(selected = tool == InkTool.SELECT, onClick = { onTool(InkTool.SELECT) }, icon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = "Auswahl") }, label = { Text("Auswahl") })
-        NavigationBarItem(selected = false, onClick = onUndo, enabled = canUndo, icon = { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Rückgängig") }, label = { Text("Zurück") })
-        NavigationBarItem(selected = false, onClick = onRedo, enabled = canRedo, icon = { Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Wiederholen") }, label = { Text("Vor") })
-        NavigationBarItem(selected = textOn, onClick = onText, icon = { Icon(Icons.Filled.Description, contentDescription = "Text") }, label = { Text("Text") })
+        NavigationBarItem(selected = tool == InkTool.PEN, onClick = { onTool(InkTool.PEN) }, icon = { Icon(Icons.Filled.Edit, contentDescription = ui("Stift")) }, label = { Text(ui("Stift")) })
+        NavigationBarItem(selected = tool == InkTool.ERASER, onClick = { onTool(InkTool.ERASER) }, icon = { Icon(Icons.Filled.CleaningServices, contentDescription = ui("Radierer")) }, label = { Text(ui("Radierer")) })
+        NavigationBarItem(selected = tool == InkTool.SELECT, onClick = { onTool(InkTool.SELECT) }, icon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = ui("Auswahl")) }, label = { Text(ui("Auswahl")) })
+        NavigationBarItem(selected = false, onClick = onUndo, enabled = canUndo, icon = { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = ui("Rückgängig")) }, label = { Text("Zurück") })
+        NavigationBarItem(selected = false, onClick = onRedo, enabled = canRedo, icon = { Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = ui("Wiederholen")) }, label = { Text("Vor") })
+        NavigationBarItem(selected = textOn, onClick = onText, icon = { Icon(Icons.Filled.Description, contentDescription = ui("Text")) }, label = { Text(ui("Text")) })
     }
 }
 
@@ -2791,7 +2794,7 @@ private fun SplitDivider(
     Box(
         Modifier
             .then(if (rows) Modifier.fillMaxWidth().height(LocalTouch.current.dividerLayoutDp.dp) else Modifier.fillMaxHeight().width(LocalTouch.current.dividerLayoutDp.dp))
-            .semantics { contentDescription = "Teilung anpassen" }
+            .semantics { contentDescription = ui("Teilung anpassen") }
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -2867,9 +2870,11 @@ private fun SplitPane(
     var typing by remember(path) { mutableStateOf(false) }
     var splitEditor by remember(path) { mutableStateOf<SplitEditorView?>(null) }
     val splitImages by model.splitPaperImages.collectAsStateWithLifecycle()
+    val splitBackdrop by model.splitBackdrop.collectAsStateWithLifecycle()
+    val isPdf = path?.endsWith(".pdf", ignoreCase = true) == true
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+            Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).widthIn(min = 96.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (splitUnsaved) {
                 Box(
                     Modifier
@@ -2877,15 +2882,18 @@ private fun SplitPane(
                         .size(6.dp)
                         .clip(androidx.compose.foundation.shape.CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .semantics { contentDescription = "Noch nicht gespeichert" },
+                        .semantics { contentDescription = ui("Noch nicht gespeichert") },
                 )
             }
-            TextButton(onClick = { typing = !typing }) { Text(if (typing) "Stift" else "Text") }
-            if (typing) TextButton(onClick = { splitEditor?.selectNext() }) { Text("Nächstes") }
-            TextButton(onClick = { model.swapSplit() }) { Text("Tauschen") }
-            TextButton(onClick = { model.toggleSplitOrientation() }) { Text("Drehen") }
-            TextButton(onClick = { model.promoteSplit() }) { Text("Einzeln") }
-            TextButton(onClick = { model.closeSplit() }) { Text("Schließen") }
+            // Narrow panes: the title keeps a readable minimum and the actions scroll instead of squeezing it.
+            Row(Modifier.weight(2f, fill = false).horizontalScroll(androidx.compose.foundation.rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                if (!isPdf) TextButton(onClick = { typing = !typing }) { Text(ui(if (typing) "Stift" else "Text")) }
+                if (typing && !isPdf) TextButton(onClick = { splitEditor?.selectNext() }) { Text(ui("Nächstes")) }
+                TextButton(onClick = { model.swapSplit() }) { Text(ui("Tauschen")) }
+                TextButton(onClick = { model.toggleSplitOrientation() }) { Text(ui("Drehen")) }
+                TextButton(onClick = { model.promoteSplit() }) { Text(ui("Einzeln")) }
+                TextButton(onClick = { model.closeSplit() }) { Text(ui("Schließen")) }
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
         AndroidView(
@@ -2935,6 +2943,7 @@ private fun SplitPane(
                     openFollowedLink(view.context, model, target, web, anchor)
                 }
                 if (view.paperImages !== splitImages) view.paperImages = splitImages
+                if (view.backdrop !== splitBackdrop) { view.backdrop = splitBackdrop; view.invalidate() }
                 view.onCamera = camera@{ _, _, _ ->
                     val current = path ?: return@camera
                     val sample = view.cameraSample() ?: return@camera
@@ -3207,6 +3216,7 @@ private fun NotePage(
                                 "more" -> "Mehr"
                                 "study-insert" -> "Lernblock einfügen"
                                 "pdf-outline" -> "Gliederung"
+                                "pdf-thumbs" -> "Seiten"
                                 else -> "Werkzeuge"
                             },
                         ),
@@ -3732,21 +3742,21 @@ private fun syncDetail(state: ch.fasrv.fanotes.sync.SyncPublicState): String {
         val progress = state.progress
         if (progress != null && progress.total > 0) {
             val verb = when (progress.phase) {
-                "pull" -> "Laden"
-                "push" -> "Senden"
-                else -> "Prüfen"
+                "pull" -> ui("Laden")
+                "push" -> ui("Senden")
+                else -> ui("Prüfen")
             }
             return "$verb ${progress.done}/${progress.total}"
         }
-        return "Synchronisiert…"
+        return ui("Synchronisiert…")
     }
     return when (state.status) {
-        SyncStatus.IDLE -> "Synchron"
-        SyncStatus.OFFLINE -> "Offline"
-        SyncStatus.ERROR -> state.error?.take(42) ?: "Sync-Fehler"
-        SyncStatus.SIGNED_OUT -> "Anmelden"
-        SyncStatus.PAUSED -> "Pausiert"
-        else -> "Sync"
+        SyncStatus.IDLE -> ui("Synchron")
+        SyncStatus.OFFLINE -> ui("Offline")
+        SyncStatus.ERROR -> state.error?.take(42) ?: ui("Sync-Fehler")
+        SyncStatus.SIGNED_OUT -> ui("Anmelden")
+        SyncStatus.PAUSED -> ui("Pausiert")
+        else -> ui("Sync")
     }
 }
 
@@ -3817,7 +3827,7 @@ private fun InkNoticeBanner(notice: ch.fasrv.fanotes.ink.InkNotice?, onClose: ()
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(current.text, modifier = Modifier.weight(1f), fontSize = 13.sp)
-        TextButton(onClick = onClose) { Text("Schließen") }
+        TextButton(onClick = onClose) { Text(ui("Schließen")) }
     }
 }
 
@@ -3825,8 +3835,8 @@ private fun InkNoticeBanner(notice: ch.fasrv.fanotes.ink.InkNotice?, onClose: ()
 private fun MarkdownPanel(text: String, onChange: (String) -> Unit, modifier: Modifier) {
     Surface(modifier, color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
         Column(Modifier.padding(16.dp)) {
-            Text("Markdown", style = MaterialTheme.typography.titleMedium)
-            Text("Getippter Text liegt in der Notiz. Die Tinte bleibt in der .famd-Datei.", style = MaterialTheme.typography.bodySmall)
+            Text(ui("Markdown"), style = MaterialTheme.typography.titleMedium)
+            Text(ui("Getippter Text liegt in der Notiz. Die Tinte bleibt in der .famd-Datei."), style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(8.dp))
             BasicTextField(
                 value = text,
@@ -3952,7 +3962,7 @@ private fun WorksheetImportDialog(
                     ) {
                         Icon(
                             Icons.Filled.Close,
-                            contentDescription = "Schließen",
+                            contentDescription = ui("Schließen"),
                             modifier = Modifier.size(ch.fasrv.fanotes.desk.SHEET_IMPORT_CLOSE_ICON_DP.dp),
                             tint = ink.muted,
                         )
@@ -4145,7 +4155,7 @@ private fun TrashDialog(
                     .padding(ch.fasrv.fanotes.desk.PROMPT_PAD_DP.dp),
                 verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.PROMPT_GAP_DP.dp),
             ) {
-                Text("Papierkorb", fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
+                Text(ui("Papierkorb"), fontSize = ch.fasrv.fanotes.desk.PROMPT_TITLE_SP.sp, fontWeight = FontWeight(650), letterSpacing = (-0.02).em)
                 Text(
                     "Gelöschte Notizen bleiben auf diesem Tablet. Andere Geräte sehen sie nicht.",
                     fontSize = 12.sp,
@@ -4153,7 +4163,7 @@ private fun TrashDialog(
                     lineHeight = 17.sp,
                 )
                 if (items.isEmpty()) {
-                    Text("Der Papierkorb ist leer.", fontSize = 14.sp, color = LocalStatusInk.current.soft)
+                    Text(ui("Der Papierkorb ist leer."), fontSize = 14.sp, color = LocalStatusInk.current.soft)
                 } else {
                     Column(
                         Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
@@ -4171,8 +4181,8 @@ private fun TrashDialog(
                                 )
                                 Text(trashWhen(item.deletedAt), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    TextButton(onClick = { onRestore(item.id) }) { Text("Wiederherstellen") }
-                                    TextButton(onClick = { onPurge(item.id) }) { Text("Endgültig löschen") }
+                                    TextButton(onClick = { onRestore(item.id) }) { Text(ui("Wiederherstellen")) }
+                                    TextButton(onClick = { onPurge(item.id) }) { Text(ui("Endgültig löschen")) }
                                 }
                             }
                         }
@@ -4180,7 +4190,7 @@ private fun TrashDialog(
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
                     if (items.isNotEmpty()) PromptButton("Papierkorb leeren", primary = false, onClick = onEmpty)
-                    PromptButton("Schließen", primary = true, onClick = onDismiss)
+                    PromptButton(ui("Schließen"), primary = true, onClick = onDismiss)
                 }
             }
         }

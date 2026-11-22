@@ -18,7 +18,7 @@ import java.io.ByteArrayOutputStream
 data class StudyImagePayload(val dataUrl: String, val aspect: Double)
 
 /** The image could not be squeezed under the per-image size cap. */
-class StudyImageTooLarge : Exception("Das Bild ist zu groß.")
+class StudyImageTooLarge : Exception("Das Bild ist zu gross.")
 
 object StudyImageImport {
     /**

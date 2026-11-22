@@ -220,7 +220,7 @@ fun WorkRequestsDialog(model: FaNotesViewModel) {
                         Text(t("Fehler & Wünsche"), fontSize = 16.sp, fontWeight = FontWeight(650))
                         Text(t("Beschreibe einen Fehler oder eine Funktion. Claude arbeitet daran und zeigt dir hier den Fortschritt."), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     }
-                    TextButton(onClick = dismiss) { Text(t("Schließen")) }
+                    TextButton(onClick = dismiss) { Text(t("Schliessen")) }
                 }
                 Row(Modifier.padding(horizontal = 18.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip(t("Neu"), tab == "new") { tab = "new"; error = null }

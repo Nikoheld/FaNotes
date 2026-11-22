@@ -187,7 +187,7 @@ private fun VaultCards(data: VaultStats, anchorY: MutableMap<String, Int>) {
     val accent = MaterialTheme.colorScheme.primary
     SettingCard("Vault", Icons.Filled.Folder, Modifier.settingsAnchor("statistics", "settings-stat-vault", anchorY)) {
         StatLine("Notizen", count(data.totals.notes))
-        StatLine("Größe des Vaults", ch.fasrv.fanotes.sync.syncByteLabel(data.totals.bytes), "${count(data.totals.files)} " + t("Dateien") + " · ${count(data.totals.folders)} " + t("Ordner"))
+        StatLine("Grösse des Vaults", ch.fasrv.fanotes.sync.syncByteLabel(data.totals.bytes), "${count(data.totals.files)} " + t("Dateien") + " · ${count(data.totals.folders)} " + t("Ordner"))
         val top = data.kinds.values.maxOfOrNull { it.count }?.coerceAtLeast(1) ?: 1
         val kinds = StatKind.values().filter { (data.kinds[it]?.count ?: 0) > 0 }
         kinds.forEachIndexed { index, kind ->
@@ -219,7 +219,7 @@ private fun VaultCards(data: VaultStats, anchorY: MutableMap<String, Int>) {
             if (index != minOf(data.subjects.size, 12) - 1) Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
         }
     }
-    FileListCard("Größte Notizen", data.largest) { ch.fasrv.fanotes.sync.syncByteLabel(it.size) }
+    FileListCard("Grösste Notizen", data.largest) { ch.fasrv.fanotes.sync.syncByteLabel(it.size) }
     FileListCard("Zuletzt bearbeitet", data.recent) { ch.fasrv.fanotes.desk.overviewModifiedLabel(it.mtime) }
     FileListCard("Neueste Notizen", data.newest) { ch.fasrv.fanotes.desk.overviewModifiedLabel(if (it.ctime > 0) it.ctime else it.mtime) }
 }
@@ -414,10 +414,10 @@ private fun DiagnosticsCard(model: FaNotesViewModel, anchorY: MutableMap<String,
     var idShown by remember { mutableStateOf(client.installId()) }
     SettingCard("Diagnose & Verbesserung", Icons.Filled.Shield, Modifier.settingsAnchor("statistics", "settings-diagnostics", anchorY)) {
         Text(
-            t("Hilf mit, FaNotes zu verbessern. Beides ist standardmäßig aus. Es werden nie Notiztexte, Titel, Dateinamen, Pfade, E-Mail-Adressen, Sync-Schlüssel oder Vault-Inhalte gesendet. Gesendet wird höchstens einmal am Tag an fanotes.fasrv.ch, mit einer zufälligen Installations-ID, die nicht mit deinem Sync-Konto verbunden ist."),
+            t("Hilf mit, FaNotes zu verbessern. Beides ist standardmässig aus. Es werden nie Notiztexte, Titel, Dateinamen, Pfade, E-Mail-Adressen, Sync-Schlüssel oder Vault-Inhalte gesendet. Gesendet wird höchstens einmal am Tag an fanotes.fasrv.ch, mit einer zufälligen Installations-ID, die nicht mit deinem Sync-Konto verbunden ist."),
             fontSize = 12.sp, color = LocalStatusInk.current.muted, modifier = Modifier.padding(15.dp),
         )
-        SettingRow("Anonyme Nutzungsstatistik senden", "Version, Betriebssystem, wie oft Werkzeuge und Ansichten genutzt werden, Fehlerzahlen, Startzeit und ungefähre Vault-Größe in Stufen.") {
+        SettingRow("Anonyme Nutzungsstatistik senden", "Version, Betriebssystem, wie oft Werkzeuge und Ansichten genutzt werden, Fehlerzahlen, Startzeit und ungefähre Vault-Grösse in Stufen.") {
             Switch(checked = settings["diagnostics-usage"] == "on", onCheckedChange = { model.updateDesk("diagnostics-usage", if (it) "on" else "off"); preview = null })
         }
         SettingRow("Logs mitsenden", "Fehlerart, Fehlercode und die Code-Zeilen der App, bei der ein Fehler auftrat, plus ein Kürzel zum Gruppieren. Der Text der Fehlermeldung wird nie gesendet.") {
@@ -446,7 +446,7 @@ private fun DiagnosticsCard(model: FaNotesViewModel, anchorY: MutableMap<String,
             }
         }
         SettingRow("Vorschau", "Zeigt genau das JSON, das gesendet würde, wenn beide Schalter an sind.") {
-            DiagnosticsButton(if (preview != null) "Vorschau schließen" else "Vorschau", true) {
+            DiagnosticsButton(if (preview != null) "Vorschau schliessen" else "Vorschau", true) {
                 preview = if (preview != null) null else client.previewText(comment)
             }
         }

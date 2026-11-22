@@ -13,7 +13,7 @@ const val WORKSHEET_PDF_MAX_BYTES = 96L * 1024 * 1024
 
 const val WORKSHEET_FORMAT_UNSUPPORTED = "Es werden PDF-, PNG-, JPEG-, WebP- und GIF-Arbeitsblätter unterstützt."
 const val WORKSHEET_BYTES_MISMATCH = "Die ausgewählte Datei stimmt nicht mit ihrem Bild- oder PDF-Format überein."
-const val WORKSHEET_TOO_LARGE = "Das Bild ist leer oder zu groß."
+const val WORKSHEET_TOO_LARGE = "Das Bild ist leer oder zu gross."
 
 fun worksheetFileFormat(fileName: String, mime: String): WorksheetFileFormat? {
     val named = extensionOf(fileName.substringAfterLast('/').substringAfterLast('\\'))

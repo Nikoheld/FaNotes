@@ -113,7 +113,7 @@ fun TextToHandwritingDialog(
             completedRequest = previewRequest
             previewError = null
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (_: Exception) { previewError = "The handwriting preview could not be generated." }
+        catch (_: Exception) { previewError = "Die Handschrift-Vorschau konnte nicht erstellt werden." }
         finally { generating = false }
     }
     val canInsert = completedRequest === previewRequest && !generating && previewError == null && result.normalizedText == ch.fasrv.fanotes.ink.normalizeHandwritingText(text) && result.strokes.isNotEmpty() && result.missingCharacters.isEmpty() && !result.overflow
@@ -143,14 +143,14 @@ fun TextToHandwritingDialog(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Text in deine Handschrift", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text(ui("Text in deine Handschrift"), fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     Text(
-                        "Learns locally from your everyday handwritten notes. Known words retain their original pen movements.",
+                        ui("Lernt lokal aus deinen alltäglichen handgeschriebenen Notizen. Bekannte Wörter behalten ihre ursprünglichen Stiftbewegungen."),
                         fontSize = 12.sp,
                         color = LocalStatusInk.current.muted,
                     )
                 }
-                Text("Schließen", modifier = Modifier.clickable(onClick = onDismiss), fontSize = 12.sp)
+                Text(ui("Schliessen"), modifier = Modifier.clickable(onClick = onDismiss), fontSize = 12.sp)
             }
             val status = when {
                 learning.error != null -> learning.error
@@ -160,8 +160,8 @@ fun TextToHandwritingDialog(
             }
             Text(status.orEmpty(), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             Choice("Learn automatically from notes", learning.enabled) { onLearningEnabled(!learning.enabled) }
-            if (generating) Text("Preparing preview…", fontSize = 12.sp)
-            previewError?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
+            if (generating) Text(ui("Vorschau wird geladen …"), fontSize = 12.sp)
+            previewError?.let { Text(ui(it), fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
             if (wide) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     HandwritingControls(
@@ -183,15 +183,15 @@ fun TextToHandwritingDialog(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "Variation follows observed handwriting; unknown shapes use the school script.",
+                    ui("Die Variation folgt der beobachteten Handschrift; unbekannte Formen nutzen die Schulschrift."),
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.muted,
                     modifier = Modifier.weight(1f),
                 )
-                Text("Abbrechen", modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp), fontSize = 13.sp)
+                Text(ui("Abbrechen"), modifier = Modifier.clickable(onClick = onDismiss).padding(8.dp), fontSize = 13.sp)
                 val insertColor = if (canInsert) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted
                 Text(
-                    "Als Handschrift einfügen",
+                    ui("Als Handschrift einfügen"),
                     color = MaterialTheme.colorScheme.background,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
@@ -230,7 +230,7 @@ private fun HandwritingControls(
     modifier: Modifier,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Text", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Text(ui("Text"), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         BasicTextField(
             value = text,
             onValueChange = onText,
@@ -243,16 +243,16 @@ private fun HandwritingControls(
                 .padding(12.dp),
             decorationBox = { inner ->
                 Box {
-                    if (text.isEmpty()) Text("Schreibe oder füge hier deinen Text ein …", color = LocalStatusInk.current.muted, fontSize = 14.sp)
+                    if (text.isEmpty()) Text(ui("Schreibe oder füge hier deinen Text ein …"), color = LocalStatusInk.current.muted, fontSize = 14.sp)
                     inner()
                 }
             },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Einfügen", fontSize = 12.sp, modifier = Modifier.clickable(onClick = onPaste))
+            Text(ui("Einfügen"), fontSize = 12.sp, modifier = Modifier.clickable(onClick = onPaste))
             Text("${text.length} / 8 000", fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
-        HandSlider("Schriftgröße", "${fontSize.toInt()} px", fontSize, 20f, 72f, onFont)
+        HandSlider("Schriftgrösse", "${fontSize.toInt()} px", fontSize, 20f, 72f, onFont)
         HandSlider("Zeilenabstand", "%.2f×".format(lineSpacing), lineSpacing, 1.05f, 2f, onSpacing)
         HandSlider("Natürliche Variation", "${(variation * 100).toInt()}%", variation, 0f, 1f, onVariation)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -265,7 +265,7 @@ private fun HandwritingControls(
         }
         if (schoolOnly) {
             Text(
-                "Letter shapes without reliable local labels use the school script. Your ordinary notes teach style automatically.",
+                ui("Buchstabenformen ohne verlässliche lokale Beschriftung nutzen die Schulschrift. Deine normalen Notizen trainieren den Stil automatisch."),
                 fontSize = 12.sp,
                 color = Color(0xFFB8860B),
             )
@@ -285,8 +285,8 @@ private fun HandwritingControls(
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Optional: Training importieren", fontSize = 12.sp, modifier = Modifier.clickable(onClick = onImport))
-            if (!schoolOnly) Text("Training entfernen", fontSize = 12.sp, modifier = Modifier.clickable(onClick = onClear))
+            Text(ui("Optional: Training importieren"), fontSize = 12.sp, modifier = Modifier.clickable(onClick = onImport))
+            if (!schoolOnly) Text(ui("Training entfernen"), fontSize = 12.sp, modifier = Modifier.clickable(onClick = onClear))
         }
     }
 }
@@ -295,7 +295,7 @@ private fun HandwritingControls(
 private fun HandSlider(label: String, value: String, current: Float, min: Float, max: Float, onChange: (Float) -> Unit) {
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(label, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(ui(label), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             Text(value, fontSize = 12.sp)
         }
         Slider(value = current, onValueChange = onChange, valueRange = min..max)
@@ -306,7 +306,7 @@ private fun HandSlider(label: String, value: String, current: Float, min: Float,
 private fun Choice(label: String, active: Boolean, onClick: () -> Unit) {
     val shape = RoundedCornerShape(10.dp)
     Text(
-        label,
+        ui(label),
         fontSize = 12.sp,
         color = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
         modifier = Modifier
@@ -328,7 +328,7 @@ private fun HandwritingPreviewPane(
     Column(Modifier.widthIn(min = 280.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("Live-Vorschau", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Text(ui("Live-Vorschau"), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                 Text(
                     "${result.glyphCount} Zeichen · ${result.lineCount} Zeilen · ${result.connectionCount} Verbindungen",
                     fontSize = 12.sp,
@@ -336,7 +336,7 @@ private fun HandwritingPreviewPane(
                 )
             }
             Text(
-                "Neu variieren",
+                ui("Neu variieren"),
                 fontSize = 12.sp,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
                 modifier = Modifier.clickable(enabled = enabled, onClick = onReseed),
@@ -379,7 +379,7 @@ private fun HandwritingPreviewPane(
             }
             if (result.strokes.isEmpty()) {
                 Text(
-                    "Deine Vorschau erscheint hier",
+                    ui("Deine Vorschau erscheint hier"),
                     fontSize = 12.sp,
                     color = LocalStatusInk.current.muted,
                     modifier = Modifier.align(Alignment.Center),
@@ -387,7 +387,7 @@ private fun HandwritingPreviewPane(
             }
         }
         if (result.fontSizeUsed < requested - 0.5) {
-            Text("Für den verfügbaren Platz automatisch auf ${result.fontSizeUsed.toInt()} px angepasst.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(if (ch.fasrv.fanotes.desk.ChromeText.language == "en") "Automatically fitted to ${result.fontSizeUsed.toInt()} px for the available space." else "Für den verfügbaren Platz automatisch auf ${result.fontSizeUsed.toInt()} px angepasst.", fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
     }
 }

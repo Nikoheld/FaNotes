@@ -192,7 +192,7 @@ private fun contentPages(root: Path): List<HtmlPage> {
     for (path in htmlFiles(root)) {
         val size = Files.size(path)
         if (size <= 0L) continue
-        if (size > 128L * 1024 * 1024) throw OneNoteFailure("Eine OneNote-Seite ist leer oder zu groß.")
+        if (size > 128L * 1024 * 1024) throw OneNoteFailure("Eine OneNote-Seite ist leer oder zu gross.")
         val text = String(Files.readAllBytes(path), Charsets.UTF_8)
         if (text.isBlank() || previewIsNav(text)) continue
         pages += HtmlPage(htmlTitle(text, path.name), text)

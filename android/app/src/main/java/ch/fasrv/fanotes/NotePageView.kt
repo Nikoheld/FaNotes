@@ -1009,7 +1009,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         compareClose.gravity = Gravity.CENTER
         compareClose.minWidth = dp(48)
         compareClose.minHeight = dp(48)
-        compareClose.contentDescription = ch.fasrv.fanotes.desk.ChromeText.ui("Vergleich schließen")
+        compareClose.contentDescription = ch.fasrv.fanotes.desk.ChromeText.ui("Vergleich schliessen")
         compareClose.setOnClickListener { closeCompare() }
         header.addView(compareTitle, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         header.addView(compareClose, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
@@ -2577,7 +2577,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private fun addStudyTools() {
         val study = ink.study
         val select = ch.fasrv.fanotes.study.StudyTool.SELECT
-        tools.addView(studyChip("Fertig", description = "Lernwerkzeuge schließen") { setStudyOpen(false) })
+        tools.addView(studyChip("Fertig", description = "Lernwerkzeuge schliessen") { setStudyOpen(false) })
         tools.addView(studyToolChip("Wählen", select, "Auswählen und verschieben"))
         tools.addView(studyToolChip("Beschriftung setzen", ch.fasrv.fanotes.study.StudyTool.CALLOUT))
         tools.addView(studyChip("Nummeriert", study.numbered, description = "Nummeriert (1, 2, 3 + Legende)") {

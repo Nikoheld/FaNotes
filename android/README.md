@@ -36,6 +36,8 @@ export ANDROID_HOME="$HOME/Android/Sdk"
 ./gradlew :companion:assembleDebug
 ```
 
+`:app:assembleDebug` needs network access: the ONNX Runtime dependency (`onnxruntime-android`) is not in an offline Gradle cache, so `--offline` fails to resolve it. `:core:test` and `:app:compileDebugKotlin` do work with `--offline`. The writing mode bundle (`assets/writing/`) is built from `fanotes/` and needs Node plus `fanotes/node_modules` (and the git-ignored `fanotes/public/` assets); without them the build succeeds and the writing screen shows a "not included in this build" page.
+
 The debug APK is `android/app/build/outputs/apk/debug/app-debug.apk`. The phone companion is `android/companion/build/outputs/apk/debug/companion-debug.apk`. Install either with `adb install -r`. Android Studio can open the `android/` directory directly; the Gradle wrapper is 9.6 and the Android Gradle Plugin is 9.4 (built-in Kotlin 2.2.10).
 
 `:core:test` does not need a device. It checks the FAMD codec, the ink JSON shape, palm rejection, vault round-trips, the WebCrypto sync vectors, and a two-device sync against an in-memory server.
