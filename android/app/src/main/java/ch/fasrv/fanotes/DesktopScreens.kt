@@ -8937,6 +8937,8 @@ fun PdfThumbStrip(model: FaNotesViewModel) {
     val thumbs by model.pdfThumbs.collectAsStateWithLifecycle()
     val active by model.pdfThumbPage.collectAsStateWithLifecycle()
     val total by model.pdfPageCount.collectAsStateWithLifecycle()
+    // The "Seiten" panel exists to show the pages: show the thumbnails right away.
+    androidx.compose.runtime.LaunchedEffect(Unit) { if (!model.pdfThumbOpen.value) model.togglePdfThumbs() }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp)) {
         TextButton(onClick = { model.togglePdfThumbs() }) { Text(if (open) "Miniaturen ●" else "Miniaturen") }
         if (open) {
