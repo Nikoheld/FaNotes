@@ -21,6 +21,8 @@ export type BugReportEvent = {
   version?: string
   platform?: string
   message?: string
+  /** Where an error was thrown: bundle file base name and line, never a path. */
+  where?: string
   pageW?: number
   pageH?: number
   padX?: number
