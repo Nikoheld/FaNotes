@@ -163,8 +163,49 @@ data class DetailsBlock(
  * touch a window; block marks (details, study blocks, fences, math, tables) are always found for the whole text,
  * because a block can start outside the window.
  */
-fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int, windows: List<IntRange>? = null): List<LiveMark> {
+fun livePreviewMarks(
+    text: String,
+    selectionStart: Int,
+    selectionEnd: Int,
+    windows: List<IntRange>? = null,
+    blockMarkers: Boolean? = null,
+): List<LiveMark> {
     if (text.isEmpty()) return emptyList()
+    if (windows != null && text.length > LARGE_PREVIEW_CHARS && !(blockMarkers ?: textHasBlockMarkers(text))) {
+        return windows.flatMap { window -> windowMarks(text, selectionStart, selectionEnd, window) }
+    }
+    return livePreviewMarksWhole(text, selectionStart, selectionEnd, windows)
+}
+
+private const val LARGE_PREVIEW_CHARS = 30_000
+
+/** Text that needs a whole-note pass (blocks that can start outside a window). Without it every mark is per line.
+ * Callers that know the answer from an earlier pass can hand it to [livePreviewMarks]. */
+fun textHasBlockMarkers(text: String): Boolean =
+    text.contains("<details") || text.contains("<Details") || text.contains("<DETAILS") || text.contains("fanotes-") || text.contains("```") ||
+        text.contains("~~~") || text.contains("$$") || text.indexOf('|') >= 0
+
+/**
+ * Per-line marks for one window of a note without block markers: the lines of the window plus one line on each side
+ * are styled as a small note of their own and only the marks inside the window are kept.
+ */
+private fun windowMarks(text: String, selectionStart: Int, selectionEnd: Int, window: IntRange): List<LiveMark> {
+    val wFrom = window.first.coerceIn(0, text.length)
+    val wTo = (window.last + 1).coerceIn(wFrom, text.length)
+    var from = if (wFrom == 0) 0 else text.lastIndexOf('\n', wFrom - 1).let { if (it < 0) 0 else it + 1 }
+    if (from > 0) from = text.lastIndexOf('\n', from - 2).let { if (it < 0) 0 else it + 1 }
+    var to = text.indexOf('\n', wTo).let { if (it < 0) text.length else it }
+    if (to < text.length) to = text.indexOf('\n', to + 1).let { if (it < 0) text.length else it }
+    val sub = text.substring(from, to)
+    if (sub.isEmpty()) return emptyList()
+    val low = (minOf(selectionStart, selectionEnd) - from)
+    val high = (maxOf(selectionStart, selectionEnd) - from)
+    return livePreviewMarksWhole(sub, low, high, null)
+        .map { it.copy(start = it.start + from, end = it.end + from) }
+        .filter { it.start >= wFrom && it.end <= wTo + 1 && it.start < wTo }
+}
+
+private fun livePreviewMarksWhole(text: String, selectionStart: Int, selectionEnd: Int, windows: List<IntRange>?): List<LiveMark> {
     val from = selectionStart.coerceIn(0, text.length)
     val to = selectionEnd.coerceIn(0, text.length)
     val active = setOf(lineNumberAtOffset(text, minOf(from, to)), lineNumberAtOffset(text, maxOf(from, to)))
@@ -231,7 +272,7 @@ fun livePreviewMarks(text: String, selectionStart: Int, selectionEnd: Int, windo
             hidden += number
         }
     }
-    for (block in tableBlocks(lines)) {
+    for (block in tableBlocks(lines, text)) {
         if ((block.first..block.last).any { it in hidden }) continue
         if (to >= lines[block.first - 1].from && from <= lines[block.last - 1].to) continue
         val host = lines[block.first - 1]
@@ -717,8 +758,9 @@ private fun selectionEditsDetails(block: DetailsBlock, from: Int, to: Int): Bool
 private fun isTableLine(text: String): Boolean = text.contains('|') && TABLE_LINE.matches(text)
 
 /** Runs of table lines (header, rule, rows) as 1-based line ranges; a run needs a header and a rule line. */
-private fun tableBlocks(lines: List<DocLine>): List<IntRange> {
+private fun tableBlocks(lines: List<DocLine>, source: String): List<IntRange> {
     val out = ArrayList<IntRange>()
+    if (source.indexOf('|') < 0) return out
     var index = 0
     while (index < lines.size) {
         if (!isTableLine(lines[index].text)) { index += 1; continue }
@@ -741,16 +783,19 @@ private fun cleanSummary(value: String): String {
     return stripped.ifEmpty { "Details" }
 }
 
-private data class DocLine(val number: Int, val from: Int, val to: Int, val text: String)
+/** A document line; its text is cut from [source] on first use, so lines nobody looks at cost no copy. */
+private class DocLine(val number: Int, val from: Int, val to: Int, private val source: String) {
+    private var cached: String? = null
+    val text: String get() = cached ?: source.substring(from, to).also { cached = it }
+}
 
 private fun documentLines(text: String): List<DocLine> {
     val lines = ArrayList<DocLine>()
     var start = 0
     var number = 1
     while (start <= text.length) {
-        var end = start
-        while (end < text.length && text[end] != '\n') end += 1
-        lines += DocLine(number, start, end, text.substring(start, end))
+        val end = text.indexOf('\n', start).let { if (it < 0) text.length else it }
+        lines += DocLine(number, start, end, text)
         if (end >= text.length) break
         start = end + 1
         number += 1
@@ -761,7 +806,11 @@ private fun documentLines(text: String): List<DocLine> {
 private fun lineNumberAtOffset(text: String, offset: Int): Int {
     var line = 1
     val limit = offset.coerceIn(0, text.length)
-    for (index in 0 until limit) if (text[index] == '\n') line += 1
+    var at = text.indexOf('\n')
+    while (at in 0 until limit) {
+        line += 1
+        at = text.indexOf('\n', at + 1)
+    }
     return line
 }
 

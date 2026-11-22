@@ -7,6 +7,22 @@ import kotlin.test.assertTrue
 
 class LivePreviewTest {
     @Test
+    fun windowedMarksOfALongPlainNoteMatchTheWholeNotePass() {
+        val note = buildString {
+            repeat(1500) { append(if (it % 7 == 0) "# Titel $it\n" else "Zeile $it: **fett** und [Link](x.md) mit *kursiv*\n") }
+        }
+        val caret = note.indexOf("Zeile 800")
+        val window = (caret - 2000)..(caret + 2000)
+        val wholeNote = livePreviewMarks(note, caret, caret, null)
+            .filter { it.start >= window.first && it.end <= window.last + 1 }
+        val windowed = livePreviewMarks(note, caret, caret, listOf(window))
+            .filter { it.start >= window.first && it.end <= window.last + 1 }
+        assertEquals(wholeNote.toSet(), windowed.toSet())
+        // The caret line keeps its markers in both.
+        assertFalse(windowed.any { it.kind == LiveKind.STRONG && it.start in note.indexOf("Zeile 800")..note.indexOf("Zeile 801") })
+    }
+
+    @Test
     fun inlineImageHidesItsLeadingBang() {
         val note = "Vorher\nSiehe ![Zelle](zelle.png) dort\nNachher"
         val marks = livePreviewMarks(note, 0, 0)

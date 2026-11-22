@@ -69,6 +69,12 @@ import ch.fasrv.fanotes.desk.paperAccentReadableArgb
 import ch.fasrv.fanotes.desk.quoteMargins
 import ch.fasrv.fanotes.desk.selectionMatchRanges
 
+/**
+ * The editor's line spacing multiplier. The layout stretches every line, including a line a block span sized to its
+ * picture, by this factor; the block spans ask for the height divided by it so the block is not followed by blank space.
+ */
+internal const val EDITOR_LINE_SPACING_MULT = 1.72f
+
 /** A span the live preview owns, so the next pass can remove only its own marks. */
 interface LivePreviewSpan
 
@@ -90,6 +96,8 @@ fun applyLivePreview(
     images: Map<String, Bitmap> = emptyMap(),
     imageColumnPx: Float = 0f,
     windows: List<IntRange>? = null,
+    blockMarkers: Boolean? = null,
+    lineSpacing: Float = EDITOR_LINE_SPACING_MULT,
 ) {
     if (BaseInputConnection.getComposingSpanStart(editable) >= 0) return
     val length = editable.length
@@ -103,12 +111,12 @@ fun applyLivePreview(
     }
     val readable = paperAccentReadableArgb(accent)
     val source = editable.toString()
-    for (mark in livePreviewMarks(source, selectionStart, selectionEnd, windows)) {
+    for (mark in livePreviewMarks(source, selectionStart, selectionEnd, windows, blockMarkers)) {
         val start = mark.start.coerceIn(0, length)
         val end = mark.end.coerceIn(start, length)
         if (start == end || !touches(start, end)) continue
         editable.setSpan(
-            spanFor(mark, readable, accent, textSizePx, images, imageColumnPx),
+            spanFor(mark, readable, accent, textSizePx, images, imageColumnPx, lineSpacing),
             start,
             end,
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
@@ -129,7 +137,7 @@ fun applyLivePreview(
             if (partner != null && touches(partner, partner + 1)) paintBracket(editable, partner, color, length)
         }
     }
-    for (mark in specialCharMarks(source)) {
+    for (mark in specialCharMarks(source, windows)) {
         val from = mark.index
         val to = from + 1
         if (to > length || !touches(from, to)) continue
@@ -196,6 +204,7 @@ private fun spanFor(
     textSizePx: Float,
     images: Map<String, Bitmap>,
     imageColumnPx: Float,
+    lineSpacing: Float,
 ): Any = when (mark.kind) {
     LiveKind.HIDE -> HideSpan()
     LiveKind.COLLAPSE -> CollapseSpan()
@@ -239,8 +248,8 @@ private fun spanFor(
     LiveKind.DETAILS_END -> DetailsBodySpan(paperDetailsFillArgb(), textSizePx, true)
     LiveKind.TABLE_ROW -> TableRowSpan(paperTableFillArgb(accent), textSizePx)
     LiveKind.TABLE_RULE -> TableRuleSpan(textSizePx)
-    LiveKind.IMAGE -> ImageBlockSpan(mark.label, images[mark.body], imageColumnPx, textSizePx)
-    LiveKind.TABLE_BLOCK -> TableBlockSpan(mark.body, mark.label, paperTableFillArgb(accent), textSizePx)
+    LiveKind.IMAGE -> ImageBlockSpan(mark.label, images[mark.body], imageColumnPx, textSizePx, lineSpacing)
+    LiveKind.TABLE_BLOCK -> TableBlockSpan(mark.body, mark.label, paperTableFillArgb(accent), textSizePx, lineSpacing)
     LiveKind.RULE -> PaperThematicRuleSpan(textSizePx)
 }
 
@@ -1146,6 +1155,7 @@ internal class ImageBlockSpan(
     private val bitmap: Bitmap?,
     private val columnPx: Float,
     private val textSizePx: Float,
+    private val lineSpacing: Float = EDITOR_LINE_SPACING_MULT,
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
     private val margin = textSizePx * 0.5f
     private val column = if (columnPx > 0f) columnPx else textSizePx * 24f
@@ -1153,7 +1163,7 @@ internal class ImageBlockSpan(
 
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
         if (fm != null) {
-            val half = ((frame.second + margin * 2f) / 2f).toInt().coerceAtLeast(1)
+            val half = ((frame.second + margin * 2f) / lineSpacing.coerceAtLeast(1f) / 2f).toInt().coerceAtLeast(1)
             fm.ascent = -half
             fm.descent = half
             fm.top = fm.ascent
@@ -1219,6 +1229,7 @@ internal class TableBlockSpan(
     private val alignWire: String,
     private val headerFill: Int,
     private val textSizePx: Float,
+    private val lineSpacing: Float = EDITOR_LINE_SPACING_MULT,
 ) : ReplacementSpan(), LineBackgroundSpan, LivePreviewSpan {
     private val cells: List<List<String>> = rows.split('\n').map { it.split('\u001f') }
     private val columns = cells.maxOfOrNull { it.size } ?: 0
@@ -1228,7 +1239,7 @@ internal class TableBlockSpan(
 
     override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
         if (fm != null) {
-            val half = ((rowHeight * cells.size + hairline * 2f) / 2f).toInt().coerceAtLeast(1)
+            val half = ((rowHeight * cells.size + hairline * 2f) / lineSpacing.coerceAtLeast(1f) / 2f).toInt().coerceAtLeast(1)
             fm.ascent = -half
             fm.descent = half
             fm.top = fm.ascent

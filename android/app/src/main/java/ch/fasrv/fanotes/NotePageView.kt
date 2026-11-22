@@ -74,6 +74,8 @@ private class GutterText(context: Context) : TextView(context) {
 private const val PREVIEW_WINDOW_MIN_CHARS = 30_000
 private const val PREVIEW_FIRST_CHARS = 12_000
 private const val PREVIEW_CARET_CHARS = 1_500
+private const val PREVIEW_TYPING_CHARS = 500
+private const val BLOCK_MARKER_CHARS = "`~\$|<-\n"
 
 /**
  * The page and its chrome live in one clipped frame. The toolbar is a later
@@ -91,6 +93,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
     private var paintedTop = 0
     private var paintedBottom = 0
     private var paintedWindowed = false
+    /** Set by a keystroke in a long note: the next paint restyles only the lines around the caret. */
+    private var typingPaint = false
+    /** Whether the long note has block markers (fences, tables, ...), kept across typing so a keystroke does not rescan it. */
+    private var blockMarkersKnown: Boolean? = null
     private val editor = object : EditText(context) {
         // EditText.setText runs from the constructor and reports a selection
         // before the fields below exist. Stay quiet until init finishes.
@@ -1098,7 +1104,7 @@ class NotePageView(context: Context) : FrameLayout(context) {
         editor.setHintTextColor(0xFF8A8D98.toInt())
         editor.hint = ch.fasrv.fanotes.desk.ChromeText.ui("Text auf dem Papier")
         editor.typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-        editor.setLineSpacing(0f, 1.72f)
+        editor.setLineSpacing(0f, EDITOR_LINE_SPACING_MULT)
         editor.gravity = Gravity.TOP or Gravity.START
         editor.setPadding(0, 0, 0, 0)
         lineNumbers.setTextColor(0xFF8A8D98.toInt())
@@ -1155,8 +1161,10 @@ class NotePageView(context: Context) : FrameLayout(context) {
                         editor.rememberChange(origin, bracket.text)
                         onVisibleMarkdown(origin, bracket.text)
                     } else {
-                        val replacement = ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
-                            ?: ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next)
+                        val replacement = (if (next.length == editBefore.length + 1 && next.getOrNull(changeStart) == '\n') {
+                            ch.fasrv.fanotes.desk.markdownEnterReplacement(editBefore, next)
+                        } else null)
+                            ?: (if (next.length == editBefore.length - 1) ch.fasrv.fanotes.desk.markdownBackspaceReplacement(editBefore, next) else null)
                         if (replacement != null) {
                             writing = true
                             editor.setText(replacement.text)
@@ -1202,7 +1210,19 @@ class NotePageView(context: Context) : FrameLayout(context) {
                         }
                     }
                 }
-                if (previewReady) paintLivePreview()
+                val next0Large = !writing && (editor.text?.length ?: 0) > PREVIEW_WINDOW_MIN_CHARS
+                // Large note: the caret move that follows this edit schedules the (single) repaint; painting here
+                // as well would restyle the window twice per keystroke.
+                if (previewReady) {
+                    if (next0Large) {
+                        val live: CharSequence = editor.text ?: ""
+                        val insertedLen = live.length - editBefore.length + changeDeleted
+                        val inserted = if (insertedLen in 1..40 && changeStart + insertedLen <= live.length) live.subSequence(changeStart, changeStart + insertedLen).toString() else ""
+                        if (changeDeleted > 0 || insertedLen > 40 || inserted.any { it in BLOCK_MARKER_CHARS }) blockMarkersKnown = null
+                        typingPaint = true
+                        schedulePreview()
+                    } else paintLivePreview()
+                }
                 if (!writing) tags?.onUserEdit()
             }
         })
@@ -1533,6 +1553,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
         }
         val windows = ArrayList<IntRange>(2)
         val layout = editor.layout
+        if (typingPaint && paintedWindowed && editor.visibility == VISIBLE) {
+            // Typing: the screen was styled already and moves with the text; only the caret lines change.
+            val from = (editor.selectionStart.coerceAtLeast(0) - PREVIEW_TYPING_CHARS).coerceAtLeast(0)
+            val to = (editor.selectionEnd.coerceAtLeast(0) + PREVIEW_TYPING_CHARS).coerceAtMost(length)
+            return listOf(from until to.coerceAtLeast(from + 1))
+        }
         if (layout != null && layout.lineCount > 0 && editor.height > 0 && editor.visibility == VISIBLE) {
             val top = (editor.scrollY - editor.height * 2).coerceAtLeast(0)
             val bottom = (editor.scrollY + editor.height * 3).coerceAtMost(layout.height)
@@ -1564,6 +1590,12 @@ class NotePageView(context: Context) : FrameLayout(context) {
             val textWidth = editor.layout?.width?.toFloat()
                 ?: (editor.width - editor.paddingLeft - editor.paddingRight).toFloat()
             val imageColumn = (textWidth - box.border * 2f - box.padX * 2f).coerceAtLeast(0f)
+            val windows = previewWindows(editable)
+            val markers = when {
+                windows == null -> null
+                typingPaint && blockMarkersKnown != null -> blockMarkersKnown
+                else -> ch.fasrv.fanotes.desk.textHasBlockMarkers(editable.toString()).also { blockMarkersKnown = it }
+            }
             applyLivePreview(
                 editable,
                 editor.selectionStart,
@@ -1573,10 +1605,13 @@ class NotePageView(context: Context) : FrameLayout(context) {
                 editor.isFocused,
                 ink.paperImages,
                 imageColumn,
-                previewWindows(editable),
+                windows,
+                markers,
+                editor.lineSpacingMultiplier,
             )
             editor.bindLinkPointer()
         } finally {
+            typingPaint = false
             paintingPreview = false
         }
     }

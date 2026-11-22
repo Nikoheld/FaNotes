@@ -10,13 +10,19 @@ data class SpecialCharMark(val index: Int, val placeholder: String)
 /** Light-theme `.cm-specialChar` is CSS `red`. */
 const val SPECIAL_CHAR_ARGB = 0xFFFF0000.toInt()
 
-fun specialCharMarks(text: String): List<SpecialCharMark> {
+fun specialCharMarks(text: String): List<SpecialCharMark> = specialCharMarks(text, null)
+
+/** With [windows] only those character ranges are scanned (a long note is not scanned top to bottom per keystroke). */
+fun specialCharMarks(text: String, windows: List<IntRange>?): List<SpecialCharMark> {
     if (text.isEmpty()) return emptyList()
     val marks = ArrayList<SpecialCharMark>()
-    for (index in text.indices) {
-        val code = text[index].code
-        if (!isEditorSpecialChar(code)) continue
-        marks += SpecialCharMark(index, specialCharPlaceholder(code))
+    val ranges = windows ?: listOf(text.indices)
+    for (range in ranges) {
+        for (index in range.first.coerceAtLeast(0)..range.last.coerceAtMost(text.length - 1)) {
+            val code = text[index].code
+            if (!isEditorSpecialChar(code)) continue
+            marks += SpecialCharMark(index, specialCharPlaceholder(code))
+        }
     }
     return marks
 }
