@@ -332,6 +332,8 @@ export class SyncEngine {
   /** Compare the local manifest with the server's in the next cycle: after sign-in or start, and after the connection came back. */
   private needsReconcile = true
   private failures = new Map<string, string>()
+  /** Remote names this Windows device cannot store: recorded once, shown in the failure list, never retried. */
+  private unsupportedNames = new Map<string, string>()
   private timer: number | null = null
   /** While the server throttles, nothing starts a request: only the scheduled resume runs, at this time (epoch ms). A manual sync waits for it too. */
   private throttledUntil = 0
@@ -475,6 +477,7 @@ export class SyncEngine {
     this.throttledUntil = 0
     this.needsReconcile = true
     this.failures.clear()
+    this.unsupportedNames.clear()
     this.unreadableLogged.clear()
     this.setState({
       failed: [],
@@ -1150,7 +1153,13 @@ export class SyncEngine {
     const path = meta.path
     if (!this.acceptsPath(path)) {
       if (this.pathOptions().windowsNames && path.split('/').some(isWindowsUnsafeSyncName)) {
-        this.log('warn', `„${path}“ hat einen Namen, den Windows nicht speichern kann, und wird auf diesem Gerät nicht synchronisiert.`)
+        if (!this.unsupportedNames.has(path)) {
+          this.unsupportedNames.set(path, 'Der Name ist unter Windows nicht erlaubt; die Datei bleibt auf den anderen Geräten und wird hier nicht synchronisiert.')
+          this.log('warn', `„${path}“ hat einen Namen, den Windows nicht speichern kann, und wird auf diesem Gerät nicht synchronisiert.`)
+          this.publishFailures()
+        }
+        // Final, not "skipped": a skipped entry stays on the retry list and would be pulled and logged every cycle.
+        return { result: 'noop', path: null }
       }
       return { result: 'skipped', path: null }
     }
@@ -1690,7 +1699,7 @@ export class SyncEngine {
    */
   /** Publishes the files that did not upload in this cycle (status line and Settings → Sync). */
   private publishFailures() {
-    this.setState({ failed: [...this.failures].map(([path, reason]) => ({ path, reason })).sort((a, b) => a.path.localeCompare(b.path, 'de')) })
+    this.setState({ failed: [...this.failures, ...this.unsupportedNames].map(([path, reason]) => ({ path, reason })).sort((a, b) => a.path.localeCompare(b.path, 'de')) })
   }
 
   /** The user asks for another attempt at the files that did not upload (also runs a full cycle). */

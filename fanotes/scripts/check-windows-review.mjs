@@ -105,4 +105,40 @@ assert.match(main, /stripBom\(buffer\.toString\('utf8'\)\)/u, 'read-file drops t
 for (const file of ['sync.cjs', 'note-history.cjs', 'onenote-importer.cjs', 'local-mcp-vault.cjs']) {
   assert.match(readFileSync(join(appRoot, 'electron', file), 'utf8'), /renameWithRetry\(/u, `${file} retries busy renames`)
 }
+// Relaunch arguments follow the CommandLineToArgvW rules: the PowerShell helper doubles backslashes before a quote
+// and before the closing quote. Take the two -replace patterns from the helper source and check them with a decoder.
+{
+  const updater = readFileSync(join(appRoot, 'electron/updater.cjs'), 'utf8')
+  const line = updater.split('\n').find((item) => item.includes("-replace '(\\\\*)\"'"))
+  assert.ok(line, 'helper quotes arguments with the backslash rules')
+  const quote = (value) => `"${value.replace(/(\\*)"/gu, '$1$1\\"').replace(/(\\+)$/u, '$1$1')}"`
+  const decode = (text) => { // CommandLineToArgvW for one quoted argument
+    let out = ''
+    let i = 1
+    for (;;) {
+      let slashes = 0
+      while (text[i] === '\\') { slashes += 1; i += 1 }
+      if (text[i] === '"') {
+        out += '\\'.repeat(slashes >> 1)
+        if (slashes & 1) { out += '"'; i += 1; continue }
+        assert.equal(i, text.length - 1, 'an unescaped quote ends the argument')
+        return out
+      }
+      out += '\\'.repeat(slashes) + text[i]
+      i += 1
+    }
+  }
+  for (const value of ['--user-data-dir=C:\\Users\\x\\', '--user-data-dir=C:\\Data Dir\\', '--a="b"', '--a=C:\\x\\"y', '--plain=1', '--two=\\\\']) {
+    assert.equal(decode(quote(value)), value, value)
+  }
+  assert.equal(quote('--p=C:\\x\\'), '"--p=C:\\x\\\\"', 'trailing backslash is doubled')
+}
+
+// Linked folders compare like NTFS does, and a remote name Windows cannot hold is recorded once, not retried.
+const locations = readFileSync(join(appRoot, 'electron/folder-locations.cjs'), 'utf8')
+assert.ok(!/(real|previous|otherReal|absolute|fromReal) === (vault|real|base|toReal)/u.test(locations), 'no case-sensitive path equality left')
+assert.equal((locations.match(/samePhysicalPath\(/gu) ?? []).length, 5)
+const engine = readFileSync(join(appRoot, 'src/lib/sync/engine.ts'), 'utf8')
+assert.match(engine, /if \(!this\.unsupportedNames\.has\(path\)\) \{[\s\S]*?\}\s*\/\/ Final, not "skipped"[\s\S]*?return \{ result: 'noop', path: null \}/u, 'logged once and not left on the retry list')
+assert.match(engine, /\[\.\.\.this\.failures, \.\.\.this\.unsupportedNames\]/u, 'shown in the failure list')
 console.log('Windows review checks passed')

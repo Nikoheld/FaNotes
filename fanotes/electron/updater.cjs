@@ -159,7 +159,8 @@ function Get-RelaunchArguments {
     } catch { }
   }
   $list += "--fanotes-updated-from=$FromVersion"
-  return @($list | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
+  # CommandLineToArgvW rules: backslashes before a quote (or before the closing quote) are doubled.
+  return @($list | ForEach-Object { '"' + (($_ -replace '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"' })
 }
 
 function Write-Log([string]$Message) {
