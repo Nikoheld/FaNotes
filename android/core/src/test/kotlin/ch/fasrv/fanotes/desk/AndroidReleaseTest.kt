@@ -27,7 +27,7 @@ class AndroidReleaseTest {
         assertEquals("German", translateChrome("Deutsch", "en", catalog))
         assertEquals("Interface", translateChrome("Oberfläche", "en", catalog))
         assertEquals("Tag hinzufügen", translateChrome("Tag hinzufügen", "de", catalog))
-        assertEquals("Im Text suchen …", translateChrome("Im Text suchen …", "en", catalog))
+        assertEquals("Nicht im Katalog …", translateChrome("Nicht im Katalog …", "en", catalog))
         assertEquals("Tag hinzufügen", presentNoteText("Tag hinzufügen"))
         assertEquals("en", resolveUiLanguage("en", listOf("de-CH", "de")))
         assertEquals("de", resolveUiLanguage("de", listOf("en-US")))
