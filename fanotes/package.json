@@ -255,7 +255,7 @@
     "check:sync-parallel": "node scripts/check-sync-parallel.mjs",
     "check:sync-all-notes": "node scripts/check-sync-all-notes.mjs",
     "check:account-share": "node scripts/check-account-share.mjs",
-    "check:live-collab": "node scripts/check-live-collab.mjs && node scripts/check-live-collab-editor.mjs && node scripts/check-live-collab-ink.mjs",
+    "check:live-collab": "node scripts/check-live-channel-gaps.mjs && node scripts/check-live-collab.mjs && node scripts/check-live-collab-editor.mjs && node scripts/check-live-collab-ink.mjs",
     "check:mcp": "node scripts/check-mcp.mjs",
     "check:site-viewer": "node scripts/check-site-viewer-famd.mjs",
     "check:local-mcp": "node scripts/check-local-mcp.mjs",
