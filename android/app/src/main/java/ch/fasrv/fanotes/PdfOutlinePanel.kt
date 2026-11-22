@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -58,7 +57,7 @@ fun PdfOutlinePanel(model: FaNotesViewModel) {
                     .padding(start = (12 + depth * 20).dp, end = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
+                VerbatimText(
                     item.title,
                     modifier = Modifier.weight(1f),
                     fontSize = if (depth == 0) 15.sp else 14.sp,

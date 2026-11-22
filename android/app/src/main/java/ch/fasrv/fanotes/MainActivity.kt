@@ -96,7 +96,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -296,6 +295,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (ch.fasrv.fanotes.desk.ChromeText.catalog.isEmpty()) {
+            val catalog = runCatching { (application as FaNotesApplication).englishCatalog.get() }.getOrNull().orEmpty()
+            if (catalog.isNotEmpty()) ch.fasrv.fanotes.desk.ChromeText.catalog = catalog
+        }
         // targetSdk 36 enforces edge-to-edge; draw behind the bars and inset the Compose root instead.
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
@@ -1558,7 +1561,7 @@ fun FaNotesScreen(
         }
         val atRoot = !path.contains('/')
         PromptCard(ch.fasrv.fanotes.desk.PROMPT_MOVE, onDismiss = { moving = null }, confirmLabel = null, onConfirm = {}) {
-            Text(path.substringAfterLast('/'), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            VerbatimText(path.substringAfterLast('/'), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             if (!atRoot) {
                 PromptChoice(ch.fasrv.fanotes.desk.PROMPT_ROOT) { model.moveEntry(path, ""); moving = null }
             }
@@ -1767,7 +1770,7 @@ private fun SidebarSearchField(query: String, onQuery: (String) -> Unit, onFocus
                     .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_RADIUS_DP.dp))
                     .background(if (clearHot) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
                     .hoverable(clearInteraction)
-                    .clickable(interactionSource = clearInteraction, indication = null, onClickLabel = "Suche leeren") { onQuery("") },
+                    .clickable(interactionSource = clearInteraction, indication = null, onClickLabel = ui("Suche leeren")) { onQuery("") },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -1929,7 +1932,7 @@ private fun VaultPane(
             Text(ui("Konflikte"), fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp))
             conflicts.forEach { conflict ->
                 Column(Modifier.padding(vertical = 4.dp)) {
-                    Text(conflict.path.substringAfterLast('/'), maxLines = 1, fontSize = 13.sp)
+                    VerbatimText(conflict.path.substringAfterLast('/'), maxLines = 1, fontSize = 13.sp)
                     Row {
                         TextButton(onClick = { onResolve(conflict, "remote") }) { Text(ui("Server")) }
                         TextButton(onClick = { onResolve(conflict, "local") }) { Text(ui("Tablet")) }
@@ -2077,7 +2080,7 @@ private fun VaultPane(
                     onClick = action,
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     modifier = Modifier.heightIn(min = 36.dp),
-                ) { Text(ui(label), fontSize = 12.sp, maxLines = 1) }
+                ) { Text(label, fontSize = 12.sp, maxLines = 1) }
             }
         }
         Box(
@@ -2108,7 +2111,7 @@ private fun VaultPane(
 @Composable
 private fun TreeMenuLabel(label: String) {
     Text(
-        label.uppercase(java.util.Locale.GERMAN),
+        upperUi(label),
         fontSize = 12.sp,
         fontWeight = FontWeight.ExtraBold,
         letterSpacing = 0.09.em,
@@ -2368,7 +2371,7 @@ private fun NoteRow(
                 },
                 tint = LocalStatusInk.current.muted,
             )
-        } else Text(
+        } else VerbatimText(
             node.name,
             maxLines = 1,
             fontSize = ch.fasrv.fanotes.desk.TREE_LABEL_SP.sp,
@@ -2483,13 +2486,13 @@ private fun NoteRow(
                             }
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    ch.fasrv.fanotes.desk.treeMenuKind(folder, node.kind == NoteKind.PDF).uppercase(java.util.Locale.GERMAN),
+                                    upperUi(ch.fasrv.fanotes.desk.treeMenuKind(folder, node.kind == NoteKind.PDF)),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight(750),
                                     letterSpacing = 0.07.em,
                                     color = LocalStatusInk.current.muted,
                                 )
-                                Text(node.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
+                                VerbatimText(node.name, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
                             }
                         }
                         Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
@@ -2515,7 +2518,7 @@ private fun NoteRow(
                             ) {
                                 Icon(Icons.Filled.Palette, contentDescription = null, modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
                                 Text(
-                                    ch.fasrv.fanotes.desk.FOLDER_COLOR_MENU.uppercase(java.util.Locale.GERMAN),
+                                    upperUi(ch.fasrv.fanotes.desk.FOLDER_COLOR_MENU),
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight(700),
                                     letterSpacing = 0.05.em,
@@ -2543,7 +2546,7 @@ private fun NoteRow(
                                                     },
                                                 contentAlignment = Alignment.Center,
                                             ) {
-                                                Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.FOLDER_COLOR_REMOVE, modifier = Modifier.size(12.dp), tint = LocalStatusInk.current.muted)
+                                                Icon(Icons.Filled.Close, contentDescription = ui(ch.fasrv.fanotes.desk.FOLDER_COLOR_REMOVE), modifier = Modifier.size(12.dp), tint = LocalStatusInk.current.muted)
                                             }
                                         } else {
                                             val selectedColor = folderColor == color
@@ -2557,7 +2560,7 @@ private fun NoteRow(
                                                         CircleShape,
                                                     )
                                                     .background(Color(android.graphics.Color.parseColor(color)))
-                                                    .clickable(onClickLabel = "Ordnerfarbe $color") {
+                                                    .clickable(onClickLabel = ui("Ordnerfarbe $color")) {
                                                         onFolderColor(node.path, color)
                                                         menu = false
                                                     },
@@ -2644,7 +2647,7 @@ private fun NoteRow(
                     .clickable(
                         interactionSource = actionInteraction,
                         indication = null,
-                        onClickLabel = "Unterordner anlegen",
+                        onClickLabel = ui("Unterordner anlegen"),
                     ) { onCreateFolderIn(node.path) }
                     .padding(horizontal = ch.fasrv.fanotes.desk.TREE_EMPTY_ACTION_PAD_DP.dp),
                 contentAlignment = Alignment.Center,
@@ -2762,7 +2765,7 @@ private fun EditorTools(
         NavigationBarItem(selected = tool == InkTool.PEN, onClick = { onTool(InkTool.PEN) }, icon = { Icon(Icons.Filled.Edit, contentDescription = ui("Stift")) }, label = { Text(ui("Stift")) })
         NavigationBarItem(selected = tool == InkTool.ERASER, onClick = { onTool(InkTool.ERASER) }, icon = { Icon(Icons.Filled.CleaningServices, contentDescription = ui("Radierer")) }, label = { Text(ui("Radierer")) })
         NavigationBarItem(selected = tool == InkTool.SELECT, onClick = { onTool(InkTool.SELECT) }, icon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = ui("Auswahl")) }, label = { Text(ui("Auswahl")) })
-        NavigationBarItem(selected = false, onClick = onUndo, enabled = canUndo, icon = { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = ui("Rückgängig")) }, label = { Text("Zurück") })
+        NavigationBarItem(selected = false, onClick = onUndo, enabled = canUndo, icon = { Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = ui("Rückgängig")) }, label = { Text(ui("Zurück")) })
         NavigationBarItem(selected = false, onClick = onRedo, enabled = canRedo, icon = { Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = ui("Wiederholen")) }, label = { Text("Vor") })
         NavigationBarItem(selected = textOn, onClick = onText, icon = { Icon(Icons.Filled.Description, contentDescription = ui("Text")) }, label = { Text(ui("Text")) })
     }
@@ -2909,7 +2912,7 @@ private fun SplitPane(
     val isPdf = path?.endsWith(".pdf", ignoreCase = true) == true
     Column(modifier) {
         Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title.ifBlank { "Zweite Spalte" }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).widthIn(min = 96.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title.ifBlank { ui("Zweite Spalte") }, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f).widthIn(min = 96.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (splitUnsaved) {
                 Box(
                     Modifier
@@ -3080,7 +3083,7 @@ private fun EmptyEditor(
                 Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.PLACEHOLDER_GLYPH_ICON_DP.dp), tint = MaterialTheme.colorScheme.background)
             }
             Text(
-                ch.fasrv.fanotes.desk.PLACEHOLDER_EYEBROW.uppercase(java.util.Locale.GERMAN),
+                upperUi(ch.fasrv.fanotes.desk.PLACEHOLDER_EYEBROW),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.08.em,
@@ -3975,7 +3978,7 @@ private fun WorksheetImportDialog(
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            ch.fasrv.fanotes.desk.SHEET_IMPORT_EYEBROW.uppercase(java.util.Locale.GERMAN),
+                            upperUi(ch.fasrv.fanotes.desk.SHEET_IMPORT_EYEBROW),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.09.em,
@@ -4206,7 +4209,7 @@ private fun TrashDialog(
                     ) {
                         items.forEach { item ->
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                VerbatimText(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
                                     "${if (item.folder) "Ordner" else "Notiz"} · ${item.path}",
                                     fontSize = 12.sp,

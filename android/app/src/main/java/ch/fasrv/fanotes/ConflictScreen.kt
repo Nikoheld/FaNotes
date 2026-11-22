@@ -31,7 +31,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -107,7 +106,7 @@ fun ConflictScreen(model: FaNotesViewModel, onClose: () -> Unit) {
                 LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(conflicts, key = { it.copyPath }) { conflict ->
                         val on = conflict.copyPath == selected?.copyPath
-                        Text(
+                        VerbatimText(
                             conflict.path.substringAfterLast('/'),
                             maxLines = 1,
                             fontSize = 14.sp,
@@ -170,7 +169,7 @@ private fun ConflictRow(conflict: SyncConflict, selected: Boolean, onClick: () -
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text(conflict.path.substringAfterLast('/'), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        VerbatimText(conflict.path.substringAfterLast('/'), fontSize = 15.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         Text(
             conflict.path.substringBeforeLast('/', "").ifEmpty { "Hauptordner" } + " · " + conflict.at.take(16).replace('T', ' '),
             fontSize = 12.sp,
@@ -273,8 +272,8 @@ private fun VersionPanel(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(ui(title), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Text(ui(subtitle), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(subtitle, fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
         Text(conflictSummary(preview), fontSize = 12.sp, color = LocalStatusInk.current.muted)
         when (preview) {
@@ -376,7 +375,7 @@ private fun PdfFirstPage(path: String, model: FaNotesViewModel) {
 @Composable
 private fun ShowBitmap(bitmap: Bitmap?, missing: String = "Vorschau wird geladen …") {
     if (bitmap == null) {
-        Text(ui(missing), fontSize = 13.sp, color = LocalStatusInk.current.muted)
+        Text(missing, fontSize = 13.sp, color = LocalStatusInk.current.muted)
         return
     }
     Image(

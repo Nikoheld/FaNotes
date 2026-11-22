@@ -24,8 +24,15 @@ class FaNotesApplication : Application() {
     lateinit var graph: AppGraph
         private set
 
+    /**
+     * The English catalog parses beside startup. The first screen waits for it, so views that read their
+     * text once (toolbars, the editor bar) are built in the right language instead of in German.
+     */
+    val englishCatalog = java.util.concurrent.FutureTask { ch.fasrv.fanotes.desk.loadEnglishCatalogResource() }
+
     override fun onCreate() {
         super.onCreate()
+        Thread(englishCatalog, "english-catalog").start()
         graph = AppGraph(this)
         graph.handwritingLearning.attach()
         graph.installDiagnosticsHook()

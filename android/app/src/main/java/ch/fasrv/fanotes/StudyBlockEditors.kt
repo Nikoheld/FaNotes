@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -216,7 +215,7 @@ private fun NodePicker(names: Map<String, String>, selected: String, onPick: (St
         ActionButton((names[selected] ?: "?").take(24)) { open = true }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             names.forEach { (id, name) ->
-                DropdownMenuItem(text = { Text(name, fontWeight = if (id == selected) FontWeight.Bold else FontWeight.Normal) }, onClick = { open = false; onPick(id) })
+                DropdownMenuItem(text = { VerbatimText(name, fontWeight = if (id == selected) FontWeight.Bold else FontWeight.Normal) }, onClick = { open = false; onPick(id) })
             }
         }
     }

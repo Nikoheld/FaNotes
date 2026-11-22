@@ -34,7 +34,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -157,7 +156,7 @@ private fun StatSkeleton() {
 @Composable
 private fun StatLine(label: String, value: String, detail: String? = null, divider: Boolean = true) {
     SettingRow(label, detail, divider = divider) {
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+        VerbatimText(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
@@ -208,7 +207,7 @@ private fun VaultCards(data: VaultStats, anchorY: MutableMap<String, Int>) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 9.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.size(9.dp).clip(CircleShape).background(color))
-                    Text(subject.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    VerbatimText(subject.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Text(
                         "${count(subject.count)} · ${ch.fasrv.fanotes.sync.syncByteLabel(subject.bytes)}" + if (subject.words > 0) " · ${count(subject.words)} " + t("Wörter") else "",
                         fontSize = 11.sp, color = LocalStatusInk.current.muted,
@@ -233,7 +232,7 @@ private fun FileListCard(title: String, rows: List<ch.fasrv.fanotes.desk.StatFil
                 ch.fasrv.fanotes.vault.titleOf(row.path).ifBlank { row.name },
                 ch.fasrv.fanotes.desk.overviewPathParent(row.path),
                 divider = index != rows.lastIndex,
-            ) { Text(value(row), fontSize = 12.sp, color = LocalStatusInk.current.soft) }
+            ) { VerbatimText(value(row), fontSize = 12.sp, color = LocalStatusInk.current.soft) }
         }
     }
 }
@@ -257,7 +256,7 @@ private fun ActivityCard(data: VaultStats, anchorY: MutableMap<String, Int>) {
                 Modifier
                     .fillMaxWidth()
                     .height(cell * 7 + gap * 6)
-                    .semantics { contentDescription = description },
+                    .semantics { contentDescription = ui(description) },
             ) {
                 val size = cell.toPx()
                 val step = (cell + gap).toPx()
@@ -330,7 +329,7 @@ private fun TimeCard(data: VaultStats) {
                 time.bySubject.forEach { row ->
                     Column {
                         Row {
-                            Text(row.name, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            VerbatimText(row.name, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(ch.fasrv.fanotes.desk.formatStudyDuration(row.dwellMs), fontSize = 11.sp, color = LocalStatusInk.current.muted)
                         }
                         Bar(row.dwellMs.toFloat() / top, folderColor(row.color, accent), Modifier.padding(top = 3.dp))

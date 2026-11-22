@@ -23,7 +23,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Dispatchers
@@ -161,7 +160,7 @@ fun TextToHandwritingDialog(
             Text(status.orEmpty(), fontSize = 12.sp, color = LocalStatusInk.current.muted)
             Choice("Learn automatically from notes", learning.enabled) { onLearningEnabled(!learning.enabled) }
             if (generating) Text(ui("Vorschau wird geladen …"), fontSize = 12.sp)
-            previewError?.let { Text(ui(it), fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
+            previewError?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error) }
             if (wide) {
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     HandwritingControls(
@@ -295,8 +294,8 @@ private fun HandwritingControls(
 private fun HandSlider(label: String, value: String, current: Float, min: Float, max: Float, onChange: (Float) -> Unit) {
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(ui(label), fontSize = 12.sp, color = LocalStatusInk.current.muted)
-            Text(value, fontSize = 12.sp)
+            Text(label, fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            VerbatimText(value, fontSize = 12.sp)
         }
         Slider(value = current, onValueChange = onChange, valueRange = min..max)
     }

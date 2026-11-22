@@ -30,7 +30,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -284,7 +283,7 @@ fun WorkRequestsDialog(model: FaNotesViewModel) {
                                     Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { selected = item.id }.padding(vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    Text(item.title, Modifier.weight(1f), fontSize = 14.sp, maxLines = 2)
+                                    VerbatimText(item.title, Modifier.weight(1f), fontSize = 14.sp, maxLines = 2)
                                     StatusChip(item)
                                 }
                             }
@@ -333,10 +332,10 @@ private fun WorkRequestDetailView(model: FaNotesViewModel, id: String, onBack: (
     val percent = workRequestProgressPercent(request, current.events)
     TextButton(onClick = onBack) { Text(t("Zurück")) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(request.title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+        VerbatimText(request.title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
         StatusChip(request)
     }
-    Text(request.description, fontSize = 13.sp)
+    VerbatimText(request.description, fontSize = 13.sp)
     if (percent != null) LinearProgressIndicator(progress = { percent / 100f }, modifier = Modifier.fillMaxWidth())
     if (request.approved && request.status == ch.fasrv.fanotes.desk.WorkRequestStatus.WaitingForYou) {
         Text(t("Freigegeben. Claude übernimmt die Änderung, sobald die Prüfung bestanden ist."), fontSize = 13.sp)

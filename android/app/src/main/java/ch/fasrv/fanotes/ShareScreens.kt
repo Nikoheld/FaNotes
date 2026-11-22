@@ -20,7 +20,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -106,8 +105,8 @@ private fun ModeRow(title: String, text: String, selected: Boolean, onClick: () 
     ) {
         RadioButton(selected = selected, onClick = onClick)
         Column(Modifier.padding(start = 4.dp)) {
-            Text(ui(title), fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(ui(text), fontSize = 12.sp, color = LocalStatusInk.current.muted)
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(text, fontSize = 12.sp, color = LocalStatusInk.current.muted)
         }
     }
 }

@@ -115,7 +115,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -392,7 +391,7 @@ fun DeskRibbon(
                 RibbonButton(
                     ch.fasrv.fanotes.desk.ribbonToolLabel(false),
                     toolsMenu || destination in toolIds || aiOpen,
-                    onClickLabel = "Zusätzliche Werkzeuge öffnen",
+                    onClickLabel = ui("Zusätzliche Werkzeuge öffnen"),
                 ) { toolsMenu = !toolsMenu }
                 DropdownMenu(expanded = toolsMenu, onDismissRequest = { toolsMenu = false }) {
                     ch.fasrv.fanotes.desk.RIBBON_TOOLS.forEach { item ->
@@ -528,7 +527,7 @@ fun FaNotesToast(
             Modifier
                 .size(ch.fasrv.fanotes.desk.TOAST_CLOSE_DP.dp)
                 .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.TOAST_CLOSE_RADIUS_DP.dp))
-                .clickable(onClickLabel = "Schliessen", onClick = onDismiss),
+                .clickable(onClickLabel = ui("Schliessen"), onClick = onDismiss),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Filled.Close, contentDescription = ui("Schliessen"), modifier = Modifier.size(14.dp), tint = LocalStatusInk.current.muted)
@@ -679,7 +678,7 @@ fun DeskStatusBar(
                             label = crumbLabel,
                             idle = ink.muted,
                             onClick = { onCrumb(crumb.path) },
-                            onClickLabel = "„$crumbLabel“ in der Dateileiste zeigen",
+                            onClickLabel = ui("„$crumbLabel“ in der Dateileiste zeigen"),
                             maxWidthDp = ch.fasrv.fanotes.desk.STATUS_FOLDER_MAX_DP,
                         )
                     }
@@ -700,7 +699,7 @@ fun DeskStatusBar(
                 label = ch.fasrv.fanotes.desk.ChromeText.ui(syncText),
                 idle = syncIdle,
                 onClick = onConflicts,
-                onClickLabel = "Synchronisation",
+                onClickLabel = ui("Synchronisation"),
                 radiusDp = ch.fasrv.fanotes.desk.STATUS_SYNC_RADIUS_DP,
                 padDp = ch.fasrv.fanotes.desk.STATUS_SYNC_PAD_DP,
                 badge = conflicts,
@@ -715,7 +714,7 @@ fun DeskStatusBar(
                     label = ch.fasrv.fanotes.desk.ChromeText.ui(saveLabel),
                     idle = saveColor,
                     onClick = onSave,
-                    onClickLabel = "Jetzt speichern",
+                    onClickLabel = ui("Jetzt speichern"),
                     padDp = ch.fasrv.fanotes.desk.STATUS_SAVE_PAD_DP,
                 )
             }
@@ -1011,7 +1010,7 @@ private fun NoteTabChip(
                     ),
                     tint = if (glyph == "pin") accent else titleColor,
                 )
-                Text(
+                VerbatimText(
                     name,
                     fontSize = 12.sp,
                     color = titleColor,
@@ -1150,7 +1149,7 @@ private fun VaultSearchField(query: String, onQuery: (String) -> Unit, keys: Mod
         )
         if (query.isNotEmpty()) {
             Box(
-                Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_RADIUS_DP.dp)).clickable(onClickLabel = "Suchbegriff löschen") { onQuery("") },
+                Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_DP.dp).clip(RoundedCornerShape(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_RADIUS_DP.dp)).clickable(onClickLabel = ui("Suchbegriff löschen")) { onQuery("") },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Filled.Close, contentDescription = ui("Suchbegriff löschen"), modifier = Modifier.size(ch.fasrv.fanotes.desk.SIDEBAR_SEARCH_CLEAR_ICON_DP.dp), tint = ink.muted)
@@ -1224,7 +1223,7 @@ fun SearchScreen(
                 Modifier.size(30.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.SEARCH_CLOSE, modifier = Modifier.size(17.dp), tint = LocalStatusInk.current.muted)
+                Icon(Icons.Filled.Close, contentDescription = ui(ch.fasrv.fanotes.desk.SEARCH_CLOSE), modifier = Modifier.size(17.dp), tint = LocalStatusInk.current.muted)
             }
         }
         val searchKeys = Modifier.onPreviewKeyEvent { event ->
@@ -1587,7 +1586,7 @@ fun HomeworkScreen(model: FaNotesViewModel) {
                     Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_DAY_GAP_DP.dp)) {
                         ch.fasrv.fanotes.desk.homeworkWeekdays().forEach { label ->
                             Text(
-                                label.uppercase(java.util.Locale.GERMAN),
+                                upperUi(label),
                                 modifier = Modifier.weight(1f),
                                 textAlign = TextAlign.Center,
                                 fontSize = 12.sp,
@@ -1706,7 +1705,7 @@ private fun HomeworkHeading() {
             tint = accent,
         )
         Text(
-            ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW.uppercase(java.util.Locale.GERMAN),
+            upperUi(ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW),
             color = accent,
             fontSize = ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW_SP.sp,
             fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_EYEBROW_WEIGHT),
@@ -1743,7 +1742,7 @@ private fun HomeworkIntro() {
     val chip = "homework-note"
     Text(
         text = buildAnnotatedString {
-            append(ch.fasrv.fanotes.desk.HOMEWORK_INTRO)
+            append(ui(ch.fasrv.fanotes.desk.HOMEWORK_INTRO))
             append(" ")
             appendInlineContent(chip, path)
             append(".")
@@ -1769,7 +1768,7 @@ private fun HomeworkIntro() {
                         .background(ink.panelStrong.copy(alpha = ch.fasrv.fanotes.desk.HOMEWORK_CODE_FILL)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(path, style = codeStyle, maxLines = 1)
+                    VerbatimText(path, style = codeStyle, maxLines = 1)
                 }
             },
         ),
@@ -1814,7 +1813,7 @@ private fun HomeworkHeaderActions(onOpen: () -> Unit, onClose: () -> Unit) {
         ) {
             Icon(
                 Icons.Filled.Close,
-                contentDescription = ch.fasrv.fanotes.desk.HOMEWORK_CLOSE,
+                contentDescription = ui(ch.fasrv.fanotes.desk.HOMEWORK_CLOSE),
                 modifier = Modifier.size(ch.fasrv.fanotes.desk.HOMEWORK_CLOSE_ICON_DP.dp),
                 tint = ink.soft,
             )
@@ -2052,7 +2051,7 @@ private fun HomeworkComposerFields(
 private fun HomeworkField(label: String, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_FIELD_GAP_DP.dp)) {
         Text(
-            label.uppercase(java.util.Locale.GERMAN),
+            upperUi(label),
             color = LocalStatusInk.current.muted,
             fontSize = ch.fasrv.fanotes.desk.HOMEWORK_FIELD_SP.sp,
             fontWeight = FontWeight(ch.fasrv.fanotes.desk.HOMEWORK_FIELD_WEIGHT),
@@ -2141,7 +2140,7 @@ private fun HomeworkSelect(
             }
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 options.forEach { (id, name) ->
-                    DropdownMenuItem(text = { Text(name) }, onClick = { onPick(id); open = false })
+                    DropdownMenuItem(text = { VerbatimText(name) }, onClick = { onPick(id); open = false })
                 }
             }
         }
@@ -2337,7 +2336,7 @@ private fun HomeworkBucket(
             horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.HOMEWORK_BUCKET_GAP_DP.dp),
         ) {
             Text(
-                ch.fasrv.fanotes.desk.homeworkBucketLabel(bucket).uppercase(java.util.Locale.GERMAN),
+                upperUi(ch.fasrv.fanotes.desk.homeworkBucketLabel(bucket)),
                 color = ink.soft,
                 fontSize = 12.sp,
                 fontWeight = FontWeight(750),
@@ -2426,7 +2425,7 @@ private fun HomeworkTaskCard(
             ) {
                 Icon(
                     if (task.done) Icons.Filled.CheckCircle else Icons.Outlined.Circle,
-                    contentDescription = if (task.done) ch.fasrv.fanotes.desk.HOMEWORK_MARK_OPEN else ch.fasrv.fanotes.desk.HOMEWORK_MARK_DONE,
+                    contentDescription = ui(if (task.done) ch.fasrv.fanotes.desk.HOMEWORK_MARK_OPEN else ch.fasrv.fanotes.desk.HOMEWORK_MARK_DONE),
                     modifier = Modifier.size(18.dp),
                     tint = accent,
                 )
@@ -2447,7 +2446,7 @@ private fun HomeworkTaskCard(
                         textDecoration = if (task.done) TextDecoration.LineThrough else null,
                     )
                     Text(
-                        ch.fasrv.fanotes.desk.homeworkKindLabel(task.kind).uppercase(java.util.Locale.GERMAN),
+                        upperUi(ch.fasrv.fanotes.desk.homeworkKindLabel(task.kind)),
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
@@ -2465,7 +2464,7 @@ private fun HomeworkTaskCard(
                     if (task.subject.isNotBlank()) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(12.dp), tint = ink.muted)
-                            Text(task.subject, color = ink.muted, fontSize = 12.sp)
+                            VerbatimText(task.subject, color = ink.muted, fontSize = 12.sp)
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2487,7 +2486,7 @@ private fun HomeworkTaskCard(
                     }
                 }
                 if (task.notes.isNotBlank()) {
-                    Text(task.notes, modifier = Modifier.padding(top = 4.dp), color = ink.soft, fontSize = 12.sp, lineHeight = 18.sp)
+                    VerbatimText(task.notes, modifier = Modifier.padding(top = 4.dp), color = ink.soft, fontSize = 12.sp, lineHeight = 18.sp)
                 }
             }
             Box(
@@ -2502,7 +2501,7 @@ private fun HomeworkTaskCard(
             ) {
                 Icon(
                     Icons.Filled.Delete,
-                    contentDescription = ch.fasrv.fanotes.desk.HOMEWORK_DELETE,
+                    contentDescription = ui(ch.fasrv.fanotes.desk.HOMEWORK_DELETE),
                     modifier = Modifier.size(15.dp),
                     tint = if (deleteHovered) danger else ink.muted,
                 )
@@ -2698,7 +2697,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 Box(
                     Modifier.size(ch.fasrv.fanotes.desk.CAL_ICON_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable(onClickLabel = if (step < 0) "Vorheriger Zeitraum" else "Nächster Zeitraum") { shiftCalendar(step) },
                     contentAlignment = Alignment.Center,
-                ) { Text(mark) }
+                ) { VerbatimText(mark) }
             }
             Row(
                 Modifier.widthIn(min = 120.dp),
@@ -2757,7 +2756,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                         }.padding(horizontal = 10.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(ui(label), fontSize = 12.sp, color = if (active) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
+                        Text(label, fontSize = 12.sp, color = if (active) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurface)
                     }
                 }
             }
@@ -2778,7 +2777,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
                 Box(
                     Modifier.height(ch.fasrv.fanotes.desk.CAL_TOOL_DP.dp).clip(calShape).border(1.dp, calRule, calShape).background(MaterialTheme.colorScheme.surface).clickable(onClick = action).padding(horizontal = 10.dp),
                     contentAlignment = Alignment.Center,
-                ) { Text(ui(label), fontSize = 12.sp) }
+                ) { Text(label, fontSize = 12.sp) }
             }
         }
         if (reminder != null) {
@@ -2828,7 +2827,7 @@ fun CalendarScreen(model: FaNotesViewModel, onOpenNote: (String) -> Unit, onImpo
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             listOf("none" to "Einmal", "daily" to "Täglich", "weekly" to "Wöchentlich", "monthly" to "Monatlich", "yearly" to "Jährlich").forEach { (id, label) ->
                 TextButton(onClick = { recurrence = id }) {
-                    Text(ui(label), color = if (recurrence == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                    Text(label, color = if (recurrence == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                 }
             }
         }
@@ -3020,9 +3019,9 @@ private fun CalendarMini(
     val accent = Color(ch.fasrv.fanotes.desk.noteTabAccentArgb(MaterialTheme.colorScheme.background.luminance() < 0.5f))
     val label = anchor.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy", ch.fasrv.fanotes.desk.calendarLocale()))
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(ui("‹"), modifier = Modifier.clickable(onClickLabel = "Vorheriger Zeitraum") { onShift(-1) }.padding(4.dp))
+        Text(ui("‹"), modifier = Modifier.clickable(onClickLabel = ui("Vorheriger Zeitraum")) { onShift(-1) }.padding(4.dp))
         Text(label, modifier = Modifier.weight(1f), textAlign = TextAlign.Center, fontSize = 12.sp, fontWeight = FontWeight(650))
-        Text(ui("›"), modifier = Modifier.clickable(onClickLabel = "Nächster Zeitraum") { onShift(1) }.padding(4.dp))
+        Text(ui("›"), modifier = Modifier.clickable(onClickLabel = ui("Nächster Zeitraum")) { onShift(1) }.padding(4.dp))
     }
     Row(Modifier.fillMaxWidth().padding(top = 4.dp)) {
         ch.fasrv.fanotes.desk.calendarRange("week", anchor).map { ch.fasrv.fanotes.desk.calendarWeekdayShort(it) }.forEach { day ->
@@ -3262,7 +3261,7 @@ private fun DayColumns(
                                 ui("+"),
                                 fontSize = 12.sp,
                                 color = LocalStatusInk.current.muted,
-                                modifier = Modifier.clickable(onClickLabel = "Neuer Termin") {
+                                modifier = Modifier.clickable(onClickLabel = ui("Neuer Termin")) {
                                     onCreate(date, date.atStartOfDay(), date.plusDays(1).atStartOfDay(), true)
                                 }.padding(horizontal = 6.dp),
                             )
@@ -3459,7 +3458,7 @@ private fun TimedBlock(
             }
             .padding(horizontal = ch.fasrv.fanotes.desk.CAL_EVENT_PAD_X_DP.dp, vertical = ch.fasrv.fanotes.desk.CAL_EVENT_PAD_Y_DP.dp),
     ) {
-        Text(slice.event.title, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight(650), maxLines = 2)
+        VerbatimText(slice.event.title, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight(650), maxLines = 2)
         Text(
             "%02d:%02d".format(slice.originStart.hour, slice.originStart.minute),
             color = LocalStatusInk.current.muted,
@@ -3498,7 +3497,7 @@ private fun AgendaList(
                     Text(ch.fasrv.fanotes.desk.agendaWhenLabel(event), fontSize = 12.sp, color = LocalStatusInk.current.muted)
                     Text(event.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                     ch.fasrv.fanotes.desk.agendaPlace(event)?.let { place ->
-                        Text(place, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1)
+                        VerbatimText(place, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1)
                     }
                 }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.onSurface.copy(alpha = ch.fasrv.fanotes.desk.SEARCH_RULE_ALPHA)))
@@ -3543,7 +3542,7 @@ private fun CalendarLists(
                 )
                 Box {
                     IconButton(onClick = { menu = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "Kalender-Optionen für ${calendar.name}", modifier = Modifier.size(18.dp))
+                        Icon(Icons.Filled.MoreVert, contentDescription = ui("Kalender-Optionen für ${calendar.name}"), modifier = Modifier.size(18.dp))
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(text = { Text(ui("Umbenennen")) }, onClick = {
@@ -3839,7 +3838,7 @@ private fun CalendarEventEditor(
                 CalEditorInput(
                     draft.title,
                     { onChange(draft.copy(title = it.take(240))) },
-                    contentDescription = ch.fasrv.fanotes.desk.CAL_EDITOR_TITLE,
+                    contentDescription = ui(ch.fasrv.fanotes.desk.CAL_EDITOR_TITLE),
                     title = true,
                 )
                 CalEditorMenu(ch.fasrv.fanotes.desk.CAL_EDITOR_CALENDAR, calendarName, document.calendars.map { it.id to it.name }) {
@@ -3940,7 +3939,7 @@ private fun CalEditorWhen(
             Text(label, fontSize = ch.fasrv.fanotes.desk.CAL_EDITOR_LABEL_SP.sp, color = LocalStatusInk.current.muted)
             CalEditorInput(date, onDate)
         }
-        Box(Modifier.widthIn(min = 88.dp)) { CalEditorInput(time, onTime, contentDescription = label) }
+        Box(Modifier.widthIn(min = 88.dp)) { CalEditorInput(time, onTime, contentDescription = ui(label)) }
     }
 }
 
@@ -3953,7 +3952,7 @@ private fun CalEditorMenu(label: String, value: String, options: List<Pair<Strin
             CalEditorInput(value, {}, readOnly = true, onClick = { if (options.isNotEmpty()) open = true })
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 options.forEach { (id, name) ->
-                    DropdownMenuItem(text = { Text(name) }, onClick = { onPick(id); open = false })
+                    DropdownMenuItem(text = { VerbatimText(name) }, onClick = { onPick(id); open = false })
                 }
             }
         }
@@ -4323,7 +4322,7 @@ fun FaNotesConfirmDialog(request: PendingConfirm, onConfirm: () -> Unit, onDismi
                             letterSpacing = 0.12.em,
                             color = MaterialTheme.colorScheme.error,
                         )
-                        Text(
+                        VerbatimText(
                             request.title,
                             fontSize = ch.fasrv.fanotes.desk.CONFIRM_TITLE_SP.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -4600,7 +4599,7 @@ fun BooksScreen(model: FaNotesViewModel, onOpen: (String) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).clickable { onOpen(book.bookPath) }.padding(vertical = 10.dp)) {
                     Text(book.subjectPath, fontWeight = FontWeight.SemiBold)
-                    Text("${book.bookPath} · Seite ${book.lastPage}", fontSize = 13.sp)
+                    Text(ui("${book.bookPath} · Seite ${book.lastPage}"), fontSize = 13.sp)
                 }
                 TextButton(onClick = { model.detachSubjectBook(book.subjectPath) }) { Text(ui("Buch entfernen")) }
             }
@@ -4636,7 +4635,7 @@ private fun PathPicker(placeholder: String, options: List<String>, value: String
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             if (options.isEmpty()) DropdownMenuItem(text = { Text(ui("Nichts gefunden")) }, enabled = false, onClick = {})
             options.forEach { path ->
-                DropdownMenuItem(text = { Text(path, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = {
+                DropdownMenuItem(text = { VerbatimText(path, maxLines = 1, overflow = TextOverflow.Ellipsis) }, onClick = {
                     open = false
                     onPick(path)
                 })
@@ -4650,7 +4649,7 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
     val pane by model.bookPane.collectAsStateWithLifecycle()
     val page = pane ?: return
     Column(modifier.padding(8.dp)) {
-        Text(page.title, maxLines = 1, fontWeight = FontWeight.SemiBold)
+        VerbatimText(page.title, maxLines = 1, fontWeight = FontWeight.SemiBold)
         if (page.needsPassword) {
             val rejected by model.bookPasswordRejected.collectAsStateWithLifecycle()
             var draft by remember(page.bookPath) { mutableStateOf("") }
@@ -4672,7 +4671,7 @@ fun BookPane(model: FaNotesViewModel, modifier: Modifier = Modifier, onOpen: (St
             }
             return@Column
         }
-        Text("Seite ${page.page} / ${page.pageCount}", fontSize = 12.sp)
+        Text(ui("Seite ${page.page} / ${page.pageCount}"), fontSize = 12.sp)
         page.bitmap?.let { bitmap ->
             Image(
                 bitmap.asImageBitmap(),
@@ -5177,7 +5176,7 @@ private fun FirstRunEyebrow(label: String, accent: Color) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text(label.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.085.em, color = accent)
+        Text(upperUi(label), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.085.em, color = accent)
     }
 }
 
@@ -5233,7 +5232,7 @@ private fun WelcomePreview(modifier: Modifier) {
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val windowBorder = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowBorder(LocalDeskThemeId.current))
     val windowShadow = Color(ch.fasrv.fanotes.desk.firstRunPreviewWindowShadowColor())
-    Box(modifier.semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL }) {
+    Box(modifier.semantics { contentDescription = ui(ch.fasrv.fanotes.desk.FIRST_RUN_PREVIEW_LABEL) }) {
         Box(Modifier.matchParentSize().welcomePreviewGlow(MaterialTheme.colorScheme.primary.toArgb()))
         Column(
             Modifier
@@ -5650,7 +5649,7 @@ private fun WritingPreview(modifier: Modifier) {
                     ),
                 )
             }
-            .semantics { contentDescription = ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_PREVIEW_LABEL },
+            .semantics { contentDescription = ui(ch.fasrv.fanotes.desk.FIRST_RUN_WRITING_PREVIEW_LABEL) },
     ) {
         Row(
             Modifier
@@ -6191,7 +6190,7 @@ private fun AiChoiceCard(title: String, detail: String, badge: String, selected:
             }
         }
         if (badge.isNotEmpty()) {
-            Text(badge.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.06.em, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 6.dp))
+            Text(upperUi(badge), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.06.em, color = LocalStatusInk.current.muted, modifier = Modifier.padding(top = 6.dp))
         }
     }
 }
@@ -6358,7 +6357,7 @@ fun AiScreen(model: FaNotesViewModel) {
                 Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(ch.fasrv.fanotes.desk.AI_MARK_ICON_DP.dp), tint = MaterialTheme.colorScheme.background)
             }
             Column(Modifier.weight(1f)) {
-                Text(ch.fasrv.fanotes.desk.AI_PANEL_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(upperUi(ch.fasrv.fanotes.desk.AI_PANEL_EYEBROW), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(ch.fasrv.fanotes.desk.AI_PANEL_TITLE, fontSize = 18.sp, letterSpacing = (-0.035).em, maxLines = 1)
                 Text(ch.fasrv.fanotes.desk.AI_PANEL_DETAIL, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
             }
@@ -6366,7 +6365,7 @@ fun AiScreen(model: FaNotesViewModel) {
                 Modifier.size(34.dp).clip(RoundedCornerShape(6.dp)).clickable(enabled = !busy, onClick = dismiss),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.Close, contentDescription = ch.fasrv.fanotes.desk.AI_CLOSE, modifier = Modifier.size(18.dp), tint = LocalStatusInk.current.muted)
+                Icon(Icons.Filled.Close, contentDescription = ui(ch.fasrv.fanotes.desk.AI_CLOSE), modifier = Modifier.size(18.dp), tint = LocalStatusInk.current.muted)
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(panelRule))
@@ -6452,7 +6451,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                     .clickable { model.updateDesk("ai-$provider-model", listed.key) }
                                     .padding(horizontal = 9.dp, vertical = 7.dp),
                             ) {
-                                Text(listed.title, fontSize = 12.sp, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+                                VerbatimText(listed.title, fontSize = 12.sp, fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
                                 if (listed.detail.isNotBlank()) Text(listed.detail, fontSize = 12.sp, color = LocalStatusInk.current.muted, maxLines = 1)
                             }
                         }
@@ -6486,7 +6485,7 @@ fun AiScreen(model: FaNotesViewModel) {
             )
             if (note != null) {
                 Text(ui("Aktuelle Notiz"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                Text(note?.path.orEmpty(), fontWeight = FontWeight.SemiBold)
+                VerbatimText(note?.path.orEmpty(), fontWeight = FontWeight.SemiBold)
                 Text("${live.length} Zeichen", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
             }
         } else {
@@ -6764,7 +6763,7 @@ fun AiScreen(model: FaNotesViewModel) {
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     if (taskLine.indent.isNotEmpty()) {
-                                        Text(taskLine.indent, fontSize = base.sp, color = MaterialTheme.colorScheme.onSurface)
+                                        VerbatimText(taskLine.indent, fontSize = base.sp, color = MaterialTheme.colorScheme.onSurface)
                                     }
                                     Box(
                                         Modifier
@@ -6849,7 +6848,7 @@ fun AiScreen(model: FaNotesViewModel) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(ch.fasrv.fanotes.desk.AI_PREVIEW_EYEBROW.uppercase(java.util.Locale.GERMAN), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1)
+                        Text(upperUi(ch.fasrv.fanotes.desk.AI_PREVIEW_EYEBROW), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.12.em, color = accent, maxLines = 1)
                         Text(previewHeading, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     if (preview != null) {
@@ -7366,7 +7365,7 @@ private fun TabletButtonMap(raw: String?, modifier: Modifier = Modifier, onChang
                 verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.input.TABLET_GROUP_GAP_DP.dp),
             ) {
                 Text(
-                    title.uppercase(java.util.Locale.GERMAN),
+                    upperUi(title),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.05.em,
@@ -7746,7 +7745,7 @@ private fun SettingsSearchField(query: String, onQuery: (String) -> Unit) {
                 )
             }
             .padding(horizontal = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_PAD_DP.dp)
-            .semantics { contentDescription = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_LABEL },
+            .semantics { contentDescription = ui(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_LABEL) },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_GAP_DP.dp),
     ) {
@@ -7786,7 +7785,7 @@ private fun SettingsSearchField(query: String, onQuery: (String) -> Unit) {
             ) {
                 Icon(
                     Icons.Filled.Close,
-                    contentDescription = ch.fasrv.fanotes.desk.SETTINGS_SEARCH_CLEAR,
+                    contentDescription = ui(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_CLEAR),
                     modifier = Modifier.size(ch.fasrv.fanotes.desk.SETTINGS_SEARCH_CLEAR_ICON_DP.dp),
                     tint = if (hot) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
                 )
@@ -7829,7 +7828,7 @@ private fun SettingsNavIconButton(
     ) {
         Icon(
             icon,
-            contentDescription = label,
+            contentDescription = ui(label),
             modifier = Modifier.size(iconDp.dp),
             tint = if (active) MaterialTheme.colorScheme.onSurface else LocalStatusInk.current.muted,
         )
@@ -8166,7 +8165,7 @@ private fun SettingsPage(
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(ch.fasrv.fanotes.desk.SETTINGS_RESULT_GAP_DP.dp)) {
                         Text(
-                            ch.fasrv.fanotes.desk.settingsSearchCount(settingsResults.size).uppercase(java.util.Locale.GERMAN),
+                            upperUi(ch.fasrv.fanotes.desk.settingsSearchCount(settingsResults.size)),
                             fontSize = 12.sp,
                             fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_WEIGHT),
                             letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_TRACKING.em,
@@ -8227,7 +8226,7 @@ private fun SettingsPage(
             } else {
                 ch.fasrv.fanotes.desk.settingsNavGroups().forEach { (group, items) ->
                     Text(
-                        group.uppercase(java.util.Locale.GERMAN),
+                        upperUi(group),
                         fontSize = 12.sp,
                         fontWeight = FontWeight(ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_WEIGHT),
                         letterSpacing = ch.fasrv.fanotes.desk.SETTINGS_NAV_GROUP_TRACKING.em,
@@ -8673,14 +8672,14 @@ private fun SettingsPage(
                     ) {
                         if (sync.account != null) {
                             Column(Modifier.fillMaxWidth().padding(15.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(sync.account?.email.orEmpty(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                VerbatimText(sync.account?.email.orEmpty(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
                                     "${ch.fasrv.fanotes.sync.syncStatusLabel(sync)} · Zuletzt: ${ch.fasrv.fanotes.sync.syncDeviceSeenLabel(sync.lastSyncAt)}",
                                     fontSize = 12.sp,
                                     color = LocalStatusInk.current.muted,
                                 )
                                 if (!sync.error.isNullOrBlank()) {
-                                    Text(sync.error.orEmpty(), fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                    VerbatimText(sync.error.orEmpty(), fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
                                 }
                                 val info = sync.info
                                 if (info != null) {
@@ -8975,7 +8974,7 @@ fun NoteTagBar(model: FaNotesViewModel) {
                         .padding(end = 6.dp)
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.6f), androidx.compose.foundation.shape.RoundedCornerShape(99.dp))
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), androidx.compose.foundation.shape.RoundedCornerShape(99.dp))
-                        .clickable(onClickLabel = "Tag entfernen") { model.setNoteTags(tags.filter { it != tag }) }
+                        .clickable(onClickLabel = ui("Tag entfernen")) { model.setNoteTags(tags.filter { it != tag }) }
                         .padding(horizontal = 7.dp, vertical = 4.dp),
                 )
             }
@@ -9054,7 +9053,7 @@ private fun PaperStylePicker(style: String, onSelect: (String) -> Unit) {
             fontSize = 12.sp,
             modifier = Modifier
                 .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.7f), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                .clickable(onClickLabel = "Notizhintergrund: $current") { open = true }
+                .clickable(onClickLabel = ui("Notizhintergrund: $current")) { open = true }
                 .padding(horizontal = 8.dp, vertical = 6.dp),
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -9099,7 +9098,7 @@ fun MarginTranscript(model: FaNotesViewModel) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                 line.text.split(Regex("""(\s+)""")).forEach { part ->
                     if (part.isBlank()) {
-                        Text(part)
+                        VerbatimText(part)
                     } else if (editing == "$index:$part") {
                         OutlinedTextField(
                             draft,
@@ -9113,7 +9112,7 @@ fun MarginTranscript(model: FaNotesViewModel) {
                             editing = null
                         }) { Text(ui("OK")) }
                     } else {
-                        Text(
+                        VerbatimText(
                             part,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.clickable {
@@ -9159,7 +9158,7 @@ fun PdfThumbStrip(model: FaNotesViewModel) {
                     ) {
                         Image(
                             bitmap.asImageBitmap(),
-                            contentDescription = "Seite $page",
+                            contentDescription = ui("Seite $page"),
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
                         )
                         Text("$page", fontSize = 11.sp)
@@ -9299,7 +9298,7 @@ fun PdfNoteToolbar(model: FaNotesViewModel) {
     androidx.compose.runtime.LaunchedEffect(page) { draft = page.toString() }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(open?.title ?: "PDF", fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
+            VerbatimText(open?.title ?: "PDF", fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f))
             Text(ch.fasrv.fanotes.desk.pdfPageCountLabel(count), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f))
         }
         Row(
@@ -9450,9 +9449,9 @@ fun NoteRelations(model: FaNotesViewModel, onOpen: (String) -> Unit) {
         }
         incoming.forEach { link ->
             Column(Modifier.fillMaxWidth().clickable { onOpen(link.path) }.padding(vertical = 4.dp)) {
-                Text(link.title, fontSize = 13.sp)
+                VerbatimText(link.title, fontSize = 13.sp)
                 if (link.excerpt.isNotEmpty()) {
-                    Text(link.excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f), maxLines = 2)
+                    VerbatimText(link.excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f), maxLines = 2)
                 }
             }
         }
@@ -9499,7 +9498,7 @@ private fun HistoryDiff(diff: String) {
 @Composable
 private fun InspectorHeading(title: String) {
     Text(
-        title.uppercase(java.util.Locale.GERMAN),
+        upperUi(title),
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = ch.fasrv.fanotes.desk.INSPECTOR_HEADING_TRACKING.em,
@@ -9589,7 +9588,7 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                             .padding(horizontal = 6.dp, vertical = 7.dp),
                     ) {
                         Text(label, fontSize = 12.sp, color = LocalStatusInk.current.muted)
-                        Text(
+                        VerbatimText(
                             value,
                             fontSize = 12.sp,
                             fontWeight = FontWeight(ch.fasrv.fanotes.desk.INSPECTOR_VALUE_WEIGHT),
@@ -9598,8 +9597,8 @@ fun Inspector(model: FaNotesViewModel, onOpen: (String) -> Unit) {
                     }
                 }
             }
-            Text("${stats.headings} Überschriften · ${stats.tasksDone}/${stats.tasks} Aufgaben", fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 6.dp))
-            if (path != null) Text(path, fontSize = 12.sp, color = muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
+            Text(ui("${stats.headings} Überschriften · ${stats.tasksDone}/${stats.tasks} Aufgaben"), fontSize = 12.sp, color = muted, modifier = Modifier.padding(top = 6.dp))
+            if (path != null) VerbatimText(path, fontSize = 12.sp, color = muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp))
             NoteRelations(model, onOpen)
             InspectorHeading("Versionen")
             TextButton(onClick = { model.openHistory() }) { Text(ui("Verlauf laden")) }
@@ -9781,7 +9780,7 @@ fun CommandPalette(
                 Modifier
                     .size(ch.fasrv.fanotes.desk.PALETTE_CLOSE_DP.dp)
                     .clip(RoundedCornerShape(ch.fasrv.fanotes.desk.PALETTE_CLOSE_RADIUS_DP.dp))
-                    .clickable(onClickLabel = "Schliessen", onClick = onDismiss),
+                    .clickable(onClickLabel = ui("Schliessen"), onClick = onDismiss),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Filled.Close, contentDescription = ui("Schliessen"), modifier = Modifier.size(16.dp), tint = LocalStatusInk.current.muted)
