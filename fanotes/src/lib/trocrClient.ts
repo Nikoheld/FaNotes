@@ -26,15 +26,41 @@ let maxWorkers = 1
 
 export const setTrocrMaxWorkers = (count: number) => { maxWorkers = Math.max(1, Math.min(4, Math.floor(count) || 1)) }
 let idleTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+/**
+ * Every worker holds its own copy of the model (about 400 MB of WASM heap, which never shrinks). An
+ * additional worker is stopped again after a short pause while the first one stays for the configured
+ * keep-alive, so a burst of scans does not leave the second copy resident.
+ */
+export const EXTRA_WORKER_IDLE_MS = 10_000
+let retireTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+const lastDone = new Map<Worker, number>()
 let unavailableUntil = 0
 let desktopRuntimeModuleSourcePromise: Promise<string> | null = null
 const pending = new Map<string, PendingRequest>()
 
+const retireIdleExtras = () => {
+  retireTimer = null
+  const now = Date.now()
+  for (let index = workers.length - 1; index >= 1; index -= 1) {
+    const entry = workers[index]!
+    if ((inFlight.get(entry) ?? 0) === 0 && now - (lastDone.get(entry) ?? 0) >= EXTRA_WORKER_IDLE_MS) {
+      workers.splice(index, 1)
+      inFlight.delete(entry)
+      lastDone.delete(entry)
+      entry.terminate()
+    }
+  }
+  if (workers.length > 1) retireTimer = globalThis.setTimeout(retireIdleExtras, EXTRA_WORKER_IDLE_MS)
+}
+
 const stopWorker = (reason?: Error) => {
   if (idleTimer !== null) globalThis.clearTimeout(idleTimer)
   idleTimer = null
+  if (retireTimer !== null) globalThis.clearTimeout(retireTimer)
+  retireTimer = null
   for (const entry of workers.splice(0)) entry.terminate()
   inFlight.clear()
+  lastDone.clear()
   pending.forEach((request) => {
     globalThis.clearTimeout(request.timeout)
     request.reject(reason ?? new Error('Die lokale TrOCR-Laufzeit wurde beendet.'))
@@ -63,6 +89,8 @@ const spawnWorker = () => {
     if (!request) return
     pending.delete(id)
     inFlight.set(next, Math.max(0, (inFlight.get(next) ?? 1) - 1))
+    lastDone.set(next, Date.now())
+    if (workers.length > 1 && retireTimer === null) retireTimer = globalThis.setTimeout(retireIdleExtras, EXTRA_WORKER_IDLE_MS)
     globalThis.clearTimeout(request.timeout)
     if (typeof event.data.text === 'string') {
       const candidates = Array.isArray(event.data.candidates)

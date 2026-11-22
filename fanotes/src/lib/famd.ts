@@ -21,6 +21,7 @@ export const FAMD_SCHEMA = 'fanotes-famd-v1'
 export const MARKDOWN_NOTE_EXTENSIONS = ['.md', '.markdown', '.famd'] as const
 export const NOTE_FILE_EXTENSIONS = ['.md', '.markdown', '.famd', '.pdf'] as const
 
+const V1_MARKER_TEXT = 'fanotes-famd:v1'
 const FAMD_HEADER = /(?:^|\n)<!--\s*fanotes-famd:v1\s+chars=(\d+)\s*-->\n/u
 const WORKSHEET_MARKER = /<!--\s*fanotes-worksheet:([a-zA-Z0-9_-]{1,96})\s*-->/gu
 
@@ -79,14 +80,15 @@ const isFamdSidecarJson = (value: string) => {
 export const stripFamdPayload = (source: string) => {
   if (typeof source !== 'string' || !source) return ''
   let text = source
-  const match = [...text.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
+  // A plain note (the usual case, and a 5 MB one costs ~10 ms per regex pass) has neither marker.
+  const match = text.includes(V1_MARKER_TEXT) ? [...text.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1) : undefined
   const v2Cut = v2CutIndex(text)
   let cut = match && match.index !== undefined ? match.index : -1
   if (v2Cut >= 0 && v2Cut > cut) cut = v2Cut
   if (cut >= 0) text = text.slice(0, cut)
-  text = text.replace(/\s+$/u, '')
+  text = text.trimEnd()
   if (isFamdSidecarJson(text)) return ''
-  const trailing = text.match(/\n(\{[\s\S]*\})\s*$/u)
+  const trailing = text.endsWith('}') ? text.match(/\n(\{[\s\S]*\})\s*$/u) : null
   if (trailing?.[1] && isFamdSidecarJson(trailing[1])) {
     return text.slice(0, trailing.index).replace(/\s+$/u, '')
   }
@@ -134,7 +136,7 @@ export const parseFamd = (source: string): { markdown: string; payload: FamdPayl
     if (!payload) throw new Error('famd v2 payload')
     return { markdown, payload }
   }
-  const match = [...source.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1)
+  const match = source.includes(V1_MARKER_TEXT) ? [...source.matchAll(new RegExp(FAMD_HEADER.source, 'gu'))].at(-1) : undefined
   if (!match || match.index === undefined) return { markdown, payload: null }
   const length = Number(match[1])
   if (!Number.isSafeInteger(length) || length < 2 || length > 32 * 1024 * 1024) {
