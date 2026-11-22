@@ -17,6 +17,8 @@ Stable receives only stable releases. Beta receives stable releases plus newer p
 
 Switching from Beta to Stable never installs an older build. A user who is ahead of Stable remains on the installed beta until a newer stable release exists.
 
+Once per device, the first time a Beta-channel install runs a stable version (desktop and Android tablet), its channel is switched to Stable silently and a persisted marker (`channelAutoStableDoneAt` on desktop, `update-channel-auto-stable` on Android) is set so the migration never repeats; a later manual choice of Beta sticks, and Nightly users are left unchanged.
+
 ## Stable cadence
 
 - Target: two meaningful stable releases per calendar month.

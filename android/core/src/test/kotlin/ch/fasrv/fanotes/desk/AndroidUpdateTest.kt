@@ -8,6 +8,30 @@ import kotlin.test.assertTrue
 
 class AndroidUpdateTest {
     @Test
+    fun betaMovesToStableOnceOnTheFirstStableVersion() {
+        val key = CHANNEL_AUTO_STABLE_KEY
+        // Fresh beta profile on a stable version: stable, marker set.
+        val moved = migrateBetaToStable(mapOf("update-channel" to "beta"), "2026.11.3")!!
+        assertEquals("stable", moved["update-channel"])
+        assertEquals("2026.11.3", moved[key])
+        // Manual beta afterwards sticks on restart and on a later stable.
+        val manual = moved + ("update-channel" to "beta")
+        assertNull(migrateBetaToStable(manual, "2026.11.3"))
+        assertNull(migrateBetaToStable(manual, "2026.11.4"))
+        // Stable users keep stable; the marker is still set so a later manual beta sticks.
+        val stable = migrateBetaToStable(mapOf("update-channel" to "stable"), "2026.11.3")!!
+        assertEquals("stable", stable["update-channel"])
+        assertNull(migrateBetaToStable(stable + ("update-channel" to "beta"), "2026.11.4"))
+        // Nightly is not beta-like and stays unchanged.
+        assertEquals("nightly", migrateBetaToStable(mapOf("update-channel" to "nightly"), "2026.11.3")!!["update-channel"])
+        // Running a beta or nightly version changes nothing; the first stable afterwards migrates.
+        assertNull(migrateBetaToStable(mapOf("update-channel" to "beta"), "2026.11.3-beta.2"))
+        assertNull(migrateBetaToStable(mapOf("update-channel" to "beta"), "2026.11.3-nightly.20261122101010.abcdef1"))
+        assertNull(migrateBetaToStable(mapOf("update-channel" to "beta"), ""))
+        assertEquals("stable", migrateBetaToStable(mapOf("update-channel" to "beta"), "2026.11.4")!!["update-channel"])
+    }
+
+    @Test
     fun versionOrderMatchesTheDesktopUpdater() {
         val nightly = "2026.10.2-nightly.20261011120000.abcdef0"
         assertTrue(compareReleaseVersions("2026.7.1-beta.2", "2026.7.1-beta.1") > 0)

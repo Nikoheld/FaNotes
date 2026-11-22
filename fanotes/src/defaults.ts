@@ -76,6 +76,7 @@ export const defaultSettingsForPlatform = (platform: string | undefined): AppSet
   installUpdatesOnQuit: true,
   backgroundUpdates: true,
   updateChannel: 'stable',
+  channelAutoStableDoneAt: '',
   memoryBudgetMb: 0,
   ocrThreadLimit: 0,
   desktopOcrModel: 'extended',

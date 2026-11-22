@@ -300,13 +300,15 @@ function runCli() {
     const { channelForPackagedVersion } = require('./releaseVersion.cjs')
     const { createUpdateManager } = require('./updater.cjs')
     const version = app.getVersion()
-    const settings = readUpdateSettings(userDataPath, {
+    const { migrateBetaToStable } = require('./channel-migration.cjs')
+    const settings = migrateBetaToStable(readUpdateSettings(userDataPath, {
       autoCheckUpdates: true,
       autoDownloadUpdates: true,
       installUpdatesOnQuit: true,
       backgroundUpdates: true,
       updateChannel: channelForPackagedVersion(version),
-    })
+      channelAutoStableDoneAt: '',
+    }), version)
     const overrides = developmentOverrides(app, process.env)
     const logger = { warn: () => undefined, info: () => undefined, error: () => undefined }
     const status = await runBackgroundUpdate({
