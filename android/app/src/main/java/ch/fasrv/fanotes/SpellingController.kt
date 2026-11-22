@@ -126,7 +126,11 @@ class SpellingController(private val view: EditText) {
         val offset = 3f * density
         val amplitude = 1.05f * density
         val period = 3.6f * density
+        // Only the visible lines: a long note can have thousands of flagged words and this runs on every draw.
+        val visibleFrom = layout.getLineStart(layout.getLineForVertical((view.scrollY - view.height).coerceAtLeast(0)))
+        val visibleTo = layout.getLineEnd(layout.getLineForVertical((view.scrollY + view.height * 2).coerceAtMost(layout.height)))
         for (error in errors) {
+            if (error.to < visibleFrom || error.from > visibleTo) continue
             val startLine = layout.getLineForOffset(error.from.coerceIn(0, layout.text.length))
             val endLine = layout.getLineForOffset((error.to - 1).coerceAtLeast(error.from).coerceIn(0, layout.text.length))
             for (line in startLine..endLine) {

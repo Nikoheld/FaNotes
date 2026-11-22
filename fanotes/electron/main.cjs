@@ -242,6 +242,7 @@ process.on('uncaughtException', (error) => {
   console.error('FaNotes: unbehandelte Ausnahme:', error?.stack ?? error)
   diagnosticsService()?.recordMainException('uncaughtException', error)
 })
+let appQuitting = false
 app.on('child-process-gone', (_event, details) => {
   diagnosticsService()?.recordProcessGone('child-process-gone', details)
   if (!details || details.type === 'Utility') return
@@ -259,6 +260,8 @@ function diagnosticsService() {
       getSettings: () => currentSettings,
       appInfo: () => ({ version: app.getVersion(), platform: process.platform === 'win32' ? 'windows' : process.platform, arch: process.arch, language: String(currentSettings.uiLanguage === 'system' ? app.getLocale() : currentSettings.uiLanguage).slice(0, 2) }),
       appRoots: [app.getAppPath(), __dirname],
+      // Helpers are killed (SIGTERM, exit 15) on every quit; that is not a crash.
+      isQuitting: () => appQuitting,
       isOnline: () => net.isOnline(),
       isIdle: () => {
         try {
@@ -269,7 +272,14 @@ function diagnosticsService() {
       memory: () => {
         const metrics = app.getAppMetrics()
         const mb = (kb) => Math.round(kb / 1024 / 10) * 10
+        // Per process kind, so a 1.6 GB total can be traced to the renderer, the GPU or a helper.
+        const byType = { main: 0, renderer: 0, gpu: 0, utility: 0, other: 0 }
+        for (const item of metrics) {
+          const kind = item.type === 'Browser' ? 'main' : item.type === 'Tab' ? 'renderer' : item.type === 'GPU' ? 'gpu' : item.type === 'Utility' ? 'utility' : 'other'
+          byType[kind] += item.memory?.workingSetSize ?? 0
+        }
         return {
+          byType: Object.fromEntries(Object.entries(byType).map(([kind, kb]) => [kind, mb(kb)])),
           processes: metrics.length,
           totalMb: mb(metrics.reduce((sum, item) => sum + (item.memory?.workingSetSize ?? 0), 0)),
           mainRssMb: mb(process.memoryUsage().rss / 1024),
@@ -388,6 +398,7 @@ const IPC = Object.freeze({
   updateCheck: 'fanotes:update-check',
   updateDownload: 'fanotes:update-download',
   updateInstall: 'fanotes:update-install',
+  updateInstallLater: 'fanotes:update-install-later',
   revealInFolder: 'fanotes:reveal-in-folder',
   openExternal: 'fanotes:open-external',
   beforeClose: 'fanotes:before-close',
@@ -731,6 +742,14 @@ let startupPreparationPromise = Promise.resolve()
 let configWriteQueue = Promise.resolve()
 let configMutationQueue = Promise.resolve()
 let updateManager = null
+/**
+ * Set when the app itself asks to close in order to restart into a staged
+ * update. The close goes through the normal renderer flush (notes, ink,
+ * settings); only after the renderer confirmed it is the install helper
+ * started. A request older than a minute is stale (the flush failed and the
+ * user kept working), so a later manual quit does not relaunch by surprise.
+ */
+let updateRestartRequestedAt = 0
 let updateManagerPromise = null
 let updateLocks = null
 let backgroundSchedulerSync = null
@@ -3899,6 +3918,14 @@ async function transformWithLmStudio(rawPayload) {
   return { markdown: unwrapLmStudioMarkdown(markdown), model: request.model, stats }
 }
 
+/** Closes the window through the normal save-everything path, then restarts into the staged update. */
+function requestUpdateRestart() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  updateRestartRequestedAt = Date.now()
+  allowWindowClose = false
+  mainWindow.close()
+}
+
 function ensureUpdateManager() {
   if (updateManager) return Promise.resolve(updateManager)
   if (!updateManagerPromise) {
@@ -4073,18 +4100,11 @@ function schedulePostStartupWork() {
         await manager.start()
         void syncBackgroundUpdates(manager)
         if (!currentSettings.installUpdatesOnQuit || !currentSettings.autoCheckUpdates) return
-        const launch = await manager.applyPendingInstallOnLaunch()
-        if (!launch?.installStarted) return
-        // The install helper waits for this process to exit, then swaps the
-        // binary and relaunches. Close without another save prompt.
-        allowWindowClose = true
-        invalidateCloseWarningState()
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          try { mainWindow.close() } catch { /* ignore */ }
-        }
-        setTimeout(() => {
-          try { app.quit() } catch { /* ignore */ }
-        }, 180).unref?.()
+        // Only a package that was already staged and verified restarts the app
+        // here; a fresh download waits for the next quit. The restart saves
+        // open work first, like every other close.
+        const launch = await manager.applyPendingInstallOnLaunch({ prepare: false })
+        if (launch?.ready) requestUpdateRestart()
       })
       .catch((error) => console.warn('FaNotes-Auto-Updater konnte nicht gestartet werden:', error?.message ?? error))
   }, 5_000)
@@ -6315,15 +6335,13 @@ function registerIpcHandlers() {
   handle(IPC.updateCheck, async () => (await ensureUpdateManager()).check({ manual: true }))
   handle(IPC.updateDownload, async () => (await ensureUpdateManager()).download())
   handle(IPC.updateInstall, async () => {
-    const nextState = await (await ensureUpdateManager()).prepareInstall()
-    setTimeout(() => {
-      if (!mainWindow || mainWindow.isDestroyed()) return
-      allowWindowClose = true
-      invalidateCloseWarningState()
-      mainWindow.close()
-    }, 120).unref?.()
-    return nextState
+    const manager = await ensureUpdateManager()
+    const current = manager.getState()
+    if (current.status !== 'downloaded') throw new Error('Es ist noch kein vollständig geprüftes Update bereit.')
+    requestUpdateRestart()
+    return manager.getState()
   })
+  handle(IPC.updateInstallLater, async (_event, requested) => (await ensureUpdateManager()).requestInstallOnQuit(requested !== false))
 
   handle(IPC.revealInFolder, async (_event, relativePath) => {
     await ensureBootstrap()
@@ -6377,12 +6395,27 @@ function registerIpcHandlers() {
   ipcMain.on(IPC.confirmClose, (event) => {
     if (!isTrustedIpcSender(event) || !mainWindow || mainWindow.isDestroyed()) return
     void (async () => {
+      const restartForUpdate = updateRestartRequestedAt > 0 && Date.now() - updateRestartRequestedAt < 60_000
+      updateRestartRequestedAt = 0
       if (updateManager) {
         try {
-          // Installs without reopening FaNotes. The package may also have been
-          // staged by the background run while this window was open.
-          await updateManager.installOnQuit()
+          if (restartForUpdate) {
+            // Everything is saved: hand over to the helper, which swaps the
+            // file and starts the new version (or restores the old one).
+            await updateManager.prepareInstall({ mode: 'relaunch' })
+          } else {
+            // Installs without reopening FaNotes. The package may also have been
+            // staged by the background run while this window was open.
+            await updateManager.installOnQuit()
+          }
         } catch (error) {
+          if (restartForUpdate) {
+            // The old version keeps running; the Settings page shows why.
+            console.warn('Das Update konnte nicht gestartet werden:', error?.message ?? error)
+            allowWindowClose = false
+            invalidateCloseWarningState()
+            return
+          }
           console.warn('Das vorbereitete FaNotes-Update konnte beim Beenden nicht installiert werden:', error?.message ?? error)
         }
       }
@@ -6702,6 +6735,7 @@ app.on('will-quit', () => {
 })
 
 app.on('before-quit', () => {
+  appQuitting = true
   try { diagnosticsServiceInstance?.flush() } catch { /* best effort */ }
   void localMcpHostInstance?.stop()
   stopNativeOcr(new Error('FaNotes wird beendet.'))

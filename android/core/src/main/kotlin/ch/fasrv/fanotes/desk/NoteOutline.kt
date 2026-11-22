@@ -67,7 +67,10 @@ fun parseNoteOutline(content: String): List<NoteOutlineHeading> {
     var fenceMarker = ""
     var fenceLength = 0
     for ((index, line) in lines.withIndex()) {
-        val fence = FENCE.matchEntire(line)
+        // A regex per line is slow on a long note: only lines that can be a fence or a heading reach one.
+        val lead = line.firstOrNull { it != ' ' }
+        if (lead != '`' && lead != '~' && fenceMarker.isEmpty() && !line.startsWith('#')) continue
+        val fence = if (lead == '`' || lead == '~') FENCE.matchEntire(line) else null
         if (fence != null) {
             val token = fence.groupValues[1]
             val marker = token.first().toString()
@@ -153,14 +156,60 @@ fun foldedHeadingHidingLine(markdown: String, foldedLines: Set<Int>, line: Int):
     return found
 }
 
-/** Glyphs for the fold gutter, one per visible line. Empty when that line is not a heading with a body. */
+/**
+ * Glyphs for the fold gutter, one per visible line. Empty when that line is not a heading with a body.
+ * One pass over the note: the outline and the fold ranges are not recomputed per line.
+ */
 fun foldMarkerGlyphs(source: String, foldedLines: Set<Int>): List<String> {
     val text = normalizeNewlines(source)
-    val visible = markdownWithFolds(text, foldedLines)
-    val lines = if (visible.isEmpty()) 1 else visible.count { it == '\n' } + 1
-    return (1..lines).map { visibleLine ->
-        val heading = headingLineForFoldMarker(text, foldedLines, visibleLine) ?: return@map ""
-        if (heading in foldedLines) "▸" else "▾"
+    val hidden = if (foldedLines.isEmpty()) null else hiddenMask(text, foldedLines)
+    val headings = parseNoteOutline(text)
+    val byLine = HashMap<Int, Int>(headings.size * 2)
+    headings.forEachIndexed { index, heading -> byLine[heading.line] = index }
+    var lineCount = 1
+    for (index in text.indices) if (text[index] == '\n') lineCount += 1
+    val lineStarts = IntArray(lineCount)
+    var lineSlot = 1
+    for (index in text.indices) if (text[index] == '\n') lineStarts[lineSlot++] = index + 1
+    fun hasBody(heading: NoteOutlineHeading, position: Int): Boolean {
+        val lineStart = lineStarts[heading.line - 1]
+        val lineEnd = if (heading.line < lineStarts.size) lineStarts[heading.line] - 1 else text.length
+        val bodyStart = if (lineEnd < text.length && text[lineEnd] == '\n') lineEnd + 1 else lineEnd
+        var next: NoteOutlineHeading? = null
+        for (i in position + 1 until headings.size) {
+            if (headings[i].level <= heading.level) {
+                next = headings[i]
+                break
+            }
+        }
+        var end = if (next == null) text.length else lineStarts[next.line - 1]
+        if (end > bodyStart && text[end - 1] == '\n') end -= 1
+        return lineStart >= 0 && bodyStart < end
+    }
+    // Source offset where each visible line starts (the first visible line starts at 0).
+    val starts = ArrayList<Int>()
+    starts += 0
+    var afterBreak = false
+    for (index in text.indices) {
+        if (hidden != null && hidden[index]) continue
+        if (afterBreak) starts += index
+        afterBreak = text[index] == '\n'
+    }
+    if (afterBreak) starts += text.length
+    return starts.map { offset ->
+        var low = 0
+        var high = lineStarts.size - 1
+        while (low < high) {
+            val mid = (low + high + 1) ushr 1
+            if (lineStarts[mid] <= offset) low = mid else high = mid - 1
+        }
+        val sourceLine = low + 1
+        val position = byLine[sourceLine]
+        val foldable = position != null && hasBody(headings[position], position)
+        when {
+            foldable || sourceLine in foldedLines -> if (sourceLine in foldedLines) "▸" else "▾"
+            else -> ""
+        }
     }
 }
 
@@ -354,4 +403,5 @@ private fun hiddenMask(text: String, foldedLines: Set<Int>): BooleanArray {
     return hidden
 }
 
-private fun normalizeNewlines(markdown: String) = markdown.replace("\r\n", "\n").replace('\r', '\n')
+private fun normalizeNewlines(markdown: String) =
+    if (markdown.indexOf('\r') < 0) markdown else markdown.replace("\r\n", "\n").replace('\r', '\n')

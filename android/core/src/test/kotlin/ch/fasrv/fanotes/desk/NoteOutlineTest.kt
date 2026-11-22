@@ -146,4 +146,21 @@ class NoteOutlineTest {
         assertNull(foldShortcut(true, true, true, false, '['))
         assertNull(foldShortcut(false, true, false, false, '['))
     }
+
+    @Test
+    fun foldMarkersOfALongNoteAreBuiltInOnePass() {
+        val note = buildString {
+            for (section in 1..500) {
+                append("# Abschnitt $section\n")
+                for (line in 1..9) append("Zeile $line\n")
+            }
+        }.trimEnd()
+        val started = System.nanoTime()
+        val glyphs = foldMarkerGlyphs(note, setOf(1))
+        assertTrue((System.nanoTime() - started) / 1_000_000 < 2000)
+        assertTrue(glyphs.size in 4991..5000)
+        assertEquals("▸", glyphs[0])
+        assertEquals("", glyphs[1])
+        assertEquals("▾", glyphs[2])
+    }
 }

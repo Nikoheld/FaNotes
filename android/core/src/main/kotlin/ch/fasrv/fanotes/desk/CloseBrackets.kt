@@ -25,8 +25,8 @@ fun bracketTyping(
     if (start < 0 || deleted < 0 || start > before.length || start + deleted > before.length) return null
     val insertedLen = after.length - before.length + deleted
     if (insertedLen < 0 || start + insertedLen > after.length) return null
-    if (after.substring(0, start) != before.substring(0, start)) return null
-    if (after.substring(start + insertedLen) != before.substring(start + deleted)) return null
+    if (!after.regionMatches(0, before, 0, start)) return null
+    if (!after.regionMatches(start + insertedLen, before, start + deleted, before.length - start - deleted)) return null
     val inserted = after.substring(start, start + insertedLen)
 
     if (deleted == 1 && insertedLen == 0) {

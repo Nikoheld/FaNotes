@@ -20,18 +20,16 @@ fun markdownBackspaceReplacement(before: String, after: String): MarkdownCaretEd
 
 private fun insertedSingleNewline(before: String, after: String): Int? {
     if (after.length != before.length + 1) return null
-    var index = 0
-    while (index < before.length && before[index] == after[index]) index++
+    val index = commonPrefixLength(before, after, before.length)
     if (after.getOrNull(index) != '\n') return null
-    if (after.substring(index + 1) != before.substring(index)) return null
+    if (!after.regionMatches(index + 1, before, index, before.length - index)) return null
     return index
 }
 
 private fun deletedSingleChar(before: String, after: String): Int? {
     if (before.length != after.length + 1) return null
-    var index = 0
-    while (index < after.length && before[index] == after[index]) index++
-    if (before.substring(index + 1) != after.substring(index)) return null
+    val index = commonPrefixLength(before, after, after.length)
+    if (!before.regionMatches(index + 1, after, index, after.length - index)) return null
     return index + 1
 }
 
