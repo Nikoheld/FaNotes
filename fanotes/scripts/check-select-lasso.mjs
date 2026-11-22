@@ -121,7 +121,10 @@ try {
   const drag = board.slice(board.indexOf('if (!drag.committed &&'), board.indexOf('onPointerUp={() => { inkDragRef.current = null'))
   assert.equal((drag.match(/undoRef\.current\.push/g) ?? []).length, 1)
   assert.match(drag, /inkEditUndoSnapshot\(strokesRef\.current\)/)
-  assert.match(drag, /moveInkSelection\(strokesRef\.current, selectedStrokeIndexesRef\.current/)
+  // Moves are batched per frame: the drag handler queues dx/dy and flushInkMove commits them.
+  assert.match(drag, /inkMovePendingRef\.current/)
+  const flushMove = board.slice(board.indexOf('const flushInkMove = useCallback'), board.indexOf('const beginInkEdit = useCallback'))
+  assert.match(flushMove, /commitTransformedInk\(moveInkSelection\(strokesRef\.current, selectedStrokeIndexesRef\.current, dx, dy\)\)/)
   assert.match(drag, /scaleInkSelection\(/)
   const copyFn = board.slice(board.indexOf('const copySelectedInk'), board.indexOf('const deleteSelectedInk'))
   assert.equal((copyFn.match(/undoRef\.current\.push/g) ?? []).length, 1)

@@ -131,7 +131,7 @@ const searchTargets = [
 for (const needle of searchTargets) {
   if (!settings.includes(needle)) throw new Error(`Suchziel fehlt: ${needle}`)
 }
-if (!settings.includes('{`Anpassung · ${section.count} Optionen`}')) throw new Error('Die Optionszahl wird nicht mehr aus section.count gelesen.')
+if (!settings.includes('`Anpassung · ${section.count} Optionen`')) throw new Error('Die Optionszahl wird nicht mehr aus section.count gelesen.')
 
 console.log(`Menüprüfung erfolgreich: Notizmenü, Datei-Kontextmenü, Zeichenstudio und ${preservedSettings.length} vorhandene Einstellungen sind gruppiert, durchsuchbar, zugänglich und responsiv.`)
 console.log('Gruppen Aussehen & Schreiben|Bedienung|Stift & Arbeitsbereich|Dateien & Vault|Sync|Profil|Teilen|Add-ons|Updates|Experimentell|Erweitert')

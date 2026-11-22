@@ -4,12 +4,18 @@ name: Ink stays put
 # web build in headless Chrome with pen, mouse and touch input on a Markdown
 # note, a PDF note, a worksheet and an ink-only page, and checks every frame
 # (fanotes/scripts/check-ink-stable.mjs), plus the pen-sample and page-grow
-# logic checks next to it. Never builds or publishes a release.
+# logic checks next to it and the fast source/logic check list (npm run check:fast). Never builds or publishes a release.
 on:
   pull_request:
     paths:
       - 'fanotes/src/**'
       - 'fanotes/index.html'
+      - 'fanotes/electron/**'
+      - 'fanotes/docs/USER_SURFACES.md'
+      - 'fanotes/resources/**'
+      - 'fanotes/scripts/run-fast-checks.mjs'
+      - 'fanotes/scripts/ci-fast-checks.txt'
+      - 'fanotes-site/public/viewer/**'
       - 'fanotes/vite.config.ts'
       - 'fanotes/package-lock.json'
       - 'src/**'
@@ -50,6 +56,14 @@ jobs:
           node scripts/check-midstroke-grow.mjs
           node scripts/check-stay-put.mjs
           node scripts/check-note-canvas.mjs
+      # About 130 source-contract and logic checks that need no browser, no Electron, no built site and no network
+      # (list: fanotes/scripts/ci-fast-checks.txt). They guard the pen, paper, PDF, menu, settings and surface contracts and
+      # used to run by hand only, which is how they went stale. Needs the staged main-process i18n catalog.
+      - name: Fast source and logic checks
+        run: |
+          node scripts/stage-main-i18n.cjs
+          npm run build:spelling
+          npm run check:fast
       - name: Ink stays put (headless Chrome, every frame)
         env:
           FANOTES_CHROMIUM: /usr/bin/google-chrome

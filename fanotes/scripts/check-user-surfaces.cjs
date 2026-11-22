@@ -56,7 +56,7 @@ for (const section of ['appearance', 'editor', 'drawing', 'files', 'updates', 'a
 }
 
 assert.match(app, /currentVersion: APP_VERSION/)
-assert.match(app, /onJumpToLine=\{\(line\) => \{ editorRef\.current\?\.revealLine\(line\) \}\}/)
+assert.match(app, /onJumpToLine=\{\(line\) => \{ commandEditor\(\)\?\.revealLine\(line\) \}\}/)
 const appVersion = fs.readFileSync(path.join(root, 'src', 'lib', 'appVersion.ts'), 'utf8')
 assert.match(appVersion, /from '\.\.\/\.\.\/package\.json'/)
 assert.match(appVersion, /export const APP_VERSION/)

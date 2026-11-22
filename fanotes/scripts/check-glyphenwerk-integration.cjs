@@ -48,9 +48,11 @@ assert.match(panel, /glyphenwerk:appearance/u)
 assert.match(panel, /glyphenwerk:ready/u)
 assert.match(panel, /glyphenwerk:recognize-neural/u, 'Der eingebettete Test fragt das neuronale Zeilenmodell nicht an.')
 assert.match(panel, /glyphenwerk:neural-result/u, 'Das neuronale Ergebnis wird nicht an GlyphenWerk zurückgegeben.')
-assert.match(panel, /recognizeNeuralText/u)
-assert.match(panel, /recognizePersonalizedTextLine/u, 'GlyphenWerk darf das persönliche Training beim sichtbaren Testergebnis nicht umgehen.')
-assert.match(panel, /personalized\.fusion\.text/u, 'GlyphenWerk muss das fusionierte statt des rohen neuronalen Ergebnisses anzeigen.')
+// Since d5c1ac99 the visible test runs the shared ink recognizer (neural lines + the local personalization),
+// not a private neural-only call, so the result matches what handwriting-to-text produces in notes.
+assert.match(panel, /recognizeInk\(strokes, message\.language/u, 'Der eingebettete Test muss den gemeinsamen Tinten-Erkenner verwenden.')
+assert.match(panel, /activateInkPersonalization\(message\.language\)/u, 'GlyphenWerk darf das persönliche Training beim sichtbaren Testergebnis nicht umgehen.')
+assert.match(panel, /personalizedSource: ink\.personalized \? 'personalized' : 'neural'/u, 'Das Ergebnis muss ausweisen, ob das persönliche Training beteiligt war.')
 assert.match(personalizedLine, /fusePersonalizedTextRecognition/u)
 assert.match(personalizedLine, /personalizedTextFusionSelectionScore/u)
 assert.match(personalizedLine, /let primary: RecognitionToken\[\] \| null = null/u, 'Die unbeschränkte persönliche Segmentierung braucht einen verzögerten Fallback.')
@@ -96,11 +98,14 @@ assert.doesNotMatch(
   /textCharacterCountHint/u,
   'Auch der klassische Textzweig darf keinen zirkulären Count erzeugen.',
 )
+// The host recognizes with the shared ink recognizer (no per-call prefix argument any more); the validated prefix hint
+// only feeds the exact-projection flag, and neither a character count nor a full-text hint ever re-enters the host.
 assert.match(
   panel,
-  /recognizePersonalizedTextLine\([\s\S]*?560,\s*undefined,\s*undefined,\s*textPrefixHint/u,
-  'Der Host muss Count und Volltext überspringen und den Präfix am angehängten Argumentplatz weiterreichen.',
+  /validatedGlyphenWerkTextPrefixHint\(message\.textPrefixHint\)[\s\S]*?glyphenWerkExactProjectionIsIndependent\(textPrefixHint,/u,
+  'Der Host muss den Präfix prüfen und nur für das Exakt-Projektions-Flag verwenden.',
 )
+assert.doesNotMatch(panel, /textCharacterCountHint|textCharacterHint/u, 'Der Host darf Count/Volltext nie zurückkoppeln.')
 assert.match(
   glyphenWerkApp,
   /recognitionFallbackRef\.current,\s*undefined,\s*undefined,\s*incrementalTextHints\.textPrefixHint/u,
@@ -123,7 +128,7 @@ assert.match(
 )
 assert.match(
   panel,
-  /glyphenWerkExactProjectionIsIndependent\([\s\S]*?exactProjectionSafe/u,
+  /exactProjectionSafe: !ink\.personalized && glyphenWerkExactProjectionIsIndependent\(/u,
   'Der Host muss präfixbeeinflusste Ergebnisse als nicht unabhängig markieren.',
 )
 assert.match(
@@ -215,8 +220,12 @@ assert.match(database, /export const removeHandwritingSamples/u)
 assert.match(database, /export const putHandwritingLabels/u)
 assert.match(database, /export const replaceManagedMathLayoutExamples/u)
 
-assert.match(main, /isEmbeddedGlyphenWerkResource/u)
-assert.match(main, /"frame-src 'self'"/u)
-assert.match(main, /isEmbeddedGlyphenWerkResource \? "frame-ancestors 'self'" : "frame-ancestors 'none'"/u)
+// The policy lives in content-security-policy.cjs now (main.cjs only installs it): only the bundled
+// /glyphenwerk/ page may be framed, by the app itself; every other document keeps frame-ancestors 'none'.
+const csp = read('electron/content-security-policy.cjs')
+assert.match(main, /installSecurityHeaders/u)
+assert.match(csp, /const glyphenWerkFrame = \/\\\/glyphenwerk\\\/\/iu\.test\(details\.url\)/u)
+assert.match(csp, /"frame-src 'self'"/u)
+assert.match(csp, /glyphenWerkFrame \? "frame-ancestors 'self'" : "frame-ancestors 'none'"/u)
 
 console.log('GlyphenWerk-Integration: Oberfläche, sichere Datenbrücke, lokaler Build und Electron-CSP geprüft.')
